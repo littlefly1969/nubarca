@@ -1,0 +1,6 @@
+# NubArca NLU sidecar — pinned CPU deps. No cloud/model download at runtime.
+# onnxruntime-genai provides the CPU decoder runtime (KV-cache autoregressive
+# generation) for the pinned Phi-3.5-mini int4 ONNX artifact.
+onnxruntime-genai==0.5.2
+fastapi==0.115.6
+uvicorn==0.34.0

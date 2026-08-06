@@ -1,0 +1,1139 @@
+{
+  "brandName": "NubArca",
+  "tvBrandName": "NubArca TV",
+  "version": "2.1",
+  "effectiveDate": "2026-07-31",
+  "palette": {
+    "midnight": "#0A0F1A",
+    "deep": "#0F1E3A",
+    "blue": "#1565FF",
+    "cyan": "#00D4FF",
+    "violet": "#9A6CFF",
+    "white": "#F5F7FB"
+  },
+  "typography": {
+    "Space Grotesk": {
+      "usage": "headings/display",
+      "weights": [
+        500,
+        600,
+        700
+      ],
+      "license": "SIL OFL 1.1",
+      "source": "official project repository / Google Fonts",
+      "integration": "self-host WOFF2 locally; font binaries not included"
+    },
+    "Exo 2": {
+      "usage": "UI/body/labels",
+      "weights": [
+        400,
+        500,
+        600
+      ],
+      "license": "SIL OFL 1.1",
+      "source": "official Google Fonts project",
+      "integration": "self-host WOFF2 locally; font binaries not included"
+    }
+  },
+  "counts": {
+    "totalAssets": 54,
+    "sourceMasters": 8,
+    "runtimeReadyAssets": 39,
+    "conditionallyReadyAssets": 0,
+    "referenceOnlyAssets": 7,
+    "missingAssets": 0
+  },
+  "assets": [
+    {
+      "path": "reference/nubarca-asset-control-board-v2.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 2200,
+      "height": 2200,
+      "aspectRatio": "2200:2200",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "9379d9a40510355a3633254d8fea14331edc1da8d08173f70d18b4fbaba4c550"
+    },
+    {
+      "path": "reference/nubarca-brand-concept-board.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1672,
+      "height": 941,
+      "aspectRatio": "1672:941",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "f6f4a4c3af3b907e4d356da7453509697ce48fab50cec35130c2e6a2fd259ffb"
+    },
+    {
+      "path": "reference/nubarca-brand-system-poster.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1491,
+      "height": 1055,
+      "aspectRatio": "1491:1055",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "587a980a4f630f00f1051bb2908b03986564c0c62de7b554af1ee426d8bf6fca"
+    },
+    {
+      "path": "reference/nubarca-color-typography-guide.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1448,
+      "height": 1086,
+      "aspectRatio": "1448:1086",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "464e02df017ed7bb8c477b8971103e81705907b9873de9ac3f9e4dc902e82efb"
+    },
+    {
+      "path": "reference/nubarca-development-guidelines.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1448,
+      "height": 1086,
+      "aspectRatio": "1448:1086",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "633b380fa4520fab2c3d2ee400a8e13640069c0b7e1ee0c04db79928d72dac9c"
+    },
+    {
+      "path": "reference/nubarca-pwa-mask-previews.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "Maskable safe-area preview board (circle / squircle / rounded rectangle / square) with text labels. Reference documentation for reviewing the maskable composition \u2014 never a shipped icon.",
+      "width": 1400,
+      "height": 420,
+      "aspectRatio": "1400:420",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "441514889eb138860f68d0d47dba1e92d582e198fceb819983abebd2997a4adb"
+    },
+    {
+      "path": "reference/nubarca-tv-banner-legacy-3x2-reference.png",
+      "role": "reference-only",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1536,
+      "height": 1024,
+      "aspectRatio": "1536:1024",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "47ac92d017b81b504366319c4c3163a182c732d89a26b97ed4a4dcf5a9c5c45c"
+    },
+    {
+      "path": "runtime/favicon/favicon-16.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 16,
+      "height": 16,
+      "aspectRatio": "16:16",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "2a5c8b95d003784e8a3110992afdb05de3b92bf5593c18a3604142e7148cb0b5"
+    },
+    {
+      "path": "runtime/favicon/favicon-24.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 24,
+      "height": 24,
+      "aspectRatio": "24:24",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "f61e7d40f4ea4802d045b78b1460cb1fb4b63cf75e68c7edde57648cead27777"
+    },
+    {
+      "path": "runtime/favicon/favicon-32.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 32,
+      "height": 32,
+      "aspectRatio": "32:32",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "ceadfad26f5c411885d5533b47dab8518621e4af53bcd0fcfd1d8d570ea5cc30"
+    },
+    {
+      "path": "runtime/favicon/favicon-48.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 48,
+      "height": 48,
+      "aspectRatio": "48:48",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "95e65d4d8aa4fcc921f530293ad2e8b67760b53e988a33deaf0fcb1553261262"
+    },
+    {
+      "path": "runtime/favicon/favicon-64.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 64,
+      "height": 64,
+      "aspectRatio": "64:64",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "959aaaa1c47a3d2d9b8b2e8e7f4d74e91a3cfd101c5af2e1f719f016398b59ee"
+    },
+    {
+      "path": "runtime/favicon/favicon-source-1024.png",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 1024,
+      "height": 1024,
+      "aspectRatio": "1024:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "c5ae51575b7fb8de7fbdc21c11b9ef471cd373e81977cb27d9c4ffa9cbca5dcc"
+    },
+    {
+      "path": "runtime/favicon/favicon.ico",
+      "role": "favicon family",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "ico",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 48,
+      "height": 48,
+      "aspectRatio": "48:48",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "939bb6126fc47bcf4fba96e7ff84452534cede79abbcdbc4bdc5fc1f616552e6"
+    },
+    {
+      "path": "runtime/pwa/nubarca-apple-touch-icon-180.png",
+      "role": "PWA/app icon",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 180,
+      "height": 180,
+      "aspectRatio": "180:180",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "e07828cc2599414d66ab9a962dfbda2e8e3b47b488b3c73530dc0a944765f864"
+    },
+    {
+      "path": "runtime/pwa/nubarca-expo-app-icon-1024.png",
+      "role": "Expo/mobile launcher",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1024,
+      "height": 1024,
+      "aspectRatio": "1024:1024",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "275290b2646d13061f2a6c8f746fac617165897ecfc0e75cf577bf752f3b13e4"
+    },
+    {
+      "path": "runtime/pwa/nubarca-pwa-192.png",
+      "role": "PWA/app icon",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 192,
+      "height": 192,
+      "aspectRatio": "192:192",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "8dcdd775b6f01e7289342bf48d25d0ab74a6db27c0c108b2c559c15c39dd6713"
+    },
+    {
+      "path": "runtime/pwa/nubarca-pwa-512.png",
+      "role": "PWA/app icon",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "b8f7e56d1dd29cfa2af8a9264fd0a4ecc5454b157899e7eba5d5d3e7fef8b83d"
+    },
+    {
+      "path": "runtime/pwa/nubarca-pwa-maskable-512.png",
+      "role": "PWA maskable icon",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "central 66% artwork; mask safe",
+      "glow": false,
+      "sha256": "bebbd781db91727ce5d67ca69954a905ea6d2237956a2c507444e602b150a1e3"
+    },
+    {
+      "path": "runtime/tv/nubarca-android-tv-banner-320x180.png",
+      "role": "Android TV launcher banner",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 320,
+      "height": 180,
+      "aspectRatio": "320:180",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "4fae795af24c24251ac13746a06dcd2fe5a61e804948803da03c1df35c4b8eba"
+    },
+    {
+      "path": "runtime/tv/nubarca-fire-tv-banner-1280x720.png",
+      "role": "Fire TV launcher/promotional banner",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1280,
+      "height": 720,
+      "aspectRatio": "1280:720",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "7fa2e270c07dd4838cce03cb1232799b0e1bec41b110025dba6c97fbbc707f33"
+    },
+    {
+      "path": "runtime/tv/nubarca-fire-tv-icon-512.png",
+      "role": "Fire TV square icon",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "71991e147c6c884d3887dd4aa5fcb82bcd9f6436a1e6f6bd28ace29d76fc8652"
+    },
+    {
+      "path": "runtime/tv/nubarca-tv-lockup-transparent-1280w.png",
+      "role": "TV transparent lockup",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1280,
+      "height": 297,
+      "aspectRatio": "1280:297",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "b5a6e6e5390535f89500de5951dacc05fdd0b4702e35050d79c487c925555f12"
+    },
+    {
+      "path": "runtime/tv/nubarca-tv-lockup-transparent-1800w.png",
+      "role": "TV transparent lockup",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1800,
+      "height": 418,
+      "aspectRatio": "1800:418",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "cd7ef5707a372e6ff6982f13539ed64fee6cdcada42c2e4e543aba9a88b695c3"
+    },
+    {
+      "path": "runtime/tv/nubarca-tv-lockup-transparent-640w.png",
+      "role": "TV transparent lockup",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 640,
+      "height": 149,
+      "aspectRatio": "640:149",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "561faa00659054803c2c87a6beed348e81238f75a9136b269f0da4fea03673d6"
+    },
+    {
+      "path": "runtime/tv/nubarca-tv-splash-1920x1080.png",
+      "role": "TV splash",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1920,
+      "height": 1080,
+      "aspectRatio": "1920:1080",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "a4bb2293e3e846a093a11f9f9e89ee95954e812ba919aea989b90a3e39100ba8"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-128.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 128,
+      "height": 128,
+      "aspectRatio": "128:128",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "4995737ba41aaba112af1b133091066975708f147c4e1d448edead5639ce0195"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-16.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 16,
+      "height": 16,
+      "aspectRatio": "16:16",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "b51489fbedee91ff55b857f4b34d4e4bb809979bbc5b27ac1ced562d270db088"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-24.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 24,
+      "height": 24,
+      "aspectRatio": "24:24",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "e99af9097934fa540b039b1dce83a6620db4b641935e04d3d8f06c5c4c088dfb"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-256.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 256,
+      "height": 256,
+      "aspectRatio": "256:256",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "c66a40ce1a240c96173b233527473ec3c09c8ea4169c4cc2ccbfb63d68b50148"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-32.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 32,
+      "height": 32,
+      "aspectRatio": "32:32",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "ec31b6ef853fca824a194276ba7221b668d21edba6f4fab6f8199dc3fb701cfd"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-48.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 48,
+      "height": 48,
+      "aspectRatio": "48:48",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "fb875698694102c6e147367f772246537c350e93026db7fac698e7944eeb5b5c"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-512.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "c53e742a51ece048ad31cf02ad0a237f675c8c2928864898ad63f3398a9a8bda"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-dark-64.png",
+      "role": "flat mark on dark",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 64,
+      "height": 64,
+      "aspectRatio": "64:64",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "8987fb9045b81849c2609310984ed9fb5da5fac93d6480d2b59ba9ae663adbe2"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-128.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 128,
+      "height": 128,
+      "aspectRatio": "128:128",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "0d8e79c3d70fbd2b33cc2647b6b64d733c50bcf3b448e504acbe0b4abfc46f69"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-16.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 16,
+      "height": 16,
+      "aspectRatio": "16:16",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "2a5c8b95d003784e8a3110992afdb05de3b92bf5593c18a3604142e7148cb0b5"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-24.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 24,
+      "height": 24,
+      "aspectRatio": "24:24",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "f61e7d40f4ea4802d045b78b1460cb1fb4b63cf75e68c7edde57648cead27777"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-256.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 256,
+      "height": 256,
+      "aspectRatio": "256:256",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "a35ff2b566370625b5c1ab66566fff332c72749b89aaf90a118fb5d98428430c"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-32.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 32,
+      "height": 32,
+      "aspectRatio": "32:32",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "ceadfad26f5c411885d5533b47dab8518621e4af53bcd0fcfd1d8d570ea5cc30"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-48.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 48,
+      "height": 48,
+      "aspectRatio": "48:48",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "95e65d4d8aa4fcc921f530293ad2e8b67760b53e988a33deaf0fcb1553261262"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-512.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "745a39de6dacef2d85c5e4bad5704ebb627d7342bcff6aef28e6cfccd2ed60c9"
+    },
+    {
+      "path": "runtime/web/nubarca-mark-flat-on-light-64.png",
+      "role": "flat mark on light",
+      "source": "derived from approved NubArca raster master (compacted)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Compact derivative: the approved artwork cropped to its alpha bounds and re-padded to a 603 px square with a uniform safe margin (scripts/generate-compact-brand-marks.py). Geometry and colours are the approved ones; only transparent excess was removed.",
+      "width": 64,
+      "height": 64,
+      "aspectRatio": "64:64",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "959aaaa1c47a3d2d9b8b2e8e7f4d74e91a3cfd101c5af2e1f719f016398b59ee"
+    },
+    {
+      "path": "runtime/web/nubarca-wordmark-on-dark-1440w.png",
+      "role": "wordmark on dark",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1440,
+      "height": 404,
+      "aspectRatio": "1440:404",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "9764c7f00baa201488fab00d2ad22b89af51518473955de05f4adcf4c13bd4a9"
+    },
+    {
+      "path": "runtime/web/nubarca-wordmark-on-dark-480w.png",
+      "role": "wordmark on dark",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 480,
+      "height": 135,
+      "aspectRatio": "480:135",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "d3b0134ab1c41dd28d326b85aedfc566be5169e3c8109ed0272d01e6a3e78df5"
+    },
+    {
+      "path": "runtime/web/nubarca-wordmark-on-dark-960w.png",
+      "role": "wordmark on dark",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 960,
+      "height": 269,
+      "aspectRatio": "960:269",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "352178bafe8e53ea08b81dd696d0159805208568273b16c9bef885e186da09fd"
+    },
+    {
+      "path": "runtime/web/nubarca-wordmark-on-light.png",
+      "role": "wordmark on light",
+      "source": "derived from approved NubArca raster master",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1516,
+      "height": 1024,
+      "aspectRatio": "1516:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "98064c8b5ef4f02c4ffe94a88875568e317d1cbc2e00a146b5d583800fabc021"
+    },
+    {
+      "path": "source/nubarca-app-icon-master.png",
+      "role": "source master",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1254,
+      "height": 1254,
+      "aspectRatio": "1254:1254",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "b68917f146083545486983129e788d60d9358f6324d719d3fed8ddd0a5ed6763"
+    },
+    {
+      "path": "source/nubarca-cloud-ark-logo-master.png",
+      "role": "source master",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1536,
+      "height": 1024,
+      "aspectRatio": "1536:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "71512e74464915baa70ba3d7463b17ad4bcc8d8f4f0ceae281411bbd7c54977a"
+    },
+    {
+      "path": "source/nubarca-cloud-ark-symbol-master.png",
+      "role": "source master",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1536,
+      "height": 1024,
+      "aspectRatio": "1536:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "bc93f3d5ba3c0d0d03fd3a7e06c59727da06da97c2cb72497524dd2ce9a49b5a"
+    },
+    {
+      "path": "source/nubarca-mark-flat-on-dark-master.png",
+      "role": "flat mark on dark",
+      "source": "BRAND-VIS-01: derived from source/nubarca-cloud-ark-symbol-master.png; alpha geometry isolated, glow removed, recolored to approved solid palette colors (Cloud White cloud outline, Cyan Glow and Electric Blue hull), and centered on a transparent 1024x1024 canvas",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1024,
+      "height": 1024,
+      "aspectRatio": "1024:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "ee19a9dd1c03e5fe6a7e879a8e794646e2bc0ec8b7f87f68ac58a78e6bc1df39"
+    },
+    {
+      "path": "source/nubarca-mark-flat-on-light-master.png",
+      "role": "flat mark on light",
+      "source": "BRAND-VIS-01: derived from source/nubarca-cloud-ark-symbol-master.png; alpha geometry isolated, glow removed, recolored to Midnight Navy/Electric Blue, and centered on a transparent 1024x1024 canvas",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1024,
+      "height": 1024,
+      "aspectRatio": "1024:1024",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 16,
+      "safeArea": "",
+      "glow": false,
+      "sha256": "b262cd864fc2d3ef694ba4af08ae3864994f338581accc2bca3a23fb9299edab"
+    },
+    {
+      "path": "source/nubarca-tv-banner-master.png",
+      "role": "source master",
+      "source": "approved source/reference from v1",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1536,
+      "height": 1024,
+      "aspectRatio": "1536:1024",
+      "hasAlpha": false,
+      "backgrounds": [
+        "embedded"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "",
+      "glow": true,
+      "sha256": "47ac92d017b81b504366319c4c3163a182c732d89a26b97ed4a4dcf5a9c5c45c"
+    },
+    {
+      "path": "source/nubarca-tv-lockup-transparent-master.png",
+      "role": "TV transparent lockup",
+      "source": "BRAND-VIS-01: derived from source/nubarca-tv-banner-master.png; card background and border removed, approved lockup isolated, tightly cropped, and preserved on transparency",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1464,
+      "height": 340,
+      "aspectRatio": "1464:340",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "d3cb05a24a231a0560d4b894850de9fe7f9556d480e585877b97b40f5c81590c"
+    },
+    {
+      "path": "source/nubarca-wordmark-on-dark-master.png",
+      "role": "wordmark on dark",
+      "source": "BRAND-VIS-01: derived from source/nubarca-cloud-ark-logo-master.png; transparent lockup isolated and tightly cropped, Nub recolored to Cloud White, and Arca retained in Electric Blue",
+      "format": "png",
+      "runtimeReady": false,
+      "conditionallyReady": false,
+      "notes": "",
+      "width": 1195,
+      "height": 335,
+      "aspectRatio": "1195:335",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "078cc3db0d50bada595383259c16edf93b62655f3d00985721ac86f3b6674b9b"
+    }
+  ],
+  "missingAssets": [],
+  "prohibitedUses": [
+    "old NubArca naming",
+    "Nubarca or Nub Arca capitalization",
+    "guideline boards as runtime art",
+    "launcher icon at 24px navigation size",
+    "heavy glow on small icons",
+    "dark wordmark on dark background",
+    "unofficial SVG/vector conversion",
+    "stretching/cropping legacy 3:2 TV banner as splash"
+  ]
+}

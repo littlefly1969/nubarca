@@ -1,0 +1,86 @@
+# Build output
+**/bin/
+**/obj/
+**/out/
+**/publish/
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test output
+[Tt]est[Rr]esult*/
+**/coverage*
+**/*.coverage
+**/*.coveragexml
+
+# Rider / ReSharper
+_ReSharper*/
+
+# Local secrets / env. `.env.example` is tracked as the template; real
+# .env files (any variant) stay local.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.env.local
+appsettings.Local.json
+appsettings.Production.json
+
+# NubArca runtime storage
+/storage/
+
+# Operator backups — created by deploy/backup.sh. They contain a pg_dump
+# (which includes the password-hash column) and the entire blob tree; do
+# not commit. Operators should ship these off-host (scp / rclone / restic).
+/backups/
+*.sql.gz
+*.tar.gz
+
+# Local agent state
+.claude/
+.codex/
+
+# AI model weights / ONNX exports — never commit. Local ONNX models live under
+# Ai__Onnx__ModelDir (e.g. /models/ai/<model>/). Keep weights off-repo; the
+# evaluation harness loads them from disk at runtime.
+/models/
+*.onnx
+*.onnx_data
+*.ort
+*.safetensors
+*.gguf
+
+# Local model-export tooling caches.
+__pycache__/
+*.pyc
+
+# OpenVINO-direct native runtime is fetched + verified reproducibly (see
+# scripts/openvino-direct/), never committed — large + redistribution-controlled.
+/scripts/openvino-direct/native/
+/scripts/openvino-direct/**/bin/
+/scripts/openvino-direct/**/obj/
+/scripts/openvino-direct/**/*.whl
+
+# Local OTA signing material
+.local/
+*.private-key.pem
+
+# Graphify generated files
+graphify-out/
+
+# Node (root-level tool caches; frontend/ has its own ignore file)
+node_modules/

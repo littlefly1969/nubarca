@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "NubArca",
+    "slug": "nubarca-mobile",
+    "version": "0.1.0",
+    "orientation": "default",
+    "platforms": ["ios", "android"],
+    "extra": {
+      "apiBaseUrl": "http://localhost:5177"
+    },
+    "android": {
+      "usesCleartextTraffic": true
+    },
+    "ios": {
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    }
+  }
+}

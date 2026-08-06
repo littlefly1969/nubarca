@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NubArca</title>
+    <meta
+      name="description"
+      content="NubArca — your files, your hardware, your private cloud. Photos, videos and documents on storage you own."
+    />
+    <meta name="theme-color" content="#0a0f1a" />
+    <meta property="og:site_name" content="NubArca" />
+    <meta property="og:title" content="NubArca" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="/brand/nubarca-pwa-512.png" />
+    <meta name="application-name" content="NubArca" />
+    <meta name="apple-mobile-web-app-title" content="NubArca" />
+
+    <!-- Approved NubArca favicon family and PWA icons, copied byte-for-byte
+         from assets/brand/nubarca/ by scripts/sync-brand-assets.py. -->
+    <link rel="icon" href="/brand/favicon.ico" sizes="16x16 24x24 32x32 48x48" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="/brand/favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/brand/nubarca-pwa-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/brand/nubarca-apple-touch-icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Theme bootstrap — runs BEFORE the stylesheet paints and before React
+      // mounts, so a light-theme flash is impossible. It mirrors, verbatim, the
+      // rules in src/theme/themePreference.ts:
+      //   * key 'nubarca.theme' holds exactly 'dark' | 'light' | 'system'
+      //   * anything else (missing, stale, unreadable) => 'dark' (the default)
+      //   * 'system' asks for prefers-color-scheme: light, so "no preference"
+      //     still resolves to dark
+      // ThemeProvider re-applies the same value on mount, which is a no-op.
+      (function () {
+        var effective = 'dark';
+        try {
+          var valid = function (v) {
+            return v === 'dark' || v === 'light' || v === 'system' ? v : null;
+          };
+          var preference = valid(window.localStorage.getItem('nubarca.theme'));
+          if (preference === null) preference = 'dark';
+          if (preference === 'system') {
+            effective =
+              window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark';
+          } else {
+            effective = preference;
+          }
+        } catch (e) {
+          // Blocked storage / private mode: keep the default.
+        }
+        document.documentElement.dataset.theme = effective;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

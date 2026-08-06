@@ -1,0 +1,51 @@
+# NubArca — development compose stack.
+#
+# Project name pinned so resource labels do not depend on the checkout directory
+# basename; see docker-compose.prod.yml for the reasoning.
+name: nubarca
+
+services:
+  postgres:
+    # pgvector-enabled Postgres 17 (matches prod). Bundles the `vector` extension
+    # used by photo-similarity ANN search; the AddPhotoVectorIndex768 migration
+    # enables it. Without pgvector the migration skips the vector table cleanly
+    # and similarity falls back to exact-scan.
+    image: pgvector/pgvector:pg17
+    container_name: nubarca-postgres
+    environment:
+      POSTGRES_DB: nubarca
+      POSTGRES_USER: nubarca
+      POSTGRES_PASSWORD: nubarca
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nubarca -d nubarca"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: src/NubArca.Api/Dockerfile
+    container_name: nubarca-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=nubarca;Username=nubarca;Password=nubarca"
+      Storage__RootPath: "/var/lib/nubarca/storage"
+      TvUpdates__RootPath: "/var/lib/nubarca/tv-updates"
+    volumes:
+      - storage-data:/var/lib/nubarca/storage
+      - tv-updates-data:/var/lib/nubarca/tv-updates:ro
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres-data:
+  storage-data:
+  tv-updates-data:

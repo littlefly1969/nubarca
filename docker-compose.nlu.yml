@@ -1,0 +1,67 @@
+# Optional internal-only NLU command-model sidecar for the "onnx" natural-language
+# gallery interpreter. Compose it ALONGSIDE the prod files (never alone):
+#
+#   NLU_MODEL_DIR=/srv/nubarca-models/nlu \
+#   docker compose -f docker-compose.prod.yml \
+#                  -f docker-compose.prod.local.yml \
+#                  -f docker-compose.nlu.yml \
+#                  --env-file .env up -d nlu
+#
+# Then set on api + worker (in .env, NOT sourced — see CLAUDE.md):
+#   Ai__NaturalGallerySearch__Interpreter=onnx
+#   Ai__NaturalGallerySearch__ModelServiceBaseUrl=http://nlu:8090
+#
+# The default interpreter is "deterministic" (needs no sidecar); this file only
+# adds the optional decoder upgrade. The service mirrors the postgres shape:
+# NO published ports, internal network only, read-only model mount.
+services:
+  nlu:
+    build:
+      context: ./scripts/nlu-sidecar
+      dockerfile: Dockerfile
+    image: nubarca-nlu:local
+    container_name: nubarca-nlu
+    restart: unless-stopped
+    # Internal-only: reachable from api/worker as http://nlu:8090. No ports block.
+    networks:
+      - nubarca-internal
+    # Weights mounted READ-ONLY from the operator-installed host dir. Never baked
+    # into the image, never committed to git.
+    volumes:
+      - ${NLU_MODEL_DIR:?set NLU_MODEL_DIR to the installed model dir}:/models/nlu:ro
+    environment:
+      NLU_MODEL_DIR: /models/nlu
+      NLU_PORT: "8090"
+      NLU_MAX_QUEUE: "4"
+      NLU_MAX_OUTPUT_TOKENS: "200"
+      NLU_REQUEST_TIMEOUT_S: "12"
+    # Bounded resources so a decoder run cannot starve Postgres / image inference
+    # on the shared host. Tune on the target host after benchmarking.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 5g
+    # Runtime hardening: read-only rootfs; the model mount is already :ro.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8090/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+# Composed together with docker-compose.prod.yml, this merges with the
+# nubarca-internal network defined there (same key) — the sidecar joins the
+# existing internal bridge, no public port. (Defined here too so `-f
+# docker-compose.nlu.yml` is valid; the prod file's definition wins on merge.)
+networks:
+  nubarca-internal:
+    # Pinned so the created network is exactly `nubarca-internal`. Without it
+    # Compose prefixes the project name and produces `nubarca_nubarca-internal`.
+    name: nubarca-internal
+    driver: bridge

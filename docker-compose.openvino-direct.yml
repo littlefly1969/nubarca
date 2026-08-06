@@ -1,0 +1,94 @@
+# Face AI milestone: in-process OpenVINO ("openvino-direct") for the COMPLETE face
+# pipeline — the SCRFD face DETECTOR and the ArcFace face RECOGNIZER — replacing the
+# Python OpenVINO sidecar for both models. Compose alongside docker-compose.prod.yml
+# (+ prod.local + --env-file .env). No ports are published.
+#
+# This override builds api/worker from the `runtime-openvino` image target (pinned
+# OpenVINO-enabled ORT native runtime + Intel GPU userspace, no Python), mounts the
+# models read-only IN-PROCESS, and maps /dev/dri only because a device defaults to
+# GPU. For a CPU-only direct config set NUBARCA_FACE_*_DEVICE=CPU and remove the
+# devices/group_add blocks. Detector and recognizer choose their device
+# INDEPENDENTLY (e.g. detector GPU, recognizer CPU).
+#
+# Readiness vs liveness: /health is liveness (green as soon as the process is up,
+# including while models compile); /health/ready is readiness (green only after BOTH
+# direct models compile and pass synthetic validation). The health check below
+# targets readiness with a generous start_period for GPU compile, then eventually
+# marks a permanently-failing instance unhealthy.
+#
+# Rollback is a pure Compose/config change: point the pinned images back at the
+# previous release. (The Python OpenVINO sidecars were removed with the SigLIP
+# direct milestone; HumanAesExpert is not affected.)
+x-openvino-direct-env: &openvino-direct-env
+  Ai__Onnx__ExecutionProvider: openvino-direct
+  Ai__Onnx__ModelDir: /models/ai
+  # NativeDir is baked into the runtime-openvino image; overridable here.
+  Ai__Onnx__OpenVino__NativeDir: /opt/nubarca/ort-openvino
+  # Independent per-model device placement (CPU | GPU).
+  Ai__Onnx__OpenVino__FaceDetectorDevice: ${NUBARCA_FACE_DETECTOR_DEVICE:-GPU}
+  Ai__Onnx__OpenVino__FaceRecognizerDevice: ${NUBARCA_FACE_RECOGNIZER_DEVICE:-GPU}
+  # SigLIP image tower device: CPU | GPU | DUAL:CPU,GPU. DUAL runs a bounded CPU+GPU
+  # tandem (benchmark: +34.7% at FP32, identical rankings) and REQUIRES two worker
+  # job slots to feed both devices — set Jobs__MaxConcurrentJobs=2 on the worker.
+  # The GPU leg degrades gracefully to CPU-only if the device is unavailable.
+  # Default CPU (opt-in): see docs/model-deployment/openvino-siglip2-benchmark-2026-07.md.
+  Ai__Onnx__OpenVino__PhotoImageDevice: ${NUBARCA_PHOTO_IMAGE_DEVICE:-CPU}
+  # FP32 is mandatory for output-equivalence with the CPU/sidecar reference.
+  Ai__Onnx__OpenVino__GpuPrecision: FP32
+  # Bounded, writable OpenVINO compile cache (on tmpfs; see tmpfs below).
+  Ai__Onnx__OpenVino__CacheDir: /tmp/ov-cache
+
+x-openvino-direct-build: &openvino-direct-build
+  context: .
+  dockerfile: src/NubArca.Api/Dockerfile
+  target: runtime-openvino
+  args:
+    # Stamp the exact commit into the image for canary/diagnostic identity.
+    GIT_SHA: ${NUBARCA_GIT_SHA:-unknown}
+
+# Safe, always-on hardening for the direct-mode services. (Strict read-only root is
+# applied by the ISOLATED canary compose, which carries no production data; here the
+# services layer on the live api/worker that write working files, so only /tmp is
+# constrained to a bounded tmpfs.)
+x-openvino-direct-hardening: &openvino-direct-hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=512m,mode=1777
+
+x-openvino-direct-healthcheck: &openvino-direct-healthcheck
+  test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/ready"]
+  interval: 15s
+  timeout: 5s
+  retries: 6
+  # Generous grace for observed GPU compile time; a permanently-failing instance
+  # still goes unhealthy after the grace period + retries*interval.
+  start_period: 300s
+
+services:
+  api:
+    build: *openvino-direct-build
+    environment: *openvino-direct-env
+    <<: *openvino-direct-hardening
+    healthcheck: *openvino-direct-healthcheck
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${OPENVINO_RENDER_GID:?set OPENVINO_RENDER_GID to the gid of /dev/dri/renderD128}
+    volumes:
+      - ${OPENVINO_AI_MODEL_DIR:?set OPENVINO_AI_MODEL_DIR to the AI model root}:/models/ai:ro
+
+  worker:
+    build: *openvino-direct-build
+    environment: *openvino-direct-env
+    <<: *openvino-direct-hardening
+    # The worker has no HTTP surface; readiness is observed via the api service. It
+    # still preloads + compiles the same models on startup.
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${OPENVINO_RENDER_GID:?set OPENVINO_RENDER_GID to the gid of /dev/dri/renderD128}
+    volumes:
+      - ${OPENVINO_AI_MODEL_DIR:?set OPENVINO_AI_MODEL_DIR to the AI model root}:/models/ai:ro

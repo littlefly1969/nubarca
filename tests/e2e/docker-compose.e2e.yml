@@ -1,0 +1,126 @@
+# NubArca browser-verification stack — ephemeral by design.
+#
+# Separate Compose project (`nubarca-e2e`) so it never touches the development
+# or production stack's containers, volumes or networks. Every volume is
+# anonymous, so `docker compose down -v` leaves nothing behind and each run
+# starts from an empty database and empty blob store.
+#
+# The API is published on its own port, not the development default, so the suite
+# can run while a normal dev backend is up. scripts/e2e.sh points the dev
+# server's proxy at it through NUBARCA_DEV_API_TARGET.
+#
+# AI runs on the DETERMINISTIC backend. That backend is dev/test only and is not
+# semantically meaningful — which is exactly what a browser test needs: the same
+# input always produces the same embeddings, so semantic-search assertions are
+# reproducible instead of depending on a model download.
+name: nubarca-e2e
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: nubarca_e2e
+      POSTGRES_USER: nubarca
+      POSTGRES_PASSWORD: nubarca_e2e
+    ports:
+      - "${E2E_PG_PORT:-55433}:5432"
+    tmpfs:
+      # The database lives in RAM: fast, and impossible to leave behind.
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nubarca -d nubarca_e2e"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  api: &api
+    build:
+      context: ../..
+      dockerfile: src/NubArca.Api/Dockerfile
+    image: nubarca-e2e-api:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: &api_env
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=nubarca_e2e;Username=nubarca;Password=nubarca_e2e"
+      Database__MigrateOnStartup: "true"
+      Storage__RootPath: "/var/lib/nubarca/storage"
+      Storage__DerivedRootPath: "/var/lib/nubarca/derived"
+      Staging__RootPath: "/var/lib/nubarca/staging"
+      TvUpdates__RootPath: "/var/lib/nubarca/tv-updates"
+      # Deterministic AI: reproducible embeddings with no model download.
+      Ai__Enabled: "true"
+      Ai__Provider: "deterministic"
+      Ai__ImageEmbeddingsEnabled: "true"
+      Ai__VideoSegmentation__Enabled: "true"
+      Ai__VideoVisualEmbeddings__Enabled: "true"
+      Ai__MaxConcurrency: "2"
+      # Point semantic search at the deterministic image-embedding profile that
+      # `ai seed` creates, so the endpoint has a default profile to resolve.
+      Ai__PhotoSimilarityProfileKey: "det-image-embedding-v1"
+      Ai__TimeoutSeconds: "30"
+      # Real ffmpeg/ffprobe ship in the image, so video posters and duration are
+      # genuine — the marker strip needs a real duration to place markers on.
+      Media__VideoPosterProvider: "ffmpeg"
+      Media__VideoMetadataProvider: "ffprobe"
+      # The API serves; the worker runs jobs. Splitting them keeps request
+      # latency out of the job loop, as in production.
+      Jobs__WorkerEnabled: "false"
+      Jobs__PollIntervalSeconds: "1"
+      # Rate limits exist to protect a public deployment. Nine browser projects
+      # signing in and searching in quick succession is not abuse, so the
+      # throwaway stack raises them rather than making the suite flaky.
+      RateLimits__Login__PermitLimit: "1000"
+      RateLimits__Login__WindowSeconds: "60"
+      RateLimits__Share__PermitLimit: "1000"
+      RateLimits__Share__WindowSeconds: "60"
+    volumes:
+      - storage:/var/lib/nubarca/storage
+      - derived:/var/lib/nubarca/derived
+      - staging:/var/lib/nubarca/staging
+      - tv-updates:/var/lib/nubarca/tv-updates
+    ports:
+      - "${E2E_API_PORT:-5277}:8080"
+    # No container healthcheck on purpose: the lean runtime image ships no HTTP
+    # client, so any in-container probe would either be a lie or force curl into
+    # a production image to serve a test. scripts/start.sh waits on /health from
+    # the host, which is also the path the browsers will actually use.
+
+  worker:
+    <<: *api
+    image: nubarca-e2e-api:local
+    environment:
+      <<: *api_env
+      Jobs__WorkerEnabled: "true"
+      Jobs__MaxConcurrentJobs: "2"
+      Database__MigrateOnStartup: "false"
+    ports: []
+    depends_on:
+      # The API owns migrations, so the worker waits for it to be up. Readiness
+      # is asserted from the host in scripts/start.sh.
+      api:
+        condition: service_started
+
+  # Single-origin front door: the built app plus a same-origin /api proxy, which
+  # is how production serves it. See nginx.e2e.conf for why this replaced driving
+  # the suite through the Vite dev proxy.
+  web:
+    build:
+      context: ../../frontend
+      dockerfile: Dockerfile
+    image: nubarca-e2e-web:local
+    depends_on:
+      api:
+        condition: service_started
+    volumes:
+      - ./nginx.e2e.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${E2E_WEB_PORT:-5273}:80"
+
+volumes:
+  # Anonymous: recreated per `up`, removed by `down -v`.
+  storage:
+  derived:
+  staging:
+  tv-updates:

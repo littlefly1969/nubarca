@@ -1,0 +1,43 @@
+# Trusted checksum manifest for KlingTeam/HumanAesExpert-1B (MIT).
+#
+# Repository (canonical): KlingTeam/HumanAesExpert-1B
+#   (the original KwaiVGI/HumanAesExpert-1B redirects here)
+# Immutable revision (model AND custom code): b8f7ee3f3a1217ecd331fd6d57b6959f5c0da183
+# lastModified upstream: 2025-08-08
+#
+# Format: "<sha256>  <relative/path>" (GNU sha256sum -c compatible), paths
+# relative to the installed model directory root. The installer verifies EVERY
+# listed file at the pinned revision; a missing manifest, missing file, or any
+# mismatch aborts the install with nothing activated.
+#
+# Provenance of these hashes (out-of-band, at the pinned immutable revision):
+#   * model.safetensors: the upstream Git-LFS OID, which IS the file's SHA-256
+#     (verified via the HF repo tree API at the pinned commit; 1876417886 bytes).
+#   * all other files: SHA-256 computed from the bytes served at the pinned
+#     commit (small non-LFS files: config, custom code, tokenizer). Re-download
+#     the same commit to reproduce these exactly.
+# The installer NEVER regenerates this manifest from a download.
+
+# --- model weights (LFS; OID == SHA-256) ---
+61c232b0068d28af64565505bce384e9b6b299c1ba4c7655a2ff647a7d3b10ec  model.safetensors
+
+# --- config ---
+4632d108fa72fb9523c34dc81059fdb9f1b01f9e55fdfbf885373c96cc789693  config.json
+44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a  configuration.json
+4003df9cc8a21b6c2bca78b9addb69fed60f286d90cc181d48e52b2c33344f93  generation_config.json
+0658115064c561026539aeeead9ed3b1a8e0cc90967df8c142849199f955d2b4  preprocessor_config.json
+
+# --- custom modeling code (trust_remote_code) ---
+22dd687a5f142985407675fc6b1dc688c2ded93e54192543ecf28ef495a6efa8  configuration_intern_vit.py
+f88c46b4abd60767396ee251bac17a02adb19a2a5d69c72d5e9ad93173f09803  configuration_internvl_chat.py
+619c2b96987bf45018a32d8abd16e7f7036995c16e1bd762c3507d58b8fdb672  modeling_intern_vit.py
+c35b8880ef24e6f6a112ba8b5bf299615dc1ac81911944c274cdf1928bdeb0b6  modeling_internvl_chat.py
+91a197e4a2aa43bd9f02a890e58231df56e1edd26795d67493340acf1a32ee52  modeling_qwen.py
+b1b9f280e9cb9211e519e2b8071002b57cc742aadb2f49b05fa674ee3c7d83ee  conversation.py
+
+# --- tokenizer ---
+2ed7120320ff66f65e1dccc704f318eeccab8941292424dfdf8290dd1b689634  tokenizer_config.json
+af3c7a7e8e3396571d8640b822cd611de2b51b15cf65a5dc1054ffea31483427  special_tokens_map.json
+baea1c1e8f24ce785f49112072664b8be778e9242a1a21cf6f7c6cb92add6d10  added_tokens.json
+455e0caaa06abffc663e9282dfe71dde07fd1991eaf24146bf08793c4dba4497  merges.txt
+87a257b04b17642a0688c98cd1df89c398bda4fee532d6f88b38a659ecb4ac8d  vocab.json

@@ -1,0 +1,582 @@
+# NubArca — production compose stack.
+#
+# The project name is PINNED. Compose otherwise derives it from the checkout
+# directory basename, and the production checkout deliberately keeps its historic
+# path, which would label every resource with the former identity. Pinning it
+# means `docker compose ls`, resource labels and any implicitly-named resource
+# all read `nubarca` regardless of where the checkout lives.
+name: nubarca
+
+# This file is INTENDED to be paired with a `.env` file (see .env.example) and
+# a reverse proxy on the host that terminates TLS. The compose stack itself
+# does NOT terminate TLS and is not safe to expose directly to the internet.
+#
+# Differences from docker-compose.yml (dev):
+#   * PostgreSQL has no published port (only reachable from the internal
+#     network). The dev compose's `5432:5432` mapping is dangerous in prod.
+#   * Credentials come from `.env` — no defaults are baked in.
+#   * `ASPNETCORE_ENVIRONMENT` defaults to `Production` (dev seed user is
+#     therefore a no-op even if those variables happen to be set).
+#   * `restart: unless-stopped` so a host reboot brings the stack back up.
+#   * `ForwardedHeaders` is enabled and trusts loopback by default — matches
+#     a same-host nginx/Caddy in front of compose.
+#   * Built-in frontend service serves the SPA bundle via nginx.
+#   * Both api + frontend bind to 127.0.0.1 ONLY. The reverse proxy on the
+#     host points at those loopback ports; nothing else can reach them.
+#
+# Bring up:
+#   docker compose -f docker-compose.prod.yml --env-file .env up -d
+# Tear down (keeps volumes):
+#   docker compose -f docker-compose.prod.yml --env-file .env down
+# Tear down + delete volumes (destroys data!):
+#   docker compose -f docker-compose.prod.yml --env-file .env down -v
+
+services:
+  postgres:
+    # pgvector-enabled Postgres 17 (same MAJOR version as the previous
+    # postgres:17-alpine, so the existing data volume is compatible — no dump/
+    # restore). This image bundles the `vector` extension for photo-similarity
+    # ANN search; the AddPhotoVectorIndex768 migration enables it. NOTE: switching
+    # from the alpine (musl) image to this Debian (glibc) image changes the libc
+    # collation provider — after the first start on the existing volume, check for
+    # a collation-version mismatch and REINDEX text indexes if Postgres warns.
+    # See docs/ai-photo-pgvector.md. Without pgvector the migration skips the
+    # vector table cleanly and similarity falls back to exact-scan.
+    image: pgvector/pgvector:pg17
+    container_name: nubarca-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - nubarca-internal
+    # No `ports:` block on purpose — PostgreSQL must only be reachable from
+    # the api service on the internal network.
+
+  api:
+    build:
+      context: .
+      dockerfile: src/NubArca.Api/Dockerfile
+    container_name: nubarca-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${ConnectionStrings__Postgres:?ConnectionStrings__Postgres is required}
+      Storage__RootPath: ${Storage__RootPath:-/var/lib/nubarca/storage}
+      # Native TV Expo Updates publications. Keep this separate from public web
+      # roots and bind the volume in docker-compose.prod.local.yml when the host
+      # publication script needs direct access.
+      TvUpdates__RootPath: ${TvUpdates__RootPath:-/var/lib/nubarca/tv-updates}
+      # Public trust root used to verify every manifest before it is served.
+      # Mount this read-only through the production-local override.
+      TvUpdates__CodeSigningCertificatePath: ${TvUpdates__CodeSigningCertificatePath:-/var/lib/nubarca/tv-ota-trust/certificate.pem}
+      # Slice 72: optional separate root for DERIVED media (thumbnails /
+      # previews / posters). Empty => derived artifacts use Storage__RootPath
+      # (single-root default, unchanged). Set to a path under a faster/cache
+      # disk to split them out; pair with the storage-derived bind mount below.
+      Storage__DerivedRootPath: ${Storage__DerivedRootPath:-}
+      ForwardedHeaders__Enabled: ${ForwardedHeaders__Enabled:-true}
+      ForwardedHeaders__ForwardLimit: ${ForwardedHeaders__ForwardLimit:-1}
+      ForwardedHeaders__TrustAny: ${ForwardedHeaders__TrustAny:-false}
+      RateLimits__Login__PermitLimit: ${RateLimits__Login__PermitLimit:-10}
+      RateLimits__Login__WindowSeconds: ${RateLimits__Login__WindowSeconds:-60}
+      RateLimits__Share__PermitLimit: ${RateLimits__Share__PermitLimit:-60}
+      RateLimits__Share__WindowSeconds: ${RateLimits__Share__WindowSeconds:-60}
+      RateLimits__Party__PermitLimit: ${RateLimits__Party__PermitLimit:-300}
+      RateLimits__Party__WindowSeconds: ${RateLimits__Party__WindowSeconds:-60}
+      RateLimits__Party__QueueLimit: ${RateLimits__Party__QueueLimit:-0}
+      RateLimits__PartyMedia__PermitLimit: ${RateLimits__PartyMedia__PermitLimit:-3000}
+      RateLimits__PartyMedia__WindowSeconds: ${RateLimits__PartyMedia__WindowSeconds:-60}
+      RateLimits__PartyMedia__QueueLimit: ${RateLimits__PartyMedia__QueueLimit:-0}
+      RateLimits__TvPersonalUnlock__PermitLimit: ${RateLimits__TvPersonalUnlock__PermitLimit:-10}
+      RateLimits__TvPersonalUnlock__WindowSeconds: ${RateLimits__TvPersonalUnlock__WindowSeconds:-60}
+      FileItemSweeper__Enabled: ${FileItemSweeper__Enabled:-false}
+      FileItemSweeper__IntervalMinutes: ${FileItemSweeper__IntervalMinutes:-5}
+      FileItemSweeper__GraceMinutes: ${FileItemSweeper__GraceMinutes:-1440}
+      BlobJanitor__Enabled: ${BlobJanitor__Enabled:-false}
+      BlobJanitor__IntervalMinutes: ${BlobJanitor__IntervalMinutes:-5}
+      BlobJanitor__GraceMinutes: ${BlobJanitor__GraceMinutes:-1440}
+      # Slice 48: opt-in startup migrations. OFF by default — the recommended
+      # path stays `db migrate` before `up -d` (see deploy/FIRST_DEPLOY.md).
+      Database__MigrateOnStartup: ${Database__MigrateOnStartup:-false}
+      # Slice 65: app-level storage limits. 2 GiB upload cap (0 = unlimited);
+      # per-user logical quota unlimited by default (0). This is SEPARATE from
+      # the reverse-proxy body-size limit — configure that on nginx/Caddy too.
+      Storage__MaxUploadBytes: ${Storage__MaxUploadBytes:-2147483648}
+      Storage__DefaultUserQuotaBytes: ${Storage__DefaultUserQuotaBytes:-0}
+      # Slice 78: Kestrel + FormOptions upload size limits. Default 10 GiB.
+      # These must also agree with the reverse-proxy body-size limit.
+      Uploads__MaxRequestBodySizeBytes: ${Uploads__MaxRequestBodySizeBytes:-10737418240}
+      Uploads__MaxFileSizeBytes: ${Uploads__MaxFileSizeBytes:-10737418240}
+      # Real gallery video derivatives. The production image bundles ffmpeg
+      # (and ffprobe); both API lazy generation and worker maintenance jobs must
+      # resolve the same provider.
+      Media__VideoPosterProvider: ${Media__VideoPosterProvider:-ffmpeg}
+      Media__FfmpegPath: ${Media__FfmpegPath:-ffmpeg}
+      Media__VideoPosterTimeoutSeconds: ${Media__VideoPosterTimeoutSeconds:-10}
+      Media__VideoPreviewStripTimeoutSeconds: ${Media__VideoPreviewStripTimeoutSeconds:-45}
+      # ffprobe also recognises legacy video containers that header sniffing
+      # alone cannot classify for the gallery regeneration traversal.
+      Media__VideoMetadataProvider: ${Media__VideoMetadataProvider:-ffprobe}
+      Media__FfprobePath: ${Media__FfprobePath:-ffprobe}
+      # Video-hls: adaptive HLS playback ladder. "none" (default) keeps the
+      # legacy direct-stream /video contract; "ffmpeg" turns on generation +
+      # the adaptive endpoint contract. The api serves playlists/segments and
+      # lazily enqueues generation; the worker runs the transcode job.
+      Media__VideoHlsProvider: ${Media__VideoHlsProvider:-none}
+      Media__VideoHlsTimeoutSeconds: ${Media__VideoHlsTimeoutSeconds:-1800}
+      # Ladder shape/quality knobs (defaults match MediaOptions). Raising the
+      # high ceiling costs bandwidth, not CPU; raising the height cap costs BOTH
+      # (4K encodes are heavy on this host — mind the thermal history).
+      Media__VideoHlsHighMaxHeight: ${Media__VideoHlsHighMaxHeight:-1080}
+      Media__VideoHlsHighMaxRateKbps: ${Media__VideoHlsHighMaxRateKbps:-5000}
+      Media__VideoHlsLowHeight: ${Media__VideoHlsLowHeight:-480}
+      Media__VideoHlsLowMaxRateKbps: ${Media__VideoHlsLowMaxRateKbps:-1000}
+      # CRF is the GOVERNING quality knob for encoded renditions (the maxrate
+      # caps only bound peaks). Lower = better quality + bigger files.
+      Media__VideoHlsHighCrf: ${Media__VideoHlsHighCrf:-23}
+      Media__VideoHlsLowCrf: ${Media__VideoHlsLowCrf:-26}
+      # Image-processing safety caps. These gate source image bytes/dimensions
+      # before thumbnail/preview decoding; raise only on hosts sized for it.
+      ImageProcessing__EnableThumbnails: ${ImageProcessing__EnableThumbnails:-true}
+      ImageProcessing__MaxWidth: ${ImageProcessing__MaxWidth:-8192}
+      ImageProcessing__MaxHeight: ${ImageProcessing__MaxHeight:-8192}
+      ImageProcessing__MaxPixels: ${ImageProcessing__MaxPixels:-64000000}
+      ImageProcessing__MaxThumbnailInputBytes: ${ImageProcessing__MaxThumbnailInputBytes:-31457280}
+      # Slice 100: image derivative backend. libvips (bundled, no apt) is the
+      # default with automatic ImageSharp fallback; defaults are production-ready
+      # so these only need overriding to tune or force a backend. The lazy
+      # preview/thumbnail endpoints use this too, hence it lives on `api` as well
+      # as `worker`.
+      MediaDerivatives__ImageBackend: ${MediaDerivatives__ImageBackend:-auto}
+      MediaDerivatives__FallbackToImageSharp: ${MediaDerivatives__FallbackToImageSharp:-true}
+      MediaDerivatives__VipsEnabled: ${MediaDerivatives__VipsEnabled:-true}
+      MediaDerivatives__VipsConcurrency: ${MediaDerivatives__VipsConcurrency:-0}
+      MediaDerivatives__SmallQuality: ${MediaDerivatives__SmallQuality:-80}
+      MediaDerivatives__MediumQuality: ${MediaDerivatives__MediumQuality:-80}
+      MediaDerivatives__SmallMaxEdge: ${MediaDerivatives__SmallMaxEdge:-768}
+      MediaDerivatives__MediumPreviewMaxEdge: ${MediaDerivatives__MediumPreviewMaxEdge:-1920}
+      MediaDerivatives__PosterWidth: ${MediaDerivatives__PosterWidth:-1280}
+      MediaDerivatives__PosterHeight: ${MediaDerivatives__PosterHeight:-720}
+      MediaDerivatives__VideoPreviewFrameWidth: ${MediaDerivatives__VideoPreviewFrameWidth:-480}
+      MediaDerivatives__VideoPreviewFrameHeight: ${MediaDerivatives__VideoPreviewFrameHeight:-270}
+      MediaDerivatives__RenderTimeoutSeconds: ${MediaDerivatives__RenderTimeoutSeconds:-30}
+      # Slice 70/89: background-job engine. The IN-PROCESS worker is OFF by
+      # default — drive jobs out-of-band with `jobs run-once` / `jobs worker`,
+      # or run a dedicated worker container (see the optional `worker` service
+      # below) unless you opt the in-process one in here.
+      Jobs__WorkerEnabled: ${Jobs__WorkerEnabled:-false}
+      Jobs__PollIntervalSeconds: ${Jobs__PollIntervalSeconds:-10}
+      # Lease/heartbeat (slice 89). A claimed job is owned for LeaseSeconds and
+      # heartbeated every HeartbeatSeconds; a crashed worker's job becomes
+      # claimable again ~LeaseSeconds later. Keep HeartbeatSeconds well under
+      # LeaseSeconds. MaxConcurrentJobs is intentionally 1 (one job at a time)
+      # for small single-server boxes.
+      Jobs__LeaseSeconds: ${Jobs__LeaseSeconds:-120}
+      Jobs__HeartbeatSeconds: ${Jobs__HeartbeatSeconds:-30}
+      Jobs__MaxConcurrentJobs: ${Jobs__MaxConcurrentJobs:-1}
+      # Slice 81: admin-only server-side import. OFF by default; bounded to the
+      # whitelisted roots below. Mount each root read-only into the container
+      # (e.g. add `- /mnt/raid1/incoming:/import/incoming:ro` to the api
+      # volumes) and point a root at the in-container path. Queued imports run
+      # via the job worker (Jobs__WorkerEnabled) or `jobs run-once`.
+      AdminImport__Enabled: ${AdminImport__Enabled:-false}
+      AdminImport__Roots__0: ${AdminImport__Roots__0:-}
+      AdminImport__Roots__1: ${AdminImport__Roots__1:-}
+      # Throttling (admin imports only). Defaults off/unlimited except the
+      # cooperative yield; tune down on a small server. See .env.example.
+      AdminImport__DelayBetweenFilesMs: ${AdminImport__DelayBetweenFilesMs:-0}
+      AdminImport__MaxBytesPerSecond: ${AdminImport__MaxBytesPerSecond:-0}
+      AdminImport__MaxRunMinutes: ${AdminImport__MaxRunMinutes:-0}
+      AdminImport__YieldEveryFiles: ${AdminImport__YieldEveryFiles:-64}
+      # Slice 93: web remote-staging upload (resumable browser chunks →
+      # verify → background import). OFF by default. When enabling, also
+      # uncomment the staging-data mount below (and on the worker, which runs
+      # the import jobs that READ staged files). Staging is temporary space —
+      # it does not need the redundancy/backups the blob store does.
+      Staging__Enabled: ${Staging__Enabled:-false}
+      Staging__RootPath: ${Staging__RootPath:-/var/lib/nubarca/staging}
+      Staging__MaxSessionBytes: ${Staging__MaxSessionBytes:-6871947673600}
+      Staging__MaxFileBytes: ${Staging__MaxFileBytes:-201474836480}
+      Staging__MaxFilesPerSession: ${Staging__MaxFilesPerSession:-500000}
+      Staging__MinChunkSizeBytes: ${Staging__MinChunkSizeBytes:-1048576}
+      Staging__MaxChunkSizeBytes: ${Staging__MaxChunkSizeBytes:-67108864}
+      Staging__DefaultChunkSizeBytes: ${Staging__DefaultChunkSizeBytes:-8388608}
+      Staging__SessionTtlHours: ${Staging__SessionTtlHours:-72}
+      Staging__CleanupEnabled: ${Staging__CleanupEnabled:-false}
+      Staging__CleanupIntervalMinutes: ${Staging__CleanupIntervalMinutes:-60}
+      # ASP.NET Core DataProtection: persist keys in a named volume so they
+      # survive container restarts and image rebuilds. Without this, every
+      # restart invalidates all auth cookies (everyone gets logged out).
+      ASPNETCORE_DataProtection__KeyPath: /var/lib/nubarca/dataprotection-keys
+      # AI substrate (Phase 0A–1). OFF by default — these only flip on when set
+      # in .env. The deterministic photo-similarity pilot uses Ai__Enabled=true,
+      # Ai__Provider=deterministic, Ai__ImageEmbeddingsEnabled=true; every other
+      # capability stays false. No ONNX/external/pgvector backend is wired yet
+      # (Onnx/External are reserved; ApiKeyRef is a secret NAME, not a value).
+      # The api needs these because the AI CLI + the owner-private /similar
+      # endpoint run in this container; the worker mirrors them below.
+      Ai__Enabled: ${Ai__Enabled:-false}
+      Ai__Provider: ${Ai__Provider:-none}
+      Ai__MaxConcurrency: ${Ai__MaxConcurrency:-1}
+      Ai__TimeoutSeconds: ${Ai__TimeoutSeconds:-30}
+      Ai__ComputeSliceSeconds: ${Ai__ComputeSliceSeconds:-30}
+      Ai__ComputeSliceItemBudget: ${Ai__ComputeSliceItemBudget:-100}
+      Ai__ImageEmbeddingsEnabled: ${Ai__ImageEmbeddingsEnabled:-false}
+      Ai__DocumentExtractionEnabled: ${Ai__DocumentExtractionEnabled:-false}
+      Ai__DocumentEmbeddingsEnabled: ${Ai__DocumentEmbeddingsEnabled:-false}
+      Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
+      Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
+      Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
+      Ai__TagsEnabled: ${Ai__TagsEnabled:-false}
+      # Video semantic processing is explicitly opt-in. Keep both switches
+      # mirrored on api and worker: the API previews/enqueues; the worker
+      # executes FFmpeg segmentation and frame embedding jobs.
+      Ai__VideoSegmentation__Enabled: ${Ai__VideoSegmentation__Enabled:-false}
+      Ai__VideoVisualEmbeddings__Enabled: ${Ai__VideoVisualEmbeddings__Enabled:-false}
+      # Canonical video face tracks are an independent opt-in pipeline. Keep
+      # disabled for the initial VFACE schema/API deploy, then enable only for
+      # the controlled canary described in docs/current-work.md.
+      Ai__VideoFaceAnalysis__Enabled: ${Ai__VideoFaceAnalysis__Enabled:-false}
+      Ai__VideoFaceAnalysis__AnalysisVersion: ${Ai__VideoFaceAnalysis__AnalysisVersion:-1}
+      Ai__VideoFaceAnalysis__FrameIntervalMilliseconds: ${Ai__VideoFaceAnalysis__FrameIntervalMilliseconds:-1000}
+      Ai__VideoFaceAnalysis__MaximumFramesPerVideo: ${Ai__VideoFaceAnalysis__MaximumFramesPerVideo:-900}
+      Ai__VideoFaceAnalysis__FrameMaxEdge: ${Ai__VideoFaceAnalysis__FrameMaxEdge:-768}
+      # Active photo-similarity profile (stable AiProfile.Key). Unset → the
+      # capability default (deterministic image profile in the current lab).
+      # Switching the photo model = set this + restart api/worker. See
+      # docs/ai-photo-profile-lifecycle.md.
+      Ai__PhotoSimilarityProfileKey: ${Ai__PhotoSimilarityProfileKey:-}
+      # Active face-recognition EVAL profile (see docs/ai-face-model-onnx-
+      # evaluation.md). Unset by default; face processing stays disabled.
+      Ai__FaceProfileKey: ${Ai__FaceProfileKey:-}
+      Ai__Onnx__ModelDir: ${Ai__Onnx__ModelDir:-}
+      # CPU-safety: cap ONNX Runtime intra-op threads for face inference. The eval
+      # host power-cut once under an uncapped full-throttle benchmark; keep this
+      # conservative (e.g. 4) before any real face backfill.
+      Ai__Onnx__IntraOpThreads: ${Ai__Onnx__IntraOpThreads:-}
+      # Face Substrate v0 similarity thresholds (provisional; admin-editable).
+      Ai__Face__ClusterSimilarityThreshold: ${Ai__Face__ClusterSimilarityThreshold:-0.40}
+      Ai__Face__CandidateSimilarityThreshold: ${Ai__Face__CandidateSimilarityThreshold:-0.30}
+      Ai__Face__SearchDefaultSimilarityThreshold: ${Ai__Face__SearchDefaultSimilarityThreshold:-0.35}
+      Ai__Face__SearchMinSimilarity: ${Ai__Face__SearchMinSimilarity:-0.20}
+      Ai__Face__SearchMaxSimilarity: ${Ai__Face__SearchMaxSimilarity:-0.95}
+      Ai__Face__MaxFacesPerImage: ${Ai__Face__MaxFacesPerImage:-50}
+      # Party public links/uploads. TokenSecret should be set in production; an
+      # empty value keeps the app fallback for existing/dev deployments.
+      Party__TokenSecret: ${Party__TokenSecret:-}
+      Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
+      # Party face search (public "find your face") — public endpoint tunables.
+      # Selfies are downscaled client-side, so the caps are generous safety bounds.
+      Party__FaceSearch__Enabled: ${Party__FaceSearch__Enabled:-true}
+      Party__FaceSearch__MaxUploadBytes: ${Party__FaceSearch__MaxUploadBytes:-15728640}
+      Party__FaceSearch__MaxImageDimension: ${Party__FaceSearch__MaxImageDimension:-12000}
+      Party__FaceSearch__SessionTtlMinutes: ${Party__FaceSearch__SessionTtlMinutes:-20}
+      Party__FaceSearch__MaxResults: ${Party__FaceSearch__MaxResults:-100}
+      Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
+      Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}
+      # Owner-private Aesthetics Lab. The model itself runs in the optional
+      # internal human-aesexpert sidecar; these settings only enable and bind
+      # the API contract. Disabled/empty by default.
+      HumanAesExpert__Enabled: ${HumanAesExpert__Enabled:-false}
+      HumanAesExpert__ProfileKey: ${HumanAesExpert__ProfileKey:-human-aesexpert-1b-expert-v1}
+      HumanAesExpert__DefaultCapabilities: ${HumanAesExpert__DefaultCapabilities:-expert_scores}
+      HumanAesExpert__AllowExpertScores: ${HumanAesExpert__AllowExpertScores:-true}
+      HumanAesExpert__AllowScoreHead: ${HumanAesExpert__AllowScoreHead:-false}
+      HumanAesExpert__AllowMetaVoter: ${HumanAesExpert__AllowMetaVoter:-false}
+      HumanAesExpert__AllowTextAssessment: ${HumanAesExpert__AllowTextAssessment:-false}
+      HumanAesExpert__MaximumBatchItems: ${HumanAesExpert__MaximumBatchItems:-20}
+      HumanAesExpert__RequestTimeoutSeconds: ${HumanAesExpert__RequestTimeoutSeconds:-120}
+      HumanAesExpert__SidecarBaseUrl: ${HumanAesExpert__SidecarBaseUrl:-}
+      HumanAesExpert__PreprocessingProfileKey: ${HumanAesExpert__PreprocessingProfileKey:-human-aesexpert-official-v1}
+      HumanAesExpert__MaxUploadBytes: ${HumanAesExpert__MaxUploadBytes:-26214400}
+      HumanAesExpert__Pepper: ${HumanAesExpert__Pepper:-}
+      # deleted-content-import-skip: server-side pepper for the deleted-content
+      # fingerprint. MUST match on api + worker (api writes tombstones on
+      # delete, worker reads them on import) and stay STABLE across restarts —
+      # changing it silently invalidates existing tombstones. Blank = built-in
+      # dev fallback (fine for a fresh deploy; set a real secret in .env).
+      DeletedContent__Pepper: ${DeletedContent__Pepper:-}
+    volumes:
+      - storage-data:/var/lib/nubarca/storage
+      - dataprotection-keys:/var/lib/nubarca/dataprotection-keys
+      - tv-updates-data:/var/lib/nubarca/tv-updates:ro
+      # Slice 72: mount a separate volume for derived media ONLY if you set
+      # Storage__DerivedRootPath (above) to this in-container path. Leave both
+      # commented for the single-root default. The host backing for this volume
+      # is configured via NUBARCA_DERIVED_DATA in the storage-derived-data
+      # volume block at the bottom of this file.
+      # - storage-derived-data:/var/lib/nubarca/derived
+      # Slice 93: OPTIONAL staging volume for web remote-staging uploads.
+      # Uncomment together with Staging__Enabled=true (and the staging-data
+      # volume block at the bottom). Temporary space only.
+      - staging-data:/var/lib/nubarca/staging
+    ports:
+      # Loopback-only: only the host's reverse proxy can reach this.
+      - "127.0.0.1:8080:8080"
+    networks:
+      - nubarca-internal
+
+  # Slice 89: OPTIONAL dedicated background-job worker. DISABLED by default —
+  # only started with `--profile worker` (e.g.
+  #   docker compose -f docker-compose.prod.yml --env-file .env --profile worker up -d
+  # ). Same image as `api`, different command (`jobs worker`). The api container
+  # is fully usable WITHOUT this service: either drive jobs out-of-band with
+  # `jobs run-once`, or set Jobs__WorkerEnabled=true on the api for the
+  # in-process worker. Run AT MOST ONE worker for now (one job at a time;
+  # MaxConcurrentJobs=1, no SKIP LOCKED yet). The lease/heartbeat means a
+  # crashed worker's in-flight job is reclaimed ~Jobs__LeaseSeconds later.
+  worker:
+    build:
+      context: .
+      dockerfile: src/NubArca.Api/Dockerfile
+    container_name: nubarca-worker
+    restart: unless-stopped
+    profiles: ["worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["jobs", "worker", "--poll-interval-seconds", "${Jobs__PollIntervalSeconds:-10}"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__Postgres: ${ConnectionStrings__Postgres:?ConnectionStrings__Postgres is required}
+      Storage__RootPath: ${Storage__RootPath:-/var/lib/nubarca/storage}
+      Storage__DerivedRootPath: ${Storage__DerivedRootPath:-}
+      # Image-processing safety caps; mirror api so worker/backfill sees the
+      # same source-image eligibility policy.
+      ImageProcessing__EnableThumbnails: ${ImageProcessing__EnableThumbnails:-true}
+      ImageProcessing__MaxWidth: ${ImageProcessing__MaxWidth:-8192}
+      ImageProcessing__MaxHeight: ${ImageProcessing__MaxHeight:-8192}
+      ImageProcessing__MaxPixels: ${ImageProcessing__MaxPixels:-64000000}
+      ImageProcessing__MaxThumbnailInputBytes: ${ImageProcessing__MaxThumbnailInputBytes:-31457280}
+      # Slice 100: the worker runs media.derivatives.backfill, so it must honour
+      # the same backend config as the api (defaults to libvips + ImageSharp
+      # fallback).
+      MediaDerivatives__ImageBackend: ${MediaDerivatives__ImageBackend:-auto}
+      MediaDerivatives__FallbackToImageSharp: ${MediaDerivatives__FallbackToImageSharp:-true}
+      MediaDerivatives__VipsEnabled: ${MediaDerivatives__VipsEnabled:-true}
+      MediaDerivatives__VipsConcurrency: ${MediaDerivatives__VipsConcurrency:-0}
+      MediaDerivatives__SmallQuality: ${MediaDerivatives__SmallQuality:-80}
+      MediaDerivatives__MediumQuality: ${MediaDerivatives__MediumQuality:-80}
+      MediaDerivatives__SmallMaxEdge: ${MediaDerivatives__SmallMaxEdge:-768}
+      MediaDerivatives__MediumPreviewMaxEdge: ${MediaDerivatives__MediumPreviewMaxEdge:-1920}
+      MediaDerivatives__PosterWidth: ${MediaDerivatives__PosterWidth:-1280}
+      MediaDerivatives__PosterHeight: ${MediaDerivatives__PosterHeight:-720}
+      MediaDerivatives__VideoPreviewFrameWidth: ${MediaDerivatives__VideoPreviewFrameWidth:-480}
+      MediaDerivatives__VideoPreviewFrameHeight: ${MediaDerivatives__VideoPreviewFrameHeight:-270}
+      MediaDerivatives__RenderTimeoutSeconds: ${MediaDerivatives__RenderTimeoutSeconds:-30}
+      # Video providers: the worker RUNS media.derivatives.backfill (video
+      # posters), media.posters.regenerate, and metadata.video.backfill
+      # (ffprobe), so it MUST see the same provider config as the api — otherwise
+      # those jobs fall back to synthetic posters / no-op video probing.
+      Media__VideoPosterProvider: ${Media__VideoPosterProvider:-ffmpeg}
+      Media__FfmpegPath: ${Media__FfmpegPath:-ffmpeg}
+      Media__VideoPosterTimeoutSeconds: ${Media__VideoPosterTimeoutSeconds:-10}
+      Media__VideoPreviewStripTimeoutSeconds: ${Media__VideoPreviewStripTimeoutSeconds:-45}
+      Media__VideoMetadataProvider: ${Media__VideoMetadataProvider:-ffprobe}
+      Media__FfprobePath: ${Media__FfprobePath:-ffprobe}
+      # Video-hls: the worker runs media.video.hls.generate, so it MUST see the
+      # same HLS provider config as the api.
+      Media__VideoHlsProvider: ${Media__VideoHlsProvider:-none}
+      Media__VideoHlsTimeoutSeconds: ${Media__VideoHlsTimeoutSeconds:-1800}
+      Media__VideoHlsHighMaxHeight: ${Media__VideoHlsHighMaxHeight:-1080}
+      Media__VideoHlsHighMaxRateKbps: ${Media__VideoHlsHighMaxRateKbps:-5000}
+      Media__VideoHlsLowHeight: ${Media__VideoHlsLowHeight:-480}
+      Media__VideoHlsLowMaxRateKbps: ${Media__VideoHlsLowMaxRateKbps:-1000}
+      Media__VideoHlsHighCrf: ${Media__VideoHlsHighCrf:-23}
+      Media__VideoHlsLowCrf: ${Media__VideoHlsLowCrf:-26}
+      Jobs__LeaseSeconds: ${Jobs__LeaseSeconds:-120}
+      Jobs__HeartbeatSeconds: ${Jobs__HeartbeatSeconds:-30}
+      Jobs__MaxConcurrentJobs: ${Jobs__MaxConcurrentJobs:-1}
+
+
+
+      Staging__Enabled: ${Staging__Enabled:-false}
+      Staging__RootPath: ${Staging__RootPath:-/var/lib/nubarca/staging}
+      Staging__MaxSessionBytes: ${Staging__MaxSessionBytes:-6871947673600}
+      Staging__MaxFileBytes: ${Staging__MaxFileBytes:-201474836480}
+      Staging__MaxFilesPerSession: ${Staging__MaxFilesPerSession:-500000}
+      Staging__MinChunkSizeBytes: ${Staging__MinChunkSizeBytes:-1048576}
+      Staging__MaxChunkSizeBytes: ${Staging__MaxChunkSizeBytes:-67108864}
+      Staging__DefaultChunkSizeBytes: ${Staging__DefaultChunkSizeBytes:-8388608}
+      Staging__SessionTtlHours: ${Staging__SessionTtlHours:-72}
+      Staging__CleanupEnabled: ${Staging__CleanupEnabled:-false}
+      Staging__CleanupIntervalMinutes: ${Staging__CleanupIntervalMinutes:-60}
+
+
+
+
+
+      # AI substrate (Phase 0A–1). OFF by default; mirror the api block so the
+      # worker — which RUNS ai.photos.embeddings.backfill — sees the same AI
+      # config from .env. Without these the worker would no-op AI jobs as
+      # "ai-disabled" even when the api is enabled.
+      Ai__Enabled: ${Ai__Enabled:-false}
+      Ai__Provider: ${Ai__Provider:-none}
+      Ai__MaxConcurrency: ${Ai__MaxConcurrency:-1}
+      Ai__TimeoutSeconds: ${Ai__TimeoutSeconds:-30}
+      Ai__ComputeSliceSeconds: ${Ai__ComputeSliceSeconds:-30}
+      Ai__ComputeSliceItemBudget: ${Ai__ComputeSliceItemBudget:-100}
+      Ai__ImageEmbeddingsEnabled: ${Ai__ImageEmbeddingsEnabled:-false}
+      Ai__DocumentExtractionEnabled: ${Ai__DocumentExtractionEnabled:-false}
+      Ai__DocumentEmbeddingsEnabled: ${Ai__DocumentEmbeddingsEnabled:-false}
+      Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
+      Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
+      Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
+      Ai__TagsEnabled: ${Ai__TagsEnabled:-false}
+      # Must match the API settings above; video jobs execute in this service.
+      Ai__VideoSegmentation__Enabled: ${Ai__VideoSegmentation__Enabled:-false}
+      Ai__VideoVisualEmbeddings__Enabled: ${Ai__VideoVisualEmbeddings__Enabled:-false}
+      Ai__VideoFaceAnalysis__Enabled: ${Ai__VideoFaceAnalysis__Enabled:-false}
+      Ai__VideoFaceAnalysis__AnalysisVersion: ${Ai__VideoFaceAnalysis__AnalysisVersion:-1}
+      Ai__VideoFaceAnalysis__FrameIntervalMilliseconds: ${Ai__VideoFaceAnalysis__FrameIntervalMilliseconds:-1000}
+      Ai__VideoFaceAnalysis__MaximumFramesPerVideo: ${Ai__VideoFaceAnalysis__MaximumFramesPerVideo:-900}
+      Ai__VideoFaceAnalysis__FrameMaxEdge: ${Ai__VideoFaceAnalysis__FrameMaxEdge:-768}
+      # Active photo-similarity profile (mirrors the api; see notes above).
+      Ai__PhotoSimilarityProfileKey: ${Ai__PhotoSimilarityProfileKey:-}
+      # Active face-recognition EVAL profile (see docs/ai-face-model-onnx-
+      # evaluation.md). Unset by default; face processing stays disabled.
+      Ai__FaceProfileKey: ${Ai__FaceProfileKey:-}
+      Ai__Onnx__ModelDir: ${Ai__Onnx__ModelDir:-}
+      # CPU-safety: cap ONNX Runtime intra-op threads for face inference. The eval
+      # host power-cut once under an uncapped full-throttle benchmark; keep this
+      # conservative (e.g. 4) before any real face backfill.
+      Ai__Onnx__IntraOpThreads: ${Ai__Onnx__IntraOpThreads:-}
+      # Face Substrate v0 similarity thresholds (provisional; admin-editable).
+      Ai__Face__ClusterSimilarityThreshold: ${Ai__Face__ClusterSimilarityThreshold:-0.40}
+      Ai__Face__CandidateSimilarityThreshold: ${Ai__Face__CandidateSimilarityThreshold:-0.30}
+      Ai__Face__SearchDefaultSimilarityThreshold: ${Ai__Face__SearchDefaultSimilarityThreshold:-0.35}
+      Ai__Face__SearchMinSimilarity: ${Ai__Face__SearchMinSimilarity:-0.20}
+      Ai__Face__SearchMaxSimilarity: ${Ai__Face__SearchMaxSimilarity:-0.95}
+      Ai__Face__MaxFacesPerImage: ${Ai__Face__MaxFacesPerImage:-50}
+      # Party public links/uploads; mirror api so any party-related worker/CLI
+      # path reads the same production config.
+      Party__TokenSecret: ${Party__TokenSecret:-}
+      Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
+      Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
+      Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}
+      # Mirror the API exactly: analysis jobs execute in this worker and call
+      # the internal HumanAesExpert sidecar.
+      HumanAesExpert__Enabled: ${HumanAesExpert__Enabled:-false}
+      HumanAesExpert__ProfileKey: ${HumanAesExpert__ProfileKey:-human-aesexpert-1b-expert-v1}
+      HumanAesExpert__DefaultCapabilities: ${HumanAesExpert__DefaultCapabilities:-expert_scores}
+      HumanAesExpert__AllowExpertScores: ${HumanAesExpert__AllowExpertScores:-true}
+      HumanAesExpert__AllowScoreHead: ${HumanAesExpert__AllowScoreHead:-false}
+      HumanAesExpert__AllowMetaVoter: ${HumanAesExpert__AllowMetaVoter:-false}
+      HumanAesExpert__AllowTextAssessment: ${HumanAesExpert__AllowTextAssessment:-false}
+      HumanAesExpert__MaximumBatchItems: ${HumanAesExpert__MaximumBatchItems:-20}
+      HumanAesExpert__RequestTimeoutSeconds: ${HumanAesExpert__RequestTimeoutSeconds:-120}
+      HumanAesExpert__SidecarBaseUrl: ${HumanAesExpert__SidecarBaseUrl:-}
+      HumanAesExpert__PreprocessingProfileKey: ${HumanAesExpert__PreprocessingProfileKey:-human-aesexpert-official-v1}
+      HumanAesExpert__MaxUploadBytes: ${HumanAesExpert__MaxUploadBytes:-26214400}
+      HumanAesExpert__Pepper: ${HumanAesExpert__Pepper:-}
+      # deleted-content-import-skip: MUST match the api service's value (the
+      # worker reads the tombstone ledger the api writes). Same variable → same
+      # value from .env.
+      DeletedContent__Pepper: ${DeletedContent__Pepper:-}
+      # To run admin-import jobs on the worker, mirror the api service's
+      # AdminImport__* settings here AND mount the same read-only import roots.
+    volumes:
+      - storage-data:/var/lib/nubarca/storage
+      # If api uses a split derived root / import mounts, mirror them here too.
+      # Slice 93: the worker executes staging-import jobs, which READ staged
+      # files — when staging is enabled, mirror the api's staging mount:
+      - staging-data:/var/lib/nubarca/staging
+    networks:
+      - nubarca-internal
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nubarca-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      # APKs are release artifacts, not source files. The publishing helper
+      # replaces nubarca-tv.apk atomically in this host directory.
+      - ${NUBARCA_TV_APK_DIR:?set NUBARCA_TV_APK_DIR in .env to this installation's APK directory}:/usr/share/nginx/html/download/tv:ro
+    networks:
+      - nubarca-internal
+
+volumes:
+  # Default: Docker-managed named volumes — zero host setup, they "just work".
+  #
+  # Three-tier single-server layout (slice 71): to put PostgreSQL on fast disk
+  # (SSD/NVMe) and the original blob store on a large/slow disk (HDD), mount
+  # those disks on the host first (see deploy/FIRST_DEPLOY.md "Three-tier
+  # storage layout"), then turn the two volumes below into bind mounts by
+  # uncommenting the driver_opts blocks. The volume NAMES are unchanged, so
+  # deploy/backup.sh and deploy/restore.sh keep working as-is.
+  #
+  # NOTE: derived media artifacts (thumbnails, medium previews, video posters)
+  # are content-addressed blobs in the SAME store as originals — they are NOT
+  # separately pathable today. A dedicated derived/cache tier is future work
+  # (needs a second storage backend); see ARCHITECTURE.md. On a single server
+  # they live with the originals on the blob volume below.
+  postgres-data:
+    name: nubarca-postgres-data
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: ${NUBARCA_POSTGRES_DATA:?set NUBARCA_POSTGRES_DATA to the fast-disk path when bind-mounting}
+  dataprotection-keys:
+    name: nubarca-dataprotection-keys
+
+  tv-updates-data:
+    name: nubarca-tv-updates-data
+
+  storage-data:
+    name: nubarca-storage-data
+    # driver: local
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: ${NUBARCA_BLOB_DATA:?set NUBARCA_BLOB_DATA to the blob-storage path when bind-mounting}
+
+  # Slice 72: separate volume for DERIVED media (thumbnails / previews /
+  # posters). Used ONLY when Storage__DerivedRootPath is set and the api
+  # service's storage-derived-data mount is uncommented. Uncomment this whole
+  # block to enable; bind it to a faster/cache disk via NUBARCA_DERIVED_DATA.
+  # Derived artifacts are regenerable cache — this volume does NOT need the
+  # redundancy/backups the originals do.
+  # storage-derived-data:
+  #   name: nubarca-storage-derived-data
+
+  # Slice 93: staging volume shared by API and worker. It stays empty while
+  # Staging__Enabled=false, but must be declared because both services mount it.
+  # TEMPORARY acquisition space: sessions expire and are reclaimed; it needs
+  # neither redundancy nor backups. Size it for your largest expected upload
+  # batch (bind-mount a big disk via NUBARCA_STAGING_DATA if needed).
+  staging-data:
+    name: nubarca-staging-data
+  #   # driver: local
+  #   # driver_opts:
+  #   #   type: none
+  #   #   o: bind
+  #   #   device: ${NUBARCA_STAGING_DATA:?set NUBARCA_STAGING_DATA when bind-mounting}
+  #   driver: local
+  #   driver_opts:
+  #     type: none
+  #     o: bind
+  #     device: ${NUBARCA_DERIVED_DATA:?set NUBARCA_DERIVED_DATA to the derived-cache path when bind-mounting}
+
+networks:
+  nubarca-internal:
+    # Pinned so the created network is exactly `nubarca-internal`. Without it
+    # Compose prefixes the project name and produces `nubarca_nubarca-internal`.
+    name: nubarca-internal
+    driver: bridge

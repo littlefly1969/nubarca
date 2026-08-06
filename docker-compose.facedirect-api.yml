@@ -1,0 +1,85 @@
+# AI direct override — in-process OpenVINO ("openvino-direct") for the COMPLETE
+# ONNX substrate on BOTH services:
+#   api    → face detector + face recognizer + SigLIP2 text/query tower
+#   worker → face detector + face recognizer + SigLIP2 image tower
+# No Python OpenVINO sidecar is used by either service (HumanAesExpert is a
+# separate, experimental sidecar and is intentionally untouched).
+#
+# Compose alongside docker-compose.prod.yml + docker-compose.prod.local.yml +
+# --env-file .env. Images are PINNED (built from the `runtime-openvino` target,
+# which bakes the OpenVINO-enabled ORT native runtime + NUBARCA_GIT_SHA):
+#   FACE_DIRECT_IMAGE    → nubarca-api:siglip-direct-<shortsha>
+#   WORKER_DIRECT_IMAGE  → nubarca-worker:siglip-direct-<shortsha>
+#
+# Per-model device placement (CPU | GPU), FP32 everywhere for output
+# equivalence with the persisted embeddings:
+#   api    detector=GPU recognizer=CPU photoText=CPU   (validated face combo)
+#   worker detector=GPU recognizer=GPU photoImage=CPU  (CPU imaging matched the
+#          2026-07 SigLIP2 benchmark: whole-graph GPU was SLOWER than CPU)
+# The model volume (/models/ai) comes from docker-compose.prod.local.yml.
+#
+# Rollback is a pure Compose/config change: point FACE_DIRECT_IMAGE /
+# WORKER_DIRECT_IMAGE back at the previous images.
+x-ai-direct-env: &ai-direct-env
+  Ai__Onnx__ExecutionProvider: "openvino-direct"
+  Ai__Onnx__ModelDir: "/models/ai"
+  Ai__Onnx__OpenVino__NativeDir: "/opt/nubarca/ort-openvino"
+  Ai__Onnx__OpenVino__GpuPrecision: "FP32"
+  Ai__Onnx__OpenVino__CacheDir: "/var/cache/nubarca/openvino"
+
+services:
+  api:
+    image: "${FACE_DIRECT_IMAGE:-nubarca-api:siglip-direct-local}"
+
+    environment:
+      <<: *ai-direct-env
+      Ai__Onnx__OpenVino__FaceDetectorDevice: "${NUBARCA_FACE_DETECTOR_DEVICE:-GPU}"
+      Ai__Onnx__OpenVino__FaceRecognizerDevice: "${NUBARCA_FACE_RECOGNIZER_DEVICE:-CPU}"
+      Ai__Onnx__OpenVino__PhotoTextDevice: "${NUBARCA_PHOTO_TEXT_DEVICE:-CPU}"
+
+    devices:
+      - "/dev/dri:/dev/dri"
+
+    group_add:
+      - "${OPENVINO_RENDER_GID:-991}"
+
+    volumes:
+      - openvino-cache-api:/var/cache/nubarca/openvino
+
+    healthcheck:
+      test:
+        - "CMD"
+        - "curl"
+        - "-fsS"
+        - "http://127.0.0.1:8080/health/ready"
+      interval: "15s"
+      timeout: "5s"
+      retries: 6
+      start_period: "300s"
+
+  worker:
+    image: "${WORKER_DIRECT_IMAGE:-nubarca-worker:siglip-direct-local}"
+
+    environment:
+      <<: *ai-direct-env
+      Ai__Onnx__OpenVino__FaceDetectorDevice: "${NUBARCA_WORKER_FACE_DETECTOR_DEVICE:-GPU}"
+      Ai__Onnx__OpenVino__FaceRecognizerDevice: "${NUBARCA_WORKER_FACE_RECOGNIZER_DEVICE:-GPU}"
+      Ai__Onnx__OpenVino__PhotoImageDevice: "${NUBARCA_WORKER_PHOTO_IMAGE_DEVICE:-CPU}"
+
+    devices:
+      - "/dev/dri:/dev/dri"
+
+    group_add:
+      - "${OPENVINO_RENDER_GID:-991}"
+
+    volumes:
+      - openvino-cache-worker:/var/cache/nubarca/openvino
+
+volumes:
+  # Persistent, per-service OpenVINO compile caches (regenerable; cut cold-start
+  # recompiles across container recreates). Separate volumes so api and worker
+  # never contend on cache files.
+  openvino-cache-api:
+    name: nubarca-openvino-cache-api
+  openvino-cache-worker:
+    name: nubarca-openvino-cache-worker

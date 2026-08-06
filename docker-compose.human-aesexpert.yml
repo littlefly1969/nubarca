@@ -1,0 +1,100 @@
+# Optional internal-only HumanAesExpert sidecar for the Aesthetics Lab
+# (Laboratorio estetico). Compose it ALONGSIDE the prod files (never alone):
+#
+#   HUMANAES_MODEL_DIR=/srv/nubarca/models/human-aesexpert/human-aesexpert-1b \
+#   docker compose -f docker-compose.prod.yml \
+#                  -f docker-compose.prod.local.yml \
+#                  -f docker-compose.human-aesexpert.yml \
+#                  --env-file .env up -d human-aesexpert
+#
+# Then set on api + worker (in .env, NOT sourced — see CLAUDE.md):
+#   HumanAesExpert__Enabled=true
+#   HumanAesExpert__SidecarBaseUrl=http://human-aesexpert:8091
+#
+# This fragment is ADDITIVE: the ordinary production stack without it continues
+# to resolve and run. The feature stays disabled by default; this only adds the
+# optional model sidecar. Mirrors the postgres/nlu shape: NO published ports,
+# internal network only, read-only model mount, no blob-store mount.
+services:
+  human-aesexpert:
+    build:
+      context: ./scripts/human-aesexpert-sidecar
+      dockerfile: Dockerfile
+    image: nubarca-human-aesexpert:local
+    container_name: nubarca-human-aesexpert
+    restart: unless-stopped
+    # Optional host-topology affinity. Empty keeps Docker's normal scheduler;
+    # production may pin one logical CPU per physical P-core (for example
+    # 0,2,4,6,8,10 on an i7-12650H). Never copy a cpuset between unlike hosts.
+    cpuset: ${HUMANAES_CPUSET:-}
+    # Internal-only: reachable from api/worker as http://human-aesexpert:8091.
+    # `expose` documents the container port for other services on the internal
+    # network WITHOUT publishing it to the host (there is deliberately NO `ports:`
+    # host mapping — the sidecar must never be reachable from outside Docker).
+    expose:
+      - "8091"
+    networks:
+      - nubarca-internal
+    # Weights mounted READ-ONLY from the operator-installed host dir. Never baked
+    # into the image, never committed to git. NO blob-store mount is ever added.
+    volumes:
+      - ${HUMANAES_MODEL_DIR:?set HUMANAES_MODEL_DIR to the installed model dir}:/models/human-aesexpert:ro
+    environment:
+      HUMANAES_MODEL_DIR: /models/human-aesexpert
+      HUMANAES_PORT: "8091"
+      HUMANAES_MAX_QUEUE: "4"
+      HUMANAES_REQUEST_TIMEOUT_S: "120"
+      HUMANAES_TORCH_THREADS: ${HUMANAES_TORCH_THREADS:-4}
+      HUMANAES_TORCH_INTEROP_THREADS: ${HUMANAES_TORCH_INTEROP_THREADS:-1}
+      # Keep native BLAS/OpenMP pools aligned with PyTorch's intra-op pool.
+      OMP_NUM_THREADS: ${HUMANAES_TORCH_THREADS:-4}
+      MKL_NUM_THREADS: ${HUMANAES_TORCH_THREADS:-4}
+      # `trust_remote_code=True` imports the checkpoint's local Python modules
+      # through Transformers' dynamic-module cache even though all model files
+      # are already installed locally. The root filesystem stays read-only;
+      # keep those regenerable runtime files in the existing /tmp tmpfs and
+      # force fail-closed offline loading (no model-hub fallback).
+      HF_HOME: /tmp/huggingface
+      HF_HUB_CACHE: /tmp/huggingface/hub
+      HF_MODULES_CACHE: /tmp/huggingface/modules
+      TRANSFORMERS_CACHE: /tmp/huggingface/transformers
+      XDG_CACHE_HOME: /tmp/cache
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      # Pinned immutable revision (KlingTeam/HumanAesExpert-1B) recorded on every
+      # run for provenance. Must match the installed model directory.
+      HUMANAES_MODEL_REVISION: "b8f7ee3f3a1217ecd331fd6d57b6959f5c0da183"
+    # Bounded resources so a 1B CPU inference cannot starve Postgres / other
+    # inference on the shared host. Tune on the target host after benchmarking.
+    deploy:
+      resources:
+        limits:
+          cpus: ${HUMANAES_CPU_LIMIT:-4.0}
+          memory: ${HUMANAES_MEMORY_LIMIT:-8g}
+    # Runtime hardening: read-only rootfs; the model mount is already :ro.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    # Readiness gate: probe /ready, which returns 200 ONLY after the model is
+    # actually loaded and warm (it returns 503 while loading or on a load
+    # failure). So container health reflects true model readiness, not mere
+    # liveness. `start_period` gives the 1B CPU model time to load before a
+    # failing probe counts against health.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8091/ready').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
+# Composed together with docker-compose.prod.yml, this merges with the
+# nubarca-internal network defined there (same key). (Defined here too so
+# `-f docker-compose.human-aesexpert.yml` is valid standalone in `config`.)
+networks:
+  nubarca-internal:
+    # Pinned so the created network is exactly `nubarca-internal`. Without it
+    # Compose prefixes the project name and produces `nubarca_nubarca-internal`.
+    name: nubarca-internal
+    driver: bridge

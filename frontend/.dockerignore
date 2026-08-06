@@ -1,0 +1,17 @@
+node_modules
+dist
+.vite
+*.tsbuildinfo
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+
+# Test artefacts — the build runs `npm run build`, not `npm run test:run`.
+coverage
+
+# Local-only files (kept out of the build context but harmless if present)
+.env
+.env.*
+!.env.example

@@ -1,0 +1,20 @@
+# NubArca HumanAesExpert sidecar — pinned CPU deps. No cloud/model download at
+# runtime. Versions pinned for a reproducible internal image. The checkpoint's
+# custom code requires transformers==4.44.2 (per the official model card).
+#
+# torch/torchvision are installed SEPARATELY in the Dockerfile from the PyTorch
+# CPU wheel index (torch==2.4.1+cpu / torchvision==0.19.1+cpu) so the image never
+# pulls the CUDA runtime — the sidecar is CPU-only by design.
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.18
+pillow==11.0.0
+# Model runtime deps (besides torch, above). NOT needed for the fake-model
+# pytest path (HUMANAES_FAKE=1), which imports none of these.
+transformers==4.44.2
+# accelerate is required by transformers when loading with low_cpu_mem_usage
+# (the sidecar loads the model that way to bound peak host memory).
+accelerate==0.34.2
+einops==0.8.0
+timm==1.0.11
+sentencepiece==0.2.0

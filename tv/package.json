@@ -1,0 +1,49 @@
+{
+  "name": "nubarca-tv",
+  "version": "1.0.1",
+  "main": "index.js",
+  "private": true,
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "tv:prebuild": "EXPO_TV=1 expo prebuild --platform android --clean",
+    "tv:android": "EXPO_TV=1 expo run:android",
+    "lint": "tsc --noEmit",
+    "config": "expo config --type introspect",
+    "publish:ota": "node scripts/ota.mjs publish",
+    "rollback:ota": "node scripts/ota.mjs rollback",
+    "cleanup:ota": "node scripts/ota.mjs cleanup",
+    "test:ota": "node --test src/ota/updateLifecycle.test.ts scripts/ota.test.mjs",
+    "test:personal": "node --test src/personal/flow.test.ts",
+    "test": "node --test scripts/appIdentity.test.mjs src/ota/updateLifecycle.test.ts scripts/ota.test.mjs src/personal/flow.test.ts src/personal/appBackNavigation.test.ts src/personal/galleryQuery.test.ts src/personal/galleryWorkspaceSource.test.ts src/lib/keepAwake.test.ts src/lib/mediaAspectRatio.test.ts src/lib/justifiedMediaRows.test.ts src/lib/mediaGridFocus.test.ts src/lib/mediaGridPresentation.test.ts src/lib/focusRemap.test.ts src/video/probeClassify.test.ts src/video/remoteMap.test.ts",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~56.0.17",
+    "expo-constants": "~56.0.20",
+    "expo-file-system": "~56.0.8",
+    "expo-keep-awake": "~56.0.3",
+    "expo-status-bar": "~56.0.4",
+    "expo-updates": "~56.0.23",
+    "expo-video": "~56.1.4",
+    "qrcode-generator": "^1.4.4",
+    "react": "19.2.3",
+    "react-native": "npm:react-native-tvos@0.85-stable"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@react-native-tvos/config-tv": "^0.1.6",
+    "@types/node": "~26.1.0",
+    "@types/react": "~19.2.14",
+    "babel-preset-expo": "~56.0.0",
+    "typescript": "~6.0.3"
+  },
+  "expo": {
+    "install": {
+      "exclude": [
+        "react-native"
+      ]
+    }
+  }
+}

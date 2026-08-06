@@ -1,0 +1,91 @@
+# Example host nginx config in front of `docker compose -f
+# docker-compose.prod.yml up -d`. Drop into /etc/nginx/sites-available/,
+# symlink into sites-enabled/, replace `nubarca.example.com` with your
+# domain, and obtain certificates (e.g. `certbot --nginx -d
+# nubarca.example.com`).
+#
+# The compose stack binds api → 127.0.0.1:8080 and frontend → 127.0.0.1:8081
+# (loopback only). This server block is the only path the public internet
+# can reach the stack.
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name nubarca.example.com;
+
+    # ACME http-01 challenges only; force everything else to HTTPS.
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name nubarca.example.com;
+
+    # Replace these paths with whatever your certificate manager produces.
+    ssl_certificate     /etc/letsencrypt/live/nubarca.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/nubarca.example.com/privkey.pem;
+
+    # Modern-only profile. Tune to taste / Mozilla SSL Configurator output.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    # File uploads can be large. Bump for big photo / video originals.
+    client_max_body_size 1G;
+    # The default proxy buffer can stall large request bodies on slow links.
+    proxy_request_buffering off;
+
+    # Hide nginx version + add a couple of conservative response headers.
+    server_tokens off;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # ------ NubArca API + share endpoints ------
+    # The backend reads X-Forwarded-For / X-Forwarded-Proto when
+    # ForwardedHeaders__Enabled=true. Loopback is trusted by default, so no
+    # extra KnownProxies config is needed for this single-host setup.
+    #
+    # Host is forwarded as $http_host, NOT $host: $host drops the port. The API
+    # rejects a state-changing /api request whose Origin does not match its own
+    # scheme/host/port, so Request.Host must carry the address the browser
+    # actually used. Serving on a non-default port with $host makes every write
+    # — login included — fail 403; on :443 the bug hides, because the stripped
+    # port and the port the API infers happen to agree.
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /s/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location = /health {
+        proxy_pass http://127.0.0.1:8080;
+        access_log off;
+    }
+
+    # ------ SPA static (everything else) ------
+    location / {
+        proxy_pass http://127.0.0.1:8081;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

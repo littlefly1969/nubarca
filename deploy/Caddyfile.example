@@ -1,0 +1,47 @@
+# Example host Caddyfile in front of `docker compose -f docker-compose.prod.yml
+# up -d`. Caddy auto-provisions Let's Encrypt certificates on first run as
+# long as ports 80 + 443 reach this host and the domain resolves correctly.
+#
+# Usage:
+#   sudo cp Caddyfile.example /etc/caddy/Caddyfile
+#   $EDITOR /etc/caddy/Caddyfile      # replace nubarca.example.com
+#   sudo systemctl reload caddy
+#
+# The compose stack binds api → 127.0.0.1:8080 and frontend → 127.0.0.1:8081
+# (loopback only). Caddy is the only thing the public internet can reach.
+
+nubarca.example.com {
+    # Automatic HTTPS via Let's Encrypt. Override the ACME email if Caddy
+    # didn't pick one from the global config:
+    # tls youremail@example.com
+
+    encode zstd gzip
+
+    # File uploads can be large. Tune to taste.
+    request_body {
+        max_size 1GB
+    }
+
+    # Conservative security headers. Adjust to taste.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Caddy hides the server header by default for security; uncomment
+        # if you specifically want to override it.
+        # -Server
+    }
+
+    # API + share + health → backend container on loopback.
+    @api {
+        path /api/* /s/* /health
+    }
+    handle @api {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Everything else → SPA bundle on loopback.
+    handle {
+        reverse_proxy 127.0.0.1:8081
+    }
+}

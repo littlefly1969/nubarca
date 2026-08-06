@@ -1,0 +1,22 @@
+{
+  "name": "nubarca-e2e",
+  "version": "0.3.0",
+  "private": true,
+  "description": "NubArca browser verification suite (Playwright).",
+  "type": "module",
+  "scripts": {
+    "e2e": "E2E_EXPECTED_TESTS=72 ./scripts/e2e.sh --project=chromium-desktop --project=chromium-mobile --project=chromium-desktop-zoom200",
+    "e2e:install": "playwright install --with-deps chromium firefox webkit",
+    "start": "./scripts/start.sh",
+    "seed": "./scripts/seed.sh",
+    "test": "playwright test",
+    "stop": "./scripts/stop.sh",
+    "report": "playwright show-report playwright-report",
+    "e2e:extended": "./scripts/e2e.sh"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "22.14.0",
+    "tsx": "4.19.3"
+  }
+}

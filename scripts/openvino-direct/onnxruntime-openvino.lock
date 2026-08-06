@@ -1,0 +1,22 @@
+# Pinned native runtime for NubArca in-process OpenVINO (Gate 3A).
+#
+# This file is the single source of truth for the OpenVINO-direct native stack.
+# It is intentionally sourced by POSIX shell (KEY=VALUE, no spaces). Regenerating
+# it is a deliberate, reviewed act — never bump to "latest" automatically.
+#
+# The managed NuGet Microsoft.ML.OnnxRuntime version MUST equal ORT_ABI_VERSION:
+# the managed P/Invoke layer and the native libonnxruntime.so.<ver> share an ABI.
+#
+# Source artifact: the official Intel-built onnxruntime-openvino Linux wheel
+# (PyPI). It is self-contained: it bundles the OpenVINO runtime + plugins, so no
+# separate `openvino` package or system OpenVINO install is required.
+
+ORT_OPENVINO_VERSION=1.24.1
+ORT_ABI_VERSION=1.24.1
+OPENVINO_VERSION=2025.4.1
+OPENVINO_SONAME=2541
+
+WHEEL_FILENAME=onnxruntime_openvino-1.24.1-cp312-cp312-manylinux_2_28_x86_64.whl
+WHEEL_URL=https://files.pythonhosted.org/packages/50/cf/17ba72de2df0fcba349937d2788f154397bbc2d1a2d67772a97e26f6bc5f/onnxruntime_openvino-1.24.1-cp312-cp312-manylinux_2_28_x86_64.whl
+# FULL SHA-256 (64 hex). Verified against PyPI's published digest for this file.
+WHEEL_SHA256=d617fac2f59a6ab5ea59a788c3e1592240a129642519aaeaa774761dfe35150e
