@@ -7,15 +7,20 @@
 
 import { seedIds } from '../src/fixtures';
 import { expect, test } from '../src/fixtures';
+import {
+  boxOf,
+  expectStationary,
+  isDesktopShell,
+  openScrollableMedia,
+  scrollMain,
+  scrollToClickableTile,
+  settledMedia as settled,
+  shellScrollState,
+  testIdAtPoint,
+} from '../src/appShell';
 
 const grid = 'media-grid';
 const organizeToggle = 'ws-unassigned-only';
-
-/** Wait for the grid to settle: present and no longer showing its skeleton. */
-async function settled(page: import('@playwright/test').Page): Promise<void> {
-  await expect(page.getByTestId(grid)).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByTestId('media-grid-skeleton')).toHaveCount(0, { timeout: 20_000 });
-}
 
 const tileByName = (page: import('@playwright/test').Page, name: RegExp) =>
   page.getByTestId(grid).locator(`[data-media-name*="${name.source}" i]`);
@@ -132,6 +137,138 @@ test.describe('media library', () => {
       `/api/albums/${ids.albumId}/items/${ids.unassignedPhoto}`,
     );
     expect(removed.ok()).toBeTruthy();
+  });
+
+  test('the workspace chrome stays reachable while the media scrolls under it', async ({
+    ownerPage,
+  }, testInfo) => {
+    const available = await openScrollableMedia(ownerPage);
+    const desktop = await isDesktopShell(ownerPage);
+
+    const tabs = ownerPage.getByTestId('media-kind-tabs');
+    const bar = ownerPage.getByTestId('ws-command-bar');
+    const viewport = await boxOf(ownerPage.getByTestId('app-main'), 'the application viewport');
+    const restBefore = await boxOf(tabs, 'the kind tabs');
+
+    // Two stops, because a sticky region legitimately travels up to its pin point
+    // on the way there: the first scroll takes it as far as it goes, and the second
+    // is where "stays put" can be asserted at all.
+    const deep = Math.min(available, 300);
+    const pinned = Math.round(deep / 2);
+    expect(deep - pinned, 'room for a second scroll').toBeGreaterThan(40);
+
+    await scrollMain(ownerPage, pinned);
+    const tabsPinned = await boxOf(tabs, 'the kind tabs');
+    const barPinned = await boxOf(bar, 'the command bar');
+    const wallPinned = await boxOf(ownerPage.getByTestId(grid), 'the media wall');
+
+    await scrollMain(ownerPage, deep);
+    const state = await shellScrollState(ownerPage);
+    expect(state.main, `scrolled in ${testInfo.project.name}`).toBeGreaterThan(40);
+
+    // The media travelled between the two stops. Without this the rest would pass
+    // on a page that simply never moved.
+    const wallAfter = await boxOf(ownerPage.getByTestId(grid), 'the media wall');
+    expect(wallPinned.y - wallAfter.y, 'the media wall moved up').toBeGreaterThan(40);
+
+    if (desktop) {
+      // Deep in a gallery the controls that describe the result are still there,
+      // in the same place, and still operable.
+      await expect(tabs).toBeVisible();
+      await expect(bar).toBeVisible();
+      expectStationary(tabsPinned, await boxOf(tabs, 'the kind tabs'), 'the kind tabs');
+      expectStationary(barPinned, await boxOf(bar, 'the command bar'), 'the command bar');
+      await expect(ownerPage.getByTestId('ws-open-filters')).toBeEnabled();
+      await expect(ownerPage.getByTestId('ws-search-input')).toBeEditable();
+      await expect(ownerPage.getByTestId(organizeToggle)).toBeEnabled();
+
+      // Where it stopped is the top of the application viewport — not an offset
+      // copied from the global top bar, which is a row of the shell above it.
+      const chrome = await boxOf(ownerPage.getByTestId('ws-sticky-chrome'), 'the workspace chrome');
+      expect(chrome.y - viewport.y, 'the chrome is pinned to the top of the viewport')
+        .toBeLessThanOrEqual(2);
+
+      // …and it is really on top of the media rather than still in the DOM
+      // underneath it: whatever is painted over the filters button is the button.
+      const filters = await boxOf(ownerPage.getByTestId('ws-open-filters'), 'the filters button');
+      expect(
+        await testIdAtPoint(
+          ownerPage,
+          filters.x + filters.width / 2,
+          filters.y + filters.height / 2,
+        ),
+        'the media wall is painted over the sticky chrome',
+      ).toBe('ws-open-filters');
+    } else {
+      // Below the sidebar breakpoint the chrome scrolls with the page rather than
+      // pinning several rows of controls over a phone screen.
+      const tabsAfter = await boxOf(tabs, 'the kind tabs');
+      expect(restBefore.y - tabsAfter.y, 'narrow layouts scroll their chrome').toBeGreaterThan(40);
+    }
+
+    expect(state.documentOverflowX, `horizontal overflow in ${testInfo.project.name}`)
+      .toBeLessThanOrEqual(1);
+  });
+
+  test('closing the viewer returns to the same place in the gallery', async ({ ownerPage }) => {
+    const available = await openScrollableMedia(ownerPage);
+    await scrollMain(ownerPage, Math.min(available, 300));
+
+    // Deep in the gallery, on a tile the user could really click.
+    const tile = await scrollToClickableTile(ownerPage, available);
+    const before = await shellScrollState(ownerPage);
+    expect(before.main, 'scrolled materially into the gallery').toBeGreaterThan(40);
+
+    await tile.locator.click();
+    await expect(ownerPage.getByTestId('media-viewer-title')).toBeVisible({ timeout: 20_000 });
+    // The overlay fills the viewport; the gallery underneath must not have moved
+    // to make room for it.
+    expect((await shellScrollState(ownerPage)).main, 'opening the viewer moved the gallery')
+      .toBe(before.main);
+
+    await ownerPage.keyboard.press('Escape');
+    await expect(ownerPage.getByTestId('media-viewer-title')).toHaveCount(0);
+    await expect(ownerPage.getByTestId(grid)).toBeVisible();
+
+    const after = await shellScrollState(ownerPage);
+    // A little layout tolerance, but nothing like a row.
+    expect(Math.abs(after.main - before.main), 'the gallery jumped on close')
+      .toBeLessThanOrEqual(2);
+    expect(after.document).toBeLessThanOrEqual(1);
+
+    // The region the user was looking at is still the region on screen.
+    const tileAfter = await boxOf(
+      ownerPage.getByTestId('media-open').nth(tile.index),
+      `tile ${tile.index}`,
+    );
+    expect(Math.abs(tileAfter.y - tile.box.y), 'the tile that was open moved')
+      .toBeLessThanOrEqual(2);
+  });
+
+  test('a new result identity starts at the top of its own results', async ({ ownerPage }) => {
+    const available = await openScrollableMedia(ownerPage);
+    await scrollMain(ownerPage, Math.min(available, 300));
+    expect((await shellScrollState(ownerPage)).main).toBeGreaterThan(40);
+
+    // Switching tab asks a different question of the library. Landing halfway down
+    // an answer to a question that was never asked is the behaviour this fixes.
+    await ownerPage.getByTestId('media-kind-tab-image').click();
+    await expect(ownerPage.getByTestId('media-kind-tab-image')).toHaveAttribute('aria-selected', 'true');
+    await expect
+      .poll(async () => (await shellScrollState(ownerPage)).main)
+      .toBeLessThanOrEqual(1);
+
+    // Same rule for a scope change made from the command bar.
+    const stillAvailable = (await shellScrollState(ownerPage)).mainOverflow;
+    if (stillAvailable > 40) {
+      await scrollMain(ownerPage, Math.min(stillAvailable, 300));
+      expect((await shellScrollState(ownerPage)).main).toBeGreaterThan(40);
+      await ownerPage.getByTestId(organizeToggle).click();
+      await expect(ownerPage.getByTestId(organizeToggle)).toHaveAttribute('aria-pressed', 'true');
+      await expect
+        .poll(async () => (await shellScrollState(ownerPage)).main)
+        .toBeLessThanOrEqual(1);
+    }
   });
 
   test('the command bar stays usable and the page does not scroll sideways', async ({

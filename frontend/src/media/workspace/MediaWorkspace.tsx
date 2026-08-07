@@ -10,6 +10,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../../auth/useAuth';
 import { useI18n } from '../../i18n';
+import { scrollViewportToTop, useAppScrollViewport } from '../../components/appScroll';
 import { MediaViewer, type MediaViewerItem } from '../../components/MediaViewer';
 import { MediaMetadataPanel } from '../metadata/MediaMetadataPanel';
 import { useMediaSimilarityActions } from '../viewer/mediaViewerActions';
@@ -45,6 +46,7 @@ import {
   clearActiveFilters,
   clearChip,
   isSemanticActive,
+  queryFingerprint,
   type FilterChipKind,
   type MediaKindScope,
   type MediaLibraryScope,
@@ -78,6 +80,7 @@ export function MediaWorkspace({
   const { invalidateAuth } = useAuth();
   const location = useLocation();
   const people = usePeopleIndex();
+  const viewportRef = useAppScrollViewport();
 
   const ws = useMediaWorkspace({
     source,
@@ -240,7 +243,6 @@ export function MediaWorkspace({
   }, [anyOverlayOpen, selection, ws.orderedIds]);
 
   // ---- infinite scroll sentinel --------------------------------------------
-  const observerRef = useRef<IntersectionObserver | null>(null);
   // Latest intersection state of the sentinel. An IntersectionObserver only
   // fires on a TRANSITION, so when a load leaves the sentinel still inside the
   // (large) preload margin no further callback comes — this ref lets the effect
@@ -248,24 +250,36 @@ export function MediaWorkspace({
   const sentinelVisibleRef = useRef(false);
   const loadMoreRef = useRef(ws.loadMore);
   loadMoreRef.current = ws.loadMore;
-  const sentinelRef = useCallback((node: HTMLDivElement | null) => {
-    observerRef.current?.disconnect();
-    observerRef.current = null;
-    if (node && typeof IntersectionObserver !== 'undefined') {
-      const observer = new IntersectionObserver(
-        // Fetch the next page well before the sentinel reaches the viewport so a
-        // fast scroll rarely hits the end of the loaded set (was 600px).
-        (entries) => {
-          sentinelVisibleRef.current = entries.some((e) => e.isIntersecting);
-          if (sentinelVisibleRef.current) loadMoreRef.current();
-        },
-        { rootMargin: '1400px 0px' },
-      );
-      observer.observe(node);
-      observerRef.current = observer;
-    }
-  }, []);
-  useEffect(() => () => observerRef.current?.disconnect(), []);
+  // The sentinel node as state, not a callback ref: the observer is then created
+  // from an effect, which runs after every ref in the commit is attached, so the
+  // application scroll viewport below is never read too early.
+  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
+
+  // The observer's root is the APPLICATION scroll viewport, not the browser
+  // viewport. `.app-main` owns the scrolling and clips what overflows it, and a
+  // root's margin inflates only the root — an intermediate clip is applied
+  // unexpanded. Left document-rooted, the 1400px preload margin would therefore
+  // be swallowed by that clip and the next page would not start loading until the
+  // sentinel was already on screen, which is the stall the margin exists to
+  // prevent. Outside the shell there is no viewport and `null` keeps the previous
+  // document-rooted behaviour.
+  useEffect(() => {
+    if (!sentinelNode || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        sentinelVisibleRef.current = entries.some((e) => e.isIntersecting);
+        if (sentinelVisibleRef.current) loadMoreRef.current();
+      },
+      { root: viewportRef?.current ?? null, rootMargin: '1400px 0px' },
+    );
+    observer.observe(sentinelNode);
+    return () => {
+      observer.disconnect();
+      // The sentinel is gone (a new query, or the end of the set): its last known
+      // visibility must not seed the chaining effect below for a different result.
+      sentinelVisibleRef.current = false;
+    };
+  }, [sentinelNode, viewportRef]);
 
   // After each page settles, if the sentinel is STILL inside the preload margin
   // and there is more to load, fetch the next page. Without this the chain
@@ -278,6 +292,22 @@ export function MediaWorkspace({
       loadMoreRef.current();
     }
   }, [ws.phase, ws.hasMore]);
+
+  // ---- a new result identity starts at the top ------------------------------
+  // Changing WHAT is on screen — tab, scope, search, filters, sort, "solo da
+  // organizzare" — must not leave the user hundreds of rows down inside a
+  // completely different result set. Changing how an item is PRESENTED — opening
+  // and closing the viewer, editing metadata, toggling a selection, a live patch —
+  // must not move the scroll at all. Keying this on the query fingerprint, the
+  // same value that decides whether the workspace refetches, is what separates the
+  // two: nothing else can reach it.
+  const fingerprint = queryFingerprint(identity);
+  const appliedFingerprintRef = useRef(fingerprint);
+  useEffect(() => {
+    if (appliedFingerprintRef.current === fingerprint) return;
+    appliedFingerprintRef.current = fingerprint;
+    scrollViewportToTop(viewportRef);
+  }, [fingerprint, viewportRef]);
 
   // VSEM-03: a video opened from a semantic result starts at its matched
   // timestamp; every other item keeps normal playback (undefined → start).
@@ -382,51 +412,60 @@ export function MediaWorkspace({
 
   return (
     <section className={`ws-page${selection.isSelectionActive ? ' has-bulk-bar' : ''}`} aria-busy={ws.loading}>
-      <MediaKindTabs
-        value={identity.mediaKind}
-        onChange={changeKind}
-        panelId={PANEL_ID}
-        counts={ws.total !== null ? { all: ws.total, image: ws.photoCount ?? 0, video: ws.videoCount ?? 0 } : null}
-      />
+      {/* Everything that describes or changes the current result, as ONE region.
+          On desktop it stays put at the top of the application scroll viewport
+          while the wall passes underneath, so a user thousands of pixels into a
+          gallery can still switch tab, search, filter, sort or drop a chip without
+          scrolling back. The media itself is never in here. */}
+      <div className="ws-sticky-chrome" data-testid="ws-sticky-chrome">
+        <MediaKindTabs
+          value={identity.mediaKind}
+          onChange={changeKind}
+          panelId={PANEL_ID}
+          counts={ws.total !== null ? { all: ws.total, image: ws.photoCount ?? 0, video: ws.videoCount ?? 0 } : null}
+        />
 
-      <MediaCommandBar
-        searchPlaceholder={searchPlaceholder}
-        searchText={searchText}
-        onSearchText={setSearchText}
-        onSubmitSearch={submitSearch}
-        activeFilterCount={activeFilterCount}
-        onOpenFilters={() => setSheetOpen(true)}
-        filtersButtonRef={filtersButtonRef}
-        showSort={!semantic}
-        sort={identity.sort}
-        direction={identity.direction}
-        onChangeSort={changeSort}
-        scope={identity.libraryScope}
-        onChangeScope={changeScope}
-        // Library only: album detail, shared albums and People grids pass
-        // nothing, so the control does not exist there at all.
-        unassignedOnly={source.kind === 'library'
-          ? identity.filters.common.albumMembership === 'unassigned'
-          : undefined}
-        onToggleUnassignedOnly={source.kind === 'library'
-          ? (next) => onIdentityChange({
-              ...identity,
-              filters: {
-                ...identity.filters,
-                common: {
-                  ...identity.filters.common,
-                  albumMembership: next ? 'unassigned' : 'any',
+        <MediaCommandBar
+          searchPlaceholder={searchPlaceholder}
+          searchText={searchText}
+          onSearchText={setSearchText}
+          onSubmitSearch={submitSearch}
+          activeFilterCount={activeFilterCount}
+          onOpenFilters={() => setSheetOpen(true)}
+          filtersButtonRef={filtersButtonRef}
+          showSort={!semantic}
+          sort={identity.sort}
+          direction={identity.direction}
+          onChangeSort={changeSort}
+          scope={identity.libraryScope}
+          onChangeScope={changeScope}
+          // Library only: album detail, shared albums and People grids pass
+          // nothing, so the control does not exist there at all.
+          unassignedOnly={source.kind === 'library'
+            ? identity.filters.common.albumMembership === 'unassigned'
+            : undefined}
+          onToggleUnassignedOnly={source.kind === 'library'
+            ? (next) => onIdentityChange({
+                ...identity,
+                filters: {
+                  ...identity.filters,
+                  common: {
+                    ...identity.filters.common,
+                    albumMembership: next ? 'unassigned' : 'any',
+                  },
                 },
-              },
-            })
-          : undefined}
-      />
+              })
+            : undefined}
+        />
 
-      <MediaFilterChips identity={identity} people={people} items={ws.items} onRemove={removeChip} onClearAll={clearAll} />
+        <MediaFilterChips identity={identity} people={people} items={ws.items} onRemove={removeChip} onClearAll={clearAll} />
 
-      {ws.semanticNotice && (
-        <p className="muted" role="status" data-testid="ws-semantic-notice">{ws.semanticNotice}</p>
-      )}
+        {/* Belongs to the chrome: it explains the ACTIVE query, so it has to stay
+            with the controls that produced it. */}
+        {ws.semanticNotice && (
+          <p className="muted" role="status" data-testid="ws-semantic-notice">{ws.semanticNotice}</p>
+        )}
+      </div>
 
       <div className="visually-hidden" role="status" aria-live="polite" data-testid="ws-sr-live">{srMessage}</div>
 
@@ -457,7 +496,7 @@ export function MediaWorkspace({
 
         <div className="gallery-scroll-footer">
           {(ws.phase.kind === 'ready' || ws.phase.kind === 'loadingMore') && ws.hasMore && (
-            <div ref={sentinelRef} className="gallery-scroll-sentinel" aria-hidden="true" />
+            <div ref={setSentinelNode} className="gallery-scroll-sentinel" aria-hidden="true" />
           )}
           <p className="muted" role="status" aria-live="polite">
             {ws.loadingMore ? t('mediaWs.loadingMore') : ''}

@@ -1,9 +1,10 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { Layout } from './Layout';
+import { useAppScrollViewport } from './appScroll';
 import { NavDrawer } from './nav/NavDrawer';
 import { ThemeProvider } from '../theme';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
@@ -113,6 +114,38 @@ describe('Layout primary navigation', () => {
     renderLayout();
     expect(screen.getByRole('navigation', { name: 'Principale' })).toBeInTheDocument();
     expect(screen.getByRole('main')).toBeInTheDocument();
+  });
+
+  it('hands its scroll viewport to the pages below it', () => {
+    // With the shell owning the viewport the document no longer moves, so a page
+    // that needs to know where scrolling happens — an observer root, a
+    // virtualizer's scroll element, a "back to the top of the results" reset —
+    // has to be told. It is told <main>, and nothing else.
+    // Read from an effect, which is how every real consumer reads it: a page
+    // commits before its ancestors' refs are attached, which is exactly why the
+    // context carries a ref object rather than the element.
+    let seen: HTMLElement | null = null;
+    function Probe() {
+      const viewportRef = useAppScrollViewport();
+      useEffect(() => { seen = viewportRef?.current ?? null; }, [viewportRef]);
+      return <div>probe page</div>;
+    }
+    render(
+      <AuthedWrapper>
+        <ThemeProvider>
+          <MemoryRouter initialEntries={['/']}>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Probe />} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ThemeProvider>
+      </AuthedWrapper>,
+    );
+    expect(screen.getByText('probe page')).toBeInTheDocument();
+    expect(seen).toBe(screen.getByRole('main'));
+    expect(screen.getByTestId('app-main')).toBe(screen.getByRole('main'));
   });
 
   it('collapses and expands the rail with an accessible toggle', async () => {

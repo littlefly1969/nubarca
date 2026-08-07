@@ -27,6 +27,25 @@ export function triggerIntersection(): void {
   });
 }
 
+export interface ObservedIntersection {
+  root: IntersectionObserverInit['root'];
+  rootMargin: IntersectionObserverInit['rootMargin'];
+  elements: Element[];
+}
+
+/**
+ * Every live (mocked) IntersectionObserver with the init it was given.
+ *
+ * Which root an observer watches decides whether its preload margin survives:
+ * inside the application scroll viewport a document-rooted observer has its
+ * margin clipped away by that container. See vitest.setup.ts for the mock.
+ */
+export function activeIntersectionObservers(): ObservedIntersection[] {
+  return (
+    globalThis as unknown as { __activeIntersections?: () => ObservedIntersection[] }
+  ).__activeIntersections?.() ?? [];
+}
+
 export interface MockRequest {
   url: string;
   method: string;

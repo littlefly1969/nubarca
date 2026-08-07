@@ -1,8 +1,17 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type RefObject,
+} from 'react';
+import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual';
 import type { MediaItem, SemanticBestMatch } from '@nubarca/api-client';
 import { formatSize } from '../../components/format';
 import { useI18n } from '../../i18n';
+import { useAppScrollViewport } from '../../components/appScroll';
 import { SemanticMarkerStrip, toMarkers } from './SemanticMarkerStrip';
 import { VideoPreview } from '../../video/VideoPreview';
 import { getMediaAspectRatio } from './mediaAspectRatio';
@@ -16,6 +25,14 @@ import type { MediaSelection } from '../../gallery/useMediaSelection';
 // library), and metadata lives in a hover/focus/selected overlay rather than a
 // permanent card panel. Infinite scroll is owned by the parent (a sentinel below
 // the wall) — this component only lays out and virtualizes what it is given.
+//
+// Virtualization has to follow whoever owns the scrolling. Inside the
+// authenticated shell that is `.app-main`, and a window virtualizer there would
+// read a scroll offset that never changes and mount the first rows forever. So
+// the wall comes in two variants over one shared layout: one measured against the
+// application scroll viewport, one against the document for the surfaces (and
+// tests) that have no shell around them. The choice is made once per mount from a
+// context value that never changes, so no hook is ever called conditionally.
 
 // Render (and therefore start downloading) several rows beyond the viewport in
 // each direction, so a fast scroll lands on rows whose images are already
@@ -63,14 +80,28 @@ interface GridProps {
   badges?: MediaTileBadges;
 }
 
-export function MediaGrid({
-  items, orderedIds, selection, onOpen, semanticTimestamps, semanticMatches, badges,
-}: GridProps) {
-  const { t } = useI18n();
+// What the wall needs from a virtualizer, whichever scroll model produced it.
+interface WallVirtualizer {
+  getTotalSize(): number;
+  getVirtualItems(): ReadonlyArray<{ index: number; start: number }>;
+  options: { scrollMargin: number };
+  measure(): void;
+}
+
+type WallRows = ReturnType<typeof computeJustifiedRows>;
+
+/**
+ * The justified layout, independent of who scrolls.
+ *
+ * Rows are not laid out against an invented fallback width, so tiles never render
+ * at one size and then reflow once the true width arrives.
+ */
+function useWallLayout(items: MediaItem[]): {
+  containerRef: RefObject<HTMLDivElement | null>;
+  measured: boolean;
+  rows: WallRows;
+} {
   const containerRef = useRef<HTMLDivElement>(null);
-  // `null` until the real width is known. Rows are NOT laid out against an
-  // invented fallback width, so tiles never render at one size and then reflow
-  // once the true width arrives (task §"Misurazione del contenitore").
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
 
   useLayoutEffect(() => {
@@ -104,7 +135,7 @@ export function MediaGrid({
     [items],
   );
 
-  // No rows until a real width is measured — the parent shows a stable skeleton
+  // No rows until a real width is measured — the wall shows a stable skeleton
   // meanwhile, and item identity / selection are untouched by a later resize.
   const rows = useMemo(
     () => (measured
@@ -119,20 +150,124 @@ export function MediaGrid({
     [measured, layoutItems, width, params.targetRowHeight, params.minRowHeight, params.maxRowHeight],
   );
 
-  // One virtual element per justified row; the size is the exact row height plus
-  // the inter-row gap (dropped on the last row) so no measurement pass is needed.
+  return { containerRef, measured, rows };
+}
+
+/**
+ * Where the wall begins inside the application scroll viewport's content.
+ *
+ * A virtualizer counts scrolling from its scroll element's origin, while the wall
+ * starts below the page heading and the sticky workspace chrome. Measured rather
+ * than expressed as a constant, so no layout number is written down twice. The
+ * observers cover the cases that actually move it: the viewport resizing, and the
+ * wall's own height changing — which is what happens when a filter chip row or a
+ * query notice appears above it, because that only ever accompanies a refetch.
+ */
+function useWallScrollMargin(
+  containerRef: RefObject<HTMLDivElement | null>,
+  viewportRef: RefObject<HTMLElement | null>,
+): number {
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    const viewport = viewportRef.current;
+    if (!node || !viewport) return;
+    const measure = () => {
+      const next = Math.round(
+        node.getBoundingClientRect().top
+        - viewport.getBoundingClientRect().top
+        + viewport.scrollTop,
+      );
+      setScrollMargin((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(viewport);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [containerRef, viewportRef]);
+
+  return scrollMargin;
+}
+
+/** One virtual element per justified row, sized exactly — no measurement pass. */
+function rowSizer(rows: WallRows) {
+  return (index: number) => {
+    const row = rows[index];
+    if (row === undefined) return 0;
+    return row.height + (row.isLastRow ? 0 : MEDIA_WALL_GAP_PX);
+  };
+}
+
+export function MediaGrid(props: GridProps) {
+  const viewportRef = useAppScrollViewport();
+  return viewportRef
+    ? <ViewportScrolledWall {...props} viewportRef={viewportRef} />
+    : <DocumentScrolledWall {...props} />;
+}
+
+/** The wall inside the authenticated shell: `.app-main` owns the scrolling. */
+function ViewportScrolledWall({
+  viewportRef, ...props
+}: GridProps & { viewportRef: RefObject<HTMLElement | null> }) {
+  const { containerRef, measured, rows } = useWallLayout(props.items);
+  const scrollMargin = useWallScrollMargin(containerRef, viewportRef);
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => viewportRef.current,
+    estimateSize: rowSizer(rows),
+    overscan: MEDIA_WALL_OVERSCAN_ROWS,
+    scrollMargin,
+  });
+  return (
+    <Wall
+      {...props}
+      containerRef={containerRef}
+      measured={measured}
+      rows={rows}
+      virtualizer={rowVirtualizer}
+    />
+  );
+}
+
+/** The wall with no shell around it (public surfaces, unit tests). */
+function DocumentScrolledWall(props: GridProps) {
+  const { containerRef, measured, rows } = useWallLayout(props.items);
   const rowVirtualizer = useWindowVirtualizer({
     count: rows.length,
-    estimateSize: (index) => rows[index].height + (rows[index].isLastRow ? 0 : MEDIA_WALL_GAP_PX),
+    estimateSize: rowSizer(rows),
     overscan: MEDIA_WALL_OVERSCAN_ROWS,
     scrollMargin: containerRef.current?.offsetTop ?? 0,
   });
+  return (
+    <Wall
+      {...props}
+      containerRef={containerRef}
+      measured={measured}
+      rows={rows}
+      virtualizer={rowVirtualizer}
+    />
+  );
+}
+
+function Wall({
+  items, orderedIds, selection, onOpen, semanticTimestamps, semanticMatches, badges,
+  containerRef, measured, rows, virtualizer,
+}: GridProps & {
+  containerRef: RefObject<HTMLDivElement | null>;
+  measured: boolean;
+  rows: WallRows;
+  virtualizer: WallVirtualizer;
+}) {
+  const { t } = useI18n();
 
   // Row geometry changes on resize / new pages without changing the count, so
   // the virtualizer's cached sizes must be recomputed explicitly.
   useEffect(() => {
-    rowVirtualizer.measure();
-  }, [rows, rowVirtualizer]);
+    virtualizer.measure();
+  }, [rows, virtualizer]);
 
   return (
     <div
@@ -142,7 +277,7 @@ export function MediaGrid({
       data-testid="media-grid"
       className="media-wall"
       aria-busy={measured ? undefined : true}
-      style={{ position: 'relative', width: '100%', height: measured ? `${rowVirtualizer.getTotalSize()}px` : undefined }}
+      style={{ position: 'relative', width: '100%', height: measured ? `${virtualizer.getTotalSize()}px` : undefined }}
     >
       {!measured && (
         <div className="media-wall__skeleton" data-testid="media-grid-skeleton" aria-hidden="true">
@@ -151,7 +286,7 @@ export function MediaGrid({
           ))}
         </div>
       )}
-      {measured && rowVirtualizer.getVirtualItems().map((vRow) => {
+      {measured && virtualizer.getVirtualItems().map((vRow) => {
         const row = rows[vRow.index];
         return (
           <div
@@ -164,7 +299,7 @@ export function MediaGrid({
               left: 0,
               width: '100%',
               height: `${row.height}px`,
-              transform: `translateY(${vRow.start - rowVirtualizer.options.scrollMargin}px)`,
+              transform: `translateY(${vRow.start - virtualizer.options.scrollMargin}px)`,
               display: 'flex',
               gap: `${MEDIA_WALL_GAP_PX}px`,
             }}

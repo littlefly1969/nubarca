@@ -9,14 +9,16 @@ import { WEB_URL } from './src/env';
 // that way exercises the real failure mode — a layout that only fits when the
 // viewport is wide in CSS pixels — which a screenshot at 1x would never catch.
 //
-// Zoom projects are restricted to the layout-sensitive surfaces named in the
-// verification requirements (media library and browser TV) rather than the whole
-// suite: running every spec six more times buys nothing and triples the runtime.
+// Zoom projects are restricted to the layout-sensitive surfaces rather than the
+// whole suite: running every spec six more times buys nothing and triples the
+// runtime. `shell` joined that set when the application shell took ownership of the
+// scrolling — a full-height shell with an internal scroll viewport is exactly the
+// kind of layout an effective 200% zoom breaks, so it has to be asserted there.
 
 const DESKTOP = { width: 1280, height: 800 };
 const ZOOMED_DESKTOP = { width: DESKTOP.width / 2, height: DESKTOP.height / 2 };
 
-const LAYOUT_SENSITIVE = /(media-library|tv-browser)\.spec\.ts/;
+const LAYOUT_SENSITIVE = /(shell|media-library|tv-browser)\.spec\.ts/;
 
 export default defineConfig({
   testDir: './specs',

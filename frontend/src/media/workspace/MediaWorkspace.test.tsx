@@ -3,7 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem, MediaListResponse } from '@nubarca/api-client';
-import { AuthedWrapper, installFetchMock, jsonResponse } from '../../test-utils';
+import {
+  activeIntersectionObservers,
+  AuthedWrapper,
+  installFetchMock,
+  jsonResponse,
+} from '../../test-utils';
+import { AppScrollProvider } from '../../components/appScroll';
 import { MediaWorkspace } from './MediaWorkspace';
 import { emptyIdentity, type MediaWorkspaceIdentity, type MediaWorkspaceSource } from './mediaWorkspaceQuery';
 
@@ -270,6 +276,162 @@ describe('MediaWorkspace', () => {
       mediaKind: 'image',
       filters: expect.objectContaining({ photo: expect.objectContaining({ similarTo: 'i1' }) }),
     }));
+  });
+
+  it('keeps its query controls in one sticky chrome region, above the results', async () => {
+    renderWorkspace(page([imageItem, videoItem]));
+    await screen.findByText('photo.jpg');
+
+    const chrome = screen.getByTestId('ws-sticky-chrome');
+    // Everything that describes or changes the current result travels together.
+    for (const control of ['media-kind-tabs', 'ws-command-bar']) {
+      expect(chrome.contains(screen.getByTestId(control)), control).toBe(true);
+    }
+    // The media itself is NOT in the region that stays on screen.
+    expect(chrome.contains(screen.getByTestId('media-grid'))).toBe(false);
+    expect(
+      chrome.compareDocumentPosition(screen.getByTestId('media-grid'))
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('a filter chip row joins the sticky chrome rather than scrolling away from its controls', async () => {
+    const identity = emptyIdentity(LIBRARY);
+    identity.filters.common.favorite = true;
+    renderWorkspace(page([imageItem]), identity);
+    await screen.findByText('photo.jpg');
+    expect(
+      screen.getByTestId('ws-sticky-chrome').contains(screen.getByTestId('media-filter-chips')),
+    ).toBe(true);
+  });
+
+  describe('with the application shell owning the scrolling', () => {
+    /**
+     * A stand-in for `.app-main`.
+     *
+     * The wall virtualizes against whatever owns the scrolling, and a virtualizer
+     * reads its scroll element's size from `offsetHeight` — which jsdom, having no
+     * layout, always reports as 0. Without a size there is no visible range and no
+     * row is mounted at all, so the viewport is given one explicitly, the same
+     * accommodation the container-width stub makes above.
+     */
+    function makeViewport(): HTMLElement {
+      const viewport = document.createElement('div');
+      Object.defineProperty(viewport, 'offsetWidth', { value: 1024, configurable: true });
+      Object.defineProperty(viewport, 'offsetHeight', { value: 768, configurable: true });
+      document.body.appendChild(viewport);
+      return viewport;
+    }
+
+    function renderInShell(
+      media: MediaListResponse | ((req: { url: string }) => Response),
+      identity: MediaWorkspaceIdentity = emptyIdentity(LIBRARY),
+    ) {
+      installFetchMock({
+        'GET /api/media': typeof media === 'function' ? media : () => jsonResponse(media),
+        'GET /api/files/i1/metadata': () => jsonResponse(metadataFor('i1')),
+        'GET /api/files/v1/metadata': () => jsonResponse(metadataFor('v1')),
+      });
+      const viewport = makeViewport();
+      const viewportRef = { current: viewport as HTMLElement | null };
+      const view = render(
+        <MemoryRouter>
+          <AuthedWrapper>
+            <AppScrollProvider viewportRef={viewportRef}>
+              <MediaWorkspace
+                source={LIBRARY}
+                identity={identity}
+                onIdentityChange={vi.fn()}
+                searchPlaceholder="Cerca"
+              />
+            </AppScrollProvider>
+          </AuthedWrapper>
+        </MemoryRouter>,
+      );
+      return { viewport, view };
+    }
+
+    it('roots the pagination sentinel in that viewport, so its preload margin survives', async () => {
+      const mk = (id: string): MediaItem => ({ ...imageItem, id, name: `${id}.jpg`, displayName: `${id}.jpg` });
+      const { viewport } = renderInShell(page([mk('a')], { nextCursor: 'c1', hasMore: true }));
+      await waitFor(() => expect(screen.getAllByTestId('media-open')).toHaveLength(1));
+
+      // `.app-main` clips its overflow, and a root margin never expands an
+      // intermediate clip. Rooted at the document the 1400px lead would be lost
+      // and the next page would only start once the sentinel was already visible.
+      const sentinel = document.querySelector('.gallery-scroll-sentinel');
+      expect(sentinel).not.toBeNull();
+      const observing = activeIntersectionObservers().filter((o) => o.elements.includes(sentinel!));
+      expect(observing).toHaveLength(1);
+      expect(observing[0].root).toBe(viewport);
+      expect(observing[0].rootMargin).toBe('1400px 0px');
+    });
+
+    it('still chains pages while the sentinel stays inside the preload margin', async () => {
+      const mk = (id: string): MediaItem => ({ ...imageItem, id, name: `${id}.jpg`, displayName: `${id}.jpg` });
+      renderInShell((req) => {
+        const cursor = new URL(req.url, 'http://localhost').searchParams.get('cursor');
+        if (!cursor) return jsonResponse(page([mk('a')], { nextCursor: 'c1', hasMore: true }));
+        if (cursor === 'c1') {
+          return jsonResponse(page([mk('b')], { nextCursor: 'c2', hasMore: true, total: -1, photoCount: -1, videoCount: -1 }));
+        }
+        return jsonResponse(page([mk('c')], { nextCursor: null, hasMore: false, total: -1, photoCount: -1, videoCount: -1 }));
+      });
+      await waitFor(() => expect(screen.getAllByTestId('media-open')).toHaveLength(1));
+
+      // Moving scroll ownership from the document to `.app-main` must not cost
+      // the chaining that keeps a fast scroll ahead of the loaded set.
+      act(() => {
+        (globalThis as unknown as { __fireIntersection: (v?: boolean) => void }).__fireIntersection(true);
+      });
+      await waitFor(() => expect(screen.getAllByTestId('media-open')).toHaveLength(3));
+    });
+
+    it('sends a NEW result identity back to the top of that viewport', async () => {
+      const identity = emptyIdentity(LIBRARY);
+      const { viewport, view } = renderInShell(page([imageItem]), identity);
+      await screen.findByText('photo.jpg');
+
+      viewport.scrollTop = 900;
+      const next = { ...identity, mediaKind: 'video' as const };
+      view.rerender(
+        <MemoryRouter>
+          <AuthedWrapper>
+            <AppScrollProvider viewportRef={{ current: viewport }}>
+              <MediaWorkspace
+                source={LIBRARY}
+                identity={next}
+                onIdentityChange={vi.fn()}
+                searchPlaceholder="Cerca"
+              />
+            </AppScrollProvider>
+          </AuthedWrapper>
+        </MemoryRouter>,
+      );
+      // A different result set starts at its own top, not halfway down the
+      // previous one.
+      await waitFor(() => expect(viewport.scrollTop).toBe(0));
+    });
+
+    it('leaves the scroll position alone when only the PRESENTATION changes', async () => {
+      const { viewport } = renderInShell(page([imageItem, videoItem]));
+      await screen.findByText('photo.jpg');
+
+      viewport.scrollTop = 640;
+      // Opening the viewer, then selecting a tile: neither changes what is being
+      // shown, so neither may move the gallery underneath.
+      await userEvent.click(screen.getAllByTestId('media-open')[0]);
+      expect(await screen.findByTestId('media-viewer-title')).toBeInTheDocument();
+      expect(viewport.scrollTop).toBe(640);
+
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByTestId('media-viewer-title')).not.toBeInTheDocument());
+      expect(viewport.scrollTop).toBe(640);
+
+      await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
+      expect(await screen.findByTestId('media-selection-bar')).toBeInTheDocument();
+      expect(viewport.scrollTop).toBe(640);
+    });
   });
 
   it('a similarity anchor routes the photo tab to /api/images (server-scoped), not /api/media', async () => {

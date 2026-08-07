@@ -9,6 +9,7 @@ import { AppNav } from './nav/AppNav';
 import { NavDrawer } from './nav/NavDrawer';
 import { UserMenu } from './UserMenu';
 import { Icon } from './icons/Icon';
+import { AppScrollProvider } from './appScroll';
 
 // Authenticated app shell: a collapsible left navigation, a compact top utility
 // bar and a full-width content region.
@@ -19,6 +20,16 @@ import { Icon } from './icons/Icon';
 // (navModel), the user-scoped controls live in one popover (UserMenu), and
 // narrow viewports get the same navigation through an accessible modal drawer
 // rather than a second information architecture.
+//
+// The shell owns the viewport rather than growing the document: `.app-shell` is
+// exactly one dynamic viewport tall, the top bar is its first row, and
+// `.app-main` is the single box that scrolls. The top bar and the sidebar used to
+// be sticky over a scrolling document, which worked but made the sidebar depend
+// on the top bar's height in rem — change one and the other had to be edited to
+// match. Now the sidebar simply fills the row it is given and `<main>` is handed
+// to the pages below through AppScrollProvider, because with the document
+// stationary an observer root or a virtualizer's scroll element has to be told
+// where scrolling actually happens.
 
 // Bounded local key for the rail state. Not a preference the backend knows or
 // needs to know about.
@@ -34,6 +45,7 @@ export function Layout() {
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   const toggleRail = useCallback(() => {
     setCollapsed((prev) => {
@@ -50,11 +62,16 @@ export function Layout() {
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   // The drawer is a modal; while it is open the page behind it must not scroll.
+  // The scroll owner is `.app-main`, not the body, so that is what gets locked —
+  // locking the body would no longer stop anything. `overflow: hidden` keeps the
+  // element's scroll offset, and the reserved scrollbar gutter means the content
+  // does not shift sideways while the drawer is open.
   useEffect(() => {
-    if (!drawerOpen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previous; };
+    const main = mainRef.current;
+    if (!drawerOpen || !main) return;
+    const previous = main.style.overflowY;
+    main.style.overflowY = 'hidden';
+    return () => { main.style.overflowY = previous; };
   }, [drawerOpen]);
 
   if (state.status !== 'authed') {
@@ -65,8 +82,9 @@ export function Layout() {
   const isAdmin = state.user.isAdmin;
 
   return (
+    <AppScrollProvider viewportRef={mainRef}>
     <div className={`app-shell${collapsed ? ' app-shell--rail' : ''}`}>
-      <header className="app-topbar">
+      <header className="app-topbar" data-testid="app-topbar">
         <button
           ref={menuButtonRef}
           type="button"
@@ -115,7 +133,9 @@ export function Layout() {
           <AppNav isAdmin={isAdmin} collapsed={collapsed} />
         </nav>
 
-        <main className="app-main">
+        {/* The application's scroll viewport. Every authenticated page scrolls
+            here; the document does not move. */}
+        <main className="app-main" ref={mainRef} data-testid="app-main">
           <Outlet />
         </main>
       </div>
@@ -124,5 +144,6 @@ export function Layout() {
         <NavDrawer isAdmin={isAdmin} onClose={closeDrawer} returnFocusRef={menuButtonRef} />
       )}
     </div>
+    </AppScrollProvider>
   );
 }

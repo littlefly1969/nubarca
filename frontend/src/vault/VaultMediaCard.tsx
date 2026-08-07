@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { VaultFile } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { formatSize } from '../components/format';
+import { useAppScrollViewport } from '../components/appScroll';
 import { useVaultMediaObjectUrl, type VaultMediaVariant } from './useVaultMediaObjectUrl';
 
 // A single vault file rendered as a visual card. Photos show their small
@@ -41,6 +42,7 @@ export function VaultMediaCard({
   onExpired: () => void;
 }) {
   const { t } = useI18n();
+  const viewportRef = useAppScrollViewport();
   const cardRef = useRef<HTMLDivElement | null>(null);
   // Lazy gate: becomes (and stays) true once the card enters/approaches the
   // viewport, so the whole vault is never prefetched.
@@ -54,6 +56,9 @@ export function VaultMediaCard({
       setVisible(true);
       return;
     }
+    // Rooted in the application scroll viewport when there is one: `.app-main`
+    // clips its overflow, so a document-rooted observer would lose the 200px lead
+    // and each card would only start loading once it was already on screen.
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
@@ -61,11 +66,11 @@ export function VaultMediaCard({
           observer.disconnect();
         }
       },
-      { rootMargin: '200px' },
+      { root: viewportRef?.current ?? null, rootMargin: '200px' },
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [viewportRef]);
 
   const variant = variantFor(file);
   const { url, status } = useVaultMediaObjectUrl({

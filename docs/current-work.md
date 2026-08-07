@@ -39,6 +39,24 @@ is built is described by `ARCHITECTURE.md`.
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
+- **The authenticated shell owns the viewport; `.app-main` owns the scrolling.**
+  `.app-shell` is exactly one dynamic viewport tall, the top bar and the sidebar
+  are rows of it, and `.app-main` is the only box with `overflow-y: auto`. The
+  sidebar therefore holds no copy of the top bar's height. This is an API and not
+  only a look: with the document stationary, anything that measures scrolling has
+  to be told where it happens, which is what `AppScrollProvider` /
+  `useAppScrollViewport` carry. Two consequences are easy to undo by accident —
+  the media wall virtualizes against that element (`useWindowVirtualizer` there
+  would read an offset that never changes and mount the first rows forever), and
+  the pagination sentinel's `IntersectionObserver` is rooted in it, because a root
+  margin never expands an intermediate clip and a document-rooted observer would
+  lose its whole 1400px preload lead to `.app-main`'s overflow clip.
+- **A new result identity starts at the top; a presentation change never moves the
+  scroll.** The media workspace resets `.app-main.scrollTop` when the query
+  fingerprint changes — tab, scope, search, filters, sort — and only then.
+  Opening or closing the viewer, editing metadata, toggling a selection and live
+  patches deliberately leave the position alone, which is why the reset is keyed
+  on the fingerprint rather than on a render or a route.
 - **Semantic search is uncalibrated by design.** `SemanticResultPolicy`
   implements a score floor, a soft limit and a safety bound, but the thresholds
   are DISABLED and effective behaviour is a deterministic top-300 cut. Live

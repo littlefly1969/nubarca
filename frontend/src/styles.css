@@ -973,17 +973,32 @@ a {
   }
 }
 
+/* The authenticated shell IS the viewport.
+   It used to be `min-height: 100vh` with a sticky top bar and a sticky sidebar
+   over a scrolling document, which looked right but left the document as the
+   principal scroll owner: `.app-main` grew with its content, so the sidebar had
+   to be told the top bar's height twice (`top: 3.4rem`, `max-height: calc(100vh -
+   3.4rem)`) and any change to the bar meant editing both. The shell is now
+   exactly one viewport tall and its rows divide that height structurally, so the
+   sidebar knows nothing about the top bar and `.app-main` is the one box that
+   scrolls. `overflow: hidden` states the consequence rather than leaving it to
+   luck; `position: fixed` overlays (drawer, viewer, sheets, selection bar) are
+   unaffected by it, and nothing here adds a `transform` that would capture them. */
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;   /* fallback where dvh is unsupported */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--surface-canvas);
 }
 
 .app-topbar {
-  position: sticky;
-  top: 0;
+  /* A normal first row of the shell, not a sticky overlay on a scrolling page.
+     Positioned only so the z-index applies to the UserMenu popover. */
+  position: relative;
   z-index: 30;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1003,22 +1018,25 @@ a {
   min-width: 0;
 }
 
+/* All the viewport height the top bar did not take. `min-height: 0` is what lets
+   its children be shorter than their content and scroll instead of growing. */
 .app-shell__body {
   flex: 1;
   display: flex;
-  align-items: flex-start;
   min-height: 0;
   /* Never let a wide child (grid, table, code block) push the page sideways. */
   max-width: 100%;
 }
 
+/* Fills the body row it is given — no top offset and no viewport-height
+   subtraction, so the top bar's height is nowhere in this rule. Its own
+   overflow only engages on screens too short for the navigation itself. */
 .app-sidebar {
-  position: sticky;
-  top: 3.4rem;
   flex: none;
   width: 15rem;
-  max-height: calc(100vh - 3.4rem);
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.9rem 0.6rem 2rem;
   border-inline-end: 1px solid var(--border-default);
   background: var(--surface-raised);
@@ -1114,12 +1132,32 @@ a {
    need a reading measure (login, account forms, confirmations, prose) set a
    LOCAL max-width instead of imposing one on everything. */
 .app-main {
+  --app-main-gutter: 1.5rem;
   flex: 1;
   min-width: 0;
+  /* The application's scroll viewport: `min-height: 0` lets it be shorter than
+     its content, and the overflow then belongs to it rather than to the
+     document. `scrollbar-gutter` reserves the bar's width up front so the media
+     wall does not reflow the moment a page becomes scrollable, and
+     `overscroll-behavior` keeps a flick at the end of a gallery from moving the
+     browser document behind the application. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
   width: 100%;
-  padding-block: 1.5rem;
+  /* The TOP gutter is deliberately not a padding here. A sticky region inside a
+     scroll container pins to the container's CONTENT box, while the container's
+     padding still scrolls, so a `padding-block-start` on this element would leave
+     a gutter-tall strip of moving media above anything stuck at `top: 0`. Giving
+     the gutter to the content instead makes "the top of the scrollport" and "the
+     top of the content" the same edge, which is what lets a sticky offset of 0
+     mean what it says. */
+  padding-block: 0 var(--app-main-gutter);
   padding-inline: clamp(1rem, 2.5vw, 2.5rem);
 }
+.app-main > :first-child { margin-block-start: var(--app-main-gutter); }
 
 /* --- Mobile drawer -------------------------------------------------------- */
 
@@ -1133,6 +1171,7 @@ a {
   width: min(19rem, 86vw);
   height: 100%;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0.6rem 0.6rem 2rem;
   background: var(--surface-raised);
   border-inline-end: 1px solid var(--border-default);
@@ -1154,7 +1193,7 @@ a {
   .app-sidebar { display: none; }
   /* Inline gutters already shrink via clamp(); only the block rhythm needs
      tightening once the rail is gone. */
-  .app-main { padding-block: 1rem; }
+  .app-main { --app-main-gutter: 1rem; }
 }
 
 /* --- User menu ------------------------------------------------------------ */
@@ -4507,6 +4546,14 @@ video.lightbox-image {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* While this modal owns the interaction, a wheel or a touch flick over it must
+     not scroll the gallery behind it — the user expects to come back to exactly
+     the row they opened. `overflow: hidden` makes the overlay a scroll container
+     so `overscroll-behavior: contain` has something to contain: chaining to
+     `.app-main` stops here. Nothing touches `.app-main.scrollTop`, so the
+     position is preserved by not being disturbed rather than by being restored. */
+  overflow: hidden;
+  overscroll-behavior: contain;
 }
 .media-viewer-backdrop {
   position: absolute;
@@ -6384,7 +6431,10 @@ video.lightbox-image {
    (--bg/--fg/--muted/--border/--accent) so light + dark follow automatically.
    ============================================================================ */
 
-.ws-page { position: relative; }
+/* The in-flow children are the sticky chrome and the result panel; the selection
+   bar, notices, sheets and the viewer are all out of flow, so the gap applies to
+   the two that are on the page. */
+.ws-page { position: relative; display: flex; flex-direction: column; gap: 0.6rem; }
 
 /* ---- Sticky workspace header --------------------------------------------- */
 .ws-header {
@@ -6474,6 +6524,9 @@ video.lightbox-image {
   position: fixed; inset: 0; z-index: 1200;
   background: color-mix(in srgb, #000 32%, transparent);
   display: flex; justify-content: flex-end;
+  /* Same reason as the media viewer: a modal must not hand its scrolling on to
+     the application viewport behind it. */
+  overflow: hidden; overscroll-behavior: contain;
 }
 .ws-sheet {
   width: min(480px, 100vw);
@@ -6506,7 +6559,7 @@ video.lightbox-image {
 .ws-tab.is-active { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
 .ws-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-.ws-sheet-body { flex: 1 1 auto; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1.1rem; }
+.ws-sheet-body { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: 1rem; display: flex; flex-direction: column; gap: 1.1rem; }
 .ws-sheet-foot {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0.75rem 1rem; border-top: 1px solid var(--border);
@@ -6672,6 +6725,38 @@ video.lightbox-image {
 .ws-page-outer { display: flex; flex-direction: column; gap: 0.85rem; }
 .ws-page-header { display: flex; flex-direction: column; gap: 0.3rem; }
 .ws-page-header h1 { margin: 0; font-size: 1.45rem; }
+
+/* The workspace's own chrome, as ONE region rather than several independently
+   pinned controls: kind tabs, the command bar, the applied-filter chips and the
+   notice that explains the active query all describe the same result, so they
+   stick or scroll together.
+   `top: 0` is the whole offset. `.app-main` already begins below the global top
+   bar and is the scroll container this sticks inside, so the bar's height is not
+   measured a second time here. The page heading above it is deliberately NOT
+   sticky: what a user deep in a gallery needs back is the tabs and the query
+   controls, not the word "Libreria". */
+.ws-sticky-chrome {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+/* Complement of the sidebar/drawer breakpoint (max-width: 900px). Below it the
+   drawer replaces the sidebar and the screen is too short to give several rows
+   of controls permanently to the chrome, so it scrolls with the page. */
+@media (min-width: 901px) {
+  .ws-sticky-chrome {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    /* Opaque, and exactly as wide as the content it covers: the wall passes
+       behind this region, never through it. Below the global top bar (z 30) and
+       below every overlay (viewer 1000, selection bar 1100, sheets 1200). */
+    background: var(--surface-canvas);
+    padding-block: 0.6rem;
+    border-bottom: 1px solid var(--border-default);
+  }
+}
 .album-detail-header .back-link { align-self: flex-start; }
 .album-detail-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .album-detail-title-row h1 { margin: 0; }

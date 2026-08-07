@@ -212,6 +212,116 @@ describe('styles.css parses', () => {
     expect(decls.get('width')).toMatch(/^min\(100%,/);
   });
 
+  // The application-shell scroll contract. These are structural invariants
+  // rather than looks: the browser tests prove the behaviour, and these prove the
+  // shape that produced it cannot quietly be reverted to a scrolling document
+  // with two elements pinned over it.
+  describe('the shell owns the viewport', () => {
+    const root = postcss.parse(CSS, { from: CSS_PATH });
+
+    /** Declarations of the BASE rule for a selector (not a @media override). */
+    function baseRule(selector: string): Map<string, string> {
+      let found: postcss.Rule | undefined;
+      root.walkRules((rule) => {
+        if (rule.selector === selector && rule.parent?.type === 'root') found = rule;
+      });
+      expect(found, `${selector} base rule`).toBeDefined();
+      const decls = new Map<string, string>();
+      found!.walkDecls((d) => { decls.set(d.prop, d.value); });
+      return decls;
+    }
+
+    it('constrains its own height instead of growing the document', () => {
+      const shell = baseRule('.app-shell');
+      // A dynamic-viewport height with a plain-vh fallback ahead of it, so an
+      // engine without dvh still gets a bounded shell.
+      expect(shell.get('height')).toBe('100dvh');
+      expect(String(root)).toContain('height: 100vh;   /* fallback where dvh is unsupported */');
+      // min-height would let content push the shell past the viewport again.
+      expect(shell.has('min-height')).toBe(false);
+    });
+
+    it('makes .app-main the scroll viewport', () => {
+      const main = baseRule('.app-main');
+      expect(main.get('overflow-y')).toBe('auto');
+      expect(main.get('overflow-x')).toBe('hidden');
+      // Without this a flex child grows to its content and nothing scrolls.
+      expect(main.get('min-height')).toBe('0');
+      // No layout jump the moment a page becomes scrollable.
+      expect(main.get('scrollbar-gutter')).toBe('stable');
+    });
+
+    it('keeps the top gutter off the scroll viewport, so `top: 0` means the top', () => {
+      // A padding-block-start here would scroll while a sticky region pinned to
+      // the content box stayed put, leaving a gutter-tall strip of moving media
+      // above the workspace chrome. The gutter belongs to the content.
+      const main = baseRule('.app-main');
+      expect(main.get('padding-block')).toBe('0 var(--app-main-gutter)');
+      expect(main.has('padding-block-start')).toBe(false);
+      expect(main.has('padding-top')).toBe(false);
+      let firstChild: postcss.Rule | undefined;
+      root.walkRules('.app-main > :first-child', (rule) => { firstChild = rule; });
+      expect(firstChild, '.app-main > :first-child').toBeDefined();
+      const decls = new Map<string, string>();
+      firstChild!.walkDecls((d) => { decls.set(d.prop, d.value); });
+      expect(decls.get('margin-block-start')).toBe('var(--app-main-gutter)');
+    });
+
+    it('never hands the whole document to the shell by hiding body overflow', () => {
+      // Login, TV pairing and the public party pages are not in the shell and
+      // still use the document; a global lock would break them.
+      root.walkRules((rule) => {
+        if (!/(^|,\s*)body(\s*,|$)/.test(rule.selector)) return;
+        rule.walkDecls('overflow', (d) => {
+          expect(d.value, `body { overflow: ${d.value} }`).not.toBe('hidden');
+        });
+        rule.walkDecls('overflow-y', (d) => {
+          expect(d.value, `body { overflow-y: ${d.value} }`).not.toBe('hidden');
+        });
+      });
+    });
+
+    it('leaves the sidebar knowing nothing about the top bar height', () => {
+      // The coupling this replaces was `top: 3.4rem` plus
+      // `max-height: calc(100vh - 3.4rem)`: the top bar's height written into the
+      // sidebar twice, so changing the bar meant editing rules that are not the
+      // bar. The sidebar now fills the body row it is given.
+      const sidebar = baseRule('.app-sidebar');
+      expect(sidebar.has('top')).toBe(false);
+      expect(sidebar.has('max-height')).toBe(false);
+      expect(sidebar.get('position')).toBeUndefined();
+      // It still scrolls itself on a screen too short for the navigation.
+      expect(sidebar.get('overflow-y')).toBe('auto');
+    });
+
+    it('sticks the workspace chrome at the top of that viewport, with no measured offset', () => {
+      let sticky: postcss.Rule | undefined;
+      root.walkRules('.ws-sticky-chrome', (rule) => {
+        if (rule.nodes.some((n) => n.type === 'decl' && n.prop === 'position')) sticky = rule;
+      });
+      expect(sticky, '.ws-sticky-chrome sticky rule').toBeDefined();
+      const decls = new Map<string, string>();
+      sticky!.walkDecls((d) => { decls.set(d.prop, d.value); });
+      expect(decls.get('position')).toBe('sticky');
+      // `.app-main` already starts below the global top bar, so the offset is 0 —
+      // never a copy of the bar's height.
+      expect(decls.get('top')).toBe('0');
+      // Desktop only, and off the SAME breakpoint the sidebar/drawer switch uses
+      // (max-width: 900px) rather than a second invented one.
+      expect((sticky!.parent as postcss.AtRule).params).toBe('(min-width: 901px)');
+      expect(CSS).toContain('@media (max-width: 900px)');
+    });
+
+    it('adds no transform to the shell or its scroll viewport', () => {
+      // A transform on an ancestor makes it the containing block for
+      // position: fixed, which would trap the viewer, drawer, sheets and the
+      // selection bar inside the scrolling region.
+      for (const selector of ['.app-shell', '.app-shell__body', '.app-main']) {
+        expect(baseRule(selector).has('transform'), selector).toBe(false);
+      }
+    });
+  });
+
   it('never lets the document itself scroll sideways', () => {
     const root = postcss.parse(CSS, { from: CSS_PATH });
     let body: postcss.Rule | undefined;

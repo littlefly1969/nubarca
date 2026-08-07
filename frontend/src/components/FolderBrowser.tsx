@@ -11,6 +11,7 @@ import { ApiError } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { getMyStorageUsage, type UserStorageUsage } from '@nubarca/api-client';
 import { type BreadcrumbEntry } from './Breadcrumb';
+import { useAppScrollViewport } from './appScroll';
 import { formatSize } from './format';
 import { CreateFolderForm } from './CreateFolderForm';
 import { UploadPanel } from './UploadPanel';
@@ -85,6 +86,7 @@ function readSort(): SortPref {
 // lives in files/*; this component is the glue + interaction model.
 export function FolderBrowser() {
   const { invalidateAuth } = useAuth();
+  const viewportRef = useAppScrollViewport();
   const [trail, setTrail] = useState<BreadcrumbEntry[]>([ROOT_ENTRY]);
   const [viewMode, setViewMode] = useState<ViewMode>(readView);
   const [sort, setSort] = useState<SortPref>(readSort);
@@ -339,6 +341,10 @@ export function FolderBrowser() {
   const canLoadMoreRef = useRef(canLoadMore);
   canLoadMoreRef.current = canLoadMore;
 
+  // Rooted in the application scroll viewport when there is one: `.app-main`
+  // clips its overflow, and a root margin never expands an intermediate clip, so
+  // a document-rooted observer would lose the 400px lead and only fire once the
+  // sentinel was already on screen.
   const sentinelRef = useCallback((node: HTMLDivElement | null) => {
     observerRef.current?.disconnect();
     observerRef.current = null;
@@ -349,12 +355,12 @@ export function FolderBrowser() {
             loadMoreRef.current();
           }
         },
-        { rootMargin: '400px' },
+        { root: viewportRef?.current ?? null, rootMargin: '400px' },
       );
       observer.observe(node);
       observerRef.current = observer;
     }
-  }, []);
+  }, [viewportRef]);
   useEffect(() => () => observerRef.current?.disconnect(), []);
 
   const busy = listing.status === 'loading';
