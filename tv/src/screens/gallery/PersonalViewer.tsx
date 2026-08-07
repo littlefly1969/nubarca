@@ -15,6 +15,7 @@ import { loadTvMedia } from '../../api/client';
 import { getPersonalMediaInfo, type TvPersonalGalleryItem, type TvPersonalMediaInfo } from '../../api/personalGallery';
 import { SlideImage } from '../../components/SlideImage';
 import { FocusableButton } from '../../components/FocusableButton';
+import { MenuCommandRail } from '../../components/MenuCommandRail';
 import { PanelShell } from './PanelShell';
 import { useMenuOverlay } from '../../lib/useMenuOverlay';
 import { useScreenAwake } from '../../lib/useScreenAwake';
@@ -259,7 +260,9 @@ export function PersonalViewer({
             </View>
           )}
 
-          <View style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}>
+          <MenuCommandRail
+            style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}
+          >
             <FocusableButton
               label={item.favorite ? t('gallery.favoriteOn') : t('gallery.favoriteOff')}
               onPress={() => void toggleFavorite()}
@@ -277,7 +280,7 @@ export function PersonalViewer({
               onPress={togglePlay}
               onFocusChange={(f) => { if (f) bumpOverlay(); }}
             />
-          </View>
+          </MenuCommandRail>
         </>
       )}
     </View>

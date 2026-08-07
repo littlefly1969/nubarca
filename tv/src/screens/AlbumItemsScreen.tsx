@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -23,6 +23,7 @@ import {
 import { ApiError } from '../api/client';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { FocusableButton } from '../components/FocusableButton';
+import { MenuCommandRail } from '../components/MenuCommandRail';
 import { AuthedTilePreview } from '../components/AuthedTilePreview';
 import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
@@ -37,6 +38,7 @@ import {
   mediaGridTargetRowHeight,
 } from '../lib/mediaGridPresentation';
 import { useTvMediaGridFocus, type TvMediaFocusTargets } from '../lib/mediaGridFocus';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { remapFocusIndexById } from '../lib/focusRemap';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
@@ -87,6 +89,7 @@ const ItemTile = memo(function ItemTile({
   width,
   height,
   preferred,
+  focusable,
   focusTargets,
   onOpen,
   onFocusIndex,
@@ -98,6 +101,9 @@ const ItemTile = memo(function ItemTile({
   width: number;
   height: number;
   preferred: boolean;
+  // False while the MENU command rail owns focus: the grid must not stay a
+  // focus destination underneath it.
+  focusable: boolean;
   focusTargets: TvMediaFocusTargets;
   onOpen: (index: number) => void;
   // Reports which tile the remote is on (index + id), so a later transition can
@@ -115,6 +121,7 @@ const ItemTile = memo(function ItemTile({
       accessibilityLabel={item.name}
       style={{ width }}
       hasTVPreferredFocus={preferred}
+      focusable={focusable}
       focusTargets={focusTargets}
       onSelect={() => onOpen(index)}
       onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
@@ -125,7 +132,7 @@ const ItemTile = memo(function ItemTile({
         style={{ width: '100%', height, borderRadius: 8 }}
       />
       {isVideo && <Text style={styles.badge}>▶</Text>}
-      {focused && (
+      {focused && focusable && (
         <View style={styles.posBadge} pointerEvents="none">
           <Text style={styles.posBadgeText}>{index + 1} / {total}</Text>
         </View>
@@ -143,10 +150,11 @@ const ItemTile = memo(function ItemTile({
 //  - MENU shows the overlay: party QR top-left, album title top-center, party
 //    upload QR top-right, and a compact command bar (Albums / Slideshow) at the
 //    bottom — all inside the overscan safe area, auto-hidden after ~6s idle.
-//    Focus jumps EXPLICITLY to the first bar command (LEFT/RIGHT move between
-//    commands, SELECT activates, UP returns into the grid). MENU hides it
-//    again; hardware BACK hides it first, then returns to the album list.
-//    Closing the overlay restores focus to the previously focused tile.
+//    The bar is a MODAL focus scope: focus moves to the first command, LEFT and
+//    RIGHT move between commands, SELECT activates one, and no direction can
+//    leave the bar — grid navigation is suspended while it is open. MENU hides
+//    it again; hardware BACK hides it first, then returns to the album list.
+//    Closing the overlay restores focus to the EXACT previously focused tile.
 //
 // A 404 (album disabled between listing and opening) routes back to the album
 // list. When the album is in PartyMode, the item list is polled so guest
@@ -223,31 +231,6 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   const bumpOnFocus = useCallback((focused: boolean) => {
     if (focused) bumpOverlay();
   }, [bumpOverlay]);
-
-  // Explicit overlay focus mode. The remote must never have to spatially hunt
-  // for the bottom command bar:
-  //  - lastFocusedIndexRef tracks the tile the user was on (updated by every
-  //    tile focus, including while the overlay is up — e.g. after pressing UP
-  //    from the bar back into the grid);
-  //  - when the overlay OPENS, the first bar command takes focus via its
-  //    mount-time hasTVPreferredFocus (and no tile keeps a preferred flag);
-  //  - when the overlay CLOSES (MENU, BACK, auto-hide or a command), the
-  //    previously focused tile's hasTVPreferredFocus flips false→true, which
-  //    natively calls requestFocus() on the mounted view (verified in
-  //    ReactViewManager.setTVPreferredFocus — it acts on every change to true).
-  // The remote's position is tracked by INDEX (for the current display list) and
-  // by ITEM ID (stable across list/row rebuilds), so focus can be restored to
-  // the same photo after a face-filter swap / live append / width change.
-  const lastFocusedIndexRef = useRef(0);
-  const lastFocusedIdRef = useRef<string | null>(null);
-  const [restoreIndex, setRestoreIndex] = useState<number | null>(0);
-  const onTileFocus = useCallback((index: number, id: string) => {
-    lastFocusedIndexRef.current = index;
-    lastFocusedIdRef.current = id;
-    // hasTVPreferredFocus is a one-shot restoration request. Leaving it true on
-    // a clipped row lets Android request focus again when that row remounts.
-    setRestoreIndex((current) => (current === null ? current : null));
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -350,58 +333,23 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   const detailRef = useRef(detail);
   detailRef.current = detail;
 
-  // Face-filter transitions preserve the user's position: keep focus on the
-  // focused photo when it is still shown in the new display list, otherwise
-  // focus the first (matching) photo. Changing restoreIndex flips that tile's
-  // hasTVPreferredFocus false→true, which natively pulls focus to it.
-  const prevFaceFilterRef = useRef(faceFilter);
-  useEffect(() => {
-    const prev = prevFaceFilterRef.current;
-    prevFaceFilterRef.current = faceFilter;
-    if (prev === faceFilter) return;
-    const full = detailRef.current?.items ?? [];
-    const prevItems = prev?.items ?? full;
-    const nextItems = faceFilter?.items ?? full;
-    // Keep the user on the same photo when it survives the transition, else the
-    // first (matching) photo.
-    const nextIndex = remapFocusIndexById(prevItems, lastFocusedIndexRef.current, nextItems);
-    lastFocusedIndexRef.current = nextIndex;
-    lastFocusedIdRef.current = nextItems[nextIndex]?.id ?? null;
-    setRestoreIndex(nextIndex);
-  }, [faceFilter]);
+  // Focus OWNERSHIP. While the overlay is up the command rail owns focus and
+  // the grid stops being a focus destination entirely; the exact tile the user
+  // was on is remembered by id (with the index as the fallback) and restored
+  // when the overlay closes for ANY reason — MENU again, BACK, the idle
+  // auto-hide, or a command. `restoreIndex` is a ONE-SHOT request: leaving it
+  // set on a clipped row is what used to let Android request focus again when
+  // that row remounted.
+  // The three callbacks are identity-stable; only `restoreIndex` re-renders.
+  const {
+    restoreIndex, onTileFocused: rememberFocusedTile, restoreTo, read: readGridFocus,
+  } = useTvGridFocusMemory(overlayVisible, displayItems);
+  // The single expression that says whether the grid is a focus destination at
+  // all. A tile may only ASK for focus when it could accept it.
+  const gridFocusable = !overlayVisible;
 
-  // Overlay just closed → point the restore flag at the last-focused tile
-  // (clamped in case the list shrank meanwhile, e.g. a face filter kicked in).
-  const prevOverlayVisibleRef = useRef(false);
-  useEffect(() => {
-    if (prevOverlayVisibleRef.current && !overlayVisible) {
-      // Prefer the id (the list may have changed while the overlay was up, e.g.
-      // a face filter kicked in); fall back to the clamped last index.
-      const items = displayItemsRef.current;
-      const byId = lastFocusedIdRef.current
-        ? items.findIndex((it) => it.id === lastFocusedIdRef.current)
-        : -1;
-      const idx = byId >= 0 ? byId : Math.min(lastFocusedIndexRef.current, items.length - 1);
-      setRestoreIndex(Math.max(0, idx));
-    }
-    prevOverlayVisibleRef.current = overlayVisible;
-  }, [overlayVisible]);
-
-  const openAt = useCallback((index: number, autoPlay = false) => {
-    const d = detailRef.current;
-    if (!d) return;
-    onOpenItem(displayItemsRef.current, index, autoPlay, {
-      albumId: album.id,
-      partyEnabled: d.partyEnabled,
-      partyUrl: d.partyUrl,
-      partyUploadUrl: d.partyUploadUrl,
-    });
-  }, [album.id, onOpenItem]);
-
-  // Justified rows from the real aspect ratios. `useWindowDimensions()` gives the
-  // real surface geometry from first paint (no invented width), and the target
-  // row height scales with the surface so ~3.5-4 rows show on 1080p and ≥3 on
-  // 720p, clamped to a prudent band.
+  // Justified rows from the real aspect ratios, and the deterministic-lane
+  // D-pad model over them.
   const contentWidth = Math.max(1, width - 2 * inset.x);
   const targetRowHeight = mediaGridTargetRowHeight(height);
   const total = displayItems.length;
@@ -417,7 +365,49 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
     }),
     [displayItems, contentWidth, targetRowHeight],
   );
-  const focusForItem = useTvMediaGridFocus(rows, GRID_GAP);
+  const laneFocus = useTvMediaGridFocus(rows, GRID_GAP);
+
+  const onTileFocus = useCallback((index: number, id: string) => {
+    rememberFocusedTile(index, id);
+    laneFocus.onTileFocused(id);
+  }, [rememberFocusedTile, laneFocus]);
+
+  // Any pending restore is an EXPLICIT focus choice, so the tile it lands on
+  // defines a new vertical lane instead of inheriting the previous one.
+  // A LAYOUT effect: it must commit in the same pass that applies the native
+  // preferred-focus prop, so the flag is already set when the resulting focus
+  // event comes back from the native side.
+  useLayoutEffect(() => {
+    if (restoreIndex !== null) laneFocus.noteFocusRestore();
+  }, [restoreIndex, laneFocus]);
+
+  // Face-filter transitions preserve the user's position: keep focus on the
+  // focused photo when it is still shown in the new display list, otherwise
+  // focus the first (matching) photo.
+  const prevFaceFilterRef = useRef(faceFilter);
+  useEffect(() => {
+    const prev = prevFaceFilterRef.current;
+    prevFaceFilterRef.current = faceFilter;
+    if (prev === faceFilter) return;
+    const full = detailRef.current?.items ?? [];
+    const prevItems = prev?.items ?? full;
+    const nextItems = faceFilter?.items ?? full;
+    // Keep the user on the same photo when it survives the transition, else the
+    // first (matching) photo.
+    const nextIndex = remapFocusIndexById(prevItems, readGridFocus().index, nextItems);
+    restoreTo(nextIndex, nextItems[nextIndex]?.id ?? null);
+  }, [faceFilter, restoreTo, readGridFocus]);
+
+  const openAt = useCallback((index: number, autoPlay = false) => {
+    const d = detailRef.current;
+    if (!d) return;
+    onOpenItem(displayItemsRef.current, index, autoPlay, {
+      albumId: album.id,
+      partyEnabled: d.partyEnabled,
+      partyUrl: d.partyUrl,
+      partyUploadUrl: d.partyUploadUrl,
+    });
+  }, [album.id, onOpenItem]);
 
   const renderRow = useCallback(({ item: row }: ListRenderItemInfo<TvJustifiedRow<TvAlbumItem>>) => (
     <View style={styles.row}>
@@ -429,21 +419,18 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           total={total}
           width={tile.width}
           height={tile.height}
-          // No tile holds the preferred flag while the overlay is up (the bar's
-          // first command takes it); on close the restore tile flips false→true,
-          // pulling focus back to where the user was.
-          preferred={
-            !overlayVisible
-            && restoreIndex !== null
-            && tile.originalIndex === restoreIndex
-          }
-          focusTargets={focusForItem(tile.item.id)}
+          // No tile holds the preferred flag while the overlay is up (the rail
+          // owns focus); on close the restore tile flips false→true, pulling
+          // focus back to exactly where the user was.
+          preferred={gridFocusable && restoreIndex !== null && tile.originalIndex === restoreIndex}
+          focusable={gridFocusable}
+          focusTargets={laneFocus.targetsFor(tile.item.id)}
           onOpen={openAt}
           onFocusIndex={onTileFocus}
         />
       ))}
     </View>
-  ), [openAt, total, overlayVisible, restoreIndex, focusForItem, onTileFocus]);
+  ), [openAt, total, gridFocusable, restoreIndex, laneFocus, onTileFocus]);
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
@@ -468,19 +455,29 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           // Virtualization: mount (and download media for) only ROWS near the
           // viewport, progressively — never the whole album at once. Tuned for
           // rows (~3.5-4 visible) rather than the old per-column count.
+          //
+          // `removeClippedSubviews` is deliberately NOT set. It is not part of
+          // windowing: it DETACHES already-rendered rows that fall outside the
+          // scroll viewport (`removeViewInLayout`, react-native's
+          // ReactViewGroup.updateSubviewClipStatus, which spares only the
+          // currently focused child). A detached row cannot be resolved by
+          // `findViewById`, so the explicit nextFocusDown into the row just
+          // below the fold silently fell back to Android's geometric focus
+          // search — the exact case the lane model exists to replace. Windowing
+          // below still keeps distant rows unmounted.
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={7}
-          removeClippedSubviews
         />
       )}
 
       {/* MENU overlay: QR corners + centered album title on top, compact command
           bar at the bottom. Absolute-positioned — it never reflows or shrinks the
-          grid. EXPLICIT focus mode: the first bar command takes focus on mount
-          (no spatial hunting past the last row), LEFT/RIGHT move between the
-          commands, SELECT activates one, UP returns into the grid; closing the
-          overlay (MENU/BACK/auto-hide) restores focus to the previous tile. */}
+          grid. The bar is a real focus SCOPE (MenuCommandRail): the first
+          command takes focus, the four traps keep every direction inside it, and
+          the grid below is switched non-focusable, so nothing there — including a
+          row the FlatList mounts meanwhile — can take focus back. Closing the
+          overlay (MENU/BACK/auto-hide/command) restores the exact tile. */}
       {overlayVisible && (
         <>
           {detail?.partyEnabled && (
@@ -511,7 +508,9 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
             </View>
           )}
 
-          <View style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}>
+          <MenuCommandRail
+            style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}
+          >
             <FocusableButton
               label={t('items.backToAlbums')}
               onPress={onBack}
@@ -528,7 +527,7 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
             {faceFilter !== null && (
               <FocusableButton label={t('items.faceShowAll')} onPress={exitFaceFilter} onFocusChange={bumpOnFocus} />
             )}
-          </View>
+          </MenuCommandRail>
         </>
       )}
     </View>

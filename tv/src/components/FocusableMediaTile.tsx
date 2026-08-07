@@ -64,6 +64,11 @@ export function FocusableMediaTile({
   // mounted later are available before the next D-pad move.
   useLayoutEffect(refreshFocusTargets, [refreshFocusTargets]);
 
+  // A tile that is not a focus destination must not keep painting a focus ring.
+  // While the MENU command rail owns focus the whole grid is switched to
+  // non-focusable, and exactly one element on screen may look focused.
+  const showFocusRing = focused && focusable;
+
   return (
     <Pressable
       ref={focusTargets?.self}
@@ -82,10 +87,10 @@ export function FocusableMediaTile({
       }}
       onBlur={() => { setFocused(false); onFocusChange?.(false); }}
       onPress={onSelect}
-      style={[styles.tile, style, focused && styles.tileFocused]}
+      style={[styles.tile, style, showFocusRing && styles.tileFocused]}
     >
       {children}
-      {focused && (
+      {showFocusRing && (
         <View pointerEvents="none" style={styles.outerRing}>
           <View style={styles.innerRing} />
         </View>

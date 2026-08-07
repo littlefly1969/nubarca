@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -37,6 +37,7 @@ import {
 } from '../personal/galleryQuery';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { FocusableButton } from '../components/FocusableButton';
+import { MenuCommandRail } from '../components/MenuCommandRail';
 import { AuthedTilePreview } from '../components/AuthedTilePreview';
 import { GalleryAlbumPanel } from './gallery/GalleryAlbumPanel';
 import { GalleryWorkspacePanel } from './gallery/GalleryWorkspacePanel';
@@ -54,6 +55,7 @@ import {
   mediaGridTargetRowHeight,
 } from '../lib/mediaGridPresentation';
 import { useTvMediaGridFocus, type TvMediaFocusTargets } from '../lib/mediaGridFocus';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 
 // The real Personal Gallery: the owner's full image gallery (same eligibility,
 // filters, search, sorting and cursor paging as the authenticated web gallery —
@@ -64,7 +66,9 @@ import { useTvMediaGridFocus, type TvMediaFocusTargets } from '../lib/mediaGridF
 //    (or toggles selection in selection mode).
 //  - MENU: overlay with the gallery title, count + active-filter summary and
 //    the contextual command rail (Search & filters / Select, or bulk actions).
-//    Focus jumps to the first command; closing restores the focused tile.
+//    The rail is a MODAL focus scope: focus moves to the first command, no
+//    direction can leave it, grid navigation is suspended, and closing it
+//    restores the EXACT tile that was focused.
 //  - The unified search workspace and selection dialogs are full-screen and
 //    own BACK.
 //  - BACK: panel → overlay → selection mode → Personal Area home (normal
@@ -113,7 +117,7 @@ const GalleryTile = memo(function GalleryTile({
   selected: boolean;
   selectionMode: boolean;
   onOpen: (index: number) => void;
-  onFocusIndex: (index: number) => void;
+  onFocusIndex: (index: number, id: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -124,7 +128,7 @@ const GalleryTile = memo(function GalleryTile({
       focusTargets={focusTargets}
       focusable={focusable}
       onSelect={() => onOpen(index)}
-      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index); }}
+      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
     >
       <AuthedTilePreview
         path={item.thumbnailUrl}
@@ -140,7 +144,7 @@ const GalleryTile = memo(function GalleryTile({
           <Text style={styles.selectBadgeText}>{selected ? '✓' : ''}</Text>
         </View>
       )}
-      {focused && !selectionMode && (
+      {focused && focusable && !selectionMode && (
         <View style={styles.posBadge} pointerEvents="none">
           <Text style={styles.posBadgeText}>{index + 1} / {total}</Text>
         </View>
@@ -186,15 +190,22 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
-  // Focus bookkeeping (same pattern as the Party grid).
-  const lastFocusedIndexRef = useRef(0);
-  const [restoreIndex, setRestoreIndex] = useState<number | null>(0);
-  const onTileFocus = useCallback((index: number) => {
-    lastFocusedIndexRef.current = index;
-    // One-shot only: a permanently preferred tile can steal focus when
-    // FlatList remounts a clipped row during D-pad scrolling.
-    setRestoreIndex((current) => (current === null ? current : null));
-  }, []);
+  // Focus OWNERSHIP (identical model to the Party grid). While the MENU command
+  // rail owns focus the grid stops being a focus destination altogether; the
+  // exact tile the user was on is remembered by id (index as the fallback) and
+  // restored when the overlay closes for ANY reason — MENU again, BACK, the
+  // idle auto-hide, or a command. `restoreIndex` is a ONE-SHOT request: leaving
+  // it set lets a tile steal focus when FlatList remounts its row.
+  const gridInteractive = panel === 'none' && viewerIndex === null;
+  const menuOwnsFocus = overlayVisible && gridInteractive;
+  // The single expression that says whether the grid is a focus destination at
+  // all — not behind the command rail, a full-screen panel or the viewer. A
+  // tile may only ASK for focus when it could accept it.
+  const gridFocusable = gridInteractive && !overlayVisible;
+  // The three callbacks are identity-stable; only `restoreIndex` re-renders.
+  const {
+    restoreIndex, onTileFocused: rememberFocusedTile, restoreTo, read: readGridFocus,
+  } = useTvGridFocusMemory(menuOwnsFocus, load.items);
 
   // Shared auth-failure mapping: 401 → pairing teardown; 403 pin_changed →
   // mode selector with the notice; any other 403 → plain lock.
@@ -219,7 +230,7 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     generationRef.current += 1;
     const gen = generationRef.current;
     const previousItems = loadRef.current.items;
-    const previousFocus = lastFocusedIndexRef.current;
+    const previousFocus = readGridFocus().index;
     setSelection((cur) => (cur !== null ? [] : null));
     setLoad(startNewQuery(gen));
 
@@ -237,8 +248,7 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
             : 'The filtered photos are not yet available for semantic search.');
         }
         const next = remapFocusIndex(previousItems, previousFocus, page.items);
-        lastFocusedIndexRef.current = next;
-        setRestoreIndex(next);
+        restoreTo(next, page.items[next]?.id ?? null);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -248,7 +258,7 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     return () => {
       cancelled = true;
     };
-  }, [filters, sort, handleAuthError]);
+  }, [filters, sort, handleAuthError, restoreTo, readGridFocus]);
 
   // Next cursor page (grid end-reached, viewer near-end, or the explicit retry).
   const loadMore = useCallback(() => {
@@ -312,16 +322,6 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     return () => sub.remove();
   }, [onBack, hideOverlay, overlayVisibleRef]);
 
-  // Overlay closed → restore focus to the last-focused tile.
-  const prevOverlayVisibleRef = useRef(false);
-  useEffect(() => {
-    if (prevOverlayVisibleRef.current && !overlayVisible) {
-      const max = loadRef.current.items.length - 1;
-      setRestoreIndex(Math.max(0, Math.min(lastFocusedIndexRef.current, max)));
-    }
-    prevOverlayVisibleRef.current = overlayVisible;
-  }, [overlayVisible]);
-
   // Toast auto-dismiss.
   useEffect(() => {
     if (toast === null) return;
@@ -344,12 +344,11 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
   }, [hideOverlay]);
 
   const closeViewer = useCallback((currentIndex: number) => {
-    const max = loadRef.current.items.length - 1;
-    const clamped = Math.max(0, Math.min(currentIndex, max));
-    lastFocusedIndexRef.current = clamped;
-    setRestoreIndex(clamped);
+    const items = loadRef.current.items;
+    const clamped = Math.max(0, Math.min(currentIndex, items.length - 1));
+    restoreTo(clamped, items[clamped]?.id ?? null);
     setViewerIndex(null);
-  }, []);
+  }, [restoreTo]);
 
   const applyWorkspace = useCallback((nextFilters: GalleryFilters, nextSort: GallerySort) => {
     setPanel('none');
@@ -376,14 +375,13 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     const failed = result.failures.map((item) => item.itemId);
     setSelection(failed.length > 0 ? failed : null);
     setPanel('none');
-    const remainingCount = loadRef.current.items.filter((item) => !removed.has(item.id)).length;
-    const nextFocus = Math.max(0, Math.min(lastFocusedIndexRef.current, remainingCount - 1));
-    lastFocusedIndexRef.current = nextFocus;
-    setRestoreIndex(nextFocus);
+    const remaining = loadRef.current.items.filter((item) => !removed.has(item.id));
+    const nextFocus = Math.max(0, Math.min(readGridFocus().index, remaining.length - 1));
+    restoreTo(nextFocus, remaining[nextFocus]?.id ?? null);
     setToast(lang === 'it'
       ? `${result.succeeded} spostate nel Cestino, ${result.skipped} non spostate.`
       : `${result.succeeded} moved to Trash, ${result.skipped} not moved.`);
-  }, [lang]);
+  }, [lang, restoreTo, readGridFocus]);
 
   const items = load.items;
   const loadedCount = items.length;
@@ -391,7 +389,6 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
   // count only until the first page of a query lands (totalCount still null).
   const total = load.totalCount ?? loadedCount;
   const activeFilterCount = countActiveFilters(filters);
-  const gridInteractive = panel === 'none' && viewerIndex === null;
 
   const contentWidth = Math.max(1, width - 2 * inset.x);
   const targetRowHeight = mediaGridTargetRowHeight(height);
@@ -411,7 +408,21 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     }),
     [items, contentWidth, targetRowHeight],
   );
-  const focusForItem = useTvMediaGridFocus(rows, GRID_GAP);
+  const laneFocus = useTvMediaGridFocus(rows, GRID_GAP);
+
+  const onTileFocus = useCallback((index: number, id: string) => {
+    rememberFocusedTile(index, id);
+    laneFocus.onTileFocused(id);
+  }, [rememberFocusedTile, laneFocus]);
+
+  // Any pending restore is an EXPLICIT focus choice, so the tile it lands on
+  // defines a new vertical lane instead of inheriting the previous one.
+  // A LAYOUT effect: it must commit in the same pass that applies the native
+  // preferred-focus prop, so the flag is already set when the resulting focus
+  // event comes back from the native side.
+  useLayoutEffect(() => {
+    if (restoreIndex !== null) laneFocus.noteFocusRestore();
+  }, [restoreIndex, laneFocus]);
 
   const selectionSet = selection === null ? null : new Set(selection);
   const renderRow = useCallback(({ item: row }: ListRenderItemInfo<TvJustifiedRow<TvPersonalGalleryItem>>) => (
@@ -424,14 +435,9 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
           total={total}
           width={tile.width}
           height={tile.height}
-          preferred={
-            gridInteractive
-            && !overlayVisible
-            && restoreIndex !== null
-            && tile.originalIndex === restoreIndex
-          }
-          focusTargets={focusForItem(tile.item.id)}
-          focusable={gridInteractive}
+          preferred={gridFocusable && restoreIndex !== null && tile.originalIndex === restoreIndex}
+          focusTargets={laneFocus.targetsFor(tile.item.id)}
+          focusable={gridFocusable}
           selected={selectionSet?.has(tile.item.id) ?? false}
           selectionMode={selection !== null}
           onOpen={openAt}
@@ -443,11 +449,10 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
     // eslint-disable-next-line react-hooks/exhaustive-deps
   ), [
     total,
-    gridInteractive,
-    overlayVisible,
+    gridFocusable,
     restoreIndex,
     selection,
-    focusForItem,
+    laneFocus,
     openAt,
     onTileFocus,
   ]);
@@ -498,10 +503,15 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
+          // `removeClippedSubviews` is deliberately NOT set: it DETACHES
+          // already-rendered rows just outside the scroll viewport, and a
+          // detached row cannot be resolved as an explicit nextFocusDown
+          // target, so vertical navigation silently fell back to Android's
+          // geometric focus search. Windowing below still keeps distant rows
+          // unmounted. Same reasoning as the Party grid.
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={7}
-          removeClippedSubviews
           onEndReachedThreshold={2}
           onEndReached={loadMore}
         />
@@ -563,7 +573,9 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
               )}
             </View>
           </View>
-          <View style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}>
+          <MenuCommandRail
+            style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}
+          >
             {selection === null ? (
               <>
                 <FocusableButton
@@ -611,7 +623,7 @@ export function PersonalGalleryScreen({ onBack, onGrantInvalid, onSessionInvalid
                 />
               </>
             )}
-          </View>
+          </MenuCommandRail>
         </>
       )}
 

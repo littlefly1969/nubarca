@@ -29,6 +29,7 @@ import {
 import { AuthedImage } from '../components/AuthedImage';
 import { FocusableButton } from '../components/FocusableButton';
 import { FocusableTile } from '../components/FocusableTile';
+import { MenuCommandRail } from '../components/MenuCommandRail';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useI18n, type TvMessageKey } from '../i18n';
@@ -268,7 +269,7 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
       )}
 
       {overlay.visible && (
-        <View style={styles.menu}>
+        <MenuCommandRail style={styles.menu}>
           <Text style={styles.menuTitle}>{t('beautyLab.menu')}</Text>
           <FocusableButton
             label={t('beautyLab.addImages')}
@@ -293,7 +294,7 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
               <FocusableButton label={t('beautyLab.clearSelection')} onPress={() => { overlay.hide(); setSelected(new Set()); }} />
             </>
           )}
-        </View>
+        </MenuCommandRail>
       )}
     </View>
   );

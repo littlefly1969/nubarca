@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   BackHandler,
@@ -33,6 +33,7 @@ import {
   mediaGridTargetRowHeight,
 } from '../lib/mediaGridPresentation';
 import { useTvMediaGridFocus, type TvMediaFocusTargets } from '../lib/mediaGridFocus';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 
 const PAGE_SIZE = 60;
 const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
@@ -55,7 +56,7 @@ function formatDuration(seconds: number | null): string {
 }
 
 const VideoTile = memo(function VideoTile({
-  item, index, total, width, height, preferred, focusTargets, onOpen, onFocusIndex,
+  item, index, total, width, height, preferred, focusable, focusTargets, onOpen, onFocusIndex,
 }: {
   item: TvPersonalVideoItem;
   index: number;
@@ -63,9 +64,10 @@ const VideoTile = memo(function VideoTile({
   width: number;
   height: number;
   preferred: boolean;
+  focusable: boolean;
   focusTargets: TvMediaFocusTargets;
   onOpen: (index: number) => void;
-  onFocusIndex: (index: number) => void;
+  onFocusIndex: (index: number, id: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
 
@@ -74,11 +76,12 @@ const VideoTile = memo(function VideoTile({
       accessibilityLabel={item.name}
       style={{ width }}
       hasTVPreferredFocus={preferred}
+      focusable={focusable}
       focusTargets={focusTargets}
       onSelect={() => onOpen(index)}
       onFocusChange={(value) => {
         setFocused(value);
-        if (value) onFocusIndex(index);
+        if (value) onFocusIndex(index, item.id);
       }}
     >
       <View style={{ width: '100%', height, borderRadius: 8, overflow: 'hidden' }}>
@@ -93,7 +96,7 @@ const VideoTile = memo(function VideoTile({
             <Text style={styles.durationText}>{formatDuration(item.durationSeconds)}</Text>
           </View>
         )}
-        {focused && (
+        {focused && focusable && (
           <View style={styles.positionBadge}>
             <Text style={styles.positionText}>{index + 1} / {total}</Text>
           </View>
@@ -115,8 +118,6 @@ export function PersonalVideosScreen({ onBack, onGrantInvalid, onSessionInvalid 
   const [loadingMore, setLoadingMore] = useState(false);
   const [failed, setFailed] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const [restoreIndex, setRestoreIndex] = useState<number | null>(0);
-  const lastFocusedIndex = useRef(0);
   const controlsRef = useRef<TvVideoControls | null>(null);
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -124,10 +125,12 @@ export function PersonalVideosScreen({ onBack, onGrantInvalid, onSessionInvalid 
   viewerIndexRef.current = viewerIndex;
   useScreenAwake(viewerIndex !== null);
 
-  const onTileFocus = useCallback((index: number) => {
-    lastFocusedIndex.current = index;
-    setRestoreIndex((current) => (current === null ? current : null));
-  }, []);
+  // Focus memory shared with the other media walls. This grid has no MENU
+  // overlay, so the rail never owns focus; the memory is what returns the
+  // remote to the EXACT video it opened after the viewer closes, by id.
+  const {
+    restoreIndex, onTileFocused: rememberFocusedTile, restoreTo,
+  } = useTvGridFocusMemory(false, items);
 
   const handleAuthError = useCallback((err: unknown): boolean => {
     if (err instanceof ApiError && err.status === 401) {
@@ -177,10 +180,9 @@ export function PersonalVideosScreen({ onBack, onGrantInvalid, onSessionInvalid 
 
   const closeViewer = useCallback(() => {
     const current = viewerIndexRef.current ?? 0;
-    setRestoreIndex(current);
-    lastFocusedIndex.current = current;
+    restoreTo(current, itemsRef.current[current]?.id ?? null);
     setViewerIndex(null);
-  }, []);
+  }, [restoreTo]);
 
   const moveViewer = useCallback((delta: number) => {
     setViewerIndex((current) => {
@@ -230,7 +232,21 @@ export function PersonalVideosScreen({ onBack, onGrantInvalid, onSessionInvalid 
     }),
     [items, contentWidth, targetRowHeight],
   );
-  const focusForItem = useTvMediaGridFocus(rows, GRID_GAP);
+  const laneFocus = useTvMediaGridFocus(rows, GRID_GAP);
+
+  const onTileFocus = useCallback((index: number, id: string) => {
+    rememberFocusedTile(index, id);
+    laneFocus.onTileFocused(id);
+  }, [rememberFocusedTile, laneFocus]);
+
+  // A pending restore is an EXPLICIT focus choice, so the tile it lands on
+  // defines a new vertical lane instead of inheriting the previous one.
+  // A LAYOUT effect: it must commit in the same pass that applies the native
+  // preferred-focus prop, so the flag is already set when the resulting focus
+  // event comes back from the native side.
+  useLayoutEffect(() => {
+    if (restoreIndex !== null) laneFocus.noteFocusRestore();
+  }, [restoreIndex, laneFocus]);
 
   if (viewerIndex !== null) {
     const item = items[Math.min(viewerIndex, items.length - 1)];
@@ -289,11 +305,9 @@ export function PersonalVideosScreen({ onBack, onGrantInvalid, onSessionInvalid 
                   total={totalCount}
                   width={tile.width}
                   height={tile.height}
-                  preferred={
-                    restoreIndex !== null
-                    && tile.originalIndex === restoreIndex
-                  }
-                  focusTargets={focusForItem(tile.item.id)}
+                  preferred={restoreIndex !== null && tile.originalIndex === restoreIndex}
+                  focusable
+                  focusTargets={laneFocus.targetsFor(tile.item.id)}
                   onOpen={setViewerIndex}
                   onFocusIndex={onTileFocus}
                 />
