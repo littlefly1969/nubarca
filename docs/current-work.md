@@ -167,11 +167,12 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the inferred one agree. `deploy/nginx.conf.example` and `nginx.e2e.conf` both
   carry `$http_host`; the browser E2E gate runs on `:5273` precisely so a
   regression here fails a test instead of an operator's first login.
-- **A production TV build fails closed without its pinned origin.**
+- **A production TV build derives all endpoints from its pinned origin.**
   `app.config.js` is evaluated twice — once by `expo prebuild` and again by the
   Gradle JS-bundling step — and only the second decides what the shipped app
-  talks to. Both `NUBARCA_PUBLIC_ORIGIN` and `NUBARCA_TV_OTA_UPDATE_URL` are
-  required under `NODE_ENV=production`.
+  talks to. `NUBARCA_PUBLIC_ORIGIN` is required under `NODE_ENV=production`;
+  API base URL and OTA URL are derived from it plus `tv/release-contract.json`.
+  APK keystore credentials remain a Gradle-only gate and are never OTA inputs.
 - **OTA isolation is structural.** Publications and channel pointers are keyed by
   runtime version, so bundles built for one native contract cannot be offered to
   a device asking for another.

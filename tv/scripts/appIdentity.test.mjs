@@ -16,11 +16,14 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const tvRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const { readReleaseContract } = require(resolve(tvRoot, 'scripts/release-contract.cjs'));
+const release = readReleaseContract();
 
 /** Load app.config.js with a controlled environment. */
 function loadConfig(env = {}) {
   const previous = { ...process.env };
-  Object.assign(process.env, env);
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, { NODE_ENV: 'development' }, env);
   try {
     delete require.cache[require.resolve(resolve(tvRoot, 'app.config.js'))];
     return require(resolve(tvRoot, 'app.config.js'))().expo;
@@ -32,12 +35,41 @@ function loadConfig(env = {}) {
 
 test('the application identity is the final NubArca TV identity', () => {
   const expo = loadConfig();
-  assert.equal(expo.name, 'NubArca TV');
+  const packageJson = JSON.parse(readFileSync(resolve(tvRoot, 'package.json'), 'utf8'));
+  assert.equal(expo.name, release.applicationName);
   assert.equal(expo.slug, 'nubarca-tv');
   assert.equal(expo.scheme, 'nubarca-tv');
-  assert.equal(expo.version, '1.0.1');
-  assert.equal(expo.android.package, 'it.littlefly.nubarca.tv');
-  assert.equal(expo.android.versionCode, 2);
+  assert.equal(expo.version, release.version);
+  assert.equal(expo.android.package, release.package);
+  assert.equal(expo.android.versionCode, release.versionCode);
+  assert.equal(packageJson.version, release.version);
+});
+
+test('the tracked release contract loader fails closed on malformed identity', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'nubarca-tv-release-contract-'));
+  try {
+    const malformed = join(directory, 'release-contract.json');
+    writeFileSync(malformed, JSON.stringify({ ...release, versionCode: 0 }));
+    assert.throws(() => readReleaseContract(malformed), /positive integer/i);
+    writeFileSync(malformed, JSON.stringify({ ...release, unexpected: true }));
+    assert.throws(() => readReleaseContract(malformed), /contain exactly/i);
+    writeFileSync(malformed, JSON.stringify({ ...release, updatePath: '/api/%2e%2e/escape' }));
+    assert.throws(() => readReleaseContract(malformed), /unsafe|invalid encoded/i);
+    writeFileSync(malformed, '{');
+    assert.throws(() => readReleaseContract(malformed), /Unable to read/i);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('APK validation and publication consume one release contract and one validator', () => {
+  const validator = readFileSync(resolve(tvRoot, '../deploy/validate-tv-apk.sh'), 'utf8');
+  const publisher = readFileSync(resolve(tvRoot, '../deploy/publish-tv-apk.sh'), 'utf8');
+  assert.match(validator, /release-contract\.cjs/);
+  assert.match(validator, /expected_signer_sha256="\$\{release_values\[7\]\}"/);
+  assert.doesNotMatch(validator, new RegExp(release.apkSignerSha256));
+  assert.match(publisher, /deploy\/validate-tv-apk\.sh/);
+  assert.doesNotMatch(publisher, /apksigner|apkanalyzer|aapt2/);
 });
 
 test('the reserved mobile applicationId is not taken by the TV app', () => {
@@ -63,16 +95,11 @@ test('no user-visible identifier carries the former product name', () => {
 
 test('the default OTA runtime belongs to the new native series', () => {
   const expo = loadConfig();
-  assert.equal(expo.runtimeVersion, 'nubarca-tv-native-2');
+  assert.equal(expo.runtimeVersion, release.runtimeVersion);
   // A runtime name identifies one native contract for ONE application. It must
   // carry this app's series, so a bundle can never be offered to an install of a
   // different package that happens to ask for a bare `tv-native-*` runtime.
   assert.ok(expo.runtimeVersion.startsWith('nubarca-tv-native-'));
-});
-
-test('the runtime version stays operator-overridable for development only', () => {
-  const expo = loadConfig({ NUBARCA_TV_RUNTIME_VERSION: 'development-runtime' });
-  assert.equal(expo.runtimeVersion, 'development-runtime');
 });
 
 test('a production https base URL builds with cleartext traffic disabled', () => {
@@ -87,16 +114,9 @@ test('development configuration remains usable without signing material', () => 
 });
 
 test('production configuration fails closed without every release input', () => {
-  assert.throws(() => loadConfig({ NODE_ENV: 'production' }), /API_BASE_URL is required/i);
-  assert.throws(() => loadConfig({
-    NODE_ENV: 'production',
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
-  }), /PUBLIC_ORIGIN is required/i);
-  assert.throws(() => loadConfig({
-    NODE_ENV: 'production',
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
-    NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
-  }), /OTA_UPDATE_URL is required/i);
+  assert.throws(() => loadConfig({ NODE_ENV: 'production' }), /PUBLIC_ORIGIN is required/i);
+  assert.throws(() => loadConfig({ NODE_ENV: 'production', NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com' }),
+    /OTA_CERTIFICATE is required/i);
 });
 
 // The pinned production origin is operator configuration rather than a source
@@ -108,7 +128,6 @@ test('production pins the API base URL to the operator-supplied origin', () => {
   // An unset origin refuses the build outright.
   assert.throws(() => loadConfig({
     ...base,
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
   }), /PUBLIC_ORIGIN is required/i);
   // A plaintext origin is refused.
   assert.throws(() => loadConfig({
@@ -123,32 +142,12 @@ test('production pins the API base URL to the operator-supplied origin', () => {
     EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://somewhere-else.example.com',
     NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
   }), /must be exactly https:\/\/nubarca\.example\.com/i);
-  // An update URL on a different origin is refused too.
-  assert.throws(() => loadConfig({
-    ...base,
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
-    NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
-    NUBARCA_TV_OTA_UPDATE_URL: 'https://somewhere-else.example.com/api/tv-app/updates',
-  }), /must be exactly https:\/\/nubarca\.example\.com\/api\/tv-app\/updates/i);
-});
-
-test('production rejects the wrong runtime and channel before native generation', () => {
-  const common = {
-    NODE_ENV: 'production',
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
-    NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
-    NUBARCA_TV_OTA_UPDATE_URL: 'https://nubarca.example.com/api/tv-app/updates',
-  };
-  assert.throws(() => loadConfig({ ...common, NUBARCA_TV_RUNTIME_VERSION: 'nubarca-tv-native-1' }), /runtime.*exactly/i);
-  assert.throws(() => loadConfig({ ...common, NUBARCA_TV_OTA_CHANNEL: 'staging' }), /channel.*exactly/i);
 });
 
 test('production requires the OTA public certificate', () => {
   assert.throws(() => loadConfig({
     NODE_ENV: 'production',
-    EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
     NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
-    NUBARCA_TV_OTA_UPDATE_URL: 'https://nubarca.example.com/api/tv-app/updates',
   }), /OTA_CERTIFICATE is required/i);
 });
 
@@ -164,21 +163,17 @@ test('the OTA certificate path is normalized relative to the TV project', () => 
     const expo = loadConfig({ NUBARCA_TV_OTA_CERTIFICATE: certificate });
     assert.equal(expo.updates.codeSigningCertificate, relative(tvRoot, resolve(certificate)));
     assert.deepEqual(expo.updates.codeSigningMetadata, { keyid: 'main', alg: 'rsa-v1_5-sha256' });
-    const storeFile = join(certificateRoot, 'release.jks');
-    writeFileSync(storeFile, 'test-only-placeholder');
     const production = loadConfig({
       NODE_ENV: 'production',
-      EXPO_PUBLIC_NUBARCA_API_BASE_URL: 'https://nubarca.example.com',
       NUBARCA_PUBLIC_ORIGIN: 'https://nubarca.example.com',
-      NUBARCA_TV_OTA_UPDATE_URL: 'https://nubarca.example.com/api/tv-app/updates',
       NUBARCA_TV_OTA_CERTIFICATE: certificate,
-      NUBARCA_TV_RELEASE_STORE_FILE: storeFile,
-      NUBARCA_TV_RELEASE_STORE_PASSWORD: 'test',
-      NUBARCA_TV_RELEASE_KEY_ALIAS: 'test',
-      NUBARCA_TV_RELEASE_KEY_PASSWORD: 'test',
     });
-    assert.equal(production.runtimeVersion, 'nubarca-tv-native-2');
-    assert.equal(production.updates.requestHeaders['expo-channel-name'], 'production');
+    assert.equal(production.extra.apiBaseUrl, 'https://nubarca.example.com');
+    assert.equal(production.updates.url, `https://nubarca.example.com${release.updatePath}`);
+    assert.equal(production.runtimeVersion, release.runtimeVersion);
+    assert.equal(production.updates.requestHeaders['expo-channel-name'], release.channel);
+    const appConfigSource = readFileSync(resolve(tvRoot, 'app.config.js'), 'utf8');
+    assert.doesNotMatch(appConfigSource, /NUBARCA_TV_RELEASE_STORE_/);
   } finally {
     rmSync(certificateRoot, { recursive: true, force: true });
   }

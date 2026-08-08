@@ -368,11 +368,18 @@ def check_runtime_identity(c: Contract) -> None:
             f"frontend package is named {FRONTEND_PACKAGE}",
         )
 
+    tv_release_contract = c.read("tv/release-contract.json")
+    if tv_release_contract is not None:
+        c.require(
+            json.loads(tv_release_contract).get("package") == TV_ANDROID_PACKAGE,
+            f"the TV Android package is {TV_ANDROID_PACKAGE}",
+        )
+
     tv_config = c.read("tv/app.config.js")
     if tv_config is not None:
         c.require(
-            f"'{TV_ANDROID_PACKAGE}'" in tv_config or f'"{TV_ANDROID_PACKAGE}"' in tv_config,
-            f"the TV Android package is {TV_ANDROID_PACKAGE}",
+            "package: release.package" in tv_config,
+            "the TV Expo config consumes the canonical Android package",
         )
         c.require(
             f"'{TV_SLUG}'" in tv_config or f'"{TV_SLUG}"' in tv_config,
@@ -508,7 +515,7 @@ def self_test() -> int:
         ("deploy/FIRST_DEPLOY.md", "ssh operator@example.com"),
         (".env.example", "NUBARCA_ADMIN_EMAIL=admin@example.com"),
         # A reversed-domain application id is not a hostname.
-        ("tv/app.config.js", "      package: 'it.littlefly.nubarca.tv',"),
+        ("tv/release-contract.json", '  "package": "it.littlefly.nubarca.tv",'),
         # Email addresses: fixtures, i18n placeholders and masked recipients are
         # not deployment targets, whatever their domain looks like.
         ("frontend/src/i18n/it.ts", "'albumShare.emailPlaceholder': 'nome@esempio.it',"),

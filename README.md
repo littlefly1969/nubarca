@@ -62,6 +62,7 @@ To run NubArca, start with the production runbook:
 
 - [First deployment](deploy/FIRST_DEPLOY.md)
 - [Operations](docs/OPERATIONS.md)
+- [TV APK/OTA release runbook](docs/tv-release.md)
 - [Architecture](ARCHITECTURE.md)
 - [Development state](DEVELOPMENT_STATE.md)
 - [Changelog](CHANGELOG.md)

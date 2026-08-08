@@ -46,6 +46,15 @@ docker compose \
 for a release deployment because it intentionally lacks the OpenVINO and
 immutable-image overrides.
 
+## TV release boundary
+
+[`../docs/tv-release.md`](../docs/tv-release.md) is the only authorized APK/OTA
+procedure. An ordinary compatible JavaScript OTA does not rebuild an APK or
+container, run a database migration, or restart the API. When the OTA depends
+on a new backward-compatible backend API, deploy and verify that backend first,
+then use the TV runbook. A native TV release also uses that runbook; do not add a
+second APK/OTA command sequence here.
+
 Never source `.env`. Let Compose read it through `--env-file .env`; sourcing it
 can truncate the semicolon-delimited PostgreSQL connection string.
 

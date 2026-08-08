@@ -98,7 +98,7 @@ gradle.taskGraph.whenReady { graph ->
             "No NubArca TV release signing key is configured.\\n" +
             "Set NUBARCA_TV_RELEASE_STORE_FILE, NUBARCA_TV_RELEASE_STORE_PASSWORD,\\n" +
             "NUBARCA_TV_RELEASE_KEY_ALIAS and NUBARCA_TV_RELEASE_KEY_PASSWORD as Gradle\\n" +
-            "properties or environment variables. See docs/tv-apk-distribution.md.\\n" +
+            "properties or environment variables. See docs/tv-release.md.\\n" +
             "All four values and an existing keystore are required.\\n" +
             "Refusing to fall back to the template debug keystore."
         )

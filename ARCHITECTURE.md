@@ -1301,7 +1301,7 @@ When changing a subsystem, review the following implementation anchors together 
 | Organizer/export | `Organizer/`, `PhotoExport/` |
 | AI and People | `Ai/`, AI entities/configurations, `docs/ai-substrate.md`, `docs/ai-photo-pgvector.md` |
 | Party | `Party/`, Party entities, public/owner/TV route sections |
-| TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
+| TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-release.md` (canonical operations), `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |
 | Plates | `Plates/`, Plate entities/configurations and job handler |
 | Aesthetics | `Aesthetics/`, Aesthetic entities/configurations, HumanAesExpert deployment docs |

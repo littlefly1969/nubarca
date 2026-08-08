@@ -1,22 +1,26 @@
 #!/usr/bin/env node
-import { createHash, createPublicKey, randomUUID, sign, verify, X509Certificate } from 'node:crypto';
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, createPublicKey, randomUUID, sign, verify } from 'node:crypto';
+import {
+  cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync,
+  realpathSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
+import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { validateCodeSigningCertificate } = require('./code-signing-certificate.cjs');
+const { normalizePublicOrigin, readReleaseContract } = require('./release-contract.cjs');
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tvRoot = resolve(here, '..');
+const release = readReleaseContract();
 const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
-const RELEASE_RUNTIME = 'nubarca-tv-native-2';
-const RELEASE_CHANNEL = 'production';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SIGNATURE = /^sig="([A-Za-z0-9+/]+={0,2})", keyid="main", alg="rsa-v1_5-sha256"$/;
-const UPDATE_PATH = '/api/tv-app/updates';
 
 export function safeSegment(value, name) {
   if (!SAFE.test(value ?? '')) throw new Error(`${name} contains unsupported characters`);
@@ -25,6 +29,10 @@ export function safeSegment(value, name) {
 
 export function sha256Base64Url(file) {
   return createHash('sha256').update(readFileSync(file)).digest('base64url');
+}
+
+function sha256Hex(value) {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function contentType(file) {
@@ -41,53 +49,35 @@ function requireEnv(name, env = process.env) {
   return value;
 }
 
-// The public OTA endpoint this installation serves. Operator-supplied, because
-// an installation-specific host is deployment configuration and must not appear
-// in product source. It is pinned per invocation and validated to one exact
-// shape, so a publication whose assets point anywhere else is still rejected —
-// externalising the value must not weaken the check.
-export function assertReleaseUpdateUrl(value) {
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new Error('NUBARCA_TV_OTA_UPDATE_URL must be an absolute URL');
+export function assertNodeVersion(version = process.versions.node) {
+  if (Number.parseInt(version.split('.')[0], 10) !== 22) {
+    throw new Error(`Node 22.x is required for TV OTA release tooling; found ${version}`);
   }
-  if (parsed.protocol !== 'https:') {
-    throw new Error('NUBARCA_TV_OTA_UPDATE_URL must use https');
-  }
-  if (parsed.pathname !== UPDATE_PATH || parsed.search || parsed.hash
-      || parsed.username || parsed.password) {
-    throw new Error(`NUBARCA_TV_OTA_UPDATE_URL must be exactly <origin>${UPDATE_PATH}`);
-  }
-  return value;
+  return version;
 }
 
-export function paths(env = process.env) {
-  const storage = resolve(requireEnv('TV_OTA_STORAGE_ROOT', env));
-  const runtime = safeSegment(requireEnv('NUBARCA_TV_RUNTIME_VERSION', env), 'runtime version');
-  const channel = safeSegment(env.NUBARCA_TV_OTA_CHANNEL || 'production', 'channel');
-  assertReleaseTarget(runtime, channel);
-  const updateUrl = assertReleaseUpdateUrl(
-    requireEnv('NUBARCA_TV_OTA_UPDATE_URL', env).replace(/\/$/, ''),
-  );
+export function resolveReleaseContext(env = process.env, { requireStorage = true, requirePrivateKey = false } = {}) {
+  const origin = normalizePublicOrigin(requireEnv('NUBARCA_PUBLIC_ORIGIN', env));
+  const certificatePath = resolve(requireEnv('NUBARCA_TV_OTA_CERTIFICATE', env));
+  const privateKeyPath = requirePrivateKey
+    ? resolve(requireEnv('TV_OTA_PRIVATE_KEY_PATH', env))
+    : (env.TV_OTA_PRIVATE_KEY_PATH ? resolve(env.TV_OTA_PRIVATE_KEY_PATH) : null);
+  const storage = requireStorage ? resolve(requireEnv('TV_OTA_STORAGE_ROOT', env)) : null;
   return {
-    storage, runtime, channel, updateUrl,
-    certificatePath: env.NUBARCA_TV_OTA_CERTIFICATE
-      ? resolve(env.NUBARCA_TV_OTA_CERTIFICATE)
-      : null,
-    publications: join(storage, 'publications', 'android', runtime),
-    pointer: join(storage, 'channels', channel, 'android', `${runtime}.json`),
+    ...release,
+    origin,
+    updateUrl: `${origin}${release.updatePath}`,
+    certificatePath,
+    privateKeyPath,
+    storage,
+    publications: storage ? join(storage, 'publications', 'android', release.runtimeVersion) : null,
+    pointer: storage ? join(storage, 'channels', release.channel, 'android', `${release.runtimeVersion}.json`) : null,
   };
 }
 
-export function assertReleaseTarget(runtime, channel) {
-  if (runtime !== RELEASE_RUNTIME) {
-    throw new Error(`OTA publication runtime must be exactly ${RELEASE_RUNTIME}`);
-  }
-  if (channel !== RELEASE_CHANNEL) {
-    throw new Error(`OTA publication channel must be exactly ${RELEASE_CHANNEL}`);
-  }
+// Backwards-compatible internal name used by publication validation tests.
+export function paths(env = process.env) {
+  return resolveReleaseContext(env);
 }
 
 export function readPointer(file) {
@@ -125,19 +115,44 @@ function assertNoSymlinkPath(file, root) {
   }
 }
 
+function assertSafeStorageContext(config) {
+  if (existsSync(config.storage)) {
+    if (lstatSync(config.storage).isSymbolicLink() || realpathSync(config.storage) !== config.storage) {
+      throw new Error('TV_OTA_STORAGE_ROOT must be a real path without symlinks');
+    }
+  }
+  assertNoSymlinkPath(config.publications, config.storage);
+  assertNoSymlinkPath(config.pointer, config.storage);
+}
+
 function parseSignature(value) {
   const match = SIGNATURE.exec(value ?? '');
   if (!match) throw new Error('missing or invalid signature metadata');
   return Buffer.from(match[1], 'base64');
 }
 
-export function validatePublication(directory, options) {
-  const expectedRuntime = options.runtime;
-  const expectedChannel = options.channel;
-  const certificatePath = options.certificatePath;
-  assertReleaseTarget(expectedRuntime, expectedChannel);
-  if (!certificatePath || !existsSync(certificatePath)) throw new Error('OTA verification certificate is unavailable');
+export function certificateIdentity(certificatePath) {
   const certificate = validateCodeSigningCertificate(certificatePath);
+  return {
+    certificate,
+    certificateSha256: sha256Hex(certificate.raw),
+    publicKeySha256: sha256Hex(certificate.publicKey.export({ type: 'spki', format: 'der' })),
+  };
+}
+
+export function validateSigningMaterial(config) {
+  if (!existsSync(config.certificatePath)) throw new Error('NUBARCA_TV_OTA_CERTIFICATE is unavailable');
+  if (!config.privateKeyPath || !existsSync(config.privateKeyPath)) throw new Error('TV_OTA_PRIVATE_KEY_PATH is unavailable');
+  const identity = certificateIdentity(config.certificatePath);
+  const privatePublic = createPublicKey(readFileSync(config.privateKeyPath)).export({ type: 'spki', format: 'der' });
+  const certificatePublic = identity.certificate.publicKey.export({ type: 'spki', format: 'der' });
+  if (!privatePublic.equals(certificatePublic)) throw new Error('OTA private key does not match the signing certificate');
+  return identity;
+}
+
+export function validatePublication(directory, options) {
+  if (!options.certificatePath || !existsSync(options.certificatePath)) throw new Error('OTA verification certificate is unavailable');
+  const certificate = validateCodeSigningCertificate(options.certificatePath);
   assertNoSymlinkPath(directory, dirname(directory));
   const metadataFile = join(directory, 'publication.json');
   const manifestFile = join(directory, 'manifest.json');
@@ -147,24 +162,22 @@ export function validatePublication(directory, options) {
   const metadata = JSON.parse(readFileSync(metadataFile, 'utf8'));
   const manifestText = readFileSync(manifestFile, 'utf8');
   const manifest = JSON.parse(manifestText);
-  if (manifest.id !== metadata.id || manifest.runtimeVersion !== expectedRuntime || metadata.runtimeVersion !== expectedRuntime ||
-      metadata.platform !== 'android' || metadata.channel !== expectedChannel ||
-      manifest.metadata?.platform !== 'android' || manifest.metadata?.channel !== expectedChannel) {
+  if (manifest.id !== metadata.id || manifest.runtimeVersion !== options.runtimeVersion || metadata.runtimeVersion !== options.runtimeVersion
+      || metadata.platform !== 'android' || metadata.channel !== options.channel
+      || manifest.metadata?.platform !== 'android' || manifest.metadata?.channel !== options.channel) {
     throw new Error('publication identity or runtime does not match');
   }
   if (!GIT_SHA.test(metadata.gitSha ?? '') || metadata.gitSha !== manifest.metadata?.gitSha) {
     throw new Error('publication Git SHA is missing or does not match');
   }
-  if (options.gitSha && metadata.gitSha !== options.gitSha) throw new Error('publication Git SHA is not the intended release SHA');
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(manifest.id)) {
-    throw new Error('update id must be a UUID');
-  }
+  if (options.gitSha && metadata.gitSha !== options.gitSha) throw new Error('publication Git SHA is not the verified HEAD');
+  if (!UUID.test(manifest.id)) throw new Error('update id must be a UUID');
   for (const asset of [manifest.launchAsset, ...manifest.assets]) {
     if (!asset || typeof asset.url !== 'string' || typeof asset.hash !== 'string') throw new Error('invalid manifest asset');
-    const prefix = `/api/tv-app/updates/assets/${encodeURIComponent(expectedRuntime)}/${manifest.id}/`;
+    const prefix = `${release.updatePath}/assets/${encodeURIComponent(options.runtimeVersion)}/${manifest.id}/`;
     const parsedAssetUrl = new URL(asset.url);
-    if (parsedAssetUrl.origin !== new URL(options.updateUrl).origin || parsedAssetUrl.username || parsedAssetUrl.password ||
-        parsedAssetUrl.search || parsedAssetUrl.hash || !parsedAssetUrl.pathname.startsWith(prefix)) {
+    if (parsedAssetUrl.origin !== options.origin || parsedAssetUrl.username || parsedAssetUrl.password
+        || parsedAssetUrl.search || parsedAssetUrl.hash || !parsedAssetUrl.pathname.startsWith(prefix)) {
       throw new Error('asset URL is not immutable or belongs to another update');
     }
     const encoded = parsedAssetUrl.pathname.slice(prefix.length);
@@ -187,6 +200,7 @@ export function validatePublication(directory, options) {
 
 export function activate(publicationId, config = paths()) {
   safeSegment(publicationId, 'update id');
+  assertSafeStorageContext(config);
   validatePublication(join(config.publications, publicationId), config);
   const old = readPointer(config.pointer);
   if (old.current === publicationId) return old;
@@ -195,160 +209,230 @@ export function activate(publicationId, config = paths()) {
   return next;
 }
 
-function expoEnvironment(runtime, env) {
-  return { ...process.env, ...env, NODE_ENV: 'production', NUBARCA_TV_RUNTIME_VERSION: runtime };
+function expoEnvironment(env) {
+  const clean = { ...process.env, ...env, NODE_ENV: 'production' };
+  for (const apkOnly of [
+    'NUBARCA_TV_RELEASE_STORE_FILE', 'NUBARCA_TV_RELEASE_STORE_PASSWORD',
+    'NUBARCA_TV_RELEASE_KEY_ALIAS', 'NUBARCA_TV_RELEASE_KEY_PASSWORD',
+  ]) delete clean[apkOnly];
+  return clean;
 }
 
-function runExport(output, runtime, env) {
+function runExport(output, env) {
   const result = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['expo', 'export', '--platform', 'android', '--output-dir', output, '--clear'],
-    { cwd: tvRoot, stdio: 'inherit', env: expoEnvironment(runtime, env) });
+    { cwd: tvRoot, stdio: 'inherit', env: expoEnvironment(env) });
   if (result.error) throw new Error(`Unable to start Expo export: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Expo export failed with status ${result.status}`);
 }
 
-function readPublicExpoConfig(runtime, env) {
+function readPublicExpoConfig(env) {
   const result = spawnSync(process.platform === 'win32' ? 'npx.cmd' : 'npx',
     ['expo', 'config', '--type', 'public', '--json'],
-    { cwd: tvRoot, encoding: 'utf8', env: expoEnvironment(runtime, env) });
+    { cwd: tvRoot, encoding: 'utf8', env: expoEnvironment(env) });
   if (result.error) throw new Error(`Unable to start Expo config export: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Expo config export failed: ${result.stderr || result.status}`);
   if (!result.stdout.trim()) throw new Error('Expo config export returned no JSON');
   const config = JSON.parse(result.stdout);
-  // This path is build-machine metadata, not client configuration. The public
-  // certificate itself remains embedded natively by the config plugin.
   if (config.updates) delete config.updates.codeSigningCertificate;
   return config;
 }
 
-function assetDescriptor(source, relativePath, runtime, id, publicBase) {
+function assetDescriptor(source, relativePath, context, id) {
   const hash = sha256Base64Url(source);
   const urlPath = relativePath.split('/').map(encodeURIComponent).join('/');
   const ext = relativePath.includes('.') ? relativePath.split('.').pop() : undefined;
   return {
     hash, key: hash, contentType: contentType(relativePath),
     ...(ext ? { fileExtension: `.${ext}` } : {}),
-    url: `${publicBase}/assets/${encodeURIComponent(runtime)}/${id}/${urlPath}`,
+    url: `${context.updateUrl}/assets/${encodeURIComponent(context.runtimeVersion)}/${id}/${urlPath}`,
   };
 }
 
-function git(command) {
-  const result = spawnSync('git', command, { cwd: tvRoot, encoding: 'utf8' });
+function git(args) {
+  const result = spawnSync('git', args, { cwd: tvRoot, encoding: 'utf8' });
   if (result.error || result.status !== 0) {
-    throw new Error(`Git release check failed: ${(result.stderr || result.error?.message || result.status).toString().trim()}`);
+    throw new Error(`Git release check failed (${args.join(' ')}): ${(result.stderr || result.error?.message || result.status).toString().trim()}`);
   }
   return result.stdout.trim();
 }
 
-export function validateReleaseGitSha(intendedSha, gitRunner = git) {
-  if (!GIT_SHA.test(intendedSha ?? '')) throw new Error('TV_OTA_RELEASE_GIT_SHA must be a full 40-character Git SHA');
+export function refreshAndValidateGitState(gitRunner = git) {
+  gitRunner(['fetch', 'origin', '+refs/heads/main:refs/remotes/origin/main']);
   const head = gitRunner(['rev-parse', 'HEAD']);
   const remoteMain = gitRunner(['rev-parse', 'origin/main']);
   const branch = gitRunner(['branch', '--show-current']);
   const status = gitRunner(['status', '--porcelain']);
-  if (head !== intendedSha || remoteMain !== intendedSha) throw new Error('OTA release SHA must equal HEAD and origin/main');
-  if (branch !== 'main') throw new Error('OTA publication must run from the main branch');
-  if (status) throw new Error('OTA publication requires a clean working tree');
-  return intendedSha;
+  if (!GIT_SHA.test(head)) throw new Error('Git HEAD must be a full 40-character SHA');
+  if (head !== remoteMain) throw new Error('OTA release HEAD must equal freshly fetched origin/main');
+  if (branch !== 'main') throw new Error('OTA release must run from the main branch');
+  if (status) throw new Error('OTA release requires a clean working tree');
+  return head;
 }
 
-export function publish(env = process.env) {
-  const config = paths(env);
-  // paths() has already required and shape-validated the operator's origin.
-  const publicBase = config.updateUrl;
-  if ((env.TV_OTA_SIGNING_REQUIRED || 'true').toLowerCase() === 'false') {
-    throw new Error('unsigned OTA publication is forbidden');
-  }
-  const privateKeyPath = env.TV_OTA_PRIVATE_KEY_PATH ? resolve(env.TV_OTA_PRIVATE_KEY_PATH) : null;
-  const certificatePath = config.certificatePath;
-  if (!privateKeyPath || !existsSync(privateKeyPath)) throw new Error('TV_OTA_PRIVATE_KEY_PATH is unavailable');
-  if (!certificatePath || !existsSync(certificatePath)) throw new Error('NUBARCA_TV_OTA_CERTIFICATE is unavailable');
-  validateCodeSigningCertificate(certificatePath);
-  const privatePublic = createPublicKey(readFileSync(privateKeyPath)).export({ type: 'spki', format: 'der' });
-  const certificatePublic = new X509Certificate(readFileSync(certificatePath)).publicKey.export({ type: 'spki', format: 'der' });
-  if (!privatePublic.equals(certificatePublic)) throw new Error('OTA private key does not match the signing certificate');
-  const gitSha = validateReleaseGitSha(requireEnv('TV_OTA_RELEASE_GIT_SHA', env));
+function createCandidate(context, gitSha, workingRoot, env, dependencies = {}) {
+  const exportRunner = dependencies.runExport ?? runExport;
+  const configReader = dependencies.readPublicExpoConfig ?? readPublicExpoConfig;
+  const exported = join(workingRoot, 'export');
+  const publication = join(workingRoot, 'publication');
+  mkdirSync(publication, { recursive: true });
+  const expoClient = configReader(env);
+  exportRunner(exported, env);
+  const exportMetadata = JSON.parse(readFileSync(join(exported, 'metadata.json'), 'utf8'));
+  const android = exportMetadata?.fileMetadata?.android;
+  if (!android?.bundle || !Array.isArray(android.assets)) throw new Error('Expo export metadata is malformed');
+  const exportedFiles = [android.bundle, ...android.assets.map((asset) => asset.path)];
+  if (new Set(exportedFiles).size !== exportedFiles.length) throw new Error('Expo export contains duplicate asset paths');
 
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const filesRoot = join(publication, 'files');
+  for (const relativePath of exportedFiles) {
+    if (typeof relativePath !== 'string' || relativePath.startsWith('/')
+        || relativePath.split('/').some((part) => !part || part === '.' || part === '..')) {
+      throw new Error(`unsafe Expo export path: ${relativePath}`);
+    }
+    const source = resolve(exported, relativePath);
+    if (!source.startsWith(`${resolve(exported)}${sep}`) || !existsSync(source)) throw new Error(`missing exported file: ${relativePath}`);
+    assertNoSymlinkPath(source, exported);
+    if (!lstatSync(source).isFile() || !realpathSync(source).startsWith(`${realpathSync(exported)}${sep}`)) {
+      throw new Error(`exported asset is not an isolated regular file: ${relativePath}`);
+    }
+    const target = join(filesRoot, relativePath);
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(source, target, { errorOnExist: true, force: false });
+  }
+
+  const launchAsset = assetDescriptor(join(exported, android.bundle), android.bundle, context, id);
+  delete launchAsset.fileExtension;
+  const assets = android.assets.map((asset) => assetDescriptor(join(exported, asset.path), asset.path, context, id));
+  const manifest = { id, createdAt, runtimeVersion: context.runtimeVersion, launchAsset, assets,
+    metadata: { channel: context.channel, platform: 'android', gitSha },
+    extra: { expoClient, release: { gitSha } } };
+  const manifestText = JSON.stringify(manifest);
+  const signature = `sig="${sign('RSA-SHA256', Buffer.from(manifestText), readFileSync(context.privateKeyPath)).toString('base64')}", keyid="main", alg="rsa-v1_5-sha256"`;
+  writeFileSync(join(publication, 'manifest.json'), manifestText, { flag: 'wx', mode: 0o644 });
+  writeFileSync(join(publication, 'publication.json'), `${JSON.stringify({ id, createdAt,
+    runtimeVersion: context.runtimeVersion, platform: 'android', channel: context.channel, gitSha, signature }, null, 2)}\n`,
+  { flag: 'wx', mode: 0o644 });
+  const validated = validatePublication(publication, { ...context, gitSha });
+  return { id, publication, ...validated };
+}
+
+function prepareRelease(env, dependencies = {}) {
+  assertNodeVersion(dependencies.nodeVersion ?? process.versions.node);
+  const context = resolveReleaseContext(env, { requireStorage: dependencies.requireStorage ?? false, requirePrivateKey: true });
+  const signing = validateSigningMaterial(context);
+  const gitSha = refreshAndValidateGitState(dependencies.gitRunner ?? git);
+  return { context, signing, gitSha };
+}
+
+function printCandidateSummary(prepared, candidate) {
+  console.log(`Git SHA: ${prepared.gitSha}`);
+  console.log(`Runtime: ${prepared.context.runtimeVersion}`);
+  console.log(`Channel: ${prepared.context.channel}`);
+  console.log(`Origin: ${prepared.context.origin}`);
+  console.log(`OTA certificate SHA-256: ${prepared.signing.certificateSha256}`);
+  console.log(`OTA public-key SPKI SHA-256: ${prepared.signing.publicKeySha256}`);
+  console.log(`Asset count: ${candidate.manifest.assets.length + 1}`);
+}
+
+export function validate(env = process.env, dependencies = {}) {
+  const prepared = prepareRelease(env, { ...dependencies, requireStorage: false });
+  const temporary = mkdtempSync(join(tmpdir(), 'nubarca-tv-ota-validate-'));
+  try {
+    const candidate = createCandidate(prepared.context, prepared.gitSha, temporary, env, dependencies);
+    printCandidateSummary(prepared, candidate);
+    console.log('Candidate validation: PASS');
+    return { ...prepared, candidate };
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+export function publish(env = process.env, dependencies = {}) {
+  const prepared = prepareRelease(env, { ...dependencies, requireStorage: true });
+  const config = prepared.context;
+  mkdirSync(config.storage, { recursive: true });
+  assertSafeStorageContext(config);
   mkdirSync(config.publications, { recursive: true });
-  if (realpathSync(config.storage) !== config.storage) throw new Error('TV_OTA_STORAGE_ROOT must not traverse symlinks');
   assertNoSymlinkPath(config.publications, config.storage);
   const stagingRoot = join(config.storage, '.staging');
   mkdirSync(stagingRoot, { recursive: true });
   assertNoSymlinkPath(stagingRoot, config.storage);
   const staging = join(stagingRoot, `${process.pid}-${randomUUID()}`);
-  const exported = join(staging, 'export');
-  const publication = join(staging, 'publication');
-  mkdirSync(publication, { recursive: true });
-
+  mkdirSync(staging, { recursive: true });
   try {
-    const expoClient = readPublicExpoConfig(config.runtime, env);
-    runExport(exported, config.runtime, env);
-    const exportMetadata = JSON.parse(readFileSync(join(exported, 'metadata.json'), 'utf8'));
-    const android = exportMetadata?.fileMetadata?.android;
-    if (!android?.bundle || !Array.isArray(android.assets)) throw new Error('Expo export metadata is malformed');
-    const exportedFiles = [android.bundle, ...android.assets.map((asset) => asset.path)];
-    if (new Set(exportedFiles).size !== exportedFiles.length) throw new Error('Expo export contains duplicate asset paths');
-
-    const id = randomUUID();
-    const createdAt = new Date().toISOString();
-    const filesRoot = join(publication, 'files');
-    for (const relativePath of exportedFiles) {
-      if (typeof relativePath !== 'string' || relativePath.startsWith('/') || relativePath.split('/').some((p) => !p || p === '.' || p === '..')) {
-        throw new Error(`unsafe Expo export path: ${relativePath}`);
-      }
-      const source = resolve(exported, relativePath);
-      if (!source.startsWith(`${resolve(exported)}${sep}`) || !existsSync(source)) throw new Error(`missing exported file: ${relativePath}`);
-      assertNoSymlinkPath(source, exported);
-      if (!lstatSync(source).isFile() || !realpathSync(source).startsWith(`${realpathSync(exported)}${sep}`)) {
-        throw new Error(`exported asset is not an isolated regular file: ${relativePath}`);
-      }
-      const target = join(filesRoot, relativePath);
-      mkdirSync(dirname(target), { recursive: true });
-      cpSync(source, target, { errorOnExist: true, force: false });
-    }
-
-    const launchAsset = assetDescriptor(join(exported, android.bundle), android.bundle, config.runtime, id, publicBase);
-    delete launchAsset.fileExtension;
-    const assets = android.assets.map((asset) => assetDescriptor(join(exported, asset.path), asset.path, config.runtime, id, publicBase));
-    const manifest = { id, createdAt, runtimeVersion: config.runtime, launchAsset, assets,
-      metadata: { channel: config.channel, platform: 'android', gitSha },
-      extra: { expoClient, release: { gitSha } } };
-    const manifestText = JSON.stringify(manifest);
-    const signature = `sig="${sign('RSA-SHA256', Buffer.from(manifestText), readFileSync(privateKeyPath)).toString('base64')}", keyid="main", alg="rsa-v1_5-sha256"`;
-    writeFileSync(join(publication, 'manifest.json'), manifestText, { flag: 'wx', mode: 0o644 });
-    writeFileSync(join(publication, 'publication.json'), `${JSON.stringify({ id, createdAt, runtimeVersion: config.runtime,
-      platform: 'android', channel: config.channel, gitSha, signature }, null, 2)}\n`, { flag: 'wx', mode: 0o644 });
-    validatePublication(publication, { ...config, gitSha });
-
-    const destination = join(config.publications, id);
-    if (existsSync(destination)) throw new Error(`publication already exists: ${id}`);
-    renameSync(publication, destination);
-    activate(id, config);
-    console.log(`Published and activated ${id} for android/${config.runtime}/${config.channel}`);
-    return id;
+    const candidate = createCandidate(config, prepared.gitSha, staging, env, dependencies);
+    printCandidateSummary(prepared, candidate);
+    const destination = join(config.publications, candidate.id);
+    if (existsSync(destination)) throw new Error(`publication already exists: ${candidate.id}`);
+    renameSync(candidate.publication, destination);
+    activate(candidate.id, config);
+    console.log(`Published and activated ${candidate.id} for android/${config.runtimeVersion}/${config.channel}`);
+    return candidate.id;
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
 }
 
-export function rollback(env = process.env) {
-  const config = paths(env);
+export function status(env = process.env) {
+  const config = resolveReleaseContext(env);
+  assertSafeStorageContext(config);
+  const identity = certificateIdentity(config.certificatePath);
   const pointer = readPointer(config.pointer);
-  const target = env.TV_OTA_ROLLBACK_TO || pointer.previous;
-  if (!target) throw new Error('no previous publication is available');
-  validatePublication(join(config.publications, safeSegment(target, 'rollback target')), config);
-  const next = { current: target, previous: pointer.current, activatedAt: new Date().toISOString() };
-  writePointerAtomic(config.pointer, next);
-  console.log(`Rolled back ${config.channel} to ${target}`);
+  console.log(`Runtime: ${config.runtimeVersion}`);
+  console.log(`Channel: ${config.channel}`);
+  console.log(`OTA certificate SHA-256: ${identity.certificateSha256}`);
+  console.log(`OTA public-key SPKI SHA-256: ${identity.publicKeySha256}`);
+  for (const [label, id] of [['Current', pointer.current], ['Previous', pointer.previous]]) {
+    if (!id) {
+      console.log(`${label} publication: none`);
+      continue;
+    }
+    const item = validatePublication(join(config.publications, id), config);
+    console.log(`${label} publication: ${id} createdAt=${item.manifest.createdAt} gitSha=${item.metadata.gitSha}`);
+  }
+  return pointer;
 }
 
-export function cleanup(env = process.env) {
-  const config = paths(env);
-  const keep = Number.parseInt(env.TV_OTA_RETENTION_COUNT || '5', 10);
-  if (!Number.isInteger(keep) || keep < 2) throw new Error('TV_OTA_RETENTION_COUNT must be an integer >= 2');
-  const dryRun = (env.TV_OTA_CLEANUP_DRY_RUN || 'true').toLowerCase() !== 'false';
+export function rollbackPointer(target, env = process.env) {
+  const config = resolveReleaseContext(env);
+  assertSafeStorageContext(config);
   const pointer = readPointer(config.pointer);
-  if (!existsSync(config.publications)) return;
+  const selected = target || pointer.previous;
+  if (!selected) throw new Error('no previous publication is available');
+  if (!UUID.test(selected)) throw new Error('rollback target must be a publication UUID');
+  if (selected === pointer.current) throw new Error('rollback target is already the current publication');
+  validatePublication(join(config.publications, selected), config);
+  const next = { current: selected, previous: pointer.current, activatedAt: new Date().toISOString() };
+  writePointerAtomic(config.pointer, next);
+  console.log('WARNING: This changes server distribution only.');
+  console.log('It does not guarantee downgrade of devices that already downloaded a newer update.');
+  console.log(`Server pointer changed to ${selected}`);
+  return next;
+}
+
+export function parseCleanupArguments(args) {
+  let apply = false;
+  let keep = 5;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--apply') apply = true;
+    else if (args[index] === '--keep') {
+      keep = Number.parseInt(args[index + 1] ?? '', 10);
+      index += 1;
+    } else throw new Error(`unknown cleanup option: ${args[index]}`);
+  }
+  if (!Number.isInteger(keep) || keep < 2) throw new Error('--keep must be an integer >= 2');
+  return { apply, keep };
+}
+
+export function cleanup(args = [], env = process.env) {
+  const { apply, keep } = parseCleanupArguments(args);
+  const config = resolveReleaseContext(env);
+  assertSafeStorageContext(config);
+  const pointer = readPointer(config.pointer);
+  if (!existsSync(config.publications)) return [];
   const entries = readdirSync(config.publications, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && SAFE.test(entry.name))
     .map((entry) => ({ id: entry.name, dir: join(config.publications, entry.name) }))
@@ -359,27 +443,88 @@ export function cleanup(env = process.env) {
   if (existsSync(channelsRoot)) {
     for (const channelEntry of readdirSync(channelsRoot, { withFileTypes: true })) {
       if (!channelEntry.isDirectory() || !SAFE.test(channelEntry.name)) continue;
-      const candidate = join(channelsRoot, channelEntry.name, 'android', `${config.runtime}.json`);
+      const candidate = join(channelsRoot, channelEntry.name, 'android', `${config.runtimeVersion}.json`);
       if (!existsSync(candidate)) continue;
       const channelPointer = readPointer(candidate);
       referenced.push(channelPointer.current, channelPointer.previous);
     }
   }
-  const protectedIds = new Set([...referenced, ...entries.slice(0, keep).map((x) => x.id)].filter(Boolean));
+  const protectedIds = new Set([...referenced, ...entries.slice(0, keep).map((item) => item.id)].filter(Boolean));
+  const removed = [];
   for (const entry of entries) {
     if (protectedIds.has(entry.id)) continue;
-    console.log(`${dryRun ? 'Would remove' : 'Removing'} ${entry.dir}`);
-    if (!dryRun) rmSync(entry.dir, { recursive: true });
+    console.log(`${apply ? 'Removing' : 'Would remove'} ${entry.dir}`);
+    if (apply) rmSync(entry.dir, { recursive: true });
+    removed.push(entry.id);
   }
+  return removed;
+}
+
+export async function verifyRemote(env = process.env, fetcher = fetch) {
+  const context = resolveReleaseContext(env, { requireStorage: false });
+  const response = await fetcher(context.updateUrl, { headers: {
+    Accept: 'application/expo+json',
+    'Expo-Protocol-Version': '1',
+    'Expo-Platform': 'android',
+    'Expo-Runtime-Version': context.runtimeVersion,
+    'expo-channel-name': context.channel,
+    'expo-expect-signature': 'sig, keyid="main", alg="rsa-v1_5-sha256"',
+  } });
+  if (response.status === 204) {
+    console.log('Remote OTA status: 204 No Content (no active publication)');
+    return null;
+  }
+  if (response.status !== 200) throw new Error(`OTA endpoint returned HTTP ${response.status}`);
+  const contentTypeHeader = response.headers.get('content-type') ?? '';
+  if (!contentTypeHeader.toLowerCase().startsWith('application/expo+json')) throw new Error(`Unexpected OTA content type: ${contentTypeHeader}`);
+  const manifestText = await response.text();
+  const manifest = JSON.parse(manifestText);
+  if (manifest.runtimeVersion !== context.runtimeVersion || manifest.metadata?.channel !== context.channel
+      || !GIT_SHA.test(manifest.metadata?.gitSha ?? '') || !UUID.test(manifest.id ?? '')) {
+    throw new Error('Remote OTA manifest identity is invalid');
+  }
+  if (!manifest.launchAsset || !Array.isArray(manifest.assets)) throw new Error('Remote OTA manifest assets are invalid');
+  const identity = certificateIdentity(context.certificatePath);
+  const signature = parseSignature(response.headers.get('expo-signature'));
+  if (!verify('RSA-SHA256', Buffer.from(manifestText), identity.certificate.publicKey, signature)) {
+    throw new Error('Remote OTA manifest signature verification failed');
+  }
+  const assets = [manifest.launchAsset, ...manifest.assets];
+  const expectedAssetPrefix = `${context.updateUrl}/assets/${encodeURIComponent(context.runtimeVersion)}/${manifest.id}/`;
+  const seenUrls = new Set();
+  for (const asset of assets) {
+    if (!asset || typeof asset.url !== 'string' || typeof asset.hash !== 'string'
+        || !/^[A-Za-z0-9_-]{43}$/.test(asset.hash) || typeof asset.contentType !== 'string'
+        || !asset.contentType.trim()) {
+      throw new Error('Remote OTA asset descriptor is invalid');
+    }
+    const url = new URL(asset.url);
+    if (!asset.url.startsWith(expectedAssetPrefix) || url.origin !== context.origin
+        || url.username || url.password || url.search || url.hash || seenUrls.has(url.href)) {
+      throw new Error('Remote OTA asset is not a unique immutable URL for this update');
+    }
+    seenUrls.add(url.href);
+    const assetResponse = await fetcher(url);
+    if (!assetResponse.ok) throw new Error(`Remote OTA asset returned HTTP ${assetResponse.status}`);
+    const assetContentType = assetResponse.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    if (assetContentType !== asset.contentType.toLowerCase()) throw new Error('Remote OTA asset content type mismatch');
+    const actual = createHash('sha256').update(Buffer.from(await assetResponse.arrayBuffer())).digest('base64url');
+    if (actual !== asset.hash) throw new Error('Remote OTA asset hash mismatch');
+  }
+  console.log(`Remote OTA VALID: ${manifest.id} gitSha=${manifest.metadata.gitSha} assets=${assets.length}`);
+  return manifest;
 }
 
 const command = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) ? process.argv[2] : null;
 if (command) {
   try {
-    if (command === 'publish') publish();
-    else if (command === 'rollback') rollback();
-    else if (command === 'cleanup') cleanup();
-    else throw new Error('usage: ota.mjs <publish|rollback|cleanup>');
+    if (command === 'validate') validate();
+    else if (command === 'publish') publish();
+    else if (command === 'status') status();
+    else if (command === 'rollback-pointer') rollbackPointer(process.argv[3]);
+    else if (command === 'cleanup') cleanup(process.argv.slice(3));
+    else if (command === 'verify') await verifyRemote();
+    else throw new Error('usage: ota.mjs <validate|publish|status|verify|rollback-pointer|cleanup>');
   } catch (error) {
     console.error(`OTA ${command} failed: ${error instanceof Error ? error.message : error}`);
     process.exitCode = 1;

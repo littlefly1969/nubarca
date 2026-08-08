@@ -1,6 +1,7 @@
 # NubArca TV
 
-Native OTA operation, signing, publication, rollback, and bootstrap instructions are documented in [`../docs/tv-ota-updates.md`](../docs/tv-ota-updates.md).
+All native APK/OTA operations use the single canonical
+[`../docs/tv-release.md`](../docs/tv-release.md) runbook.
 
 A **separate** Expo React Native application for the 10-foot TV experience,
 targeting **Fire Stick / Android TV** first. It is intentionally NOT the mobile
@@ -566,43 +567,13 @@ On Node v22.22.3, all green:
   the foojay toolchain resolver (needs JDK 17); (2) **no Android SDK**
   (`ANDROID_HOME` unset, no `~/Android/Sdk`). Build on a proper host (below).
 
-## Build the APK (needs JDK 17 + an Android SDK)
+## Native release operations
 
-```bash
-cd tv
-npm install                              # uses tv/.npmrc (legacy-peer-deps)
-export JAVA_HOME=/usr/lib/jvm/java-17-openjdk   # JDK 17 — NOT 26 (foojay resolver fails)
-export ANDROID_HOME="$HOME/Android/Sdk"; export PATH="$JAVA_HOME/bin:$PATH"
-# production target (cleartext disabled); omit the env var for the LAN dev default:
-EXPO_PUBLIC_NUBARCA_API_BASE_URL=https://nubarca.example.com npm run tv:prebuild
-cd android
-./gradlew assembleRelease   # → app/build/outputs/apk/release/app-release.apk  (built here ✔)
-# or a debug variant:
-./gradlew assembleDebug     # → app/build/outputs/apk/debug/app-debug.apk
-```
-
-`assembleRelease` succeeds locally against platform android-36 / build-tools 36 /
-NDK 27 and produces a ~72 MB sideloadable APK.
-
-Release builds require the NubArca TV release key
-(`NUBARCA_TV_RELEASE_STORE_FILE` and friends, as Gradle properties or
-environment variables). `plugins/withReleaseSigning.js` wires it in on every
-prebuild and **fails the build** when it is missing, rather than falling back to
-the React Native template's public debug keystore. See
-[`../docs/tv-apk-distribution.md`](../docs/tv-apk-distribution.md#signing).
-
-Sideload to a Fire Stick (only with a device IP; enable ADB debugging on the
-device first):
-
-```bash
-adb connect <FIRE_STICK_IP>:5555
-adb install android/app/build/outputs/apk/release/app-release.apk
-```
-
-Use plain `adb install`, not `adb install -r`, when replacing an app whose
-package name differs — uninstall the old package first.
-
-Or via EAS Build with a TV profile (`EXPO_TV=1`) for reproducible cloud builds.
+Toolchain requirements, the tracked release contract, production inputs,
+Gradle signing gate, APK validation, sideload acceptance and atomic publication
+are documented only in the canonical
+[`../docs/tv-release.md`](../docs/tv-release.md) runbook. Do not derive a native
+release procedure from the historical validation notes in this README.
 
 ## Device checklist (run on a real Fire Stick)
 
@@ -652,8 +623,9 @@ Or via EAS Build with a TV profile (`EXPO_TV=1`) for reproducible cloud builds.
 
 ## Remaining follow-ups (unvalidated / out of scope)
 
-- NubArca TV 1.0.1 still requires its definitive merged-main APK build and the
-  physical Fire Stick in-place/OTA cold-launch gate before public replacement.
+- Future native releases require the physical Fire Stick in-place and OTA
+  cold-launch gates in `docs/tv-release.md`; the current 1.0.1 APK is canonical
+  and must be validated rather than rebuilt.
 - Automatic full-screen viewer takeover on an active party face-search (native
   currently filters the grid + banner; browser supersedes full-screen).
 - Exact-tile focus restore when returning from the slideshow (currently re-lands

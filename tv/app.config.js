@@ -1,25 +1,10 @@
 // Dynamic Expo config for the NubArca TV app.
 //
-// The API base URL is configurable for real Fire Stick / Android TV testing
-// against a production server, WITHOUT hardcoding any host or secret in source:
-//
-//   EXPO_PUBLIC_NUBARCA_API_BASE_URL   (preferred; also readable at runtime via
-//                                       process.env.* since it is an EXPO_PUBLIC_ var)
-//   NUBARCA_TV_API_BASE_URL            (build-time alias, config only)
-//
-// When neither is set, a loopback dev default is used (plain http, cleartext) so
-// the normal dev workflow keeps working. A physical Fire Stick / Android TV
-// cannot reach the workstation's loopback address, so device testing always sets
-// one of the variables above to the workstation's own LAN address — that address
-// belongs to whoever is developing and is never baked into source.
-//
-// Point the app at production with:
-//
-//   EXPO_PUBLIC_NUBARCA_API_BASE_URL="$NUBARCA_PUBLIC_ORIGIN" \
-//     npm run tv:prebuild && (cd android && ./gradlew assembleRelease)
-//
-// A release build additionally requires the NubArca TV release signing key; see
-// plugins/withReleaseSigning.js and docs/tv-apk-distribution.md.
+// Production has one authoritative installation value: NUBARCA_PUBLIC_ORIGIN.
+// API and OTA URLs are derived from it and tv/release-contract.json. Development
+// may override the API base through EXPO_PUBLIC_NUBARCA_API_BASE_URL or the
+// config-only NUBARCA_TV_API_BASE_URL alias. See docs/tv-release.md for the one
+// release procedure; this file deliberately does not duplicate that runbook.
 //
 // Cleartext (unencrypted http) traffic is enabled ONLY when the resolved base
 // URL is http:// (dev on the LAN). An https:// production base URL builds with
@@ -27,14 +12,10 @@
 
 const DEV_DEFAULT_BASE_URL = 'http://localhost:5177';
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { validateCodeSigningCertificate } = require('./scripts/code-signing-certificate.cjs');
-
-const RELEASE_VERSION = '1.0.1';
-const RELEASE_VERSION_CODE = 2;
-const RELEASE_RUNTIME = 'nubarca-tv-native-2';
-const RELEASE_CHANNEL = 'production';
+const { normalizePublicOrigin, readReleaseContract } = require('./scripts/release-contract.cjs');
+const release = readReleaseContract();
 
 // The exact origin this installation's release APK must talk to. It is supplied
 // by the operator and deliberately NOT hardcoded: an installation-specific host
@@ -45,73 +26,33 @@ const RELEASE_CHANNEL = 'production';
 // throws below rather than accepting whatever base URL happens to be exported —
 // which is the failure mode that once produced a perfectly signed APK unable to
 // reach any server.
-const releaseOrigin =
-  process.env.NUBARCA_PUBLIC_ORIGIN?.trim().replace(/\/$/, '') || null;
-const releaseUpdateUrl = releaseOrigin ? `${releaseOrigin}/api/tv-app/updates` : null;
-const RELEASE_SIGNING_INPUTS = [
-  'NUBARCA_TV_RELEASE_STORE_FILE',
-  'NUBARCA_TV_RELEASE_STORE_PASSWORD',
-  'NUBARCA_TV_RELEASE_KEY_ALIAS',
-  'NUBARCA_TV_RELEASE_KEY_PASSWORD',
-];
-
-function readGradleProperties() {
-  const gradleHome = process.env.GRADLE_USER_HOME || path.join(os.homedir(), '.gradle');
-  const propertiesPath = path.join(gradleHome, 'gradle.properties');
-  if (!fs.existsSync(propertiesPath)) return {};
-  return Object.fromEntries(
-    fs.readFileSync(propertiesPath, 'utf8').split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#') && !line.startsWith('!'))
-      .map((line) => {
-        const separator = line.search(/[=:]/);
-        return separator < 0
-          ? [line, '']
-          : [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
-      }),
-  );
-}
+const isProduction = process.env.NODE_ENV === 'production';
+const releaseOrigin = isProduction
+  ? normalizePublicOrigin(process.env.NUBARCA_PUBLIC_ORIGIN)
+  : null;
 
 const explicitBaseUrl =
   process.env.EXPO_PUBLIC_NUBARCA_API_BASE_URL || process.env.NUBARCA_TV_API_BASE_URL;
 
-// This config is evaluated TWICE: once by `expo prebuild`, and again by the
+// This config is evaluated twice: once by `expo prebuild`, and again by the
 // Gradle JS-bundling step that writes assets/app.config into the APK. Only the
-// second one decides what the shipped app talks to. Exporting the base URL for
-// prebuild alone silently produces a release APK whose manifest is correct in
-// every respect — right package, label, leanback, signature — but whose bundle
-// points at DEV_DEFAULT_BASE_URL, with cleartext already disabled. The result
-// installs, launches and can never reach a server.
-//
-// So a production bundle must not be allowed to fall back. NODE_ENV is
-// 'production' during release bundling and in the documented build procedure.
-if (!explicitBaseUrl && process.env.NODE_ENV === 'production') {
-  throw new Error(
-    'EXPO_PUBLIC_NUBARCA_API_BASE_URL is required for a production build.\n' +
-      'Export it in the SAME shell that runs Gradle, not only for prebuild — the\n' +
-      'JS bundle is produced by the Gradle build. Refusing to embed the LAN dev\n' +
-      `default (${DEV_DEFAULT_BASE_URL}) into a production bundle.`,
-  );
+// second decides what the shipped app talks to, so NUBARCA_PUBLIC_ORIGIN must
+// remain exported in the same shell through the Gradle build. Production never
+// falls back to DEV_DEFAULT_BASE_URL.
+const normalizedExplicitBaseUrl = explicitBaseUrl?.replace(/\/$/, '');
+if (isProduction && normalizedExplicitBaseUrl && normalizedExplicitBaseUrl !== releaseOrigin) {
+  throw new Error(`Production API base URL must be exactly ${releaseOrigin}.`);
 }
-
-const apiBaseUrl = (explicitBaseUrl || DEV_DEFAULT_BASE_URL).replace(/\/$/, '');
+const apiBaseUrl = isProduction
+  ? releaseOrigin
+  : (normalizedExplicitBaseUrl || DEV_DEFAULT_BASE_URL);
 
 // Only permit cleartext http on non-https (LAN dev) targets. A production
 // https:// base URL does not need — and does not get — cleartext traffic.
 const usesCleartextTraffic = apiBaseUrl.startsWith('http://');
-const explicitUpdateUrl = process.env.NUBARCA_TV_OTA_UPDATE_URL;
-const updateUrl = (explicitUpdateUrl || `${apiBaseUrl}/api/tv-app/updates`).replace(/\/$/, '');
-// This value identifies one exact native ABI/configuration contract. Increment
-// it before every build containing native or build-time environment changes.
-//
-// The `nubarca-tv-native-*` series belongs to the NubArca TV application id
-// (it.littlefly.nubarca.tv) and starts over at 1. It is deliberately disjoint
-// from the retired `tv-native-*` series, which belongs to the previous TV
-// package: a device still running that package asks for `tv-native-3` and must
-// never be served a bundle built for this one. See tv/README.md for the
-// retired identity.
-const runtimeVersion = process.env.NUBARCA_TV_RUNTIME_VERSION || RELEASE_RUNTIME;
-const updateChannel = process.env.NUBARCA_TV_OTA_CHANNEL || RELEASE_CHANNEL;
+const updateUrl = `${apiBaseUrl}${release.updatePath}`;
+const runtimeVersion = release.runtimeVersion;
+const updateChannel = release.channel;
 const codeSigningCertificate = process.env.NUBARCA_TV_OTA_CERTIFICATE;
 const codeSigningCertificateConfigPath = codeSigningCertificate
   ? path.relative(__dirname, path.resolve(codeSigningCertificate))
@@ -124,54 +65,18 @@ if (codeSigningCertificate) {
   validateCodeSigningCertificate(path.resolve(codeSigningCertificate));
 }
 
-if (process.env.NODE_ENV === 'production') {
-  if (!releaseOrigin) {
-    throw new Error(
-      'NUBARCA_PUBLIC_ORIGIN is required for a production build.\n' +
-        'Set it to this installation\'s public https origin in the SAME shell that\n' +
-        'runs Gradle. Refusing to build a release APK without a pinned origin.',
-    );
-  }
-  if (!releaseOrigin.startsWith('https://')) {
-    throw new Error('NUBARCA_PUBLIC_ORIGIN must be an https:// origin.');
-  }
-  if (apiBaseUrl !== releaseOrigin) {
-    throw new Error(`Production API base URL must be exactly ${releaseOrigin}.`);
-  }
-  if (!explicitUpdateUrl || updateUrl !== releaseUpdateUrl) {
-    throw new Error(`NUBARCA_TV_OTA_UPDATE_URL is required and must be exactly ${releaseUpdateUrl}.`);
-  }
-  if (runtimeVersion !== RELEASE_RUNTIME) {
-    throw new Error(`Production runtime must be exactly ${RELEASE_RUNTIME}.`);
-  }
-  if (updateChannel !== RELEASE_CHANNEL) {
-    throw new Error(`Production OTA channel must be exactly ${RELEASE_CHANNEL}.`);
-  }
+if (isProduction) {
   if (!codeSigningCertificate) {
     throw new Error('NUBARCA_TV_OTA_CERTIFICATE is required for a production build.');
-  }
-
-  const gradleProperties = readGradleProperties();
-  const missingSigningInputs = RELEASE_SIGNING_INPUTS.filter(
-    (name) => !(process.env[name]?.trim() || gradleProperties[name]?.trim()),
-  );
-  if (missingSigningInputs.length > 0) {
-    throw new Error(
-      `Production release signing is incomplete; missing: ${missingSigningInputs.join(', ')}.`,
-    );
-  }
-  const storeFile = process.env.NUBARCA_TV_RELEASE_STORE_FILE || gradleProperties.NUBARCA_TV_RELEASE_STORE_FILE;
-  if (!fs.existsSync(path.resolve(storeFile))) {
-    throw new Error('NUBARCA_TV_RELEASE_STORE_FILE does not exist.');
   }
 }
 
 module.exports = () => ({
   expo: {
-    name: 'NubArca TV',
+    name: release.applicationName,
     slug: 'nubarca-tv',
     scheme: 'nubarca-tv',
-    version: RELEASE_VERSION,
+    version: release.version,
     runtimeVersion,
     orientation: 'landscape',
     platforms: ['android', 'ios'],
@@ -232,8 +137,8 @@ module.exports = () => ({
       // EXPO_PUBLIC_* runtime env var is absent.
       apiBaseUrl,
       otaChannel: updateChannel,
-      releaseVersion: RELEASE_VERSION,
-      releaseVersionCode: RELEASE_VERSION_CODE,
+      releaseVersion: release.version,
+      releaseVersionCode: release.versionCode,
     },
     android: {
       // The final NubArca TV application id. It also becomes the Gradle
@@ -247,8 +152,8 @@ module.exports = () => ({
       // applicationId has no in-place rename, so there is no upgrade path. The
       // single device holding it was uninstalled and re-paired deliberately.
       // tv/README.md names the retired package for the uninstall step.
-      package: 'it.littlefly.nubarca.tv',
-      versionCode: RELEASE_VERSION_CODE,
+      package: release.package,
+      versionCode: release.versionCode,
       usesCleartextTraffic,
       icon: './assets/brand/nubarca-fire-tv-icon-512.png',
       adaptiveIcon: {

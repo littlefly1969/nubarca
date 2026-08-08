@@ -3,6 +3,9 @@
   "version": "1.0.1",
   "main": "index.js",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
@@ -10,8 +13,11 @@
     "tv:android": "EXPO_TV=1 expo run:android",
     "lint": "tsc --noEmit",
     "config": "expo config --type introspect",
+    "validate:ota": "node scripts/ota.mjs validate",
     "publish:ota": "node scripts/ota.mjs publish",
-    "rollback:ota": "node scripts/ota.mjs rollback",
+    "status:ota": "node scripts/ota.mjs status",
+    "verify:ota": "node scripts/ota.mjs verify",
+    "rollback-pointer:ota": "node scripts/ota.mjs rollback-pointer",
     "cleanup:ota": "node scripts/ota.mjs cleanup",
     "test:ota": "node --test src/ota/updateLifecycle.test.ts scripts/ota.test.mjs",
     "test:personal": "node --test src/personal/flow.test.ts",

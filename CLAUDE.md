@@ -100,6 +100,10 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
   production command. It is the source of truth for the current four-file
   Compose stack, immutable image builds, OpenVINO target, smoke checks and
   rollback. Do not deploy from remembered chat commands.
+- **TV releases:** [`docs/tv-release.md`](docs/tv-release.md) is the only
+  authorized APK/OTA runbook. Ordinary OTA publication is not a container
+  deploy and never rebuilds the APK; if it needs a compatible backend change,
+  deploy and verify the backend first.
 - **Before deploying to an existing installation, obtain the production checkout
   location and connection settings from the operator. Never infer or hardcode a
   host path.** A host, login, directory and public origin belong to one
