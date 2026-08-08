@@ -152,6 +152,21 @@ services:
       # caps only bound peaks). Lower = better quality + bigger files.
       Media__VideoHlsHighCrf: ${Media__VideoHlsHighCrf:-23}
       Media__VideoHlsLowCrf: ${Media__VideoHlsLowCrf:-26}
+      # Google Cast. API-only configuration: the worker never mints or serves a
+      # Cast grant, so these deliberately do not appear on that service.
+      #
+      # The allowlist is the EXACT Origin the receiver presents, discovered once
+      # from a physical device — never a wildcard, because a Cast media URL
+      # carries a bearer secret. Empty is the safe default: grant creation still
+      # works and no origin is advertised, so a misconfiguration shows up as a
+      # television that will not start rather than as a permissive server.
+      #
+      # A variable that is not listed HERE is not passed to the container even
+      # when it is set in .env: `--env-file` feeds Compose substitution, not the
+      # process environment. That is exactly how the allowlist reached .env and
+      # never reached the API.
+      Cast__GrantLifetimeMinutes: ${Cast__GrantLifetimeMinutes:-360}
+      Cast__AllowedReceiverOrigins__0: ${Cast__AllowedReceiverOrigins__0:-}
       # Image-processing safety caps. These gate source image bytes/dimensions
       # before thumbnail/preview decoding; raise only on hosts sized for it.
       ImageProcessing__EnableThumbnails: ${ImageProcessing__EnableThumbnails:-true}
