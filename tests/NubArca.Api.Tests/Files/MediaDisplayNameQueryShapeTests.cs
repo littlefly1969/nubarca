@@ -34,6 +34,7 @@ public sealed class MediaDisplayNameQueryShapeTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
         _db.Users.Add(new User
         {
             Id = _owner,

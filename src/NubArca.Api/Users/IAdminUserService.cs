@@ -13,11 +13,16 @@ public interface IAdminUserService
 
     Task<AdminUserDto?> GetAsync(Guid userId, CancellationToken cancellationToken = default);
 
-    // The Access editor's view: the user plus every catalogue permission with
-    // its role/override/effective breakdown.
+    // The admin detail view: the user alone. What they may do is the role's
+    // permission set, read from the role catalogue.
     Task<AdminUserDetailDto?> GetDetailAsync(Guid userId, CancellationToken cancellationToken = default);
 
-    Task<AdminUserDto> CreateAsync(CreateAdminUserRequest request, CancellationToken cancellationToken = default);
+    // Takes the CALLER because the requested role is an escalation question:
+    // nobody may create an account with authority they do not hold themselves.
+    Task<(AdminSetRoleResult Result, AdminUserDto? User)> CreateAsync(
+        Guid callerUserId,
+        CreateAdminUserRequest request,
+        CancellationToken cancellationToken = default);
 
     Task<AdminUserDto?> UpdateAsync(
         Guid userId,
@@ -30,17 +35,6 @@ public interface IAdminUserService
         Guid callerUserId,
         Guid targetUserId,
         string? roleKey,
-        CancellationToken cancellationToken = default);
-
-    Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> SetPermissionOverrideAsync(
-        Guid targetUserId,
-        string permissionKey,
-        string? effect,
-        CancellationToken cancellationToken = default);
-
-    Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> ClearPermissionOverrideAsync(
-        Guid targetUserId,
-        string permissionKey,
         CancellationToken cancellationToken = default);
 
     Task<(AdminSetDisabledResult Result, AdminUserDto? User)> SetDisabledAsync(

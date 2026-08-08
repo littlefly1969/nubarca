@@ -98,7 +98,7 @@ public sealed class RoleMigrationTests : IAsyncLifetime
 
         // The mapping is total: no row was left without a role.
         Assert.Equal(5, roles.Count);
-        Assert.All(roles.Values, role => Assert.True(RoleKeys.IsKnown(role)));
+        Assert.All(roles.Values, role => Assert.True(RoleKeys.IsBuiltIn(role)));
 
         // Nobody was accidentally made Restricted — the failure mode that would
         // silently take People, Laboratory, Cloud Functions and the Private
@@ -111,12 +111,12 @@ public sealed class RoleMigrationTests : IAsyncLifetime
         // Every migrated non-admin keeps every non-administrative feature.
         foreach (var definition in PermissionCatalog.All.Where(p => !p.Administrative))
         {
-            Assert.Contains(definition.Key, RolePermissionCatalog.For(RoleKeys.Member));
+            Assert.Contains(definition.Key, RoleDefaults.MemberPermissions);
         }
         // …and gains no administrative one.
         foreach (var definition in PermissionCatalog.All.Where(p => p.Administrative))
         {
-            Assert.DoesNotContain(definition.Key, RolePermissionCatalog.For(RoleKeys.Member));
+            Assert.DoesNotContain(definition.Key, RoleDefaults.MemberPermissions);
         }
 
         // Session versioning starts from a value a cookie can compare against.

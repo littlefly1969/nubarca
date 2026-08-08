@@ -76,6 +76,7 @@ public sealed class AdminImportStatusLengthTests : IDisposable
         // accepts and round-trips the long values end-to-end (the Postgres bound
         // is asserted structurally above).
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         var run = new AdminImportRun
         {

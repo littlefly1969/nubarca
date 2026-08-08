@@ -1,7 +1,7 @@
 namespace NubArca.Api.Access;
 
 // The stable machine keys the backend authorizes on. A key is a wire contract:
-// it is stored in user_permission_overrides rows and returned to the browser in
+// it is stored in role_permissions rows and returned to the browser in
 // `/api/auth/me`, so renaming one is a migration, not an edit.
 //
 // The unit here is a FEATURE SURFACE, not a CRUD verb. `people.access` means
@@ -36,10 +36,17 @@ public static class Permissions
     // NOT gate anything an already-paired TV does with its own session token.
     public const string TvManage = "tv.manage";
 
-    // Administration. Four separate authorities on purpose: holding one must
+    // Administration. Five separate authorities on purpose: holding one must
     // never open another's API.
     public const string AdminDashboard = "admin.dashboard";
     public const string AdminUsersManage = "admin.users.manage";
     public const string AdminImport = "admin.import";
     public const string AdminJobsManage = "admin.jobs.manage";
+
+    // Editing the roles themselves — which is editing what every user assigned
+    // to a role may do. It is deliberately NOT assignable: the catalogue marks
+    // it Administrator-only, so it can only ever be held through the
+    // Administrator role. Without that, a user manager could mint a role that
+    // grants themselves administration and step into it.
+    public const string AdminRolesManage = "admin.roles.manage";
 }

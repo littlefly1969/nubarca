@@ -23,6 +23,7 @@ public sealed class FolderRestoreServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(dbOptions);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _service = new FolderService(_db, TimeProvider.System);
     }

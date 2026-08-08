@@ -34,6 +34,7 @@ public sealed class MetadataBackfillServiceTests : IDisposable
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-backfill-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

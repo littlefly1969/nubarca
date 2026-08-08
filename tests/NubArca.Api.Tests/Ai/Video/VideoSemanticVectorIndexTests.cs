@@ -27,6 +27,7 @@ public sealed class VideoSemanticVectorIndexTests : IDisposable
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
     }
 
     public void Dispose()

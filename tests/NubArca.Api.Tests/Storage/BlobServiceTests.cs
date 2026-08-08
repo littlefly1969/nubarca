@@ -37,6 +37,7 @@ public sealed class BlobServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(dbOptions);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         var blobOptions = Options.Create(new BlobStorageOptions { RootPath = _storageRoot });
         _storage = new LocalFileSystemBlobStorage(blobOptions);

@@ -422,7 +422,7 @@ public static class CliEntryPoint
         // The role is its own toggle: --admin on an existing non-administrator
         // is a deliberate upgrade. The CLI does NOT silently downgrade
         // someone — use `users revoke-admin` for that.
-        if (makeAdmin && !RolePermissionCatalog.IsAdministrator(existing.RoleKey))
+        if (makeAdmin && !RoleKeys.IsAdministrator(existing.RoleKey))
         {
             await users.SetRoleAsync(existing.Id, RoleKeys.Administrator);
             stdout.WriteLine($"users ensure: granted the Administrator role to {existing.Email}.");
@@ -461,7 +461,7 @@ public static class CliEntryPoint
             return 64;
         }
 
-        if (RolePermissionCatalog.IsAdministrator(existing.RoleKey) == isAdmin)
+        if (RoleKeys.IsAdministrator(existing.RoleKey) == isAdmin)
         {
             stdout.WriteLine(
                 $"users {verb}: {existing.Email} is already "
@@ -504,18 +504,26 @@ public static class CliEntryPoint
         }
 
         var requestedRole = ReadOption(args, "--role");
-        if (!RoleKeys.TryNormalize(requestedRole, out var roleKey))
-        {
-            stderr.WriteLine(
-                $"users set-role: --role must be one of: {string.Join(", ", RoleKeys.All)}.");
-            return 64;
-        }
 
         var users = services.GetService<IUserService>();
-        if (users is null)
+        var roles = services.GetService<IRoleService>();
+        if (users is null || roles is null)
         {
             stderr.WriteLine("users set-role: database is not configured. Set ConnectionStrings__Postgres and retry.");
             return 78;
+        }
+
+        // Roles are operator-created rows, so the accepted values are whatever
+        // this installation actually has — resolved by key or by name, and
+        // never defaulted: an unrecognised role has to fail rather than
+        // silently become Member.
+        var roleKey = await roles.ResolveRoleKeyAsync(requestedRole);
+        if (roleKey is null)
+        {
+            var known = (await roles.ListAsync()).Select(r => r.Name);
+            stderr.WriteLine(
+                $"users set-role: --role must be one of: {string.Join(", ", known)}.");
+            return 64;
         }
 
         var existing = await users.GetByEmailAsync(email);
@@ -534,8 +542,8 @@ public static class CliEntryPoint
         // Refuse to demote the LAST active administrator, for the same reason
         // the admin API does: an installation with no administrator cannot
         // recover through the product, only through the database.
-        if (RolePermissionCatalog.IsAdministrator(existing.RoleKey)
-            && !RolePermissionCatalog.IsAdministrator(roleKey)
+        if (RoleKeys.IsAdministrator(existing.RoleKey)
+            && !RoleKeys.IsAdministrator(roleKey)
             && existing.DisabledAt is null)
         {
             var db = services.GetService<NubArca.Api.Data.AppDbContext>();
@@ -583,6 +591,7 @@ public static class CliEntryPoint
             if (pending.Count == 0)
             {
                 stdout.WriteLine("db migrate: no pending migrations.");
+                await EnsureRolesAsync(services, stdout);
                 return 0;
             }
             stdout.WriteLine($"db migrate: applying {pending.Count} migration(s):");
@@ -591,6 +600,7 @@ public static class CliEntryPoint
                 stdout.WriteLine($"  + {name}");
             }
             await ctx.Database.MigrateAsync();
+            await EnsureRolesAsync(services, stdout);
             stdout.WriteLine("db migrate: completed.");
             return 0;
         }
@@ -602,6 +612,21 @@ public static class CliEntryPoint
             stderr.WriteLine($"db migrate: failed: {ex.GetType().Name}: {ex.Message}");
             return 1;
         }
+    }
+
+    // The built-in roles, after any migration. Idempotent, and the one thing
+    // that keeps an Administrator's permission set complete when a release adds
+    // a catalogue key: an operator who migrates from the CLI gets the same
+    // guarantee the API host applies at boot.
+    private static async Task EnsureRolesAsync(IServiceProvider services, TextWriter stdout)
+    {
+        var roles = services.GetService<IRoleService>();
+        if (roles is null)
+        {
+            return;
+        }
+        await roles.EnsureBuiltInRolesAsync();
+        stdout.WriteLine("db migrate: built-in roles verified.");
     }
 
     // ---- subcommand: metadata backfill ------------------------------------
@@ -2100,6 +2125,11 @@ public static class CliEntryPoint
             services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cs));
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<IAuthService, AuthService>();
+            // Roles are rows, so the CLI needs the catalogue to resolve
+            // `users set-role --role <name>` and to verify the built-ins after
+            // `db migrate`. Registered beside IUserService because both are
+            // needed by the same commands.
+            services.AddScoped<NubArca.Api.Access.IRoleService, NubArca.Api.Access.RoleService>();
 
             // Graph needed by `metadata backfill` (slice 55): the backfill
             // service drives FileItemService.ReExtractEmbeddedMetadataAsync,

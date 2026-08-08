@@ -520,10 +520,12 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // Application services that depend on AppDbContext are only registered when Postgres is configured.
     builder.Services.AddScoped<IBlobService, BlobService>();
     builder.Services.AddScoped<IUserService, UserService>();
-    // Identity & Access: effective-permission resolution (role baseline +
-    // per-user overrides) and the password-recovery flow. Scoped, because both
-    // read current database state per request — that is what makes a permission
-    // or credential change take effect on the next request.
+    // Identity & Access: the role catalogue, effective-permission resolution
+    // (a user's role, and nothing else) and the password-recovery flow. Scoped,
+    // because they read current database state per request — that is what makes
+    // a role edit or a credential change take effect on the next request, with
+    // no re-login and no cached authority to invalidate.
+    builder.Services.AddScoped<IRoleService, RoleService>();
     builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
     builder.Services.AddScoped<IPasswordRecoveryService, PasswordRecoveryService>();
     // Slice 94: media-library rules + eligibility (single source of truth for
@@ -914,6 +916,13 @@ if (builder.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
     await ApplyStartupMigrationsAsync(app);
 }
 
+// The three built-in roles. The migration seeds them, so this is a self-heal
+// rather than the primary path — and it is the ONE thing that keeps an
+// Administrator's authority complete across a release that ADDS a permission
+// key. Fail-soft on purpose: an installation whose schema has not been migrated
+// yet must still boot far enough to serve /health and be diagnosed.
+await EnsureAccessRolesAsync(app);
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -1044,6 +1053,10 @@ app.MapPhotoOrganizerEndpoints();
 // authorization, same last-admin/self-demotion/self-disable safety behavior;
 // see that file for the implementation.
 app.MapAdminUserEndpoints();
+
+// Roles as first-class objects. Reads are open to either administrative editor;
+// every mutation requires admin.roles.manage, which is Administrator-only.
+app.MapAdminRoleEndpoints();
 
 // Admin server-side directory import endpoints live in
 // Endpoints/AdminImportEndpoints.cs — extracted as part of the
@@ -1221,6 +1234,27 @@ static async Task ApplyStartupMigrationsAsync(WebApplication app)
     {
         app.Logger.LogCritical(ex, "Startup migration failed; aborting host start.");
         throw;
+    }
+}
+
+static async Task EnsureAccessRolesAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var roles = scope.ServiceProvider.GetService<IRoleService>();
+    if (roles is null)
+    {
+        // No database configured (a host started for /health only).
+        return;
+    }
+
+    try
+    {
+        await roles.EnsureBuiltInRolesAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(
+            ex, "Could not ensure the built-in access roles; the schema may not be migrated yet.");
     }
 }
 

@@ -156,6 +156,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<IBlobService, BlobService>();
             services.AddScoped<IUserService, UserService>();
             // Identity & Access. Mirrors Program.cs (Postgres-only block).
+            services.AddScoped<NubArca.Api.Access.IRoleService,
+                NubArca.Api.Access.RoleService>();
             services.AddScoped<NubArca.Api.Access.IUserPermissionService,
                 NubArca.Api.Access.UserPermissionService>();
             services.AddScoped<NubArca.Api.Auth.Recovery.IPasswordRecoveryService,
@@ -399,6 +401,11 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 using var scope = Services.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
                 db.Database.EnsureCreated();
+                // The built-in roles go into the TEMPLATE, so every cloned
+                // factory starts with them exactly as a migrated database does.
+                // users.RoleKey is a foreign key: without them, no test could
+                // create a single account.
+                db.SeedBuiltInRoles();
 
                 _schemaTemplate = new SqliteConnection("DataSource=:memory:");
                 _schemaTemplate.Open();
@@ -442,17 +449,60 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
 
     public Task DemoteFromAdminAsync(Guid userId) => SetRoleAsync(userId, RoleKeys.Member);
 
-    // Writes a per-user permission exception (Grant or Deny).
-    public async Task SetPermissionOverrideAsync(Guid userId, string permissionKey, PermissionEffect effect)
+    // Creates a custom role carrying exactly these permissions and returns its
+    // key. The way a test gives an account a specific authority now: there is no
+    // per-user exception to write, so "this user may do exactly X" is expressed
+    // the same way an operator would express it.
+    public async Task<string> CreateRoleAsync(string name, params string[] permissions)
     {
         using var scope = Services.CreateScope();
-        var permissions = scope.ServiceProvider
-            .GetRequiredService<NubArca.Api.Access.IUserPermissionService>();
-        var ok = await permissions.SetOverrideAsync(userId, permissionKey, effect);
-        if (!ok)
+        var roles = scope.ServiceProvider.GetRequiredService<IRoleService>();
+        var (result, role) = await roles.CreateAsync(
+            new CreateRoleRequest(name, null, permissions));
+        if (result != RoleMutationResult.Ok || role is null)
         {
-            throw new InvalidOperationException($"SetPermissionOverrideAsync: unknown permission '{permissionKey}'.");
+            throw new InvalidOperationException($"CreateRoleAsync({name}): {result}.");
         }
+        return role.Key;
+    }
+
+    // Seeds a user holding exactly these permissions, through a purpose-made
+    // role, and logs them in.
+    public async Task<(Guid UserId, HttpClient Client)> CreatePermissionClientAsync(
+        string email, params string[] permissions)
+    {
+        var roleKey = await CreateRoleAsync($"Test {email}", permissions);
+        return await CreateRoleClientAsync(roleKey, email);
+    }
+
+    // Replaces a role's permission set through the service, which validates it.
+    public async Task SetRolePermissionsAsync(string roleKey, params string[] permissions)
+    {
+        using var scope = Services.CreateScope();
+        var roles = scope.ServiceProvider.GetRequiredService<IRoleService>();
+        var current = await roles.GetAsync(roleKey)
+            ?? throw new InvalidOperationException($"SetRolePermissionsAsync: no role '{roleKey}'.");
+        var (result, _) = await roles.UpdateAsync(
+            roleKey, new UpdateRoleRequest(current.Name, current.Description, permissions, current.Version));
+        if (result != RoleMutationResult.Ok)
+        {
+            throw new InvalidOperationException($"SetRolePermissionsAsync({roleKey}): {result}.");
+        }
+    }
+
+    // Writes rows straight to the table, bypassing validation. Only for proving
+    // that an endpoint guard still holds against a shape the service refuses to
+    // store — never a convenience shortcut.
+    public async Task SetRolePermissionsRawAsync(string roleKey, params string[] permissions)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.RolePermissions.Where(p => p.RoleKey == roleKey).ExecuteDeleteAsync();
+        foreach (var permission in permissions)
+        {
+            db.RolePermissions.Add(new RolePermission { RoleKey = roleKey, PermissionKey = permission });
+        }
+        await db.SaveChangesAsync();
     }
 
     // Seeds a user with a specific role and logs them in, which is the shape
@@ -607,6 +657,16 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             using var foreignKeysOn = pooled.Connection.CreateCommand();
             foreignKeysOn.CommandText = "PRAGMA foreign_keys = ON";
             foreignKeysOn.ExecuteNonQuery();
+        }
+
+        // The truncation above empties access_roles too, and users.RoleKey is a
+        // foreign key into it — so a reused host with no roles cannot create a
+        // single account. The built-in roles are part of the empty baseline, not
+        // test data, and are put back with the schema.
+        using (var scope = pooled.Host.Services.CreateScope())
+        {
+            scope.ServiceProvider.GetRequiredService<NubArca.Api.Access.IRoleService>()
+                .EnsureBuiltInRolesAsync().GetAwaiter().GetResult();
         }
 
         if (Directory.Exists(pooled.StorageRoot))

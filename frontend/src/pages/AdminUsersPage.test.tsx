@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { PERMISSIONS, ROLES, type AdminUser, type AdminUserPermission } from '@nubarca/api-client';
+import { PERMISSIONS, ROLES, type AdminUser, type Role } from '@nubarca/api-client';
 import { AdminUsersPage } from './AdminUsersPage';
 import {
   AuthedWrapper,
@@ -48,69 +48,141 @@ const otherUser: AdminUser = {
   passwordChangedAt: null,
 };
 
-// A realistic permission breakdown for a Member: features inherited from the
-// role, administration absent from it.
-function permissionsFor(user: AdminUser): AdminUserPermission[] {
-  const administrative = new Set<string>([
-    PERMISSIONS.adminDashboard,
-    PERMISSIONS.adminUsersManage,
-    PERMISSIONS.adminImport,
-    PERMISSIONS.adminJobsManage,
-  ]);
-  return Object.values(PERMISSIONS).map((key) => {
-    const isAdministrative = administrative.has(key);
-    const inherited = user.role === ROLES.administrator
-      ? true
-      : user.role === ROLES.member && !isAdministrative;
-    return {
-      key,
-      group: isAdministrative ? 'administration' : 'features',
-      administrative: isAdministrative,
-      inheritedFromRole: inherited,
-      override: null,
-      effective: inherited,
-    };
-  });
-}
+const MEMBER_KEYS = [
+  PERMISSIONS.peopleAccess,
+  PERMISSIONS.semanticSearchAccess,
+  PERMISSIONS.laboratoryAccess,
+  PERMISSIONS.laboratoryPlates,
+  PERMISSIONS.laboratoryAesthetics,
+  PERMISSIONS.cloudFunctionsAccess,
+  PERMISSIONS.privateVaultAccess,
+  PERMISSIONS.tvManage,
+];
+
+const ROLE_CATALOG: Role[] = [
+  {
+    key: ROLES.administrator,
+    name: 'Administrator',
+    description: null,
+    isSystem: true,
+    isAdministrator: true,
+    userCount: 1,
+    permissions: Object.values(PERMISSIONS),
+    version: 1,
+  },
+  {
+    key: ROLES.member,
+    name: 'Member',
+    description: null,
+    isSystem: true,
+    isAdministrator: false,
+    userCount: 1,
+    permissions: MEMBER_KEYS,
+    version: 1,
+  },
+  {
+    key: ROLES.restricted,
+    name: 'Restricted',
+    description: null,
+    isSystem: true,
+    isAdministrator: false,
+    userCount: 0,
+    permissions: [],
+    version: 1,
+  },
+  {
+    key: 'custom:lab',
+    name: 'Laboratorio',
+    description: 'Laboratory-oriented account',
+    isSystem: false,
+    isAdministrator: false,
+    userCount: 3,
+    permissions: [PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates],
+    version: 2,
+  },
+];
+
+// Mirrors what /api/admin/permissions returns.
+const PERMISSION_CATALOG = [
+  { key: PERMISSIONS.peopleAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  { key: PERMISSIONS.semanticSearchAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  { key: PERMISSIONS.laboratoryAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  {
+    key: PERMISSIONS.laboratoryPlates,
+    group: 'features',
+    administrative: false,
+    parent: PERMISSIONS.laboratoryAccess,
+    assignable: true,
+  },
+  {
+    key: PERMISSIONS.laboratoryAesthetics,
+    group: 'features',
+    administrative: false,
+    parent: PERMISSIONS.laboratoryAccess,
+    assignable: true,
+  },
+  { key: PERMISSIONS.cloudFunctionsAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  { key: PERMISSIONS.privateVaultAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  { key: PERMISSIONS.tvManage, group: 'features', administrative: false, parent: null, assignable: true },
+  { key: PERMISSIONS.adminDashboard, group: 'administration', administrative: true, parent: null, assignable: true },
+  { key: PERMISSIONS.adminUsersManage, group: 'administration', administrative: true, parent: null, assignable: true },
+  { key: PERMISSIONS.adminImport, group: 'administration', administrative: true, parent: null, assignable: true },
+  { key: PERMISSIONS.adminJobsManage, group: 'administration', administrative: true, parent: null, assignable: true },
+  { key: PERMISSIONS.adminRolesManage, group: 'administration', administrative: true, parent: null, assignable: false },
+];
 
 function listResponse(items: AdminUser[] = [adminSelf, otherUser]) {
   return jsonResponse({ items, total: items.length, limit: 50, offset: 0 });
 }
 
-function detailResponse(user: AdminUser, overrides: Partial<AdminUserPermission>[] = []) {
-  const permissions = permissionsFor(user).map((p) => {
-    const patch = overrides.find((o) => o.key === p.key);
-    return patch ? { ...p, ...patch } : p;
-  });
-  return jsonResponse({ user, permissions });
+// The catalogue routes every test needs, so a test only declares what it is
+// actually about.
+function baseHandlers(items: AdminUser[] = [adminSelf, otherUser]) {
+  return {
+    'GET /api/admin/users': () => listResponse(items),
+    'GET /api/admin/roles': () => jsonResponse({ roles: ROLE_CATALOG }),
+    'GET /api/admin/permissions': () => jsonResponse({ permissions: PERMISSION_CATALOG }),
+  };
+}
+
+function renderPage() {
+  render(
+    <AuthedWrapper isAdmin>
+      <AdminUsersPage />
+    </AuthedWrapper>,
+  );
 }
 
 async function openDetail(email: string) {
-  const row = (await screen.findByText(email)).closest('tr')!;
-  await userEvent.click(within(row).getByRole('button', { name: 'Gestisci' }));
+  const row = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>(`[data-email="${email}"]`);
+    if (!found) throw new Error(`no user row for ${email}`);
+    return found;
+  });
+  await userEvent.click(row);
   return screen.findByTestId('admin-user-detail');
 }
 
-describe('AdminUsersPage', () => {
-  it('loads and renders the user list with roles', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-    });
+// The permission preview row for one key, read from wherever it is rendered.
+function previewRow(key: string): HTMLElement {
+  const preview = screen.getAllByTestId('role-permission-preview').at(-1)!;
+  return preview.querySelector<HTMLElement>(`[data-permission="${key}"]`)!;
+}
 
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
+describe('AdminUsersPage', () => {
+  it('loads and renders the user list with role badges', async () => {
+    installFetchMock(baseHandlers());
+    renderPage();
 
     expect(await screen.findByText('admin@example.com')).toBeInTheDocument();
     expect(screen.getByText('bob@example.com')).toBeInTheDocument();
-    expect(screen.getByText('Amministratore')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Amministratore')).toBeInTheDocument());
     expect(screen.getByText('Membro')).toBeInTheDocument();
   });
 
   it('shows the admin-access-required message on 403', async () => {
     installFetchMock({
+      ...baseHandlers(),
       'GET /api/admin/users': () => errorResponse(403),
     });
 
@@ -124,416 +196,375 @@ describe('AdminUsersPage', () => {
   });
 
   it('never renders a passwordHash field', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-    });
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
+    installFetchMock(baseHandlers());
+    renderPage();
 
     await screen.findByText('admin@example.com');
     expect(document.body.textContent ?? '').not.toContain('passwordHash');
   });
 
   it('keeps the row to identity and state, with one way in', async () => {
-    // The row used to grow a button per capability. Everything but "Manage"
-    // moved into the detail surface, and this is what stops it growing again.
-    installFetchMock({ 'GET /api/admin/users': () => listResponse() });
+    // The row used to grow a button per capability. It is a single affordance
+    // now, and this is what stops it growing again.
+    installFetchMock(baseHandlers());
+    renderPage();
 
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const row = (await screen.findByText('bob@example.com')).closest('tr')!;
-    const buttons = within(row).getAllByRole('button');
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]).toHaveTextContent('Gestisci');
+    await screen.findByText('bob@example.com');
+    const row = document.querySelector<HTMLElement>('[data-email="bob@example.com"]')!;
+    expect(row.tagName).toBe('BUTTON');
+    expect(within(row).queryAllByRole('button')).toHaveLength(0);
   });
 
-  it('create user form validates password confirmation before calling the API', async () => {
+  describe('the New user modal', () => {
+    it('is a real overlay above the page, not content below the list', async () => {
+      installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+
+      const modal = await screen.findByTestId('create-user-modal');
+      // Portalled to <body>, so no page container's overflow or stacking
+      // context can put it underneath the list it was opened from.
+      expect(modal.closest('.admin-page')).toBeNull();
+      expect(modal.parentElement?.className).toContain('overlay-backdrop');
+      expect(modal).toHaveAttribute('aria-modal', 'true');
+      expect(modal).toHaveAttribute('role', 'dialog');
+      // …and the list is still in the document behind it, not replaced.
+      expect(screen.getByTestId('admin-users-list')).toBeInTheDocument();
+    });
+
+    it('locks the background scroll while open and releases it on close', async () => {
+      installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+      await screen.findByTestId('create-user-modal');
+      expect(document.body.style.overflow).toBe('hidden');
+
+      await user.click(screen.getByTestId('create-user-modal-close'));
+      await waitFor(() => expect(screen.queryByTestId('create-user-modal')).toBeNull());
+      expect(document.body.style.overflow).not.toBe('hidden');
+    });
+
+    it('closes on Escape and gives focus back to the New user button', async () => {
+      installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      const trigger = await screen.findByTestId('admin-users-new');
+      await user.click(trigger);
+      await screen.findByTestId('create-user-modal');
+
+      await user.keyboard('{Escape}');
+
+      await waitFor(() => expect(screen.queryByTestId('create-user-modal')).toBeNull());
+      expect(document.activeElement).toBe(trigger);
+    });
+
+    it('explains the selected role and updates the preview immediately', async () => {
+      installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+      await screen.findByTestId('create-user-modal');
+
+      // Member: every feature, no administration.
+      await waitFor(() =>
+        expect(previewRow(PERMISSIONS.privateVaultAccess)).toHaveAttribute('data-included', 'yes'));
+      expect(previewRow(PERMISSIONS.adminUsersManage)).toHaveAttribute('data-included', 'no');
+      expect(screen.getByTestId('role-permission-count')).toHaveTextContent('8 permessi');
+
+      // Restricted: nothing at all — and no request was needed to find out.
+      await user.selectOptions(screen.getByTestId('admin-user-role'), ROLES.restricted);
+      expect(previewRow(PERMISSIONS.privateVaultAccess)).toHaveAttribute('data-included', 'no');
+      expect(screen.getByTestId('role-permission-count')).toHaveTextContent('0 permessi');
+
+      // A custom role describes itself too.
+      await user.selectOptions(screen.getByTestId('admin-user-role'), 'custom:lab');
+      expect(previewRow(PERMISSIONS.laboratoryPlates)).toHaveAttribute('data-included', 'yes');
+      expect(previewRow(PERMISSIONS.laboratoryAesthetics)).toHaveAttribute('data-included', 'no');
+      expect(screen.getByTestId('role-summary')).toHaveTextContent('Laboratorio');
+    });
+
+    it('never shows a raw permission key', async () => {
+      installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+      const modal = await screen.findByTestId('create-user-modal');
+
+      await waitFor(() => expect(modal.textContent).toContain('Cassaforte privata'));
+      expect(modal.textContent).not.toContain('private-vault.access');
+      expect(modal.textContent).not.toContain('laboratory.plates');
+    });
+
+    it('validates password confirmation before calling the API', async () => {
+      const mock = installFetchMock(baseHandlers());
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+      await screen.findByTestId('create-user-modal');
+      await user.type(screen.getByLabelText('Email'), 'new@example.com');
+      await user.type(screen.getByLabelText('Nome visualizzato'), 'New User');
+      await user.type(screen.getByLabelText('Password iniziale'), 'correct-horse-battery');
+      await user.type(screen.getByLabelText('Conferma password'), 'different-password');
+      await user.click(screen.getByRole('button', { name: 'Crea' }));
+
+      expect(await screen.findByText('Le password non coincidono.')).toBeInTheDocument();
+      expect(mock.calls.some((c) => c.method === 'POST' && c.url === '/api/admin/users')).toBe(false);
+    });
+
+    it('creates the user with the chosen role', async () => {
+      const mock = installFetchMock({
+        ...baseHandlers(),
+        'POST /api/admin/users': () => jsonResponse(otherUser, 201),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByTestId('admin-users-new'));
+      await screen.findByTestId('create-user-modal');
+      await user.type(screen.getByLabelText('Email'), 'new@example.com');
+      await user.type(screen.getByLabelText('Nome visualizzato'), 'New User');
+      await user.selectOptions(screen.getByTestId('admin-user-role'), 'custom:lab');
+      await user.type(screen.getByLabelText('Password iniziale'), 'correct-horse-battery');
+      await user.type(screen.getByLabelText('Conferma password'), 'correct-horse-battery');
+      await user.click(screen.getByRole('button', { name: 'Crea' }));
+
+      await waitFor(() => {
+        const post = mock.calls.find((c) => c.method === 'POST' && c.url === '/api/admin/users');
+        expect(post).toBeDefined();
+        expect(JSON.parse(post!.body!).role).toBe('custom:lab');
+      });
+    });
+  });
+
+  describe('the user detail sheet', () => {
+    it('opens as an overlay with Profile, Access and Security as tabs', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      });
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+
+      expect(sheet.parentElement?.className).toContain('overlay-backdrop--sheet');
+      expect(sheet).toHaveAttribute('aria-modal', 'true');
+      const tabs = within(sheet).getAllByRole('tab');
+      expect(tabs.map((x) => x.textContent)).toEqual(['Profilo', 'Accesso', 'Sicurezza']);
+      // One panel at a time: Security is never below Profile on a long page.
+      expect(within(sheet).getAllByRole('tabpanel')).toHaveLength(1);
+    });
+
+    it('switches to Security in one click, without scrolling past Profile', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      expect(within(sheet).getByLabelText('Nome visualizzato')).toBeInTheDocument();
+
+      await user.click(within(sheet).getByRole('tab', { name: 'Sicurezza' }));
+
+      expect(within(sheet).getByText('Zona critica')).toBeInTheDocument();
+      expect(within(sheet).queryByLabelText('Nome visualizzato')).toBeNull();
+    });
+
+    it('returns focus to the row that opened it', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(screen.getByTestId('admin-user-detail-close'));
+
+      await waitFor(() => expect(screen.queryByTestId('admin-user-detail')).toBeNull());
+      expect(document.activeElement).toBe(
+        document.querySelector('[data-email="bob@example.com"]'));
+      expect(sheet).not.toBeInTheDocument();
+    });
+
+    it('Access offers a role and its permissions, and no override control at all', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+
+      expect(within(sheet).getByTestId('admin-user-role')).toBeInTheDocument();
+      expect(within(sheet).getByTestId('role-permission-preview')).toBeInTheDocument();
+
+      // The concepts that no longer exist.
+      for (const gone of ['Ereditato', 'Concedi', 'Nega', 'Origine', 'Effettivo']) {
+        expect(within(sheet).queryByText(gone)).toBeNull();
+      }
+      expect(within(sheet).queryAllByRole('checkbox')).toHaveLength(0);
+    });
+
+    it('changing the role updates the preview before anything is saved', async () => {
+      const mock = installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+
+      // Member, as loaded.
+      await waitFor(() =>
+        expect(previewRow(PERMISSIONS.privateVaultAccess)).toHaveAttribute('data-included', 'yes'));
+
+      await user.selectOptions(within(sheet).getByTestId('admin-user-role'), 'custom:lab');
+
+      // The preview describes the SELECTED role immediately — this is the bug
+      // the old page had, where the role name changed and the permissions
+      // beside it still described the previous one.
+      expect(previewRow(PERMISSIONS.privateVaultAccess)).toHaveAttribute('data-included', 'no');
+      expect(previewRow(PERMISSIONS.laboratoryPlates)).toHaveAttribute('data-included', 'yes');
+      // …and nothing was persisted by merely looking.
+      expect(mock.calls.some((c) => c.method === 'PUT' && c.url.includes('/role'))).toBe(false);
+    });
+
+    it('persists the role only on Apply', async () => {
+      const mock = installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+        'PUT /api/admin/users/user-2/role': () =>
+          jsonResponse({ ...otherUser, role: 'custom:lab' }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+
+      // Nothing to apply until something changes.
+      expect(within(sheet).getByTestId('apply-role')).toBeDisabled();
+
+      await user.selectOptions(within(sheet).getByTestId('admin-user-role'), 'custom:lab');
+      await user.click(within(sheet).getByTestId('apply-role'));
+
+      await waitFor(() => {
+        const put = mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/role'));
+        expect(put).toBeDefined();
+        expect(JSON.parse(put!.body!).role).toBe('custom:lab');
+      });
+      expect(await within(sheet).findByRole('status')).toHaveTextContent('Ruolo aggiornato');
+    });
+
+    it('reports a privilege-escalation refusal in words', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+        'PUT /api/admin/users/user-2/role': () =>
+          errorResponse(403, { error: 'You cannot assign a role that grants more than your own permissions.' }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+      await user.selectOptions(within(sheet).getByTestId('admin-user-role'), ROLES.administrator);
+      await user.click(within(sheet).getByTestId('apply-role'));
+
+      expect(await within(sheet).findByRole('alert')).toHaveTextContent(
+        'Non puoi assegnare un ruolo che concede più dei tuoi permessi.');
+    });
+
+    it('keeps disabling an account apart from the recovery actions', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+        'PUT /api/admin/users/user-2/disabled': () =>
+          jsonResponse({ ...otherUser, disabledAt: '2026-03-01T00:00:00Z' }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Sicurezza' }));
+
+      const danger = sheet.querySelector<HTMLElement>('.danger-zone')!;
+      expect(within(danger).getByRole('button', { name: 'Disabilita' })).toBeInTheDocument();
+      // The recovery button is NOT in the danger zone.
+      expect(within(danger).queryByRole('button', { name: 'Invia email di reimpostazione' })).toBeNull();
+      expect(within(sheet).getByRole('button', { name: 'Invia email di reimpostazione' })).toBeInTheDocument();
+    });
+
+    it('does not offer a self-demotion an administrator would only be refused', async () => {
+      installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-1': () => jsonResponse({ user: adminSelf }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('admin@example.com');
+      await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+
+      expect(within(sheet).getByTestId('admin-user-role')).toBeDisabled();
+      expect(within(sheet).getByText('Non puoi cambiare il ruolo del tuo stesso account.')).toBeInTheDocument();
+    });
+
+    it('saves a profile edit', async () => {
+      const mock = installFetchMock({
+        ...baseHandlers(),
+        'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+        'PUT /api/admin/users/user-2': () =>
+          jsonResponse({ ...otherUser, displayName: 'Roberto' }),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      const sheet = await openDetail('bob@example.com');
+      const name = within(sheet).getByLabelText('Nome visualizzato');
+      await user.clear(name);
+      await user.type(name, 'Roberto');
+      await user.click(within(sheet).getByRole('button', { name: 'Salva' }));
+
+      await waitFor(() =>
+        expect(mock.calls.some((c) => c.method === 'PUT' && c.url === '/api/admin/users/user-2'))
+          .toBe(true));
+      expect(await within(sheet).findByRole('status')).toHaveTextContent('Profilo aggiornato');
+    });
+  });
+
+  it('never calls a per-user permission endpoint', async () => {
+    // The model is gone, not hidden: no code path here can reach it.
     const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
+      ...baseHandlers(),
+      'GET /api/admin/users/user-2': () => jsonResponse({ user: otherUser }),
+      'PUT /api/admin/users/user-2/role': () => jsonResponse(otherUser),
+      'PUT /api/admin/users/user-2/disabled': () => emptyResponse(),
     });
     const user = userEvent.setup();
+    renderPage();
 
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
+    const sheet = await openDetail('bob@example.com');
+    await user.click(within(sheet).getByRole('tab', { name: 'Accesso' }));
+    await user.selectOptions(within(sheet).getByTestId('admin-user-role'), ROLES.restricted);
+    await user.click(within(sheet).getByTestId('apply-role'));
 
-    await user.click(await screen.findByRole('button', { name: 'Crea utente' }));
-    await user.type(screen.getByLabelText('Email'), 'new@example.com');
-    await user.type(screen.getByLabelText('Nome visualizzato'), 'New User');
-    await user.type(screen.getByLabelText('Password iniziale'), 'correct-horse-battery');
-    await user.type(screen.getByLabelText('Conferma password'), 'different-password');
-    await user.click(screen.getByRole('button', { name: 'Crea' }));
-
-    expect(await screen.findByText('Le password non coincidono.')).toBeInTheDocument();
-    expect(mock.calls.some((c) => c.method === 'POST' && c.url === '/api/admin/users')).toBe(false);
-  });
-
-  it('creates a user with the chosen role', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'POST /api/admin/users': () => jsonResponse({ ...otherUser, id: 'user-3' }, 201),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    await user.click(await screen.findByRole('button', { name: 'Crea utente' }));
-    await user.type(screen.getByLabelText('Email'), 'new@example.com');
-    await user.type(screen.getByLabelText('Nome visualizzato'), 'New User');
-    await user.type(screen.getByLabelText('Password iniziale'), 'correct-horse-battery');
-    await user.type(screen.getByLabelText('Conferma password'), 'correct-horse-battery');
-    await user.selectOptions(screen.getByLabelText('Ruolo'), ROLES.restricted);
-    await user.click(screen.getByRole('button', { name: 'Crea' }));
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) => c.method === 'POST' && c.url === '/api/admin/users')).toBe(true);
-    });
-    const postCall = mock.calls.find((c) => c.method === 'POST' && c.url === '/api/admin/users');
-    expect(JSON.parse(postCall!.body ?? '{}')).toMatchObject({
-      email: 'new@example.com',
-      displayName: 'New User',
-      password: 'correct-horse-battery',
-      role: ROLES.restricted,
-    });
-  });
-
-  // ------------------------------------------------------- detail surface
-
-  it('opens a detail surface with Profile, Access and Security sections', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-    });
-    userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    expect(within(detail).getByText('Profilo')).toBeInTheDocument();
-    expect(within(detail).getByText('Accesso')).toBeInTheDocument();
-    expect(within(detail).getByText('Sicurezza')).toBeInTheDocument();
-  });
-
-  it('distinguishes inherited, granted and denied permissions', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser, [
-        { key: PERMISSIONS.peopleAccess, override: 'deny', effective: false },
-        {
-          key: PERMISSIONS.adminJobsManage,
-          override: 'grant',
-          effective: true,
-          inheritedFromRole: false,
-        },
-      ]),
-    });
-    userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    const peopleRow = within(detail).getByText('Persone').closest('tr')!;
-    expect(within(peopleRow).getByText('Negato esplicitamente')).toBeInTheDocument();
-
-    const jobsRow = within(detail).getByText('Amministrazione — Processi').closest('tr')!;
-    expect(within(jobsRow).getByText('Concesso esplicitamente')).toBeInTheDocument();
-
-    const vaultRow = within(detail).getByText('Cassaforte privata').closest('tr')!;
-    expect(within(vaultRow).getByText('Ereditato dal ruolo')).toBeInTheDocument();
-  });
-
-  it('sets a permission override through the catalogue label, not a raw key', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-      'PUT /api/admin/users/user-2/permissions/people.access': () => detailResponse(otherUser, [
-        { key: PERMISSIONS.peopleAccess, override: 'deny', effective: false },
-      ]),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.selectOptions(
-      within(detail).getByLabelText('Persone — Eccezione'),
-      'deny',
-    );
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) =>
-        c.method === 'PUT'
-        && c.url === '/api/admin/users/user-2/permissions/people.access')).toBe(true);
-    });
-    const call = mock.calls.find((c) => c.method === 'PUT' && c.url.includes('/permissions/'));
-    expect(JSON.parse(call!.body ?? '{}')).toEqual({ effect: 'deny' });
-  });
-
-  it('clears an override with a DELETE rather than a third effect value', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser, [
-        { key: PERMISSIONS.peopleAccess, override: 'deny', effective: false },
-      ]),
-      'DELETE /api/admin/users/user-2/permissions/people.access': () => detailResponse(otherUser),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.selectOptions(
-      within(detail).getByLabelText('Persone — Eccezione'),
-      'inherit',
-    );
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) =>
-        c.method === 'DELETE'
-        && c.url === '/api/admin/users/user-2/permissions/people.access')).toBe(true);
-    });
-  });
-
-  it('changes a role through the Access section', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-      'PUT /api/admin/users/user-2/role': () =>
-        jsonResponse({ ...otherUser, role: ROLES.restricted }),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.selectOptions(within(detail).getByTestId('admin-user-role'), ROLES.restricted);
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) =>
-        c.method === 'PUT' && c.url === '/api/admin/users/user-2/role')).toBe(true);
-    });
-    const call = mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/role'));
-    expect(JSON.parse(call!.body ?? '{}')).toEqual({ role: ROLES.restricted });
-  });
-
-  it('locks the role control on the caller’s own account', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-1': () => detailResponse(adminSelf),
-    });
-    userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('admin@example.com');
-    expect(within(detail).getByTestId('admin-user-role')).toBeDisabled();
-    expect(within(detail).getByText('Non puoi cambiare il ruolo del tuo stesso account.'))
-      .toBeInTheDocument();
-  });
-
-  it('surfaces the last-administrator refusal from the backend', async () => {
-    const anotherAdmin: AdminUser = {
-      ...adminSelf, id: 'user-3', email: 'carol@example.com', displayName: 'Carol',
-    };
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse([adminSelf, anotherAdmin]),
-      'GET /api/admin/users/user-3': () => detailResponse(anotherAdmin),
-      'PUT /api/admin/users/user-3/role': () =>
-        errorResponse(409, { error: 'You cannot demote the last administrator.' }),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('carol@example.com');
-    await user.selectOptions(within(detail).getByTestId('admin-user-role'), ROLES.member);
-
-    expect(await screen.findByText("Non puoi rimuovere l'ultimo amministratore.")).toBeInTheDocument();
-  });
-
-  it('surfaces the administrator-protection refusal', async () => {
-    const anotherAdmin: AdminUser = {
-      ...adminSelf, id: 'user-3', email: 'carol@example.com', displayName: 'Carol',
-    };
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse([adminSelf, anotherAdmin]),
-      'GET /api/admin/users/user-3': () => detailResponse(anotherAdmin),
-      'PUT /api/admin/users/user-3/permissions/admin.users.manage': () =>
-        errorResponse(409, {
-          error: 'An administrator cannot be denied an administrative permission.',
-        }),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('carol@example.com');
-    await user.selectOptions(
-      within(detail).getByLabelText('Amministrazione — Utenti — Eccezione'),
-      'deny',
-    );
-
-    expect(await screen.findByText(
-      'Non puoi negare un permesso amministrativo a un amministratore.',
-    )).toBeInTheDocument();
-  });
-
-  it('disables an account from the Security section', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-      'PUT /api/admin/users/user-2/disabled': () =>
-        jsonResponse({ ...otherUser, disabledAt: '2026-01-05T00:00:00Z' }),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.click(within(detail).getByRole('button', { name: 'Disabilita' }));
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) =>
-        c.method === 'PUT' && c.url === '/api/admin/users/user-2/disabled')).toBe(true);
-    });
-    const call = mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/disabled'));
-    expect(JSON.parse(call!.body ?? '{}')).toEqual({ disabled: true });
-  });
-
-  it('cannot disable the caller’s own account', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-1': () => detailResponse(adminSelf),
-    });
-    userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('admin@example.com');
-    expect(within(detail).getByRole('button', { name: 'Disabilita' })).toBeDisabled();
-  });
-
-  it('sends a recovery email and explains when mail is not configured', async () => {
-    installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-      'POST /api/admin/users/user-2/password-reset-email': () =>
-        errorResponse(409, { error: 'Email recovery is not configured on this installation.' }),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.click(within(detail).getByRole('button', { name: 'Invia email di reimpostazione' }));
-
-    expect(await screen.findByText(
-      'Il recupero via email non è configurato su questa installazione.',
-    )).toBeInTheDocument();
-  });
-
-  it('keeps the manual password reset as the emergency fallback', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-      'POST /api/admin/users/user-2/password': () => emptyResponse(),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.type(within(detail).getByLabelText('Password iniziale'), 'brand-new-password-1');
-    await user.type(within(detail).getByLabelText('Conferma password'), 'brand-new-password-1');
-    await user.click(within(detail).getByRole('button', { name: 'Reset password' }));
-
-    await waitFor(() => {
-      expect(mock.calls.some((c) =>
-        c.method === 'POST' && c.url === '/api/admin/users/user-2/password')).toBe(true);
-    });
-  });
-
-  it('refuses a mismatched manual password before calling the API', async () => {
-    const mock = installFetchMock({
-      'GET /api/admin/users': () => listResponse(),
-      'GET /api/admin/users/user-2': () => detailResponse(otherUser),
-    });
-    const user = userEvent.setup();
-
-    render(
-      <AuthedWrapper isAdmin>
-        <AdminUsersPage />
-      </AuthedWrapper>,
-    );
-
-    const detail = await openDetail('bob@example.com');
-    await user.type(within(detail).getByLabelText('Password iniziale'), 'brand-new-password-1');
-    await user.type(within(detail).getByLabelText('Conferma password'), 'a-different-password');
-    await user.click(within(detail).getByRole('button', { name: 'Reset password' }));
-
-    expect(await screen.findByText('Le password non coincidono.')).toBeInTheDocument();
-    expect(mock.calls.some((c) => c.method === 'POST' && c.url.endsWith('/password'))).toBe(false);
+    await waitFor(() =>
+      expect(mock.calls.some((c) => c.url.endsWith('/role'))).toBe(true));
+    expect(mock.calls.some((c) => c.url.includes('/permissions/'))).toBe(false);
   });
 });

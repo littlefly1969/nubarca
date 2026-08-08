@@ -12,6 +12,7 @@ export * from './metadata';
 export * from './share-links';
 export * from './admin';
 export * from './adminUsers';
+export * from './roles';
 export * from './adminImport';
 export * from './adminJobs';
 export * from './storage';

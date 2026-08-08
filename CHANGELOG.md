@@ -8,23 +8,34 @@ originating repository and is deliberately not reproduced here.
 
 ### Identity & Access
 
-Authorization moved from a single `IsAdmin` boolean to roles, feature
-permissions and per-user exceptions, and password recovery by email arrived
-alongside it. No public registration was added.
+Authorization moved from a single `IsAdmin` boolean to roles and feature
+permissions, and password recovery by email arrived alongside it. No public
+registration was added.
 
-- **Roles** — three built-in keys: `Administrator`, `Member`, `Restricted`.
-  Custom roles remain out of scope. `Member` carries every non-administrative
-  permission, because that is what every pre-role non-admin account became:
-  existing users keep exactly the access they had.
-- **Permissions** — one catalogue of feature-surface keys (`people.access`,
-  `semantic-search.access`, `laboratory.access` and its two sections,
-  `cloud-functions.access`, `private-vault.access`, `tv.manage`, and four
-  separate administration permissions). The catalogue is authoritative: an
-  unknown key is rejected server-side and never stored.
-- **Per-user overrides** — an explicit grant or deny per (user, permission),
-  layered over the role baseline. An Administrator always holds the complete
-  catalogue and overrides are not consulted for one, so a deny can never remove
-  the authority that would let another administrator restore it.
+The model is deliberately `USER → ROLE → PERMISSIONS`, with nothing in between:
+a user holds exactly one role, the role owns its permissions, and there is no
+per-user exception anywhere. When a different combination is needed, the
+operator creates another role — a thing they can name, describe and reason
+about — rather than an invisible exception on one account.
+
+- **Roles are rows** — created, renamed, described, duplicated and deleted by an
+  administrator. Three are built in and cannot be deleted: `Administrator`,
+  `Member`, `Restricted`. `Administrator` is immutable and always holds the
+  whole catalogue. `Member` carries every non-administrative permission by
+  default, because that is what every pre-role non-admin account became:
+  existing users keep exactly the access they had. A role's identity is an
+  immutable server-generated key, so renaming one never re-points a single user.
+- **Permissions** — one catalogue of thirteen feature-surface keys
+  (`people.access`, `semantic-search.access`, `laboratory.access` and its two
+  sections, `cloud-functions.access`, `private-vault.access`, `tv.manage`, and
+  five separate administration permissions). The catalogue is authoritative: an
+  unknown key is rejected server-side and never stored, and so is a Laboratory
+  section without the Laboratory shell.
+- **No privilege escalation** — `admin.roles.manage` can only ever be held
+  through the Administrator role, assigning that role requires holding it, and
+  any other role may only be assigned by somebody who already holds everything
+  it grants. A user manager therefore runs ordinary accounts and can never
+  promote anybody — including themselves.
 - **Server-side enforcement** — People, semantic search, the Laboratory and its
   sections, Cloud Functions, the Private Vault, TV device management and each
   administration surface are gated by ASP.NET Core policies. Frontend hiding is
@@ -33,8 +44,8 @@ alongside it. No public registration was added.
   personal cloud — and semantic search is refused without disabling the media
   endpoint that also supports it.
 - **Immediate effect** — the authorization handler reads current database state
-  per request, so a role or permission change applies on the next request with
-  no re-login and no second session subsystem.
+  per request, so assigning a role, or editing one, applies to every affected
+  user on their next request, with no re-login and no second session subsystem.
 - **Session versioning** — a credential change (self-service, admin reset, or a
   completed recovery) increments `User.SecurityVersion` in the same transaction
   as the new hash, invalidating sessions opened with the old password. Changing
@@ -50,20 +61,34 @@ alongside it. No public registration was added.
 - **Richer profiles** — first/last name, time zone, last login and
   password-changed-at, editable by the user and by an administrator. Email
   remains the login and recovery identity and is not editable from either.
-- **Admin user management** — reorganised into Profile / Access / Security
-  instead of a row that grew a button per capability. The Access editor shows,
-  for every permission, whether it is inherited from the role, explicitly
-  granted or explicitly denied.
+- **Admin user management** — a list of accounts with one way in, instead of a
+  row that grew a button per capability. Creating a user opens a real modal over
+  the page; managing one opens a side sheet whose Profile / Access / Security
+  are tabs, so Security is never behind a long scroll. Access offers the role
+  and a read-only preview of what it contains, read from the role itself:
+  choosing a different role explains it immediately, before anything is saved.
+- **Roles administration** — a first-class `/admin/roles` destination behind its
+  own permission. Grouped, described check cards rather than a technical table;
+  every change is a draft until one deliberate Save, applied atomically with
+  optimistic concurrency; enabling a Laboratory section enables the Laboratory
+  with it; a role in use says how many people a change affects, and cannot be
+  deleted until they are reassigned.
 - **Operator CLI** — `users set-role --email <addr> --role <role>` assigns any
-  built-in role and refuses to demote the last active administrator.
-  `users revoke-admin` now returns an account to `Member` rather than removing
-  its feature access.
+  role this installation has, by key or by name, and refuses to demote the last
+  active administrator. `users revoke-admin` now returns an account to `Member`
+  rather than removing its feature access.
 
 Migration `AddRolesPermissionsAndPasswordRecovery` adds `RoleKey`, backfills
 `Administrator` from `IsAdmin` and `Member` for everybody else, then drops
-`IsAdmin`. The ordering is deliberate and covered by a PostgreSQL integration
-test. `isAdmin` survives only as a computed compatibility field on
-`/api/auth/me` and the admin import user picker; nothing stores it.
+`IsAdmin`. `MakeRolesFirstClass` then creates and seeds the role tables, reads
+the per-user exception rows, turns every distinct effective permission set into
+a real role — reusing an existing role where one already matches, and one
+`Migrated access N` role for every user who resolved to the same set — and only
+then drops the table. Both orderings are deliberate and covered by PostgreSQL
+integration tests: for every account, the permissions in force after the upgrade
+equal the permissions in force before it. `isAdmin` survives only as a computed
+compatibility field on `/api/auth/me` and the admin import user picker; nothing
+stores it.
 
 ## 0.3.0
 

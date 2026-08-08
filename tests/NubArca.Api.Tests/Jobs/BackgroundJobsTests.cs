@@ -30,6 +30,7 @@ public sealed class BackgroundJobsTests : IDisposable
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
         _clock = new MutableTimeProvider(new DateTimeOffset(2026, 5, 30, 12, 0, 0, TimeSpan.Zero));
         // Long lease/heartbeat so the background heartbeat timer never fires
         // during these millisecond-scale tests; lease/heartbeat mechanics are

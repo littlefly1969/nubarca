@@ -34,6 +34,7 @@ public sealed class MetadataBackfillSlicingTests : IDisposable
         _connection.Open();
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-meta-slice-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);
         var storage = new LocalFileSystemBlobStorage(Options.Create(new BlobStorageOptions { RootPath = _storageRoot }));

@@ -1,17 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Access;
-using NubArca.Api.Data;
 using NubArca.Api.Tests.Endpoints;
 using NubArca.Api.Users;
 
 namespace NubArca.Api.Tests.Users;
 
-// The admin Access surface over HTTP: role changes, per-user overrides, the
+// The admin Access surface over HTTP: role assignment, the role catalogue, the
 // safety guards that keep an installation from locking itself out, and the
-// separation between the four administrative permissions.
+// separation between the administrative permissions.
 public sealed class AdminAccessEditorTests : IDisposable
 {
     private readonly SqliteWebApplicationFactory _factory;
@@ -28,117 +25,103 @@ public sealed class AdminAccessEditorTests : IDisposable
         _factory.CreateRoleClientAsync(RoleKeys.Administrator, email);
 
     [Fact]
-    public async Task The_Catalogue_Endpoint_Describes_Roles_Permissions_And_Baselines()
+    public async Task The_Catalogue_Endpoint_Describes_Grouping_Dependencies_And_Assignability()
     {
         var (_, admin) = await AdminAsync();
 
         var catalogue = await admin.GetFromJsonAsync<PermissionCatalogResponse>("/api/admin/permissions");
 
         Assert.NotNull(catalogue);
-        Assert.Equal(RoleKeys.All, catalogue!.Roles);
         Assert.Equal(
             PermissionCatalog.AllKeys,
-            catalogue.Permissions.Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray());
-        Assert.Equal(PermissionCatalog.AllKeys, catalogue.RoleBaselines[RoleKeys.Administrator]);
-        Assert.Empty(catalogue.RoleBaselines[RoleKeys.Restricted]);
+            catalogue!.Permissions.Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray());
+
+        var plates = catalogue.Permissions.Single(p => p.Key == Permissions.LaboratoryPlates);
+        Assert.Equal(Permissions.LaboratoryAccess, plates.Parent);
+        Assert.True(plates.Assignable);
+
+        // Role management is presented but never offered as a checkbox.
+        var rolesManage = catalogue.Permissions.Single(p => p.Key == Permissions.AdminRolesManage);
+        Assert.False(rolesManage.Assignable);
+        Assert.True(rolesManage.Administrative);
     }
 
     [Fact]
-    public async Task The_Detail_View_Separates_Inherited_Granted_And_Denied()
+    public async Task The_User_Detail_Carries_No_Permission_List_At_All()
     {
+        // The bug this design removes: a user-shaped permission list that went
+        // stale the moment the role changed. Permissions come from the ROLE now.
         var (_, admin) = await AdminAsync();
-        var targetId = await _factory.SeedUserAsync("breakdown@example.com");
-        await _factory.SetRoleAsync(targetId, RoleKeys.Member);
-        await _factory.SetPermissionOverrideAsync(
-            targetId, Permissions.PeopleAccess, NubArca.Api.Domain.PermissionEffect.Deny);
-        await _factory.SetPermissionOverrideAsync(
-            targetId, Permissions.AdminJobsManage, NubArca.Api.Domain.PermissionEffect.Grant);
+        var targetId = await _factory.SeedUserAsync("no-perm-list@example.com");
 
-        var detail = await admin.GetFromJsonAsync<AdminUserDetailDto>($"/api/admin/users/{targetId}");
+        var raw = await admin.GetStringAsync($"/api/admin/users/{targetId}");
 
-        var people = detail!.Permissions.Single(p => p.Key == Permissions.PeopleAccess);
-        Assert.True(people.InheritedFromRole);
-        Assert.Equal("deny", people.Override);
-        Assert.False(people.Effective);
-
-        var jobs = detail.Permissions.Single(p => p.Key == Permissions.AdminJobsManage);
-        Assert.False(jobs.InheritedFromRole);
-        Assert.Equal("grant", jobs.Override);
-        Assert.True(jobs.Effective);
-
-        var vault = detail.Permissions.Single(p => p.Key == Permissions.PrivateVaultAccess);
-        Assert.True(vault.InheritedFromRole);
-        Assert.Null(vault.Override);
-        Assert.True(vault.Effective);
+        Assert.DoesNotContain("permissions", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("inheritedFromRole", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("override", raw, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"role\"", raw, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task An_Override_Can_Be_Set_And_Then_Cleared()
+    public async Task Changing_A_Role_Immediately_Changes_What_The_User_May_Do()
     {
         var (_, admin) = await AdminAsync();
-        var targetId = await _factory.SeedUserAsync("toggle@example.com");
+        var targetId = await _factory.SeedUserAsync("promoted@example.com");
         await _factory.SetRoleAsync(targetId, RoleKeys.Restricted);
+        var target = await _factory.LoginAsync("promoted@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/people")).StatusCode);
 
-        var granted = await admin.PutAsJsonAsync(
+        var response = await admin.PutAsJsonAsync(
+            $"/api/admin/users/{targetId}/role", new { role = RoleKeys.Member });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        // Same session, no re-login.
+        Assert.NotEqual(HttpStatusCode.Forbidden, (await target.GetAsync("/api/people")).StatusCode);
+        Assert.Equal(RoleKeys.Member,
+            (await response.Content.ReadFromJsonAsync<AdminUserDto>())!.Role);
+    }
+
+    [Fact]
+    public async Task There_Is_No_Per_User_Permission_Endpoint_Left()
+    {
+        // The whole model is gone, not merely hidden: a client that remembers
+        // the old route finds nothing there.
+        var (_, admin) = await AdminAsync();
+        var targetId = await _factory.SeedUserAsync("legacy-route@example.com");
+
+        var set = await admin.PutAsJsonAsync(
             $"/api/admin/users/{targetId}/permissions/{Permissions.PeopleAccess}",
             new { effect = "grant" });
-        Assert.Equal(HttpStatusCode.OK, granted.StatusCode);
-        var afterGrant = await granted.Content.ReadFromJsonAsync<AdminUserDetailDto>();
-        Assert.True(afterGrant!.Permissions.Single(p => p.Key == Permissions.PeopleAccess).Effective);
-
-        var cleared = await admin.DeleteAsync(
+        var clear = await admin.DeleteAsync(
             $"/api/admin/users/{targetId}/permissions/{Permissions.PeopleAccess}");
-        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
-        var afterClear = await cleared.Content.ReadFromJsonAsync<AdminUserDetailDto>();
-        var row = afterClear!.Permissions.Single(p => p.Key == Permissions.PeopleAccess);
-        Assert.Null(row.Override);
-        Assert.False(row.Effective);
+
+        Assert.Equal(HttpStatusCode.NotFound, set.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, clear.StatusCode);
     }
 
     [Fact]
-    public async Task An_Unknown_Permission_Key_Is_Rejected_And_Never_Stored()
+    public async Task A_Custom_Role_Can_Be_Assigned_And_Is_Enforced()
     {
         var (_, admin) = await AdminAsync();
-        var targetId = await _factory.SeedUserAsync("unknown-key@example.com");
+        var created = await admin.PostAsJsonAsync("/api/admin/roles", new
+        {
+            name = "Laboratorio",
+            description = "Laboratory-oriented account",
+            permissions = new[] { Permissions.LaboratoryAccess, Permissions.LaboratoryPlates },
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var role = await created.Content.ReadFromJsonAsync<RoleDto>();
 
-        var response = await admin.PutAsJsonAsync(
-            $"/api/admin/users/{targetId}/permissions/definitely.not.a.permission",
-            new { effect = "grant" });
+        var targetId = await _factory.SeedUserAsync("lab-user@example.com");
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await admin.PutAsJsonAsync(
+                $"/api/admin/users/{targetId}/role", new { role = role!.Key })).StatusCode);
 
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-
-        using var scope = _factory.Services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        Assert.Empty(await db.UserPermissionOverrides.AsNoTracking().ToListAsync());
-    }
-
-    [Fact]
-    public async Task An_Unknown_Effect_Is_Rejected()
-    {
-        var (_, admin) = await AdminAsync();
-        var targetId = await _factory.SeedUserAsync("bad-effect@example.com");
-
-        var response = await admin.PutAsJsonAsync(
-            $"/api/admin/users/{targetId}/permissions/{Permissions.PeopleAccess}",
-            new { effect = "maybe" });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task An_Administrator_Cannot_Be_Denied_An_Administrative_Permission()
-    {
-        var (_, admin) = await AdminAsync();
-        var otherAdminId = await _factory.SeedUserAsync("peer-admin@example.com");
-        await _factory.SetRoleAsync(otherAdminId, RoleKeys.Administrator);
-        var peer = await _factory.LoginAsync("peer-admin@example.com");
-
-        var response = await admin.PutAsJsonAsync(
-            $"/api/admin/users/{otherAdminId}/permissions/{Permissions.AdminUsersManage}",
-            new { effect = "deny" });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await peer.GetAsync("/api/admin/users")).StatusCode);
+        var target = await _factory.LoginAsync("lab-user@example.com");
+        Assert.NotEqual(HttpStatusCode.Forbidden, (await target.GetAsync("/api/plates/images")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/aesthetics-lab/items")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await target.GetAsync("/api/people")).StatusCode);
     }
 
     [Fact]
@@ -214,14 +197,13 @@ public sealed class AdminAccessEditorTests : IDisposable
     [Fact]
     public async Task Holding_One_Admin_Permission_Does_Not_Open_Another_Admin_Api()
     {
-        // The reason there are four administrative permissions rather than one.
-        var (userId, client) = await _factory.CreateRoleClientAsync(
-            RoleKeys.Restricted, "jobs-only@example.com");
-        await _factory.SetPermissionOverrideAsync(
-            userId, Permissions.AdminJobsManage, NubArca.Api.Domain.PermissionEffect.Grant);
+        // The reason there are five administrative permissions rather than one.
+        var (_, client) = await _factory.CreatePermissionClientAsync(
+            "jobs-only@example.com", Permissions.AdminJobsManage);
 
         Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/jobs")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/users")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/roles")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/import/roots")).StatusCode);
         Assert.Equal(
             HttpStatusCode.Forbidden,

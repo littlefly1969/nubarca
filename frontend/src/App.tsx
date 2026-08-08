@@ -9,6 +9,7 @@ import { Layout } from './components/Layout';
 import { AccountPage } from './pages/AccountPage';
 import { AdminImportPage } from './pages/AdminImportPage';
 import { AdminJobsPage } from './pages/AdminJobsPage';
+import { AdminRolesPage } from './pages/AdminRolesPage';
 import { AdminStatsPage } from './pages/AdminStatsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
@@ -215,6 +216,16 @@ export function App() {
               element={
                 <PermissionRoute permissions={[PERMISSIONS.adminUsersManage]}>
                   <AdminUsersPage />
+                </PermissionRoute>
+              }
+            />
+            {/* Editing roles is its own authority: a user manager may assign a
+                role and can never change what one contains. */}
+            <Route
+              path="/admin/roles"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminRolesManage]}>
+                  <AdminRolesPage />
                 </PermissionRoute>
               }
             />

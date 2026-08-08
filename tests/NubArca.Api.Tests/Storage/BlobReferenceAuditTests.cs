@@ -147,6 +147,7 @@ public sealed class BlobReferenceAuditTests : IDisposable
         var dbOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
         using var db = new AppDbContext(dbOptions);
         db.Database.EnsureCreated();
+        db.SeedBuiltInRoles();
         var storageRoot = Path.Combine(Path.GetTempPath(), $"nc-cancel97-{Guid.NewGuid():N}");
         Directory.CreateDirectory(storageRoot);
         try

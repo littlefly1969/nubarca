@@ -39,6 +39,7 @@ public sealed class GalleryPeopleFilterQueryShapeTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
         _db.Users.Add(new User { Id = _owner, Email = $"o-{_owner:N}@x.t", DisplayName = "O", CreatedAt = DateTime.UtcNow });
         _db.SaveChanges();
         _service = new FileItemService(_db, null!, null!, TimeProvider.System);

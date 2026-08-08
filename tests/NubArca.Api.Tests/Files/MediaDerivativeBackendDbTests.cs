@@ -33,6 +33,7 @@ public sealed class MediaDerivativeBackendDbTests : IDisposable
         _connection.Open();
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-backend-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

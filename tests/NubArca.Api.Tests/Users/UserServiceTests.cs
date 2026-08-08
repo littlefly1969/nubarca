@@ -24,6 +24,7 @@ public sealed class UserServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(dbOptions);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _service = new UserService(_db, TimeProvider.System);
     }

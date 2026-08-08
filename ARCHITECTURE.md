@@ -273,36 +273,64 @@ what an endpoint names. `NubArca.Api.Access` owns the whole model:
   (`people.access`, `semantic-search.access`, `laboratory.access`,
   `laboratory.plates`, `laboratory.aesthetics`, `cloud-functions.access`,
   `private-vault.access`, `tv.manage`, `admin.dashboard`,
-  `admin.users.manage`, `admin.import`, `admin.jobs.manage`). The unit is a
-  feature surface, not a CRUD verb: owner isolation is an unconditional
-  property of every query and is never expressed as a permission.
-- `RoleKeys` are three built-in **keys**, not editable rows: `Administrator`,
-  `Member`, `Restricted`. Custom roles are out of scope, and keys avoid a table
-  whose rows could be edited out from under the last administrator.
-- `RolePermissionCatalog` holds each role's baseline. **Member carries every
-  non-administrative permission** — that is the migration contract, not a
-  preference: an account that was a non-admin before roles existed became a
-  Member and must not notice the change. Restricted's baseline is empty by
-  construction, because the core personal cloud (files/folders, media library,
-  albums, authenticated sharing, account/profile, trash) is not gated at all.
-- `UserPermissionOverride` rows are EXCEPTIONS to a baseline, one per
-  (user, permission) by unique index, with effect `Grant` or `Deny`. Effective
-  permissions are `role baseline + grants − denies`; an **Administrator always
-  receives the complete catalogue and overrides are not consulted at all**, so
-  a deny can never strip the authority that would let another administrator
-  restore it. Unknown permission keys are rejected server-side and never
-  persisted — the catalogue is authoritative, the browser never defines one.
+  `admin.users.manage`, `admin.import`, `admin.jobs.manage`,
+  `admin.roles.manage` — thirteen). The unit is a feature surface, not a CRUD
+  verb: owner isolation is an unconditional property of every query and is
+  never expressed as a permission. Each definition also carries the two
+  structural facts a role editor cannot be correct without: `Parent` (a
+  Laboratory section requires the Laboratory shell) and `AdministratorOnly`
+  (`admin.roles.manage` may only ever be held through the built-in
+  Administrator role).
+- **A user holds exactly one role, and the role owns its permissions.** There is
+  no per-user exception of any kind: effective permissions ARE the role's
+  permission set. When a different combination is needed the operator creates
+  another role — a thing they can name, describe and reason about — rather than
+  an invisible exception on one account.
+- `AccessRole` + `RolePermission` are real rows (`access_roles`,
+  `role_permissions`), and `users.RoleKey` is a foreign key into them with
+  `RESTRICT` on delete — so a role that still has users cannot be deleted, and
+  an account can never reference a role that does not exist. A role's `Key` is
+  immutable identity, generated server-side as `custom:<uuid>` for a custom
+  role; the operator edits `Name`, `Description` and permissions. `Version` is
+  the optimistic-concurrency token: a whole permission set is saved in one
+  request, and a stale version is answered `409` rather than silently
+  overwriting somebody else's edit.
+- Three roles are **system** roles (`RoleKeys.BuiltIn`) and cannot be deleted.
+  `Administrator` is additionally immutable and always resolves to the complete
+  catalogue whatever rows exist — no edit and no missing row can strip the
+  authority that would let another administrator restore it. **Member carries
+  every non-administrative permission** by default: that is the migration
+  contract, not a preference, since an account that was a non-admin before
+  roles existed became a Member. `Restricted` is empty by construction, because
+  the core personal cloud (files/folders, media library, albums, authenticated
+  sharing, account/profile, trash) is not gated at all. Member and Restricted
+  belong to the operator after seeding — `RoleService.EnsureBuiltInRolesAsync`
+  creates what is missing and re-syncs only the Administrator's set, so an edit
+  survives the next deploy while a newly added catalogue key still reaches
+  every administrator.
+- Unknown permission keys are rejected server-side and never persisted; so is a
+  Laboratory section without its shell, and so is `admin.roles.manage` on any
+  role but Administrator. The catalogue is authoritative and the browser never
+  defines a permission.
 - `PermissionRequirement` + `PermissionAuthorizationHandler` back one ASP.NET
-  Core policy per key (plus two composite Laboratory policies, because a
-  section requires the shell permission as well). Endpoints say
+  Core policy per key, plus two composite Laboratory policies (a section
+  requires the shell permission as well) and one **any-of** policy for reading
+  the role catalogue, which both administrative editors need. Endpoints say
   `.RequirePermission(Permissions.PeopleAccess)`; no controller or service
   compares a role by hand.
 - The handler is registered **scoped** and resolves `IUserPermissionService`
   from the request's own provider, reading current database state per request.
-  That is what makes a role or permission change take effect on the next
-  request with no re-login and no second session subsystem. A singleton handler
-  would capture the root provider and answer every later request from the first
-  one's cached permissions.
+  That is what makes a role assignment OR a role EDIT take effect on the next
+  request, for every user in that role, with no re-login and no second session
+  subsystem. A singleton handler would capture the root provider and answer
+  every later request from the first one's cached permissions.
+- Assigning a role is an **escalation** question, so it takes the caller's id:
+  the Administrator role requires `admin.roles.manage` (Administrator-only), and
+  every other role requires that its permission set be a subset of the caller's
+  own. A user manager holding `admin.users.manage` alone therefore runs ordinary
+  accounts and can neither promote anybody to Administrator nor hand out a
+  capability they do not hold themselves — at assignment time and at creation
+  time alike.
 
 `User.IsAdmin` no longer exists. The `AddRolesPermissionsAndPasswordRecovery`
 migration added `RoleKey`, backfilled `Administrator` where `IsAdmin` was true
@@ -312,6 +340,18 @@ drop-first migration would have silently demoted every administrator. `isAdmin`
 survives only as a **computed compatibility field** (`role == Administrator`) on
 `CurrentUserResponse` and `AdminImportUserDto`; nothing stores it and nothing
 writes both.
+
+`MakeRolesFirstClass` retired the per-user exception model by the same rule, and
+its ordering is again the whole correctness argument: it creates and seeds the
+role tables, READS `user_permission_overrides`, turns every distinct effective
+set into a real role, and only then drops the table. A scaffolded migration
+drops first and silently discards every exception an operator ever set. The
+promise is exact — for every account, the permissions in force afterwards equal
+the permissions in force before. A user whose exceptions reproduced an existing
+role is simply assigned it; anybody else is moved to a `Migrated access N` role,
+with ONE role reused for every user who resolved to the same set. The rollback
+is symmetric: users on a custom role return to Member carrying the grants and
+denies that reproduce their set precisely.
 
 Sessions are versioned. `User.SecurityVersion` is written into the cookie at
 sign-in and re-checked on every request by `CookieSessionValidator`, which also
@@ -325,12 +365,26 @@ browser they are using. A cookie predating the claim is read as version 1 (the
 migration default), which keeps existing sessions alive across the upgrade
 while still failing closed after any credential change.
 
-Admin user management is UI-backed (`AdminUsersPage` + `AdminUserService`),
-organised as Profile / Access / Security rather than one row of buttons: an
-administrator can list/search users, create a user with an initial password and
-role, edit profile fields, change a role, set or clear a per-user permission
-override, enable/disable an account, reset a password manually, and send a
-recovery email. Every authenticated user can edit their own profile
+Admin user management is UI-backed (`AdminUsersPage` + `AdminUserService`): a
+LIST of accounts — identity, role badge, status, last login — with one way in.
+Creating a user opens a real modal (portalled, fixed to the viewport, focus
+trapped, background scroll locked); managing one opens a right-side sheet whose
+Profile / Access / Security are TABS, so an administrator reaches Security
+without scrolling past Profile. An administrator can list/search users, create a
+user with an initial password and role, edit profile fields, change a role,
+enable/disable an account, reset a password manually, and send a recovery email.
+
+The Access tab has no permission editor, because there is nothing per-user to
+edit: it offers the role and a read-only preview of what that role contains,
+rendered from ROLE data. That is not a detail — a user-shaped permission list is
+exactly what used to go stale, showing the previous role's permissions after the
+role had changed, because only the user object was refreshed. Roles themselves
+live at `/admin/roles` (`AdminRolesPage`) behind `admin.roles.manage`: create,
+edit, duplicate and delete, with grouped check cards rather than a technical
+table, every change held as a draft until one deliberate Save, and a plain
+statement of how many people a change affects.
+
+Every authenticated user can edit their own profile
 (`PUT /api/auth/me/profile`) and change their own password
 (`POST /api/auth/me/password`), which requires the current password and is
 distinct from an admin-initiated reset. Neither self-service nor the admin
@@ -340,8 +394,11 @@ changing it needs a verification workflow that is out of scope.
 Guardrails enforced by `AdminUserService`: the last active administrator can
 never be demoted or disabled; an administrator can never demote or disable
 their own account (disallowed outright, not merely confirmed); an administrator
-cannot be denied an administrative permission; holding one administrative
-permission never opens another's API. Password hashes and the security version
+cannot hand out a role that grants more than they hold themselves; only an
+administrator can create another administrator; a system role cannot be deleted
+and the Administrator role cannot be edited at all; a role with users assigned
+cannot be deleted, and nothing cascades into an account or reassigns it
+silently; holding one administrative permission never opens another's API. Password hashes and the security version
 are never returned by any endpoint; a shared `PasswordPolicy` (10–256 chars,
 not-all-whitespace) gates every password-setting path — admin create, admin
 reset, self-service change, and recovery reset alike. Sensitive actions are

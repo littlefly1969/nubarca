@@ -18,6 +18,12 @@ public static class PermissionPolicies
     public const string LaboratoryPlates = Prefix + "laboratory:plates+access";
     public const string LaboratoryAesthetics = Prefix + "laboratory:aesthetics+access";
 
+    // READING the role catalogue. Both administrative editors need it — the
+    // Users editor to show what a role means before it is assigned, the Roles
+    // editor to edit it — so the read is "either authority" while every role
+    // MUTATION stays behind admin.roles.manage alone.
+    public const string RolesRead = Prefix + "roles:read";
+
     public static string For(string permissionKey) => Prefix + permissionKey;
 
     public static void AddNubArcaPermissionPolicies(this AuthorizationOptions options)
@@ -44,6 +50,13 @@ public static class PermissionPolicies
             policy.AddRequirements(new PermissionRequirement(
                 Permissions.LaboratoryAccess, Permissions.LaboratoryAesthetics));
         });
+
+        options.AddPolicy(RolesRead, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.AddRequirements(PermissionRequirement.Any(
+                Permissions.AdminUsersManage, Permissions.AdminRolesManage));
+        });
     }
 }
 
@@ -63,4 +76,8 @@ public static class PermissionEndpointExtensions
     public static TBuilder RequireLaboratoryAesthetics<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
         => builder.RequireAuthorization(PermissionPolicies.LaboratoryAesthetics);
+
+    public static TBuilder RequireRolesRead<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.RolesRead);
 }

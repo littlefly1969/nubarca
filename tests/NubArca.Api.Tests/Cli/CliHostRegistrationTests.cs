@@ -226,6 +226,10 @@ public sealed class CliHostRegistrationTests : IDisposable
         var services = scope.ServiceProvider;
 
         Assert.NotNull(services.GetService<NubArca.Api.Users.IUserService>());        // users *
+        // users set-role resolves a role by key or NAME against the role table,
+        // and db migrate verifies the built-ins afterwards. Missing here, both
+        // print "database is not configured" against a perfectly good one.
+        Assert.NotNull(services.GetService<NubArca.Api.Access.IRoleService>());        // users set-role, db migrate
         Assert.NotNull(services.GetService<NubArca.Api.Data.AppDbContext>());          // db migrate
         Assert.NotNull(services.GetService<NubArca.Api.Metadata.MetadataBackfillService>());        // metadata backfill
         Assert.NotNull(services.GetService<NubArca.Api.Files.IFileItemService>());     // metadata recompute-effective-dates

@@ -18,11 +18,10 @@ public class User
     public DateTime CreatedAt { get; set; }
     public DateTime? DisabledAt { get; set; }
 
-    // The authoritative authorization source: one of RoleKeys. It replaced the
-    // former IsAdmin boolean outright — nothing anywhere decides access from a
-    // flag on this row any more, and the migration mapped every previous admin
-    // to Administrator and everybody else to Member so no account changed what
-    // it could do.
+    // The authoritative authorization source, and a real foreign key into
+    // access_roles. A user holds exactly ONE role and the role owns its
+    // permissions: there is no per-user exception anywhere, so this column plus
+    // that role's rows is the complete answer to "what may this person do".
     public string RoleKey { get; set; } = RoleKeys.Member;
 
     // Persisted UI language preference. One of the codes in UiLanguages.All

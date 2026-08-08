@@ -12,10 +12,14 @@ public class AppDbContext : DbContext
 
     public DbSet<User> Users => Set<User>();
 
-    // Identity & Access: exceptions to a user's role baseline (one row per
-    // user+permission), and single-use hash-only password recovery tokens.
-    // Both are owned by the user row and cascade with it.
-    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+    // Identity & Access: the roles themselves and the permissions each carries.
+    // A user's authority is exactly their role's permission set — there is no
+    // per-user exception table, by design.
+    public DbSet<AccessRole> AccessRoles => Set<AccessRole>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+
+    // Single-use hash-only password recovery tokens, owned by the user row and
+    // cascading with it.
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
     public DbSet<Folder> Folders => Set<Folder>();

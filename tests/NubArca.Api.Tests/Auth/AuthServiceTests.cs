@@ -27,6 +27,7 @@ public sealed class AuthServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _users = new UserService(_db, TimeProvider.System);
         _auth = new AuthService(_db, _users, new PasswordHasher<User>(), TimeProvider.System);

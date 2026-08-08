@@ -38,6 +38,7 @@ public sealed class DeletedContentTombstoneTests : IDisposable
         _connection.Open();
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nc-tombstone-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

@@ -44,7 +44,8 @@ export type IconName =
   | 'album-add'
   | 'similar'
   | 'explore'
-  | 'info';
+  | 'info'
+  | 'roles';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -85,6 +86,8 @@ const PATHS: Record<IconName, string> = {
   similar: 'M4 5h7v7H4zM14 12h6v6h-6zM11.5 8.5h3M13 10.5V6.5',
   explore: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM15.5 8.5l-2 5-5 2 2-5z',
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 11v6M12 8h.01',
+  // A key: a role is what opens which doors.
+  roles: 'M14.5 9.5a3.5 3.5 0 1 1-4.9 3.2L4 18.3V21h3v-2h2v-2h2l.7-.7a3.5 3.5 0 0 0 2.8-6.8zM15.5 8.5h.01',
 };
 
 export interface IconProps {

@@ -31,6 +31,7 @@ public sealed class AiSubstrateModelTests : IDisposable
         // Proves the AI schema (incl. the partial-unique default index and
         // check constraints) is valid on SQLite as well as PostgreSQL.
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
     }
 
     public void Dispose()

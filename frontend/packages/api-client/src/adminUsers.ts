@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { AdminUserPermission, PermissionCatalog } from './permissions';
+import type { PermissionCatalog } from './permissions';
 
 // Mirrors NubArca.Api.Users.AdminUserDto. Never includes PasswordHash, the
 // security version, raw auth claims, token hashes or storage internals —
@@ -20,11 +20,12 @@ export interface AdminUser {
   passwordChangedAt: string | null;
 }
 
-// The Access editor's view: the user plus every catalogue permission with its
-// role/override/effective breakdown.
+// The admin detail view: the user alone. Deliberately carries NO permission
+// list — permissions belong to the ROLE and are read from the role catalogue.
+// A user-shaped permission list is precisely what used to go stale the moment
+// the role changed.
 export interface AdminUserDetail {
   user: AdminUser;
-  permissions: AdminUserPermission[];
 }
 
 export interface ListAdminUsersResponse {
@@ -106,30 +107,6 @@ export function setAdminUserRole(userId: string, role: string): Promise<AdminUse
     method: 'PUT',
     json: { role },
   });
-}
-
-// Sets a per-user exception. The backend rejects an unknown permission key and
-// refuses to deny an administrator an administrative permission.
-export function setAdminUserPermission(
-  userId: string,
-  permissionKey: string,
-  effect: 'grant' | 'deny',
-): Promise<AdminUserDetail> {
-  return api<AdminUserDetail>(
-    `/api/admin/users/${userId}/permissions/${encodeURIComponent(permissionKey)}`,
-    { method: 'PUT', json: { effect } },
-  );
-}
-
-// Removes the exception so the role baseline applies again.
-export function clearAdminUserPermission(
-  userId: string,
-  permissionKey: string,
-): Promise<AdminUserDetail> {
-  return api<AdminUserDetail>(
-    `/api/admin/users/${userId}/permissions/${encodeURIComponent(permissionKey)}`,
-    { method: 'DELETE' },
-  );
 }
 
 export function setAdminUserDisabled(userId: string, disabled: boolean): Promise<AdminUser> {

@@ -42,6 +42,7 @@ public sealed class CliEntryPointTests : IDisposable
         _assertScope = _services.CreateScope();
         _db = _assertScope.ServiceProvider.GetRequiredService<AppDbContext>();
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
     }
 
     public void Dispose()

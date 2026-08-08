@@ -39,23 +39,42 @@ is built is described by `ARCHITECTURE.md`.
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
-- **Authorization is permissions; roles are only bundles.** An endpoint names a
-  permission (`.RequirePermission(Permissions.PeopleAccess)`), never a role, and
-  the handler reads the database on every request — which is why a role or
-  permission change takes effect on the next request with no re-login and no
-  second session subsystem. Two things are easy to undo by accident. The
-  authorization handler is registered **scoped**, so it receives the request's
-  own service provider; as a singleton it would capture the ROOT provider and
-  answer every later request from the first one's cached permissions, and a role
-  change would appear not to work at all. And **Member carries every
-  non-administrative permission** — that is the migration contract, because every
+- **Authorization is permissions; a user holds exactly one role and the role owns
+  its permissions.** An endpoint names a permission
+  (`.RequirePermission(Permissions.PeopleAccess)`), never a role, and the handler
+  reads the database on every request — which is why assigning a role OR editing
+  one takes effect on the next request, for everybody in that role, with no
+  re-login and no second session subsystem. There is deliberately **no per-user
+  exception**: a grant/deny model was implemented and then removed, because
+  `USER → ROLE → PERMISSIONS` has one answer per person that is also the answer
+  for everybody else in that role. If a different combination is needed, make
+  another role. Two things are easy to undo by accident. The authorization
+  handler is registered **scoped**, so it receives the request's own service
+  provider; as a singleton it would capture the ROOT provider and answer every
+  later request from the first one's cached permissions, and a role change would
+  appear not to work at all. And **Member carries every non-administrative
+  permission** by default — that is the migration contract, because every
   pre-role non-admin account became a Member. Adding a key to the catalogue
   without adding it to Member silently removes a capability from every existing
-  account.
-- **An Administrator's authority is not deniable.** The resolver ignores
-  overrides entirely for an Administrator, and the admin API refuses to store a
-  deny of an administrative permission on one. Without both, one administrator
-  could quietly remove another's ability to put it back.
+  account. (Member's set is the operator's after seeding: the seeder creates it
+  if missing and never rewrites it.)
+- **An Administrator's authority is not deniable, and cannot be delegated into
+  existence.** The resolver returns the complete catalogue for an Administrator
+  without querying at all, so no missing row and no edit can strip it; the
+  Administrator role itself refuses every edit and delete. `admin.roles.manage`
+  is marked Administrator-only in the catalogue, so it can never be put on
+  another role — and assigning the Administrator role requires holding it. A
+  user manager with `admin.users.manage` alone may therefore only assign roles
+  whose permissions are a subset of their own, at creation time as well as at
+  assignment time. Without all of that, one administrator could quietly remove
+  another's ability to put it back, or a user manager could mint themselves a
+  role that grants administration.
+- **A role preview is rendered from ROLE data, never from a user's detail.** The
+  admin Users page once carried a per-user permission list beside the role
+  selector; changing the role refreshed the user object and left that list
+  describing the PREVIOUS role. `AdminUserDetailDto` therefore carries no
+  permissions at all — the Access tab reads the role catalogue, which is also
+  what makes "select another role, see what it contains" true before saving.
 - **`SecurityVersion` invalidates sessions; permissions do not need it.** A
   credential event (self-service change, admin reset, completed recovery) bumps
   the version in the same transaction as the hash, and the cookie carries the

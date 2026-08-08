@@ -78,7 +78,12 @@ public sealed class UserService : IUserService
         string roleKey,
         CancellationToken cancellationToken = default)
     {
-        if (!RoleKeys.IsKnown(roleKey))
+        // Roles are rows now, so "is this a role" is a lookup rather than a
+        // list in code. The column is a foreign key as well: this check turns
+        // what would otherwise surface as a constraint violation into a clear
+        // argument error at the call site.
+        if (!await _db.AccessRoles.AsNoTracking()
+                .AnyAsync(r => r.Key == roleKey, cancellationToken))
         {
             throw new ArgumentException($"Unknown role '{roleKey}'.", nameof(roleKey));
         }

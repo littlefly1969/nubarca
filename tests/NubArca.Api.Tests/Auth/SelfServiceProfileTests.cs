@@ -189,7 +189,10 @@ public sealed class SelfServiceProfileTests : IDisposable
         Assert.Equal(RoleKeys.Restricted, row.RoleKey);
         Assert.Equal("escalate@example.com", row.Email);
         Assert.Null(row.DisabledAt);
-        Assert.Empty(await db.UserPermissionOverrides.AsNoTracking().ToListAsync());
+        // No side channel exists to widen access either: permissions live on the
+        // role, and a profile write cannot reach a role.
+        Assert.Empty(await db.RolePermissions.AsNoTracking()
+            .Where(p => p.RoleKey == RoleKeys.Restricted).ToListAsync());
 
         // …and the admin API is still shut.
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/admin/users")).StatusCode);

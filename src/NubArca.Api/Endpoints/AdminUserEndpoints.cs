@@ -8,38 +8,41 @@ using NubArca.Api.Users;
 namespace NubArca.Api.Endpoints;
 
 // Admin user management, gated on `admin.users.manage` specifically. Holding a
-// different administrative permission (import, jobs, dashboard) does NOT open
-// this API — that separation is the reason there are four admin permissions
-// rather than one.
+// different administrative permission (import, jobs, dashboard, roles) does NOT
+// open this API — that separation is the reason there are five admin
+// permissions rather than one.
 //
 // Responses are always the safe AdminUserDto / AdminUserDetailDto projections:
 // no PasswordHash, no token hashes, no SecurityVersion, no storage internals.
 // Role changes and enable/disable guard against removing the last active
 // administrator and against an administrator acting on their own account
-// (self-demotion / self-disable are outright disallowed, not just confirmed).
+// (self-demotion / self-disable are outright disallowed, not just confirmed),
+// and role assignment additionally refuses to hand out authority the caller
+// does not hold.
+//
+// There is no per-user permission endpoint. A user's authority IS their role's
+// permission set: to change what somebody may do, either move them to another
+// role or edit the role — and editing roles is a different permission.
 public static class AdminUserEndpoints
 {
+    private const string EscalationMessage =
+        "You cannot assign a role that grants more than your own permissions.";
+
     public static IEndpointRouteBuilder MapAdminUserEndpoints(this IEndpointRouteBuilder app)
     {
-        // The catalogue itself, so the Access editor renders labels and grouping
-        // from the server's list rather than from a copy the frontend has to
-        // keep in step. Nothing here is user-specific.
+        // The catalogue itself, so the role editor renders grouping, the
+        // Laboratory dependency and the Administrator-only marker from the
+        // server's list rather than from a copy the frontend has to keep in
+        // step. Nothing here is user-specific. Readable by either administrative
+        // editor: the Users page needs it to explain a role before it is
+        // assigned.
         app.MapGet("/api/admin/permissions", () =>
-        {
-            var baselines = RoleKeys.All.ToDictionary(
-                role => role,
-                role => (IReadOnlyList<string>)RolePermissionCatalog.For(role)
-                    .OrderBy(k => k, StringComparer.Ordinal)
-                    .ToArray(),
-                StringComparer.Ordinal);
-
-            return Results.Ok(new PermissionCatalogResponse(
-                RoleKeys.All,
+            Results.Ok(new PermissionCatalogResponse(
                 PermissionCatalog.All
-                    .Select(p => new PermissionCatalogEntryDto(p.Key, p.Group, p.Administrative))
-                    .ToList(),
-                baselines));
-        }).WithName("AdminPermissionCatalog").RequirePermission(Permissions.AdminUsersManage);
+                    .Select(p => new PermissionCatalogEntryDto(
+                        p.Key, p.Group, p.Administrative, p.Parent, !p.AdministratorOnly))
+                    .ToList())))
+            .WithName("AdminPermissionCatalog").RequireRolesRead();
 
         app.MapGet("/api/admin/users", async (
             [FromQuery] string? q,
@@ -81,23 +84,29 @@ public static class AdminUserEndpoints
                 });
             }
 
-            if (body.Role is not null && !RoleKeys.TryNormalize(body.Role, out _))
-            {
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["role"] = new[] { $"Unknown role. Supported values: {string.Join(", ", RoleKeys.All)}." },
-                });
-            }
-
             try
             {
-                var created = await adminUsers.CreateAsync(body, cancellationToken);
+                var callerUserId = httpContext.GetCurrentUserId()!.Value;
+                var (result, created) = await adminUsers.CreateAsync(callerUserId, body, cancellationToken);
+
+                switch (result)
+                {
+                    case AdminSetRoleResult.UnknownRole:
+                        return Results.ValidationProblem(new Dictionary<string, string[]>
+                        {
+                            ["role"] = new[] { "Unknown role." },
+                        });
+                    case AdminSetRoleResult.Escalation:
+                        return Results.Json(
+                            new { error = EscalationMessage },
+                            statusCode: StatusCodes.Status403Forbidden);
+                }
 
                 await audit.LogAsync(
-                    userId: httpContext.GetCurrentUserId(),
+                    userId: callerUserId,
                     action: AuditActions.AdminUserCreate,
                     entityType: AuditEntityTypes.User,
-                    entityId: created.Id,
+                    entityId: created!.Id,
                     ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                     metadata: new { role = created.Role },
                     cancellationToken: cancellationToken);
@@ -262,12 +271,18 @@ public static class AdminUserEndpoints
                 case AdminSetRoleResult.UnknownRole:
                     return Results.ValidationProblem(new Dictionary<string, string[]>
                     {
-                        ["role"] = new[] { $"Unknown role. Supported values: {string.Join(", ", RoleKeys.All)}." },
+                        ["role"] = new[] { "Unknown role." },
                     });
                 case AdminSetRoleResult.SelfDemotion:
                     return Results.Conflict(new { error = "You cannot remove your own administrator role." });
                 case AdminSetRoleResult.LastAdmin:
                     return Results.Conflict(new { error = "You cannot demote the last administrator." });
+                case AdminSetRoleResult.Escalation:
+                    // 403, not 409: this is an authority the caller does not
+                    // have, not a state the installation refuses to enter.
+                    return Results.Json(
+                        new { error = EscalationMessage },
+                        statusCode: StatusCodes.Status403Forbidden);
             }
 
             await audit.LogAsync(
@@ -281,88 +296,6 @@ public static class AdminUserEndpoints
 
             return Results.Ok(user);
         }).WithName("AdminUsersSetRole").RequirePermission(Permissions.AdminUsersManage);
-
-        app.MapPut("/api/admin/users/{userId:guid}/permissions/{permissionKey}", async (
-            Guid userId,
-            string permissionKey,
-            SetAdminUserPermissionRequest? body,
-            HttpContext httpContext,
-            [FromServices] IAdminUserService adminUsers,
-            [FromServices] IAuditLogger audit,
-            CancellationToken cancellationToken) =>
-        {
-            var (result, detail) = await adminUsers.SetPermissionOverrideAsync(
-                userId, permissionKey, body?.Effect, cancellationToken);
-
-            switch (result)
-            {
-                case AdminSetPermissionResult.NotFound:
-                    return Results.NotFound();
-                case AdminSetPermissionResult.UnknownPermission:
-                    // The catalogue is authoritative: an unknown key is rejected
-                    // rather than persisted, so a crafted request cannot store
-                    // an arbitrary permission string.
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["permissionKey"] = new[] { "Unknown permission." },
-                    });
-                case AdminSetPermissionResult.UnknownEffect:
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["effect"] = new[] { "Effect must be 'grant' or 'deny'." },
-                    });
-                case AdminSetPermissionResult.AdministratorProtected:
-                    return Results.Conflict(new
-                    {
-                        error = "An administrator cannot be denied an administrative permission.",
-                    });
-            }
-
-            await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
-                action: AuditActions.AdminUserPermissionSet,
-                entityType: AuditEntityTypes.User,
-                entityId: userId,
-                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                metadata: new { permission = permissionKey, effect = body?.Effect },
-                cancellationToken: cancellationToken);
-
-            return Results.Ok(detail);
-        }).WithName("AdminUsersSetPermission").RequirePermission(Permissions.AdminUsersManage);
-
-        app.MapDelete("/api/admin/users/{userId:guid}/permissions/{permissionKey}", async (
-            Guid userId,
-            string permissionKey,
-            HttpContext httpContext,
-            [FromServices] IAdminUserService adminUsers,
-            [FromServices] IAuditLogger audit,
-            CancellationToken cancellationToken) =>
-        {
-            var (result, detail) = await adminUsers.ClearPermissionOverrideAsync(
-                userId, permissionKey, cancellationToken);
-
-            switch (result)
-            {
-                case AdminSetPermissionResult.NotFound:
-                    return Results.NotFound();
-                case AdminSetPermissionResult.UnknownPermission:
-                    return Results.ValidationProblem(new Dictionary<string, string[]>
-                    {
-                        ["permissionKey"] = new[] { "Unknown permission." },
-                    });
-            }
-
-            await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
-                action: AuditActions.AdminUserPermissionClear,
-                entityType: AuditEntityTypes.User,
-                entityId: userId,
-                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                metadata: new { permission = permissionKey },
-                cancellationToken: cancellationToken);
-
-            return Results.Ok(detail);
-        }).WithName("AdminUsersClearPermission").RequirePermission(Permissions.AdminUsersManage);
 
         app.MapPut("/api/admin/users/{userId:guid}/disabled", async (
             Guid userId,

@@ -65,8 +65,16 @@ describe('primary navigation model', () => {
     expect(groups.map((g) => g.id)).toEqual(['main', 'more', 'admin']);
     const admin = groups.find((g) => g.id === 'admin')!;
     expect(admin.items.map((i) => i.to)).toEqual([
-      '/admin', '/admin/import', '/admin/jobs', '/admin/users',
+      '/admin', '/admin/users', '/admin/roles', '/admin/import', '/admin/jobs',
     ]);
+  });
+
+  it('shows Roles only to somebody who may edit them', () => {
+    // Managing users and editing roles are different authorities: a user
+    // manager assigns roles and can never change what one contains.
+    expect(allRoutes([PERMISSIONS.adminUsersManage])).toContain('/admin/users');
+    expect(allRoutes([PERMISSIONS.adminUsersManage])).not.toContain('/admin/roles');
+    expect(allRoutes([PERMISSIONS.adminRolesManage])).toContain('/admin/roles');
   });
 
   it('matches / and /admin exactly so their children do not light them up', () => {

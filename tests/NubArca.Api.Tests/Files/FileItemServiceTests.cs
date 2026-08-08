@@ -39,6 +39,7 @@ public sealed class FileItemServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(dbOptions);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-file-svc-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

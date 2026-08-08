@@ -1,5 +1,5 @@
-// The permission keys and role keys, mirroring NubArca.Api.Access on the
-// backend. They are a wire contract: the server rejects any key it does not
+// The permission keys and built-in role keys, mirroring NubArca.Api.Access on
+// the backend. They are a wire contract: the server rejects any key it does not
 // recognise, so this file must stay in step with the server catalogue.
 //
 // The backend remains the authority on every decision. What these are for is
@@ -19,40 +19,36 @@ export const PERMISSIONS = {
   adminUsersManage: 'admin.users.manage',
   adminImport: 'admin.import',
   adminJobsManage: 'admin.jobs.manage',
+  // Editing the roles themselves. Administrator-only server-side: it can never
+  // be put on another role, so holding it means holding the Administrator role.
+  adminRolesManage: 'admin.roles.manage',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
+// The three BUILT-IN role keys. Roles are rows now and an installation may have
+// any number of custom ones, so this is not the list of roles — it is the list
+// of keys the product itself names.
 export const ROLES = {
   administrator: 'Administrator',
   member: 'Member',
   restricted: 'Restricted',
 } as const;
 
-export type RoleKey = (typeof ROLES)[keyof typeof ROLES];
+export type BuiltInRoleKey = (typeof ROLES)[keyof typeof ROLES];
 
-// One permission as the admin Access editor shows it. `inheritedFromRole`,
-// `override` and `effective` are kept apart on purpose: a flat list of
-// effective keys cannot tell "the role grants this" from "somebody granted it
-// to this person specifically", and an administrator editing access has to see
-// the difference.
-export interface AdminUserPermission {
-  key: string;
-  group: string;
-  administrative: boolean;
-  inheritedFromRole: boolean;
-  override: 'grant' | 'deny' | null;
-  effective: boolean;
-}
-
+// One permission as the server describes it. `parent` names a permission this
+// one is meaningless without (a Laboratory section needs the Laboratory shell);
+// `assignable` is false for a capability only the Administrator role may carry,
+// which is why the role editor never offers it as a checkbox.
 export interface PermissionCatalogEntry {
   key: string;
   group: string;
   administrative: boolean;
+  parent: string | null;
+  assignable: boolean;
 }
 
 export interface PermissionCatalog {
-  roles: string[];
   permissions: PermissionCatalogEntry[];
-  roleBaselines: Record<string, string[]>;
 }

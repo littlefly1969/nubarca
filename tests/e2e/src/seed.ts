@@ -87,6 +87,23 @@ export interface SeedResult {
 const VIDEO_SECONDS = 12;
 
 /** The admin user list is the only place a user id is discoverable by email. */
+// Creates a role with exactly these permissions, or reuses the one a previous
+// seed left behind, and returns its key. Idempotent because the seeder may run
+// against a stack that has already been seeded once.
+async function ensureRole(
+  admin: Session, name: string, permissions: string[],
+): Promise<string> {
+  const listed = await get<{ roles: { key: string; name: string }[] }>(
+    admin, '/api/admin/roles');
+  const existing = listed.roles.find((r) => r.name === name);
+  if (existing) {
+    return existing.key;
+  }
+  const created = await post<{ key: string }>(
+    admin, '/api/admin/roles', { name, description: null, permissions });
+  return created.key;
+}
+
 async function findUserId(admin: Session, email: string): Promise<string> {
   const page = await get<{ items?: { id: string; email: string }[] }>(
     admin, `/api/admin/users?q=${encodeURIComponent(email)}&includeDisabled=true`);
@@ -104,19 +121,21 @@ export async function seed(): Promise<SeedResult> {
   const owner = await login(OWNER.email, OWNER.password);
   const other = await login(OTHER_OWNER.email, OTHER_OWNER.password);
 
-  // Permission fixtures. Roles come from the CLI (scripts/seed.sh); the
-  // per-user EXCEPTIONS are set through the product's own admin API, so the
-  // seed exercises the same path an administrator uses.
+  // Permission fixtures. The built-in roles come from the CLI
+  // (scripts/seed.sh); a narrower authority is a ROLE, created through the
+  // product's own admin API — which is exactly how an operator would express
+  // it, and the only way to express it at all now that per-user exceptions are
+  // gone.
   //
-  // labplates is Restricted plus the Laboratory shell and Plates only — the
-  // "one section, not the other" case. Setting it here rather than in a spec
-  // keeps it identical for every browser project.
+  // labplates holds the Laboratory shell and Plates only — the "one section,
+  // not the other" case. Setting it here rather than in a spec keeps it
+  // identical for every browser project.
   const admin = await login(ADMIN.email, ADMIN.password);
+  const labRole = await ensureRole(admin, 'E2E Laboratory Plates', [
+    'laboratory.access', 'laboratory.plates',
+  ]);
   const labPlatesUserId = await findUserId(admin, LAB_PLATES.email);
-  await put(admin, `/api/admin/users/${labPlatesUserId}/permissions/laboratory.access`,
-    { effect: 'grant' });
-  await put(admin, `/api/admin/users/${labPlatesUserId}/permissions/laboratory.plates`,
-    { effect: 'grant' });
+  await put(admin, `/api/admin/users/${labPlatesUserId}/role`, { role: labRole });
 
   // Seeding expects an empty library. Say so plainly instead of letting the
   // first upload fail with a bare 409 from the duplicate-name check.

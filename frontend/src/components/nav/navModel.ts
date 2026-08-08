@@ -92,14 +92,23 @@ const ADMIN: NavItem[] = [
     end: true,
     permission: PERMISSIONS.adminDashboard,
   },
-  { to: '/admin/import', labelKey: 'nav.import', icon: 'import', permission: PERMISSIONS.adminImport },
-  { to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'jobs', permission: PERMISSIONS.adminJobsManage },
   {
     to: '/admin/users',
     labelKey: 'nav.users',
     icon: 'users',
     permission: PERMISSIONS.adminUsersManage,
   },
+  // Roles are a first-class destination, and a SEPARATE authority: a user
+  // manager runs accounts, while editing what a role may do is Administrator
+  // work. Managing users without seeing this entry is the intended shape.
+  {
+    to: '/admin/roles',
+    labelKey: 'nav.roles',
+    icon: 'roles',
+    permission: PERMISSIONS.adminRolesManage,
+  },
+  { to: '/admin/import', labelKey: 'nav.import', icon: 'import', permission: PERMISSIONS.adminImport },
+  { to: '/admin/jobs', labelKey: 'nav.jobs', icon: 'jobs', permission: PERMISSIONS.adminJobsManage },
 ];
 
 export interface NavModelInput {

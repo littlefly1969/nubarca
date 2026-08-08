@@ -3400,25 +3400,6 @@ button.logout {
   font-size: 1.25rem;
 }
 
-/* Admin user management (list filters + per-row actions). */
-.admin-users-filters {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.admin-users-table {
-  overflow-x: auto;
-  display: block;
-}
-
-.admin-users-row-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-}
-
 /* Slice 81: admin server-side import wizard. */
 .admin-import-steps {
   display: flex;
@@ -7285,3 +7266,558 @@ video.lightbox-image {
   .ws-chip-toggle-label { display: none; }
   .ws-chip-toggle { padding: 0.35rem 0.5rem; }
 }
+
+/* ===========================================================================
+   Identity & Access administration — NUBARCA-USERS-ROLES-UX
+   ---------------------------------------------------------------------------
+   Two overlay surfaces (a centred modal, a trailing-edge sheet), the user list,
+   the role list and the role editor. Everything consumes the semantic tokens
+   above; nothing here invents a colour, and no state is carried by colour alone
+   — every badge and permission row pairs its tint with a word or a symbol.
+   =========================================================================== */
+
+/* ---- Overlays ----------------------------------------------------------- */
+
+/* Fixed against the VIEWPORT and portalled to <body>, so an overlay is visible
+   without scrolling and can never render underneath the list that opened it. */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  background: rgb(0 0 0 / 55%);
+  overscroll-behavior: contain;
+}
+.overlay-backdrop--modal {
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.overlay-backdrop--sheet {
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.overlay-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+}
+.overlay-panel:focus-visible { outline: none; }
+
+.overlay-panel--modal {
+  width: min(680px, 100%);
+  /* Never taller than the viewport: the body scrolls inside instead. */
+  max-height: min(90dvh, 100%);
+  border-radius: var(--radius-card);
+}
+.overlay-panel--sheet {
+  width: min(820px, 100%);
+  height: 100dvh;
+  border-radius: 0;
+  border-inline-end: none;
+}
+
+/* The header stays put while the body scrolls, so an administrator always knows
+   whose account they are editing. */
+.overlay-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--border-default);
+}
+.overlay-head h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.15rem;
+  line-height: 1.3;
+}
+.overlay-head__subtitle {
+  margin-top: 0.15rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.overlay-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.25rem;
+}
+
+.overlay-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.875rem 1.25rem;
+  background: var(--surface-raised);
+  border-top: 1px solid var(--border-default);
+}
+
+/* On a phone both surfaces become the whole screen: a centred card with margins
+   wastes the only space there is. */
+@media (max-width: 40rem) {
+  .overlay-backdrop--modal { padding: 0; align-items: stretch; }
+  .overlay-panel--modal {
+    width: 100%;
+    max-height: 100dvh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+  .overlay-panel--sheet { width: 100%; }
+}
+
+/* ---- Form grid ---------------------------------------------------------- */
+
+/* One rhythm for every administration form: label, optional help, control. The
+   controls share height, border, radius and focus ring so a form reads as one
+   surface rather than a pile of inputs. */
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.form-grid__section {
+  margin: 0.5rem 0 0;
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.form-grid__section:first-child { margin-top: 0; }
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.field__label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.field__help {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font: inherit;
+}
+.field input:focus-visible,
+.field select:focus-visible,
+.field textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--accent);
+}
+.field input:disabled,
+.field select:disabled {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--surface-subtle) 60%, transparent);
+  cursor: not-allowed;
+}
+
+/* Two columns on a comfortable viewport, stacked below it. */
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1rem;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.form-actions--start { justify-content: flex-start; }
+
+.form-notice {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-button);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+/* Destructive actions get their own bounded region, so "disable this account"
+   never sits on the same row as "send a recovery email". */
+.danger-zone {
+  margin-top: 0.5rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border-default));
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.danger-zone h3 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-heading);
+  font-size: 0.9375rem;
+  color: var(--danger);
+}
+.danger-zone p { margin: 0 0 0.75rem; }
+
+/* ---- Tabs --------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-default);
+  margin-bottom: 1rem;
+  overflow-x: auto;
+}
+.tabs__tab {
+  padding: 0.55rem 0.9rem;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tabs__tab:hover { color: var(--text-primary); }
+.tabs__tab.is-active {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+.tabs__tab:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.tabs__panel:focus-visible { outline: none; }
+
+/* ---- Admin page head + toolbar ------------------------------------------ */
+
+.admin-page__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.admin-page__head h2 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+}
+.admin-page__head p { margin: 0.2rem 0 0; }
+
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.admin-toolbar__search {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding: 0 0.65rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+  color: var(--text-muted);
+}
+.admin-toolbar__search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 2.5rem;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+}
+.admin-toolbar__search input:focus-visible { outline: none; }
+.admin-toolbar__search:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.admin-toolbar__filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+.admin-toolbar__filter select {
+  min-height: 2.5rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+/* ---- Badges ------------------------------------------------------------- */
+
+.role-badge,
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-overlay);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.role-badge--system {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
+  color: var(--accent);
+}
+.status-badge--on {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border-strong));
+  color: var(--success);
+}
+.status-badge--off {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--border-strong));
+  color: var(--danger);
+}
+
+/* ---- User list ---------------------------------------------------------- */
+
+.user-list {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.user-list ul { list-style: none; margin: 0; padding: 0; }
+.user-list li + li { border-top: 1px solid var(--border-default); }
+
+.user-list__head,
+.user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1fr) 1.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 1rem;
+}
+.user-list__head {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-default);
+}
+
+/* The whole row is the affordance. A button element, so it is reachable by
+   keyboard and announced as an action rather than as decorated text. */
+.user-row {
+  width: 100%;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.user-row:hover { background: var(--surface-overlay); }
+.user-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+.user-row__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.user-row__name { font-weight: 600; overflow-wrap: anywhere; }
+.user-row__email {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.user-row__cell { min-width: 0; font-size: 0.875rem; }
+.user-row__go { color: var(--text-muted); display: inline-flex; }
+
+/* Below the breakpoint the grid becomes a card: a squeezed four-column table is
+   unusable on a phone, and a horizontally scrolling page is worse. */
+@media (max-width: 52rem) {
+  .user-list__head { display: none; }
+  .user-row {
+    grid-template-columns: minmax(0, 1fr) 1.5rem;
+    grid-template-areas:
+      'identity go'
+      'meta     meta';
+    row-gap: 0.5rem;
+  }
+  .user-row__identity { grid-area: identity; }
+  .user-row__go { grid-area: go; }
+  .user-row__cell {
+    grid-area: meta;
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+  .user-row__cell + .user-row__cell { margin-top: 0.15rem; }
+  .user-row__cell::before {
+    content: attr(data-label) ':';
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+  /* Three stacked meta rows rather than three overlapping grid items. */
+  .user-row { grid-auto-flow: row; }
+  .user-row__cell { grid-area: auto; grid-column: 1 / -1; }
+}
+
+/* ---- Role summary + preview --------------------------------------------- */
+
+.role-summary {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+}
+.role-summary p { margin: 0.2rem 0 0; font-size: 0.875rem; }
+.role-summary__count { color: var(--text-secondary); font-weight: 600; }
+
+.role-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.role-preview__group h3,
+.role-preview__group h4,
+.role-preview__group h5 {
+  margin: 0 0 0.4rem;
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.role-preview__group ul { list-style: none; margin: 0; padding: 0; }
+
+.role-preview__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.3rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 60%, transparent);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+.role-preview__row:last-child { border-bottom: none; }
+.role-preview__row.is-on { color: var(--text-primary); }
+.role-preview__row--child .role-preview__name { padding-inline-start: 1.1rem; }
+/* Symbol AND colour: state is never carried by colour alone. */
+.role-preview__state { font-weight: 600; }
+.role-preview__row.is-on .role-preview__state { color: var(--success); }
+
+/* ---- Role list ---------------------------------------------------------- */
+
+.role-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(22rem, 100%), 1fr));
+  gap: 0.75rem;
+}
+.role-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+.role-card h3 {
+  margin: 0 0 0.3rem;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+}
+.role-card__text { flex: 1 1 auto; }
+.role-card__text p { margin: 0.25rem 0 0; font-size: 0.875rem; }
+.role-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+}
+.role-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.role-card__note { margin: 0; font-size: 0.8125rem; }
+
+/* ---- Permission editor -------------------------------------------------- */
+
+.permission-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.permission-editor__group {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+.permission-editor__group legend {
+  padding: 0 0.35rem;
+  font-family: var(--font-heading);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* A check CARD, not a table row: the capability's name and a sentence about
+   what it opens, so the decision is made from meaning rather than from a key. */
+.permission-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.5rem;
+  border-radius: var(--radius-button);
+  cursor: pointer;
+}
+.permission-check:hover { background: var(--surface-overlay); }
+.permission-check:focus-within { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+.permission-check input { margin-top: 0.2rem; flex: 0 0 auto; }
+.permission-check__text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.permission-check__label { font-weight: 600; font-size: 0.9375rem; }
+.permission-check__description { font-size: 0.8125rem; color: var(--text-muted); }
+.permission-check.is-on .permission-check__label { color: var(--accent); }
+/* A section is visibly subordinate to its shell. */
+.permission-check--child { margin-inline-start: 1.5rem; }

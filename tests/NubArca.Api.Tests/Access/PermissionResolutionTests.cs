@@ -6,12 +6,13 @@ using NubArca.Api.Domain;
 
 namespace NubArca.Api.Tests.Access;
 
-// Effective-permission resolution: role baseline + explicit overrides, and the
-// rules that make an Administrator's authority non-removable.
+// Effective-permission resolution: USER → ROLE → PERMISSIONS, with nothing in
+// between, and the rules that make an Administrator's authority non-removable.
 public sealed class PermissionResolutionTests : IDisposable
 {
     private readonly SqliteConnection _connection;
     private readonly AppDbContext _db;
+    private readonly RoleService _roles;
     private readonly UserPermissionService _permissions;
 
     public PermissionResolutionTests()
@@ -21,7 +22,9 @@ public sealed class PermissionResolutionTests : IDisposable
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
-        _permissions = new UserPermissionService(_db, TimeProvider.System);
+        _db.SeedBuiltInRoles();
+        _roles = new RoleService(_db, TimeProvider.System);
+        _permissions = new UserPermissionService(_db, _roles);
     }
 
     public void Dispose()
@@ -45,6 +48,73 @@ public sealed class PermissionResolutionTests : IDisposable
         return user;
     }
 
+    private async Task<string> CustomRoleAsync(string name, params string[] permissions)
+    {
+        var (result, role) = await _roles.CreateAsync(new CreateRoleRequest(name, null, permissions));
+        Assert.Equal(RoleMutationResult.Ok, result);
+        return role!.Key;
+    }
+
+    [Fact]
+    public async Task The_Built_In_Roles_Are_Seeded_With_Their_Documented_Sets()
+    {
+        var roles = await _roles.ListAsync();
+
+        Assert.Equal(RoleKeys.BuiltIn, roles.Select(r => r.Key).ToArray());
+        Assert.All(roles, role => Assert.True(role.IsSystem));
+
+        var administrator = roles.Single(r => r.Key == RoleKeys.Administrator);
+        Assert.True(administrator.IsAdministrator);
+        Assert.Equal(PermissionCatalog.AllKeys, administrator.Permissions);
+        Assert.Equal(13, administrator.Permissions.Count);
+
+        Assert.Equal(RoleDefaults.MemberPermissions, roles.Single(r => r.Key == RoleKeys.Member).Permissions);
+        Assert.Empty(roles.Single(r => r.Key == RoleKeys.Restricted).Permissions);
+    }
+
+    [Fact]
+    public async Task Seeding_Twice_Changes_Nothing()
+    {
+        var before = await _roles.ListAsync();
+
+        await _roles.EnsureBuiltInRolesAsync();
+
+        var after = await _roles.ListAsync();
+        Assert.Equal(
+            before.Select(r => (r.Key, string.Join(",", r.Permissions))),
+            after.Select(r => (r.Key, string.Join(",", r.Permissions))));
+    }
+
+    [Fact]
+    public async Task Seeding_Does_Not_Rewrite_An_Edited_Member_Set()
+    {
+        // The operator owns Member after migration; a deploy must not silently
+        // put back what they took away.
+        var member = (await _roles.GetAsync(RoleKeys.Member))!;
+        await _roles.UpdateAsync(RoleKeys.Member, new UpdateRoleRequest(
+            member.Name, member.Description, [Permissions.PeopleAccess], member.Version));
+
+        await _roles.EnsureBuiltInRolesAsync();
+
+        Assert.Equal([Permissions.PeopleAccess], (await _roles.GetAsync(RoleKeys.Member))!.Permissions);
+    }
+
+    [Fact]
+    public async Task Seeding_Restores_A_Permission_Missing_From_The_Administrator()
+    {
+        // The one set that IS a contract: a release adding a catalogue key must
+        // not leave administrators without it.
+        await _db.RolePermissions
+            .Where(p => p.RoleKey == RoleKeys.Administrator && p.PermissionKey == Permissions.AdminRolesManage)
+            .ExecuteDeleteAsync();
+
+        await _roles.EnsureBuiltInRolesAsync();
+
+        Assert.Contains(
+            Permissions.AdminRolesManage,
+            (await _roles.GetAsync(RoleKeys.Administrator))!.Permissions);
+    }
+
     [Fact]
     public async Task Administrator_Receives_Every_Permission_In_The_Catalogue()
     {
@@ -54,6 +124,21 @@ public sealed class PermissionResolutionTests : IDisposable
 
         Assert.Equal(PermissionCatalog.AllKeys, effective.ToSortedList());
         Assert.True(effective.IsAdministrator);
+    }
+
+    [Fact]
+    public async Task An_Administrator_Keeps_Everything_Even_With_Rows_Deleted()
+    {
+        // Resolution never queries for an administrator. A missing row — however
+        // it got that way — must not be able to strip the authority that lets
+        // another administrator put it back.
+        var user = await SeedAsync(RoleKeys.Administrator, "protected@example.com");
+        await _db.RolePermissions.Where(p => p.RoleKey == RoleKeys.Administrator).ExecuteDeleteAsync();
+
+        var effective = await _permissions.GetEffectiveAsync(user.Id);
+
+        Assert.Equal(PermissionCatalog.AllKeys, effective.ToSortedList());
+        Assert.True(effective.Has(Permissions.AdminUsersManage));
     }
 
     [Fact]
@@ -89,68 +174,39 @@ public sealed class PermissionResolutionTests : IDisposable
     }
 
     [Fact]
-    public async Task Grant_Override_Adds_A_Permission_The_Role_Does_Not_Carry()
+    public async Task A_Custom_Role_Resolves_To_Exactly_Its_Own_Permissions()
     {
-        var user = await SeedAsync(RoleKeys.Restricted, "grant@example.com");
-
-        Assert.True(await _permissions.SetOverrideAsync(
-            user.Id, Permissions.PeopleAccess, PermissionEffect.Grant));
-
-        var effective = await _permissions.GetEffectiveAsync(user.Id);
-        Assert.True(effective.Has(Permissions.PeopleAccess));
-        Assert.False(effective.Has(Permissions.LaboratoryAccess));
-    }
-
-    [Fact]
-    public async Task Deny_Override_Removes_A_Permission_The_Role_Carries()
-    {
-        var user = await SeedAsync(RoleKeys.Member, "deny@example.com");
-
-        Assert.True(await _permissions.SetOverrideAsync(
-            user.Id, Permissions.PrivateVaultAccess, PermissionEffect.Deny));
-
-        var effective = await _permissions.GetEffectiveAsync(user.Id);
-        Assert.False(effective.Has(Permissions.PrivateVaultAccess));
-        Assert.True(effective.Has(Permissions.PeopleAccess));
-    }
-
-    [Fact]
-    public async Task Clearing_An_Override_Restores_The_Role_Baseline()
-    {
-        var user = await SeedAsync(RoleKeys.Member, "clear@example.com");
-        await _permissions.SetOverrideAsync(user.Id, Permissions.PeopleAccess, PermissionEffect.Deny);
-        Assert.False((await _permissions.GetEffectiveAsync(user.Id)).Has(Permissions.PeopleAccess));
-
-        Assert.True(await _permissions.ClearOverrideAsync(user.Id, Permissions.PeopleAccess));
-
-        Assert.True((await _permissions.GetEffectiveAsync(user.Id)).Has(Permissions.PeopleAccess));
-    }
-
-    [Fact]
-    public async Task Unknown_Permission_Key_Is_Never_Persisted()
-    {
-        var user = await SeedAsync(RoleKeys.Member, "unknown@example.com");
-
-        Assert.False(await _permissions.SetOverrideAsync(
-            user.Id, "not-a-real.permission", PermissionEffect.Grant));
-
-        Assert.Empty(await _db.UserPermissionOverrides.AsNoTracking().ToListAsync());
-    }
-
-    [Fact]
-    public async Task A_Deny_Cannot_Strip_An_Administrator()
-    {
-        // Overrides are not consulted for an Administrator at all: a stored Deny
-        // — however it got there — must never be able to remove the authority
-        // that lets another administrator undo it.
-        var user = await SeedAsync(RoleKeys.Administrator, "protected@example.com");
-        await _permissions.SetOverrideAsync(
-            user.Id, Permissions.AdminUsersManage, PermissionEffect.Deny);
+        var roleKey = await CustomRoleAsync(
+            "Laboratorio", Permissions.LaboratoryAccess, Permissions.LaboratoryPlates);
+        var user = await SeedAsync(roleKey, "custom@example.com");
 
         var effective = await _permissions.GetEffectiveAsync(user.Id);
 
-        Assert.True(effective.Has(Permissions.AdminUsersManage));
-        Assert.Equal(PermissionCatalog.AllKeys, effective.ToSortedList());
+        Assert.Equal(
+            new[] { Permissions.LaboratoryAccess, Permissions.LaboratoryPlates }
+                .OrderBy(k => k, StringComparer.Ordinal).ToArray(),
+            effective.ToSortedList());
+        Assert.False(effective.Has(Permissions.PeopleAccess));
+    }
+
+    [Fact]
+    public async Task Editing_A_Role_Changes_Every_Assigned_User()
+    {
+        // The whole reason there are no per-user exceptions: one edit, and
+        // everybody in the role is affected on their next resolution.
+        var roleKey = await CustomRoleAsync("Famiglia", Permissions.PeopleAccess);
+        var first = await SeedAsync(roleKey, "family-a@example.com");
+        var second = await SeedAsync(roleKey, "family-b@example.com");
+        Assert.False((await _permissions.GetEffectiveAsync(first.Id)).Has(Permissions.TvManage));
+
+        var role = (await _roles.GetAsync(roleKey))!;
+        await _roles.UpdateAsync(roleKey, new UpdateRoleRequest(
+            role.Name, role.Description, [Permissions.PeopleAccess, Permissions.TvManage], role.Version));
+
+        // A fresh resolver, as the next request would have.
+        var fresh = new UserPermissionService(_db, new RoleService(_db, TimeProvider.System));
+        Assert.True((await fresh.GetEffectiveAsync(first.Id)).Has(Permissions.TvManage));
+        Assert.True((await fresh.GetEffectiveAsync(second.Id)).Has(Permissions.TvManage));
     }
 
     [Fact]
@@ -166,21 +222,14 @@ public sealed class PermissionResolutionTests : IDisposable
     }
 
     [Fact]
-    public async Task An_Override_For_A_Retired_Permission_Key_Is_Inert()
+    public async Task A_Role_Row_For_A_Retired_Permission_Key_Is_Inert()
     {
         // A key removed from the catalogue in a future release must not break
-        // the login of everybody who happened to have an override for it.
-        var user = await SeedAsync(RoleKeys.Member, "retired@example.com");
-        _db.UserPermissionOverrides.Add(new UserPermissionOverride
-        {
-            Id = Guid.NewGuid(),
-            UserId = user.Id,
-            PermissionKey = "retired.feature",
-            Effect = PermissionEffect.Grant,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        });
+        // the login of everybody whose role happened to mention it.
+        var roleKey = await CustomRoleAsync("Legacy", Permissions.PeopleAccess);
+        _db.RolePermissions.Add(new RolePermission { RoleKey = roleKey, PermissionKey = "retired.feature" });
         await _db.SaveChangesAsync();
+        var user = await SeedAsync(roleKey, "retired@example.com");
 
         var effective = await _permissions.GetEffectiveAsync(user.Id);
 
@@ -199,14 +248,33 @@ public sealed class PermissionResolutionTests : IDisposable
     }
 
     [Fact]
-    public void Every_Role_Baseline_Names_Only_Catalogue_Keys()
+    public async Task Every_Seeded_Role_Names_Only_Catalogue_Keys()
     {
-        foreach (var role in RoleKeys.All)
+        foreach (var role in await _roles.ListAsync())
         {
-            foreach (var key in RolePermissionCatalog.For(role))
+            foreach (var key in role.Permissions)
             {
-                Assert.True(PermissionCatalog.IsKnown(key), $"{role} references unknown key {key}");
+                Assert.True(PermissionCatalog.IsKnown(key), $"{role.Key} references unknown key {key}");
             }
         }
+    }
+
+    [Fact]
+    public void The_Catalogue_Declares_The_Laboratory_Dependency_Once()
+    {
+        // The role editor and the composite endpoint policies both read this,
+        // so the two cannot drift apart.
+        Assert.Equal(Permissions.LaboratoryAccess, PermissionCatalog.ParentOf(Permissions.LaboratoryPlates));
+        Assert.Equal(Permissions.LaboratoryAccess, PermissionCatalog.ParentOf(Permissions.LaboratoryAesthetics));
+        Assert.Null(PermissionCatalog.ParentOf(Permissions.LaboratoryAccess));
+    }
+
+    [Fact]
+    public void Only_Role_Management_Is_Administrator_Only()
+    {
+        Assert.True(PermissionCatalog.IsAdministratorOnly(Permissions.AdminRolesManage));
+        Assert.DoesNotContain(Permissions.AdminRolesManage, PermissionCatalog.AssignableKeys);
+        Assert.Equal(12, PermissionCatalog.AssignableKeys.Count);
+        Assert.Equal(13, PermissionCatalog.AllKeys.Count);
     }
 }

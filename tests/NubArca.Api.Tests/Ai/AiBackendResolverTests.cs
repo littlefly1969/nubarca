@@ -26,6 +26,7 @@ public sealed class AiBackendResolverTests : IDisposable
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
         _db = new AppDbContext(options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _registry = new AiProfileRegistry(_db, TimeProvider.System);
         _backends = new IAiBackend[] { new NoneAiBackend(), new DeterministicAiBackend() };

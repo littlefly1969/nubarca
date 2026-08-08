@@ -4,14 +4,20 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace NubArca.Api.Access;
 
-// "The caller must hold ALL of these permission keys." One requirement carries
-// the whole set rather than several requirements carrying one each, because
-// ASP.NET Core succeeds a policy when ANY handler succeeds for a requirement —
-// modelling "A and B" as two requirements would work, but modelling it as one
-// keeps the failure a single, obvious decision.
+// "The caller must hold ALL of these permission keys" — or, for the `Any`
+// variant, at least one of them. One requirement carries the whole set rather
+// than several requirements carrying one each, because ASP.NET Core succeeds a
+// policy when ANY handler succeeds for a requirement: modelling "A and B" as
+// two requirements would work, but modelling it as one keeps the failure a
+// single, obvious decision, and modelling "A or B" that way would be wrong.
 public sealed class PermissionRequirement : IAuthorizationRequirement
 {
     public PermissionRequirement(params string[] permissionKeys)
+        : this(true, permissionKeys)
+    {
+    }
+
+    private PermissionRequirement(bool requireAll, string[] permissionKeys)
     {
         if (permissionKeys.Length == 0)
         {
@@ -26,8 +32,18 @@ public sealed class PermissionRequirement : IAuthorizationRequirement
                 throw new ArgumentException($"Unknown permission key '{key}'.", nameof(permissionKeys));
             }
         }
+        RequireAll = requireAll;
         PermissionKeys = permissionKeys;
     }
+
+    // "Any of these opens the door." Used where two different administrative
+    // authorities legitimately need the same read — the role catalogue is read
+    // by the Users editor and by the Roles editor — while the mutations stay
+    // behind the single permission that owns them.
+    public static PermissionRequirement Any(params string[] permissionKeys) =>
+        new(false, permissionKeys);
+
+    public bool RequireAll { get; }
 
     public IReadOnlyList<string> PermissionKeys { get; }
 }
@@ -73,7 +89,10 @@ public sealed class PermissionAuthorizationHandler : AuthorizationHandler<Permis
         }
 
         var effective = await permissions.GetEffectiveAsync(userId);
-        if (effective.HasAll((IReadOnlyList<string>)requirement.PermissionKeys))
+        var satisfied = requirement.RequireAll
+            ? effective.HasAll(requirement.PermissionKeys)
+            : effective.HasAny(requirement.PermissionKeys);
+        if (satisfied)
         {
             context.Succeed(requirement);
         }

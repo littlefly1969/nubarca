@@ -59,20 +59,20 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
 
     [Theory]
     [MemberData(nameof(GatedRoutes))]
-    public async Task An_Explicit_Grant_Opens_The_Route_For_A_Restricted_User(
+    public async Task A_Role_Carrying_The_Permission_Opens_The_Route(
         string route, string permissionKey)
     {
-        var (userId, client) = await _factory.CreateRoleClientAsync(
-            RoleKeys.Restricted, $"granted-{Guid.NewGuid():N}@example.com");
+        // The only way to give somebody a capability now: put them in a role
+        // that carries it. A Laboratory section needs the shell permission too —
+        // that is the composite policy, and the role editor refuses to store a
+        // section without it.
+        string[] permissions = permissionKey is Permissions.LaboratoryPlates
+            or Permissions.LaboratoryAesthetics
+            ? [Permissions.LaboratoryAccess, permissionKey]
+            : [permissionKey];
 
-        await _factory.SetPermissionOverrideAsync(userId, permissionKey, PermissionEffect.Grant);
-        // A Laboratory section needs the shell permission too — that is the
-        // composite policy, not an accident of ordering.
-        if (permissionKey is Permissions.LaboratoryPlates or Permissions.LaboratoryAesthetics)
-        {
-            await _factory.SetPermissionOverrideAsync(
-                userId, Permissions.LaboratoryAccess, PermissionEffect.Grant);
-        }
+        var (_, client) = await _factory.CreatePermissionClientAsync(
+            $"granted-{Guid.NewGuid():N}@example.com", permissions);
 
         var response = await client.GetAsync(route);
 
@@ -126,15 +126,32 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Deny_Override_Removes_A_Member_Feature()
+    public async Task Moving_A_User_To_A_Role_Without_A_Permission_Closes_The_Route()
     {
+        // What replaced the per-user deny: the operator moves the account to a
+        // role that does not carry the capability, and it is gone on the next
+        // request with no re-login.
         var (userId, client) = await _factory.CreateRoleClientAsync(
-            RoleKeys.Member, "denied-people@example.com");
+            RoleKeys.Member, "moved-off-people@example.com");
         Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/people")).StatusCode);
 
-        await _factory.SetPermissionOverrideAsync(userId, Permissions.PeopleAccess, PermissionEffect.Deny);
+        await _factory.SetRoleAsync(userId, RoleKeys.Restricted);
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/people")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Editing_A_Role_Changes_Its_Users_On_The_Next_Request()
+    {
+        // No re-login, no second session subsystem: authorization reads the
+        // role's current rows on every request.
+        var roleKey = await _factory.CreateRoleAsync("Lab only", Permissions.LaboratoryAccess);
+        var (_, client) = await _factory.CreateRoleClientAsync(roleKey, "role-edited@example.com");
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/people")).StatusCode);
+
+        await _factory.SetRolePermissionsAsync(roleKey, Permissions.LaboratoryAccess, Permissions.PeopleAccess);
+
+        Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/people")).StatusCode);
     }
 
     [Fact]
@@ -142,10 +159,9 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
     {
         // The scenario the two sub-permissions exist for: Laboratory visible,
         // Plates usable, Aesthetics refused.
-        var (userId, client) = await _factory.CreateRoleClientAsync(
-            RoleKeys.Restricted, "lab-plates-only@example.com");
-        await _factory.SetPermissionOverrideAsync(userId, Permissions.LaboratoryAccess, PermissionEffect.Grant);
-        await _factory.SetPermissionOverrideAsync(userId, Permissions.LaboratoryPlates, PermissionEffect.Grant);
+        var (_, client) = await _factory.CreatePermissionClientAsync(
+            "lab-plates-only@example.com",
+            Permissions.LaboratoryAccess, Permissions.LaboratoryPlates);
 
         Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/plates/images")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/aesthetics-lab/items")).StatusCode);
@@ -154,9 +170,13 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
     [Fact]
     public async Task A_Laboratory_Section_Alone_Opens_Nothing_Without_The_Shell()
     {
-        var (userId, client) = await _factory.CreateRoleClientAsync(
-            RoleKeys.Restricted, "lab-section-only@example.com");
-        await _factory.SetPermissionOverrideAsync(userId, Permissions.LaboratoryPlates, PermissionEffect.Grant);
+        // The role editor refuses to STORE this shape, so the row is written
+        // straight to the table: the point is that the endpoint's composite
+        // policy is the real guard and would still refuse a role that somehow
+        // carried an orphaned section key.
+        var roleKey = await _factory.CreateRoleAsync("Orphan section", Permissions.LaboratoryAccess);
+        await _factory.SetRolePermissionsRawAsync(roleKey, Permissions.LaboratoryPlates);
+        var (_, client) = await _factory.CreateRoleClientAsync(roleKey, "lab-section-only@example.com");
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/plates/images")).StatusCode);
     }
@@ -169,6 +189,8 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         // would take normal search away from a Restricted user.
         var (userId, client) = await _factory.CreateRoleClientAsync(
             RoleKeys.Restricted, "no-semantic@example.com");
+        var semanticRole = await _factory.CreateRoleAsync(
+            "Semantic", Permissions.SemanticSearchAccess);
 
         Assert.Equal(
             HttpStatusCode.Forbidden,
@@ -185,8 +207,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/images?q=holiday&favorite=true")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/media-library/stats")).StatusCode);
 
-        await _factory.SetPermissionOverrideAsync(
-            userId, Permissions.SemanticSearchAccess, PermissionEffect.Grant);
+        await _factory.SetRoleAsync(userId, semanticRole);
 
         // With the permission the semantic route is reached; whether the
         // installation can currently ANSWER it (a profile, a model) is a

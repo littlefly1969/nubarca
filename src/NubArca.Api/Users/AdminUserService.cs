@@ -7,12 +7,15 @@ using NubArca.Api.Domain;
 namespace NubArca.Api.Users;
 
 // Admin-facing user management: list/create/update/reset-password/set-role/
-// set-permission-override/disable. Reuses IUserService (creation + email
-// normalization/uniqueness), IAuthService (password hashing, which is also the
-// credential-security event) and IUserPermissionService (override rows) rather
-// than duplicating any of it — this service owns only the admin-specific
-// projection and the guard rules: last administrator, self-demotion,
-// self-disable, and the administrator-protection rule on denies.
+// disable. Reuses IUserService (creation + email normalization/uniqueness),
+// IAuthService (password hashing, which is also the credential-security event)
+// and IRoleService (what a role means) rather than duplicating any of it — this
+// service owns only the admin-specific projection and the guard rules.
+//
+// Four guards live here: last administrator, self-demotion, self-disable, and
+// privilege escalation. The last one is the reason role assignment takes the
+// CALLER's id: a user manager may only hand out authority they already hold
+// themselves, and only an administrator may create another administrator.
 public sealed class AdminUserService : IAdminUserService
 {
     private const int DefaultLimit = 50;
@@ -22,6 +25,7 @@ public sealed class AdminUserService : IAdminUserService
     private readonly IUserService _users;
     private readonly IAuthService _auth;
     private readonly IUserPermissionService _permissions;
+    private readonly IRoleService _roles;
     private readonly TimeProvider _clock;
 
     public AdminUserService(
@@ -29,12 +33,14 @@ public sealed class AdminUserService : IAdminUserService
         IUserService users,
         IAuthService auth,
         IUserPermissionService permissions,
+        IRoleService roles,
         TimeProvider clock)
     {
         _db = db;
         _users = users;
         _auth = auth;
         _permissions = permissions;
+        _roles = roles;
         _clock = clock;
     }
 
@@ -84,18 +90,32 @@ public sealed class AdminUserService : IAdminUserService
     public Task<User?> FindAsync(Guid userId, CancellationToken cancellationToken = default) =>
         _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
-    public async Task<AdminUserDetailDto?> GetDetailAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<AdminUserDetailDto?> GetDetailAsync(
+        Guid userId, CancellationToken cancellationToken = default)
     {
         var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
-        return user is null ? null : await BuildDetailAsync(user, cancellationToken);
+        return user is null ? null : new AdminUserDetailDto(ToDto(user));
     }
 
-    public async Task<AdminUserDto> CreateAsync(
+    public async Task<(AdminSetRoleResult Result, AdminUserDto? User)> CreateAsync(
+        Guid callerUserId,
         CreateAdminUserRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Email);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DisplayName);
+
+        // The role is settled BEFORE the account exists, so a refused
+        // escalation never leaves a half-created user behind.
+        var roleKey = await _roles.ResolveRoleKeyAsync(request.Role ?? RoleKeys.Member, cancellationToken);
+        if (roleKey is null)
+        {
+            return (AdminSetRoleResult.UnknownRole, null);
+        }
+        if (!await MayAssignAsync(callerUserId, roleKey, cancellationToken))
+        {
+            return (AdminSetRoleResult.Escalation, null);
+        }
 
         var created = await _users.CreateAsync(request.Email, request.DisplayName, cancellationToken);
 
@@ -105,11 +125,6 @@ public sealed class AdminUserService : IAdminUserService
         }
 
         var user = await _db.Users.FirstAsync(u => u.Id == created.Id, cancellationToken);
-
-        // An unrecognised role falls back to Member rather than failing: the
-        // endpoint validates the value, and a new account defaulting to the
-        // ordinary role is the safe reading if one ever slips past.
-        RoleKeys.TryNormalize(request.Role, out var roleKey);
         user.RoleKey = roleKey;
 
         if (request.Disabled)
@@ -134,7 +149,7 @@ public sealed class AdminUserService : IAdminUserService
         }
         await _db.SaveChangesAsync(cancellationToken);
 
-        return ToDto(user);
+        return (AdminSetRoleResult.Ok, ToDto(user));
     }
 
     public async Task<AdminUserDto?> UpdateAsync(
@@ -200,9 +215,10 @@ public sealed class AdminUserService : IAdminUserService
         string? roleKey,
         CancellationToken cancellationToken = default)
     {
-        // TryNormalize returns false for anything the catalogue does not name, so
-        // an unknown value never silently becomes Member here.
-        if (!RoleKeys.TryNormalize(roleKey, out var normalizedRole))
+        // Resolved against the role table, so an unknown value fails rather than
+        // silently becoming Member.
+        var normalizedRole = await _roles.ResolveRoleKeyAsync(roleKey, cancellationToken);
+        if (normalizedRole is null)
         {
             return (AdminSetRoleResult.UnknownRole, null);
         }
@@ -214,8 +230,8 @@ public sealed class AdminUserService : IAdminUserService
         }
 
         var losingAdministrator =
-            RolePermissionCatalog.IsAdministrator(user.RoleKey)
-            && !RolePermissionCatalog.IsAdministrator(normalizedRole);
+            RoleKeys.IsAdministrator(user.RoleKey)
+            && !RoleKeys.IsAdministrator(normalizedRole);
 
         if (losingAdministrator)
         {
@@ -233,68 +249,17 @@ public sealed class AdminUserService : IAdminUserService
             }
         }
 
+        // Demoting an administrator is a guard question, answered above.
+        // Handing out a role is an ESCALATION question: the caller may only
+        // assign authority they already hold.
+        if (!await MayAssignAsync(callerUserId, normalizedRole, cancellationToken))
+        {
+            return (AdminSetRoleResult.Escalation, null);
+        }
+
         user.RoleKey = normalizedRole;
         await _db.SaveChangesAsync(cancellationToken);
         return (AdminSetRoleResult.Ok, ToDto(user));
-    }
-
-    public async Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> SetPermissionOverrideAsync(
-        Guid targetUserId,
-        string permissionKey,
-        string? effect,
-        CancellationToken cancellationToken = default)
-    {
-        if (!PermissionCatalog.IsKnown(permissionKey))
-        {
-            return (AdminSetPermissionResult.UnknownPermission, null);
-        }
-
-        if (!TryParseEffect(effect, out var parsed))
-        {
-            return (AdminSetPermissionResult.UnknownEffect, null);
-        }
-
-        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == targetUserId, cancellationToken);
-        if (user is null)
-        {
-            return (AdminSetPermissionResult.NotFound, null);
-        }
-
-        // An Administrator's administrative permissions are not deniable. The
-        // resolver already ignores overrides for administrators, so a stored
-        // Deny would be inert — but refusing it outright keeps the admin UI
-        // honest instead of accepting a setting that does nothing.
-        if (RolePermissionCatalog.IsAdministrator(user.RoleKey)
-            && parsed == PermissionEffect.Deny
-            && PermissionCatalog.IsAdministrative(permissionKey))
-        {
-            return (AdminSetPermissionResult.AdministratorProtected, null);
-        }
-
-        await _permissions.SetOverrideAsync(targetUserId, permissionKey, parsed, cancellationToken);
-        return (AdminSetPermissionResult.Ok, await BuildDetailAsync(user, cancellationToken));
-    }
-
-    public async Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> ClearPermissionOverrideAsync(
-        Guid targetUserId,
-        string permissionKey,
-        CancellationToken cancellationToken = default)
-    {
-        if (!PermissionCatalog.IsKnown(permissionKey))
-        {
-            return (AdminSetPermissionResult.UnknownPermission, null);
-        }
-
-        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == targetUserId, cancellationToken);
-        if (user is null)
-        {
-            return (AdminSetPermissionResult.NotFound, null);
-        }
-
-        // Clearing an override that is not there is a success: the caller asked
-        // for "no exception on this key" and that is the state they get.
-        await _permissions.ClearOverrideAsync(targetUserId, permissionKey, cancellationToken);
-        return (AdminSetPermissionResult.Ok, await BuildDetailAsync(user, cancellationToken));
     }
 
     public async Task<(AdminSetDisabledResult Result, AdminUserDto? User)> SetDisabledAsync(
@@ -320,7 +285,7 @@ public sealed class AdminUserService : IAdminUserService
                 return (AdminSetDisabledResult.SelfDisable, null);
             }
 
-            if (RolePermissionCatalog.IsAdministrator(user.RoleKey)
+            if (RoleKeys.IsAdministrator(user.RoleKey)
                 && await ActiveAdministratorCountAsync(cancellationToken) <= 1)
             {
                 return (AdminSetDisabledResult.LastAdmin, null);
@@ -332,52 +297,31 @@ public sealed class AdminUserService : IAdminUserService
         return (AdminSetDisabledResult.Ok, ToDto(user));
     }
 
+    // May this caller put this role on somebody?
+    //
+    // Administrator is gated on admin.roles.manage, which the catalogue makes
+    // Administrator-only — so only an administrator can create another. Every
+    // other role is gated on coverage: a manager holding admin.users.manage
+    // alone cannot hand out People, the Private Vault or the jobs console by
+    // assigning a role that carries them.
+    private async Task<bool> MayAssignAsync(
+        Guid callerUserId, string roleKey, CancellationToken cancellationToken)
+    {
+        var caller = await _permissions.GetEffectiveAsync(callerUserId, cancellationToken);
+
+        if (RoleKeys.IsAdministrator(roleKey))
+        {
+            return caller.Has(Permissions.AdminRolesManage);
+        }
+
+        var target = await _roles.GetEffectivePermissionsAsync(roleKey, cancellationToken);
+        return caller.Covers(target);
+    }
+
     private Task<int> ActiveAdministratorCountAsync(CancellationToken cancellationToken) =>
         _db.Users.AsNoTracking().CountAsync(
             u => u.RoleKey == RoleKeys.Administrator && u.DisabledAt == null,
             cancellationToken);
-
-    private async Task<AdminUserDetailDto> BuildDetailAsync(User user, CancellationToken cancellationToken)
-    {
-        var baseline = RolePermissionCatalog.For(user.RoleKey);
-        var overrides = (await _permissions.ListOverridesAsync(user.Id, cancellationToken))
-            .Where(o => PermissionCatalog.IsKnown(o.PermissionKey))
-            .ToDictionary(o => o.PermissionKey, o => o.Effect, StringComparer.Ordinal);
-        var effective = await _permissions.GetEffectiveAsync(user, cancellationToken);
-
-        var rows = PermissionCatalog.All
-            .OrderBy(p => p.Key, StringComparer.Ordinal)
-            .Select(definition =>
-            {
-                var hasOverride = overrides.TryGetValue(definition.Key, out var overrideEffect);
-                return new AdminUserPermissionDto(
-                    definition.Key,
-                    definition.Group,
-                    definition.Administrative,
-                    baseline.Contains(definition.Key),
-                    hasOverride ? (overrideEffect == PermissionEffect.Grant ? "grant" : "deny") : null,
-                    effective.Has(definition.Key));
-            })
-            .ToList();
-
-        return new AdminUserDetailDto(ToDto(user), rows);
-    }
-
-    private static bool TryParseEffect(string? raw, out PermissionEffect effect)
-    {
-        if (string.Equals(raw, "grant", StringComparison.OrdinalIgnoreCase))
-        {
-            effect = PermissionEffect.Grant;
-            return true;
-        }
-        if (string.Equals(raw, "deny", StringComparison.OrdinalIgnoreCase))
-        {
-            effect = PermissionEffect.Deny;
-            return true;
-        }
-        effect = PermissionEffect.Deny;
-        return false;
-    }
 
     private static AdminUserDto ToDto(User user) => new(
         user.Id,

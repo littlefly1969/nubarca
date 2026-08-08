@@ -37,6 +37,7 @@ public sealed class FileThumbnailServiceTests : IDisposable
             .Options;
         _db = new AppDbContext(dbOptions);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-thumb-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

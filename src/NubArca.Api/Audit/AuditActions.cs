@@ -248,11 +248,15 @@ public static class AuditActions
     // only — the role is not a secret and naming it is what makes the trail
     // answer "who made this account an administrator".
     public const string AdminUserRoleChange = "admin.user.role.change";
-    // An administrator set or removed a per-user permission override. Metadata
-    // carries the permission key and the effect ("grant"/"deny"), both of which
-    // are public catalogue values.
-    public const string AdminUserPermissionSet = "admin.user.permission.set";
-    public const string AdminUserPermissionClear = "admin.user.permission.clear";
+    // Role administration. Editing a role changes what EVERY user assigned to
+    // it may do, so these are recorded as their own actions rather than folded
+    // into the per-user trail. Metadata carries the role key and COUNTS — how
+    // many permissions, how many accounts affected — never a copy of the
+    // permission list, because an audit log records that access changed, not the
+    // policy itself.
+    public const string AdminRoleCreate = "admin.role.create";
+    public const string AdminRoleUpdate = "admin.role.update";
+    public const string AdminRoleDelete = "admin.role.delete";
     // An administrator triggered a password-recovery email for a user. NEVER
     // records the token, the reset URL, or anything derived from either.
     public const string AdminUserPasswordResetEmail = "admin.user.password.reset_email";
@@ -269,6 +273,10 @@ public static class AuditEntityTypes
     public const string PrivateVault = "private_vault";
     public const string MediaLibrary = "media_library";
     public const string User = "user";
+    // A role. Recorded with a null entityId — a role's identity is its key,
+    // which travels in the metadata, and the audit log's entity id column is a
+    // Guid.
+    public const string Role = "role";
     public const string Folder = "folder";
     public const string File = "file";
     public const string ShareLink = "share_link";

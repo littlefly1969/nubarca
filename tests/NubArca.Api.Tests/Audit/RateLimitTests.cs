@@ -138,7 +138,10 @@ public sealed class RateLimitTests : IDisposable
                 services.AddScoped<IFileThumbnailService, FileThumbnailService>();
                 services.AddScoped<IAuthService, AuthService>();
                 // Login projects the caller's effective permissions, so this
-                // minimal host needs the resolver too.
+                // minimal host needs the resolver — and the role catalogue it
+                // resolves against.
+                services.AddScoped<NubArca.Api.Access.IRoleService,
+                    NubArca.Api.Access.RoleService>();
                 services.AddScoped<NubArca.Api.Access.IUserPermissionService,
                     NubArca.Api.Access.UserPermissionService>();
                 services.AddScoped<IShareLinkService, ShareLinkService>();
@@ -151,6 +154,7 @@ public sealed class RateLimitTests : IDisposable
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             db.Database.EnsureCreated();
+            db.SeedBuiltInRoles();
         }
 
         public async Task<(Guid UserId, HttpClient Client)> CreateAuthenticatedClientAsync(string email = "owner@example.com")

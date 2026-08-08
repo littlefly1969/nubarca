@@ -71,6 +71,7 @@ public sealed class VideoFaceAnalysisJobTests : IDisposable
         _db = new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(_connection).Options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
 
         _storageRoot = Path.Combine(Path.GetTempPath(), $"nubarca-vfacejob-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_storageRoot);

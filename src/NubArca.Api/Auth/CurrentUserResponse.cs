@@ -33,7 +33,7 @@ public sealed record CurrentUserResponse(
         user.DisplayName,
         user.FirstName,
         user.LastName,
-        RolePermissionCatalog.IsAdministrator(user.RoleKey),
+        RoleKeys.IsAdministrator(user.RoleKey),
         user.RoleKey,
         permissions.ToSortedList(),
         user.UiLanguage,

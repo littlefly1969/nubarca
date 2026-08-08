@@ -43,9 +43,14 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         // default so a row inserted by an older code path can never land
         // without a role; the migration backfilled Administrator for every
         // previous IsAdmin=true account and Member for the rest.
+        //
+        // 64 characters, matching access_roles.Key exactly — this is a foreign
+        // key, and a custom role's generated `custom:<uuid>` key is 39. The
+        // column started at 32, when the only possible values were the three
+        // built-in names.
         builder.Property(u => u.RoleKey)
             .IsRequired()
-            .HasMaxLength(32)
+            .HasMaxLength(64)
             .HasDefaultValue(RoleKeys.Member);
 
         // Persisted UI language. NOT NULL with an "it" default so the migration
@@ -81,5 +86,17 @@ public class UserConfiguration : IEntityTypeConfiguration<User>
         // last-administrator invariant is answered by an index rather than a
         // sequential scan of the user table.
         builder.HasIndex(u => u.RoleKey);
+
+        // A real reference, not a loose string. RESTRICT is the point: a role
+        // that still has users cannot be deleted, so "reassign them first" is
+        // enforced by the database and not only by the endpoint that happens to
+        // check. It also means an account can never reference a role that does
+        // not exist, which is what lets permission resolution treat a missing
+        // role as impossible rather than guessing a fallback.
+        builder.HasOne<AccessRole>()
+            .WithMany()
+            .HasForeignKey(u => u.RoleKey)
+            .HasPrincipalKey(r => r.Key)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

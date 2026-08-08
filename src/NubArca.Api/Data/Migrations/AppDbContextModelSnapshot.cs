@@ -22,6 +22,43 @@ namespace NubArca.Api.Data.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("NubArca.Api.Domain.AccessRole", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("IsAdministrator")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Key");
+
+                    b.ToTable("access_roles", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.AdminImportItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4274,6 +4311,21 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("remote_upload_sessions", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.RolePermission", b =>
+                {
+                    b.Property<string>("RoleKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PermissionKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("RoleKey", "PermissionKey");
+
+                    b.ToTable("role_permissions", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.ShareLink", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4556,8 +4608,8 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<string>("RoleKey")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
                         .HasDefaultValue("Member");
 
                     b.Property<int>("SecurityVersion")
@@ -4584,38 +4636,6 @@ namespace NubArca.Api.Data.Migrations
                     b.HasIndex("RoleKey");
 
                     b.ToTable("users", (string)null);
-                });
-
-            modelBuilder.Entity("NubArca.Api.Domain.UserPermissionOverride", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Effect")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("PermissionKey")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "PermissionKey")
-                        .IsUnique();
-
-                    b.ToTable("user_permission_overrides", (string)null);
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.AdminImportItem", b =>
@@ -5543,6 +5563,15 @@ namespace NubArca.Api.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.RolePermission", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.AccessRole", null)
+                        .WithMany()
+                        .HasForeignKey("RoleKey")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.ShareLink", b =>
                 {
                     b.HasOne("NubArca.Api.Domain.FileItem", null)
@@ -5604,12 +5633,12 @@ namespace NubArca.Api.Data.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("NubArca.Api.Domain.UserPermissionOverride", b =>
+            modelBuilder.Entity("NubArca.Api.Domain.User", b =>
                 {
-                    b.HasOne("NubArca.Api.Domain.User", null)
+                    b.HasOne("NubArca.Api.Domain.AccessRole", null)
                         .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasForeignKey("RoleKey")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 #pragma warning restore 612, 618

@@ -19,6 +19,7 @@ public sealed class AiDiagnosticsTests : IDisposable
         var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
         _db = new AppDbContext(options);
         _db.Database.EnsureCreated();
+        _db.SeedBuiltInRoles();
     }
 
     public void Dispose()

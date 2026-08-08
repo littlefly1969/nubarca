@@ -85,8 +85,13 @@ public sealed class SecurityVersionSessionTests : IDisposable
             RoleKeys.Member, "revoke-live@example.com");
         Assert.NotEqual(HttpStatusCode.Forbidden, (await client.GetAsync("/api/private-vault")).StatusCode);
 
-        await _factory.SetPermissionOverrideAsync(
-            userId, Permissions.PrivateVaultAccess, PermissionEffect.Deny);
+        // Editing the ROLE, not the user: the account this session belongs to
+        // loses the capability on its very next request, with no re-login and
+        // no session invalidation.
+        await _factory.SetRolePermissionsAsync(
+            RoleKeys.Member,
+            RoleDefaults.MemberPermissions.Where(k => k != Permissions.PrivateVaultAccess).ToArray());
+        _ = userId;
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/private-vault")).StatusCode);
     }
