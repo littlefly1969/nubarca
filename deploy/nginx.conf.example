@@ -13,11 +13,21 @@
 # format logs $request, which includes the query string — so the default would
 # write that secret into the access log of every installation.
 #
-# This format logs the method, the sanitized PATH and the status, with no $args
-# and no $request_uri. It is applied to the Cast media location only: logging for
-# every other NubArca route is deliberately unchanged.
+# This format logs the method, the sanitized PATH and the status, with no $args,
+# no $request and no $request_uri. `$uri` is the decoded path AFTER rewrites and
+# carries no query string, which is the whole point.
+#
+# `$http_origin` is deliberately included and is the one field an operator
+# actually needs from this log: the first physical cast is how an installation
+# discovers the exact Origin its Default Media Receiver presents, which then goes
+# into `Cast__AllowedReceiverOrigins__0`. Without it the documented capture
+# procedure has nothing to read. The User-Agent is deliberately NOT logged — it
+# identifies the device without helping anyone.
+#
+# Applied to the Cast media location only: logging for every other NubArca route
+# is unchanged.
 log_format nubarca_cast '$remote_addr - [$time_local] "$request_method $uri" '
-                        '$status $body_bytes_sent "$http_user_agent"';
+                        '$status $body_bytes_sent origin="$http_origin"';
 
 server {
     listen 80;

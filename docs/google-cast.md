@@ -189,14 +189,22 @@ that will not start, never a server that quietly allowed an unknown origin.
 ### Capturing the receiver origin
 
 The Default Media Receiver's `Origin` is captured **once**, from a real device,
-during the first physical test:
+during the first physical test. Watch the sanitised Cast access log while
+pressing Cast:
 
 ```bash
-$DC logs api --since 5m | grep -i origin
+sudo tail -f /var/log/nginx/nubarca-cast.log
 ```
 
-Record the `Origin` value only. Never the token, never the complete media URL.
-Then configure the exact value:
+Each line carries the method, the path, the status and the origin — and no query
+string, so the bearer token cannot appear:
+
+```text
+203.0.113.7 - [09/Aug/2026:12:00:00 +0000] "GET /api/cast/media/<grant-id>/video" 200 1234 origin="https://…"
+```
+
+Record the `origin="…"` value only. Never the token, never the complete media
+URL. Then configure the exact value:
 
 ```text
 Cast__AllowedReceiverOrigins__0=<the observed origin>
@@ -220,18 +228,29 @@ so it is treated as a secret everywhere else:
 ### Reverse-proxy logging
 
 nginx's default `combined` format logs `$request`, which includes the query
-string — and therefore the token. `deploy/nginx.conf.example` defines a
-`nubarca_cast` format that logs the method, the **sanitised path** and the status
-without `$args`, and applies it to `location /api/cast/media/`. Logging for every
-other NubArca route is unchanged.
+string — and therefore the token. This is not hypothetical: an installation that
+has never been hardened **is** writing Cast tokens to disk from the first cast.
+`deploy/nginx.conf.example` defines a `nubarca_cast` format that logs the method,
+the **sanitised path**, the status and the `Origin` — no `$args`, no `$request`,
+no `$request_uri` — and applies it to `location /api/cast/media/`. Logging for
+every other NubArca route is unchanged.
 
-If the reverse proxy is operator-local, make the same change there during
-deployment and verify it with one request:
+**Hardening the proxy is a precondition of the first physical cast**, not a
+follow-up: the receiver origin is discovered *from* this log, so the log has to
+be safe before it is read.
+
+Where the reverse proxy is operator-local, make the same change there and prove
+it with one request whose query string carries a deliberate marker:
 
 ```bash
-# after a single cast, on the proxy host
-sudo grep -c 'token=' /var/log/nginx/access.log   # must print 0
+curl -s -o /dev/null "https://<origin>/api/cast/media/00000000-0000-0000-0000-000000000000/video?token=probe&x=marker1"
+sudo grep -c 'marker1' /var/log/nginx/nubarca-cast.log   # must print 0
+sudo grep -c 'token='  /var/log/nginx/nubarca-cast.log   # must print 0
 ```
+
+A `404` is the expected status — the point is what reaches the log, not what the
+request returns. Check the *general* access log too: a `location` that does not
+match leaves the request on the default format.
 
 ## Requirements and limitations
 
