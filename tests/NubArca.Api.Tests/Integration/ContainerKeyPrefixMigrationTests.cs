@@ -145,19 +145,24 @@ public sealed class ContainerKeyPrefixMigrationTests : IAsyncLifetime
     private AppDbContext CreateContext() =>
         new(new DbContextOptionsBuilder<AppDbContext>().UseNpgsql(_connectionString).Options);
 
+    // Raw SQL, deliberately. The schema here is pinned to PreviousMigration while
+    // the EF model is always at head, so inserting through the model would fail
+    // the moment a later migration adds a user column — which is exactly what
+    // happened when roles and profile fields arrived. The owner is incidental to
+    // this test (it exists only to own the seeded rows), so it is written with
+    // the columns that exist AT THIS MIGRATION and nothing else.
     private static async Task<Guid> SeedOwnerAsync(AppDbContext ctx, string email)
     {
-        var user = new User
-        {
-            Id = Guid.NewGuid(),
-            Email = email,
-            DisplayName = email,
-            PasswordHash = "not-a-real-hash",
-            CreatedAt = DateTime.UtcNow,
-        };
-        ctx.Users.Add(user);
-        await ctx.SaveChangesAsync();
-        return user.Id;
+        var id = Guid.NewGuid();
+        await ctx.Database.ExecuteSqlRawAsync(
+            """
+            INSERT INTO users ("Id", "Email", "DisplayName", "PasswordHash", "CreatedAt",
+                               "DisabledAt", "IsAdmin", "UiLanguage")
+            VALUES ({0}, {1}, {1}, 'not-a-real-hash', now(), NULL, false, 'it');
+            """.Replace("{0}", "@p0").Replace("{1}", "@p1"),
+            new NpgsqlParameter("p0", id),
+            new NpgsqlParameter("p1", email));
+        return id;
     }
 
     private static async Task<Guid> SeedBlobAsync(AppDbContext ctx)

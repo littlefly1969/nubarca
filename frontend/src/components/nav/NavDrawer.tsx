@@ -7,7 +7,7 @@ import { Icon } from '../icons/Icon';
 import { AppNav } from './AppNav';
 
 interface NavDrawerProps {
-  isAdmin: boolean;
+  permissions: readonly string[];
   onClose(): void;
   // Focus returns here on close, so keyboard users land back on the trigger.
   returnFocusRef?: React.RefObject<HTMLButtonElement | null>;
@@ -20,7 +20,7 @@ const FOCUSABLE =
 // Escape closes it, it closes on any route change and on backdrop click, and it
 // restores focus to the trigger. It renders the SAME `AppNav` as the desktop
 // sidebar, so mobile has no separate information architecture.
-export function NavDrawer({ isAdmin, onClose, returnFocusRef }: NavDrawerProps) {
+export function NavDrawer({ permissions, onClose, returnFocusRef }: NavDrawerProps) {
   const { t } = useI18n();
   const panelRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
@@ -110,7 +110,7 @@ export function NavDrawer({ isAdmin, onClose, returnFocusRef }: NavDrawerProps) 
           </button>
         </div>
         <nav aria-label={t('nav.primary')}>
-          <AppNav isAdmin={isAdmin} onNavigate={onClose} />
+          <AppNav permissions={permissions} onNavigate={onClose} />
         </nav>
       </div>
     </div>

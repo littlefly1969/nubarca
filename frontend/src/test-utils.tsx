@@ -11,6 +11,7 @@
 //   * `AuthedWrapper` / `AnonWrapper` — render-time context providers that
 //     short-circuit the real `AuthProvider`'s `/api/auth/me` probe, so each
 //     test can render a component in isolation against a known auth state.
+import { PERMISSIONS, ROLES } from '@nubarca/api-client';
 import type { ReactNode } from 'react';
 import { act } from 'react';
 import { vi } from 'vitest';
@@ -190,16 +191,41 @@ export function makeAuthValue(
   };
 }
 
+// Mirrors the server's role baselines so a test principal is a realistic one:
+// Member holds every non-administrative feature, an Administrator holds the
+// whole catalogue.
+export const ALL_PERMISSIONS: readonly string[] = Object.values(PERMISSIONS);
+
+export const MEMBER_PERMISSIONS: readonly string[] = [
+  PERMISSIONS.peopleAccess,
+  PERMISSIONS.semanticSearchAccess,
+  PERMISSIONS.laboratoryAccess,
+  PERMISSIONS.laboratoryPlates,
+  PERMISSIONS.laboratoryAesthetics,
+  PERMISSIONS.cloudFunctionsAccess,
+  PERMISSIONS.privateVaultAccess,
+  PERMISSIONS.tvManage,
+];
+
 export function AuthedWrapper({
   children,
   value,
   isAdmin = false,
+  role,
+  permissions,
 }: {
   children: ReactNode;
   value?: Partial<AuthContextValue>;
-  // Slice 47: tests can opt into an admin principal by passing isAdmin.
+  // `isAdmin` is the shorthand for "an Administrator principal": it sets the
+  // role AND the full catalogue, because those are what the product decides on
+  // now. A test needing a narrower authority passes `permissions` (and `role`).
   isAdmin?: boolean;
+  role?: string;
+  permissions?: readonly string[];
 }) {
+  const effectivePermissions = [
+    ...(permissions ?? (isAdmin ? ALL_PERMISSIONS : MEMBER_PERMISSIONS)),
+  ].sort();
   const auth = makeAuthValue(
     {
       status: 'authed',
@@ -207,8 +233,14 @@ export function AuthedWrapper({
         id: 'user-1',
         email: 'dev@nubarca.local',
         displayName: 'Dev User',
+        firstName: null,
+        lastName: null,
         isAdmin,
+        role: role ?? (isAdmin ? ROLES.administrator : ROLES.member),
+        effectivePermissions,
         language: 'it',
+        timeZone: null,
+        lastLoginAt: null,
       },
     },
     value,

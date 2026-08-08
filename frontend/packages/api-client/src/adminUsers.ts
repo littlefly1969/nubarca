@@ -1,17 +1,30 @@
 import { api } from './client';
+import type { AdminUserPermission, PermissionCatalog } from './permissions';
 
-// Mirrors NubArca.Api.Users.AdminUserDto on the backend. Never includes
-// PasswordHash, raw auth claims, token hashes, or storage internals —
-// `hasPassword` is the only signal about credential state.
+// Mirrors NubArca.Api.Users.AdminUserDto. Never includes PasswordHash, the
+// security version, raw auth claims, token hashes or storage internals —
+// `hasPassword` is the only credential signal.
 export interface AdminUser {
   id: string;
   email: string;
   displayName: string;
-  isAdmin: boolean;
+  firstName: string | null;
+  lastName: string | null;
+  role: string;
   disabledAt: string | null;
   createdAt: string;
   hasPassword: boolean;
   language: string;
+  timeZone: string | null;
+  lastLoginAt: string | null;
+  passwordChangedAt: string | null;
+}
+
+// The Access editor's view: the user plus every catalogue permission with its
+// role/override/effective breakdown.
+export interface AdminUserDetail {
+  user: AdminUser;
+  permissions: AdminUserPermission[];
 }
 
 export interface ListAdminUsersResponse {
@@ -45,22 +58,30 @@ export interface CreateAdminUserRequest {
   email: string;
   displayName: string;
   password: string;
-  isAdmin?: boolean;
+  role?: string;
   disabled?: boolean;
   language?: string;
+  firstName?: string;
+  lastName?: string;
+  timeZone?: string;
 }
 
 export function createAdminUser(body: CreateAdminUserRequest): Promise<AdminUser> {
   return api<AdminUser>('/api/admin/users', { method: 'POST', json: body });
 }
 
-export function getAdminUser(userId: string, signal?: AbortSignal): Promise<AdminUser> {
-  return api<AdminUser>(`/api/admin/users/${userId}`, { signal });
+export function getAdminUser(userId: string, signal?: AbortSignal): Promise<AdminUserDetail> {
+  return api<AdminUserDetail>(`/api/admin/users/${userId}`, { signal });
 }
 
+// Profile fields only. Role, permissions, disabled state and email each have
+// their own guarded endpoint.
 export interface UpdateAdminUserRequest {
   displayName?: string;
+  firstName?: string;
+  lastName?: string;
   language?: string;
+  timeZone?: string;
 }
 
 export function updateAdminUser(userId: string, body: UpdateAdminUserRequest): Promise<AdminUser> {
@@ -74,11 +95,41 @@ export function resetAdminUserPassword(userId: string, password: string): Promis
   });
 }
 
-export function setAdminUserAdmin(userId: string, isAdmin: boolean): Promise<AdminUser> {
-  return api<AdminUser>(`/api/admin/users/${userId}/admin`, {
+// Sends the ordinary recovery email to this user. 409 when the installation has
+// no mail configured, or when the account is disabled.
+export function sendAdminUserPasswordResetEmail(userId: string): Promise<void> {
+  return api<void>(`/api/admin/users/${userId}/password-reset-email`, { method: 'POST' });
+}
+
+export function setAdminUserRole(userId: string, role: string): Promise<AdminUser> {
+  return api<AdminUser>(`/api/admin/users/${userId}/role`, {
     method: 'PUT',
-    json: { isAdmin },
+    json: { role },
   });
+}
+
+// Sets a per-user exception. The backend rejects an unknown permission key and
+// refuses to deny an administrator an administrative permission.
+export function setAdminUserPermission(
+  userId: string,
+  permissionKey: string,
+  effect: 'grant' | 'deny',
+): Promise<AdminUserDetail> {
+  return api<AdminUserDetail>(
+    `/api/admin/users/${userId}/permissions/${encodeURIComponent(permissionKey)}`,
+    { method: 'PUT', json: { effect } },
+  );
+}
+
+// Removes the exception so the role baseline applies again.
+export function clearAdminUserPermission(
+  userId: string,
+  permissionKey: string,
+): Promise<AdminUserDetail> {
+  return api<AdminUserDetail>(
+    `/api/admin/users/${userId}/permissions/${encodeURIComponent(permissionKey)}`,
+    { method: 'DELETE' },
+  );
 }
 
 export function setAdminUserDisabled(userId: string, disabled: boolean): Promise<AdminUser> {
@@ -86,4 +137,10 @@ export function setAdminUserDisabled(userId: string, disabled: boolean): Promise
     method: 'PUT',
     json: { disabled },
   });
+}
+
+// The catalogue itself, so the editor renders labels and grouping from the
+// server's list rather than a copy the frontend has to keep in step.
+export function fetchPermissionCatalog(signal?: AbortSignal): Promise<PermissionCatalog> {
+  return api<PermissionCatalog>('/api/admin/permissions', { signal });
 }

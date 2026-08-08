@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { Navigate, useLocation } from 'react-router';
+import { Link, Navigate, useLocation } from 'react-router';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
 import { BrandMark } from '../brand/BrandMark';
@@ -69,6 +69,13 @@ export function LoginPage() {
         <button type="submit" disabled={submitting}>
           {submitting ? t('login.signingIn') : t('login.signIn')}
         </button>
+
+        {/* Always offered. Whether email recovery is actually configured is the
+            forgot-password page's own question — deciding it here would need a
+            probe on every login render for no gain. */}
+        <p className="login-forgot">
+          <Link to="/forgot-password">{t('login.forgotPassword')}</Link>
+        </p>
 
         {error !== null && (
           <div className="login-error" role="alert">

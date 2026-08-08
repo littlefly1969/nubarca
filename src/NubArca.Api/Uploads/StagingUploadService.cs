@@ -12,8 +12,13 @@ namespace NubArca.Api.Uploads;
 public interface IStagingUploadService
 {
     StagingConfigResponse GetConfig();
+    // `canTargetOtherUsers` is the caller's `admin.import` answer, not "is an
+    // administrator": staging INTO ANOTHER USER'S account is the server-side
+    // import authority, and naming the parameter after the permission keeps the
+    // service from implying a role it no longer knows about.
     Task<StagingSessionResponse> CreateSessionAsync(
-        Guid userId, bool isAdmin, StagingSessionCreateRequest request, CancellationToken cancellationToken);
+        Guid userId, bool canTargetOtherUsers, StagingSessionCreateRequest request,
+        CancellationToken cancellationToken);
     Task<StagingSessionListResponse> ListSessionsAsync(Guid userId, int limit, CancellationToken cancellationToken);
     Task<StagingSessionResponse?> GetSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken);
     Task<StagingManifestResponse?> SubmitManifestAsync(
@@ -107,14 +112,16 @@ public sealed class StagingUploadService : IStagingUploadService
     // ---- sessions ------------------------------------------------------------
 
     public async Task<StagingSessionResponse> CreateSessionAsync(
-        Guid userId, bool isAdmin, StagingSessionCreateRequest request, CancellationToken cancellationToken)
+        Guid userId, bool canTargetOtherUsers, StagingSessionCreateRequest request,
+        CancellationToken cancellationToken)
     {
         ResolveStagingRoot(); // throws StagingUnavailableException when off/unconfigured
 
         var targetUserId = request.TargetUserId ?? userId;
-        if (targetUserId != userId && !isAdmin)
+        if (targetUserId != userId && !canTargetOtherUsers)
         {
-            throw new StagingForbiddenException("Only an admin can stage an upload for another user.");
+            throw new StagingForbiddenException(
+                "Staging an upload for another user requires the import permission.");
         }
         var targetExists = await _db.Users.AsNoTracking()
             .AnyAsync(u => u.Id == targetUserId, cancellationToken);

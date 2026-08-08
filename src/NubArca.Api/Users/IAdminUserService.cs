@@ -1,3 +1,5 @@
+using NubArca.Api.Domain;
+
 namespace NubArca.Api.Users;
 
 public interface IAdminUserService
@@ -11,6 +13,10 @@ public interface IAdminUserService
 
     Task<AdminUserDto?> GetAsync(Guid userId, CancellationToken cancellationToken = default);
 
+    // The Access editor's view: the user plus every catalogue permission with
+    // its role/override/effective breakdown.
+    Task<AdminUserDetailDto?> GetDetailAsync(Guid userId, CancellationToken cancellationToken = default);
+
     Task<AdminUserDto> CreateAsync(CreateAdminUserRequest request, CancellationToken cancellationToken = default);
 
     Task<AdminUserDto?> UpdateAsync(
@@ -20,10 +26,21 @@ public interface IAdminUserService
 
     Task<bool> ResetPasswordAsync(Guid userId, string password, CancellationToken cancellationToken = default);
 
-    Task<(AdminSetAdminResult Result, AdminUserDto? User)> SetAdminAsync(
+    Task<(AdminSetRoleResult Result, AdminUserDto? User)> SetRoleAsync(
         Guid callerUserId,
         Guid targetUserId,
-        bool isAdmin,
+        string? roleKey,
+        CancellationToken cancellationToken = default);
+
+    Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> SetPermissionOverrideAsync(
+        Guid targetUserId,
+        string permissionKey,
+        string? effect,
+        CancellationToken cancellationToken = default);
+
+    Task<(AdminSetPermissionResult Result, AdminUserDetailDto? User)> ClearPermissionOverrideAsync(
+        Guid targetUserId,
+        string permissionKey,
         CancellationToken cancellationToken = default);
 
     Task<(AdminSetDisabledResult Result, AdminUserDto? User)> SetDisabledAsync(
@@ -31,4 +48,8 @@ public interface IAdminUserService
         Guid targetUserId,
         bool disabled,
         CancellationToken cancellationToken = default);
+
+    // The raw user row, for endpoints that need the email to send a recovery
+    // message. Never surfaced to the browser — AdminUserDto is what leaves.
+    Task<User?> FindAsync(Guid userId, CancellationToken cancellationToken = default);
 }

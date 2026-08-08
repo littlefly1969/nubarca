@@ -2,7 +2,9 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { I18nProvider } from './i18n';
 import { ThemeProvider } from './theme';
 import { AuthProvider } from './auth/AuthProvider';
+import { PermissionRoute } from './auth/PermissionRoute';
 import { ProtectedRoute } from './auth/ProtectedRoute';
+import { PERMISSIONS } from '@nubarca/api-client';
 import { Layout } from './components/Layout';
 import { AccountPage } from './pages/AccountPage';
 import { AdminImportPage } from './pages/AdminImportPage';
@@ -17,11 +19,13 @@ import { LegacyMediaRedirect } from './media/workspace/LegacyMediaRedirect';
 import { SimilarPhotosExplorerPage } from './pages/SimilarPhotosExplorerPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { PeoplePage } from './pages/PeoplePage';
 import { PersonDetailPage } from './pages/PersonDetailPage';
 import { PlatesPage } from './pages/PlatesPage';
 import { AestheticsLabPage } from './pages/AestheticsLabPage';
-import { LAB_DEFAULT_ROUTE, LaboratoryPage } from './pages/LaboratoryPage';
+import { LaboratoryIndexRedirect, LaboratoryPage } from './pages/LaboratoryPage';
 import { PrivateVaultPage } from './pages/PrivateVaultPage';
 import { SharedAlbumDetailPage } from './pages/SharedAlbumDetailPage';
 import { SharedAlbumsPage } from './pages/SharedAlbumsPage';
@@ -45,6 +49,10 @@ export function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* PUBLIC password recovery. Unauthenticated by necessity — the
+              person asking cannot sign in. */}
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/tv" element={<TvPage />} />
           {/* PUBLIC, unauthenticated party album landing (QR target). */}
           <Route path="/party/:token" element={<PartyPage />} />
@@ -92,17 +100,60 @@ export function App() {
               path="/gallery/files/:fileId/similar"
               element={<SimilarPhotosExplorerPage />}
             />
-            {/* People v0: owner-private face grouping. */}
-            <Route path="/people" element={<PeoplePage />} />
-            <Route path="/people/:personId" element={<PersonDetailPage />} />
+            {/* People v0: owner-private face grouping. The guard produces a
+                clean forbidden state for a direct navigation; the backend
+                refuses every /api/people call independently. */}
+            <Route
+              path="/people"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.peopleAccess]}>
+                  <PeoplePage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/people/:personId"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.peopleAccess]}>
+                  <PersonDetailPage />
+                </PermissionRoute>
+              }
+            />
             {/* Laboratory (Laboratorio): ONE primary destination whose sections
                 are routes, so a tab survives refresh, is linkable and moves
                 Back/Forward. Plates and Aesthetics keep their own APIs,
                 storage and data models — only the shell is shared. */}
-            <Route path="/lab" element={<LaboratoryPage />}>
-              <Route index element={<Navigate to={LAB_DEFAULT_ROUTE} replace />} />
-              <Route path="plates" element={<PlatesPage />} />
-              <Route path="aesthetics" element={<AestheticsLabPage />} />
+            <Route
+              path="/lab"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.laboratoryAccess]}>
+                  <LaboratoryPage />
+                </PermissionRoute>
+              }
+            >
+              <Route index element={<LaboratoryIndexRedirect />} />
+              {/* A section needs the shell permission AND its own — the same
+                  composite the server's Laboratory policies require. */}
+              <Route
+                path="plates"
+                element={
+                  <PermissionRoute
+                    permissions={[PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryPlates]}
+                  >
+                    <PlatesPage />
+                  </PermissionRoute>
+                }
+              />
+              <Route
+                path="aesthetics"
+                element={
+                  <PermissionRoute
+                    permissions={[PERMISSIONS.laboratoryAccess, PERMISSIONS.laboratoryAesthetics]}
+                  >
+                    <AestheticsLabPage />
+                  </PermissionRoute>
+                }
+              />
             </Route>
             {/* Plates was a top-level destination before the Laboratory existed;
                 the old deep link keeps working. */}
@@ -113,22 +164,60 @@ export function App() {
                 URL, so existing bookmarks keep working. */}
             <Route path="/tv-devices" element={<LegacyCloudToolRedirect tool="tv-devices" />} />
             <Route path="/upload" element={<LegacyCloudToolRedirect tool="upload" />} />
-            <Route path="/cloud-functions" element={<CloudFunctionsPage />} />
-            <Route path="/private" element={<PrivateVaultPage />} />
+            <Route
+              path="/cloud-functions"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.cloudFunctionsAccess]}>
+                  <CloudFunctionsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/private"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.privateVaultAccess]}>
+                  <PrivateVaultPage />
+                </PermissionRoute>
+              }
+            />
             <Route path="/trash" element={<TrashPage />} />
             {/* Self-service account settings (own password change). */}
             <Route path="/account" element={<AccountPage />} />
-            {/* /admin lives behind the same ProtectedRoute. The page itself
-                handles 403 from the backend for non-admin users. */}
-            <Route path="/admin" element={<AdminStatsPage />} />
-            {/* Slice 81: admin-only server-side import. The page + backend
-                both gate non-admins (403). */}
-            <Route path="/admin/import" element={<AdminImportPage />} />
-            {/* Slice 90: admin-only background-jobs dashboard. */}
-            <Route path="/admin/jobs" element={<AdminJobsPage />} />
-            {/* Admin user management: list/create/reset password/grant admin/
-                enable-disable. The page + backend both gate non-admins (403). */}
-            <Route path="/admin/users" element={<AdminUsersPage />} />
+            {/* Each administration destination carries its OWN permission, so
+                holding one never opens another — the same separation the four
+                admin APIs enforce server-side. */}
+            <Route
+              path="/admin"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminDashboard]}>
+                  <AdminStatsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/admin/import"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminImport]}>
+                  <AdminImportPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/admin/jobs"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminJobsManage]}>
+                  <AdminJobsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.adminUsersManage]}>
+                  <AdminUsersPage />
+                </PermissionRoute>
+              }
+            />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

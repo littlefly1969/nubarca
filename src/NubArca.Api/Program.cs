@@ -12,6 +12,8 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.OpenApi;
+using Microsoft.AspNetCore.Authorization;
+using NubArca.Api.Access;
 using NubArca.Api.Admin;
 using NubArca.Api.Aesthetics;
 using NubArca.Api.Ai;
@@ -19,6 +21,7 @@ using NubArca.Api.Ai.Photos;
 using NubArca.Api.Albums;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth;
+using NubArca.Api.Auth.Recovery;
 using NubArca.Api.Cli;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -55,6 +58,11 @@ const string PartyFaceSearchRateLimitPolicy = "party-face-search";
 const string SemanticSearchRateLimitPolicy = "semantic-search";
 const string TvPersonalInterpretRateLimitPolicy = "tv-personal-interpret";
 const string BeautyLabUploadRateLimitPolicy = "beauty-lab-upload";
+// Public password-recovery request/reset. The SECOND axis (per normalized
+// email) lives in PasswordRecoveryThrottle: an IP limit alone lets a
+// distributed caller hammer one mailbox, an email limit alone lets one host
+// walk an address list.
+const string PasswordRecoveryRateLimitPolicy = "password-recovery";
 
 // Operator CLI fast-path. When invoked with a recognised subcommand we run
 // the one-shot command and exit without ever building the web host. See
@@ -194,12 +202,20 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 builder.Services.AddAuthorization(options =>
 {
-    // Minimal admin policy (slice 46). Today it gates `/api/admin/*` only.
-    // When NubArca grows more than one role this should move to a proper
-    // RBAC table; the policy name stays the same so callers don't churn.
-    options.AddPolicy(CookieSessionValidator.AdminRole, policy =>
-        policy.RequireRole(CookieSessionValidator.AdminRole));
+    // One policy per permission key, plus the two composite Laboratory
+    // policies. The former single `Admin` role policy is gone: authorization
+    // is expressed in permissions now, and an endpoint names the permission it
+    // needs through .RequirePermission(...) rather than a role string.
+    options.AddNubArcaPermissionPolicies();
 });
+// SCOPED, not singleton. ASP.NET Core resolves IAuthorizationHandler from
+// HttpContext.RequestServices, so a scoped handler receives the REQUEST's
+// service provider — which is what makes its IUserPermissionService (and that
+// service's DbContext and per-request memo) belong to this request. Registered
+// as a singleton it would capture the ROOT provider instead, and the memo would
+// then answer every future request with the first one's permissions: a role
+// change would appear not to take effect at all.
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 builder.Services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
 // Private Vault passwords use the same PBKDF2 hasher (registered unconditionally
 // so both the web host and the SQLite test host resolve it).
@@ -256,6 +272,12 @@ var partyFaceSearchWindowSeconds = builder.Configuration.GetValue<int?>("RateLim
 // Authenticated semantic search runs the large text tower; bound bursts so one
 // client cannot starve normal API traffic. ONNX concurrency remains the second
 // line of defence.
+// Password recovery is an unauthenticated endpoint that sends mail, so it gets
+// a conservative per-IP window suited to a self-hosted installation: a person
+// retrying is fine, a script is not. No CAPTCHA — this plus the per-email
+// throttle is the whole defence.
+var passwordRecoveryPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PasswordRecovery:PermitLimit") ?? 5;
+var passwordRecoveryWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PasswordRecovery:WindowSeconds") ?? 300;
 var semanticSearchPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:SemanticSearch:PermitLimit") ?? 30;
 var semanticSearchWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:SemanticSearch:WindowSeconds") ?? 60;
 // Natural-language interpret is bounded (a local model queue must never be
@@ -398,6 +420,17 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    options.AddPolicy(PasswordRecoveryRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = passwordRecoveryPermitLimit,
+                Window = TimeSpan.FromSeconds(passwordRecoveryWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
     options.AddPolicy(SemanticSearchRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -487,6 +520,12 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // Application services that depend on AppDbContext are only registered when Postgres is configured.
     builder.Services.AddScoped<IBlobService, BlobService>();
     builder.Services.AddScoped<IUserService, UserService>();
+    // Identity & Access: effective-permission resolution (role baseline +
+    // per-user overrides) and the password-recovery flow. Scoped, because both
+    // read current database state per request — that is what makes a permission
+    // or credential change take effect on the next request.
+    builder.Services.AddScoped<IUserPermissionService, UserPermissionService>();
+    builder.Services.AddScoped<IPasswordRecoveryService, PasswordRecoveryService>();
     // Slice 94: media-library rules + eligibility (single source of truth for
     // gallery/map/batch-media membership). FolderService and FileItemService
     // both consume it; it depends only on AppDbContext.
@@ -785,6 +824,14 @@ builder.Services.Configure<BlobStorageOptions>(
 builder.Services.Configure<ImageProcessingOptions>(
     builder.Configuration.GetSection(ImageProcessingOptions.SectionName));
 builder.Services.AddSingleton(TimeProvider.System);
+// Password-recovery email. Bound outside the Postgres-conditional block so the
+// public status endpoint answers even on a host without a database, and so a
+// misconfigured mailer presents as "recovery unavailable" rather than a
+// missing service. Credentials live only in the operator's .env.
+builder.Services.Configure<MailOptions>(
+    builder.Configuration.GetSection(MailOptions.SectionName));
+builder.Services.AddSingleton<IEmailSender, SmtpEmailSender>();
+builder.Services.AddSingleton<PasswordRecoveryThrottle>();
 builder.Services.AddSingleton<IBlobStorage, LocalFileSystemBlobStorage>();
 // Slice 72: derived media store (thumbnails / previews / posters). Rooted at
 // Storage:DerivedRootPath when set, else Storage:RootPath (single-root
@@ -956,9 +1003,10 @@ app.MapGet("/api/storage/me", async (
     return Results.Ok(usage);
 }).WithName("StorageMe").RequireAuthorization();
 
-// Deployment-wide aggregate counters. Admin-only since slice 46: any
-// authenticated non-admin user gets 403. Unauthenticated callers get 401
-// from the cookie middleware before the policy runs.
+// Deployment-wide aggregate counters — the admin dashboard's data. Requires
+// `admin.dashboard`: a user without it gets 403, and holding a different
+// administrative permission does not open this one. Unauthenticated callers get
+// 401 from the cookie middleware before the policy runs.
 app.MapGet("/api/admin/storage-stats", async (
     [FromQuery] bool? refresh,
     [FromQuery] bool? physical,
@@ -969,7 +1017,7 @@ app.MapGet("/api/admin/storage-stats", async (
     // passes physical=false for fast loads and physical=true on demand.
     var snapshot = await stats.GetAsync(refresh ?? false, physical ?? true, cancellationToken);
     return Results.Ok(snapshot);
-}).WithName("StorageStats").RequireAuthorization(CookieSessionValidator.AdminRole);
+}).WithName("StorageStats").RequirePermission(Permissions.AdminDashboard);
 
 // Admin-only medium-preview rebuild status/trigger and AI substrate
 // status/diagnostics/face-settings endpoints live in

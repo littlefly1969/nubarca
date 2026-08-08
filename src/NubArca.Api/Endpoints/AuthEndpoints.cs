@@ -3,19 +3,21 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using NubArca.Api.Access;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth;
+using NubArca.Api.Auth.Recovery;
 using NubArca.Api.Domain;
 using NubArca.Api.Http;
 using NubArca.Api.Users;
 
 namespace NubArca.Api.Endpoints;
 
-// Extracted verbatim from Program.cs (modular-monolith cleanup, not a service
-// split — same process, same DI container, same middleware pipeline). Route
-// paths, HTTP methods, endpoint names, auth requirements, status codes, and
-// audit/cookie/password behavior are unchanged from the original inline
-// mappings.
+// Authentication, the caller's own profile, and the public password-recovery
+// flow. Route paths, HTTP methods, endpoint names, auth requirements, status
+// codes and audit/cookie behavior of the pre-existing endpoints are unchanged;
+// the identity slice added the profile fields, the role/permission projection
+// and the two recovery endpoints.
 public static class AuthEndpoints
 {
     // Mirrors the top-level `LoginRateLimitPolicy` constant still defined in
@@ -23,13 +25,26 @@ public static class AuthEndpoints
     // duplicated here only as the literal policy name, not a new policy.
     private const string LoginRateLimitPolicy = "login";
 
+    // Per-IP limiter for the recovery request endpoint. The second axis (per
+    // normalized email) lives in PasswordRecoveryThrottle; one alone is not
+    // enough, because they stop different attacks.
+    private const string PasswordRecoveryRateLimitPolicy = "password-recovery";
+
+    // The ONE public answer to a recovery request. Identical for a known
+    // address, an unknown address, a disabled account and a delivery failure.
+    private const string RecoveryAcceptedMessage =
+        "If the address belongs to an active account, an email with instructions has been sent.";
+
     public static IEndpointRouteBuilder MapAuthEndpoints(this IEndpointRouteBuilder app)
     {
         app.MapPost("/api/auth/login", async (
             LoginRequest? body,
             HttpContext httpContext,
             [FromServices] IAuthService auth,
+            [FromServices] IUserService users,
+            [FromServices] IUserPermissionService permissions,
             [FromServices] IAuditLogger audit,
+            [FromServices] TimeProvider clock,
             CancellationToken cancellationToken) =>
         {
             var ip = httpContext.Connection.RemoteIpAddress?.ToString();
@@ -49,17 +64,16 @@ public static class AuthEndpoints
                 return Results.Unauthorized();
             }
 
-            var claims = new List<Claim>
-            {
-                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new(ClaimTypes.Email, user.Email),
-                new(ClaimTypes.Name, user.DisplayName),
-            };
-            if (user.IsAdmin)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, CookieSessionValidator.AdminRole));
-            }
-            var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            // This is the ONLY place LastLoginAt moves. A background request or
+            // a token validation must never touch it, or the column stops
+            // meaning "last sign-in".
+            var now = clock.GetUtcNow().UtcDateTime;
+            await users.RecordLoginAsync(user.Id, now, cancellationToken);
+            user.LastLoginAt = now;
+
+            var identity = new ClaimsIdentity(
+                CookieSessionValidator.BuildClaims(user),
+                CookieAuthenticationDefaults.AuthenticationScheme);
             await httpContext.SignInAsync(
                 CookieAuthenticationDefaults.AuthenticationScheme,
                 new ClaimsPrincipal(identity));
@@ -73,7 +87,8 @@ public static class AuthEndpoints
                 metadata: new { email = user.Email },
                 cancellationToken: cancellationToken);
 
-            return Results.Ok(new CurrentUserResponse(user.Id, user.Email, user.DisplayName, user.IsAdmin, user.UiLanguage));
+            var effective = await permissions.GetEffectiveAsync(user, cancellationToken);
+            return Results.Ok(CurrentUserResponse.From(user, effective));
         }).WithName("Login").RequireRateLimiting(LoginRateLimitPolicy);
 
         app.MapPost("/api/auth/logout", async (
@@ -104,6 +119,7 @@ public static class AuthEndpoints
         app.MapGet("/api/auth/me", async (
             HttpContext httpContext,
             [FromServices] IUserService users,
+            [FromServices] IUserPermissionService permissions,
             CancellationToken cancellationToken) =>
         {
             if (httpContext.GetCurrentUserId() is not Guid userId)
@@ -117,7 +133,8 @@ public static class AuthEndpoints
                 return Results.Unauthorized();
             }
 
-            return Results.Ok(new CurrentUserResponse(user.Id, user.Email, user.DisplayName, user.IsAdmin, user.UiLanguage));
+            var effective = await permissions.GetEffectiveAsync(user, cancellationToken);
+            return Results.Ok(CurrentUserResponse.From(user, effective));
         }).WithName("Me").RequireAuthorization();
 
         // Update ONLY the caller's own UI language preference. Cookie session, no
@@ -128,6 +145,7 @@ public static class AuthEndpoints
             UpdateLanguageRequest? body,
             HttpContext httpContext,
             [FromServices] IUserService users,
+            [FromServices] IUserPermissionService permissions,
             CancellationToken cancellationToken) =>
         {
             if (httpContext.GetCurrentUserId() is not Guid userId)
@@ -155,8 +173,58 @@ public static class AuthEndpoints
                 return Results.Unauthorized();
             }
 
-            return Results.Ok(new CurrentUserResponse(user.Id, user.Email, user.DisplayName, user.IsAdmin, user.UiLanguage));
+            var effective = await permissions.GetEffectiveAsync(user, cancellationToken);
+            return Results.Ok(CurrentUserResponse.From(user, effective));
         }).WithName("UpdateMyLanguage").RequireAuthorization();
+
+        // Self-service PROFILE edit: display name, first/last name, language and
+        // time zone. Role, permissions, disabled state and email are absent from
+        // the request record entirely, so this endpoint has no path to them
+        // however the body is crafted. Email stays the login and recovery
+        // identity and is changed by neither this nor the admin editor —
+        // changing it would need a verification workflow of its own.
+        app.MapPut("/api/auth/me/profile", async (
+            UpdateMyProfileRequest? body,
+            HttpContext httpContext,
+            [FromServices] IUserService users,
+            [FromServices] IUserPermissionService permissions,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            if (httpContext.GetCurrentUserId() is not Guid userId)
+            {
+                return Results.Unauthorized();
+            }
+
+            if (!TryBuildProfileUpdate(body, out var update, out var problems))
+            {
+                return Results.ValidationProblem(problems!);
+            }
+
+            var updated = await users.UpdateProfileAsync(userId, update, cancellationToken);
+            if (!updated)
+            {
+                return Results.Unauthorized();
+            }
+
+            var user = await users.GetByIdAsync(userId, cancellationToken);
+            if (user is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            await audit.LogAsync(
+                userId: userId,
+                action: AuditActions.AuthProfileUpdate,
+                entityType: AuditEntityTypes.User,
+                entityId: userId,
+                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                metadata: null,
+                cancellationToken: cancellationToken);
+
+            var effective = await permissions.GetEffectiveAsync(user, cancellationToken);
+            return Results.Ok(CurrentUserResponse.From(user, effective));
+        }).WithName("UpdateMyProfile").RequireAuthorization();
 
         // Self-service password change. Requires the caller's CURRENT password —
         // this is a change, not an admin reset. A user with no PasswordHash set
@@ -215,7 +283,20 @@ public static class AuthEndpoints
                 });
             }
 
-            await auth.SetPasswordAsync(userId, body.NewPassword!, cancellationToken);
+            // Bumps SecurityVersion, so every OTHER session opened with the old
+            // password is dead on its next request, and invalidates outstanding
+            // recovery links.
+            var securityVersion = await auth.SetPasswordAsync(userId, body.NewPassword!, cancellationToken);
+
+            // …including this one, which is why the caller is immediately
+            // re-issued a cookie at the new version. Changing your own password
+            // signs out your other devices, not the browser you did it from.
+            user.SecurityVersion = securityVersion;
+            await httpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(new ClaimsIdentity(
+                    CookieSessionValidator.BuildClaims(user),
+                    CookieAuthenticationDefaults.AuthenticationScheme)));
 
             await audit.LogAsync(
                 userId: userId,
@@ -229,7 +310,123 @@ public static class AuthEndpoints
             return Results.NoContent();
         }).WithName("ChangeMyPassword").RequireAuthorization();
 
+        MapPasswordRecoveryEndpoints(app);
+
         return app;
+    }
+
+    private static void MapPasswordRecoveryEndpoints(IEndpointRouteBuilder app)
+    {
+        // PUBLIC. Says only whether the operator has configured email recovery,
+        // so the forgot-password page can either offer the form or explain that
+        // the administrator must reset the password manually. No account
+        // information of any kind passes through here.
+        app.MapGet("/api/auth/password-recovery/status", (
+            [FromServices] IPasswordRecoveryService recovery) =>
+            Results.Ok(new PasswordRecoveryStatusResponse(recovery.IsEnabled)))
+            .WithName("PasswordRecoveryStatus");
+
+        // PUBLIC. Always 202 with the same message — for a real address, an
+        // unknown one, a disabled account, an account with no password, and a
+        // send that failed. The handler cannot leak the difference because the
+        // service returns nothing to branch on.
+        app.MapPost("/api/auth/password-recovery/request", async (
+            PasswordRecoveryRequest? body,
+            [FromServices] IPasswordRecoveryService recovery,
+            CancellationToken cancellationToken) =>
+        {
+            if (!recovery.TryConsumeEmailQuota(body?.Email))
+            {
+                // Counted per submitted address regardless of whether it exists,
+                // so a 429 tells an enumerator nothing about the account.
+                return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+            }
+
+            await recovery.RequestAsync(body?.Email, cancellationToken);
+            return Results.Accepted(value: new { message = RecoveryAcceptedMessage });
+        }).WithName("PasswordRecoveryRequest")
+          .RequireRateLimiting(PasswordRecoveryRateLimitPolicy);
+
+        // PUBLIC. Consumes the token from the BODY and sets the new password.
+        // No sign-in happens: a reset returns the user to the login form, and
+        // every pre-reset session is already invalid by the time this responds.
+        app.MapPost("/api/auth/password-recovery/reset", async (
+            PasswordResetRequest? body,
+            [FromServices] IPasswordRecoveryService recovery,
+            CancellationToken cancellationToken) =>
+        {
+            var result = await recovery.ResetAsync(body?.Token, body?.NewPassword, cancellationToken);
+            return result switch
+            {
+                PasswordResetResult.Ok => Results.NoContent(),
+                PasswordResetResult.WeakPassword => Results.ValidationProblem(
+                    new Dictionary<string, string[]>
+                    {
+                        ["newPassword"] = new[] { PasswordPolicy.ErrorMessage },
+                    }),
+                // Expired, spent, unknown and malformed all land here with one
+                // message. Distinguishing them would confirm that a token once
+                // existed.
+                _ => Results.BadRequest(new { error = "This password reset link is no longer valid." }),
+            };
+        }).WithName("PasswordRecoveryReset")
+          .RequireRateLimiting(PasswordRecoveryRateLimitPolicy);
+    }
+
+    // Shared by the self-service endpoint and the admin editor so both accept
+    // exactly the same values. An empty string clears an optional field; a null
+    // leaves it untouched.
+    internal static bool TryBuildProfileUpdate(
+        UpdateMyProfileRequest? body,
+        out UserProfileUpdate update,
+        out Dictionary<string, string[]>? problems)
+    {
+        update = new UserProfileUpdate();
+        problems = null;
+        if (body is null)
+        {
+            return true;
+        }
+
+        var errors = new Dictionary<string, string[]>();
+
+        if (!UserProfileFields.TryNormalizeDisplayName(body.DisplayName, out var displayName, out var displayError))
+        {
+            errors["displayName"] = [displayError!];
+        }
+        if (!UserProfileFields.TryNormalizeOptionalName(body.FirstName, out var firstName, out var firstError))
+        {
+            errors["firstName"] = [firstError!];
+        }
+        if (!UserProfileFields.TryNormalizeOptionalName(body.LastName, out var lastName, out var lastError))
+        {
+            errors["lastName"] = [lastError!];
+        }
+        if (!UserProfileFields.TryNormalizeTimeZone(body.TimeZone, out var timeZone, out var zoneError))
+        {
+            errors["timeZone"] = [zoneError!];
+        }
+        if (body.Language is not null && !UiLanguages.TryNormalize(body.Language, out _))
+        {
+            errors["language"] = ["Unsupported language. Supported values: it, en."];
+        }
+
+        if (errors.Count > 0)
+        {
+            problems = errors;
+            return false;
+        }
+
+        update = new UserProfileUpdate(
+            DisplayName: displayName,
+            FirstName: firstName,
+            LastName: lastName,
+            Language: body.Language,
+            TimeZone: timeZone,
+            ClearFirstName: body.FirstName is not null && firstName is null,
+            ClearLastName: body.LastName is not null && lastName is null,
+            ClearTimeZone: body.TimeZone is not null && timeZone is null);
+        return true;
     }
 
     private static string? NormalizeForAudit(string? email)

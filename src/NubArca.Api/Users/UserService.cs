@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Access;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using Npgsql;
@@ -72,17 +73,83 @@ public sealed class UserService : IUserService
             .FirstOrDefaultAsync(u => u.Email == normalizedEmail, cancellationToken);
     }
 
-    public async Task<bool> SetAdminAsync(
+    public async Task<bool> SetRoleAsync(
         Guid userId,
-        bool isAdmin,
+        string roleKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (!RoleKeys.IsKnown(roleKey))
+        {
+            throw new ArgumentException($"Unknown role '{roleKey}'.", nameof(roleKey));
+        }
+
+        var affected = await _db.Users
+            .Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(u => u.RoleKey, _ => roleKey),
+                cancellationToken);
+        return affected > 0;
+    }
+
+    public async Task<bool> RecordLoginAsync(
+        Guid userId,
+        DateTime utcNow,
         CancellationToken cancellationToken = default)
     {
         var affected = await _db.Users
             .Where(u => u.Id == userId)
             .ExecuteUpdateAsync(
-                setters => setters.SetProperty(u => u.IsAdmin, _ => isAdmin),
+                setters => setters.SetProperty(u => u.LastLoginAt, _ => utcNow),
                 cancellationToken);
         return affected > 0;
+    }
+
+    public async Task<bool> UpdateProfileAsync(
+        Guid userId,
+        UserProfileUpdate update,
+        CancellationToken cancellationToken = default)
+    {
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+        if (user is null)
+        {
+            return false;
+        }
+
+        if (update.DisplayName is not null)
+        {
+            user.DisplayName = update.DisplayName;
+        }
+        if (update.ClearFirstName)
+        {
+            user.FirstName = null;
+        }
+        else if (update.FirstName is not null)
+        {
+            user.FirstName = update.FirstName;
+        }
+        if (update.ClearLastName)
+        {
+            user.LastName = null;
+        }
+        else if (update.LastName is not null)
+        {
+            user.LastName = update.LastName;
+        }
+        if (update.Language is not null && UiLanguages.TryNormalize(update.Language, out var language))
+        {
+            user.UiLanguage = language;
+        }
+        if (update.ClearTimeZone)
+        {
+            user.TimeZone = null;
+        }
+        else if (update.TimeZone is not null)
+        {
+            user.TimeZone = update.TimeZone;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<bool> SetLanguageAsync(

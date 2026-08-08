@@ -14,11 +14,15 @@ import { WEB_URL } from './src/env';
 // runtime. `shell` joined that set when the application shell took ownership of the
 // scrolling — a full-height shell with an internal scroll viewport is exactly the
 // kind of layout an effective 200% zoom breaks, so it has to be asserted there.
+// `identity-access` joined it because permission-aware navigation is read from
+// the sidebar on a wide viewport and from the modal drawer on a narrow one: at an
+// effective 200% zoom the desktop projects cross that breakpoint, which is
+// exactly where a second, form-factor-specific navigation model would show up.
 
 const DESKTOP = { width: 1280, height: 800 };
 const ZOOMED_DESKTOP = { width: DESKTOP.width / 2, height: DESKTOP.height / 2 };
 
-const LAYOUT_SENSITIVE = /(shell|media-library|tv-browser)\.spec\.ts/;
+const LAYOUT_SENSITIVE = /(shell|media-library|tv-browser|identity-access)\.spec\.ts/;
 
 export default defineConfig({
   testDir: './specs',

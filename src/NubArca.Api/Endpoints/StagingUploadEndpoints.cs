@@ -3,6 +3,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Auth;
 using NubArca.Api.Http;
 using NubArca.Api.Uploads;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -26,20 +27,27 @@ public static class StagingUploadEndpoints
             [FromServices] IStagingUploadService staging) =>
         {
             return Results.Ok(staging.GetConfig());
-        }).WithName("StagingConfig").RequireAuthorization();
+        }).WithName("StagingConfig").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPost("/api/uploads/staging/sessions", async (
             [FromBody] StagingSessionCreateRequest request,
             HttpContext httpContext,
             [FromServices] IStagingUploadService staging,
+            [FromServices] IUserPermissionService userPermissions,
             [FromServices] IAuditLogger audit,
             CancellationToken cancellationToken) =>
         {
             var userId = httpContext.GetCurrentUserId()!.Value;
-            var isAdmin = httpContext.User.IsInRole(CookieSessionValidator.AdminRole);
+            // Staging INTO ANOTHER USER'S account is the server-side import
+            // authority, so it is gated on `admin.import` rather than on being
+            // an administrator. Everything else on this route is the caller's
+            // own upload and needs only `cloud-functions.access`.
+            var effective = await userPermissions.GetEffectiveAsync(userId, cancellationToken);
+            var canTargetOtherUsers = effective.Has(Permissions.AdminImport);
             try
             {
-                var session = await staging.CreateSessionAsync(userId, isAdmin, request, cancellationToken);
+                var session = await staging.CreateSessionAsync(
+                    userId, canTargetOtherUsers, request, cancellationToken);
                 await audit.LogAsync(
                     userId, AuditActions.StagingSessionCreate, AuditEntityTypes.StagingSession,
                     session.SessionId, httpContext.Connection.RemoteIpAddress?.ToString(),
@@ -49,7 +57,7 @@ public static class StagingUploadEndpoints
             catch (StagingUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (StagingValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (StagingForbiddenException ex) { return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden); }
-        }).WithName("StagingSessionCreate").RequireAuthorization();
+        }).WithName("StagingSessionCreate").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapGet("/api/uploads/staging/sessions", async (
             [FromQuery] int? limit,
@@ -60,7 +68,7 @@ public static class StagingUploadEndpoints
             var userId = httpContext.GetCurrentUserId()!.Value;
             var sessions = await staging.ListSessionsAsync(userId, limit ?? 25, cancellationToken);
             return Results.Ok(sessions);
-        }).WithName("StagingSessionList").RequireAuthorization();
+        }).WithName("StagingSessionList").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapGet("/api/uploads/staging/sessions/{sessionId:guid}", async (
             Guid sessionId,
@@ -71,7 +79,7 @@ public static class StagingUploadEndpoints
             var userId = httpContext.GetCurrentUserId()!.Value;
             var session = await staging.GetSessionAsync(userId, sessionId, cancellationToken);
             return session is null ? Results.NotFound() : Results.Ok(session);
-        }).WithName("StagingSessionDetail").RequireAuthorization();
+        }).WithName("StagingSessionDetail").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPost("/api/uploads/staging/sessions/{sessionId:guid}/manifest", async (
             Guid sessionId,
@@ -95,7 +103,7 @@ public static class StagingUploadEndpoints
             catch (StagingUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (StagingValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (StagingConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
-        }).WithName("StagingManifest").RequireAuthorization();
+        }).WithName("StagingManifest").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapGet("/api/uploads/staging/sessions/{sessionId:guid}/items", async (
             Guid sessionId,
@@ -114,7 +122,7 @@ public static class StagingUploadEndpoints
                 return result is null ? Results.NotFound() : Results.Ok(result);
             }
             catch (StagingValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).WithName("StagingItems").RequireAuthorization();
+        }).WithName("StagingItems").RequirePermission(Permissions.CloudFunctionsAccess);
 
         // Resume protocol: a keyset page of incomplete items + their missing chunk
         // indices. The browser uploads exactly what this reports.
@@ -130,7 +138,7 @@ public static class StagingUploadEndpoints
             var result = await staging.GetMissingAsync(
                 userId, sessionId, afterOrdinal ?? 0, limit ?? 100, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
-        }).WithName("StagingMissing").RequireAuthorization();
+        }).WithName("StagingMissing").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPut("/api/uploads/staging/sessions/{sessionId:guid}/items/{itemId:guid}/chunks/{chunkIndex:int}", async (
             Guid sessionId,
@@ -151,7 +159,7 @@ public static class StagingUploadEndpoints
             catch (StagingUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (StagingValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (StagingConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
-        }).WithName("StagingChunkUpload").RequireAuthorization();
+        }).WithName("StagingChunkUpload").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPost("/api/uploads/staging/sessions/{sessionId:guid}/verify", async (
             Guid sessionId,
@@ -173,7 +181,7 @@ public static class StagingUploadEndpoints
             }
             catch (StagingUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (StagingConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
-        }).WithName("StagingVerify").RequireAuthorization();
+        }).WithName("StagingVerify").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPost("/api/uploads/staging/sessions/{sessionId:guid}/import", async (
             Guid sessionId,
@@ -196,7 +204,7 @@ public static class StagingUploadEndpoints
             catch (StagingUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (StagingValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
             catch (StagingConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
-        }).WithName("StagingImport").RequireAuthorization();
+        }).WithName("StagingImport").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapPost("/api/uploads/staging/sessions/{sessionId:guid}/cancel", async (
             Guid sessionId,
@@ -217,7 +225,7 @@ public static class StagingUploadEndpoints
                 return Results.Ok(result);
             }
             catch (StagingConflictException ex) { return Results.Conflict(new { error = ex.Message }); }
-        }).WithName("StagingCancel").RequireAuthorization();
+        }).WithName("StagingCancel").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapDelete("/api/uploads/staging/sessions/{sessionId:guid}", async (
             Guid sessionId,
@@ -238,7 +246,7 @@ public static class StagingUploadEndpoints
                 sessionId, httpContext.Connection.RemoteIpAddress?.ToString(),
                 null, cancellationToken);
             return Results.NoContent();
-        }).WithName("StagingDelete").RequireAuthorization();
+        }).WithName("StagingDelete").RequirePermission(Permissions.CloudFunctionsAccess);
 
         return app;
     }

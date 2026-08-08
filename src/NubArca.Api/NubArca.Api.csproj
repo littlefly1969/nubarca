@@ -10,6 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Password-recovery email. MailKit is the maintained SMTP client for
+         modern .NET (System.Net.Mail.SmtpClient is obsolete for new code and
+         does not do modern TLS/authentication properly). Generic SMTP only —
+         no provider SDK, so a self-hosted installation stays free of anyone
+         else's service. -->
+    <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="MetadataExtractor" Version="2.9.3" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.4" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.4" />

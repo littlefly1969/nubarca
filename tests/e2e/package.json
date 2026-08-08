@@ -5,7 +5,7 @@
   "description": "NubArca browser verification suite (Playwright).",
   "type": "module",
   "scripts": {
-    "e2e": "E2E_EXPECTED_TESTS=98 ./scripts/e2e.sh --project=chromium-desktop --project=chromium-mobile --project=chromium-desktop-zoom200",
+    "e2e": "E2E_EXPECTED_TESTS=131 ./scripts/e2e.sh --project=chromium-desktop --project=chromium-mobile --project=chromium-desktop-zoom200",
     "e2e:install": "playwright install --with-deps chromium firefox webkit",
     "start": "./scripts/start.sh",
     "seed": "./scripts/seed.sh",

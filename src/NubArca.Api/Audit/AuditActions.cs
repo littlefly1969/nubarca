@@ -244,12 +244,24 @@ public static class AuditActions
     public const string AdminUserCreate = "admin.user.create";
     public const string AdminUserUpdate = "admin.user.update";
     public const string AdminUserPasswordReset = "admin.user.password.reset";
-    public const string AdminUserAdminGrant = "admin.user.admin.grant";
-    public const string AdminUserAdminRevoke = "admin.user.admin.revoke";
+    // An administrator changed a user's ROLE. Metadata carries the new role key
+    // only — the role is not a secret and naming it is what makes the trail
+    // answer "who made this account an administrator".
+    public const string AdminUserRoleChange = "admin.user.role.change";
+    // An administrator set or removed a per-user permission override. Metadata
+    // carries the permission key and the effect ("grant"/"deny"), both of which
+    // are public catalogue values.
+    public const string AdminUserPermissionSet = "admin.user.permission.set";
+    public const string AdminUserPermissionClear = "admin.user.permission.clear";
+    // An administrator triggered a password-recovery email for a user. NEVER
+    // records the token, the reset URL, or anything derived from either.
+    public const string AdminUserPasswordResetEmail = "admin.user.password.reset_email";
     public const string AdminUserDisable = "admin.user.disable";
     public const string AdminUserEnable = "admin.user.enable";
     // Self-service password change (authenticated user, own account only).
     public const string AuthPasswordChange = "auth.password.change";
+    // Self-service profile edit (display/first/last name, language, time zone).
+    public const string AuthProfileUpdate = "auth.profile.update";
 }
 
 public static class AuditEntityTypes

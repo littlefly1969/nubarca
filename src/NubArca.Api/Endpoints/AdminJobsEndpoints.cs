@@ -4,6 +4,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Auth;
 using NubArca.Api.Http;
 using NubArca.Api.Jobs;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -37,7 +38,7 @@ public static class AdminJobsEndpoints
             var result = await jobs.ListAdminJobsAsync(
                 new AdminJobFilter(status, type), page ?? 1, pageSize ?? 20, cancellationToken);
             return Results.Ok(result);
-        }).WithName("AdminJobsList").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminJobsList").RequirePermission(Permissions.AdminJobsManage);
 
         app.MapGet("/api/admin/jobs/{id:guid}", async (
             Guid id,
@@ -46,7 +47,7 @@ public static class AdminJobsEndpoints
         {
             var job = await jobs.GetAdminJobAsync(id, cancellationToken);
             return job is null ? Results.NotFound() : Results.Ok(job);
-        }).WithName("AdminJobDetail").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminJobDetail").RequirePermission(Permissions.AdminJobsManage);
 
         app.MapPost("/api/admin/jobs/{id:guid}/cancel", async (
             Guid id,
@@ -84,7 +85,7 @@ public static class AdminJobsEndpoints
 
             var updated = await jobs.GetAdminJobAsync(id, cancellationToken);
             return Results.Ok(updated);
-        }).WithName("AdminJobCancel").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminJobCancel").RequirePermission(Permissions.AdminJobsManage);
 
         // Admin console: the catalog of jobs an admin can launch from the UI, with
         // their parameter specs. Server-driven — the frontend renders one form per
@@ -94,7 +95,7 @@ public static class AdminJobsEndpoints
             [FromServices] NubArca.Api.Admin.AdminJobCatalogService catalog,
             CancellationToken cancellationToken) =>
             Results.Ok(await catalog.BuildAsync(cancellationToken)))
-            .WithName("AdminJobsCatalog").RequireAuthorization(CookieSessionValidator.AdminRole);
+            .WithName("AdminJobsCatalog").RequirePermission(Permissions.AdminJobsManage);
 
         // Admin console: how many items each command would process right now. Split
         // from the catalog so the page renders instantly and these (wider) counts load
@@ -103,7 +104,7 @@ public static class AdminJobsEndpoints
             [FromServices] NubArca.Api.Admin.AdminJobCatalogService catalog,
             CancellationToken cancellationToken) =>
             Results.Ok(await catalog.PendingCountsAsync(cancellationToken)))
-            .WithName("AdminJobsPending").RequireAuthorization(CookieSessionValidator.AdminRole);
+            .WithName("AdminJobsPending").RequirePermission(Permissions.AdminJobsManage);
 
         // Admin console: enqueue a catalogued job with validated parameters. Mirrors
         // `jobs enqueue` (same job types + payloads + idempotency keys). The submitted
@@ -162,7 +163,7 @@ public static class AdminJobsEndpoints
 
             return Results.Ok(new NubArca.Api.Admin.AdminJobEnqueueResponse(
                 job.Id, spec.JobType, alreadyQueued));
-        }).WithName("AdminJobsEnqueue").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminJobsEnqueue").RequirePermission(Permissions.AdminJobsManage);
 
         return app;
     }

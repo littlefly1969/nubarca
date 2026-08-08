@@ -39,6 +39,39 @@ is built is described by `ARCHITECTURE.md`.
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
+- **Authorization is permissions; roles are only bundles.** An endpoint names a
+  permission (`.RequirePermission(Permissions.PeopleAccess)`), never a role, and
+  the handler reads the database on every request — which is why a role or
+  permission change takes effect on the next request with no re-login and no
+  second session subsystem. Two things are easy to undo by accident. The
+  authorization handler is registered **scoped**, so it receives the request's
+  own service provider; as a singleton it would capture the ROOT provider and
+  answer every later request from the first one's cached permissions, and a role
+  change would appear not to work at all. And **Member carries every
+  non-administrative permission** — that is the migration contract, because every
+  pre-role non-admin account became a Member. Adding a key to the catalogue
+  without adding it to Member silently removes a capability from every existing
+  account.
+- **An Administrator's authority is not deniable.** The resolver ignores
+  overrides entirely for an Administrator, and the admin API refuses to store a
+  deny of an administrative permission on one. Without both, one administrator
+  could quietly remove another's ability to put it back.
+- **`SecurityVersion` invalidates sessions; permissions do not need it.** A
+  credential event (self-service change, admin reset, completed recovery) bumps
+  the version in the same transaction as the hash, and the cookie carries the
+  version it was minted with. A user changing their OWN password is re-issued a
+  cookie at the new version, so they sign out their other devices and not the
+  browser they are using. A cookie predating the claim is read as version 1 —
+  deliberately the migration default, not "whatever the row says now", because
+  adopting the current value would let a pre-upgrade cookie survive a password
+  reset that happened after the upgrade.
+- **The recovery token lives in the fragment, and only as a digest.** The reset
+  URL is built on the operator's `Mail__PublicOrigin`, never the request's Host
+  header, and `#token=` is never sent to a server — so it cannot reach a
+  reverse-proxy access log. The database stores `SHA-256(raw)` only. The request
+  endpoint answers one generic 202 for a real address, an unknown one, a
+  disabled account and a failed delivery alike; the service returns nothing, so
+  there is no result for an endpoint to leak by accident.
 - **The authenticated shell owns the viewport; `.app-main` owns the scrolling.**
   `.app-shell` is exactly one dynamic viewport tall, the top bar and the sidebar
   are rows of it, and `.app-main` is the only box with `overflow-y: auto`. The

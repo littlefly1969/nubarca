@@ -4,6 +4,67 @@ This changelog begins at the NubArca product baseline. Earlier development
 happened under a different product name; that history is preserved in the
 originating repository and is deliberately not reproduced here.
 
+## Unreleased
+
+### Identity & Access
+
+Authorization moved from a single `IsAdmin` boolean to roles, feature
+permissions and per-user exceptions, and password recovery by email arrived
+alongside it. No public registration was added.
+
+- **Roles** — three built-in keys: `Administrator`, `Member`, `Restricted`.
+  Custom roles remain out of scope. `Member` carries every non-administrative
+  permission, because that is what every pre-role non-admin account became:
+  existing users keep exactly the access they had.
+- **Permissions** — one catalogue of feature-surface keys (`people.access`,
+  `semantic-search.access`, `laboratory.access` and its two sections,
+  `cloud-functions.access`, `private-vault.access`, `tv.manage`, and four
+  separate administration permissions). The catalogue is authoritative: an
+  unknown key is rejected server-side and never stored.
+- **Per-user overrides** — an explicit grant or deny per (user, permission),
+  layered over the role baseline. An Administrator always holds the complete
+  catalogue and overrides are not consulted for one, so a deny can never remove
+  the authority that would let another administrator restore it.
+- **Server-side enforcement** — People, semantic search, the Laboratory and its
+  sections, Cloud Functions, the Private Vault, TV device management and each
+  administration surface are gated by ASP.NET Core policies. Frontend hiding is
+  UX only. Ordinary search, files, media, albums, sharing and trash stay open to
+  every authenticated user, so a Restricted account keeps the whole core
+  personal cloud — and semantic search is refused without disabling the media
+  endpoint that also supports it.
+- **Immediate effect** — the authorization handler reads current database state
+  per request, so a role or permission change applies on the next request with
+  no re-login and no second session subsystem.
+- **Session versioning** — a credential change (self-service, admin reset, or a
+  completed recovery) increments `User.SecurityVersion` in the same transaction
+  as the new hash, invalidating sessions opened with the old password. Changing
+  your own password signs out your other devices, not the browser you used.
+- **Password recovery by email** — opt-in and OFF by default. The request
+  endpoint answers one generic message for every case, so it discloses nothing
+  about which addresses exist; it is rate limited per source IP and per
+  normalized email. Tokens carry 256 bits of entropy, are stored only as a
+  SHA-256 digest, are single-use with a short expiry, and travel in the URL
+  fragment so they never reach a reverse-proxy log. A reset does not sign the
+  user in. With mail unconfigured, authentication is unaffected and the
+  administrator's manual reset remains the recovery path.
+- **Richer profiles** — first/last name, time zone, last login and
+  password-changed-at, editable by the user and by an administrator. Email
+  remains the login and recovery identity and is not editable from either.
+- **Admin user management** — reorganised into Profile / Access / Security
+  instead of a row that grew a button per capability. The Access editor shows,
+  for every permission, whether it is inherited from the role, explicitly
+  granted or explicitly denied.
+- **Operator CLI** — `users set-role --email <addr> --role <role>` assigns any
+  built-in role and refuses to demote the last active administrator.
+  `users revoke-admin` now returns an account to `Member` rather than removing
+  its feature access.
+
+Migration `AddRolesPermissionsAndPasswordRecovery` adds `RoleKey`, backfills
+`Administrator` from `IsAdmin` and `Member` for everybody else, then drops
+`IsAdmin`. The ordering is deliberate and covered by a PostgreSQL integration
+test. `isAdmin` survives only as a computed compatibility field on
+`/api/auth/me` and the admin import user picker; nothing stores it.
+
 ## 0.3.0
 
 NubArca `0.3.0` is the consolidated product baseline: one coherent identity

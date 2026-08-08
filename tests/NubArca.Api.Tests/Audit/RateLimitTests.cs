@@ -137,6 +137,10 @@ public sealed class RateLimitTests : IDisposable
                 services.AddScoped<IFileItemService, FileItemService>();
                 services.AddScoped<IFileThumbnailService, FileThumbnailService>();
                 services.AddScoped<IAuthService, AuthService>();
+                // Login projects the caller's effective permissions, so this
+                // minimal host needs the resolver too.
+                services.AddScoped<NubArca.Api.Access.IUserPermissionService,
+                    NubArca.Api.Access.UserPermissionService>();
                 services.AddScoped<IShareLinkService, ShareLinkService>();
                 services.AddScoped<IAuditLogger, AuditLogger>();
             });

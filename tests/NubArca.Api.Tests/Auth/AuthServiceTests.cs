@@ -29,7 +29,7 @@ public sealed class AuthServiceTests : IDisposable
         _db.Database.EnsureCreated();
 
         _users = new UserService(_db, TimeProvider.System);
-        _auth = new AuthService(_db, _users, new PasswordHasher<User>());
+        _auth = new AuthService(_db, _users, new PasswordHasher<User>(), TimeProvider.System);
     }
 
     public void Dispose()

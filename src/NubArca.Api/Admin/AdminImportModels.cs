@@ -33,6 +33,9 @@ public sealed record AdminImportBrowseResponse(
     string? ParentRelativePath,
     IReadOnlyList<AdminImportDirectoryEntry> Directories);
 
+// The import target picker's view of a user. `IsAdmin` is COMPUTED from the
+// role on the way out (it drives one badge in the picker); the stored source of
+// truth is RoleKey, and nothing writes both.
 public sealed record AdminImportUserDto(
     Guid Id,
     string Email,

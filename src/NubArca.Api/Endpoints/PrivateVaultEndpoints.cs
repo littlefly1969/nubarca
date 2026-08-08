@@ -3,6 +3,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.Vault;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -51,7 +52,7 @@ public static class PrivateVaultEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var status = await vault.GetStatusAsync(ownerUserId, cancellationToken);
             return Results.Ok(status);
-        }).WithName("GetPrivateVaultStatus").RequireAuthorization();
+        }).WithName("GetPrivateVaultStatus").RequirePermission(Permissions.PrivateVaultAccess);
 
         app.MapPost("/api/private-vault/setup", async (
             HttpContext httpContext,
@@ -74,7 +75,7 @@ public static class PrivateVaultEndpoints
                 default:
                     return Results.BadRequest(new { error = "Password must be at least 8 characters." });
             }
-        }).WithName("SetupPrivateVault").RequireAuthorization().RequireRateLimiting(VaultUnlockRateLimitPolicy);
+        }).WithName("SetupPrivateVault").RequirePermission(Permissions.PrivateVaultAccess).RequireRateLimiting(VaultUnlockRateLimitPolicy);
 
         app.MapPost("/api/private-vault/unlock", async (
             HttpContext httpContext,
@@ -95,7 +96,7 @@ public static class PrivateVaultEndpoints
             await audit.LogAsync(ownerUserId, AuditActions.PrivateVaultUnlock,
                 AuditEntityTypes.PrivateVault, null, ip, null, cancellationToken);
             return Results.Ok(result);
-        }).WithName("UnlockPrivateVault").RequireAuthorization().RequireRateLimiting(VaultUnlockRateLimitPolicy);
+        }).WithName("UnlockPrivateVault").RequirePermission(Permissions.PrivateVaultAccess).RequireRateLimiting(VaultUnlockRateLimitPolicy);
 
         app.MapPost("/api/private-vault/lock", async (
             HttpContext httpContext,
@@ -109,7 +110,7 @@ public static class PrivateVaultEndpoints
             await audit.LogAsync(ownerUserId, AuditActions.PrivateVaultLock,
                 AuditEntityTypes.PrivateVault, null, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("LockPrivateVault").RequireAuthorization();
+        }).WithName("LockPrivateVault").RequirePermission(Permissions.PrivateVaultAccess);
 
         app.MapGet("/api/private-vault/root", async (
             HttpContext httpContext,
@@ -124,7 +125,7 @@ public static class PrivateVaultEndpoints
             }
             var listing = await vault.ListRootAsync(ownerUserId, vaultId.Value, cancellationToken);
             return Results.Ok(listing);
-        }).WithName("ListPrivateVaultRoot").RequireAuthorization();
+        }).WithName("ListPrivateVaultRoot").RequirePermission(Permissions.PrivateVaultAccess);
 
         app.MapGet("/api/private-vault/folders/{id:guid}", async (
             Guid id,
@@ -140,7 +141,7 @@ public static class PrivateVaultEndpoints
             }
             var listing = await vault.ListFolderAsync(ownerUserId, vaultId.Value, id, cancellationToken);
             return listing is null ? Results.NotFound() : Results.Ok(listing);
-        }).WithName("ListPrivateVaultFolder").RequireAuthorization();
+        }).WithName("ListPrivateVaultFolder").RequirePermission(Permissions.PrivateVaultAccess);
 
         app.MapPost("/api/private-vault/move-in", async (
             HttpContext httpContext,
@@ -164,7 +165,7 @@ public static class PrivateVaultEndpoints
                 AuditEntityTypes.PrivateVault, null, ip,
                 new { movedFiles = result.MovedFiles, movedFolders = result.MovedFolders }, cancellationToken);
             return Results.Ok(result);
-        }).WithName("PrivateVaultMoveIn").RequireAuthorization();
+        }).WithName("PrivateVaultMoveIn").RequirePermission(Permissions.PrivateVaultAccess);
 
         app.MapPost("/api/private-vault/move-out", async (
             HttpContext httpContext,
@@ -188,7 +189,7 @@ public static class PrivateVaultEndpoints
                 AuditEntityTypes.PrivateVault, null, ip,
                 new { movedFiles = result.MovedFiles, movedFolders = result.MovedFolders }, cancellationToken);
             return Results.Ok(result);
-        }).WithName("PrivateVaultMoveOut").RequireAuthorization();
+        }).WithName("PrivateVaultMoveOut").RequirePermission(Permissions.PrivateVaultAccess);
 
         // ── Private Vault media (slice 4) ───────────────────────────────────────────
         // Owner-private DERIVED-media only: small/medium thumbnail, medium preview, or
@@ -244,7 +245,7 @@ public static class PrivateVaultEndpoints
                 return Results.NotFound();
             }
             return await ServeVaultDerivativeAsync(httpContext, vault, thumbnails, fileId, requested, cancellationToken);
-        }).WithName("GetPrivateVaultMediaThumbnail").RequireAuthorization();
+        }).WithName("GetPrivateVaultMediaThumbnail").RequirePermission(Permissions.PrivateVaultAccess);
 
         // Medium photo preview (viewer/lightbox). A non-photo file simply has no medium
         // derivative → generic 404. No original fallback.
@@ -256,7 +257,7 @@ public static class PrivateVaultEndpoints
             CancellationToken cancellationToken) =>
             await ServeVaultDerivativeAsync(
                 httpContext, vault, thumbnails, fileId, ThumbnailSizes.Medium, cancellationToken))
-            .WithName("GetPrivateVaultMediaPreview").RequireAuthorization();
+            .WithName("GetPrivateVaultMediaPreview").RequirePermission(Permissions.PrivateVaultAccess);
 
         // Video poster. A non-video file has no poster derivative → generic 404.
         app.MapGet("/api/private-vault/media/{fileId:guid}/poster", async (
@@ -267,7 +268,7 @@ public static class PrivateVaultEndpoints
             CancellationToken cancellationToken) =>
             await ServeVaultDerivativeAsync(
                 httpContext, vault, thumbnails, fileId, ThumbnailSizes.Poster, cancellationToken))
-            .WithName("GetPrivateVaultMediaPoster").RequireAuthorization();
+            .WithName("GetPrivateVaultMediaPoster").RequirePermission(Permissions.PrivateVaultAccess);
 
         // Sanitized read-only detail for the viewer / info panel.
         app.MapGet("/api/private-vault/media/{fileId:guid}/info", async (
@@ -285,7 +286,7 @@ public static class PrivateVaultEndpoints
             }
             var info = await vault.GetMediaInfoAsync(ownerUserId, vaultId.Value, fileId, cancellationToken);
             return info is null ? Results.NotFound() : Results.Ok(info);
-        }).WithName("GetPrivateVaultMediaInfo").RequireAuthorization();
+        }).WithName("GetPrivateVaultMediaInfo").RequirePermission(Permissions.PrivateVaultAccess);
 
         return app;
     }

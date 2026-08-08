@@ -11,6 +11,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Plates;
 using NubArca.Api.Security;
 using NubArca.Api.Tv;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -112,7 +113,7 @@ public static class TvEndpoints
                     ownerUserId, httpContext.Connection.RemoteIpAddress?.ToString(), null, cancellationToken);
             }
             return Results.Ok(result.Response);
-        }).WithName("ApproveTvPairing").RequireAuthorization();
+        }).WithName("ApproveTvPairing").RequirePermission(Permissions.TvManage);
 
         app.MapGet("/api/tv/session", async (
             HttpContext httpContext,
@@ -161,7 +162,7 @@ public static class TvEndpoints
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             return Results.Ok(await tv.ListOwnerSessionsAsync(ownerUserId, cancellationToken));
-        }).WithName("ListTvDevices").RequireAuthorization();
+        }).WithName("ListTvDevices").RequirePermission(Permissions.TvManage);
 
         app.MapDelete("/api/tv-devices/{sessionId:guid}", async (
             Guid sessionId,
@@ -182,7 +183,7 @@ public static class TvEndpoints
             await audit.LogAsync(ownerUserId, AuditActions.TvSessionRevoke, AuditEntityTypes.TvSession,
                 sessionId, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("RevokeTvDevice").RequireAuthorization();
+        }).WithName("RevokeTvDevice").RequirePermission(Permissions.TvManage);
 
         // --- TV Personal Area: owner-side PIN management ---
         // OWNER endpoints (normal auth cookie), deliberately NOT under /api/tv (the
@@ -198,7 +199,7 @@ public static class TvEndpoints
             SetNoStore(httpContext);
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             return Results.Ok(await personal.GetPinStatusAsync(ownerUserId, cancellationToken));
-        }).WithName("GetTvPersonalPinStatus").RequireAuthorization();
+        }).WithName("GetTvPersonalPinStatus").RequirePermission(Permissions.TvManage);
 
         // Owner-authenticated set/change/reset. No old PIN is required (the owner
         // session IS the authorization) and no "would the old PIN have matched" signal
@@ -235,7 +236,7 @@ public static class TvEndpoints
                 new { grantsRevoked = result.GrantsRevoked }, cancellationToken);
             return Results.Ok(new TvPersonalPinStatusDto(true, result.UpdatedAt));
         }).WithName("SetTvPersonalPin")
-            .RequireAuthorization()
+            .RequirePermission(Permissions.TvManage)
             .RequireRateLimiting(TvPersonalUnlockRateLimitPolicy);
 
         // --- TV Personal Area: TV-session endpoints ---

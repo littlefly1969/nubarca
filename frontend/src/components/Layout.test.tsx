@@ -1,3 +1,4 @@
+import { PERMISSIONS } from '@nubarca/api-client';
 import { StrictMode, useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
@@ -18,15 +19,19 @@ afterEach(() => {
 
 function renderLayout({
   isAdmin = false,
+  permissions,
   value,
   initialEntries = ['/'],
 }: {
   isAdmin?: boolean;
+  // A narrower authority than the isAdmin/Member shorthands, for the
+  // permission-gating cases.
+  permissions?: readonly string[];
   value?: Parameters<typeof AuthedWrapper>[0]['value'];
   initialEntries?: string[];
 } = {}) {
   return render(
-    <AuthedWrapper isAdmin={isAdmin} value={value}>
+    <AuthedWrapper isAdmin={isAdmin} permissions={permissions} value={value}>
       <ThemeProvider>
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
@@ -101,6 +106,49 @@ describe('Layout primary navigation', () => {
     renderLayout({ isAdmin: true });
     expect(sidebar().getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
     expect(sidebar().getByRole('link', { name: 'Utenti' })).toHaveAttribute('href', '/admin/users');
+  });
+
+  // ------------------------------------------------- permission-aware nav
+
+  it('omits People and the Laboratory for a Restricted user', () => {
+    renderLayout({ permissions: [] });
+    const nav = sidebar();
+    expect(nav.queryByRole('link', { name: 'Volti' })).not.toBeInTheDocument();
+    expect(nav.queryByRole('link', { name: 'Laboratorio' })).not.toBeInTheDocument();
+    expect(nav.queryByRole('link', { name: 'Funzioni cloud' })).not.toBeInTheDocument();
+    expect(nav.queryByRole('link', { name: 'Privato' })).not.toBeInTheDocument();
+    // …while the core personal cloud is untouched.
+    expect(nav.getByRole('link', { name: 'File' })).toBeInTheDocument();
+    expect(nav.getByRole('link', { name: 'Libreria' })).toBeInTheDocument();
+    expect(nav.getByRole('link', { name: 'Cestino' })).toBeInTheDocument();
+  });
+
+  it('shows People as soon as the permission is granted', () => {
+    renderLayout({ permissions: [PERMISSIONS.peopleAccess] });
+    expect(sidebar().getByRole('link', { name: 'Volti' })).toHaveAttribute('href', '/people');
+  });
+
+  it('shows only the administration destinations the user holds', () => {
+    // Holding one administrative permission must not advertise the others.
+    renderLayout({ permissions: [PERMISSIONS.adminJobsManage] });
+    const nav = sidebar();
+    expect(nav.getByRole('heading', { name: 'Amministrazione' })).toBeInTheDocument();
+    expect(nav.getByRole('link', { name: 'Processi' })).toHaveAttribute('href', '/admin/jobs');
+    expect(nav.queryByRole('link', { name: 'Utenti' })).not.toBeInTheDocument();
+    expect(nav.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  it('drives the mobile drawer from the same model as the desktop rail', async () => {
+    // One information architecture: a permission hidden in the rail must be
+    // hidden in the drawer too, because both read the same nav model.
+    const user = userEvent.setup();
+    renderLayout({ permissions: [PERMISSIONS.peopleAccess] });
+
+    await user.click(screen.getByTestId('nav-menu-button'));
+    const drawer = within(screen.getByRole('dialog'));
+    expect(drawer.getByRole('link', { name: 'Volti' })).toBeInTheDocument();
+    expect(drawer.queryByRole('link', { name: 'Laboratorio' })).not.toBeInTheDocument();
+    expect(drawer.queryByRole('link', { name: 'Utenti' })).not.toBeInTheDocument();
   });
 
   it('marks the current destination as the active nav link', () => {
@@ -238,7 +286,7 @@ describe('Layout mobile drawer', () => {
     const { rerender } = render(
       <AuthedWrapper>
         <MemoryRouter initialEntries={['/media']}>
-          <NavDrawer isAdmin={false} onClose={onClose} />
+          <NavDrawer permissions={[]} onClose={onClose} />
         </MemoryRouter>
       </AuthedWrapper>,
     );
@@ -249,7 +297,7 @@ describe('Layout mobile drawer', () => {
       rerender(
         <AuthedWrapper>
           <MemoryRouter initialEntries={['/media']}>
-            <NavDrawer isAdmin={false} onClose={() => onClose()} />
+            <NavDrawer permissions={[]} onClose={() => onClose()} />
           </MemoryRouter>
         </AuthedWrapper>,
       );
@@ -344,7 +392,9 @@ describe('Layout user menu', () => {
     const mock = installFetchMock({
       'PUT /api/auth/me/language': () => jsonResponse({
         id: 'user-1', email: 'dev@nubarca.local', displayName: 'Dev User',
-        isAdmin: false, language: 'en',
+        firstName: null, lastName: null, isAdmin: false,
+        role: 'Member', effectivePermissions: [], language: 'en',
+        timeZone: null, lastLoginAt: null,
       }),
     });
 

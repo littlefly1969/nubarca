@@ -4,6 +4,7 @@ using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.Plates;
 using NubArca.Api.Storage;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -76,7 +77,7 @@ public static class PlatesEndpoints
                     new { error = PlateImageValidationException.TooLarge },
                     statusCode: StatusCodes.Status413PayloadTooLarge);
             }
-        }).WithName("UploadPlateImage").RequireAuthorization();
+        }).WithName("UploadPlateImage").RequireLaboratoryPlates();
 
         // Add EXISTING owner gallery images into the hidden plates container by
         // fileItemId — no bytes are copied (each acquires an additional reference to the
@@ -121,7 +122,7 @@ public static class PlatesEndpoints
                 ownerUserId, AuditActions.PlateAddFromGallery, AuditEntityTypes.Plate, null, ip,
                 new { source = "gallery", added = added.Count, skipped = skipped.Count }, cancellationToken);
             return Results.Ok(new { added, skipped });
-        }).WithName("AddPlateImagesFromGallery").RequireAuthorization();
+        }).WithName("AddPlateImagesFromGallery").RequireLaboratoryPlates();
 
         app.MapGet("/api/plates/images", async (
             HttpContext httpContext,
@@ -131,7 +132,7 @@ public static class PlatesEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var items = await plates.ListAsync(ownerUserId, cancellationToken);
             return Results.Ok(items);
-        }).WithName("ListPlateImages").RequireAuthorization();
+        }).WithName("ListPlateImages").RequireLaboratoryPlates();
 
         app.MapGet("/api/plates/images/{id:guid}", async (
             Guid id,
@@ -142,7 +143,7 @@ public static class PlatesEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var detail = await plates.GetDetailAsync(ownerUserId, id, cancellationToken);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
-        }).WithName("GetPlateImage").RequireAuthorization();
+        }).WithName("GetPlateImage").RequireLaboratoryPlates();
 
         app.MapDelete("/api/plates/images/{id:guid}", async (
             Guid id,
@@ -160,7 +161,7 @@ public static class PlatesEndpoints
             }
             await audit.LogAsync(ownerUserId, AuditActions.PlateDelete, AuditEntityTypes.Plate, id, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("DeletePlateImage").RequireAuthorization();
+        }).WithName("DeletePlateImage").RequireLaboratoryPlates();
 
         app.MapGet("/api/plates/images/{id:guid}/thumbnail", async (
             Guid id,
@@ -186,7 +187,7 @@ public static class PlatesEndpoints
             }
             SetPrivateDerivativeCache(httpContext);
             return Results.File(content.Content, content.ContentType);
-        }).WithName("GetPlateImageThumbnail").RequireAuthorization();
+        }).WithName("GetPlateImageThumbnail").RequireLaboratoryPlates();
 
         app.MapGet("/api/plates/images/{id:guid}/preview", async (
             Guid id,
@@ -210,7 +211,7 @@ public static class PlatesEndpoints
             }
             SetPrivateDerivativeCache(httpContext);
             return Results.File(content.Content, content.ContentType);
-        }).WithName("GetPlateImagePreview").RequireAuthorization();
+        }).WithName("GetPlateImagePreview").RequireLaboratoryPlates();
 
         app.MapGet("/api/plates/images/{id:guid}/original", async (
             Guid id,
@@ -239,7 +240,7 @@ public static class PlatesEndpoints
             }
             await audit.LogAsync(ownerUserId, AuditActions.PlateDownload, AuditEntityTypes.Plate, id, ip, null, cancellationToken);
             return Results.File(content.Content, content.ContentType, content.FileName);
-        }).WithName("GetPlateImageOriginal").RequireAuthorization();
+        }).WithName("GetPlateImageOriginal").RequireLaboratoryPlates();
 
         // Request owner-private ALPR analysis of a plate image. Creates/queues a job and
         // returns quickly — the detection + OCR run on the WORKER, never in this request
@@ -262,7 +263,7 @@ public static class PlatesEndpoints
                 ownerUserId, AuditActions.PlateAnalyzeRequest, AuditEntityTypes.Plate, id, ip,
                 new { jobId = summary.Id, status = summary.Status }, cancellationToken);
             return Results.Accepted($"/api/plates/images/{id}/analysis/latest", summary);
-        }).WithName("RequestPlateAnalysis").RequireAuthorization();
+        }).WithName("RequestPlateAnalysis").RequireLaboratoryPlates();
 
         // Latest analysis summary for polling (status + plate count). Owner-scoped.
         app.MapGet("/api/plates/images/{id:guid}/analysis/latest", async (
@@ -274,7 +275,7 @@ public static class PlatesEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var summary = await analysis.GetLatestSummaryAsync(ownerUserId, id, cancellationToken);
             return summary is null ? Results.NotFound() : Results.Ok(summary);
-        }).WithName("GetPlateAnalysisLatest").RequireAuthorization();
+        }).WithName("GetPlateAnalysisLatest").RequireLaboratoryPlates();
 
         return app;
     }

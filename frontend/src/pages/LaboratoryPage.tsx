@@ -1,4 +1,6 @@
-import { NavLink, Outlet } from 'react-router';
+import { Navigate, NavLink, Outlet } from 'react-router';
+import { PERMISSIONS, type PermissionKey } from '@nubarca/api-client';
+import { usePermissions } from '../auth/usePermissions';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -25,18 +27,29 @@ import type { MessageKey } from '../i18n';
 interface LabSection {
   to: string;
   labelKey: MessageKey;
+  // The section's own permission. The shell permission (laboratory.access) is
+  // required on top of it — that is the composite the server authorizes, so a
+  // user with Plates but not Aesthetics sees the Laboratory with one tab.
+  permission: PermissionKey;
 }
 
 export const LAB_SECTIONS: readonly LabSection[] = [
-  { to: '/lab/plates', labelKey: 'lab.plates' },
-  { to: '/lab/aesthetics', labelKey: 'lab.aesthetics' },
+  { to: '/lab/plates', labelKey: 'lab.plates', permission: PERMISSIONS.laboratoryPlates },
+  { to: '/lab/aesthetics', labelKey: 'lab.aesthetics', permission: PERMISSIONS.laboratoryAesthetics },
 ] as const;
 
-/** Where a bare /lab lands. */
+/** Where a bare /lab lands when the user holds every section. */
 export const LAB_DEFAULT_ROUTE = LAB_SECTIONS[0].to;
+
+/** The first section this user may actually open, or null if none. */
+export function firstAllowedLabRoute(permissions: readonly string[]): string | null {
+  return LAB_SECTIONS.find((s) => permissions.includes(s.permission))?.to ?? null;
+}
 
 export function LaboratoryPage() {
   const { t } = useI18n();
+  const perms = usePermissions();
+  const sections = LAB_SECTIONS.filter((section) => perms.has(section.permission));
 
   return (
     <section className="lab-workspace" aria-label={t('lab.heading')}>
@@ -45,7 +58,7 @@ export function LaboratoryPage() {
       </header>
 
       <nav className="lab-tabs" aria-label={t('lab.sectionsAria')}>
-        {LAB_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <NavLink
             key={section.to}
             to={section.to}
@@ -60,4 +73,13 @@ export function LaboratoryPage() {
       <Outlet />
     </section>
   );
+}
+
+// The index route for a bare /lab: land on the first section this user may
+// open rather than always on Plates, which would greet a user who only holds
+// Aesthetics with a forbidden page on their own Laboratory.
+export function LaboratoryIndexRedirect() {
+  const perms = usePermissions();
+  const target = firstAllowedLabRoute(perms.all);
+  return <Navigate to={target ?? LAB_DEFAULT_ROUTE} replace />;
 }

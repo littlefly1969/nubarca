@@ -35,8 +35,14 @@ function landingFor(returnTo: unknown): string {
           id: 'user-1',
           email: 'dev@nubarca.local',
           displayName: 'Dev User',
+          firstName: null,
+          lastName: null,
           isAdmin: false,
+          role: 'Member',
+          effectivePermissions: [],
           language: 'it',
+          timeZone: null,
+          lastLoginAt: null,
         },
       })}
     >

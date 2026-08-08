@@ -87,6 +87,19 @@ export async function post<T>(session: Session, path: string, body: unknown): Pr
   return (text ? JSON.parse(text) : null) as T;
 }
 
+export async function put<T>(session: Session, path: string, body: unknown): Promise<T> {
+  const response = await expectOk(
+    await fetch(`${API_URL}${path}`, {
+      method: 'PUT',
+      headers: { ...json, cookie: session.cookie },
+      body: JSON.stringify(body),
+    }),
+    `PUT ${path}`,
+  );
+  const text = await response.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
 export async function del(session: Session, path: string): Promise<void> {
   await expectOk(
     await fetch(`${API_URL}${path}`, { method: 'DELETE', headers: { cookie: session.cookie } }),

@@ -11,6 +11,13 @@ public class AppDbContext : DbContext
     }
 
     public DbSet<User> Users => Set<User>();
+
+    // Identity & Access: exceptions to a user's role baseline (one row per
+    // user+permission), and single-use hash-only password recovery tokens.
+    // Both are owned by the user row and cascade with it.
+    public DbSet<UserPermissionOverride> UserPermissionOverrides => Set<UserPermissionOverride>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<FileItem> FileItems => Set<FileItem>();
     public DbSet<BlobObject> BlobObjects => Set<BlobObject>();

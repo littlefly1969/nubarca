@@ -4,6 +4,7 @@ using NubArca.Api.Albums;
 using NubArca.Api.Files;
 using NubArca.Api.Folders;
 using NubArca.Api.Http;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -70,7 +71,7 @@ public static class GalleryMediaEndpoints
             return Results.Ok(new ImageListResponse(
                 items, pageSize, 0, items.Count, page.NextCursor, page.HasMore));
         }).WithName("SearchImagesSemantically")
-            .RequireAuthorization()
+            .RequirePermission(Permissions.SemanticSearchAccess)
             .RequireRateLimiting(SemanticSearchRateLimitPolicy);
 
         app.MapGet("/api/images", async (
@@ -102,12 +103,26 @@ public static class GalleryMediaEndpoints
             [FromServices] IAlbumService albums,
             [FromServices] NubArca.Api.Ai.Photos.PhotoSimilarityService similarity,
             [FromServices] NubArca.Api.Ai.Photos.GallerySemanticQueryService semantic,
+            [FromServices] IUserPermissionService userPermissions,
             CancellationToken cancellationToken) =>
         {
             // Bounded candidate set for the "similar photos in the gallery" bridge.
             const int SimilarRestrictCap = 500;
 
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+
+            // The semantic residual is the only part of this endpoint that needs
+            // `semantic-search.access`. Checked here rather than on the route so
+            // a user without it keeps the whole ordinary metadata/search/filter
+            // surface and is refused ONLY the semantic invocation.
+            if (!string.IsNullOrWhiteSpace(semanticQuery))
+            {
+                var effective = await userPermissions.GetEffectiveAsync(ownerUserId, cancellationToken);
+                if (!effective.Has(Permissions.SemanticSearchAccess))
+                {
+                    return Results.Forbid();
+                }
+            }
 
             // Common gallery-query surface (limit / q / sort / filters / people) is
             // parsed by the shared GalleryQueryParser — the same semantics the TV
@@ -652,7 +667,7 @@ public static class GalleryMediaEndpoints
                 page.StillIndexingManyItems ? "indexing" : "ok",
                 page.Total));
         }).WithName("SearchMediaSemantically")
-            .RequireAuthorization()
+            .RequirePermission(Permissions.SemanticSearchAccess)
             .RequireRateLimiting(SemanticSearchRateLimitPolicy);
 
         app.MapGet("/api/albums/{albumId:guid}/media", async (

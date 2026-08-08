@@ -4,7 +4,10 @@ import { Icon } from '../icons/Icon';
 import { buildNavGroups } from './navModel';
 
 interface AppNavProps {
-  isAdmin: boolean;
+  // The caller's effective permissions. Passed down rather than read from
+  // context here so the nav stays a pure function of its input and a test can
+  // render any authority without building an auth provider.
+  permissions: readonly string[];
   // Icons-only rail. Labels stay in the accessible name via `title` + the
   // visually-hidden span, so a collapsed rail is still usable with a screen
   // reader and with a mouse hover.
@@ -16,9 +19,9 @@ interface AppNavProps {
 // The nav item list, rendered identically by the desktop sidebar and the mobile
 // drawer. One component, one information architecture — there is no separate
 // mobile navigation model.
-export function AppNav({ isAdmin, collapsed = false, onNavigate }: AppNavProps) {
+export function AppNav({ permissions, collapsed = false, onNavigate }: AppNavProps) {
   const { t } = useI18n();
-  const groups = buildNavGroups({ isAdmin });
+  const groups = buildNavGroups({ permissions });
 
   return (
     <div className={`app-nav${collapsed ? ' is-collapsed' : ''}`}>

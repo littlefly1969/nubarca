@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AccountPage } from './AccountPage';
-import { AuthedWrapper, emptyResponse, errorResponse, installFetchMock } from '../test-utils';
+import { AuthedWrapper, emptyResponse, errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 
 afterEach(() => {
   cleanup();
@@ -142,5 +142,103 @@ describe('AccountPage', () => {
     });
     const body = document.body.textContent ?? '';
     expect(body).not.toContain('super-secret-new-1');
+  });
+  // ------------------------------------------------------------- profile
+
+  it('saves the profile fields a user owns', async () => {
+    const mock = installFetchMock({
+      'PUT /api/auth/me/profile': () => jsonResponse({
+        id: 'user-1',
+        email: 'dev@nubarca.local',
+        displayName: 'Renamed',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
+        isAdmin: false,
+        role: 'Member',
+        effectivePermissions: [],
+        language: 'it',
+        timeZone: null,
+        lastLoginAt: null,
+      }),
+    });
+    const user = userEvent.setup();
+
+    render(
+      <AuthedWrapper>
+        <AccountPage />
+      </AuthedWrapper>,
+    );
+
+    await user.clear(screen.getByLabelText('Nome visualizzato'));
+    await user.type(screen.getByLabelText('Nome visualizzato'), 'Renamed');
+    await user.type(screen.getByLabelText('Nome'), 'Ada');
+    await user.type(screen.getByLabelText('Cognome'), 'Lovelace');
+    await user.click(screen.getByRole('button', { name: 'Salva profilo' }));
+
+    await waitFor(() => {
+      expect(mock.calls.some((c) => c.url === '/api/auth/me/profile')).toBe(true);
+    });
+    const call = mock.calls.find((c) => c.url === '/api/auth/me/profile')!;
+    expect(JSON.parse(call.body ?? '{}')).toMatchObject({
+      displayName: 'Renamed',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    });
+    expect(await screen.findByText('Profilo aggiornato')).toBeInTheDocument();
+  });
+
+  it('offers no control for role, permissions, disabled state or email', () => {
+    // What is absent is the point: none of these are editable by their owner,
+    // and the API this page calls has no field for them either.
+    installFetchMock({});
+
+    render(
+      <AuthedWrapper>
+        <AccountPage />
+      </AuthedWrapper>,
+    );
+
+    expect(screen.queryByLabelText('Ruolo')).not.toBeInTheDocument();
+    expect(screen.queryByText('Eccezione')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Disabilita' })).not.toBeInTheDocument();
+    // Email is shown as the identity, and only as a read-only field.
+    expect(screen.getByLabelText('Email')).toBeDisabled();
+  });
+
+  it('never sends the role or permissions with a profile save', async () => {
+    const mock = installFetchMock({
+      'PUT /api/auth/me/profile': () => jsonResponse({
+        id: 'user-1',
+        email: 'dev@nubarca.local',
+        displayName: 'Dev User',
+        firstName: null,
+        lastName: null,
+        isAdmin: false,
+        role: 'Member',
+        effectivePermissions: [],
+        language: 'it',
+        timeZone: null,
+        lastLoginAt: null,
+      }),
+    });
+    const user = userEvent.setup();
+
+    render(
+      <AuthedWrapper>
+        <AccountPage />
+      </AuthedWrapper>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Salva profilo' }));
+
+    await waitFor(() => {
+      expect(mock.calls.some((c) => c.url === '/api/auth/me/profile')).toBe(true);
+    });
+    const body = JSON.parse(
+      mock.calls.find((c) => c.url === '/api/auth/me/profile')!.body ?? '{}',
+    ) as Record<string, unknown>;
+    for (const forbidden of ['role', 'roleKey', 'isAdmin', 'permissions', 'effectivePermissions', 'email', 'disabledAt']) {
+      expect(body).not.toHaveProperty(forbidden);
+    }
   });
 });

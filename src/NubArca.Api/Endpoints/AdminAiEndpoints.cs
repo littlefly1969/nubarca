@@ -8,6 +8,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.Jobs;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -51,7 +52,7 @@ public static class AdminAiEndpoints
                 mediumPreviewMaxEdge = options.Value.EdgeFor(ThumbnailSizes.Medium),
                 job,
             });
-        }).WithName("AdminMediumPreviewStatus").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminMediumPreviewStatus").RequirePermission(Permissions.AdminDashboard);
 
         app.MapPost("/api/admin/media/previews/medium/rebuild", async (
             HttpContext httpContext,
@@ -81,7 +82,7 @@ public static class AdminAiEndpoints
                 status = job.Status,
                 mediumPreviewMaxEdge = options.Value.EdgeFor(ThumbnailSizes.Medium),
             });
-        }).WithName("AdminMediumPreviewRebuild").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminMediumPreviewRebuild").RequirePermission(Permissions.AdminDashboard);
 
         // ── AI substrate (Phase 0C): admin-only operational status + aggregate
         // diagnostics. Aggregate/status data only — no raw vectors, blob ids, SHA,
@@ -94,7 +95,7 @@ public static class AdminAiEndpoints
         {
             var snapshot = await status.GetStatusAsync(cancellationToken);
             return Results.Ok(snapshot);
-        }).WithName("AiStatus").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AiStatus").RequirePermission(Permissions.AdminDashboard);
 
         app.MapGet("/api/admin/ai/diagnostics", async (
             [FromServices] AiDiagnosticsAggregator aggregator,
@@ -102,7 +103,7 @@ public static class AdminAiEndpoints
         {
             var snapshot = await aggregator.AggregateAsync(cancellationToken);
             return Results.Ok(snapshot);
-        }).WithName("AiDiagnostics").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AiDiagnostics").RequirePermission(Permissions.AdminDashboard);
 
         // Face Substrate v0: admin-only face settings + diagnostics. Returns the ACTIVE
         // similarity thresholds + safety caps (the admin-editable extension point),
@@ -114,7 +115,7 @@ public static class AdminAiEndpoints
             CancellationToken cancellationToken) =>
         {
             return Results.Ok(await faces.GetAsync(cancellationToken));
-        }).WithName("AiFaceSettings").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AiFaceSettings").RequirePermission(Permissions.AdminDashboard);
 
         // Admin write of the face similarity thresholds (People v0). Validated ranges;
         // persisted as non-secret overrides in ai_settings (layered over config). Returns
@@ -153,7 +154,7 @@ public static class AdminAiEndpoints
             {
                 return Results.BadRequest(new { error = "Invalid settings.", details = ex.Errors });
             }
-        }).WithName("AiFaceSettingsUpdate").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AiFaceSettingsUpdate").RequirePermission(Permissions.AdminDashboard);
 
         // (The bounded face-job triggers formerly here — POST /api/admin/ai/faces/jobs/
         // {kind} — were superseded by the unified admin jobs console:

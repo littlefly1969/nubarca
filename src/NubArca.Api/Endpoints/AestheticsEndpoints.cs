@@ -6,6 +6,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.Storage;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -177,7 +178,7 @@ public static class AestheticsEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var page = await lab.ListAsync(ownerUserId, cursor, limit ?? 50, cancellationToken);
             return Results.Ok(page);
-        }).WithName("ListAestheticLabItems").RequireAuthorization();
+        }).WithName("ListAestheticLabItems").RequireLaboratoryAesthetics();
 
         // Add selected gallery images to the lab (acquire blob refs, no byte copy).
         app.MapPost("/api/aesthetics-lab/items/from-gallery", async (
@@ -220,7 +221,7 @@ public static class AestheticsEndpoints
                 ownerUserId, AuditActions.AestheticLabAdd, AuditEntityTypes.AestheticLabItem, null, ip,
                 new { source = "gallery", added = added.Count, skipped = skipped.Count }, cancellationToken);
             return Results.Ok(new { added, skipped });
-        }).WithName("AddAestheticLabFromGallery").RequireAuthorization();
+        }).WithName("AddAestheticLabFromGallery").RequireLaboratoryAesthetics();
 
         // Direct upload straight into the lab (never becomes a FileItem / Gallery item).
         app.MapPost("/api/aesthetics-lab/items/upload", async (
@@ -265,7 +266,7 @@ public static class AestheticsEndpoints
             {
                 return Results.Json(new { error = AestheticLabValidationException.TooLarge }, statusCode: StatusCodes.Status413PayloadTooLarge);
             }
-        }).WithName("UploadAestheticLabItem").RequireAuthorization();
+        }).WithName("UploadAestheticLabItem").RequireLaboratoryAesthetics();
 
         app.MapGet("/api/aesthetics-lab/items/{id:guid}", async (
             Guid id,
@@ -277,7 +278,7 @@ public static class AestheticsEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var detail = await lab.GetDetailAsync(ownerUserId, id, cancellationToken);
             return detail is null ? Results.NotFound() : Results.Ok(detail);
-        }).WithName("GetAestheticLabItem").RequireAuthorization();
+        }).WithName("GetAestheticLabItem").RequireLaboratoryAesthetics();
 
         app.MapDelete("/api/aesthetics-lab/items/{id:guid}", async (
             Guid id,
@@ -295,7 +296,7 @@ public static class AestheticsEndpoints
             }
             await audit.LogAsync(ownerUserId, AuditActions.AestheticLabRemove, AuditEntityTypes.AestheticLabItem, id, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("RemoveAestheticLabItem").RequireAuthorization();
+        }).WithName("RemoveAestheticLabItem").RequireLaboratoryAesthetics();
 
         app.MapGet("/api/aesthetics-lab/items/{id:guid}/thumbnail", async (
             Guid id,
@@ -313,7 +314,7 @@ public static class AestheticsEndpoints
             }
             SetPrivateDerivativeCache(httpContext);
             return Results.File(content.Content, content.ContentType);
-        }).WithName("GetAestheticLabItemThumbnail").RequireAuthorization();
+        }).WithName("GetAestheticLabItemThumbnail").RequireLaboratoryAesthetics();
 
         app.MapGet("/api/aesthetics-lab/items/{id:guid}/preview", async (
             Guid id,
@@ -329,7 +330,7 @@ public static class AestheticsEndpoints
             }
             SetPrivateDerivativeCache(httpContext);
             return Results.File(content.Content, content.ContentType);
-        }).WithName("GetAestheticLabItemPreview").RequireAuthorization();
+        }).WithName("GetAestheticLabItemPreview").RequireLaboratoryAesthetics();
 
         // Manually request analysis of a bounded batch. Creates one run + one durable
         // job PER item on the WORKER (Compute band); never runs inference in-request.
@@ -369,7 +370,7 @@ public static class AestheticsEndpoints
                 ownerUserId, AuditActions.AestheticAnalyzeRequest, AuditEntityTypes.AestheticRun, null, ip,
                 new { enqueued = result.Enqueued.Count, skipped = result.Skipped.Count }, cancellationToken);
             return Results.Accepted("/api/aesthetics-lab/items", result);
-        }).WithName("RequestAestheticAnalysis").RequireAuthorization();
+        }).WithName("RequestAestheticAnalysis").RequireLaboratoryAesthetics();
 
         app.MapGet("/api/aesthetics-lab/runs/{id:guid}", async (
             Guid id,
@@ -381,7 +382,7 @@ public static class AestheticsEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var run = await analysis.GetRunAsync(ownerUserId, id, cancellationToken);
             return run is null ? Results.NotFound() : Results.Ok(run);
-        }).WithName("GetAestheticRun").RequireAuthorization();
+        }).WithName("GetAestheticRun").RequireLaboratoryAesthetics();
 
         app.MapPost("/api/aesthetics-lab/runs/{id:guid}/cancel", async (
             Guid id,
@@ -400,7 +401,7 @@ public static class AestheticsEndpoints
             }
             await audit.LogAsync(ownerUserId, AuditActions.AestheticAnalyzeCancel, AuditEntityTypes.AestheticRun, id, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("CancelAestheticRun").RequireAuthorization();
+        }).WithName("CancelAestheticRun").RequireLaboratoryAesthetics();
 
         app.MapPost("/api/aesthetics-lab/runs/{id:guid}/retry", async (
             Guid id,
@@ -419,7 +420,7 @@ public static class AestheticsEndpoints
             }
             await audit.LogAsync(ownerUserId, AuditActions.AestheticAnalyzeRetry, AuditEntityTypes.AestheticRun, run.Id, ip, null, cancellationToken);
             return Results.Accepted($"/api/aesthetics-lab/runs/{run.Id}", run);
-        }).WithName("RetryAestheticRun").RequireAuthorization();
+        }).WithName("RetryAestheticRun").RequireLaboratoryAesthetics();
 
         return app;
     }

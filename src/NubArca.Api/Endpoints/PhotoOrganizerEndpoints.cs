@@ -3,6 +3,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Http;
 using NubArca.Api.MediaLibrary;
 using NubArca.Api.Organizer;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -155,7 +156,7 @@ public static class PhotoOrganizerEndpoints
             }
             var result = await organizer.DryRunAsync(ownerUserId, options, cancellationToken);
             return Results.Ok(result);
-        }).WithName("PhotoOrganizerDryRun").RequireAuthorization();
+        }).WithName("PhotoOrganizerDryRun").RequirePermission(Permissions.CloudFunctionsAccess);
 
         // POST /api/photo-organizer/date-taken/run — create a run + enqueue the job.
         app.MapPost("/api/photo-organizer/date-taken/run", async (
@@ -171,7 +172,7 @@ public static class PhotoOrganizerEndpoints
             }
             var result = await organizer.StartRunAsync(ownerUserId, options, cancellationToken);
             return Results.Ok(result);
-        }).WithName("PhotoOrganizerRun").RequireAuthorization();
+        }).WithName("PhotoOrganizerRun").RequirePermission(Permissions.CloudFunctionsAccess);
 
         // GET /api/photo-organizer/date-taken/runs/{id} — owner-scoped run status.
         app.MapGet("/api/photo-organizer/date-taken/runs/{id:guid}", async (
@@ -183,7 +184,7 @@ public static class PhotoOrganizerEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var status = await organizer.GetRunStatusAsync(ownerUserId, id, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("PhotoOrganizerRunStatus").RequireAuthorization();
+        }).WithName("PhotoOrganizerRunStatus").RequirePermission(Permissions.CloudFunctionsAccess);
 
         return app;
     }

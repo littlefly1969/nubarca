@@ -13,7 +13,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ADMIN,
   AI_TIMEOUT_MS,
+  LAB_PLATES,
   OTHER_OWNER,
   OWNER,
   SEED,
@@ -22,9 +24,11 @@ import {
   type Session,
   health,
   login,
+  get,
   media,
   mediaItemId,
   post,
+  put,
   semantic,
   upload,
   waitFor,
@@ -82,6 +86,15 @@ export interface SeedResult {
 
 const VIDEO_SECONDS = 12;
 
+/** The admin user list is the only place a user id is discoverable by email. */
+async function findUserId(admin: Session, email: string): Promise<string> {
+  const page = await get<{ items?: { id: string; email: string }[] }>(
+    admin, `/api/admin/users?q=${encodeURIComponent(email)}&includeDisabled=true`);
+  const found = (page.items ?? []).find((u) => u.email.toLowerCase() === email.toLowerCase());
+  if (!found) throw new Error(`seed: no user with email ${email}`);
+  return found.id;
+}
+
 export async function seed(): Promise<SeedResult> {
   rmSync(WORK, { recursive: true, force: true });
   mkdirSync(WORK, { recursive: true });
@@ -90,6 +103,20 @@ export async function seed(): Promise<SeedResult> {
 
   const owner = await login(OWNER.email, OWNER.password);
   const other = await login(OTHER_OWNER.email, OTHER_OWNER.password);
+
+  // Permission fixtures. Roles come from the CLI (scripts/seed.sh); the
+  // per-user EXCEPTIONS are set through the product's own admin API, so the
+  // seed exercises the same path an administrator uses.
+  //
+  // labplates is Restricted plus the Laboratory shell and Plates only — the
+  // "one section, not the other" case. Setting it here rather than in a spec
+  // keeps it identical for every browser project.
+  const admin = await login(ADMIN.email, ADMIN.password);
+  const labPlatesUserId = await findUserId(admin, LAB_PLATES.email);
+  await put(admin, `/api/admin/users/${labPlatesUserId}/permissions/laboratory.access`,
+    { effect: 'grant' });
+  await put(admin, `/api/admin/users/${labPlatesUserId}/permissions/laboratory.plates`,
+    { effect: 'grant' });
 
   // Seeding expects an empty library. Say so plainly instead of letting the
   // first upload fail with a bare 409 from the duplicate-name check.

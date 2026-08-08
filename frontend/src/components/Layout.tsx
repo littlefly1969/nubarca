@@ -79,7 +79,8 @@ export function Layout() {
     return null;
   }
 
-  const isAdmin = state.user.isAdmin;
+  // One permission list feeds both the desktop rail and the mobile drawer.
+  const permissions = state.user.effectivePermissions;
 
   return (
     <AppScrollProvider viewportRef={mainRef}>
@@ -130,7 +131,7 @@ export function Layout() {
         {/* Desktop rail. CSS hides it below the drawer breakpoint; the drawer
             renders the same AppNav there. */}
         <nav className="app-sidebar" aria-label={t('nav.primary')} data-testid="app-sidebar">
-          <AppNav isAdmin={isAdmin} collapsed={collapsed} />
+          <AppNav permissions={permissions} collapsed={collapsed} />
         </nav>
 
         {/* The application's scroll viewport. Every authenticated page scrolls
@@ -141,7 +142,7 @@ export function Layout() {
       </div>
 
       {drawerOpen && (
-        <NavDrawer isAdmin={isAdmin} onClose={closeDrawer} returnFocusRef={menuButtonRef} />
+        <NavDrawer permissions={permissions} onClose={closeDrawer} returnFocusRef={menuButtonRef} />
       )}
     </div>
     </AppScrollProvider>

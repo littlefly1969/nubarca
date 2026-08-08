@@ -7,6 +7,7 @@ using NubArca.Api.Cli;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Users;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Tests.Cli;
 
@@ -297,7 +298,7 @@ public sealed class CliEntryPointTests : IDisposable
         Assert.False(CliEntryPoint.IsCliInvocation(new[] { "--urls", "http://+:8080" }));
     }
 
-    // ---- slice 46: admin flag + grant-admin / revoke-admin ----------------
+    // ---- role assignment: --admin flag + grant-admin / revoke-admin -------
 
     [Fact]
     public async Task EnsureUser_With_Admin_Flag_Creates_Admin_User()
@@ -310,9 +311,9 @@ public sealed class CliEntryPointTests : IDisposable
             "--admin");
 
         Assert.Equal(0, exit);
-        Assert.Contains("as admin", stdout);
+        Assert.Contains("as an Administrator", stdout);
         var row = await _db.Users.AsNoTracking().SingleAsync();
-        Assert.True(row.IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, row.RoleKey);
     }
 
     [Fact]
@@ -326,7 +327,7 @@ public sealed class CliEntryPointTests : IDisposable
 
         Assert.Equal(0, exit);
         var row = await _db.Users.AsNoTracking().SingleAsync();
-        Assert.False(row.IsAdmin);
+        Assert.Equal(RoleKeys.Member, row.RoleKey);
     }
 
     [Fact]
@@ -338,7 +339,7 @@ public sealed class CliEntryPointTests : IDisposable
             "--display-name", "Alice",
             "--password", "strong-password-1");
         Assert.Equal(0, first.exit);
-        Assert.False((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Equal(RoleKeys.Member, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
 
         var second = await RunCli(
             "users", "ensure",
@@ -347,8 +348,8 @@ public sealed class CliEntryPointTests : IDisposable
             "--password", "strong-password-1",
             "--admin");
         Assert.Equal(0, second.exit);
-        Assert.Contains("granted admin", second.stdout);
-        Assert.True((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Contains("granted the Administrator role", second.stdout);
+        Assert.Equal(RoleKeys.Administrator, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
     }
 
     [Fact]
@@ -369,7 +370,7 @@ public sealed class CliEntryPointTests : IDisposable
             "--display-name", "Alice",
             "--password", "strong-password-1");
         Assert.Equal(0, second.exit);
-        Assert.True((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
     }
 
     [Fact]
@@ -386,8 +387,8 @@ public sealed class CliEntryPointTests : IDisposable
             "--email", "alice@example.com");
 
         Assert.Equal(0, exit);
-        Assert.Contains("is now admin", stdout);
-        Assert.True((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Contains($"now has the {RoleKeys.Administrator} role", stdout);
+        Assert.Equal(RoleKeys.Administrator, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
     }
 
     [Fact]
@@ -405,8 +406,8 @@ public sealed class CliEntryPointTests : IDisposable
             "--email", "alice@example.com");
 
         Assert.Equal(0, exit);
-        Assert.Contains("is now not admin", stdout);
-        Assert.False((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Contains($"now has the {RoleKeys.Member} role", stdout);
+        Assert.Equal(RoleKeys.Member, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
     }
 
     [Fact]
@@ -424,7 +425,7 @@ public sealed class CliEntryPointTests : IDisposable
             "--email", "alice@example.com");
 
         Assert.Equal(0, exit);
-        Assert.Contains("already admin", stdout);
+        Assert.Contains("already an administrator", stdout);
     }
 
     [Fact]
@@ -458,6 +459,6 @@ public sealed class CliEntryPointTests : IDisposable
 
         var (exit, _, _) = await RunCli("grant-admin", "--email", "alice@example.com");
         Assert.Equal(0, exit);
-        Assert.True((await _db.Users.AsNoTracking().SingleAsync()).IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, (await _db.Users.AsNoTracking().SingleAsync()).RoleKey);
     }
 }

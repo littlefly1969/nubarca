@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using NubArca.Api.Tests.Endpoints;
 using NubArca.Api.Users;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Tests.Users;
 
@@ -76,7 +77,7 @@ public sealed class AdminUsersEndpointTests : IDisposable
         Assert.NotNull(created);
         Assert.Equal("newuser@example.com", created!.Email);
         Assert.True(created.HasPassword);
-        Assert.False(created.IsAdmin);
+        Assert.Equal(RoleKeys.Member, created.Role);
 
         var anon = _factory.CreateClient();
         var login = await anon.PostAsJsonAsync(
@@ -110,11 +111,11 @@ public sealed class AdminUsersEndpointTests : IDisposable
             email = "newadmin@example.com",
             displayName = "New Admin",
             password = "correct-horse-battery",
-            isAdmin = true,
+            role = "Administrator",
         });
         Assert.Equal(HttpStatusCode.Created, create.StatusCode);
         var created = await create.Content.ReadFromJsonAsync<AdminUserDto>();
-        Assert.True(created!.IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, created!.Role);
     }
 
     [Fact]
@@ -150,7 +151,8 @@ public sealed class AdminUsersEndpointTests : IDisposable
         var forbidden = await targetClient.GetAsync("/api/admin/users");
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
 
-        var grant = await adminClient.PutAsJsonAsync($"/api/admin/users/{targetId}/admin", new { isAdmin = true });
+        var grant = await adminClient.PutAsJsonAsync(
+            $"/api/admin/users/{targetId}/role", new { role = RoleKeys.Administrator });
         Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
 
         var allowed = await targetClient.GetAsync("/api/admin/users");
@@ -166,7 +168,7 @@ public sealed class AdminUsersEndpointTests : IDisposable
         var otherAdminClient = await _factory.LoginAsync("other-admin@example.com");
 
         var revoke = await adminClient.PutAsJsonAsync(
-            $"/api/admin/users/{otherAdminId}/admin", new { isAdmin = false });
+            $"/api/admin/users/{otherAdminId}/role", new { role = RoleKeys.Member });
         Assert.Equal(HttpStatusCode.OK, revoke.StatusCode);
 
         var forbidden = await otherAdminClient.GetAsync("/api/admin/users");
@@ -180,7 +182,8 @@ public sealed class AdminUsersEndpointTests : IDisposable
         var otherAdminId = await _factory.SeedUserAsync("other-admin2@example.com");
         await _factory.PromoteToAdminAsync(otherAdminId);
 
-        var response = await adminClient.PutAsJsonAsync($"/api/admin/users/{adminId}/admin", new { isAdmin = false });
+        var response = await adminClient.PutAsJsonAsync(
+            $"/api/admin/users/{adminId}/role", new { role = RoleKeys.Member });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var me = await adminClient.GetAsync("/api/admin/users");

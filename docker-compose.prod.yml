@@ -91,6 +91,11 @@ services:
       ForwardedHeaders__TrustAny: ${ForwardedHeaders__TrustAny:-false}
       RateLimits__Login__PermitLimit: ${RateLimits__Login__PermitLimit:-10}
       RateLimits__Login__WindowSeconds: ${RateLimits__Login__WindowSeconds:-60}
+      # Public password-recovery request/reset, per source IP. The SECOND axis
+      # (per normalized email) is Mail__PerEmail* below; one alone is not
+      # enough, because they stop different attacks.
+      RateLimits__PasswordRecovery__PermitLimit: ${RateLimits__PasswordRecovery__PermitLimit:-5}
+      RateLimits__PasswordRecovery__WindowSeconds: ${RateLimits__PasswordRecovery__WindowSeconds:-300}
       RateLimits__Share__PermitLimit: ${RateLimits__Share__PermitLimit:-60}
       RateLimits__Share__WindowSeconds: ${RateLimits__Share__WindowSeconds:-60}
       RateLimits__Party__PermitLimit: ${RateLimits__Party__PermitLimit:-300}
@@ -302,6 +307,29 @@ services:
       HumanAesExpert__PreprocessingProfileKey: ${HumanAesExpert__PreprocessingProfileKey:-human-aesexpert-official-v1}
       HumanAesExpert__MaxUploadBytes: ${HumanAesExpert__MaxUploadBytes:-26214400}
       HumanAesExpert__Pepper: ${HumanAesExpert__Pepper:-}
+      # Password recovery by email. OFF by default: with Mail__Enabled=false the
+      # rest of authentication is completely unaffected, the forgot-password
+      # page explains that recovery is unavailable, and the administrator's
+      # manual password reset stays the recovery path. Enabling it needs REAL
+      # operator SMTP values in .env — never a default here, and never a
+      # credential in tracked source.
+      #
+      # Mail__PublicOrigin is the origin the reset link is built on. It comes
+      # from NUBARCA_PUBLIC_ORIGIN and is deliberately NOT derived from the
+      # request's Host header: an attacker who can set Host would otherwise
+      # have the product mail a link pointing at their own server.
+      Mail__Enabled: ${Mail__Enabled:-false}
+      Mail__Smtp__Host: ${Mail__Smtp__Host:-}
+      Mail__Smtp__Port: ${Mail__Smtp__Port:-587}
+      Mail__Smtp__Username: ${Mail__Smtp__Username:-}
+      Mail__Smtp__Password: ${Mail__Smtp__Password:-}
+      Mail__Smtp__UseTls: ${Mail__Smtp__UseTls:-true}
+      Mail__FromAddress: ${Mail__FromAddress:-}
+      Mail__FromName: ${Mail__FromName:-NubArca}
+      Mail__PublicOrigin: ${NUBARCA_PUBLIC_ORIGIN:-}
+      Mail__TokenLifetimeMinutes: ${Mail__TokenLifetimeMinutes:-30}
+      Mail__PerEmailPermitLimit: ${Mail__PerEmailPermitLimit:-3}
+      Mail__PerEmailWindowMinutes: ${Mail__PerEmailWindowMinutes:-15}
       # deleted-content-import-skip: server-side pepper for the deleted-content
       # fingerprint. MUST match on api + worker (api writes tombstones on
       # delete, worker reads them on import) and stay STABLE across restarts —

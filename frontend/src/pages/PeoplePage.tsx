@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
+import { PERMISSIONS } from '@nubarca/api-client';
 import {
   ApiError,
   assignGroup,
@@ -11,6 +12,7 @@ import {
   type SuggestedGroup,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
+import { usePermissions } from '../auth/usePermissions';
 import { FaceCrop } from '../components/people/FaceCrop';
 import { FaceContextViewer } from '../components/people/FaceContextViewer';
 import { FaceAISettings } from '../components/people/FaceAISettings';
@@ -32,14 +34,19 @@ const SELF_LOADING_TABS: Tab[] = ['settings', 'unassigned', 'ignored', 'videoFac
 //
 // The selected tab lives in the URL (?tab=), not in state: see facesTabs.ts.
 export function PeoplePage() {
-  const { state, invalidateAuth } = useAuth();
+  const { invalidateAuth } = useAuth();
+  const perms = usePermissions();
   const { t } = useI18n();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const isAdmin = state.status === 'authed' && state.user.isAdmin;
+  // The Settings tab reads and writes /api/admin/ai/face-settings, which the
+  // backend gates on `admin.dashboard`. Asking for that permission — rather
+  // than for the compatibility isAdmin flag — makes the tab appear exactly when
+  // the API will answer it.
+  const canManageFaceSettings = perms.has(PERMISSIONS.adminDashboard);
 
   const requestedTab = searchParams.get('tab');
-  const tab = resolveFacesTab(requestedTab, isAdmin);
+  const tab = resolveFacesTab(requestedTab, canManageFaceSettings);
 
   // Normalize an absent, unknown or unauthorized ?tab= to the resolved one.
   // `replace` on purpose: a URL the user never chose must not become a Back
@@ -110,7 +117,7 @@ export function PeoplePage() {
         <TabButton active={tab === 'review'} onClick={() => selectTab('review')}>{t('people.tabReview')}</TabButton>
         <TabButton active={tab === 'videoFaces'} onClick={() => selectTab('videoFaces')}>{t('people.tabVideoFaces')}</TabButton>
         <TabButton active={tab === 'ignored'} onClick={() => selectTab('ignored')}>{t('people.tabIgnored')}</TabButton>
-        {isAdmin && (
+        {canManageFaceSettings && (
           <TabButton active={tab === 'settings'} onClick={() => selectTab('settings')}>{t('people.tabSettings')}</TabButton>
         )}
       </nav>

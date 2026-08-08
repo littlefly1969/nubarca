@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Http;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -24,7 +25,7 @@ public static class PeopleEndpoints
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             return Results.Ok(await people.ListPeopleAsync(ownerUserId, cancellationToken));
-        }).WithName("ListPeople").RequireAuthorization();
+        }).WithName("ListPeople").RequirePermission(Permissions.PeopleAccess);
 
         app.MapPost("/api/people", async (
             [FromBody] CreatePersonRequest? body,
@@ -35,7 +36,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await people.CreatePersonAsync(ownerUserId, body?.Name, cancellationToken);
             return Results.Created($"/api/people/{dto.PersonId}", dto);
-        }).WithName("CreatePerson").RequireAuthorization();
+        }).WithName("CreatePerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapGet("/api/people/suggested-groups", async (
             [FromQuery] bool? review,
@@ -45,7 +46,7 @@ public static class PeopleEndpoints
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             return Results.Ok(await people.ListGroupsAsync(ownerUserId, review ?? false, cancellationToken));
-        }).WithName("ListSuggestedGroups").RequireAuthorization();
+        }).WithName("ListSuggestedGroups").RequirePermission(Permissions.PeopleAccess);
 
         app.MapGet("/api/people/{id:guid}", async (
             Guid id,
@@ -56,7 +57,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await people.GetPersonAsync(ownerUserId, id, cancellationToken);
             return dto is null ? Results.NotFound() : Results.Ok(dto);
-        }).WithName("GetPerson").RequireAuthorization();
+        }).WithName("GetPerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapPut("/api/people/{id:guid}", async (
             Guid id,
@@ -68,7 +69,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await people.RenamePersonAsync(ownerUserId, id, body?.Name, cancellationToken);
             return dto is null ? Results.NotFound() : Results.Ok(dto);
-        }).WithName("RenamePerson").RequireAuthorization();
+        }).WithName("RenamePerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapDelete("/api/people/{id:guid}", async (
             Guid id,
@@ -79,7 +80,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.ArchivePersonAsync(ownerUserId, id, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("ArchivePerson").RequireAuthorization();
+        }).WithName("ArchivePerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapPost("/api/people/groups/{groupId:guid}/assign", async (
             Guid groupId,
@@ -91,7 +92,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await people.AssignGroupAsync(ownerUserId, groupId, body?.Name, body?.PersonId, cancellationToken);
             return dto is null ? Results.NotFound() : Results.Ok(dto);
-        }).WithName("AssignGroup").RequireAuthorization();
+        }).WithName("AssignGroup").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: bulk-ignore a suggested/review group. This is a per-face action
         // applied to every surfaceable member (each lands in "Ignorati", restorable
@@ -105,7 +106,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var count = await people.IgnoreGroupAsync(ownerUserId, groupId, cancellationToken);
             return count is null ? Results.NotFound() : Results.Ok(new { ignored = count.Value });
-        }).WithName("IgnoreGroup").RequireAuthorization();
+        }).WithName("IgnoreGroup").RequirePermission(Permissions.PeopleAccess);
 
         app.MapPost("/api/people/{personId:guid}/faces", async (
             Guid personId,
@@ -121,7 +122,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.AddFaceToPersonAsync(ownerUserId, personId, body.FaceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("AddFaceToPerson").RequireAuthorization();
+        }).WithName("AddFaceToPerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapDelete("/api/people/{personId:guid}/faces/{faceId:guid}", async (
             Guid personId,
@@ -133,7 +134,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.RemoveFaceFromPersonAsync(ownerUserId, personId, faceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("RemoveFaceFromPerson").RequireAuthorization();
+        }).WithName("RemoveFaceFromPerson").RequirePermission(Permissions.PeopleAccess);
 
         app.MapGet("/api/people/{personId:guid}/photos", async (
             Guid personId,
@@ -144,7 +145,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var photos = await people.GetPersonPhotosAsync(ownerUserId, personId, cancellationToken);
             return photos is null ? Results.NotFound() : Results.Ok(photos);
-        }).WithName("GetPersonPhotos").RequireAuthorization();
+        }).WithName("GetPersonPhotos").RequirePermission(Permissions.PeopleAccess);
 
         app.MapGet("/api/people/{personId:guid}/similar-faces", async (
             Guid personId,
@@ -163,7 +164,7 @@ public static class PeopleEndpoints
             var page = await people.FindSimilarFacesAsync(
                 ownerUserId, personId, minSimilarity, limit ?? 30, cursor, cancellationToken);
             return page is null ? Results.NotFound() : Results.Ok(page);
-        }).WithName("PersonSimilarFaces").RequireAuthorization();
+        }).WithName("PersonSimilarFaces").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private high-quality face crop (UI-only derived artifact). Lazily
         // generated from the ORIGINAL blob; cached. Cross-owner / vaulted / missing →
@@ -190,7 +191,7 @@ public static class PeopleEndpoints
 
             SetPrivateDerivativeCache(httpContext);
             return Results.File(content.Content, content.MimeType);
-        }).WithName("GetFacePreview").RequireAuthorization();
+        }).WithName("GetFacePreview").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private full-photo context for the face viewer (fileItemId + face boxes +
         // person). Sanitized; 404 on cross-owner/vaulted/missing.
@@ -203,7 +204,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var context = await people.GetFaceContextAsync(ownerUserId, faceId, cancellationToken);
             return context is null ? Results.NotFound() : Results.Ok(context);
-        }).WithName("GetFaceContext").RequireAuthorization();
+        }).WithName("GetFaceContext").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private manual assignment of a SINGLE face. Body: { personId } to assign
         // to an existing person, or { name } to create a new person and assign. Honors
@@ -223,7 +224,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await people.AssignFaceAsync(ownerUserId, faceId, body.PersonId, body.Name, cancellationToken);
             return dto is null ? Results.NotFound() : Results.Ok(dto);
-        }).WithName("AssignFace").RequireAuthorization();
+        }).WithName("AssignFace").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: remove a face's person assignment (any person). The face becomes
         // unassigned and eligible for clustering again. Generic 404 if not assigned.
@@ -236,7 +237,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.RemoveFaceAssignmentAsync(ownerUserId, faceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("RemoveFaceAssignment").RequireAuthorization();
+        }).WithName("RemoveFaceAssignment").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: dismiss a single face (mis-detection / stranger) so it stops
         // surfacing. Reversible. Cross-owner / vaulted / missing → generic 404.
@@ -249,7 +250,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.IgnoreFaceAsync(ownerUserId, faceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("IgnoreFace").RequireAuthorization();
+        }).WithName("IgnoreFace").RequirePermission(Permissions.PeopleAccess);
 
         app.MapDelete("/api/people/faces/{faceId:guid}/ignore", async (
             Guid faceId,
@@ -260,7 +261,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await people.UnignoreFaceAsync(ownerUserId, faceId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("UnignoreFace").RequireAuthorization();
+        }).WithName("UnignoreFace").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: associate an entire cluster with a person. Assigns all eligible
         // unassigned members (skips faces on other people unless moveAssigned; excludes
@@ -278,7 +279,7 @@ public static class PeopleEndpoints
             var summary = await people.AssignClusterToPersonAsync(
                 ownerUserId, personId, clusterId, body?.MoveAssigned ?? false, body?.DryRun ?? false, cancellationToken);
             return summary is null ? Results.NotFound() : Results.Ok(summary);
-        }).WithName("AssignClusterToPerson").RequireAuthorization();
+        }).WithName("AssignClusterToPerson").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: all surfaceable faces of a suggested/review group, so the whole
         // group can be reviewed face-by-face in the viewer. Generic 404 on cross-owner/missing.
@@ -291,7 +292,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var faces = await people.GetGroupFacesAsync(ownerUserId, groupId, cancellationToken);
             return faces is null ? Results.NotFound() : Results.Ok(faces);
-        }).WithName("GroupFaces").RequireAuthorization();
+        }).WithName("GroupFaces").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: faces the owner has individually ignored, so a mistaken ignore
         // can be restored (DELETE .../ignore). Keyset-paged. Sanitized DTOs.
@@ -305,7 +306,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var page = await people.GetIgnoredFacesAsync(ownerUserId, limit ?? 60, cursor, cancellationToken);
             return Results.Ok(page);
-        }).WithName("IgnoredFaces").RequireAuthorization();
+        }).WithName("IgnoredFaces").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: faces not yet assigned to any person (and not ignored). Keyset
         // paged; sort recent|quality|detection; hasEmbedding filter. Sanitized DTOs.
@@ -321,7 +322,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var page = await people.GetUnassignedFacesAsync(ownerUserId, limit ?? 60, cursor, hasEmbedding, sort, cancellationToken);
             return Results.Ok(page);
-        }).WithName("UnassignedFaces").RequireAuthorization();
+        }).WithName("UnassignedFaces").RequirePermission(Permissions.PeopleAccess);
 
         // Owner-private: drop cached crops for a face so they regenerate. Idempotent.
         app.MapPost("/api/people/faces/{faceId:guid}/preview/regenerate", async (
@@ -333,7 +334,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await previews.RegenerateAsync(faceId, ownerUserId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("RegenerateFacePreview").RequireAuthorization();
+        }).WithName("RegenerateFacePreview").RequirePermission(Permissions.PeopleAccess);
 
         MapVideoFaceEndpoints(app);
         return app;
@@ -360,7 +361,7 @@ public static class PeopleEndpoints
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             return Results.Ok(await tracks.ListUndecidedAsync(ownerUserId, limit, cancellationToken));
-        }).WithName("UndecidedVideoFaceTracks").RequireAuthorization();
+        }).WithName("UndecidedVideoFaceTracks").RequirePermission(Permissions.PeopleAccess);
 
         // Bounded, owner-scoped candidate people for one track. ADVISORY ONLY —
         // calling this never changes any decision.
@@ -374,7 +375,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var dto = await suggestions.SuggestAsync(ownerUserId, trackId, limit, cancellationToken);
             return dto is null ? Results.NotFound() : Results.Ok(dto);
-        }).WithName("VideoFaceTrackSuggestions").RequireAuthorization();
+        }).WithName("VideoFaceTrackSuggestions").RequirePermission(Permissions.PeopleAccess);
 
         // Confirm: this track shows one of MY people. Replaces any previous
         // decision, including an ignore.
@@ -393,7 +394,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await tracks.AssignAsync(ownerUserId, trackId, body.PersonId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("AssignVideoFaceTrack").RequireAuthorization();
+        }).WithName("AssignVideoFaceTrack").RequirePermission(Permissions.PeopleAccess);
 
         // Dismiss the track. The canonical evidence is never deleted.
         app.MapPost("/api/people/video-tracks/{trackId:guid}/ignore", async (
@@ -405,7 +406,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await tracks.IgnoreAsync(ownerUserId, trackId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("IgnoreVideoFaceTrack").RequireAuthorization();
+        }).WithName("IgnoreVideoFaceTrack").RequirePermission(Permissions.PeopleAccess);
 
         // Back to undecided. Nothing is reassigned automatically.
         app.MapDelete("/api/people/video-tracks/{trackId:guid}/decision", async (
@@ -417,7 +418,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var ok = await tracks.ClearAsync(ownerUserId, trackId, cancellationToken);
             return ok ? Results.NoContent() : Results.NotFound();
-        }).WithName("ClearVideoFaceTrackDecision").RequireAuthorization();
+        }).WithName("ClearVideoFaceTrackDecision").RequirePermission(Permissions.PeopleAccess);
 
         // The person-media surface, extended: videos where this person has a
         // CONFIRMED track, with the intervals the player opens at. Sits next to
@@ -431,7 +432,7 @@ public static class PeopleEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var videos = await tracks.GetPersonVideosAsync(ownerUserId, personId, cancellationToken);
             return videos is null ? Results.NotFound() : Results.Ok(videos);
-        }).WithName("GetPersonVideos").RequireAuthorization();
+        }).WithName("GetPersonVideos").RequirePermission(Permissions.PeopleAccess);
 
         // Videos where BOTH people have confirmed tracks that overlap in time.
         app.MapGet("/api/people/{personId:guid}/co-present/{otherPersonId:guid}", async (
@@ -445,7 +446,7 @@ public static class PeopleEndpoints
             var videos = await tracks.GetCoPresentVideosAsync(
                 ownerUserId, personId, otherPersonId, cancellationToken);
             return videos is null ? Results.NotFound() : Results.Ok(videos);
-        }).WithName("GetPersonCoPresentVideos").RequireAuthorization();
+        }).WithName("GetPersonCoPresentVideos").RequirePermission(Permissions.PeopleAccess);
     }
 
     // Duplicated from Program.cs's local `SetPrivateDerivativeCache` helper

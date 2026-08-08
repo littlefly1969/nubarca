@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using NubArca.Api.Access;
 using NubArca.Api.Admin;
 using NubArca.Api.Ai;
 using NubArca.Api.Albums;
@@ -28,6 +29,7 @@ using NubArca.Api.ShareLinks;
 using NubArca.Api.Storage;
 using NubArca.Api.Tv;
 using NubArca.Api.Uploads;
+using NubArca.Api.Tests.Auth;
 using NubArca.Api.Users;
 
 namespace NubArca.Api.Tests.Endpoints;
@@ -153,6 +155,17 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             }
             services.AddScoped<IBlobService, BlobService>();
             services.AddScoped<IUserService, UserService>();
+            // Identity & Access. Mirrors Program.cs (Postgres-only block).
+            services.AddScoped<NubArca.Api.Access.IUserPermissionService,
+                NubArca.Api.Access.UserPermissionService>();
+            services.AddScoped<NubArca.Api.Auth.Recovery.IPasswordRecoveryService,
+                NubArca.Api.Auth.Recovery.PasswordRecoveryService>();
+            // Password-recovery mail goes to a recorder, never to a socket. The
+            // same instance is resolvable directly so a test can read what would
+            // have been sent.
+            services.AddSingleton<NubArca.Api.Tests.Auth.RecordingEmailSender>();
+            services.Replace(ServiceDescriptor.Singleton<NubArca.Api.Auth.Recovery.IEmailSender>(
+                sp => sp.GetRequiredService<NubArca.Api.Tests.Auth.RecordingEmailSender>()));
             services.AddScoped<IFileItemService, FileItemService>();
             // deleted-content-import-skip: ledger + import skip evaluator
             // (Program.cs registers these inside the Postgres-only block).
@@ -411,27 +424,50 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         return user.Id;
     }
 
-    // Promotes an existing user to admin. The admin claim is added to the
-    // principal at LOGIN time, so the typical test pattern is:
-    //   SeedUserAsync → PromoteToAdminAsync → LoginAsync. The cookie
-    //   revalidator will also pick up admin changes after a login.
-    public async Task PromoteToAdminAsync(Guid userId)
+    // Sets an existing user's role. Permission checks read current database
+    // state on every request, so a role changed after login takes effect on the
+    // next call — no re-login needed, which is what the identity slice promises.
+    public async Task SetRoleAsync(Guid userId, string roleKey)
     {
         using var scope = Services.CreateScope();
         var users = scope.ServiceProvider.GetRequiredService<IUserService>();
-        var ok = await users.SetAdminAsync(userId, true);
+        var ok = await users.SetRoleAsync(userId, roleKey);
         if (!ok)
         {
-            throw new InvalidOperationException($"PromoteToAdminAsync: no user with id {userId}.");
+            throw new InvalidOperationException($"SetRoleAsync: no user with id {userId}.");
         }
     }
 
-    public async Task DemoteFromAdminAsync(Guid userId)
+    public Task PromoteToAdminAsync(Guid userId) => SetRoleAsync(userId, RoleKeys.Administrator);
+
+    public Task DemoteFromAdminAsync(Guid userId) => SetRoleAsync(userId, RoleKeys.Member);
+
+    // Writes a per-user permission exception (Grant or Deny).
+    public async Task SetPermissionOverrideAsync(Guid userId, string permissionKey, PermissionEffect effect)
     {
         using var scope = Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<IUserService>();
-        await users.SetAdminAsync(userId, false);
+        var permissions = scope.ServiceProvider
+            .GetRequiredService<NubArca.Api.Access.IUserPermissionService>();
+        var ok = await permissions.SetOverrideAsync(userId, permissionKey, effect);
+        if (!ok)
+        {
+            throw new InvalidOperationException($"SetPermissionOverrideAsync: unknown permission '{permissionKey}'.");
+        }
     }
+
+    // Seeds a user with a specific role and logs them in, which is the shape
+    // almost every authorization test needs.
+    public async Task<(Guid UserId, HttpClient Client)> CreateRoleClientAsync(
+        string roleKey, string email)
+    {
+        var userId = await SeedUserAsync(email);
+        await SetRoleAsync(userId, roleKey);
+        var client = await LoginAsync(email);
+        return (userId, client);
+    }
+
+    public RecordingEmailSender EmailSender =>
+        Services.GetRequiredService<RecordingEmailSender>();
 
     // Marks an existing user as disabled. Useful for testing disabled-login paths.
     public async Task DisableUserAsync(Guid userId)
@@ -592,6 +628,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         pooled.Host.Services
             .GetRequiredService<NubArca.Api.Tests.Aesthetics.FakeAestheticModelClient>()
             .Reset();
+        pooled.Host.Services.GetRequiredService<RecordingEmailSender>().Reset();
     }
 
     private static void DeleteDirectoryBestEffort(string path)

@@ -36,13 +36,17 @@ const ADMIN_ONLY: ReadonlySet<FacesTab> = new Set<FacesTab>(['settings']);
  *
  * Anything unrecognised, absent, or not permitted for this user resolves to
  * the default rather than erroring — a hand-edited or stale URL should show
- * the page, not break it. The admin gate here is UX: the backend gates the
- * Face AI settings endpoints itself.
+ * the page, not break it. `canManageFaceSettings` is the caller's answer to
+ * "do they hold admin.dashboard"; the gate here is UX, and the backend gates
+ * the Face AI settings endpoints itself.
  */
-export function resolveFacesTab(raw: string | null | undefined, isAdmin: boolean): FacesTab {
+export function resolveFacesTab(
+  raw: string | null | undefined,
+  canManageFaceSettings: boolean,
+): FacesTab {
   const candidate = FACES_TABS.find((t) => t === raw);
   if (candidate === undefined) return DEFAULT_FACES_TAB;
-  if (ADMIN_ONLY.has(candidate) && !isAdmin) return DEFAULT_FACES_TAB;
+  if (ADMIN_ONLY.has(candidate) && !canManageFaceSettings) return DEFAULT_FACES_TAB;
   return candidate;
 }
 

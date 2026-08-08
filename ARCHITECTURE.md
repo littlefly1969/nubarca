@@ -253,35 +253,136 @@ The effective middleware order is:
 6. rate limiting;
 7. minimal API endpoints.
 
-### 7.1 Authentication and roles
+### 7.1 Authentication, roles, and permissions
 
 - No public registration endpoint exists.
-- Users are provisioned through operator CLI paths or, once at least one admin
-  exists, through the admin user-management UI/API (`/admin/users`,
-  `/api/admin/users/*`) described below.
+- Users are provisioned through operator CLI paths (`users ensure`,
+  `users set-role`, `users grant-admin`/`revoke-admin`) or, once at least one
+  administrator exists, through the admin user-management UI/API
+  (`/admin/users`, `/api/admin/users/*`) described below.
 - Browser/mobile sessions use the standard application cookie.
 - The cookie is `HttpOnly`, `SameSite=Lax`, uses the request's secure policy, expires after fourteen days, and slides while active.
-- The authenticated principal is revalidated so disabled users and admin-role changes take effect without waiting for a new login.
-- Admin routes require the admin policy backed by `User.IsAdmin`.
 - Login uses a dummy password-hash verification when the account is absent to reduce user-enumeration timing differences.
+- `LastLoginAt` is stamped by an interactive login only — never by an ordinary
+  authenticated request, and never by a successful password-reset validation.
+
+Authorization is **permission-based**, and the permission — not the role — is
+what an endpoint names. `NubArca.Api.Access` owns the whole model:
+
+- `PermissionCatalog` is the authoritative list of feature-surface keys
+  (`people.access`, `semantic-search.access`, `laboratory.access`,
+  `laboratory.plates`, `laboratory.aesthetics`, `cloud-functions.access`,
+  `private-vault.access`, `tv.manage`, `admin.dashboard`,
+  `admin.users.manage`, `admin.import`, `admin.jobs.manage`). The unit is a
+  feature surface, not a CRUD verb: owner isolation is an unconditional
+  property of every query and is never expressed as a permission.
+- `RoleKeys` are three built-in **keys**, not editable rows: `Administrator`,
+  `Member`, `Restricted`. Custom roles are out of scope, and keys avoid a table
+  whose rows could be edited out from under the last administrator.
+- `RolePermissionCatalog` holds each role's baseline. **Member carries every
+  non-administrative permission** — that is the migration contract, not a
+  preference: an account that was a non-admin before roles existed became a
+  Member and must not notice the change. Restricted's baseline is empty by
+  construction, because the core personal cloud (files/folders, media library,
+  albums, authenticated sharing, account/profile, trash) is not gated at all.
+- `UserPermissionOverride` rows are EXCEPTIONS to a baseline, one per
+  (user, permission) by unique index, with effect `Grant` or `Deny`. Effective
+  permissions are `role baseline + grants − denies`; an **Administrator always
+  receives the complete catalogue and overrides are not consulted at all**, so
+  a deny can never strip the authority that would let another administrator
+  restore it. Unknown permission keys are rejected server-side and never
+  persisted — the catalogue is authoritative, the browser never defines one.
+- `PermissionRequirement` + `PermissionAuthorizationHandler` back one ASP.NET
+  Core policy per key (plus two composite Laboratory policies, because a
+  section requires the shell permission as well). Endpoints say
+  `.RequirePermission(Permissions.PeopleAccess)`; no controller or service
+  compares a role by hand.
+- The handler is registered **scoped** and resolves `IUserPermissionService`
+  from the request's own provider, reading current database state per request.
+  That is what makes a role or permission change take effect on the next
+  request with no re-login and no second session subsystem. A singleton handler
+  would capture the root provider and answer every later request from the first
+  one's cached permissions.
+
+`User.IsAdmin` no longer exists. The `AddRolesPermissionsAndPasswordRecovery`
+migration added `RoleKey`, backfilled `Administrator` where `IsAdmin` was true
+and left everybody else on the `Member` default, and only then dropped the
+column — that order is the migration's correctness argument, and a scaffolded
+drop-first migration would have silently demoted every administrator. `isAdmin`
+survives only as a **computed compatibility field** (`role == Administrator`) on
+`CurrentUserResponse` and `AdminImportUserDto`; nothing stores it and nothing
+writes both.
+
+Sessions are versioned. `User.SecurityVersion` is written into the cookie at
+sign-in and re-checked on every request by `CookieSessionValidator`, which also
+rejects a missing or disabled user and re-issues the principal when the role
+claim disagrees with the row. A credential event — self-service change, admin
+reset, or a completed recovery — increments the version in the same transaction
+that writes the hash, so every session opened with the old password dies on its
+next request. A user changing their OWN password is immediately re-issued a
+cookie at the new version, so they sign out their other devices and not the
+browser they are using. A cookie predating the claim is read as version 1 (the
+migration default), which keeps existing sessions alive across the upgrade
+while still failing closed after any credential change.
 
 Admin user management is UI-backed (`AdminUsersPage` + `AdminUserService`),
-not CLI-only: an admin can list/search users, create a user with an initial
-password, edit display name/language, reset another user's password, grant or
-revoke the admin marker, and enable/disable an account. Every authenticated
-user can change their own password (`POST /api/auth/me/password`), which
-requires the current password and is distinct from an admin-initiated reset.
-`User.IsAdmin` remains a single boolean operator marker, not a role/permission
-table — the admin surface adds CRUD and safety guards around that same
-column, it does not introduce RBAC. Guardrails enforced by `AdminUserService`:
-the last active admin can never be demoted or disabled, and an admin can never
-demote or disable their own account (self-service demotion/disable is
-disallowed outright, not merely confirmed). Password hashes are never
-returned by any endpoint; a shared `PasswordPolicy` (10–256 chars,
+organised as Profile / Access / Security rather than one row of buttons: an
+administrator can list/search users, create a user with an initial password and
+role, edit profile fields, change a role, set or clear a per-user permission
+override, enable/disable an account, reset a password manually, and send a
+recovery email. Every authenticated user can edit their own profile
+(`PUT /api/auth/me/profile`) and change their own password
+(`POST /api/auth/me/password`), which requires the current password and is
+distinct from an admin-initiated reset. Neither self-service nor the admin
+editor changes an email address: it is the login and recovery identity and
+changing it needs a verification workflow that is out of scope.
+
+Guardrails enforced by `AdminUserService`: the last active administrator can
+never be demoted or disabled; an administrator can never demote or disable
+their own account (disallowed outright, not merely confirmed); an administrator
+cannot be denied an administrative permission; holding one administrative
+permission never opens another's API. Password hashes and the security version
+are never returned by any endpoint; a shared `PasswordPolicy` (10–256 chars,
 not-all-whitespace) gates every password-setting path — admin create, admin
-reset, and self-service change alike. Sensitive actions are audited
-(`admin.user.*`, `auth.password.change`) with target user id only — never a
-password or its hash.
+reset, self-service change, and recovery reset alike. Sensitive actions are
+audited (`admin.user.*`, `auth.password.change`, `auth.profile.update`) with
+target user id, role key and permission key only — never a password, a hash, or
+a reset token.
+
+### 7.1.1 Password recovery by email
+
+Opt-in and OFF by default (`Mail__Enabled=false`), in which case authentication
+is completely unaffected: the forgot-password page explains that recovery is
+unavailable and the administrator's manual reset stays the recovery path.
+
+- `POST /api/auth/password-recovery/request` always answers **202 with one
+  generic message** — for a real address, an unknown one, a disabled account, an
+  account with no password, and a delivery failure alike. The service returns
+  nothing, so the endpoint has no result to leak even by accident.
+- Rate limiting is two-axis: a per-IP fixed window (`RateLimits:PasswordRecovery:*`)
+  and a per-normalized-email window (`PasswordRecoveryThrottle`). An IP limit
+  alone lets a distributed caller hammer one mailbox; an email limit alone lets
+  one host walk an address list. The email counter counts the SUBMITTED address
+  whether or not it names an account, so a 429 reveals nothing. No CAPTCHA.
+- `PasswordResetToken` stores only `SHA-256(raw token)`; 256 bits of
+  cryptographically secure entropy, single-use, ~30-minute expiry, invalidated
+  by a later request, by any credential change, and by account disable.
+  Expired, spent, unknown and malformed tokens share one rejection message.
+- The reset URL is built on the operator's `Mail__PublicOrigin`
+  (`NUBARCA_PUBLIC_ORIGIN`), never the incoming `Host` header, and carries the
+  token in the **fragment** so it never reaches a reverse-proxy access log. The
+  frontend reads it from `location.hash`, holds it in component memory, calls
+  `history.replaceState` immediately, posts it in the JSON body, and never
+  writes it to web storage. Nothing logs the raw token or a complete link.
+- `POST /api/auth/password-recovery/reset` validates the token, applies the
+  shared `PasswordPolicy`, and in ONE transaction marks the token used, writes
+  the new hash, stamps `PasswordChangedAt`, increments `SecurityVersion` (which
+  invalidates pre-reset browser sessions) and sweeps the user's other
+  outstanding tokens. It does **not** sign the user in.
+- `IEmailSender`/`SmtpEmailSender` is generic SMTP (MailKit) — no provider SDK,
+  no API keys. Tests substitute a recording sender; no automated test opens a
+  socket. TV limited sessions are untouched by a web password change: they are
+  a separate token system with their own contract.
 
 ### 7.2 CSRF and proxy trust
 
@@ -294,6 +395,8 @@ Forwarded headers are not accepted indiscriminately. Production configuration ex
 Fixed-window, remote-IP-partitioned policies cover at least:
 
 - login;
+- public password-recovery request/reset (per IP; the per-email axis lives in
+  `PasswordRecoveryThrottle`);
 - public share download;
 - photo-export creation;
 - Vault setup/unlock;

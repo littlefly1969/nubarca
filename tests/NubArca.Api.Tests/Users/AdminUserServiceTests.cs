@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Access;
 using NubArca.Api.Auth;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -24,6 +25,7 @@ public sealed class AdminUserServiceTests : IDisposable
     private readonly AdminUserService _service;
     private readonly UserService _users;
     private readonly AuthService _auth;
+    private readonly UserPermissionService _permissions;
 
     public AdminUserServiceTests()
     {
@@ -38,8 +40,9 @@ public sealed class AdminUserServiceTests : IDisposable
 
         var hasher = new PasswordHasher<User>();
         _users = new UserService(_db, TimeProvider.System);
-        _auth = new AuthService(_db, _users, hasher);
-        _service = new AdminUserService(_db, _users, _auth, TimeProvider.System);
+        _auth = new AuthService(_db, _users, hasher, TimeProvider.System);
+        _permissions = new UserPermissionService(_db, TimeProvider.System);
+        _service = new AdminUserService(_db, _users, _auth, _permissions, TimeProvider.System);
     }
 
     public void Dispose()
@@ -70,13 +73,13 @@ public sealed class AdminUserServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task CreateAsync_Can_Set_IsAdmin_Disabled_And_Language()
+    public async Task CreateAsync_Can_Set_Role_Disabled_And_Language()
     {
         var dto = await _service.CreateAsync(new CreateAdminUserRequest(
             "full@example.com", "Full", "correct-horse-battery",
-            IsAdmin: true, Disabled: true, Language: "en"));
+            Role: RoleKeys.Administrator, Disabled: true, Language: "en"));
 
-        Assert.True(dto.IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, dto.Role);
         Assert.NotNull(dto.DisabledAt);
         Assert.Equal("en", dto.Language);
     }
@@ -118,55 +121,55 @@ public sealed class AdminUserServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SetAdminAsync_Blocks_LastAdmin_When_Caller_Differs_From_Target()
+    public async Task SetRoleAsync_Blocks_LastAdmin_When_Caller_Differs_From_Target()
     {
         var sole = await _service.CreateAsync(new CreateAdminUserRequest(
-            "sole-admin@example.com", "Sole Admin", "correct-horse-battery", IsAdmin: true));
+            "sole-admin@example.com", "Sole Admin", "correct-horse-battery", Role: RoleKeys.Administrator));
         // A hypothetical different caller (e.g. a second admin that has since
         // been removed out-of-band) tries to demote the last remaining admin.
         var otherCallerId = Guid.NewGuid();
 
-        var (result, user) = await _service.SetAdminAsync(otherCallerId, sole.Id, isAdmin: false);
+        var (result, user) = await _service.SetRoleAsync(otherCallerId, sole.Id, RoleKeys.Member);
 
-        Assert.Equal(AdminSetAdminResult.LastAdmin, result);
+        Assert.Equal(AdminSetRoleResult.LastAdmin, result);
         Assert.Null(user);
         var row = await _db.Users.AsNoTracking().SingleAsync(u => u.Id == sole.Id);
-        Assert.True(row.IsAdmin);
+        Assert.Equal(RoleKeys.Administrator, row.RoleKey);
     }
 
     [Fact]
-    public async Task SetAdminAsync_Blocks_Self_Demotion_Even_With_Other_Admins_Present()
+    public async Task SetRoleAsync_Blocks_Self_Demotion_Even_With_Other_Admins_Present()
     {
         var a = await _service.CreateAsync(new CreateAdminUserRequest(
-            "a@example.com", "A", "correct-horse-battery", IsAdmin: true));
+            "a@example.com", "A", "correct-horse-battery", Role: RoleKeys.Administrator));
         await _service.CreateAsync(new CreateAdminUserRequest(
-            "b@example.com", "B", "correct-horse-battery", IsAdmin: true));
+            "b@example.com", "B", "correct-horse-battery", Role: RoleKeys.Administrator));
 
-        var (result, user) = await _service.SetAdminAsync(a.Id, a.Id, isAdmin: false);
+        var (result, user) = await _service.SetRoleAsync(a.Id, a.Id, RoleKeys.Member);
 
-        Assert.Equal(AdminSetAdminResult.SelfDemotion, result);
+        Assert.Equal(AdminSetRoleResult.SelfDemotion, result);
         Assert.Null(user);
     }
 
     [Fact]
-    public async Task SetAdminAsync_Allows_Demoting_One_Of_Two_Admins()
+    public async Task SetRoleAsync_Allows_Demoting_One_Of_Two_Admins()
     {
         var a = await _service.CreateAsync(new CreateAdminUserRequest(
-            "a2@example.com", "A2", "correct-horse-battery", IsAdmin: true));
+            "a2@example.com", "A2", "correct-horse-battery", Role: RoleKeys.Administrator));
         var b = await _service.CreateAsync(new CreateAdminUserRequest(
-            "b2@example.com", "B2", "correct-horse-battery", IsAdmin: true));
+            "b2@example.com", "B2", "correct-horse-battery", Role: RoleKeys.Administrator));
 
-        var (result, user) = await _service.SetAdminAsync(a.Id, b.Id, isAdmin: false);
+        var (result, user) = await _service.SetRoleAsync(a.Id, b.Id, RoleKeys.Member);
 
-        Assert.Equal(AdminSetAdminResult.Ok, result);
-        Assert.False(user!.IsAdmin);
+        Assert.Equal(AdminSetRoleResult.Ok, result);
+        Assert.Equal(RoleKeys.Member, user!.Role);
     }
 
     [Fact]
-    public async Task SetAdminAsync_NotFound_For_Missing_User()
+    public async Task SetRoleAsync_NotFound_For_Missing_User()
     {
-        var (result, user) = await _service.SetAdminAsync(Guid.NewGuid(), Guid.NewGuid(), isAdmin: true);
-        Assert.Equal(AdminSetAdminResult.NotFound, result);
+        var (result, user) = await _service.SetRoleAsync(Guid.NewGuid(), Guid.NewGuid(), RoleKeys.Administrator);
+        Assert.Equal(AdminSetRoleResult.NotFound, result);
         Assert.Null(user);
     }
 
@@ -174,7 +177,7 @@ public sealed class AdminUserServiceTests : IDisposable
     public async Task SetDisabledAsync_Blocks_LastAdmin_When_Caller_Differs_From_Target()
     {
         var sole = await _service.CreateAsync(new CreateAdminUserRequest(
-            "sole-admin2@example.com", "Sole Admin", "correct-horse-battery", IsAdmin: true));
+            "sole-admin2@example.com", "Sole Admin", "correct-horse-battery", Role: RoleKeys.Administrator));
         var otherCallerId = Guid.NewGuid();
 
         var (result, user) = await _service.SetDisabledAsync(otherCallerId, sole.Id, disabled: true);
@@ -189,7 +192,7 @@ public sealed class AdminUserServiceTests : IDisposable
     public async Task SetDisabledAsync_Blocks_Self_Disable()
     {
         var admin = await _service.CreateAsync(new CreateAdminUserRequest(
-            "self-disable@example.com", "Self Disable", "correct-horse-battery", IsAdmin: true));
+            "self-disable@example.com", "Self Disable", "correct-horse-battery", Role: RoleKeys.Administrator));
 
         var (result, user) = await _service.SetDisabledAsync(admin.Id, admin.Id, disabled: true);
 
@@ -201,7 +204,7 @@ public sealed class AdminUserServiceTests : IDisposable
     public async Task SetDisabledAsync_Allows_Disabling_A_Non_Admin()
     {
         var admin = await _service.CreateAsync(new CreateAdminUserRequest(
-            "admin3@example.com", "Admin3", "correct-horse-battery", IsAdmin: true));
+            "admin3@example.com", "Admin3", "correct-horse-battery", Role: RoleKeys.Administrator));
         var plain = await _service.CreateAsync(new CreateAdminUserRequest(
             "plain@example.com", "Plain", "correct-horse-battery"));
 

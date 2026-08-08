@@ -34,6 +34,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Storage;
 using NubArca.Api.Uploads;
 using NubArca.Api.Users;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Cli;
 
@@ -112,6 +113,12 @@ public static class CliEntryPoint
                 return await DispatchAsync(
                     serviceProviderFactory,
                     sp => SetAdminAsync(rest, sp, stdout, stderr, isAdmin: false),
+                    stderr);
+
+            case ("users", "set-role"):
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => SetRoleAsync(rest, sp, stdout, stderr),
                     stderr);
 
             case ("db", "migrate"):
@@ -393,11 +400,11 @@ public static class CliEntryPoint
             await auth.SetPasswordAsync(created.Id, password);
             if (makeAdmin)
             {
-                await users.SetAdminAsync(created.Id, true);
+                await users.SetRoleAsync(created.Id, RoleKeys.Administrator);
             }
             stdout.WriteLine(
                 $"users ensure: created user {created.Email} ({created.Id:N})"
-                + (makeAdmin ? " as admin." : "."));
+                + (makeAdmin ? " as an Administrator." : " as a Member."));
             return 0;
         }
 
@@ -412,13 +419,13 @@ public static class CliEntryPoint
             stdout.WriteLine("              Pass --update-password (or set NUBARCA_ADMIN_UPDATE_PASSWORD=true) to overwrite.");
         }
 
-        // Admin flag is its own toggle: --admin on an existing non-admin
-        // user is a deliberate upgrade. The CLI does NOT silently downgrade
+        // The role is its own toggle: --admin on an existing non-administrator
+        // is a deliberate upgrade. The CLI does NOT silently downgrade
         // someone — use `users revoke-admin` for that.
-        if (makeAdmin && !existing.IsAdmin)
+        if (makeAdmin && !RolePermissionCatalog.IsAdministrator(existing.RoleKey))
         {
-            await users.SetAdminAsync(existing.Id, true);
-            stdout.WriteLine($"users ensure: granted admin to {existing.Email}.");
+            await users.SetRoleAsync(existing.Id, RoleKeys.Administrator);
+            stdout.WriteLine($"users ensure: granted the Administrator role to {existing.Email}.");
         }
 
         return 0;
@@ -454,16 +461,20 @@ public static class CliEntryPoint
             return 64;
         }
 
-        if (existing.IsAdmin == isAdmin)
+        if (RolePermissionCatalog.IsAdministrator(existing.RoleKey) == isAdmin)
         {
             stdout.WriteLine(
                 $"users {verb}: {existing.Email} is already "
-                + (isAdmin ? "admin." : "not admin.")
+                + (isAdmin ? "an administrator." : "not an administrator.")
                 + " No change.");
             return 0;
         }
 
-        var ok = await users.SetAdminAsync(existing.Id, isAdmin);
+        // Revoking returns the account to Member — the role every pre-role
+        // account migrated to — not to Restricted. Taking away administration
+        // must not also take away the ordinary features the person had.
+        var targetRole = isAdmin ? RoleKeys.Administrator : RoleKeys.Member;
+        var ok = await users.SetRoleAsync(existing.Id, targetRole);
         if (!ok)
         {
             stderr.WriteLine($"users {verb}: update did not match a row (concurrent delete?).");
@@ -471,8 +482,84 @@ public static class CliEntryPoint
         }
 
         stdout.WriteLine(
-            $"users {verb}: {existing.Email} is now "
-            + (isAdmin ? "admin." : "not admin."));
+            $"users {verb}: {existing.Email} now has the {targetRole} role.");
+        return 0;
+    }
+
+    // Assigns any built-in role, which grant-admin/revoke-admin cannot express:
+    // they only move an account between Administrator and Member. Restricted has
+    // no CLI shorthand for a reason — an operator demoting somebody to it is
+    // removing feature access and should have to name the role.
+    internal static async Task<int> SetRoleAsync(
+        string[] args,
+        IServiceProvider services,
+        TextWriter stdout,
+        TextWriter stderr)
+    {
+        var email = ReadOption(args, "--email") ?? ReadEnv("NUBARCA_ADMIN_EMAIL");
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            stderr.WriteLine("users set-role: --email or NUBARCA_ADMIN_EMAIL is required.");
+            return 64;
+        }
+
+        var requestedRole = ReadOption(args, "--role");
+        if (!RoleKeys.TryNormalize(requestedRole, out var roleKey))
+        {
+            stderr.WriteLine(
+                $"users set-role: --role must be one of: {string.Join(", ", RoleKeys.All)}.");
+            return 64;
+        }
+
+        var users = services.GetService<IUserService>();
+        if (users is null)
+        {
+            stderr.WriteLine("users set-role: database is not configured. Set ConnectionStrings__Postgres and retry.");
+            return 78;
+        }
+
+        var existing = await users.GetByEmailAsync(email);
+        if (existing is null)
+        {
+            stderr.WriteLine($"users set-role: no user with email {email}.");
+            return 64;
+        }
+
+        if (string.Equals(existing.RoleKey, roleKey, StringComparison.Ordinal))
+        {
+            stdout.WriteLine($"users set-role: {existing.Email} already has the {roleKey} role. No change.");
+            return 0;
+        }
+
+        // Refuse to demote the LAST active administrator, for the same reason
+        // the admin API does: an installation with no administrator cannot
+        // recover through the product, only through the database.
+        if (RolePermissionCatalog.IsAdministrator(existing.RoleKey)
+            && !RolePermissionCatalog.IsAdministrator(roleKey)
+            && existing.DisabledAt is null)
+        {
+            var db = services.GetService<NubArca.Api.Data.AppDbContext>();
+            if (db is not null)
+            {
+                var activeAdmins = await db.Users
+                    .AsNoTracking()
+                    .CountAsync(u => u.RoleKey == RoleKeys.Administrator && u.DisabledAt == null);
+                if (activeAdmins <= 1)
+                {
+                    stderr.WriteLine("users set-role: refusing to demote the last active administrator.");
+                    return 1;
+                }
+            }
+        }
+
+        var ok = await users.SetRoleAsync(existing.Id, roleKey);
+        if (!ok)
+        {
+            stderr.WriteLine("users set-role: update did not match a row (concurrent delete?).");
+            return 1;
+        }
+
+        stdout.WriteLine($"users set-role: {existing.Email} now has the {roleKey} role.");
         return 0;
     }
 
@@ -4594,6 +4681,7 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll users ensure        [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll users grant-admin   --email <addr>");
         stdout.WriteLine("  dotnet NubArca.Api.dll users revoke-admin  --email <addr>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll users set-role      --email <addr> --role <role>");
         stdout.WriteLine("  dotnet NubArca.Api.dll db migrate");
         stdout.WriteLine("  dotnet NubArca.Api.dll metadata backfill   [options]");
         stdout.WriteLine("  dotnet NubArca.Api.dll metadata recompute-effective-dates");
@@ -4631,9 +4719,18 @@ public static class CliEntryPoint
         stdout.WriteLine("  does not end up in shell history.");
         stdout.WriteLine();
         stdout.WriteLine("users grant-admin / users revoke-admin");
-        stdout.WriteLine("  Toggles the admin marker on an existing user, identified by email.");
-        stdout.WriteLine("  Idempotent: re-granting an already-admin user is a no-op. Missing");
-        stdout.WriteLine("  users return exit code 64. Today the marker gates /api/admin/*.");
+        stdout.WriteLine("  Moves an existing user between the Administrator and Member roles,");
+        stdout.WriteLine("  identified by email. Idempotent: re-granting is a no-op. Missing");
+        stdout.WriteLine("  users return exit code 64. Revoking returns the account to Member,");
+        stdout.WriteLine("  never Restricted — removing administration must not also remove the");
+        stdout.WriteLine("  ordinary features the person had.");
+        stdout.WriteLine();
+        stdout.WriteLine("users set-role");
+        stdout.WriteLine("  Assigns any built-in role: Administrator, Member or Restricted.");
+        stdout.WriteLine("  Refuses to demote the last active administrator.");
+        stdout.WriteLine();
+        stdout.WriteLine("  --email <addr>           or NUBARCA_ADMIN_EMAIL");
+        stdout.WriteLine("  --role <role>            Administrator | Member | Restricted");
         stdout.WriteLine();
         stdout.WriteLine("db migrate");
         stdout.WriteLine("  Applies pending EF Core migrations against the configured");

@@ -3,6 +3,7 @@ using NubArca.Api.Admin;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth;
 using NubArca.Api.Http;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -23,7 +24,7 @@ public static class AdminImportEndpoints
             [FromServices] IAdminImportService import) =>
         {
             return Results.Ok(import.GetRoots());
-        }).WithName("AdminImportRoots").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRoots").RequirePermission(Permissions.AdminImport);
 
         app.MapGet("/api/admin/import/browse", async (
             [FromQuery] string rootId,
@@ -38,7 +39,7 @@ public static class AdminImportEndpoints
             }
             catch (AdminImportUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (AdminImportValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).WithName("AdminImportBrowse").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportBrowse").RequirePermission(Permissions.AdminImport);
 
         app.MapGet("/api/admin/import/users", async (
             [FromServices] IAdminImportService import,
@@ -46,7 +47,7 @@ public static class AdminImportEndpoints
         {
             var users = await import.GetSelectableUsersAsync(cancellationToken);
             return Results.Ok(users);
-        }).WithName("AdminImportUsers").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportUsers").RequirePermission(Permissions.AdminImport);
 
         app.MapGet("/api/admin/import/destination-folders", async (
             [FromQuery] Guid userId,
@@ -60,7 +61,7 @@ public static class AdminImportEndpoints
                 return Results.Ok(result);
             }
             catch (AdminImportValidationException ex) { return Results.NotFound(new { error = ex.Message }); }
-        }).WithName("AdminImportDestinationFolders").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportDestinationFolders").RequirePermission(Permissions.AdminImport);
 
         app.MapPost("/api/admin/import/preview", async (
             [FromBody] AdminImportPreviewRequest request,
@@ -74,7 +75,7 @@ public static class AdminImportEndpoints
             }
             catch (AdminImportUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (AdminImportValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).WithName("AdminImportPreview").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportPreview").RequirePermission(Permissions.AdminImport);
 
         app.MapPost("/api/admin/import/run", async (
             [FromBody] AdminImportRunRequest request,
@@ -99,7 +100,7 @@ public static class AdminImportEndpoints
             }
             catch (AdminImportUnavailableException ex) { return Results.Conflict(new { error = ex.Message }); }
             catch (AdminImportValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).WithName("AdminImportRun").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRun").RequirePermission(Permissions.AdminImport);
 
         app.MapGet("/api/admin/import/runs", async (
             [FromQuery] int? limit,
@@ -109,7 +110,7 @@ public static class AdminImportEndpoints
         {
             var result = await import.ListRunsAsync(limit ?? 25, offset ?? 0, cancellationToken);
             return Results.Ok(result);
-        }).WithName("AdminImportRuns").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRuns").RequirePermission(Permissions.AdminImport);
 
         app.MapGet("/api/admin/import/runs/{importRunId:guid}", async (
             Guid importRunId,
@@ -118,7 +119,7 @@ public static class AdminImportEndpoints
         {
             var status = await import.GetRunStatusAsync(importRunId, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("AdminImportRunStatus").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRunStatus").RequirePermission(Permissions.AdminImport);
 
         app.MapPost("/api/admin/import/runs/{importRunId:guid}/cancel", async (
             Guid importRunId,
@@ -141,7 +142,7 @@ public static class AdminImportEndpoints
                     cancellationToken);
             }
             return Results.Ok(result);
-        }).WithName("AdminImportRunCancel").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRunCancel").RequirePermission(Permissions.AdminImport);
 
         // Slice 92: paginated, safe view over a run's persisted import items (the
         // manifest). Filterable by item status; bounded page size; relative paths +
@@ -161,7 +162,7 @@ public static class AdminImportEndpoints
                 return result is null ? Results.NotFound() : Results.Ok(result);
             }
             catch (AdminImportValidationException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        }).WithName("AdminImportRunItems").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRunItems").RequirePermission(Permissions.AdminImport);
 
         // Slice 92: enqueue the idempotent media-derivatives backfill job so a
         // completed/partial run's missing thumbnails/previews/posters are generated
@@ -184,7 +185,7 @@ public static class AdminImportEndpoints
                 new { result.JobId },
                 cancellationToken);
             return Results.Ok(result);
-        }).WithName("AdminImportRunEnqueueDerivatives").RequireAuthorization(CookieSessionValidator.AdminRole);
+        }).WithName("AdminImportRunEnqueueDerivatives").RequirePermission(Permissions.AdminImport);
 
         return app;
     }

@@ -4,6 +4,7 @@ using NubArca.Api.Files;
 using NubArca.Api.Http;
 using NubArca.Api.PhotoExport;
 using NubArca.Api.Security;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -47,7 +48,7 @@ public static class PhotoExportEndpoints
                 created.SessionId, ip, new { expiresAt = created.ExpiresAt }, cancellationToken);
 
             return Results.Created($"/api/photo-exports/{created.SessionId}", created);
-        }).WithName("CreatePhotoExport").RequireAuthorization().RequireRateLimiting(ExportCreateRateLimitPolicy);
+        }).WithName("CreatePhotoExport").RequirePermission(Permissions.CloudFunctionsAccess).RequireRateLimiting(ExportCreateRateLimitPolicy);
 
         app.MapGet("/api/photo-exports/{id:guid}", async (
             Guid id,
@@ -58,7 +59,7 @@ public static class PhotoExportEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var status = await exports.GetStatusForOwnerAsync(id, ownerUserId, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("GetPhotoExport").RequireAuthorization();
+        }).WithName("GetPhotoExport").RequirePermission(Permissions.CloudFunctionsAccess);
 
         app.MapDelete("/api/photo-exports/{id:guid}", async (
             Guid id,
@@ -78,7 +79,7 @@ public static class PhotoExportEndpoints
                 ownerUserId, AuditActions.PhotoExportRevoke, AuditEntityTypes.PhotoExportSession,
                 id, ip, null, cancellationToken);
             return Results.NoContent();
-        }).WithName("RevokePhotoExport").RequireAuthorization();
+        }).WithName("RevokePhotoExport").RequirePermission(Permissions.CloudFunctionsAccess);
 
         // Manifest: JSON Lines, streamed page-by-page from the persisted snapshot (never
         // the live tree). Cookie owner OR Bearer token. No auth attribute — token-only

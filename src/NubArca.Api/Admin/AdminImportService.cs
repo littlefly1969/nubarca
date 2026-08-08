@@ -15,6 +15,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Storage;
 using NubArca.Api.Uploads;
 using SixLabors.ImageSharp;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Admin;
 
@@ -174,7 +175,9 @@ public sealed class AdminImportService : IAdminImportService
         return await _db.Users
             .AsNoTracking()
             .OrderBy(u => u.Email)
-            .Select(u => new AdminImportUserDto(u.Id, u.Email, u.DisplayName, u.IsAdmin, u.DisabledAt == null))
+            .Select(u => new AdminImportUserDto(
+                u.Id, u.Email, u.DisplayName,
+                u.RoleKey == RoleKeys.Administrator, u.DisabledAt == null))
             .ToListAsync(cancellationToken);
     }
 

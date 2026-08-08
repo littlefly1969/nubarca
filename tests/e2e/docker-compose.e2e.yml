@@ -41,6 +41,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mail:
+        condition: service_started
     environment: &api_env
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=nubarca_e2e;Username=nubarca;Password=nubarca_e2e"
@@ -75,6 +77,23 @@ services:
       RateLimits__Login__WindowSeconds: "60"
       RateLimits__Share__PermitLimit: "1000"
       RateLimits__Share__WindowSeconds: "60"
+      RateLimits__PasswordRecovery__PermitLimit: "1000"
+      RateLimits__PasswordRecovery__WindowSeconds: "60"
+      # Password recovery against a LOCAL mail sink (see the `mail` service).
+      # No credentials, no TLS, nothing leaves the compose network — the suite
+      # reads the delivered message back over Mailpit's HTTP API, which is how a
+      # browser test can follow a real reset link without a real mail server.
+      Mail__Enabled: "true"
+      Mail__Smtp__Host: "mail"
+      Mail__Smtp__Port: "1025"
+      Mail__Smtp__UseTls: "false"
+      Mail__FromAddress: "nubarca@nubarca.test"
+      Mail__FromName: "NubArca"
+      # The front door the browsers actually use, so a link opened from a
+      # captured email lands on this stack.
+      Mail__PublicOrigin: "http://127.0.0.1:${E2E_WEB_PORT:-5273}"
+      Mail__TokenLifetimeMinutes: "30"
+      Mail__PerEmailPermitLimit: "1000"
     volumes:
       - storage:/var/lib/nubarca/storage
       - derived:/var/lib/nubarca/derived
@@ -101,6 +120,17 @@ services:
       # is asserted from the host in scripts/start.sh.
       api:
         condition: service_started
+
+  # Local SMTP sink. Accepts every message and never forwards one, so the suite
+  # can assert on delivery without a real mail server and without any risk of a
+  # test email reaching a real mailbox.
+  mail:
+    image: axllent/mailpit:v1.21
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "${E2E_MAIL_PORT:-58025}:8025"
 
   # Single-origin front door: the built app plus a same-origin /api proxy, which
   # is how production serves it. See nginx.e2e.conf for why this replaced driving

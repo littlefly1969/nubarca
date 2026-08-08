@@ -131,6 +131,24 @@ describe('App route table (anonymous)', () => {
     await expectLanded('/tv/pair');
   });
 
+  // Password recovery is unauthenticated by necessity: the person asking
+  // cannot sign in, so a redirect to /login would make the feature unusable.
+  it('keeps /forgot-password public', async () => {
+    goto('/forgot-password');
+    render(<App />);
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/forgot-password');
+    });
+  });
+
+  it('keeps /reset-password public', async () => {
+    goto('/reset-password');
+    render(<App />);
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/reset-password');
+    });
+  });
+
   it('preserves the query string of the requested destination through the redirect', async () => {
     goto('/media?kind=image&q=dog');
     render(<App />);
