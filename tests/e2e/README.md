@@ -51,7 +51,9 @@ gate passed, and it does so only when three independent sources agree:
 - the exit code Playwright actually returned;
 - the JSON report's own pass/fail totals, counted per test rather than read off a
   summary line;
-- the test count the gate is required to run — **72** for the Chromium gate.
+- the test count the gate is required to run, `E2E_EXPECTED_TESTS` in
+  `package.json` — deliberately stated in exactly one place, because a required
+  count restated in prose drifts and then certifies the wrong thing.
 
 The third is the one a green run cannot supply for itself. A project that
 silently stops matching, or a spec renamed out of `testDir`, yields zero failures
@@ -59,6 +61,22 @@ out of fewer tests; without a required count that reads as a pass. The JSON
 report is written to `.artifacts/` rather than `test-results/` because Playwright
 clears `outputDir` when a run starts, which deleted the machine-readable result
 before anything could read it.
+
+There is a fourth property, asserted before any test runs: **the containers under
+test were built from the source under test.** `scripts/start.sh` stamps both
+images with a fingerprint of the working tree and refuses to proceed unless the
+running containers carry the current one.
+
+This closes the worst false green the harness had. The build step used to run
+only when an image was *missing*, so a run after a source change quietly
+exercised the previous build and still reported "131/131 against this commit" —
+confident, complete, and about code that was never executed. Comparing the stamp
+instead rebuilds when the source changed, keeps the fast path when it did not,
+and makes running against a stale image an abort rather than a pass.
+
+The fingerprint covers the working tree, not `HEAD`: the gate is meant to be run
+*before* committing, so a commit-based stamp would either reject every honest
+pre-commit run or ignore uncommitted edits — which is the hole itself.
 
 ## Individual steps
 

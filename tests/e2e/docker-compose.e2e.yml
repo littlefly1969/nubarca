@@ -37,6 +37,13 @@ services:
     build:
       context: ../..
       dockerfile: src/NubArca.Api/Dockerfile
+      # Provenance stamp. scripts/lib.sh computes this from the working tree and
+      # the authoritative gate refuses to report a result unless the running
+      # containers carry it — otherwise a run against images that predate the
+      # source still reads as a pass. Defaults to `unset` so a bare
+      # `docker compose config` stays valid.
+      labels:
+        nubarca.e2e.source-fingerprint: "${E2E_SOURCE_FINGERPRINT:-unset}"
     image: nubarca-e2e-api:local
     depends_on:
       postgres:
@@ -139,6 +146,8 @@ services:
     build:
       context: ../../frontend
       dockerfile: Dockerfile
+      labels:
+        nubarca.e2e.source-fingerprint: "${E2E_SOURCE_FINGERPRINT:-unset}"
     image: nubarca-e2e-web:local
     depends_on:
       api:

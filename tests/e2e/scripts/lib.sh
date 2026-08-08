@@ -40,6 +40,68 @@ require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "$1 is required but not on PATH${2:+ ($2)}"
 }
 
+# ---------------------------------------------------------------------------
+# Image provenance
+#
+# The gate builds the product into images and then drives a browser against
+# them. If those images predate the source under test, the run still passes and
+# still reads as "131/131 against this commit" — a FALSE GREEN, and the worst
+# kind, because the report is confident and wrong.
+#
+# So every image is stamped at build time with a fingerprint of the source that
+# went into it, and the authoritative run refuses to report a result unless the
+# RUNNING containers carry the fingerprint of the working tree being tested.
+#
+# The fingerprint is over the working tree, not `git rev-parse HEAD`: the gate is
+# meant to be run BEFORE committing, so a commit-based stamp would either reject
+# every pre-commit run or quietly ignore uncommitted edits — which is the exact
+# hole this closes.
+E2E_SOURCE_LABEL="nubarca.e2e.source-fingerprint"
+
+# Content hash of everything that lands in the two build contexts. Tracked files
+# plus untracked-but-not-ignored ones, so a brand-new file counts; ignored paths
+# (node_modules, dist, bin, obj) are excluded by construction, which is also what
+# keeps this fast.
+e2e_source_fingerprint() {
+  (
+    cd "$REPO_ROOT"
+    {
+      git ls-files -z -- src frontend
+      git ls-files -z --others --exclude-standard -- src frontend
+    } | sort -z | xargs -0 -r sha256sum
+    # The compose file decides how those contexts are built, so a change to it
+    # is a change to the images.
+    sha256sum "$COMPOSE_FILE"
+  ) | sha256sum | cut -c1-16
+}
+
+# The fingerprint an image was built with, or empty when it carries none (an
+# image built before this stamp existed, or by a plain `docker build`).
+e2e_image_fingerprint() {
+  docker image inspect "$1" \
+    --format "{{index .Config.Labels \"$E2E_SOURCE_LABEL\"}}" 2>/dev/null || true
+}
+
+# The authoritative provenance check. Reads the fingerprint off the image each
+# RUNNING container was actually created from — not off the tag, which can be
+# moved after the fact — so it cannot be satisfied by a rebuild that the stack
+# never picked up.
+assert_images_match_source() {
+  local want="$1" service cid image got
+  for service in api worker web; do
+    cid="$(dc ps -q "$service" 2>/dev/null || true)"
+    [ -n "$cid" ] || die "provenance: the '$service' container is not running"
+    image="$(docker inspect "$cid" --format '{{.Image}}')"
+    got="$(e2e_image_fingerprint "$image")"
+    if [ "$got" != "$want" ]; then
+      die "provenance: '$service' is running an image built from ${got:-an unstamped source} but the working tree is $want.
+      The result of this run would describe code that is not the code under test.
+      Rebuild with: (cd tests/e2e && docker compose --project-name $E2E_PROJECT -f docker-compose.e2e.yml build)"
+    fi
+  done
+  info "images match the source under test ($want)"
+}
+
 wait_for_url() {
   local url="$1" what="$2" budget="${3:-120}"
   local waited=0
