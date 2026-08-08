@@ -213,14 +213,36 @@ Compose network:
 docker run --rm --network "$(docker inspect nubarca-postgres \
   -f '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -1)" \
   --env-file .env \
-  nubarca-api:release-<shortsha> dotnet NubArca.Api.dll db migrate
+  nubarca-api:release-<shortsha> db migrate
 ```
+
+Pass **only the verb**. The image's `ENTRYPOINT` is already
+`["dotnet", "NubArca.Api.dll"]`, so anything after the tag is appended as
+arguments to the running application. Writing
+`… nubarca-api:release-<shortsha> dotnet NubArca.Api.dll db migrate` hands the
+CLI four arguments whose first is `dotnet`; no subcommand matches, and the
+process falls through to **starting a full API host** — which then applies
+pending migrations itself through `Database:MigrateOnStartup` and, far worse,
+starts BlobJanitor, FileItemSweeper and the staging/aesthetics cleanup services
+against production data, listening on 8080 inside the Compose network until
+somebody notices and stops it. It looks like a hung migration. Check
+`docker ps` if `db migrate` does not return within a few seconds.
 
 Read the network name from the running PostgreSQL container as above rather
 than guessing it. The Compose project is pinned to `nubarca`, so the network is
 attached as `nubarca-internal` — **not** `nubarca_nubarca-internal`. Composing
 the `<project>_<network>` form by hand fails with "network not found" and can
 read as a migration failure when nothing is wrong with the migration.
+
+A successful run prints its own confirmation, and the second line is the one
+that proves the release's role catalogue is in place:
+
+```text
+db migrate: applying 1 migration(s):
+  + 20260808122509_MakeRolesFirstClass
+db migrate: built-in roles verified.
+db migrate: completed.
+```
 
 Verify the migration by its effect on the data, not only by its exit code:
 
