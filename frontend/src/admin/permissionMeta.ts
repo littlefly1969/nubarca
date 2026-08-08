@@ -50,6 +50,10 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.tvManage',
     descriptionKey: 'permDesc.tvManage',
   },
+  [PERMISSIONS.castAccess]: {
+    labelKey: 'perm.castAccess',
+    descriptionKey: 'permDesc.castAccess',
+  },
   [PERMISSIONS.adminDashboard]: {
     labelKey: 'perm.adminDashboard',
     descriptionKey: 'permDesc.adminDashboard',

@@ -1566,6 +1566,33 @@ const it = {
   'mediaViewer.noAudio': 'Nessun audio',
   'mediaViewer.audioPresent': 'Presente',
 
+  // --- Trasmissione su TV (Google Cast) ---
+  'cast.cast': 'Trasmetti',
+  'cast.playHere': 'Riproduci sulla TV',
+  'cast.preparing': 'Preparazione video per la TV…',
+  'cast.playingOn': 'In riproduzione su {device}',
+  'cast.unavailable': 'Trasmissione non disponibile',
+  'cast.unsupportedBrowser':
+    'Questo browser non può trasmettere. Usa Chrome su computer o Android; Chrome su iPhone e iPad non supporta Google Cast.',
+  'cast.insecureOrigin':
+    'La trasmissione richiede una connessione HTTPS attendibile.',
+  'cast.unreachableOrigin':
+    'La TV non può raggiungere questo indirizzo. Apri NubArca dal suo nome host di rete, non da localhost.',
+  'cast.sdkFailed': 'Impossibile caricare il componente Google Cast.',
+  'cast.errorGrant': 'Impossibile autorizzare la riproduzione su questo dispositivo.',
+  'cast.errorPreparing': 'Il video non è stato preparato in tempo. Riprova tra poco.',
+  'cast.errorMedia': 'Il dispositivo non è in grado di riprodurre questo video.',
+  'cast.miniAria': 'Controllo trasmissione',
+  'cast.untitled': 'Video',
+  'cast.unknownDevice': 'Dispositivo esterno',
+  'cast.play': 'Riproduci',
+  'cast.pause': 'Pausa',
+  'cast.mute': 'Disattiva audio',
+  'cast.unmute': 'Riattiva audio',
+  'cast.seek': 'Posizione',
+  'cast.volume': 'Volume',
+  'cast.stop': 'Interrompi',
+
   // --- Similar photos panel (viewer drawer) ---
   'similarPanel.aria': 'Foto simili',
   'similarPanel.toggle': 'Foto simili',
@@ -2303,6 +2330,7 @@ const it = {
   'perm.cloudFunctionsAccess': 'Funzioni cloud',
   'perm.privateVaultAccess': 'Cassaforte privata',
   'perm.tvManage': 'Gestione TV',
+  'perm.castAccess': 'Trasmissione su TV',
   'perm.adminDashboard': 'Amministrazione — Cruscotto',
   'perm.adminUsersManage': 'Amministrazione — Utenti',
   'perm.adminImport': 'Amministrazione — Importazione',
@@ -2451,6 +2479,7 @@ const it = {
   'permDesc.cloudFunctionsAccess': 'Caricamento massivo, organizzatore per data ed esportazione archivio.',
   'permDesc.privateVaultAccess': 'La Cassaforte privata protetta da passphrase.',
   'permDesc.tvManage': 'Abbina, revoca e configura i dispositivi TV.',
+  'permDesc.castAccess': 'Permette di trasmettere video a dispositivi esterni compatibili.',
   'permDesc.adminDashboard': 'Il cruscotto di amministrazione e le statistiche di archiviazione.',
   'permDesc.adminUsersManage': 'Crea account, modifica profili e assegna ruoli.',
   'permDesc.adminImport': 'Importazione lato server di cartelle gi\u00e0 presenti sull\u2019host.',

@@ -18,6 +18,13 @@ const port = (name: string, fallback: number): number => {
 export const WEB_URL = process.env.E2E_WEB_URL ?? 'http://127.0.0.1:5273';
 
 /**
+ * The receiver origin the ephemeral API is configured to allow. Deterministic
+ * and fictional on purpose: it is a TEST value, never a guess at what Google's
+ * Default Media Receiver presents in production.
+ */
+export const CAST_RECEIVER_ORIGIN = 'https://receiver.nubarca.test';
+
+/**
  * API published by docker-compose.e2e.yml, for seeding and direct assertions.
  *
  * Deliberately NOT the development default, so the suite can run while a normal

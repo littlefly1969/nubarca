@@ -18,8 +18,9 @@ NubArca 0.3.0 browser E2E certification covers Chromium desktop, mobile and
 effective-200%-layout. Firefox and WebKit projects are retained as extended
 compatibility diagnostics but are not certified release gates in 0.3.0.
 
-`npm run e2e` therefore runs the three Chromium projects and is the release gate.
-The full nine-project matrix is available separately and may report failures:
+`npm run e2e` therefore runs the three Chromium projects plus `chromium-cast`,
+and is the release gate. The full nine-project matrix is available separately and
+may report failures:
 
 ```bash
 npm run e2e:extended
@@ -36,7 +37,7 @@ test fails:
 2. start the ephemeral `nubarca-e2e` Compose stack;
 3. wait for the API to report healthy;
 4. seed deterministic users, media, albums and semantic data;
-5. run the three Chromium release-gate projects;
+5. run the Chromium release-gate projects (three layout projects + `chromium-cast`);
 6. verify the result is authoritative (see below);
 7. preserve diagnostics on failure;
 8. stop the stack and remove its volumes.
@@ -113,7 +114,9 @@ reproducible on any host and keeps "works on my distribution" out of the result.
 engines your host can actually launch: expect WebKit to fail outside a
 Debian/Ubuntu-family host.
 
-## The nine projects
+## The projects
+
+Nine layout projects over `specs/`, plus one dedicated project for Google Cast.
 
 | project | engine | form factor |
 | --- | --- | --- |
@@ -126,6 +129,7 @@ Debian/Ubuntu-family host.
 | `chromium-desktop-zoom200` | Chromium | effective-200% layout |
 | `firefox-desktop-zoom200` | Firefox | effective-200% layout |
 | `webkit-desktop-zoom200` | WebKit | effective-200% layout |
+| `chromium-cast` | Chromium | desktop 1280×800, synthetic secure origin |
 
 **On the zoom projects.** They halve the CSS-pixel viewport and (where the engine
 supports it) double the device pixel ratio, which is what a page *sees* at 200%
@@ -137,6 +141,25 @@ and should not be described as such.
 **On mobile Firefox.** Playwright ships no touch-enabled Firefox descriptor, so
 that project is a narrow viewport without touch emulation: responsive-layout
 coverage, not touch behaviour.
+
+**On `chromium-cast`.** It has its own directory (`cast-specs/`) and covers the
+half of Google Cast a browser on this stack can actually prove: the grant
+endpoint through nginx, a COOKIE-LESS fetch of the resulting bearer URL with real
+Range delivery — exactly what a television does — the CORS boundary including a
+real preflight, and the fact that NubArca REFUSES to offer casting from this
+origin and says why.
+
+The sender half (launcher, session, MediaInfo, position handoff, receiver
+mirroring, mini controller, stop-and-revoke) is deliberately NOT here. It needs a
+secure origin a receiver could also reach, and the ephemeral stack is http on
+loopback: Chromium calls that secure, NubArca correctly calls it unreachable, and
+`--unsafely-treat-insecure-origin-as-secure` does not move `isSecureContext` in
+Playwright's Chromium (measured, not assumed). Giving the stack TLS to satisfy
+one spec would put a certificate, a second port and forwarded-header trust into
+the shared release gate for every other spec to trip over. That half is covered
+at DOM level in `frontend/src/cast/CastProvider.test.tsx` against a framework
+double, and the definitive proof is the physical-device acceptance in
+`docs/google-cast.md`.
 
 ## The stack
 

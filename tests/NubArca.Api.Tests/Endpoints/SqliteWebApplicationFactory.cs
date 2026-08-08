@@ -119,7 +119,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "BeautyLabUpload", "PartyFaceSearch",
-                "SemanticSearch", "TvPersonalInterpret"
+                "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate"
             })
             {
                 builder.UseSetting($"RateLimits:{policy}:PermitLimit", "100000");
@@ -258,6 +258,10 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // regardless of whether the provider is enabled).
             services.AddScoped<IJobQueueAccessor, NubArca.Api.Jobs.VideoHlsJobQueueAccessor>();
             services.AddScoped<VideoHlsServingService>();
+            // NUBARCA-GOOGLE-CAST-01: delegated external playback (mirrors
+            // Program.cs's Postgres-only block; CastOptions itself binds from
+            // configuration outside it, so tests set Cast:* via extraSettings).
+            services.AddScoped<NubArca.Api.Cast.CastGrantService>();
             services.AddScoped<NubArca.Api.Admin.AdminJobCatalogService>();
             services.AddScoped<MetadataBackfillService>();
             services.AddScoped<VideoMetadataBackfillService>();

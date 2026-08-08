@@ -205,6 +205,7 @@ export const MEMBER_PERMISSIONS: readonly string[] = [
   PERMISSIONS.cloudFunctionsAccess,
   PERMISSIONS.privateVaultAccess,
   PERMISSIONS.tvManage,
+  PERMISSIONS.castAccess,
 ];
 
 export function AuthedWrapper({

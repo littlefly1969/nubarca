@@ -266,6 +266,14 @@ public static class AuditActions
     public const string AuthPasswordChange = "auth.password.change";
     // Self-service profile edit (display/first/last name, language, time zone).
     public const string AuthProfileUpdate = "auth.profile.update";
+
+    // NUBARCA-GOOGLE-CAST-01: delegating (and withdrawing) external playback of
+    // one video. Recorded against the FILE, with the grant id and expiry in the
+    // metadata. The bearer secret is NEVER recorded — not raw, not hashed, not
+    // as part of a URL — because an audit trail is read by more people and kept
+    // longer than anything else that touches it.
+    public const string CastGrantCreate = "cast.grant.create";
+    public const string CastGrantRevoke = "cast.grant.revoke";
 }
 
 public static class AuditEntityTypes

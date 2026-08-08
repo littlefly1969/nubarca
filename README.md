@@ -15,6 +15,7 @@ NubArca is designed for a **single operator and their users**, running on one sm
 - **Photo organization without rewriting files** — photos can be organized into date-based folders through previewable, cancellable background jobs. Moves are logical: original bytes, thumbnails, metadata and shares remain intact.
 - **Local AI, under your control** — optional services provide semantic text-to-photo search, image similarity and post-ingestion face detection/embedding. The experimental **Aesthetics Lab** evaluates selected images locally and remains isolated from the main library.
 - **Built for the living room** — the dedicated Fire TV / Android TV experience supports secure QR pairing, remote-first albums and slideshows, personal videos and live Party Mode refresh as new guest photos arrive.
+- **Cast a video to the television** — Chrome on a desktop or on Android can send a video to a Chromecast, a Google TV or any certified Google Cast receiver, and stays a real remote control while it plays. The receiver never holds a NubArca session: it is handed a short-lived, single-video capability whose permission, account and file are re-checked on every request. See [Google Cast](docs/google-cast.md).
 
 ## Current state — 0.3.0
 
@@ -63,6 +64,7 @@ To run NubArca, start with the production runbook:
 - [First deployment](deploy/FIRST_DEPLOY.md)
 - [Operations](docs/OPERATIONS.md)
 - [TV APK/OTA release runbook](docs/tv-release.md)
+- [Google Cast](docs/google-cast.md)
 - [Architecture](ARCHITECTURE.md)
 - [Development state](DEVELOPMENT_STATE.md)
 - [Changelog](CHANGELOG.md)

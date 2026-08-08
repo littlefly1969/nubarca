@@ -62,6 +62,11 @@ public class AppDbContext : DbContext
     public DbSet<PrivateVault> PrivateVaults => Set<PrivateVault>();
     public DbSet<PrivateVaultAccessToken> PrivateVaultAccessTokens => Set<PrivateVaultAccessToken>();
     public DbSet<OwnerDeletedContentTombstone> OwnerDeletedContentTombstones => Set<OwnerDeletedContentTombstone>();
+
+    // Short-lived, single-video playback capabilities delegated to an external
+    // Cast receiver (token hash only). See Domain/CastMediaGrant.
+    public DbSet<CastMediaGrant> CastMediaGrants => Set<CastMediaGrant>();
+
     public DbSet<TvPairingRequest> TvPairingRequests => Set<TvPairingRequest>();
     public DbSet<TvSession> TvSessions => Set<TvSession>();
 

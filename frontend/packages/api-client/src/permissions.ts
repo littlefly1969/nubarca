@@ -15,6 +15,9 @@ export const PERMISSIONS = {
   cloudFunctionsAccess: 'cloud-functions.access',
   privateVaultAccess: 'private-vault.access',
   tvManage: 'tv.manage',
+  // Delegating short-lived external playback of a video the user can already
+  // play (Google Cast). It never widens which files are reachable.
+  castAccess: 'cast.access',
   adminDashboard: 'admin.dashboard',
   adminUsersManage: 'admin.users.manage',
   adminImport: 'admin.import',

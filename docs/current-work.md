@@ -153,6 +153,19 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **`Retry-After` is a minimum wait, not an appointment.** The preparation
   endpoint is stateless and cannot estimate a transcode, so it sends a small
   constant and the client takes `max(localRamp, header)`.
+- **A Cast grant is a capability, never a session.** It reaches one video, for
+  one user, with an expiry — and every request re-reads the account, the
+  `cast.access` permission and the file, so a role edit stops the NEXT segment.
+  Two things are easy to undo by accident. The Cast route asks
+  `VideoHlsServingService` for the **raw** master (`VideoHlsMasterForm.Raw`),
+  because the owner form already prefixes `video/` and un-picking that would be
+  exactly the unchecked string surgery the rewriter exists to avoid. And the
+  **variant** playlists must be rewritten too, not just the master: HLS resolves
+  a relative URI against the playlist's URL and DISCARDS the query, so an
+  untouched variant sends the receiver at token-less segment URLs and it stalls
+  on the first one. A password change deliberately does NOT revoke a grant —
+  `SecurityVersion` signs other browsers out, and a television in the owner's
+  own home is not a browser session. See [google-cast.md](google-cast.md).
 - **`MediaItem.takenAt` falls back to `CreatedAt`.** Only
   `FileMetadata.effective.dateTakenSource` distinguishes a real capture date, so
   the viewer suppresses the `uploaded` source rather than presenting it as a

@@ -22,12 +22,14 @@ using NubArca.Api.Albums;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth;
 using NubArca.Api.Auth.Recovery;
+using NubArca.Api.Cast;
 using NubArca.Api.Cli;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Endpoints;
 using NubArca.Api.Files;
 using NubArca.Api.Folders;
+using NubArca.Api.Http;
 using NubArca.Api.Ingestion;
 using NubArca.Api.Jobs;
 using NubArca.Api.Jobs.Handlers;
@@ -226,6 +228,50 @@ builder.Services.AddSingleton<IPasswordHasher<NubArca.Api.Domain.PrivateVault>,
 builder.Services.AddSingleton<IPasswordHasher<NubArca.Api.Domain.TvPersonalPin>,
     PasswordHasher<NubArca.Api.Domain.TvPersonalPin>>();
 
+// NUBARCA-GOOGLE-CAST-01: Cast configuration + the ONE CORS policy NubArca has.
+//
+// CORS is emphatically NOT enabled globally. This policy is attached to the
+// grant-scoped Cast media routes and to nothing else, because those are the only
+// URLs a foreign document (Google's Default Media Receiver, running on its own
+// origin) ever fetches. Every other NubArca endpoint stays same-origin-only.
+//
+// The allowlist is exact and comes from operator configuration. There is no
+// wildcard: `Access-Control-Allow-Origin: *` on a URL that carries a bearer
+// secret would let any page on the internet read protected media the moment it
+// learned the URL. An unconfigured or unlisted origin simply gets no CORS
+// permission — grant creation still works, so the failure shows up on the
+// television rather than as a silently permissive server.
+builder.Services.Configure<NubArca.Api.Cast.CastOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Cast.CastOptions.SectionName));
+var castReceiverOrigins = builder.Configuration
+    .GetSection(NubArca.Api.Cast.CastOptions.SectionName)
+    .Get<NubArca.Api.Cast.CastOptions>()?.NormalizedReceiverOrigins ?? [];
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy(NubArca.Api.Endpoints.CastEndpoints.MediaCorsPolicy, policy =>
+    {
+        if (castReceiverOrigins.Count == 0)
+        {
+            // Fail closed: no origin is echoed at all.
+            policy.SetIsOriginAllowed(_ => false);
+        }
+        else
+        {
+            policy.WithOrigins([.. castReceiverOrigins]);
+        }
+
+        // Playback only. A grant is never a write surface.
+        policy.WithMethods("GET", "HEAD", "OPTIONS");
+        // What a media player actually sends on a cross-origin fetch.
+        policy.WithHeaders("Range", "Accept", "Accept-Encoding", "Content-Type");
+        // What a media player has to be able to READ back to seek correctly.
+        policy.WithExposedHeaders(
+            "Content-Type", "Content-Length", "Content-Range", "Accept-Ranges");
+        // Deliberately no AllowCredentials: the receiver has no cookie and must
+        // never be able to send one.
+    });
+});
+
 var loginPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:Login:PermitLimit") ?? 10;
 var loginWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:Login:WindowSeconds") ?? 60;
 var sharePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:Share:PermitLimit") ?? 60;
@@ -282,6 +328,13 @@ var semanticSearchPermitLimit = builder.Configuration.GetValue<int?>("RateLimits
 var semanticSearchWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:SemanticSearch:WindowSeconds") ?? 60;
 // Natural-language interpret is bounded (a local model queue must never be
 // flooded): conservative default 15/min per TV session IP, small queue.
+// Creating a Cast grant mints a bearer capability, so it is capped per USER
+// rather than per IP: several people behind one home NAT must not share a
+// budget. HLS segment fetches are deliberately NOT on this policy — one film is
+// hundreds of them — and need no separate one, because the bearer URL is already
+// scoped to a single video with an expiry.
+var castGrantCreatePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:CastGrantCreate:PermitLimit") ?? 20;
+var castGrantCreateWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:CastGrantCreate:WindowSeconds") ?? 60;
 var tvPersonalInterpretPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:PermitLimit") ?? 15;
 var tvPersonalInterpretWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:WindowSeconds") ?? 60;
 var tvPersonalInterpretQueueLimit = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:QueueLimit") ?? 2;
@@ -438,6 +491,22 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = semanticSearchPermitLimit,
                 Window = TimeSpan.FromSeconds(semanticSearchWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // Partitioned by USER (the endpoint is authenticated), so a household
+    // sharing one public address does not share one budget. An unauthenticated
+    // request cannot reach the endpoint at all; the IP fallback exists only so
+    // the partition key is never empty.
+    options.AddPolicy(CastEndpoints.GrantCreateRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.GetCurrentUserId()?.ToString()
+                ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = castGrantCreatePermitLimit,
+                Window = TimeSpan.FromSeconds(castGrantCreateWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
@@ -648,6 +717,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<VideoHlsBackfillService>();
     builder.Services.AddScoped<IJobQueueAccessor, NubArca.Api.Jobs.VideoHlsJobQueueAccessor>();
     builder.Services.AddScoped<VideoHlsServingService>();
+    // NUBARCA-GOOGLE-CAST-01: delegated external playback. Depends on the DB,
+    // the permission resolver and the HLS serving service, so it belongs in
+    // this block; CastOptions itself is bound unconditionally below.
+    builder.Services.AddScoped<NubArca.Api.Cast.CastGrantService>();
     // Admin console: dynamic command catalog (profile options, availability,
     // pending counts). Needs the DB + AI registry, so it lives in this block.
     builder.Services.AddScoped<NubArca.Api.Admin.AdminJobCatalogService>();
@@ -948,6 +1021,12 @@ app.Use(static async (context, next) =>
 });
 app.Use(CsrfOriginValidation.InvokeAsync);
 
+// CORS runs before authentication so a preflight is answered without one. It
+// grants NOTHING by itself: only endpoints that opt in with
+// .RequireCors(CastEndpoints.MediaCorsPolicy) are affected, which in this
+// application is the grant-scoped Cast media family and nothing else.
+app.UseCors();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
@@ -1087,6 +1166,12 @@ app.MapAdminJobsEndpoints();
 // doesn't matter.)
 app.MapFileEndpoints();
 app.MapFolderTrashEndpoints();
+
+// NUBARCA-GOOGLE-CAST-01: Google Cast grant lifecycle (cookie-authenticated,
+// cast.access) plus the grant-scoped media family a Default Media Receiver
+// fetches. The owner's own /api/files/{id}/video contract above is untouched
+// and stays cookie-only. See Endpoints/CastEndpoints.cs.
+app.MapCastEndpoints();
 
 app.MapGet("/api/search", async (
     [FromQuery] string? q,

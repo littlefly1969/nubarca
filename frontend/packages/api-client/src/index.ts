@@ -30,3 +30,4 @@ export * from './adminFaceAI';
 export * from './tv';
 export * from './party';
 export * from './beautyLabUpload';
+export * from './cast';

@@ -41,10 +41,12 @@ public sealed class AdminRoleEndpointTests : IDisposable
         var administrator = listed.Roles.Single(r => r.Key == RoleKeys.Administrator);
         Assert.True(administrator.IsSystem);
         Assert.True(administrator.IsAdministrator);
-        Assert.Equal(13, administrator.Permissions.Count);
+        Assert.Equal(14, administrator.Permissions.Count);
         Assert.Equal(1, administrator.UserCount);
 
-        Assert.Equal(8, listed.Roles.Single(r => r.Key == RoleKeys.Member).Permissions.Count);
+        // Member carries every non-administrative permission, `cast.access`
+        // included — that is the migration contract, not an oversight.
+        Assert.Equal(9, listed.Roles.Single(r => r.Key == RoleKeys.Member).Permissions.Count);
         Assert.Empty(listed.Roles.Single(r => r.Key == RoleKeys.Restricted).Permissions);
     }
 

@@ -317,7 +317,8 @@ test.describe('roles and permissions', () => {
 
     await modal.getByTestId('admin-user-role').selectOption('Member');
     await expect(vault).toHaveAttribute('data-included', 'yes');
-    await expect(modal.getByTestId('role-permission-count')).toHaveText('8 permessi');
+    // Every non-administrative permission in the catalogue — nine of them.
+    await expect(modal.getByTestId('role-permission-count')).toHaveText('9 permessi');
 
     // Escape closes it; the list underneath was never replaced.
     await page.keyboard.press('Escape');

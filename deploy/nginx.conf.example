@@ -8,6 +8,17 @@
 # (loopback only). This server block is the only path the public internet
 # can reach the stack.
 
+# Google Cast media URLs carry a bearer secret in their QUERY STRING, because a
+# television cannot be handed a cookie or a header. nginx's default `combined`
+# format logs $request, which includes the query string — so the default would
+# write that secret into the access log of every installation.
+#
+# This format logs the method, the sanitized PATH and the status, with no $args
+# and no $request_uri. It is applied to the Cast media location only: logging for
+# every other NubArca route is deliberately unchanged.
+log_format nubarca_cast '$remote_addr - [$time_local] "$request_method $uri" '
+                        '$status $body_bytes_sent "$http_user_agent"';
+
 server {
     listen 80;
     listen [::]:80;
@@ -57,6 +68,22 @@ server {
     # actually used. Serving on a non-default port with $host makes every write
     # — login included — fail 403; on :443 the bug hides, because the stripped
     # port and the port the API infers happen to agree.
+    # Google Cast media. MUST come before the generic /api/ block so the
+    # token-free log format applies. Everything else about the proxying is
+    # identical; only the logging differs.
+    location /api/cast/media/ {
+        access_log /var/log/nginx/nubarca-cast.log nubarca_cast;
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Real-IP $remote_addr;
+        # A receiver seeks with Range requests; neither direction may buffer.
+        proxy_request_buffering off;
+        proxy_buffering off;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;

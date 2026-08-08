@@ -7821,3 +7821,147 @@ video.lightbox-image {
 .permission-check.is-on .permission-check__label { color: var(--accent); }
 /* A section is visibly subordinate to its shell. */
 .permission-check--child { margin-inline-start: 1.5rem; }
+
+/* ── Trasmissione su TV (Google Cast) ──────────────────────────────────────
+   Two surfaces: the control that sits in the media viewer's action row, and
+   the compact controller pinned to the authenticated shell while a receiver
+   is playing. The launcher itself is Google's custom element, so the styling
+   here sizes and colours the box it lives in and leaves its artwork alone. */
+
+.cast-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cast-launcher {
+  /* The framework paints the glyph with --connected-color / --disconnected-color
+     and needs an explicit box: the element has no intrinsic size. */
+  --connected-color: #fff;
+  --disconnected-color: #fff;
+  width: 32px;
+  height: 32px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.cast-button {
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 0.75rem;
+  cursor: pointer;
+}
+
+.cast-button--send { font-size: 0.85rem; white-space: nowrap; }
+
+.cast-control--unavailable .cast-button {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cast-status {
+  color: #fff;
+  font-size: 0.8rem;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  max-width: 22ch;
+}
+
+.cast-status--error { color: var(--error, #ff8f8f); }
+
+/* The mini controller. Pinned above the shell's own content, restrained on
+   purpose: a reminder plus a stop button, never a second player. It sits
+   inside .app-shell (which owns the viewport) so it never scrolls away. */
+.cast-mini {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: min(720px, calc(100vw - 2rem));
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--border-default, #22355c);
+  border-radius: 10px;
+  background: var(--surface-overlay, #132546);
+  color: var(--text, #eee);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.cast-mini__identity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 12rem;
+}
+
+.cast-mini__title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cast-mini__device {
+  font-size: 0.8rem;
+  color: var(--text-muted, #8fa0be);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cast-mini__transport {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.cast-mini__clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--text-muted, #8fa0be);
+  white-space: nowrap;
+}
+
+/* The scrubber is the one element allowed to take the leftover width. */
+.cast-mini__scrubber { flex: 1 1 4rem; min-width: 4rem; }
+
+.cast-mini__stop {
+  background: transparent;
+  color: var(--text, #eee);
+  border: 1px solid var(--border-strong, #33507f);
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 0 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cast-mini__stop:hover { border-color: var(--accent, #3d82ff); }
+
+/* Narrow viewports stack the two rows rather than letting the transport
+   squeeze the title to nothing. */
+@media (max-width: 40rem) {
+  .cast-mini { flex-direction: column; align-items: stretch; gap: 0.5rem; }
+  .cast-mini__transport { flex: 1 1 auto; }
+}
+
+/* The volume trim sits next to the scrubber but never competes with it for
+   width: the position is what a person actually drags. */
+.cast-mini__volume { flex: 0 0 5rem; width: 5rem; }

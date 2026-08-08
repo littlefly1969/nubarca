@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { getFileMetadata, originalDownloadUrl, type FileMetadata } from '@nubarca/api-client';
 import { formatSize } from './format';
 import { useI18n } from '../i18n';
-import { HlsVideoPlayer } from '../video/HlsVideoPlayer';
+import { HlsVideoPlayer, type VideoPlayerHandle } from '../video/HlsVideoPlayer';
+import { CastVideoControl } from '../cast/CastVideoControl';
+import { useCast } from '../cast/useCast';
 import { resolveViewerSummary } from './mediaViewerSummary';
 
 // Slice 86: a reusable, clean full-screen media viewer for images and videos.
@@ -81,6 +83,10 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   const [metadata, setMetadata] = useState<FileMetadata | null>(null);
   const [metadataError, setMetadataError] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // NUBARCA-GOOGLE-CAST-01: the player bridge. The viewer never reaches into
+  // the player's DOM; it asks the handle for the position and to stop.
+  const playerRef = useRef<VideoPlayerHandle | null>(null);
+  const cast = useCast();
 
   useEffect(() => { setImageFailed(false); }, [index]);
 
@@ -147,6 +153,21 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
     if (Math.abs(dx) > 50) { if (dx > 0) goPrev(); else goNext(); showChrome(); }
   }
 
+  // A cast that ended (stopped, or the receiver went away) hands its last known
+  // position back. Applied once, to the file it belongs to, and always PAUSED —
+  // a television that stops must not become loud local playback in a room where
+  // somebody was watching the TV.
+  const consumeHandoff = cast?.consumeHandoff;
+  const currentItemId = item?.id;
+  const castingThis = cast?.remote?.fileId === currentItemId && currentItemId !== undefined;
+  useEffect(() => {
+    if (consumeHandoff === undefined || currentItemId === undefined || castingThis) return;
+    const resumeAt = consumeHandoff(currentItemId);
+    if (resumeAt === null) return;
+    playerRef.current?.pause();
+    playerRef.current?.seek(resumeAt);
+  }, [consumeHandoff, currentItemId, castingThis]);
+
   if (!item) return null;
 
   // Size comes from the loaded item when available (no request); the effective
@@ -203,6 +224,8 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
             fileId={item.id}
             className="media-viewer-media"
             initialPositionMilliseconds={item.initialPositionMilliseconds ?? null}
+            playerRef={playerRef}
+            suppressLocalPlayback={castingThis}
           />
         )}
       </div>
@@ -222,6 +245,16 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
             )}
           </div>
           <div className="media-viewer-actions">
+            {/* Video only in this phase: images are not cast. */}
+            {item.kind === 'video' && (
+              <CastVideoControl
+                fileId={item.id}
+                title={item.displayName}
+                subtitle={summaryParts.length > 0 ? summaryParts.join(' · ') : null}
+                getPositionSeconds={() => playerRef.current?.getCurrentTime() ?? 0}
+                onHandoff={() => playerRef.current?.pause()}
+              />
+            )}
             <button type="button" aria-label={t('mediaViewer.details')} aria-pressed={detailsOpen}
               data-testid="viewer-details-toggle"
               onClick={() => setDetailsOpen((v) => !v)}>ⓘ</button>

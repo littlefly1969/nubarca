@@ -116,6 +116,20 @@ export default defineConfig({
         deviceScaleFactor: 2,
       },
     },
+
+    // ----------------------------------------------------------- Google Cast
+    // Its own directory, because Cast is the one feature whose full sender flow
+    // this stack cannot host: Google's Web Sender needs a secure context, and
+    // NubArca additionally refuses to offer casting from a loopback address (no
+    // television can resolve 127.0.0.1). The ephemeral stack is http on
+    // loopback, so what a browser can prove here is the SERVER half plus the
+    // refusal — see cast-specs/cast.spec.ts for exactly what is and is not
+    // covered, and where the rest lives.
+    {
+      name: 'chromium-cast',
+      testDir: './cast-specs',
+      use: { ...devices['Desktop Chrome'], viewport: DESKTOP },
+    },
   ],
 
   // No webServer: the ephemeral stack serves the built app and the API from one

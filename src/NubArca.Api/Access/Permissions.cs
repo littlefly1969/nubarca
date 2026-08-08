@@ -36,6 +36,14 @@ public static class Permissions
     // NOT gate anything an already-paired TV does with its own session token.
     public const string TvManage = "tv.manage";
 
+    // Casting a video to an external receiver (Google Cast in the first
+    // implementation). It authorizes the DELEGATION, not the media: holding it
+    // means "may mint a short-lived, single-video playback capability for
+    // something I can already play", never "may reach somebody else's files".
+    // Every Cast media request re-reads this key, so losing it stops the next
+    // segment — see NubArca.Api.Cast.
+    public const string CastAccess = "cast.access";
+
     // Administration. Five separate authorities on purpose: holding one must
     // never open another's API.
     public const string AdminDashboard = "admin.dashboard";

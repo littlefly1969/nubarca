@@ -86,6 +86,12 @@ services:
       RateLimits__Share__WindowSeconds: "60"
       RateLimits__PasswordRecovery__PermitLimit: "1000"
       RateLimits__PasswordRecovery__WindowSeconds: "60"
+      RateLimits__CastGrantCreate__PermitLimit: "1000"
+      RateLimits__CastGrantCreate__WindowSeconds: "60"
+      # Google Cast: a DETERMINISTIC test receiver origin, never a guess at what
+      # Google's Default Media Receiver presents in production. The real value is
+      # captured once from a physical device and configured per installation.
+      Cast__AllowedReceiverOrigins__0: "https://receiver.nubarca.test"
       # Password recovery against a LOCAL mail sink (see the `mail` service).
       # No credentials, no TLS, nothing leaves the compose network — the suite
       # reads the delivered message back over Mailpit's HTTP API, which is how a

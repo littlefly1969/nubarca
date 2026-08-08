@@ -44,6 +44,7 @@ public static class PermissionCatalog
         new(Permissions.CloudFunctionsAccess, PermissionGroups.Features, false),
         new(Permissions.PrivateVaultAccess, PermissionGroups.Features, false),
         new(Permissions.TvManage, PermissionGroups.Features, false),
+        new(Permissions.CastAccess, PermissionGroups.Features, false),
         new(Permissions.AdminDashboard, PermissionGroups.Administration, true),
         new(Permissions.AdminUsersManage, PermissionGroups.Administration, true),
         new(Permissions.AdminImport, PermissionGroups.Administration, true),

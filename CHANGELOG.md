@@ -90,6 +90,47 @@ equal the permissions in force before it. `isAdmin` survives only as a computed
 compatibility field on `/api/auth/me` and the admin import user picker; nothing
 stores it.
 
+### Google Cast
+
+A video can be sent to a Chromecast, a Google TV, an Android TV or any other
+certified Google Cast receiver, from Chrome on a desktop or on Android. The
+browser stays a real remote control, and changes made on the television flow
+back into it. See [docs/google-cast.md](docs/google-cast.md).
+
+The television has no NubArca session and cannot be given one, so NubArca
+authorises *before* playback instead of trying to authenticate the receiver.
+
+- **A temporary, single-video grant** — 256 bits of CSPRNG entropy, returned once
+  and held only in the sender tab's memory; the database stores the SHA-256
+  digest and nothing else. It reaches one file, for one user, for six hours by
+  default (`Cast__GrantLifetimeMinutes`, clamped to 30–720). Never written to web
+  storage, browser history, a log or an audit payload.
+- **A grant is not standing authority** — every Cast request, including every HLS
+  segment, re-reads the grant, the account, the permission and the file. Removing
+  `cast.access` from a role or disabling an account stops the *next* segment,
+  with no re-login: the same "permissions change on the next request" contract
+  every other endpoint has. Every failure answers one indistinguishable `404`.
+- **`cast.access`** — a fourteenth catalogue key, *Trasmissione su TV*. Held by
+  Administrator and Member (the migration adds it to an existing Member role);
+  never granted to a custom role an operator built themselves.
+- **The existing video contract is untouched** — `/api/files/{id}/video` and its
+  ladder routes stay cookie-only and owner-scoped. Cast is a separate route
+  family that reuses the same HLS pipeline, with no second transcoder and no
+  second copy of the media. The Cast master *and* every variant are rewritten to
+  signed grant-scoped URLs, because HLS resolves a relative URI against the
+  playlist's URL and discards the query — an unsigned variant would stall the
+  receiver on its first segment. Every URI is validated against the storage
+  layer's own whitelist and a playlist with one bad URI is rejected whole.
+- **CORS is not enabled globally** — one policy, attached to the Cast media
+  routes and nothing else, echoing only the exact origins an operator configured.
+  Never a wildcard: these URLs carry a bearer secret.
+- **The secret stays out of logs** — it must ride in a URL, so it rides in the
+  query string, and `deploy/nginx.conf.example` ships a token-free access-log
+  format for `/api/cast/media/`.
+- Videos only. Google's Default Media Receiver, so no custom receiver and no Cast
+  Developer Console registration. Chrome on iPhone and iPad is not supported by
+  the Google Web Sender — every iOS browser is WebKit underneath.
+
 ## 0.3.0
 
 NubArca `0.3.0` is the consolidated product baseline: one coherent identity

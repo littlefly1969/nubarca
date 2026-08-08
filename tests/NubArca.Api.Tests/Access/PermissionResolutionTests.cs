@@ -66,7 +66,8 @@ public sealed class PermissionResolutionTests : IDisposable
         var administrator = roles.Single(r => r.Key == RoleKeys.Administrator);
         Assert.True(administrator.IsAdministrator);
         Assert.Equal(PermissionCatalog.AllKeys, administrator.Permissions);
-        Assert.Equal(13, administrator.Permissions.Count);
+        // Nine feature permissions plus five administrative ones.
+        Assert.Equal(14, administrator.Permissions.Count);
 
         Assert.Equal(RoleDefaults.MemberPermissions, roles.Single(r => r.Key == RoleKeys.Member).Permissions);
         Assert.Empty(roles.Single(r => r.Key == RoleKeys.Restricted).Permissions);
@@ -274,7 +275,7 @@ public sealed class PermissionResolutionTests : IDisposable
     {
         Assert.True(PermissionCatalog.IsAdministratorOnly(Permissions.AdminRolesManage));
         Assert.DoesNotContain(Permissions.AdminRolesManage, PermissionCatalog.AssignableKeys);
-        Assert.Equal(12, PermissionCatalog.AssignableKeys.Count);
-        Assert.Equal(13, PermissionCatalog.AllKeys.Count);
+        Assert.Equal(13, PermissionCatalog.AssignableKeys.Count);
+        Assert.Equal(14, PermissionCatalog.AllKeys.Count);
     }
 }

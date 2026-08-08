@@ -272,9 +272,9 @@ what an endpoint names. `NubArca.Api.Access` owns the whole model:
 - `PermissionCatalog` is the authoritative list of feature-surface keys
   (`people.access`, `semantic-search.access`, `laboratory.access`,
   `laboratory.plates`, `laboratory.aesthetics`, `cloud-functions.access`,
-  `private-vault.access`, `tv.manage`, `admin.dashboard`,
+  `private-vault.access`, `tv.manage`, `cast.access`, `admin.dashboard`,
   `admin.users.manage`, `admin.import`, `admin.jobs.manage`,
-  `admin.roles.manage` — thirteen). The unit is a feature surface, not a CRUD
+  `admin.roles.manage` — fourteen). The unit is a feature surface, not a CRUD
   verb: owner isolation is an unconditional property of every query and is
   never expressed as a permission. Each definition also carries the two
   structural facts a role editor cannot be correct without: `Parent` (a

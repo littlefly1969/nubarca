@@ -47,7 +47,10 @@ public sealed class VideoHlsServingService
     public bool Enabled => _options.Value.VideoHlsEnabled;
 
     public async Task<VideoHlsMasterResult> GetMasterAsync(
-        Guid fileId, Guid ownerUserId, CancellationToken cancellationToken)
+        Guid fileId,
+        Guid ownerUserId,
+        CancellationToken cancellationToken,
+        VideoHlsMasterForm form = VideoHlsMasterForm.ChildRouteRelative)
     {
         var gate = await ResolveGateAsync(fileId, ownerUserId, cancellationToken);
         if (gate is null)
@@ -71,7 +74,8 @@ public sealed class VideoHlsServingService
             if (stream is not null)
             {
                 using var reader = new StreamReader(stream);
-                var master = RewriteMasterUris(await reader.ReadToEndAsync(cancellationToken));
+                var body = await reader.ReadToEndAsync(cancellationToken);
+                var master = form == VideoHlsMasterForm.Raw ? body : RewriteMasterUris(body);
                 return new VideoHlsMasterResult(VideoHlsMasterStatus.Ready, master);
             }
             // Row says ready but the root playlist vanished mid-check — fall
@@ -204,6 +208,27 @@ public enum VideoHlsMasterStatus
     NotFound,
     Preparing,
     Ready,
+}
+
+// Which shape of rendition URI a caller wants back. The ladder on disk is one
+// thing; how a given route family has to REFERENCE it is another, and only the
+// caller knows that.
+public enum VideoHlsMasterForm
+{
+    /// <summary>
+    /// URIs prefixed "video/" so they resolve under a `.../video` URL segment.
+    /// What the owner's own player and the shared-album recipient both need.
+    /// </summary>
+    ChildRouteRelative,
+
+    /// <summary>
+    /// Exactly what ffmpeg wrote — storage-relative ("high/stream.m3u8"). For a
+    /// caller that has to build its own URIs, such as the Cast route family,
+    /// which signs each one with a bearer secret. Asking for the raw form is how
+    /// such a caller avoids un-picking somebody else's rewrite, which is the
+    /// unsafe string surgery this parameter exists to prevent.
+    /// </summary>
+    Raw,
 }
 
 public sealed record VideoHlsMasterResult(VideoHlsMasterStatus Status, string? MasterPlaylist);

@@ -10,6 +10,8 @@ import { NavDrawer } from './nav/NavDrawer';
 import { UserMenu } from './UserMenu';
 import { Icon } from './icons/Icon';
 import { AppScrollProvider } from './appScroll';
+import { CastProvider } from '../cast/CastProvider';
+import { CastMiniController } from '../cast/CastMiniController';
 
 // Authenticated app shell: a collapsible left navigation, a compact top utility
 // bar and a full-width content region.
@@ -83,6 +85,11 @@ export function Layout() {
   const permissions = state.user.effectivePermissions;
 
   return (
+    // NUBARCA-GOOGLE-CAST-01: the Cast session is owned HERE, above every page
+    // and every media viewer. That placement is the feature: closing the viewer
+    // — or navigating to another page entirely — leaves the television playing,
+    // and the mini controller below stays the way back to it.
+    <CastProvider>
     <AppScrollProvider viewportRef={mainRef}>
     <div className={`app-shell${collapsed ? ' app-shell--rail' : ''}`}>
       <header className="app-topbar" data-testid="app-topbar">
@@ -144,7 +151,11 @@ export function Layout() {
       {drawerOpen && (
         <NavDrawer permissions={permissions} onClose={closeDrawer} returnFocusRef={menuButtonRef} />
       )}
+
+      {/* Renders itself only while something is playing on a receiver. */}
+      <CastMiniController />
     </div>
     </AppScrollProvider>
+    </CastProvider>
   );
 }

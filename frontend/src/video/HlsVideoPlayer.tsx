@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { useI18n } from '../i18n';
 import { readDisplayContext, selectInitialLevel } from './hlsLevelSelection';
 import { EMPTY_BUDGET, classifyFatalError, planRecovery } from './hlsRecovery';
@@ -85,6 +85,27 @@ export async function probeVideoPlayback(
   };
 }
 
+/**
+ * The narrow contract another component may drive this player through.
+ *
+ * NUBARCA-GOOGLE-CAST-01 needs the local position at the instant the user casts,
+ * and needs local playback to stop. The media element is an implementation
+ * detail of this component — reaching for it with a DOM query from outside
+ * would work today and break the moment the element is wrapped, keyed or
+ * swapped. So the player states what it is willing to be asked, and nothing
+ * else. Every method is safe before the element exists.
+ */
+export interface VideoPlayerHandle {
+  /** Seconds into the media, or 0 when nothing is loaded. */
+  getCurrentTime(): number;
+  /** Duration in seconds, or 0 when unknown. */
+  getDuration(): number;
+  isPaused(): boolean;
+  pause(): void;
+  /** Move the playhead. Ignored when the media has not loaded yet. */
+  seek(seconds: number): void;
+}
+
 interface HlsVideoPlayerProps {
   fileId: string;
   className?: string;
@@ -105,11 +126,20 @@ interface HlsVideoPlayerProps {
   // Works for both playback contracts: the direct byte stream seeks via Range,
   // HLS via the segment index. Nothing is persisted.
   initialPositionMilliseconds?: number | null;
+  /** See VideoPlayerHandle. Absent for every call site that only watches. */
+  playerRef?: Ref<VideoPlayerHandle>;
+  // NUBARCA-GOOGLE-CAST-01: this video is playing on a Cast receiver, so the
+  // local element must stay quiet. It suppresses autoplay and pauses whatever
+  // is already running — two devices playing the same soundtrack a second apart
+  // is the most jarring way to get casting wrong, and the remote device is
+  // authoritative while a cast is live.
+  suppressLocalPlayback?: boolean;
 }
 
 export function HlsVideoPlayer({
   fileId, className, initialPositionMilliseconds = null,
-  videoUrl: videoUrlProp, posterUrl: posterUrlProp,
+  videoUrl: videoUrlProp, posterUrl: posterUrlProp, playerRef,
+  suppressLocalPlayback = false,
 }: HlsVideoPlayerProps) {
   const { t } = useI18n();
   const [mode, setMode] = useState<VideoPlaybackMode | 'probing'>('probing');
@@ -137,6 +167,39 @@ export function HlsVideoPlayer({
 
   const videoUrl = videoUrlProp ?? `/api/files/${fileId}/video`;
   const posterUrl = posterUrlProp ?? `/api/files/${fileId}/poster`;
+
+  // The player bridge. Declared here (before the conditional returns below) so
+  // the handle exists for every mode, and each method tolerates a missing
+  // element: while the ladder is preparing there is no <video> at all, and a
+  // caller asking for the position then should get 0, not a crash.
+  useImperativeHandle(playerRef, (): VideoPlayerHandle => ({
+    getCurrentTime: () => {
+      const time = videoRef.current?.currentTime ?? 0;
+      return Number.isFinite(time) ? time : 0;
+    },
+    getDuration: () => {
+      const duration = videoRef.current?.duration ?? 0;
+      return Number.isFinite(duration) ? duration : 0;
+    },
+    isPaused: () => videoRef.current?.paused ?? true,
+    pause: () => { videoRef.current?.pause(); },
+    seek: (seconds: number) => {
+      const video = videoRef.current;
+      if (!video || !Number.isFinite(video.duration)) return;
+      try {
+        video.currentTime = Math.max(0, Math.min(seconds, video.duration));
+      } catch {
+        // A container/browser that refuses the seek just stays where it is.
+      }
+    },
+  }), []);
+
+  // Casting became authoritative (here or on another device) while this element
+  // is mounted: stop it. Autoplay is suppressed by the attribute below, but an
+  // element that was ALREADY playing has to be told.
+  useEffect(() => {
+    if (suppressLocalPlayback) videoRef.current?.pause();
+  }, [suppressLocalPlayback, mode]);
 
   // Leaving the player (close/navigate) while in wrapper-fullscreen: exit so
   // the viewer chrome comes back instead of a black fullscreen shell.
@@ -318,6 +381,12 @@ export function HlsVideoPlayer({
   // plays inside the viewer; the next manual play retries). ESC exits, per
   // the platform convention.
   const onPlay = () => {
+    // A cast is authoritative: a stray local play (a keyboard shortcut, the
+    // native control) is undone rather than allowed to talk over the television.
+    if (suppressLocalPlayback) {
+      videoRef.current?.pause();
+      return;
+    }
     if (document.fullscreenElement) return;
     wrapRef.current?.requestFullscreen?.().catch(() => { /* stay windowed */ });
   };
@@ -334,7 +403,7 @@ export function HlsVideoPlayer({
         poster={posterUrl}
         controls
         controlsList="nofullscreen"
-        autoPlay
+        autoPlay={!suppressLocalPlayback}
         playsInline
         preload="metadata"
         onLoadedMetadata={onLoadedMetadata}

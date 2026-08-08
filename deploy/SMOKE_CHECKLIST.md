@@ -84,6 +84,15 @@ admin user created by `users ensure`.
 - [ ] **Video** (if you uploaded an `.mp4`/`.webm`): a poster renders on the
       row and the Play button opens the in-app `<video>` player; playback
       seeks (Range requests work).
+- [ ] **Cast** (Chrome on a desktop or Android, with the account holding
+      `cast.access`): the Cast launcher appears beside a video. Pressing it and
+      choosing a receiver starts playback at roughly the local position, local
+      playback pauses, and play/pause/seek/volume work in both directions.
+      Closing the viewer leaves the mini controller and keeps the television
+      playing; **Interrompi** stops it and revokes the grant. Re-requesting the
+      revoked media URL must answer `404`. Then confirm the secret never reached
+      the proxy log: `sudo grep -c 'token=' <access log>` prints `0`. Full
+      procedure in [`docs/google-cast.md`](../docs/google-cast.md).
 - [ ] **Albums**: create an album under `/albums`, add an image to it from
       the gallery lightbox, open the album and confirm the item is listed,
       then remove it. Deleting an album must NOT delete the underlying file.

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { HlsVideoPlayer, probeVideoPlayback } from './HlsVideoPlayer';
+import { HlsVideoPlayer, probeVideoPlayback, type VideoPlayerHandle } from './HlsVideoPlayer';
 import { AuthedWrapper } from '../test-utils';
 
 // Scope note: hls.js is loaded through a dynamic import, and under this jsdom
@@ -270,5 +270,98 @@ describe('HlsVideoPlayer direct playback', () => {
     await waitFor(() => {
       expect(document.querySelector('.media-viewer-video-spinner')).toBeNull();
     });
+  });
+});
+
+// NUBARCA-GOOGLE-CAST-01 — the player bridge and the local/remote handover.
+//
+// "Local and TV audio play simultaneously" is a completion blocker for the Cast
+// slice, and the DOM node that would cause it lives in here. The two mechanisms
+// are asserted separately because they cover different moments: autoplay is what
+// a video mounted DURING a cast would do, and the pause is what an already
+// playing video has to be told.
+describe('HlsVideoPlayer casting handover', () => {
+  it('exposes position, duration and transport through the ref instead of the DOM', async () => {
+    mockFetchResponse(206, { 'content-type': 'video/mp4' });
+    const handle = { current: null as VideoPlayerHandle | null };
+    render(
+      <AuthedWrapper><HlsVideoPlayer fileId="x" playerRef={handle} /></AuthedWrapper>,
+    );
+    const video = await waitFor(() => {
+      const v = document.querySelector('video');
+      expect(v).not.toBeNull();
+      return v!;
+    });
+
+    // jsdom never loads media, so the element's own values are the contract.
+    Object.defineProperty(video, 'duration', { value: 600, configurable: true });
+    video.currentTime = 42;
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {});
+
+    expect(handle.current).not.toBeNull();
+    expect(handle.current!.getCurrentTime()).toBe(42);
+    expect(handle.current!.getDuration()).toBe(600);
+    expect(handle.current!.isPaused()).toBe(true);
+
+    handle.current!.pause();
+    expect(pause).toHaveBeenCalled();
+
+    handle.current!.seek(120);
+    expect(video.currentTime).toBe(120);
+    // Clamped to the real duration rather than seeking past the end.
+    handle.current!.seek(99_999);
+    expect(video.currentTime).toBe(600);
+  });
+
+  it('answers safely before the element exists', async () => {
+    // 202: the ladder is preparing, so there is no <video> at all yet.
+    mockFetchResponse(202);
+    const handle = { current: null as VideoPlayerHandle | null };
+    render(
+      <AuthedWrapper><HlsVideoPlayer fileId="x" playerRef={handle} /></AuthedWrapper>,
+    );
+
+    await waitFor(() => { expect(handle.current).not.toBeNull(); });
+    expect(handle.current!.getCurrentTime()).toBe(0);
+    expect(handle.current!.getDuration()).toBe(0);
+    expect(handle.current!.isPaused()).toBe(true);
+    // Neither of these may throw.
+    handle.current!.pause();
+    handle.current!.seek(10);
+  });
+
+  it('does not autoplay while the video is playing on a receiver', async () => {
+    mockFetchResponse(206, { 'content-type': 'video/mp4' });
+    render(
+      <AuthedWrapper>
+        <HlsVideoPlayer fileId="x" suppressLocalPlayback />
+      </AuthedWrapper>,
+    );
+    const video = await waitFor(() => {
+      const v = document.querySelector('video');
+      expect(v).not.toBeNull();
+      return v!;
+    });
+
+    expect(video.hasAttribute('autoplay')).toBe(false);
+  });
+
+  it('undoes a stray local play while casting', async () => {
+    mockFetchResponse(206, { 'content-type': 'video/mp4' });
+    render(
+      <AuthedWrapper>
+        <HlsVideoPlayer fileId="x" suppressLocalPlayback />
+      </AuthedWrapper>,
+    );
+    const video = await waitFor(() => {
+      const v = document.querySelector('video');
+      expect(v).not.toBeNull();
+      return v!;
+    });
+    const pause = vi.spyOn(video, 'pause').mockImplementation(() => {});
+
+    fireEvent(video, new Event('play'));
+
+    expect(pause).toHaveBeenCalled();
   });
 });

@@ -112,7 +112,7 @@ public sealed partial class HlsDerivativeStorage
     // files — collapses to null (no-leak: indistinguishable from absent).
     public Stream? OpenServableFile(string sha256, string relativePath)
     {
-        if (string.IsNullOrEmpty(relativePath) || !ServableFilePattern.IsMatch(relativePath))
+        if (!IsServableRelativePath(relativePath))
         {
             return null;
         }
@@ -140,6 +140,15 @@ public sealed partial class HlsDerivativeStorage
             return null;
         }
     }
+
+    // THE whitelist of ladder paths this store will ever serve, exposed so a
+    // caller that has to REWRITE a playlist can validate every URI it finds
+    // against the same rule the read path enforces — rather than inventing a
+    // second, looser notion of "looks like a segment". Cast playlist rewriting
+    // (NubArca.Api.Cast) is the caller; anything it cannot validate here makes
+    // the whole playlist a 404 instead of an unchecked URL handed to a TV.
+    public static bool IsServableRelativePath(string? relativePath)
+        => !string.IsNullOrEmpty(relativePath) && ServableFilePattern.IsMatch(relativePath);
 
     // Best-effort cleanup of a staging (or any partial) directory.
     public void DeleteDirectoryQuietly(string directory)

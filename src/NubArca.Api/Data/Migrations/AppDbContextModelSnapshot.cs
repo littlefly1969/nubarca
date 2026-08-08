@@ -2741,6 +2741,49 @@ namespace NubArca.Api.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.CastMediaGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .IsFixedLength();
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt")
+                        .HasDatabaseName("ix_cast_media_grants_expires");
+
+                    b.HasIndex("FileItemId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_cast_media_grants_token_hash");
+
+                    b.HasIndex("UserId", "ExpiresAt")
+                        .HasDatabaseName("ix_cast_media_grants_user_expires");
+
+                    b.ToTable("cast_media_grants", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.DerivativeDiagnostic", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5213,6 +5256,21 @@ namespace NubArca.Api.Data.Migrations
                     b.HasOne("NubArca.Api.Domain.BlobObject", null)
                         .WithMany()
                         .HasForeignKey("BlobObjectId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.CastMediaGrant", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

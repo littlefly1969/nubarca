@@ -138,7 +138,7 @@ describe('AdminRolesPage', () => {
     const admin = card(ROLES.administrator);
     expect(within(admin).getByText('Di sistema')).toBeInTheDocument();
     expect(within(admin).getByTestId('role-user-count')).toHaveTextContent('1 utente');
-    expect(within(admin).getByTestId('role-permission-total')).toHaveTextContent('13 permessi');
+    expect(within(admin).getByTestId('role-permission-total')).toHaveTextContent('14 permessi');
 
     const lab = card('custom:lab');
     expect(within(lab).getByText('Personalizzato')).toBeInTheDocument();
