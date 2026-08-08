@@ -171,6 +171,71 @@ If and only if the diff contains a new EF migration:
 
 Do not run a migration for releases without migration files.
 
+### 4.1 Where backups go
+
+**Backups do not live on the root filesystem.** `BACKUP_DIR` in the production
+`.env` points at a dedicated large data mount, and the checkout's `backups/`
+directory is a symlink to it. Read the target and its free space rather than
+assuming either:
+
+```bash
+grep '^BACKUP_DIR=' .env
+df -h "$(grep '^BACKUP_DIR=' .env | cut -d= -f2-)"
+```
+
+This matters because §1's capacity gate is about `/`, where the image build
+happens — it is **not** a reason to skip or shrink a backup. A full backup is
+sized against the backup mount, which is provisioned for it. Do not reason from
+`df -h /` to "there is no room for a backup"; that conclusion is wrong here and
+would trade the one artifact that makes a migration reversible for nothing.
+
+Verify a dump before relying on it — a truncated dump is worse than none,
+because it looks like a backup:
+
+```bash
+gzip -t <dump>.sql.gz                       # integrity
+zcat <dump>.sql.gz | tail -2                # terminated cleanly
+zcat <dump>.sql.gz | sed -n '/CREATE TABLE public.users/,/);/p'
+```
+
+The last line is the one that proves the dump captured the PRE-migration
+schema, which is what a rollback needs. Name it after the slice it precedes
+(`pre-<slice>-<UTC stamp>.sql.gz`), matching the existing files in that
+directory.
+
+### 4.2 Running `db migrate` off the newly built image
+
+The migration must run on the image being released, not on the currently pinned
+one, and the pins are not updated until §5. Run the new image directly on the
+Compose network:
+
+```bash
+docker run --rm --network "$(docker inspect nubarca-postgres \
+  -f '{{range $k,$v := .NetworkSettings.Networks}}{{println $k}}{{end}}' | head -1)" \
+  --env-file .env \
+  nubarca-api:release-<shortsha> dotnet NubArca.Api.dll db migrate
+```
+
+Read the network name from the running PostgreSQL container as above rather
+than guessing it. The Compose project is pinned to `nubarca`, so the network is
+attached as `nubarca-internal` — **not** `nubarca_nubarca-internal`. Composing
+the `<project>_<network>` form by hand fails with "network not found" and can
+read as a migration failure when nothing is wrong with the migration.
+
+Verify the migration by its effect on the data, not only by its exit code:
+
+```bash
+docker exec -i nubarca-postgres sh -c \
+  "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql -U <user> -d <db> -At -F' = '" <<'SQL'
+SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId" DESC LIMIT 1;
+SQL
+```
+
+Use a heredoc for SQL. Nested `ssh "docker exec sh -c \"psql -c ...\""` quoting
+strips the inner double quotes, and PostgreSQL then folds every quoted
+identifier to lowercase — so `"RoleKey"` arrives as `rolekey` and the query
+fails with "column does not exist" against a perfectly good schema.
+
 ## 5. Pin and deploy
 
 Update only the relevant image entries in

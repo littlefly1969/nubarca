@@ -119,6 +119,12 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
 
 - Public origin: read `NUBARCA_PUBLIC_ORIGIN` from the production `.env`
   (`grep '^NUBARCA_PUBLIC_ORIGIN=' .env`), never by sourcing the file.
+- **Backups do not live on the root filesystem.** `BACKUP_DIR` in the production
+  `.env` points at a dedicated large data mount, and the checkout's `backups/`
+  is a symlink to it. Read `BACKUP_DIR` and `df -h` that target before
+  concluding anything about capacity: the root-filesystem gate in
+  `deploy/FAST_DEPLOY.md` is about where images are BUILT, and is never a reason
+  to skip or shrink a pre-migration backup.
 
 The current release deployment always uses all four Compose files:
 
