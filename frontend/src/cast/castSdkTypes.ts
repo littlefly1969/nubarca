@@ -18,6 +18,13 @@ export interface CastMediaInfoLike {
   streamType: string;
   metadata?: unknown;
   customData?: unknown;
+  // How the receiver should parse HLS segments. NubArca's ladder is fMP4/CMAF
+  // (init.mp4 + fragmented MP4 media segments), and a Web Receiver told nothing
+  // assumes MPEG-2 TS — it then buffers forever on a stream it cannot parse,
+  // showing a loading UI rather than an error. Both are set: the audio/general
+  // property and the video-specific one.
+  hlsSegmentFormat?: string;
+  hlsVideoSegmentFormat?: string;
 }
 
 export interface CastLoadRequestLike {
@@ -100,6 +107,8 @@ export interface ChromeCastLike {
       GenericMediaMetadata: new () => Record<string, unknown>;
       LoadRequest: new (media: CastMediaInfoLike) => CastLoadRequestLike;
       StreamType: { BUFFERED: string };
+      HlsSegmentFormat: { FMP4: string };
+      HlsVideoSegmentFormat: { FMP4: string };
     };
     AutoJoinPolicy: { ORIGIN_SCOPED: string; TAB_AND_ORIGIN_SCOPED: string; PAGE_SCOPED: string };
     Image: new (url: string) => { url: string };

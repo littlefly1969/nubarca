@@ -307,6 +307,18 @@ export function CastProvider({ children }: { children: ReactNode }) {
     );
     mediaInfo.streamType = sdk.chrome.cast.media.StreamType.BUFFERED;
 
+    // NubArca's ladder is fMP4/CMAF — an init.mp4 plus fragmented MP4 segments.
+    // A Web Receiver that is not told this assumes MPEG-2 TS, and then sits on a
+    // loading screen forever instead of reporting an error, because it is
+    // waiting for a container that never arrives. The segment format is
+    // therefore declared explicitly, and only for HLS: a progressive grant has
+    // no segments to describe.
+    if (grant.mode === 'hls') {
+      mediaInfo.hlsSegmentFormat = sdk.chrome.cast.media.HlsSegmentFormat.FMP4;
+      mediaInfo.hlsVideoSegmentFormat =
+        sdk.chrome.cast.media.HlsVideoSegmentFormat.FMP4;
+    }
+
     const metadata = new sdk.chrome.cast.media.GenericMediaMetadata();
     metadata.title = request.title;
     if (request.subtitle != null && request.subtitle !== '') {

@@ -195,6 +195,8 @@ export function createFakeCastSdk(options: FakeCastOptions = {}): FakeCastSdk {
           this.media = media;
         } as unknown as new (media: CastMediaInfoLike) => CastLoadRequestLike,
         StreamType: { BUFFERED: 'BUFFERED' },
+        HlsSegmentFormat: { FMP4: 'fmp4' },
+        HlsVideoSegmentFormat: { FMP4: 'fmp4' },
       },
       AutoJoinPolicy: {
         ORIGIN_SCOPED: 'origin_scoped',
