@@ -134,6 +134,9 @@ function identityToImagesQuery(
     minRating: common.minRating ?? undefined,
     dateTakenFrom: common.dateTakenFrom.length > 0 ? common.dateTakenFrom : undefined,
     dateTakenTo: common.dateTakenTo.length > 0 ? common.dateTakenTo : undefined,
+    albumMembership: source.kind === 'library' && common.albumMembership !== 'any'
+      ? common.albumMembership
+      : undefined,
     hasGps: photo.hasGps ?? undefined,
     collapseDuplicates: photo.collapseDuplicates || undefined,
     similarTo: photo.similarTo.length > 0 ? photo.similarTo : undefined,

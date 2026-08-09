@@ -167,6 +167,24 @@ describe('server-side filtering', () => {
     expect(url.searchParams.get('albumMembership')).toBe('unassigned');
   });
 
+  it('sends the filter on a photo-only semantic search too', async () => {
+    const mock = installFetchMock({
+      'GET /api/images': () => jsonResponse(emptyPage()),
+    });
+    const id = unassigned();
+    renderWorkspace({
+      ...id,
+      mediaKind: 'image',
+      filters: { ...id.filters, photo: { ...id.filters.photo, visualQuery: 'mare' } },
+    });
+
+    await waitFor(() => expect(mock.calls.length).toBeGreaterThan(0));
+    const url = new URL(mock.calls.at(-1)!.url, 'http://x');
+    expect(url.pathname).toBe('/api/images');
+    expect(url.searchParams.get('semanticQuery')).toBe('mare');
+    expect(url.searchParams.get('albumMembership')).toBe('unassigned');
+  });
+
   it('omits the parameter entirely when the filter is off', async () => {
     const mock = installFetchMock({ 'GET /api/media': () => jsonResponse(emptyPage()) });
     renderWorkspace(emptyIdentity(LIBRARY));
