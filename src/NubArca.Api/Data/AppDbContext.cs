@@ -57,6 +57,7 @@ public class AppDbContext : DbContext
     public DbSet<FileItemLocation> FileItemLocations => Set<FileItemLocation>();
     public DbSet<PhotoOrganizerRun> PhotoOrganizerRuns => Set<PhotoOrganizerRun>();
     public DbSet<PhotoOrganizerMove> PhotoOrganizerMoves => Set<PhotoOrganizerMove>();
+    public DbSet<MediaDuplicateCleanupRun> MediaDuplicateCleanupRuns => Set<MediaDuplicateCleanupRun>();
     public DbSet<PhotoExportSession> PhotoExportSessions => Set<PhotoExportSession>();
     public DbSet<PhotoExportEntry> PhotoExportEntries => Set<PhotoExportEntry>();
     public DbSet<PrivateVault> PrivateVaults => Set<PrivateVault>();

@@ -95,6 +95,14 @@ function renderBrowser(value?: Parameters<typeof makeAuthValue>[1]) {
 }
 
 describe('FolderBrowser (Files UI v2)', () => {
+  it('does not expose the photo organizer in the Files toolbar', async () => {
+    installFetchMock({ 'GET /api/folders/children': childrenPage({}) });
+    renderBrowser();
+    await screen.findByText('This folder is empty.');
+    expect(screen.queryByRole('button', { name: 'Organize photos by date' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Organize by date')).not.toBeInTheDocument();
+  });
+
   it('renders folders and files from the directory listing', async () => {
     installFetchMock({
       'GET /api/folders/children': childrenPage({

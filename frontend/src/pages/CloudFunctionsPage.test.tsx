@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 // Every tool panel loads its own data on mount, so the shared handler table
-// covers all four. A tool that is not selected never fetches.
+// covers all tools. A tool that is not selected never fetches.
 const STAGING_CONFIG = {
   enabled: true,
   maxSessionBytes: 1024 * 1024,
@@ -79,17 +79,18 @@ function tabs() {
 }
 
 describe('Cloud Functions hub — tools', () => {
-  it('offers exactly four tools as an accessible tablist', () => {
+  it('offers all Cloud Functions as an accessible tablist', () => {
     installFetchMock(toolHandlers());
     renderHub();
 
     const tablist = screen.getByRole('tablist', { name: 'Strumenti delle funzioni cloud' });
     expect(tablist).toBeInTheDocument();
     const all = tabs().getAllByRole('tab');
-    expect(all).toHaveLength(4);
+    expect(all).toHaveLength(5);
     expect(all.map((t) => t.textContent)).toEqual([
       'Caricamento in blocco',
       'Organizza le foto per data',
+      'Rimuovi duplicati multimediali esatti',
       'Scarica archivio foto',
       'Dispositivi TV',
     ]);
@@ -245,6 +246,29 @@ describe('Cloud Functions hub — tool behaviour preserved', () => {
       const dialogs = screen.queryAllByRole('dialog');
       expect(dialogs.length + screen.queryAllByText(/organi/i).length).toBeGreaterThan(0);
     });
+  });
+
+  it('confirms exact-media cleanup and shows its aggregate result', async () => {
+    vi.stubGlobal('confirm', () => true);
+    installFetchMock({
+      ...toolHandlers(),
+      'POST /api/cloud-functions/media-duplicates/exact/runs': () => jsonResponse({
+        runId: 'run-1', jobId: 'job-1', status: 'queued',
+      }, 202),
+      'GET /api/cloud-functions/media-duplicates/exact/runs/run-1': () => jsonResponse({
+        runId: 'run-1', status: 'succeeded', duplicateGroupCount: 2,
+        filesRemovedCount: 3, filesRetainedCount: 2, error: null,
+        createdAt: '2026-08-09T10:00:00Z', startedAt: '2026-08-09T10:00:01Z',
+        completedAt: '2026-08-09T10:00:02Z',
+      }),
+    });
+    renderHub(['/cloud-functions?tool=dedupe']);
+
+    await userEvent.setup().click(screen.getByTestId('cf-dedupe'));
+    const result = await screen.findByTestId('cf-dedupe-status');
+    expect(result).toHaveTextContent('Gruppi di duplicati esatti trovati2');
+    expect(result).toHaveTextContent('File rimossi3');
+    expect(result).toHaveTextContent('File conservati2');
   });
 
   it('creates an export session from the archive tool', async () => {

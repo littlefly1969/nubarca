@@ -243,6 +243,18 @@ public interface IFileItemService
         CancellationToken cancellationToken = default,
         FileDeleteReason reason = FileDeleteReason.Unspecified);
 
+    // Atomically revalidates that `survivorFileItemId` is still an active,
+    // conclusively classified photo/video with the exact same canonical blob
+    // as `redundantFileItemId`, then applies the normal soft-delete lifecycle
+    // to the redundant item. Both rows must belong to ownerUserId and neither
+    // may be a guest Party upload. Returns false when a concurrent mutation
+    // invalidated any condition; it never deletes the survivor.
+    Task<bool> SoftDeleteExactMediaDuplicateAsync(
+        Guid ownerUserId,
+        Guid redundantFileItemId,
+        Guid survivorFileItemId,
+        CancellationToken cancellationToken = default);
+
     // Returns the restored FileItem, or null if no such file exists for this
     // owner (treat as 404). Restoring an already-active file is idempotent and
     // returns the file unchanged. Throws RestoreParentDeletedException when

@@ -23,7 +23,6 @@ import { SelectionBar } from './files/SelectionBar';
 import { DestinationPicker } from './files/DestinationPicker';
 import { MoveToVaultModal } from './files/MoveToVaultModal';
 import { DetailsPanel, type DetailsOutcome } from './files/DetailsPanel';
-import { OrganizeByDateWizard } from './files/OrganizeByDateWizard';
 import { useDirectoryListing } from './files/useDirectoryListing';
 import { useSelection } from './files/useSelection';
 import {
@@ -97,7 +96,6 @@ export function FolderBrowser() {
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [bulkMoveOpen, setBulkMoveOpen] = useState(false);
   const [moveToVaultOpen, setMoveToVaultOpen] = useState(false);
-  const [organizeOpen, setOrganizeOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkError, setBulkError] = useState<string | null>(null);
   const [storageReloadToken, setStorageReloadToken] = useState(0);
@@ -380,7 +378,6 @@ export function FolderBrowser() {
         onToggleNewFolder={() => setNewFolderOpen((v) => !v)}
         uploadOpen={uploadOpen}
         onToggleUpload={() => setUploadOpen((v) => !v)}
-        onOrganize={() => { setBanner(null); setOrganizeOpen(true); }}
         onRefresh={refresh}
         busy={busy}
       />
@@ -512,16 +509,6 @@ export function FolderBrowser() {
           onClose={() => setViewerIndex(null)}
           onIndexChange={setViewerIndex}
           onNearEnd={() => { if (canLoadMoreRef.current) loadMoreRef.current(); }}
-        />
-      )}
-
-      {organizeOpen && (
-        <OrganizeByDateWizard
-          currentFolderId={current.id}
-          currentFolderName={current.name}
-          selectedFileIds={selectedEntries.filter((e) => e.kind === 'file').map((e) => e.id)}
-          onClose={() => setOrganizeOpen(false)}
-          onDone={(message) => { setBanner(message); selection.clear(); refresh(); }}
         />
       )}
 

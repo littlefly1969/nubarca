@@ -28,6 +28,11 @@ public enum FileDeleteReason
     // copy still holds the content; this is automatic maintenance, not intent).
     OrganizerExactDedupe,
 
+    // Owner-triggered exact-media duplicate cleanup. The redundant logical
+    // item moves to Trash; this is automatic cleanup rather than an instruction
+    // to suppress future imports, so it never records a tombstone.
+    ExactMediaDuplicateCleanup,
+
     // Background maintenance / system cleanup — never a tombstone.
     SystemCleanup,
 

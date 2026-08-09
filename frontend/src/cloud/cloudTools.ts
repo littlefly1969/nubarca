@@ -4,12 +4,12 @@ import type { IconName } from '../components/icons/Icon';
 // The Cloud Functions tool model — pure, so the tool list, the canonical URLs
 // and the invalid-value fallback are all testable without rendering.
 //
-// Exactly four normal-user tools live here. Private Vault is deliberately NOT
+// Private Vault is deliberately NOT
 // one of them: it is a primary-navigation destination (/private), not an
 // operational tool, and listing it in both places was the duplication this
 // slice removes.
 
-export type CloudToolId = 'upload' | 'organize' | 'archive' | 'tv-devices';
+export type CloudToolId = 'upload' | 'organize' | 'dedupe' | 'archive' | 'tv-devices';
 
 export interface CloudTool {
   id: CloudToolId;
@@ -21,6 +21,7 @@ export interface CloudTool {
 export const CLOUD_TOOLS: readonly CloudTool[] = [
   { id: 'upload', titleKey: 'cloud.bulkUpload', descriptionKey: 'cloud.bulkUploadDesc', icon: 'upload' },
   { id: 'organize', titleKey: 'cloud.organize', descriptionKey: 'cloud.organizeDesc', icon: 'calendar' },
+  { id: 'dedupe', titleKey: 'cloud.dedupe', descriptionKey: 'cloud.dedupeDesc', icon: 'trash' },
   { id: 'archive', titleKey: 'cloud.downloadArchive', descriptionKey: 'cloud.downloadArchiveDesc', icon: 'archive' },
   { id: 'tv-devices', titleKey: 'cloud.tvDevices', descriptionKey: 'cloud.tvDevicesDesc', icon: 'tv' },
 ];

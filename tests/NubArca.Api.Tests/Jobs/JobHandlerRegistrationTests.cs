@@ -39,6 +39,7 @@ public sealed class JobHandlerRegistrationTests
         Assert.Contains(typeof(StorageReconcileJobHandler), types);
         Assert.Contains(typeof(AdminImportJobHandler), types);
         Assert.Contains(typeof(PhotoOrganizerJobHandler), types);
+        Assert.Contains(typeof(ExactMediaDuplicateCleanupJobHandler), types);
         Assert.Contains(typeof(PhotoExportBuildJobHandler), types);
     }
 }

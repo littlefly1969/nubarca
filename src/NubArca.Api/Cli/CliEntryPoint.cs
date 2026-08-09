@@ -2275,6 +2275,7 @@ public static class CliEntryPoint
             services.AddScoped<JobProcessor>();
             services.AddScoped<IAuditLogger, AuditLogger>();
             services.AddScoped<PhotoDateTakenOrganizerService>();
+            services.AddScoped<ExactMediaDuplicateCleanupService>();
             services.AddScoped<PhotoExportService>();
             // Background-job handlers — the SHARED list (see
             // JobHandlerRegistration), identical to the web host, so the worker

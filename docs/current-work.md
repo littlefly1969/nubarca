@@ -170,6 +170,13 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `FileMetadata.effective.dateTakenSource` distinguishes a real capture date, so
   the viewer suppresses the `uploaded` source rather than presenting it as a
   Date Taken.
+- **Exact-media cleanup is logical and owner-scoped.** The Cloud Function uses
+  the immutable `BlobObject.Sha256` as full-file identity and only accepts
+  server-detected image/video metadata. It keeps the oldest `FileItem.CreatedAt`
+  (normalized full path, then ID, break ties) and sends every redundant
+  `FileItem` through the canonical Trash transition. Private Vault, Trash,
+  Party media and every other owner's logical files are outside the scan; a
+  shared physical blob is never deleted by the function.
 - **A reverse proxy must forward `Host $http_host`, never `$host`.** The CSRF
   middleware rejects a state-changing `/api` request whose `Origin` disagrees
   with the request's own scheme/host/port, so `Request.Host` has to be the

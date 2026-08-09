@@ -22,6 +22,7 @@ export * from './stagingUpload';
 export * from './photoOrganizer';
 export * from './photoExports';
 export * from './mediaLibrary';
+export * from './mediaDuplicates';
 export * from './privateVault';
 export * from './plates';
 export * from './aestheticsLab';

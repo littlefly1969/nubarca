@@ -9,9 +9,9 @@ import {
 } from './cloudTools';
 
 describe('Cloud Functions tool model', () => {
-  it('offers exactly the four normal-user tools, in order', () => {
+  it('offers the normal-user tools in order', () => {
     expect(CLOUD_TOOLS.map((tool) => tool.id)).toEqual([
-      'upload', 'organize', 'archive', 'tv-devices',
+      'upload', 'organize', 'dedupe', 'archive', 'tv-devices',
     ]);
   });
 
@@ -25,6 +25,7 @@ describe('Cloud Functions tool model', () => {
   it('narrows only known tool ids', () => {
     expect(toCloudToolId('upload')).toBe('upload');
     expect(toCloudToolId('tv-devices')).toBe('tv-devices');
+    expect(toCloudToolId('dedupe')).toBe('dedupe');
     expect(toCloudToolId('private')).toBeNull();
     expect(toCloudToolId('Upload')).toBeNull();
     expect(toCloudToolId('')).toBeNull();
@@ -49,6 +50,7 @@ describe('Cloud Functions tool model', () => {
   it('builds the canonical deep-link URL for every tool', () => {
     expect(cloudToolUrl('upload')).toBe('/cloud-functions?tool=upload');
     expect(cloudToolUrl('organize')).toBe('/cloud-functions?tool=organize');
+    expect(cloudToolUrl('dedupe')).toBe('/cloud-functions?tool=dedupe');
     expect(cloudToolUrl('archive')).toBe('/cloud-functions?tool=archive');
     expect(cloudToolUrl('tv-devices')).toBe('/cloud-functions?tool=tv-devices');
   });

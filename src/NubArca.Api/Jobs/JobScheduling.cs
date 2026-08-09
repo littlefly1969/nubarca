@@ -45,6 +45,7 @@ public static class JobScheduling
         JobTypes.AdminImport => Foreground,
         // User-initiated bulk organize: prompt, but yields to foreground import.
         JobTypes.PhotoOrganizerDateTaken => Normal,
+        JobTypes.MediaExactDuplicateCleanup => Normal,
         // User-initiated export-snapshot build: same band as organize.
         JobTypes.PhotoExportBuild => Normal,
         // Video-hls: a user pressed play on an unprepared video — latency

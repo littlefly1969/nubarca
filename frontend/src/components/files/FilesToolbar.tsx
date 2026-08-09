@@ -13,7 +13,6 @@ interface FilesToolbarProps {
   onToggleNewFolder(): void;
   uploadOpen: boolean;
   onToggleUpload(): void;
-  onOrganize(): void;
   onRefresh(): void;
   busy: boolean;
 }
@@ -41,7 +40,6 @@ export function FilesToolbar({
   onToggleNewFolder,
   uploadOpen,
   onToggleUpload,
-  onOrganize,
   onRefresh,
   busy,
 }: FilesToolbarProps) {
@@ -72,16 +70,6 @@ export function FilesToolbar({
         >
           <span aria-hidden="true">⬆</span>
           <span className="files-action-label">Upload</span>
-        </button>
-
-        <button
-          type="button"
-          className="files-action"
-          onClick={onOrganize}
-          aria-label="Organize photos by date"
-        >
-          <span aria-hidden="true">🗓</span>
-          <span className="files-action-label">Organize by date</span>
         </button>
 
         <span className="files-sort">

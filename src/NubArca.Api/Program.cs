@@ -745,6 +745,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // a cooperative `photo.organizer.datetaken` background job.
     builder.Services.AddScoped<PhotoDateTakenOrganizerService>();
 
+    // Owner-scoped exact image/video duplicate cleanup. Uses canonical
+    // BlobObject SHA-256 identity and the normal FileItem Trash lifecycle.
+    builder.Services.AddScoped<ExactMediaDuplicateCleanupService>();
+
     // Photo archive export: read-only snapshot/manifest built by a cooperative
     // `photo.export.build` background job; streamed per-file downloads.
     builder.Services.AddScoped<PhotoExportService>();
@@ -1127,6 +1131,7 @@ app.MapPeopleEndpoints();
 // modular-monolith cleanup. Same routes, same owner-scoped behavior; see
 // that file for the implementation.
 app.MapPhotoOrganizerEndpoints();
+app.MapExactMediaDuplicateEndpoints();
 
 // Admin user management endpoints live in Endpoints/AdminUserEndpoints.cs —
 // extracted as part of the modular-monolith cleanup. Same routes, same

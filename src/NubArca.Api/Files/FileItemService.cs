@@ -2097,7 +2097,30 @@ public sealed class FileItemService : IFileItemService
         {
             return false;
         }
-        var blobObjectId = target.BlobObjectId;
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            await TreeMutationLock.AcquireAsync(_db, ownerUserId, cancellationToken);
+
+            var deleted = await SoftDeleteLockedAsync(
+                ownerUserId, fileItemId, target.BlobObjectId, target.Name, now, reason, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return deleted;
+        });
+    }
+
+    public async Task<bool> SoftDeleteExactMediaDuplicateAsync(
+        Guid ownerUserId,
+        Guid redundantFileItemId,
+        Guid survivorFileItemId,
+        CancellationToken cancellationToken = default)
+    {
+        if (redundantFileItemId == survivorFileItemId)
+        {
+            return false;
+        }
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var strategy = _db.Database.CreateExecutionStrategy();
@@ -2106,64 +2129,93 @@ public sealed class FileItemService : IFileItemService
             await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
             await TreeMutationLock.AcquireAsync(_db, ownerUserId, cancellationToken);
 
-            var affected = await _db.FileItems
-                .Where(f => f.Id == fileItemId
-                    && f.OwnerUserId == ownerUserId
-                    && f.DeletedAt == null)
-                .ExecuteUpdateAsync(
-                    setters => setters.SetProperty(f => f.DeletedAt, _ => (DateTime?)now),
-                    cancellationToken);
+            // Re-establish exact identity, ownership, active state, canonical
+            // byte-detected media classification, and Party exclusion while the
+            // owner tree is locked. The survivor is a required live witness.
+            var pair = await _db.FileItems
+                .AsNoTracking()
+                .Where(f => f.OwnerUserId == ownerUserId
+                    && f.DeletedAt == null
+                    && (f.Id == redundantFileItemId || f.Id == survivorFileItemId)
+                    && !_db.PartyUploadItems.Any(p => p.FileItemId == f.Id)
+                    && !_db.AlbumItems.Any(item => item.FileItemId == f.Id
+                        && _db.PartyAlbumLinks.Any(link => link.AlbumId == item.AlbumId))
+                    && _db.BlobMetadata.Any(m => m.BlobObjectId == f.BlobObjectId
+                        && m.DetectedContentType != null
+                        && ((m.MediaCategory == MediaCategories.Image
+                                && m.DetectedContentType.StartsWith("image/"))
+                            || (m.MediaCategory == MediaCategories.Video
+                                && m.DetectedContentType.StartsWith("video/")))))
+                .Select(f => new { f.Id, f.BlobObjectId, f.Name })
+                .ToListAsync(cancellationToken);
 
-            if (affected == 0)
+            if (pair.Count != 2 || pair[0].BlobObjectId != pair[1].BlobObjectId)
             {
-                // Lost a race with another writer who already soft-deleted the
-                // same file. They will have released the blob; we must not.
                 await tx.CommitAsync(cancellationToken);
                 return false;
             }
 
-            // A trashed FileItem remains a real, restorable owner through its
-            // FK. Release the ACTIVE refcount, but do not start the physical
-            // purge grace window until the retained row is hard-deleted.
-            await _db.BlobObjects
-                .Where(b => b.Id == blobObjectId && b.ReferenceCount > 0)
-                .ExecuteUpdateAsync(
-                    setters => setters
-                        .SetProperty(b => b.ReferenceCount, b => b.ReferenceCount - 1)
-                        .SetProperty(b => b.PurgeEligibleAt, _ => null),
-                    cancellationToken);
-
-            // deleted-content-import-skip: record a tombstone iff this was an
-            // explicit user-intent delete of the owner's final active occurrence
-            // of the content. Runs inside this transaction (shared DbContext) so
-            // the ledger write commits atomically with the delete; a no-op for
-            // every other reason. Never blocks the delete on a ledger failure.
-            if (_tombstones is not null && reason.MayRecordTombstone())
-            {
-                try
-                {
-                    await _tombstones.RecordFinalOccurrenceDeletionAsync(
-                        ownerUserId, blobObjectId, reason,
-                        fileNameSnapshot: target.Name,
-                        deletedFromPathSnapshot: null,
-                        cancellationToken);
-                }
-                catch
-                {
-                    // The delete itself must always succeed; the ledger is
-                    // best-effort. Detach any half-tracked ledger entity so the
-                    // failure can't poison the committed delete, then continue.
-                    foreach (var e in _db.ChangeTracker
-                        .Entries<OwnerDeletedContentTombstone>().ToList())
-                    {
-                        e.State = EntityState.Detached;
-                    }
-                }
-            }
-
+            var target = pair.Single(f => f.Id == redundantFileItemId);
+            var deleted = await SoftDeleteLockedAsync(
+                ownerUserId,
+                redundantFileItemId,
+                target.BlobObjectId,
+                target.Name,
+                now,
+                FileDeleteReason.ExactMediaDuplicateCleanup,
+                cancellationToken);
             await tx.CommitAsync(cancellationToken);
-            return true;
+            return deleted;
         });
+    }
+
+    // The one canonical soft-delete transition. Callers acquire the owner tree
+    // lock and establish any operation-specific preconditions first.
+    private async Task<bool> SoftDeleteLockedAsync(
+        Guid ownerUserId,
+        Guid fileItemId,
+        Guid blobObjectId,
+        string fileName,
+        DateTime deletedAt,
+        FileDeleteReason reason,
+        CancellationToken cancellationToken)
+    {
+        var affected = await _db.FileItems
+            .Where(f => f.Id == fileItemId
+                && f.OwnerUserId == ownerUserId
+                && f.DeletedAt == null
+                && f.BlobObjectId == blobObjectId)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(f => f.DeletedAt, _ => (DateTime?)deletedAt),
+                cancellationToken);
+        if (affected != 1) return false;
+
+        // A trashed row stays restorable. Release only its ACTIVE reference and
+        // never begin physical purge while retained logical references exist.
+        await _db.BlobObjects
+            .Where(b => b.Id == blobObjectId && b.ReferenceCount > 0)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(b => b.ReferenceCount, b => b.ReferenceCount - 1)
+                    .SetProperty(b => b.PurgeEligibleAt, _ => null),
+                cancellationToken);
+
+        if (_tombstones is not null && reason.MayRecordTombstone())
+        {
+            try
+            {
+                await _tombstones.RecordFinalOccurrenceDeletionAsync(
+                    ownerUserId, blobObjectId, reason, fileName, null, cancellationToken);
+            }
+            catch
+            {
+                // Tombstones are best-effort and must never poison deletion.
+                foreach (var entry in _db.ChangeTracker.Entries<OwnerDeletedContentTombstone>().ToList())
+                    entry.State = EntityState.Detached;
+            }
+        }
+
+        return true;
     }
 
     public async Task<FileItem?> RestoreAsync(

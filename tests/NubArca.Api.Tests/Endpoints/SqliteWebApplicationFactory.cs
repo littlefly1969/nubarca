@@ -292,6 +292,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<IAdminImportService, AdminImportService>();
             // Phase 2: photo date-taken organizer service.
             services.AddScoped<PhotoDateTakenOrganizerService>();
+            services.AddScoped<ExactMediaDuplicateCleanupService>();
             // Photo archive export service.
             services.AddScoped<PhotoExportService>();
             // Private Vault (v0).

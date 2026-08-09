@@ -6,6 +6,7 @@ import { PhotoArchiveExportPanel } from '../components/PhotoArchiveExportPanel';
 import { OrganizeByDatePanel } from '../cloud/OrganizeByDatePanel';
 import { StagingUploadPanel } from '../cloud/StagingUploadPanel';
 import { TvDevicesPanel } from '../cloud/TvDevicesPanel';
+import { ExactMediaDuplicatesPanel } from '../cloud/ExactMediaDuplicatesPanel';
 import {
   CLOUD_TOOLS,
   CLOUD_TOOL_PARAM,
@@ -113,6 +114,7 @@ export function CloudFunctionsPage() {
             resets the panel's internal state instead of leaking it across. */}
         {active === 'upload' && <StagingUploadPanel key="upload" />}
         {active === 'organize' && <OrganizeByDatePanel key="organize" />}
+        {active === 'dedupe' && <ExactMediaDuplicatesPanel key="dedupe" />}
         {active === 'archive' && <PhotoArchiveExportPanel key="archive" />}
         {active === 'tv-devices' && <TvDevicesPanel key="tv-devices" />}
       </div>

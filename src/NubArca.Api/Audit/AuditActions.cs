@@ -136,6 +136,11 @@ public static class AuditActions
     public const string OrganizerRunCancel = "organizer.run_cancel";
     public const string OrganizerRunFail = "organizer.run_fail";
 
+    // Exact owner-media duplicate cleanup (aggregate counts only).
+    public const string MediaDuplicateCleanupStart = "media_duplicates.run_start";
+    public const string MediaDuplicateCleanupComplete = "media_duplicates.run_complete";
+    public const string MediaDuplicateCleanupFail = "media_duplicates.run_fail";
+
     // Photo archive export session lifecycle (aggregate counts only; never the
     // token). Per-file streaming reuses FileDownload.
     public const string PhotoExportCreate = "photo_export.create";
@@ -309,6 +314,7 @@ public static class AuditEntityTypes
     public const string BackgroundJob = "background_job";
     public const string StagingSession = "staging_session";
     public const string OrganizerRun = "organizer_run";
+    public const string MediaDuplicateCleanupRun = "media_duplicate_cleanup_run";
     public const string PhotoExportSession = "photo_export_session";
     public const string TvSession = "tv_session";
     public const string TvPairing = "tv_pairing";

@@ -40,6 +40,10 @@ public static class JobTypes
     // the Normal band so a foreground import can preempt it.
     public const string PhotoOrganizerDateTaken = "photo.organizer.datetaken";
 
+    // Owner-scoped exact photo/video duplicate cleanup. Identity comes from
+    // the immutable SHA-256 BlobObject; payload carries only the run id.
+    public const string MediaExactDuplicateCleanup = "media.duplicates.exact.cleanup";
+
     // Owner-scoped photo-archive export: builds a read-only snapshot/manifest of
     // exportable photos. The payload carries only the PhotoExportSession id.
     // Sliceable + checkpointed; Normal band (yields to foreground import).

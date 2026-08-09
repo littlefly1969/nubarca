@@ -214,7 +214,7 @@ The web client uses React, TypeScript, Vite, React Router, `@tanstack/react-virt
 
 Legacy `/gallery` and `/videos` routes redirect into the unified `/media` workspace while preserving compatible query state.
 
-`/cloud-functions` is a presentation-level hub for existing owner-private bulk workflows—staged upload, DateTaken organization, photo export, and Private Vault access. It is not a Function-as-a-Service runtime, plugin host, or separate execution boundary.
+`/cloud-functions` is a presentation-level hub for owner-private bulk workflows—staged upload, DateTaken organization, exact photo/video duplicate cleanup, photo export, and TV-device management. Exact cleanup groups only conclusively detected media by the canonical immutable blob SHA-256, keeps the oldest `FileItem.CreatedAt` (logical path and ID break ties), and sends redundant logical files through the normal Trash lifecycle. It is not a Function-as-a-Service runtime, plugin host, or separate execution boundary.
 
 ### 6.3 Mobile client
 
