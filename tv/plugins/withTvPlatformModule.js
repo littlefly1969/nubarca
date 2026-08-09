@@ -69,6 +69,12 @@ import com.facebook.react.bridge.ReactMethod
  * Runs on the UI thread because finishAndRemoveTask() is an Activity call.
  * Resolves false when there is no current Activity (nothing to finish) so the
  * JavaScript side can fall back rather than hang.
+ *
+ * The Activity is read through reactApplicationContext, NOT through the
+ * inherited getCurrentActivity(). In React Native 0.85 that inherited member is
+ * a Kotlin *function*, so Kotlin's synthetic-property access (\`currentActivity\`)
+ * does not resolve against it — only Java getters get that treatment — and it is
+ * deprecated in favour of exactly this call.
  */
 class NubArcaTvPlatformModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -77,7 +83,7 @@ class NubArcaTvPlatformModule(reactContext: ReactApplicationContext) :
 
     @ReactMethod
     fun exitAndRemoveTask(promise: Promise) {
-        val activity: Activity? = currentActivity
+        val activity: Activity? = reactApplicationContext.currentActivity
         if (activity == null) {
             promise.resolve(false)
             return
