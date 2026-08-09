@@ -2,7 +2,7 @@
   "applicationName": "NubArca TV",
   "package": "it.littlefly.nubarca.tv",
   "version": "1.0.2",
-  "versionCode": 3,
+  "versionCode": 4,
   "runtimeVersion": "nubarca-tv-native-3",
   "channel": "production",
   "updatePath": "/api/tv-app/updates",

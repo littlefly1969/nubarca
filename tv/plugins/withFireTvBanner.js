@@ -1,0 +1,119 @@
+// Expo config plugin: make the Fire TV launcher tile show the approved NubArca
+// TV artwork instead of a small square icon.
+//
+// WHAT WAS ACTUALLY WRONG
+// -----------------------
+// Diagnosed from a clean prebuild, not guessed. Two independent defects:
+//
+//  1. WRONG DENSITY. `@react-native-tvos/config-tv` takes the single
+//     `androidTVBanner` file and copies it, unscaled, into EVERY density
+//     bucket: drawable/, -mdpi, -hdpi, -xhdpi, -xxhdpi and -xxxhdpi all held
+//     the identical 320x180 bitmap. A drawable's density bucket declares the
+//     scale it was DESIGNED for, so the same 320x180 file means 320x180dp in
+//     -mdpi but only 80x45dp in -xxxhdpi. The Android TV banner spec is
+//     320x180dp, so on a 1080p Fire Stick (xhdpi) that bitmap claimed half the
+//     required size and the launcher drew a small image inside the full-size
+//     rectangular tile — precisely the reported symptom.
+//
+//  2. NO ACTIVITY BANNER. `android:banner` was declared on <application> only.
+//     Stock Leanback falls back to the application banner, but Fire OS ships
+//     Amazon's own launcher, and several of its surfaces read the banner from
+//     the LEANBACK_LAUNCHER activity and fall back to `android:icon` — the
+//     square — when the activity does not declare one.
+//
+// WHAT THIS DOES
+// --------------
+// Places each APPROVED asset in the density bucket where its pixel size is
+// mathematically exactly 320x180dp, and declares the banner on the launcher
+// activity as well as the application:
+//
+//     assets/brand/nubarca-android-tv-banner-320x180.png    → drawable-mdpi    (1x)
+//     assets/brand/nubarca-fire-tv-banner-1280x720.png      → drawable-xxxhdpi (4x)
+//
+// 1280/4 = 320 and 720/4 = 180, so the approved Fire TV artwork IS the 4x
+// variant of the same banner. Nothing is redrawn, recoloured, resized or
+// recomposed — this is placement, which is what §9 asks for. The intermediate
+// buckets are removed so resource resolution picks the nearest LARGER asset and
+// downscales it (crisp) rather than matching a bucket holding a too-small
+// bitmap (blurry, undersized). Android TV keeps working: an mdpi/hdpi device
+// selects the 320x180 exactly as before.
+
+// ORDERING. The resource placement runs as a FINALIZED mod, not a dangerous
+// one. Expo's mod compiler gives `dangerous` precedence -2 (runs first) and
+// `finalized` precedence 1 (runs last), and config-tv copies its banner from a
+// dangerous mod — so a dangerous mod here is overwritten by it no matter where
+// this plugin sits in the `plugins` array. Verified empirically: the manifest
+// edit below survived while an earlier dangerous-mod version of the copy did
+// not. `finalized` is the only phase guaranteed to run after every copy.
+const {
+  AndroidConfig,
+  withAndroidManifest,
+  withFinalizedMod,
+} = require('expo/config-plugins');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const BANNER_RESOURCE = 'tv_banner';
+// Density buckets the config-tv plugin populates, and the approved asset that
+// genuinely belongs in each. `null` means "delete it and let Android downscale
+// from the next larger bucket" — never "leave a wrong-size bitmap there".
+const BANNER_BY_BUCKET = {
+  'drawable-mdpi': 'nubarca-android-tv-banner-320x180.png',
+  'drawable-xxxhdpi': 'nubarca-fire-tv-banner-1280x720.png',
+  drawable: null,
+  'drawable-hdpi': null,
+  'drawable-xhdpi': null,
+  'drawable-xxhdpi': null,
+};
+
+const withBannerResources = (config) =>
+  withFinalizedMod(config, [
+    'android',
+    (modConfig) => {
+      const projectRoot = modConfig.modRequest.projectRoot;
+      const res = path.join(
+        modConfig.modRequest.platformProjectRoot, 'app', 'src', 'main', 'res');
+
+      for (const [bucket, asset] of Object.entries(BANNER_BY_BUCKET)) {
+        const target = path.join(res, bucket, `${BANNER_RESOURCE}.png`);
+        if (asset === null) {
+          if (fs.existsSync(target)) fs.rmSync(target);
+          continue;
+        }
+        const source = path.join(projectRoot, 'assets', 'brand', asset);
+        if (!fs.existsSync(source)) {
+          // Fail loudly: silently shipping the wrong banner is the defect this
+          // plugin exists to fix, and a missing approved asset must not
+          // degrade into "whatever config-tv left behind".
+          throw new Error(
+            `withFireTvBanner: approved asset missing: ${source}. ` +
+              'Run the brand sync before building; refusing to ship an ' +
+              'unapproved or wrongly-scaled launcher banner.',
+          );
+        }
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(source, target);
+      }
+      return modConfig;
+    },
+  ]);
+
+const withActivityBanner = (config) =>
+  withAndroidManifest(config, (manifestConfig) => {
+    const application = AndroidConfig.Manifest.getMainApplicationOrThrow(
+      manifestConfig.modResults);
+    const activity = AndroidConfig.Manifest.getMainActivityOrThrow(
+      manifestConfig.modResults);
+
+    // Keep the application banner (stock Leanback reads it) AND add the
+    // activity banner (Fire OS's launcher reads it, and falls back to the
+    // square android:icon without it).
+    application.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
+    activity.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
+    return manifestConfig;
+  });
+
+/** @type {import('expo/config-plugins').ConfigPlugin} */
+const withFireTvBanner = (config) => withActivityBanner(withBannerResources(config));
+
+module.exports = withFireTvBanner;

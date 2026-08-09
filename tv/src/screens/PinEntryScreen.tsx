@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
   BackHandler,
+  Pressable,
   StyleSheet,
   Text,
   View,
@@ -44,10 +45,24 @@ interface Props {
 // pressed. Rendering is driven by `entry.code.length` alone — the symbols
 // themselves reach no style, no accessibility label and no debug line.
 //
-// INPUT OWNERSHIP. This screen owns the whole D-pad through useTVEventHandler
-// and contains no focusable views, so the native focus engine has nothing to
-// move and cannot compete for the same event (VIEWER-style explicit ownership;
-// see the mode rules in lib/tvFixedGridFocus.ts).
+// INPUT OWNERSHIP. This screen owns the whole D-pad through useTVEventHandler.
+// It contains exactly ONE focusable view — an invisible full-screen anchor — so
+// the native focus engine has a destination but nowhere to move it.
+//
+// The anchor is not decoration. A Fire TV Activity delivers key events to the
+// focused view's hierarchy; with NO focusable view anywhere on screen, Android
+// has nothing to route a D-pad press to and the JS key handler is never
+// invoked, so the screen looked completely dead to the remote. One focusable
+// view restores delivery while keeping the security property intact: it is a
+// single, screen-sized, invisible destination, so focus can never MOVE — and it
+// is movement between per-symbol controls that let a bystander read the old
+// numeric PIN off the television. There is no ring, no border, no scale and no
+// colour change, because a focus cue on a single anchor conveys nothing about
+// the secret but would still be visual noise.
+//
+// The anchor's onPress is deliberately a no-op. CENTER must produce exactly one
+// symbol, and it already does through useTVEventHandler → 'select' →
+// dpadSymbolForKey; appending there too would enter two.
 //
 // BACK removes one symbol; BACK on an empty code returns to mode selection.
 // Submission is automatic at exactly DPAD_CODE_LENGTH symbols and happens once.
@@ -68,6 +83,18 @@ export function PinEntryScreen({
   entryRef.current = entry;
   const upgradeRef = useRef(upgradeRequired);
   upgradeRef.current = upgradeRequired;
+
+  // The single focus anchor. `hasTVPreferredFocus` covers the ordinary mount,
+  // and the imperative `requestTVFocus()` below covers the case it does not:
+  // arriving from a screen that still held focus when this one mounted, where
+  // the preferred-focus flag is evaluated before the outgoing view releases it.
+  // Belt and braces, because losing this race means a remote that does nothing.
+  const anchorRef = useRef<View | null>(null);
+  useEffect(() => {
+    if (upgradeRequired) return;
+    const anchor = anchorRef.current as (View & { requestTVFocus?: () => void }) | null;
+    anchor?.requestTVFocus?.();
+  }, [upgradeRequired]);
 
   // Invariant check. Two DIFFERENT conditions, deliberately not conflated:
   //   * no credential row at all → the pairing is incomplete (legacy/corrupted
@@ -199,6 +226,22 @@ export function PinEntryScreen({
           {error === 'throttled' ? t('pin.throttled') : t('pin.error')}
         </Text>
       )}
+
+      {/* THE FOCUS ANCHOR — the only focusable view on this screen.
+          Absolutely positioned behind the content and fully transparent, so it
+          changes nothing visually while giving Android a view to deliver D-pad
+          keys to. It renders no children and carries no focus styling: with a
+          single destination there is nowhere for focus to travel, which is
+          exactly the property that keeps the code unreadable from the room.
+          onPress is a no-op — CENTER is entered once, by useTVEventHandler. */}
+      <Pressable
+        ref={anchorRef}
+        style={StyleSheet.absoluteFill}
+        focusable
+        hasTVPreferredFocus
+        accessibilityLabel={t('pin.prompt')}
+        onPress={() => { /* CENTER is handled by useTVEventHandler; see above. */ }}
+      />
     </View>
   );
 }

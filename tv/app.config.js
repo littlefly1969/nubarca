@@ -115,6 +115,11 @@ module.exports = () => ({
       // BackHandler.exitApp() only backgrounds the task on Fire TV. Same
       // prebuild-regeneration reasoning as above.
       './plugins/withTvPlatformModule',
+      // Places the approved TV banner artwork in the density buckets where it
+      // is actually 320x180dp, and declares android:banner on the launcher
+      // ACTIVITY too. Must run AFTER @react-native-tvos/config-tv, which
+      // otherwise leaves the same 320x180 bitmap in every bucket.
+      './plugins/withFireTvBanner',
     ],
     updates: {
       url: updateUrl,
