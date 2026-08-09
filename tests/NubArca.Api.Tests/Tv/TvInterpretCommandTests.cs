@@ -16,7 +16,9 @@ namespace NubArca.Api.Tests.Tv;
 // interpretation + STRICTLY owner-scoped person resolution (no cross-owner leak).
 public sealed class TvInterpretCommandTests : IDisposable
 {
-    private const string Pin = "123456";
+    // A valid directional code in the current scheme; the value itself is
+    // arbitrary.
+    private const string Pin = "URDLSUDLR";
     private const string Url = "/api/tv/personal/gallery/interpret-command";
 
     private readonly SqliteWebApplicationFactory _factory = new();
@@ -192,7 +194,7 @@ public sealed class TvInterpretCommandTests : IDisposable
         var started = (await start.Content.ReadFromJsonAsync<TvPairingStartedDto>())!;
         (await owner.PostAsJsonAsync(
             $"/api/tv/pairing/{started.PublicCode}/approve",
-            new { pairingSecret = started.PairingSecret, personalPin = Pin, personalPinConfirmation = Pin }))
+            new { pairingSecret = started.PairingSecret, personalCode = Pin, personalCodeConfirmation = Pin }))
             .EnsureSuccessStatusCode();
         var pollRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/tv/pairing/{started.PublicCode}/status");
         pollRequest.Headers.Add(TvPairingService.PairingSecretHeader, started.PairingSecret);
@@ -203,7 +205,7 @@ public sealed class TvInterpretCommandTests : IDisposable
 
     private async Task<string> UnlockTokenAsync(string setCookie)
     {
-        var response = await SendAsync(setCookie, "/api/tv/personal/unlock", grant: null, json: new { pin = Pin });
+        var response = await SendAsync(setCookie, "/api/tv/personal/unlock", grant: null, json: new { code = Pin });
         response.EnsureSuccessStatusCode();
         var dto = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         return dto.GetProperty("unlockToken").GetString()!;

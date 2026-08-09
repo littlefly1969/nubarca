@@ -8,7 +8,7 @@ is built is described by `ARCHITECTURE.md`.
 ## Baseline
 
 - Release: `0.3.0` (server and web)
-- NubArca TV: `1.0.1`, `versionCode` 2, OTA runtime `nubarca-tv-native-2`
+- NubArca TV: `1.0.2`, `versionCode` 3, OTA runtime `nubarca-tv-native-3`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
@@ -189,3 +189,55 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **OTA isolation is structural.** Publications and channel pointers are keyed by
   runtime version, so bundles built for one native contract cannot be offered to
   a device asking for another.
+- **The TV Personal Area secret is entered BLIND, and that is structural, not a
+  masking rule.** The retired 6-digit PIN was shown on a visible keypad: masking
+  the digits changed nothing, because the FOCUS RING walked from key to key and
+  anyone in the room could read the code off the television. The directional code
+  (`dpad-v1`: nine presses of UP/DOWN/LEFT/RIGHT/CENTER, 5^9 = 1,953,125 — about
+  twice the numeric space) is safe only because the unlock screen contains no
+  focusable secret controls at all, renders no symbol, and has no state that
+  varies with which button was pressed; the remote diagram on it is static by
+  contract. Nothing logs a symbol either — a debug line naming the direction
+  would move the same leak into logcat. `TvPersonalPin.Scheme` names the
+  generation so ONE row describes both: `pin-v1` still VERIFIES so an
+  already-paired television keeps working, but nothing creates one, and the
+  status endpoint's `scheme` is what tells a television to say "configure the new
+  code from your account" instead of offering entry that can never succeed.
+- **The TV browses the SAME query the web does — not a copy kept in agreement.**
+  `/api/tv/personal/media` and `/api/tv/personal/albums/{id}/media` bind through
+  `MediaCollectionQueryBinder` and run through `IMediaCollectionQueryService`,
+  exactly like `/api/media`. Kind/filter compatibility (photo filters ⇒
+  kind=image, video ⇒ kind=video, neither with kind=all), the library-only
+  album-membership rule and the cursor fingerprint are therefore inherited, not
+  reimplemented. `tv/src/personal/mediaWorkspaceQuery.ts` mirrors the web model
+  field-for-field; the two packages cannot share code, so the SERVER is the
+  safety net.
+- **Fire TV D-pad determinism comes from a UNIFORM grid, not from a debounce.**
+  The justified wall made Android's geometric focus search disagree with the
+  column the user believed they were in; the lane (`preferredX`) that patched it
+  made the focus graph depend on React committing between two key presses, which
+  is why fast and slow navigation diverged. `tv/src/lib/tvFixedGrid.ts` is a pure
+  function of `(itemCount, columns)`: nothing re-renders during a burst, and
+  because the tiles are uniform Android's own fallback names the SAME tile the
+  explicit link does — so a momentarily unmounted neighbour degrades to an
+  equivalent answer instead of a lateral drift. Never reintroduce a repeat
+  debounce: the auto-repeat stream is valid input and every accepted repeat must
+  be exactly one step. Note that `additionalRenderRegions` is documented in the
+  react-native-tvos README but is NOT implemented in the shipped 0.85.3-3
+  JavaScript; a wide `windowSize` is what keeps neighbours mounted.
+- **`BackHandler.exitApp()` does not close an Android app.** It maps to
+  `Activity.moveTaskToBack(true)` — it BACKGROUNDS the task, which on a Fire
+  Stick left NubArca in recents and resumed the old Activity on relaunch. The
+  navigation root calls the native `Activity.finishAndRemoveTask()` through
+  `NubArcaTvPlatform` (`tv/plugins/withTvPlatformModule.js`, re-applied on every
+  prebuild because prebuild regenerates `android/`). "Closed" means the Activity
+  is finished, the task removed, nothing playing and a relaunch creating a new
+  Activity — NOT that the Linux process is gone. Never `System.exit` or
+  `killProcess`.
+- **A browsing tile never mounts a player.** Video tiles use derived STILL images
+  only: poster → a derived still → an EXPLICIT "video, no preview" placeholder.
+  A blank focusable rectangle is the failure mode to avoid. `previewStripUrl` is
+  a six-cell 2880x270 sprite and is deliberately never used as a tile image. In
+  the viewer exactly one `VideoPlayer` exists at a time (keyed by source), with
+  an explicit Android buffer budget — the platform default byte budget is
+  UNLIMITED, which on a constrained Fire Stick is a memory climb with no ceiling.

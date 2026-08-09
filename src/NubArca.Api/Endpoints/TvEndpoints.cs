@@ -91,17 +91,17 @@ public static class TvEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var result = await tv.ApproveAsync(
                 publicCode, body?.PairingSecret, ownerUserId,
-                body?.PersonalPin, body?.PersonalPinConfirmation, cancellationToken);
+                body?.PersonalCode, body?.PersonalCodeConfirmation, cancellationToken);
             switch (result.Status)
             {
                 case TvPairingApproveStatus.NotFound:
                     return Results.NotFound();
                 case TvPairingApproveStatus.PinRequired:
-                    return Results.BadRequest(new { error = "pin_required" });
+                    return Results.BadRequest(new { error = "code_required" });
                 case TvPairingApproveStatus.InvalidPin:
-                    return Results.BadRequest(new { error = "invalid_pin" });
+                    return Results.BadRequest(new { error = "invalid_code" });
                 case TvPairingApproveStatus.PinMismatch:
-                    return Results.BadRequest(new { error = "pin_mismatch" });
+                    return Results.BadRequest(new { error = "code_mismatch" });
             }
 
             await audit.LogAsync(ownerUserId, AuditActions.TvPairingApprove, AuditEntityTypes.TvPairing,
@@ -185,11 +185,11 @@ public static class TvEndpoints
             return Results.NoContent();
         }).WithName("RevokeTvDevice").RequirePermission(Permissions.TvManage);
 
-        // --- TV Personal Area: owner-side PIN management ---
+        // --- TV Personal Area: owner-side credential management ---
         // OWNER endpoints (normal auth cookie), deliberately NOT under /api/tv (the
         // path-scoped TV cookie is never sent here, and the TV session can never call
-        // them). The PIN is created exactly once from the authenticated pairing/approval
-        // flow; it is never chosen on the TV and never returned by any endpoint.
+        // them). The secret is chosen on the authenticated web account page; it is
+        // never chosen on the TV and never returned by any endpoint.
 
         app.MapGet("/api/tv-personal/pin", async (
             HttpContext httpContext,
@@ -201,14 +201,19 @@ public static class TvEndpoints
             return Results.Ok(await personal.GetPinStatusAsync(ownerUserId, cancellationToken));
         }).WithName("GetTvPersonalPinStatus").RequirePermission(Permissions.TvManage);
 
-        // Owner-authenticated set/change/reset. No old PIN is required (the owner
-        // session IS the authorization) and no "would the old PIN have matched" signal
-        // exists. Changing the PIN atomically bumps the generation, revokes every
-        // outstanding unlock grant of this owner (all TVs must re-enter the new PIN),
-        // and clears the owner's TV-session cooldown state. The TV pairing itself is
-        // NOT revoked — Party keeps working.
-        app.MapPost("/api/tv-personal/pin", async (
-            [FromBody] TvPersonalPinSetRequest? body,
+        // Owner-authenticated set/change/reset of the DIRECTIONAL TV code. No old
+        // code is required (the owner session IS the authorization) and no "would the
+        // old code have matched" signal exists. Changing it atomically bumps the
+        // generation, revokes every outstanding unlock grant of this owner (all TVs
+        // must re-enter the new code), and clears the owner's TV-session cooldown
+        // state. The TV pairing itself is NOT revoked — Party keeps working.
+        //
+        // This is the ONLY credential-creation route. An owner still holding the
+        // retired 6-digit PIN crosses over by calling it: the same transaction
+        // replaces the hash AND the scheme, so no installation ever has two live
+        // schemes. There is deliberately no route that writes a numeric PIN.
+        app.MapPost("/api/tv-personal/tv-code", async (
+            [FromBody] TvPersonalDpadCodeSetRequest? body,
             HttpContext httpContext,
             [FromServices] ITvPersonalAreaService personal,
             [FromServices] IAuditLogger audit,
@@ -216,14 +221,14 @@ public static class TvEndpoints
         {
             SetNoStore(httpContext);
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-            var result = await personal.SetPinAsync(
-                ownerUserId, body?.Pin, body?.ConfirmPin, cancellationToken);
+            var result = await personal.SetDpadCodeAsync(
+                ownerUserId, body?.Code, body?.ConfirmCode, cancellationToken);
             switch (result.Outcome)
             {
                 case TvPersonalPinSetOutcome.InvalidPin:
-                    return Results.BadRequest(new { error = "invalid_pin" });
+                    return Results.BadRequest(new { error = "invalid_code" });
                 case TvPersonalPinSetOutcome.PinMismatch:
-                    return Results.BadRequest(new { error = "pin_mismatch" });
+                    return Results.BadRequest(new { error = "code_mismatch" });
             }
 
             await audit.LogAsync(
@@ -233,21 +238,25 @@ public static class TvEndpoints
                     : AuditActions.TvPersonalPinChange,
                 AuditEntityTypes.User, ownerUserId,
                 httpContext.Connection.RemoteIpAddress?.ToString(),
-                new { grantsRevoked = result.GrantsRevoked }, cancellationToken);
-            return Results.Ok(new TvPersonalPinStatusDto(true, result.UpdatedAt));
-        }).WithName("SetTvPersonalPin")
+                // The audited payload carries the scheme and how many grants were
+                // dropped — never the code, its length, or any part of the hash.
+                new { grantsRevoked = result.GrantsRevoked, scheme = result.Scheme },
+                cancellationToken);
+            return Results.Ok(new TvPersonalPinStatusDto(true, result.UpdatedAt, result.Scheme));
+        }).WithName("SetTvPersonalDpadCode")
             .RequirePermission(Permissions.TvManage)
             .RequireRateLimiting(TvPersonalUnlockRateLimitPolicy);
 
         // --- TV Personal Area: TV-session endpoints ---
-        // The paired TV session authenticates the DEVICE; the 6-digit PIN is a second
-        // local authorization step. Personal access requires BOTH: the limited TV
-        // session cookie AND a server-side unlock grant presented in the
+        // The paired TV session authenticates the DEVICE; the directional code is a
+        // second local authorization step. Personal access requires BOTH: the limited
+        // TV session cookie AND a server-side unlock grant presented in the
         // X-Tv-Personal-Unlock header (opaque; only its hash is stored, bound to this
-        // session + owner + PIN generation). Wrong PIN, malformed PIN, and "no PIN
-        // configured" collapse into ONE generic 403 so a TV session cannot probe
-        // PIN/account state; the progressive per-session cooldown answers 429 with
-        // Retry-After. Everything is no-store: no personal payload may be cached.
+        // session + owner + code generation). A wrong code, a malformed code, a code
+        // in the wrong scheme, and "nothing configured" collapse into ONE generic 403
+        // so a TV session cannot probe credential/account state; the progressive
+        // per-session cooldown answers 429 with Retry-After. Everything is no-store:
+        // no personal payload may be cached.
 
         app.MapPost("/api/tv/personal/unlock", async (
             [FromBody] TvPersonalUnlockRequest? body,
@@ -259,7 +268,7 @@ public static class TvEndpoints
             SetNoStore(httpContext);
             var ip = httpContext.Connection.RemoteIpAddress?.ToString();
             var outcome = await personal.UnlockAsync(
-                httpContext.Request.Cookies[TvPairingService.CookieName], body?.Pin, cancellationToken);
+                httpContext.Request.Cookies[TvPairingService.CookieName], body?.Secret, cancellationToken);
             switch (outcome.Status)
             {
                 case TvPersonalUnlockStatus.SessionInvalid:
@@ -393,10 +402,163 @@ public static class TvEndpoints
                 : Results.Ok(result.Page);
         }).WithName("ListTvPersonalGallery");
 
-        // Owner-private video library for the native TV app. This is deliberately a
-        // separate surface from the image gallery, matching the web /api/videos model:
-        // newest-first, cursor-paged, server-detected videos only. Every page and every
-        // byte below revalidates the limited TV session + in-memory Personal grant.
+        // --- Unified TV Personal media workspace (current surface) ---
+        //
+        // ONE endpoint for "Tutti | Foto | Video" over the library, and the same
+        // contract again for a single album. Both bind through the SHARED
+        // MediaCollectionQueryBinder and run through IMediaCollectionQueryService —
+        // byte-for-byte the parser and service behind the web GET /api/media and
+        // GET /api/albums/{id}/media. That is what makes the television's filters
+        // mean exactly what the web's mean: not a second implementation kept in
+        // agreement, but no second implementation at all.
+        //
+        // Consequences the TV inherits for free, and must not re-derive:
+        //   * photo filters are valid only with kind=image, video filters only with
+        //     kind=video, and neither may accompany kind=all (400 otherwise) — so a
+        //     stale photo filter can never be applied invisibly to a mixed tab;
+        //   * albumMembership is library-only and is rejected inside an album;
+        //   * a foreign/missing album is a generic 404, never an empty grid;
+        //   * the cursor is bound to the filter fingerprint, so a page cannot be
+        //     served under a query it was not issued for.
+        static IResult MapTvPersonalMediaResult(TvPersonalMediaListResult result) =>
+            result.Status switch
+            {
+                NubArca.Api.Media.MediaCollectionStatus.Ok => Results.Ok(result.Page),
+                NubArca.Api.Media.MediaCollectionStatus.AlbumNotFound => Results.NotFound(),
+                _ => Results.BadRequest(new { error = result.Error }),
+            };
+
+        app.MapGet("/api/tv/personal/media", async (
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            [FromQuery] string? kind,
+            [FromQuery] string? q,
+            [FromQuery] bool? favorite,
+            [FromQuery] int? minRating,
+            [FromQuery] DateTime? dateTakenFrom,
+            [FromQuery] DateTime? dateTakenTo,
+            [FromQuery] string? albumMembership,
+            [FromQuery] string? sort,
+            [FromQuery] string? direction,
+            [FromQuery] bool? hasGps,
+            [FromQuery] bool? collapseDuplicates,
+            [FromQuery] string? includePeople,
+            [FromQuery] string? excludePeople,
+            [FromQuery] string? includePeopleMode,
+            [FromQuery] double? durationMin,
+            [FromQuery] double? durationMax,
+            [FromQuery] int? minHeight,
+            [FromQuery] string? codec,
+            [FromQuery] bool? hasAudio,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] ITvPersonalMediaService media,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+
+            // `scope` is deliberately NOT accepted: the Personal Area browses the
+            // ACTIVE library only. Excluded media is a library-maintenance view
+            // that belongs on the web, and omitting the parameter means the TV
+            // cannot ask for it rather than silently ignoring a request for it.
+            if (!NubArca.Api.Media.MediaCollectionQueryBinder.TryBind(
+                new NubArca.Api.Media.MediaCollectionSource.Library(),
+                limit, cursor, scope: null, kind, q, favorite, minRating,
+                dateTakenFrom, dateTakenTo, albumMembership, sort, direction,
+                hasGps, collapseDuplicates, similarTo: null,
+                includePeople, excludePeople, includePeopleMode,
+                durationMin, durationMax, minHeight, codec, hasAudio,
+                out var query, out var bindError))
+            {
+                return Results.BadRequest(new { error = bindError });
+            }
+
+            return MapTvPersonalMediaResult(
+                await media.QueryAsync(ownerUserId, query, cancellationToken));
+        }).WithName("ListTvPersonalMedia");
+
+        app.MapGet("/api/tv/personal/albums", async (
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] ITvPersonalMediaService media,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+            return Results.Ok(await media.ListAlbumsAsync(ownerUserId, cancellationToken));
+        }).WithName("ListTvPersonalAlbums");
+
+        app.MapGet("/api/tv/personal/albums/{albumId:guid}", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] ITvPersonalMediaService media,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+            var album = await media.GetAlbumAsync(ownerUserId, albumId, cancellationToken);
+            return album is null ? Results.NotFound() : Results.Ok(album);
+        }).WithName("GetTvPersonalAlbum");
+
+        app.MapGet("/api/tv/personal/albums/{albumId:guid}/media", async (
+            Guid albumId,
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            [FromQuery] string? kind,
+            [FromQuery] string? q,
+            [FromQuery] bool? favorite,
+            [FromQuery] int? minRating,
+            [FromQuery] DateTime? dateTakenFrom,
+            [FromQuery] DateTime? dateTakenTo,
+            [FromQuery] string? sort,
+            [FromQuery] string? direction,
+            [FromQuery] bool? hasGps,
+            [FromQuery] bool? collapseDuplicates,
+            [FromQuery] string? includePeople,
+            [FromQuery] string? excludePeople,
+            [FromQuery] string? includePeopleMode,
+            [FromQuery] double? durationMin,
+            [FromQuery] double? durationMax,
+            [FromQuery] int? minHeight,
+            [FromQuery] string? codec,
+            [FromQuery] bool? hasAudio,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] ITvPersonalMediaService media,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+
+            // `albumMembership` is not a parameter here at all: every item of an
+            // album is a member, so the filter is meaningless. The shared service
+            // would reject it; not accepting it means the TV cannot even ask.
+            if (!NubArca.Api.Media.MediaCollectionQueryBinder.TryBind(
+                new NubArca.Api.Media.MediaCollectionSource.Album(albumId),
+                limit, cursor, scope: null, kind, q, favorite, minRating,
+                dateTakenFrom, dateTakenTo, albumMembership: null, sort, direction,
+                hasGps, collapseDuplicates, similarTo: null,
+                includePeople, excludePeople, includePeopleMode,
+                durationMin, durationMax, minHeight, codec, hasAudio,
+                out var query, out var bindError))
+            {
+                return Results.BadRequest(new { error = bindError });
+            }
+
+            return MapTvPersonalMediaResult(
+                await media.QueryAsync(ownerUserId, query, cancellationToken));
+        }).WithName("ListTvPersonalAlbumMedia");
+
+        // Owner-private video library for the native TV app. Superseded by the
+        // unified /api/tv/personal/media above and retained only so a television
+        // still running the previous native contract keeps working until its APK
+        // is replaced. Newest-first, cursor-paged, no filters.
         app.MapGet("/api/tv/personal/videos", async (
             [FromQuery] int? limit,
             [FromQuery] string? cursor,

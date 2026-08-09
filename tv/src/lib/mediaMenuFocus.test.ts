@@ -126,21 +126,29 @@ test('the grid starts by asking for focus on its first tile', () => {
 
 const SCREENS = {
   'AlbumItemsScreen.tsx': readFileSync(new URL('../screens/AlbumItemsScreen.tsx', import.meta.url), 'utf8'),
-  'PersonalGalleryScreen.tsx': readFileSync(new URL('../screens/PersonalGalleryScreen.tsx', import.meta.url), 'utf8'),
-  'PersonalVideosScreen.tsx': readFileSync(new URL('../screens/PersonalVideosScreen.tsx', import.meta.url), 'utf8'),
+  'PersonalLibraryScreen.tsx': readFileSync(new URL('../screens/PersonalLibraryScreen.tsx', import.meta.url), 'utf8'),
 };
 
-test('every native media wall uses the one shared lane + focus-memory model', () => {
+test('every native media wall uses the one shared focus graph + focus memory', () => {
   for (const [name, source] of Object.entries(SCREENS)) {
-    assert.match(source, /useTvMediaGridFocus\(rows, GRID_GAP\)/, name);
-    assert.match(source, /laneFocus\.targetsFor\(tile\.item\.id\)/, name);
-    assert.match(source, /laneFocus\.onTileFocused\(id\)/, name);
+    assert.match(source, /useTvFixedGridFocus\(/, name);
+    assert.match(source, /gridFocus\.targetsFor\(index\)/, name);
     assert.match(source, /useTvGridFocusMemory\(/, name);
-    // A pending restore always re-establishes the lane rather than inheriting
-    // the one the user was steering before.
-    assert.match(source, /laneFocus\.noteFocusRestore\(\)/, name);
-    // No screen may keep its own vertical-geometry rules.
-    assert.doesNotMatch(source, /buildTvMediaFocusLinks|verticalTarget/, name);
+    // No screen may keep its own vertical-geometry rules, and none may bring
+    // back the lane state whose re-render the key-press path could outrun.
+    assert.doesNotMatch(source, /buildTvMediaFocusLinks|verticalTarget|preferredX/, name);
+  }
+});
+
+test('no media wall debounces or throttles the D-pad', () => {
+  // The Fire remote's auto-repeat stream is valid user input: every accepted
+  // repeat must perform exactly one predictable step. Swallowing repeats would
+  // hide the divergence instead of removing it, and would make a held button
+  // feel broken.
+  for (const [name, source] of Object.entries(SCREENS)) {
+    assert.doesNotMatch(source, /debounce|throttle/i, name);
+    // A timer gating navigation is the same mistake wearing a different name.
+    assert.doesNotMatch(source, /setTimeout\([^)]*(?:navigate|move|focus)/i, name);
   }
 });
 
@@ -154,8 +162,7 @@ test('every focusable command overlay is a trapping focus scope', () => {
   // one escaping rail is enough to make the remote feel unpredictable.
   const railed = {
     'screens/AlbumItemsScreen.tsx': /<View style=\{\[styles\.commandBar/,
-    'screens/PersonalGalleryScreen.tsx': /<View style=\{\[styles\.commandBar/,
-    'screens/gallery/PersonalViewer.tsx': /<View style=\{\[styles\.commandBar/,
+    'screens/PersonalLibraryScreen.tsx': /<View style=\{\[styles\.commandBar/,
     'screens/BeautyLabScreen.tsx': /<View style=\{styles\.menu\}/,
   };
   for (const [path, plainView] of Object.entries(railed)) {
@@ -169,10 +176,10 @@ test('every focusable command overlay is a trapping focus scope', () => {
 test('the grid stops being a focus destination while the rail owns focus', () => {
   assert.match(SCREENS['AlbumItemsScreen.tsx'], /const gridFocusable = !overlayVisible;/);
   assert.match(
-    SCREENS['PersonalGalleryScreen.tsx'],
+    SCREENS['PersonalLibraryScreen.tsx'],
     /const gridFocusable = gridInteractive && !overlayVisible;/,
   );
-  for (const name of ['AlbumItemsScreen.tsx', 'PersonalGalleryScreen.tsx']) {
+  for (const name of ['AlbumItemsScreen.tsx', 'PersonalLibraryScreen.tsx']) {
     const source = SCREENS[name as keyof typeof SCREENS];
     assert.match(source, /focusable=\{gridFocusable\}/, name);
     // A tile may only ASK for focus when it could accept it — a preferred-focus
@@ -182,7 +189,7 @@ test('the grid stops being a focus destination while the rail owns focus', () =>
 });
 
 test('BACK closes the overlay first and does not navigate away', () => {
-  for (const name of ['AlbumItemsScreen.tsx', 'PersonalGalleryScreen.tsx']) {
+  for (const name of ['AlbumItemsScreen.tsx', 'PersonalLibraryScreen.tsx']) {
     const source = SCREENS[name as keyof typeof SCREENS];
     assert.match(
       source,
@@ -201,7 +208,11 @@ test('no media wall detaches rows that vertical focus links point at', () => {
     // Anchored to a JSX prop line, so the comments explaining the removal do
     // not satisfy the assertion by accident.
     assert.doesNotMatch(source, /^\s*removeClippedSubviews\s*(\{|$)/m, name);
-    // Windowing itself stays on: only the detaching optimization is gone.
-    assert.match(source, /windowSize=\{7\}/, name);
+    // Windowing itself stays ON — a library must never render thousands of
+    // tiles — but the window is wide, because `additionalRenderRegions` is
+    // documented in the react-native-tvos README and NOT implemented in the
+    // shipped 0.85.3-3 JavaScript, so this is what keeps the focused row's
+    // immediate neighbours mounted during an auto-repeat burst.
+    assert.match(source, /windowSize=\{11\}/, name);
   }
 });

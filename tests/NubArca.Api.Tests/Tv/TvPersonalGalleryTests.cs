@@ -27,7 +27,9 @@ namespace NubArca.Api.Tests.Tv;
 // favorite / album-add mutations; (5) media-byte rules (derived only).
 public sealed class TvPersonalGalleryTests : IDisposable
 {
-    private const string Pin = "123456";
+    // A valid directional code in the current scheme; the value itself is
+    // arbitrary.
+    private const string Pin = "URDLSUDLR";
 
     // The standard pooled factory raises non-dedicated rate-limit buckets.
     // Dedicated rate-limit tests retain explicitly configured factories.
@@ -156,7 +158,7 @@ public sealed class TvPersonalGalleryTests : IDisposable
         // Stale PIN generation → the DISTINCT pin_changed reason.
         var stale = await UnlockTokenAsync(cookie);
         (await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = "999999", confirmPin = "999999" }))
+            "/api/tv-personal/tv-code", new { code = "SSSUUUDDD", confirmCode = "SSSUUUDDD" }))
             .EnsureSuccessStatusCode();
         var staleResp = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/personal/gallery", stale);
         Assert.Equal(HttpStatusCode.Forbidden, staleResp.StatusCode);
@@ -1209,8 +1211,8 @@ public sealed class TvPersonalGalleryTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = Pin,
-                personalPinConfirmation = Pin,
+                personalCode = Pin,
+                personalCodeConfirmation = Pin,
             })).EnsureSuccessStatusCode();
 
         var pollRequest = new HttpRequestMessage(
@@ -1224,7 +1226,7 @@ public sealed class TvPersonalGalleryTests : IDisposable
     private async Task<string> UnlockTokenAsync(string setCookie)
     {
         var response = await TvSendAsync(
-            setCookie, HttpMethod.Post, "/api/tv/personal/unlock", json: new { pin = Pin });
+            setCookie, HttpMethod.Post, "/api/tv/personal/unlock", json: new { code = Pin });
         response.EnsureSuccessStatusCode();
         var dto = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         return dto.GetProperty("unlockToken").GetString()!;

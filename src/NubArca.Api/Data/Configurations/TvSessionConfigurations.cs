@@ -64,6 +64,10 @@ public sealed class TvPersonalPinConfiguration : IEntityTypeConfiguration<TvPers
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.PinHash).IsRequired().HasMaxLength(512);
+        // Rows created before the directional code existed are numeric PINs; the
+        // default makes that true for every backfilled row without a data script.
+        builder.Property(x => x.Scheme).IsRequired().HasMaxLength(20)
+            .HasDefaultValue(TvPersonalSecretSchemes.LegacyPin);
         builder.Property(x => x.Generation).HasDefaultValue(1);
         builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");

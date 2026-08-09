@@ -3,7 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 import { FocusableButton } from '../../components/FocusableButton';
 import { PanelShell } from './PanelShell';
-import { isValidDateInput } from '../../personal/galleryQuery';
+import { isValidDateInput } from '../../lib/dateInput';
 import { useI18n } from '../../i18n';
 
 // Remote-friendly on-screen keyboard: a DPAD character grid (no dependency on

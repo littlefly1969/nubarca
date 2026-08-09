@@ -201,6 +201,9 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<ITvMediaService, TvMediaService>();
             services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
             services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();
+            // The unified TV Personal media workspace. Mirrors Program.cs
+            // (Postgres-only block).
+            services.AddScoped<ITvPersonalMediaService, TvPersonalMediaService>();
             services.AddScoped<IShareLinkService, ShareLinkService>();
             services.AddScoped<IAuditLogger, AuditLogger>();
             services.AddSingleton<StorageStatsCache>();

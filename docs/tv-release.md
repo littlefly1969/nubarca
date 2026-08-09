@@ -7,10 +7,22 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.1,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 2, runtime
-`nubarca-tv-native-2`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.2,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 3, runtime
+`nubarca-tv-native-3`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
+
+1.0.2 is a NATIVE release: it adds the `NubArcaTvPlatform` module
+(`Activity.finishAndRemoveTask()`, wired by
+[`tv/plugins/withTvPlatformModule.js`](../tv/plugins/withTvPlatformModule.js)),
+so the runtime had to increment. No dependency was upgraded for it —
+`react-native-tvos` resolves to 0.85.3-3, which already carries the Fire TV IME
+and Android list fixes.
+
+Runtime `nubarca-tv-native-3` starts with NO OTA publication, and that is
+correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
+until a later deliberate OTA exists. Do not publish one merely to exercise the
+endpoint.
 
 A future native release intentionally updates at least `version`, `versionCode`
 and `runtimeVersion` as appropriate. Every native-contract change requires a new
@@ -155,9 +167,9 @@ compatible runtime. Complete the normal device cold-launch acceptance.
 
 ## 10. Native APK build
 
-Do not rebuild the current 1.0.1 APK for validation. For a future intentional
-native release, first update `tv/release-contract.json`, while retaining the
-definitive Android signer and normally the same OTA trust root.
+Do not rebuild a published APK for validation. For an intentional native
+release, first update `tv/release-contract.json`, while retaining the definitive
+Android signer and normally the same OTA trust root.
 
 Required inputs are Node 22, JDK 17, Android SDK, `NUBARCA_PUBLIC_ORIGIN`,
 `NUBARCA_TV_OTA_CERTIFICATE` and the four `NUBARCA_TV_RELEASE_*` Gradle

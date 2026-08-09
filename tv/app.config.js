@@ -111,6 +111,10 @@ module.exports = () => ({
       // than falling back. Must run on every prebuild, because prebuild
       // regenerates android/ from that template.
       './plugins/withReleaseSigning',
+      // Adds the NubArcaTvPlatform native module (finishAndRemoveTask), because
+      // BackHandler.exitApp() only backgrounds the task on Fire TV. Same
+      // prebuild-regeneration reasoning as above.
+      './plugins/withTvPlatformModule',
     ],
     updates: {
       url: updateUrl,

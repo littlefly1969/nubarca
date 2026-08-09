@@ -35,12 +35,25 @@ function renderTv() {
   render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
 }
 
-async function enterPin(pin: string) {
+// Enter a directional code the way a remote does: arrow keys and Enter on the
+// blind entry surface. There is deliberately NO keypad to click — the visible
+// numeric keypad was the security defect, because the focus ring walking from
+// key to key told anyone watching the television what the secret was.
+const CODE_KEY: Record<string, string> = {
+  U: '{ArrowUp}', D: '{ArrowDown}', L: '{ArrowLeft}', R: '{ArrowRight}', S: '{Enter}',
+};
+
+async function enterCode(code: string) {
   const user = userEvent.setup();
-  for (const d of pin) {
-    await user.click(screen.getByRole('button', { name: d }));
+  const surface = screen.getByTestId('tv-code-entry');
+  surface.focus();
+  for (const symbol of code) {
+    await user.keyboard(CODE_KEY[symbol]);
   }
 }
+
+const VALID_CODE = 'URDLSUDLR';
+const WRONG_CODE = 'LLLLLLLLL';
 
 describe('/tv Personal Area', () => {
   it('paired startup always opens mode selection with Party focused', async () => {
@@ -67,7 +80,7 @@ describe('/tv Personal Area', () => {
   it('Beauty Lab uses the existing PIN flow and a successful unlock opens the lab grid', async () => {
     installFetchMock({
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
       'GET /api/tv/personal/home': () => jsonResponse({ displayName: 'Owner', galleryAvailable: true }),
       'GET /api/tv/personal/aesthetics/items': () => jsonResponse({ items: [], nextCursor: null }),
@@ -75,9 +88,9 @@ describe('/tv Personal Area', () => {
     renderTv();
 
     await userEvent.setup().click(await screen.findByTestId('tv-mode-beauty-lab'));
-    // Same PIN screen as Personal Area — no second PIN system.
-    expect(await screen.findByTestId('tv-pin-entry')).toBeInTheDocument();
-    await enterPin('123456');
+    // Same unlock screen as the Personal Area — no second credential system.
+    expect(await screen.findByTestId('tv-code-entry')).toBeInTheDocument();
+    await enterCode(VALID_CODE);
 
     // Unlock lands on the Beauty Lab, not the Personal Area home.
     expect(await screen.findByTestId('tv-beauty-lab')).toBeInTheDocument();
@@ -87,7 +100,7 @@ describe('/tv Personal Area', () => {
   it('BACK from the Beauty Lab root locks and returns to mode selection', async () => {
     installFetchMock({
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
       'GET /api/tv/personal/home': () => jsonResponse({ displayName: 'Owner', galleryAvailable: true }),
       'GET /api/tv/personal/aesthetics/items': () => jsonResponse({ items: [], nextCursor: null }),
@@ -95,8 +108,8 @@ describe('/tv Personal Area', () => {
     });
     renderTv();
     await userEvent.setup().click(await screen.findByTestId('tv-mode-beauty-lab'));
-    await screen.findByTestId('tv-pin-entry');
-    await enterPin('123456');
+    await screen.findByTestId('tv-code-entry');
+    await enterCode(VALID_CODE);
     const lab = await screen.findByTestId('tv-beauty-lab');
 
     fireEvent.keyDown(lab, { key: 'Escape' });
@@ -107,32 +120,35 @@ describe('/tv Personal Area', () => {
   it('Personal area opens PIN entry; a wrong PIN shows a generic error, clears input, and stays locked', async () => {
     installFetchMock({
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(403),
     });
     renderTv();
     await userEvent.setup().click(await screen.findByTestId('tv-mode-personal'));
 
-    expect(await screen.findByTestId('tv-pin-entry')).toBeInTheDocument();
-    await enterPin('000000');
+    expect(await screen.findByTestId('tv-code-entry')).toBeInTheDocument();
+    await enterCode(WRONG_CODE);
 
-    expect(await screen.findByTestId('tv-pin-error')).toHaveTextContent('PIN non valido.');
-    // Digits are cleared after the failure and we are still on the PIN screen.
-    expect(screen.getByTestId('tv-pin-entry')).toBeInTheDocument();
-    expect(screen.queryByText('●')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('tv-pin-error')).toHaveTextContent('Codice non valido.');
+    // The code is cleared after the failure and we are still on the unlock screen.
+    expect(screen.getByTestId('tv-code-entry')).toBeInTheDocument();
+    // No progress dot is filled any more. Asserted on the DOTS specifically —
+    // the instructional remote ring also draws a centre glyph, and it is STATIC
+    // by design, so it must survive a failure untouched.
+    expect(document.querySelectorAll('.tv-pin-dot-filled')).toHaveLength(0);
     expect(screen.queryByTestId('tv-personal-home')).not.toBeInTheDocument();
   });
 
   it('a throttled unlock (429) shows the cooldown message', async () => {
     installFetchMock({
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(429),
     });
     renderTv();
     await userEvent.setup().click(await screen.findByTestId('tv-mode-personal'));
-    await screen.findByTestId('tv-pin-entry');
-    await enterPin('123456');
+    await screen.findByTestId('tv-code-entry');
+    await enterCode(VALID_CODE);
 
     expect(await screen.findByTestId('tv-pin-error')).toHaveTextContent('Troppi tentativi');
   });
@@ -152,13 +168,13 @@ describe('/tv Personal Area', () => {
     );
     expect(screen.getByRole('button', { name: 'Abbina di nuovo questa TV' })).toBeInTheDocument();
     expect(screen.queryByTestId('tv-mode-party')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('tv-pin-entry')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('tv-code-entry')).not.toBeInTheDocument();
   });
 
   function unlockableHandlers(mock: { locks: number }): Parameters<typeof installFetchMock>[0] {
     return {
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => jsonResponse({
         unlockToken: 'grant-token-1', expiresAt: '2026-07-11T23:59:00Z',
       }),
@@ -179,8 +195,8 @@ describe('/tv Personal Area', () => {
   async function unlockToHome(fetchMock: InstalledFetchMock) {
     renderTv();
     await userEvent.setup().click(await screen.findByTestId('tv-mode-personal'));
-    await screen.findByTestId('tv-pin-entry');
-    await enterPin('123456');
+    await screen.findByTestId('tv-code-entry');
+    await enterCode(VALID_CODE);
     await screen.findByTestId('tv-personal-home');
     return fetchMock;
   }
@@ -236,7 +252,7 @@ describe('/tv Personal Area', () => {
 
     // Entering the Personal Area again always re-asks the PIN.
     await userEvent.setup().click(screen.getByTestId('tv-mode-personal'));
-    expect(await screen.findByTestId('tv-pin-entry')).toBeInTheDocument();
+    expect(await screen.findByTestId('tv-code-entry')).toBeInTheDocument();
     expect(screen.queryByTestId('tv-personal-home')).not.toBeInTheDocument();
   });
 
@@ -254,7 +270,7 @@ describe('/tv Personal Area', () => {
   it('pairing revocation during PIN entry returns to the revoked screen', async () => {
     installFetchMock({
       'GET /api/tv/session': activeSession,
-      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false }),
+      'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(401),
       'POST /api/tv/pairing/start': () => jsonResponse({
         publicCode: 'NEWCODE1',
@@ -265,8 +281,8 @@ describe('/tv Personal Area', () => {
     });
     renderTv();
     await userEvent.setup().click(await screen.findByTestId('tv-mode-personal'));
-    await screen.findByTestId('tv-pin-entry');
-    await enterPin('123456');
+    await screen.findByTestId('tv-code-entry');
+    await enterCode(VALID_CODE);
 
     expect(await screen.findByText('Questa sessione TV è stata revocata.')).toBeInTheDocument();
     expect(screen.queryByTestId('tv-personal-home')).not.toBeInTheDocument();
@@ -327,7 +343,7 @@ describe('/tv Personal Area', () => {
     expect(await screen.findByTestId('tv-albums-empty')).toBeInTheDocument();
     fireEvent.keyDown(screen.getByTestId('tv-albums-empty').parentElement!, { key: 'Backspace' });
     await userEvent.setup().click(await screen.findByTestId('tv-mode-personal'));
-    expect(await screen.findByTestId('tv-pin-entry')).toBeInTheDocument();
+    expect(await screen.findByTestId('tv-code-entry')).toBeInTheDocument();
   });
 
   it('BACK from the Party root returns to mode selection without a PIN', async () => {
@@ -357,10 +373,32 @@ describe('atomic pairing approval', () => {
     );
   }
 
-  it('owner without a PIN sees mandatory create+confirm fields in ONE atomic approval', async () => {
+  // The approval page is an owner-private page on the owner's OWN device, so
+  // it deliberately SHOWS the code while it is being chosen — the opposite of
+  // the television, which never renders a symbol. Entry is by the same
+  // directions the remote uses.
+  async function typeCode(field: HTMLElement, code: string) {
+    const user = userEvent.setup();
+    field.focus();
+    for (const symbol of code) {
+      await user.keyboard(CODE_KEY[symbol]);
+    }
+  }
+
+  // Backspace removes one move, exactly as it does on the remote. A rejected
+  // submit deliberately does NOT clear the fields — client-side validation
+  // returns before the request, so the user can correct what they entered
+  // rather than start over.
+  async function clearCode(field: HTMLElement) {
+    const user = userEvent.setup();
+    field.focus();
+    for (let i = 0; i < 9; i++) await user.keyboard('{Backspace}');
+  }
+
+  it('owner without a code sees mandatory create+confirm fields in ONE atomic approval', async () => {
     let approveBody: string | null = null;
     installFetchMock({
-      'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null }),
+      'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null, scheme: null }),
       'POST /api/tv/pairing/ABCD2345/approve': ({ body }) => {
         approveBody = body;
         return jsonResponse({ status: 'approved', expiresAt: '2026-07-05T12:10:00Z' });
@@ -369,60 +407,64 @@ describe('atomic pairing approval', () => {
     renderApproval();
     const user = userEvent.setup();
 
-    // One coherent form: PIN fields are part of the approval itself.
-    const submit = await screen.findByRole('button', { name: 'Crea PIN e approva la TV' });
-    const [pinInput, confirmInput] = screen.getAllByLabelText(/PIN/);
+    // One coherent form: the code fields are part of the approval itself.
+    const submit = await screen.findByRole('button', { name: 'Crea il codice e approva la TV' });
+    const codeField = document.getElementById('tv-pair-code')!;
+    const confirmField = document.getElementById('tv-pair-code-confirm')!;
 
-    // Too short → rejected client-side; the approve endpoint is NEVER called.
-    await user.type(pinInput, '123');
-    await user.type(confirmInput, '123');
+    // Incomplete → rejected client-side; the approve endpoint is NEVER called.
+    await typeCode(codeField, 'URD');
+    await typeCode(confirmField, 'URD');
     await user.click(submit);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Il PIN deve essere di 6 cifre.');
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('Il codice deve essere di 9 movimenti.');
     expect(approveBody).toBeNull();
 
-    // Mismatch → rejected client-side.
-    await user.clear(pinInput);
-    await user.clear(confirmInput);
-    await user.type(pinInput, '123456');
-    await user.type(confirmInput, '654321');
+    // Mismatch → rejected client-side. Both fields reach nine symbols; only the
+    // last one differs.
+    await typeCode(codeField, 'LSUDLR');            // completes the first field
+    await typeCode(confirmField, 'LSUDLL');         // nine symbols, different
     await user.click(submit);
-    expect(await screen.findByRole('alert')).toHaveTextContent('I PIN non coincidono.');
+    expect(codeField.querySelectorAll('.is-filled')).toHaveLength(9);
+    expect(confirmField.querySelectorAll('.is-filled')).toHaveLength(9);
+    expect(await screen.findByRole('alert')).toHaveTextContent('I codici non coincidono.');
     expect(approveBody).toBeNull();
     expect(screen.queryByRole('heading', { name: 'TV approvata' })).not.toBeInTheDocument();
 
-    // Valid + confirmed → ONE server call carrying secret + PIN; success only
+    // Valid + confirmed → ONE server call carrying secret + code; success only
     // after the atomic server completion.
-    await user.clear(pinInput);
-    await user.clear(confirmInput);
-    await user.type(pinInput, '123456');
-    await user.type(confirmInput, '123456');
+    await clearCode(codeField);
+    await clearCode(confirmField);
+    await typeCode(codeField, VALID_CODE);
+    await typeCode(confirmField, VALID_CODE);
     await user.click(submit);
     expect(await screen.findByRole('heading', { name: 'TV approvata' })).toBeInTheDocument();
     expect(approveBody!).toContain('pairingSecret');
-    expect(approveBody!).toContain('"personalPin":"123456"');
-    expect(approveBody!).toContain('"personalPinConfirmation":"123456"');
+    expect(approveBody!).toContain(`"personalCode":"${VALID_CODE}"`);
+    expect(approveBody!).toContain(`"personalCodeConfirmation":"${VALID_CODE}"`);
   });
 
-  it('a server-side rejection keeps the form (no false success) and clears the PIN fields', async () => {
+  it('a server-side rejection keeps the form (no false success) and clears the code fields', async () => {
     installFetchMock({
-      'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null }),
+      'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null, scheme: null }),
       'POST /api/tv/pairing/ABCD2345/approve': () =>
-        errorResponse(400, { error: 'invalid_pin' }),
+        errorResponse(400, { error: 'invalid_code' }),
     });
     renderApproval();
     const user = userEvent.setup();
 
-    const submit = await screen.findByRole('button', { name: 'Crea PIN e approva la TV' });
-    const [pinInput, confirmInput] = screen.getAllByLabelText(/PIN/) as HTMLInputElement[];
-    await user.type(pinInput, '123456');
-    await user.type(confirmInput, '123456');
+    const submit = await screen.findByRole('button', { name: 'Crea il codice e approva la TV' });
+    const codeField = document.getElementById('tv-pair-code')!;
+    const confirmField = document.getElementById('tv-pair-code-confirm')!;
+    await typeCode(codeField, VALID_CODE);
+    await typeCode(confirmField, VALID_CODE);
     await user.click(submit);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Il PIN deve essere di 6 cifre.');
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('Il codice deve essere di 9 movimenti.');
     expect(screen.queryByRole('heading', { name: 'TV approvata' })).not.toBeInTheDocument();
-    // The entered PIN never lingers after a submit.
-    expect(pinInput.value).toBe('');
-    expect(confirmInput.value).toBe('');
+    // The entered code never lingers after a submit.
+    expect(codeField.textContent).not.toContain('↑');
   });
 
   it('owner with an existing PIN approves with one tap and sees no PIN fields', async () => {
@@ -448,7 +490,7 @@ describe('atomic pairing approval', () => {
   });
 });
 
-describe('owner Personal Area PIN panel', () => {
+describe('owner Personal Area TV code panel', () => {
   const activeDevice = {
     id: 's1', deviceLabel: null, userAgent: null, status: 'active',
     createdAt: '2026-07-01T10:00:00Z', lastSeenAt: '2026-07-10T10:00:00Z',
@@ -463,85 +505,122 @@ describe('owner Personal Area PIN panel', () => {
     );
   }
 
-  it('shows the unconfigured status and sets a missing PIN', async () => {
+  // The account page is the one place the code is deliberately VISIBLE: it is
+  // the owner's own authenticated device and they are choosing a secret they
+  // have to remember. The television never renders a symbol.
+  async function typeCode(id: string, code: string) {
+    const user = userEvent.setup();
+    document.getElementById(id)!.focus();
+    for (const symbol of code) {
+      await user.keyboard(CODE_KEY[symbol]);
+    }
+  }
+
+  it('shows the unconfigured status and configures a missing code', async () => {
     let setBody: string | null = null;
     installFetchMock({
       'GET /api/tv-devices': () => jsonResponse([activeDevice]),
-      'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null }),
-      'POST /api/tv-personal/pin': ({ body }) => {
+      'GET /api/tv-personal/pin': () =>
+        jsonResponse({ configured: false, updatedAt: null, scheme: null }),
+      'POST /api/tv-personal/tv-code': ({ body }) => {
         setBody = body;
-        return jsonResponse({ configured: true, updatedAt: '2026-07-11T10:00:00Z' });
+        return jsonResponse({
+          configured: true, updatedAt: '2026-07-11T10:00:00Z', scheme: 'dpad-v1',
+        });
       },
     });
     renderDevices();
 
-    expect(await screen.findByTestId('tv-pin-status')).toHaveTextContent('Nessun PIN impostato.');
+    expect(await screen.findByTestId('tv-pin-status'))
+      .toHaveTextContent('Nessun codice impostato.');
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Nuovo PIN (6 cifre)'), '123456');
-    await user.type(screen.getByLabelText('Conferma nuovo PIN'), '123456');
-    await user.click(screen.getByRole('button', { name: 'Imposta PIN' }));
+    await user.click(screen.getByRole('button', { name: 'Configura il codice' }));
 
-    expect(await screen.findByText('PIN aggiornato. Ogni TV chiederà il nuovo PIN.'))
+    await typeCode('tv-personal-code', VALID_CODE);
+    await typeCode('tv-personal-code-confirm', VALID_CODE);
+    await user.click(screen.getByRole('button', { name: 'Configura il codice' }));
+
+    expect(await screen.findByText('Codice aggiornato. Ogni TV chiederà il nuovo codice.'))
       .toBeInTheDocument();
-    expect(setBody!).toContain('"pin":"123456"');
-    // The status flips to configured and the fields are cleared.
-    expect(screen.getByRole('button', { name: 'Cambia PIN' })).toBeInTheDocument();
-    expect((screen.getByLabelText('Nuovo PIN (6 cifre)') as HTMLInputElement).value).toBe('');
+    expect(setBody!).toContain(`"code":"${VALID_CODE}"`);
+    // Status flips to configured, and the editor closes with nothing retained.
+    expect(screen.getByRole('button', { name: 'Cambia codice' })).toBeInTheDocument();
+    // The secret is never written to browser storage.
     expect(window.localStorage.length).toBe(0);
     expect(window.sessionStorage.length).toBe(0);
   });
 
-  it('validates digits and confirmation before calling the API', async () => {
+  it('validates length and confirmation before calling the API', async () => {
     let called = false;
     installFetchMock({
       'GET /api/tv-devices': () => jsonResponse([]),
       'GET /api/tv-personal/pin': () => jsonResponse({
-        configured: true, updatedAt: '2026-07-01T10:00:00Z',
+        configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'dpad-v1',
       }),
-      'POST /api/tv-personal/pin': () => {
+      'POST /api/tv-personal/tv-code': () => {
         called = true;
-        return jsonResponse({ configured: true, updatedAt: '2026-07-11T10:00:00Z' });
+        return jsonResponse({
+          configured: true, updatedAt: '2026-07-11T10:00:00Z', scheme: 'dpad-v1',
+        });
       },
     });
     renderDevices();
     const user = userEvent.setup();
 
-    const pinInput = await screen.findByLabelText('Nuovo PIN (6 cifre)');
-    const confirmInput = screen.getByLabelText('Conferma nuovo PIN');
-    await user.type(pinInput, '123');
-    await user.type(confirmInput, '123');
-    await user.click(screen.getByRole('button', { name: 'Cambia PIN' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Il PIN deve essere di 6 cifre.');
+    await user.click(await screen.findByRole('button', { name: 'Cambia codice' }));
+
+    // Incomplete → refused client-side; the API is never called.
+    await typeCode('tv-personal-code', 'URD');
+    await typeCode('tv-personal-code-confirm', 'URD');
+    await user.click(screen.getByRole('button', { name: 'Cambia codice' }));
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('Il codice deve essere di 9 movimenti.');
     expect(called).toBe(false);
 
-    await user.clear(pinInput);
-    await user.clear(confirmInput);
-    await user.type(pinInput, '123456');
-    await user.type(confirmInput, '654321');
-    await user.click(screen.getByRole('button', { name: 'Cambia PIN' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('I PIN non coincidono.');
+    // Complete but mismatched → also refused client-side.
+    await typeCode('tv-personal-code', 'LSUDLR');
+    await typeCode('tv-personal-code-confirm', 'LSUDLL');
+    await user.click(screen.getByRole('button', { name: 'Cambia codice' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('I codici non coincidono.');
     expect(called).toBe(false);
   });
 
-  it('an API failure keeps no PIN in the fields', async () => {
+  it('an account still on the legacy PIN is told to configure the new code', async () => {
+    // The pairing is fine and its televisions still unlock — only the
+    // credential needs upgrading, and the current TV app has no numeric entry
+    // surface to offer. That is a call to action, not a broken pairing.
+    installFetchMock({
+      'GET /api/tv-devices': () => jsonResponse([activeDevice]),
+      'GET /api/tv-personal/pin': () => jsonResponse({
+        configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'pin-v1',
+      }),
+    });
+    renderDevices();
+
+    expect(await screen.findByTestId('tv-pin-legacy'))
+      .toHaveTextContent('vecchio PIN numerico');
+    expect(screen.getByRole('button', { name: 'Configura il codice' })).toBeInTheDocument();
+  });
+
+  it('an API failure keeps no code in the fields', async () => {
     installFetchMock({
       'GET /api/tv-devices': () => jsonResponse([]),
       'GET /api/tv-personal/pin': () => jsonResponse({
-        configured: true, updatedAt: '2026-07-01T10:00:00Z',
+        configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'dpad-v1',
       }),
-      'POST /api/tv-personal/pin': () => errorResponse(500),
+      'POST /api/tv-personal/tv-code': () => errorResponse(500),
     });
     renderDevices();
     const user = userEvent.setup();
 
-    const pinInput = (await screen.findByLabelText('Nuovo PIN (6 cifre)')) as HTMLInputElement;
-    const confirmInput = screen.getByLabelText('Conferma nuovo PIN') as HTMLInputElement;
-    await user.type(pinInput, '123456');
-    await user.type(confirmInput, '123456');
-    await user.click(screen.getByRole('button', { name: 'Cambia PIN' }));
+    await user.click(await screen.findByRole('button', { name: 'Cambia codice' }));
+    await typeCode('tv-personal-code', VALID_CODE);
+    await typeCode('tv-personal-code-confirm', VALID_CODE);
+    await user.click(screen.getByRole('button', { name: 'Cambia codice' }));
 
-    expect(await screen.findByText('Impossibile salvare il PIN. Riprova.')).toBeInTheDocument();
-    expect(pinInput.value).toBe('');
-    expect(confirmInput.value).toBe('');
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('Impossibile salvare il codice. Riprova.');
+    // The secret never lingers in the control after a submit.
+    expect(document.getElementById('tv-personal-code')!.textContent).not.toContain('↑');
   });
 });

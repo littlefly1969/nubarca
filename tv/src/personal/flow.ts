@@ -6,13 +6,22 @@
 //      │                          └── CHOOSE_PERSONAL ──▶ pin
 //      │                                 │  ◀── PIN_CANCELLED
 //      │                                 └── UNLOCKED ──▶ personalHome
-//      │                                       │ OPEN_GALLERY ▶ personalGallery
-//      │                                       │ ◀─ GALLERY_BACK┘
-//      │                                       │ OPEN_VIDEOS ▶ personalVideos
-//      │                                       │ ◀─ VIDEOS_BACK┘
+//      │                                       │ OPEN_LIBRARY ▶ personalLibrary
+//      │                                       │ ◀─ LIBRARY_BACK┘
+//      │                                       │ OPEN_ALBUMS ▶ personalAlbums
+//      │                                       │ ◀─ ALBUMS_BACK┘  │ OPEN_ALBUM
+//      │                                       │                  ▼
+//      │                                       │            personalAlbumItems
+//      │                                       │            ◀─ ALBUM_BACK
 //      │                                       └── LOCK ──▶ mode
 //      ├── SESSION_INVALID (from ANY state) ──▶ pairing ── SESSION_READY ▶ mode
 //      └── ASSOCIATION_INCOMPLETE (any paired state) ──▶ pairing(incomplete)
+//
+// `personalGallery` and `personalVideos` are GONE. They were two independent
+// browsing surfaces over the same owner media with two query models, two filter
+// vocabularies and two navigation engines — and the video one had no filters at
+// all. One `personalLibrary` state now serves All/Photos/Videos from a single
+// query identity, exactly as the web Media Workspace does.
 //
 // Invariants enforced here (side effects — revoking the grant, clearing caches
 // — are driven by App.tsx off the transitions, see `flowEffects`):
@@ -43,6 +52,14 @@ export type ModeNotice = 'pinChanged' | null;
 // SAME in-memory grant; Beauty Lab never mints a second PIN or grant type.
 export type UnlockTarget = 'personal' | 'beautyLab';
 
+// One album the user opened from the Personal Area album shelf. Only what the
+// items screen needs to render its header — never a cover URL cache or counts
+// that would go stale behind it.
+export interface PersonalAlbumRef {
+  id: string;
+  name: string;
+}
+
 export type TvFlowState =
   | { name: 'loading' }
   | { name: 'pairing'; incomplete: boolean }
@@ -50,8 +67,9 @@ export type TvFlowState =
   | { name: 'party' }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
-  | { name: 'personalGallery'; home: PersonalHomeInfo }
-  | { name: 'personalVideos'; home: PersonalHomeInfo }
+  | { name: 'personalLibrary'; home: PersonalHomeInfo }
+  | { name: 'personalAlbums'; home: PersonalHomeInfo }
+  | { name: 'personalAlbumItems'; home: PersonalHomeInfo; album: PersonalAlbumRef }
   | { name: 'beautyLab'; home: PersonalHomeInfo };
 
 export type TvFlowEvent =
@@ -63,10 +81,12 @@ export type TvFlowEvent =
   | { type: 'CHOOSE_BEAUTY_LAB' }
   | { type: 'PIN_CANCELLED' }
   | { type: 'UNLOCKED'; home: PersonalHomeInfo }
-  | { type: 'OPEN_GALLERY' }
-  | { type: 'GALLERY_BACK' }
-  | { type: 'OPEN_VIDEOS' }
-  | { type: 'VIDEOS_BACK' }
+  | { type: 'OPEN_LIBRARY' }
+  | { type: 'LIBRARY_BACK' }
+  | { type: 'OPEN_ALBUMS' }
+  | { type: 'ALBUMS_BACK' }
+  | { type: 'OPEN_ALBUM'; album: PersonalAlbumRef }
+  | { type: 'ALBUM_BACK' }
   | { type: 'LOCK'; reason?: 'pinChanged' }
   | { type: 'PARTY_EXIT' };
 
@@ -105,29 +125,41 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
       return state.target === 'beautyLab'
         ? { name: 'beautyLab', home: event.home }
         : { name: 'personalHome', home: event.home };
-    case 'OPEN_GALLERY':
+    case 'OPEN_LIBRARY':
       return state.name === 'personalHome' && state.home.galleryAvailable
-        ? { name: 'personalGallery', home: state.home }
+        ? { name: 'personalLibrary', home: state.home }
         : state;
-    case 'GALLERY_BACK':
-      return state.name === 'personalGallery'
+    case 'LIBRARY_BACK':
+      return state.name === 'personalLibrary'
         ? { name: 'personalHome', home: state.home }
         : state;
-    case 'OPEN_VIDEOS':
+    case 'OPEN_ALBUMS':
       return state.name === 'personalHome' && state.home.galleryAvailable
-        ? { name: 'personalVideos', home: state.home }
+        ? { name: 'personalAlbums', home: state.home }
         : state;
-    case 'VIDEOS_BACK':
-      return state.name === 'personalVideos'
+    case 'ALBUMS_BACK':
+      return state.name === 'personalAlbums'
         ? { name: 'personalHome', home: state.home }
+        : state;
+    case 'OPEN_ALBUM':
+      // An album is reachable ONLY from the album shelf, which is itself only
+      // reachable through UNLOCKED — so no caller can navigate straight into
+      // owner-private album content.
+      return state.name === 'personalAlbums'
+        ? { name: 'personalAlbumItems', home: state.home, album: event.album }
+        : state;
+    case 'ALBUM_BACK':
+      // BACK from inside an album returns to the album LIST, not to the
+      // Personal Area home: the user came from the shelf and expects it back.
+      return state.name === 'personalAlbumItems'
+        ? { name: 'personalAlbums', home: state.home }
         : state;
     case 'LOCK':
       // BACK from the Personal Area OR Beauty Lab root, an explicit lock, or a
       // server-side grant invalidation (reason 'pinChanged' when the owner
-      // changed the PIN): always back to mode selection — never to pairing, the
-      // TV association stays valid.
-      return state.name === 'personalHome' || state.name === 'personalGallery'
-        || state.name === 'personalVideos' || state.name === 'beautyLab'
+      // changed the code): always back to mode selection — never to pairing,
+      // the TV association stays valid.
+      return isPersonalState(state)
         ? { name: 'mode', notice: event.reason ?? null }
         : state;
     case 'PARTY_EXIT':
@@ -142,11 +174,21 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
 //   * dropGrant   — drop the in-memory grant only (the session is dead or the
 //                   association is invalid — bounded expiry covers the rest);
 //   * clearSession— drop the persisted TV session + purge cached media.
+// Every state that lives behind the unlock grant. Kept as ONE predicate so a
+// new personal screen cannot be added without also being locked, re-validated
+// and torn down — the failure mode of listing the names at each call site.
+export function isPersonalState(state: TvFlowState): boolean {
+  return state.name === 'personalHome'
+    || state.name === 'personalLibrary'
+    || state.name === 'personalAlbums'
+    || state.name === 'personalAlbumItems'
+    || state.name === 'beautyLab';
+}
+
 export function flowEffects(
   from: TvFlowState, event: TvFlowEvent,
 ): { revokeGrant: boolean; dropGrant: boolean; clearSession: boolean } {
-  const canLock = from.name === 'personalHome' || from.name === 'personalGallery'
-    || from.name === 'personalVideos' || from.name === 'beautyLab';
+  const canLock = isPersonalState(from);
   const teardown = event.type === 'SESSION_INVALID' || event.type === 'ASSOCIATION_INCOMPLETE';
   return {
     revokeGrant: event.type === 'LOCK' && canLock,

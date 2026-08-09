@@ -9,14 +9,18 @@ using NubArca.Api.Tv;
 
 namespace NubArca.Api.Tests.Tv;
 
-// TV Personal Area: owner-side PIN creation (authenticated pairing flow) and
-// TV-side unlock/lock/status/home. Personal access always requires BOTH the
-// limited TV session cookie AND a server-side unlock grant; wrong/malformed/
-// missing PIN collapse into one generic 403 and failures are progressively
+// TV Personal Area: owner-side DIRECTIONAL CODE creation (authenticated pairing
+// flow + account page) and TV-side unlock/lock/status/home. Personal access
+// always requires BOTH the limited TV session cookie AND a server-side unlock
+// grant; a wrong code, a malformed code, a code in the wrong scheme and "nothing
+// configured" all collapse into one generic 403, and failures are progressively
 // throttled per session.
 public sealed class TvPersonalAreaTests : IDisposable
 {
-    private const string Pin = "123456";
+    // Nine directional symbols. Nothing about the value is special — it is
+    // simply a valid code in the current scheme.
+    private const string Code = "URDLSUDLR";
+    private const string OtherCode = "SSSUUUDDD";
 
     // The standard pooled factory raises the per-IP bucket so these tests can
     // exercise the per-session progressive cooldown deterministically.
@@ -29,7 +33,7 @@ public sealed class TvPersonalAreaTests : IDisposable
     // ── owner-side PIN management (set / change) ────────────────────────────
 
     [Fact]
-    public async Task Owner_Can_Create_A_Missing_Pin_And_It_Is_Stored_Hashed()
+    public async Task Owner_Can_Create_A_Missing_Code_And_It_Is_Stored_Hashed()
     {
         var (userId, owner) = await _factory.CreateAuthenticatedClientAsync();
 
@@ -37,7 +41,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         Assert.False(before.GetProperty("configured").GetBoolean());
 
         var created = await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = Pin, confirmPin = Pin });
+            "/api/tv-personal/tv-code", new { code = Code, confirmCode = Code });
         Assert.Equal(HttpStatusCode.OK, created.StatusCode);
         var createdRaw = await created.Content.ReadAsStringAsync();
         var createdDto = JsonDocument.Parse(createdRaw).RootElement;
@@ -46,7 +50,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         // Never the hash, salt, generation, attempts, or grant details.
         Assert.DoesNotContain("hash", createdRaw, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("generation", createdRaw, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Pin, createdRaw, StringComparison.Ordinal);
+        Assert.DoesNotContain(Code, createdRaw, StringComparison.Ordinal);
 
         var after = await owner.GetFromJsonAsync<JsonElement>("/api/tv-personal/pin");
         Assert.True(after.GetProperty("configured").GetBoolean());
@@ -55,20 +59,22 @@ public sealed class TvPersonalAreaTests : IDisposable
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var row = await db.TvPersonalPins.SingleAsync(p => p.OwnerUserId == userId);
-        Assert.DoesNotContain(Pin, row.PinHash, StringComparison.Ordinal);
+        Assert.DoesNotContain(Code, row.PinHash, StringComparison.Ordinal);
         Assert.Equal(1, row.Generation);
     }
 
     [Theory]
-    [InlineData("12345")]      // too short
-    [InlineData("1234567")]    // too long
-    [InlineData("12345a")]     // non-numeric
-    [InlineData("")]           // empty
-    public async Task Invalid_Pin_Formats_Are_Rejected(string pin)
+    [InlineData("URDLSUDL")]    // eight symbols — too short
+    [InlineData("URDLSUDLRU")]  // ten symbols — too long
+    [InlineData("URDLSUDL1")]   // a digit is not a remote direction
+    [InlineData("URDLSUDLX")]   // outside the five-symbol alphabet
+    [InlineData("URDLS UDL")]   // whitespace is never a separator
+    [InlineData("")]            // empty
+    public async Task Invalid_Code_Formats_Are_Rejected(string code)
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var response = await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin, confirmPin = pin });
+            "/api/tv-personal/tv-code", new { code, confirmCode = code });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -77,12 +83,12 @@ public sealed class TvPersonalAreaTests : IDisposable
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var response = await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = Pin, confirmPin = "654321" });
+            "/api/tv-personal/tv-code", new { code = Code, confirmCode = OtherCode });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
     [Fact]
-    public async Task Changing_The_Pin_Bumps_Generation_Revokes_Grants_And_Requires_The_New_Pin()
+    public async Task Changing_The_Code_Bumps_Generation_Revokes_Grants_And_Requires_The_New_Code()
     {
         var (userId, owner) = await _factory.CreateAuthenticatedClientAsync();
         await CreatePinAsync(owner);
@@ -90,7 +96,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         var staleToken = await UnlockTokenAsync(cookie);
 
         var changed = await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = "999999", confirmPin = "999999" });
+            "/api/tv-personal/tv-code", new { code = OtherCode, confirmCode = OtherCode });
         Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
 
         using (var scope = _factory.Services.CreateScope())
@@ -98,7 +104,7 @@ public sealed class TvPersonalAreaTests : IDisposable
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var row = await db.TvPersonalPins.SingleAsync(p => p.OwnerUserId == userId);
             Assert.Equal(2, row.Generation);
-            Assert.DoesNotContain("999999", row.PinHash, StringComparison.Ordinal);
+            Assert.DoesNotContain(OtherCode, row.PinHash, StringComparison.Ordinal);
             Assert.True(await db.TvPersonalUnlockGrants.AllAsync(g => g.RevokedAt != null));
         }
 
@@ -109,10 +115,10 @@ public sealed class TvPersonalAreaTests : IDisposable
         Assert.Contains("pin_changed", await staleHome.Content.ReadAsStringAsync());
 
         // The old PIN no longer unlocks; the new one does; Party never blinks.
-        var oldPin = await UnlockAsync(cookie, Pin);
-        Assert.Equal(HttpStatusCode.Forbidden, oldPin.StatusCode);
-        var newPin = await UnlockAsync(cookie, "999999");
-        Assert.Equal(HttpStatusCode.OK, newPin.StatusCode);
+        var oldCode = await UnlockAsync(cookie, Code);
+        Assert.Equal(HttpStatusCode.Forbidden, oldCode.StatusCode);
+        var newCode = await UnlockAsync(cookie, OtherCode);
+        Assert.Equal(HttpStatusCode.OK, newCode.StatusCode);
         var albums = await TvSendAsync(cookie, HttpMethod.Get, "/api/tv/albums");
         Assert.Equal(HttpStatusCode.OK, albums.StatusCode);
     }
@@ -126,7 +132,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         var bobToken = await UnlockTokenAsync(bobCookie);
 
         (await alice.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = "222222", confirmPin = "222222" }))
+            "/api/tv-personal/tv-code", new { code = "DDDRRRLLL", confirmCode = "DDDRRRLLL" }))
             .EnsureSuccessStatusCode();
 
         // Bob's grant and PIN are untouched by Alice's change.
@@ -141,7 +147,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         var status = await anonymous.GetAsync("/api/tv-personal/pin");
         Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
         var create = await anonymous.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = Pin, confirmPin = Pin });
+            "/api/tv-personal/tv-code", new { code = Code, confirmCode = Code });
         Assert.Equal(HttpStatusCode.Unauthorized, create.StatusCode);
     }
 
@@ -154,7 +160,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         await CreatePinAsync(owner);
         var cookie = await PairTvAsync(owner);
 
-        var response = await UnlockAsync(cookie, Pin);
+        var response = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         AssertNoStore(response);
         var raw = await response.Content.ReadAsStringAsync();
@@ -164,7 +170,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         Assert.True(dto.GetProperty("expiresAt").GetDateTime() > DateTime.UtcNow);
         // No PIN, hash, or internals in the response.
         Assert.DoesNotContain("pinHash", raw, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Pin, raw, StringComparison.Ordinal);
+        Assert.DoesNotContain(Code, raw, StringComparison.Ordinal);
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -180,27 +186,27 @@ public sealed class TvPersonalAreaTests : IDisposable
         // Owner A has a PIN; owner B is a LEGACY inconsistency (paired before
         // the atomic flow / corrupted data — simulated by removing the PIN row).
         // Both failures must be byte-identical: no PIN-state oracle.
-        var (_, withPin) = await _factory.CreateAuthenticatedClientAsync("a@example.com");
-        var cookieWithPin = await PairTvAsync(withPin);
-        var wrongPin = await UnlockAsync(cookieWithPin, "000000");
+        var (_, withCode) = await _factory.CreateAuthenticatedClientAsync("a@example.com");
+        var cookieWithCode = await PairTvAsync(withCode);
+        var wrongCode = await UnlockAsync(cookieWithCode, "LLLLLLLLL");
 
-        var (bobId, withoutPin) = await _factory.CreateAuthenticatedClientAsync("b@example.com");
-        var cookieWithoutPin = await PairTvAsync(withoutPin);
+        var (bobId, withoutCode) = await _factory.CreateAuthenticatedClientAsync("b@example.com");
+        var cookieWithoutCode = await PairTvAsync(withoutCode);
         await DeletePinRowAsync(bobId);
-        var noPin = await UnlockAsync(cookieWithoutPin, Pin);
+        var noCode = await UnlockAsync(cookieWithoutCode, Code);
 
-        Assert.Equal(HttpStatusCode.Forbidden, wrongPin.StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, noPin.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, wrongCode.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, noCode.StatusCode);
         Assert.Equal(
-            await wrongPin.Content.ReadAsStringAsync(),
-            await noPin.Content.ReadAsStringAsync());
+            await wrongCode.Content.ReadAsStringAsync(),
+            await noCode.Content.ReadAsStringAsync());
     }
 
     [Fact]
     public async Task Unlock_Without_Tv_Session_Is_Unauthorized()
     {
         var response = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/tv/personal/unlock", new { pin = Pin });
+            "/api/tv/personal/unlock", new { code = Code });
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
@@ -212,7 +218,7 @@ public sealed class TvPersonalAreaTests : IDisposable
 
         // The owner cookie client has NO TV session cookie: every TV personal
         // endpoint must refuse it outright.
-        var unlock = await owner.PostAsJsonAsync("/api/tv/personal/unlock", new { pin = Pin });
+        var unlock = await owner.PostAsJsonAsync("/api/tv/personal/unlock", new { code = Code });
         Assert.Equal(HttpStatusCode.Unauthorized, unlock.StatusCode);
         var status = await owner.GetAsync("/api/tv/personal/status");
         Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
@@ -230,25 +236,25 @@ public sealed class TvPersonalAreaTests : IDisposable
         // The first free attempts fail generically without a cooldown.
         for (var i = 0; i < TvPersonalAreaService.FreeAttempts - 1; i++)
         {
-            var failure = await UnlockAsync(cookie, "000000");
+            var failure = await UnlockAsync(cookie, "LLLLLLLLL");
             Assert.Equal(HttpStatusCode.Forbidden, failure.StatusCode);
         }
 
         // The threshold failure arms the cooldown …
-        var arming = await UnlockAsync(cookie, "000000");
+        var arming = await UnlockAsync(cookie, "LLLLLLLLL");
         Assert.Equal(HttpStatusCode.Forbidden, arming.StatusCode);
 
         // … so now even the CORRECT PIN is throttled with Retry-After.
-        var throttled = await UnlockAsync(cookie, Pin);
+        var throttled = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
         var retryAfter = throttled.Headers.GetValues("Retry-After").Single();
         Assert.InRange(int.Parse(retryAfter), 1, 30);
 
         // After the cooldown elapses another failure doubles it (progressive).
         await ExpireCooldownAsync();
-        var failureAfterCooldown = await UnlockAsync(cookie, "000000");
+        var failureAfterCooldown = await UnlockAsync(cookie, "LLLLLLLLL");
         Assert.Equal(HttpStatusCode.Forbidden, failureAfterCooldown.StatusCode);
-        var throttledAgain = await UnlockAsync(cookie, Pin);
+        var throttledAgain = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.TooManyRequests, throttledAgain.StatusCode);
         var secondRetry = int.Parse(throttledAgain.Headers.GetValues("Retry-After").Single());
         Assert.InRange(secondRetry, 31, 60);
@@ -268,7 +274,7 @@ public sealed class TvPersonalAreaTests : IDisposable
 
         for (var i = 0; i < TvPersonalAreaService.FreeAttempts; i++)
         {
-            await UnlockAsync(cookie, "000000");
+            await UnlockAsync(cookie, "LLLLLLLLL");
         }
 
         DateTime? lockedUntil;
@@ -286,7 +292,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         // must not push the lock further out or count as new failures.
         for (var i = 0; i < 4; i++)
         {
-            var throttled = await UnlockAsync(cookie, i % 2 == 0 ? "000000" : Pin);
+            var throttled = await UnlockAsync(cookie, i % 2 == 0 ? "LLLLLLLLL" : Code);
             Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
         }
 
@@ -307,14 +313,14 @@ public sealed class TvPersonalAreaTests : IDisposable
 
         for (var i = 0; i < TvPersonalAreaService.FreeAttempts; i++)
         {
-            await UnlockAsync(cookie, "000000");
+            await UnlockAsync(cookie, "LLLLLLLLL");
         }
-        var throttled = await UnlockAsync(cookie, Pin);
+        var throttled = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.TooManyRequests, throttled.StatusCode);
 
         // Changing the PIN is the owner's recovery path from a lockout.
         (await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = "999999", confirmPin = "999999" }))
+            "/api/tv-personal/tv-code", new { code = OtherCode, confirmCode = OtherCode }))
             .EnsureSuccessStatusCode();
 
         using (var scope = _factory.Services.CreateScope())
@@ -325,7 +331,7 @@ public sealed class TvPersonalAreaTests : IDisposable
             Assert.Null(session.PersonalPinLockedUntil);
         }
 
-        var unlocked = await UnlockAsync(cookie, "999999");
+        var unlocked = await UnlockAsync(cookie, OtherCode);
         Assert.Equal(HttpStatusCode.OK, unlocked.StatusCode);
     }
 
@@ -338,11 +344,11 @@ public sealed class TvPersonalAreaTests : IDisposable
 
         for (var i = 0; i < TvPersonalAreaService.FreeAttempts; i++)
         {
-            await UnlockAsync(cookie, "000000");
+            await UnlockAsync(cookie, "LLLLLLLLL");
         }
         await ExpireCooldownAsync();
 
-        var unlocked = await UnlockAsync(cookie, Pin);
+        var unlocked = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.OK, unlocked.StatusCode);
 
         using var scope = _factory.Services.CreateScope();
@@ -493,7 +499,7 @@ public sealed class TvPersonalAreaTests : IDisposable
         Assert.Equal(HttpStatusCode.Unauthorized, home.StatusCode);
         var status = await StatusAsync(cookie, token);
         Assert.Equal(HttpStatusCode.Unauthorized, status.StatusCode);
-        var unlock = await UnlockAsync(cookie, Pin);
+        var unlock = await UnlockAsync(cookie, Code);
         Assert.Equal(HttpStatusCode.Unauthorized, unlock.StatusCode);
     }
 
@@ -546,7 +552,7 @@ public sealed class TvPersonalAreaTests : IDisposable
 
     private static async Task CreatePinAsync(HttpClient owner)
         => (await owner.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = Pin, confirmPin = Pin })).EnsureSuccessStatusCode();
+            "/api/tv-personal/tv-code", new { code = Code, confirmCode = Code })).EnsureSuccessStatusCode();
 
     private async Task<string> PairTvAsync(HttpClient owner)
     {
@@ -560,10 +566,11 @@ public sealed class TvPersonalAreaTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                // Atomic first pairing: approval creates the owner's PIN when
-                // missing; ignored for owners who already have one.
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                // Atomic first pairing: approval creates the owner's
+                // directional code when missing; ignored for owners who
+                // already have a credential.
+                personalCode = Code,
+                personalCodeConfirmation = Code,
             })).EnsureSuccessStatusCode();
 
         var pollRequest = new HttpRequestMessage(
@@ -574,13 +581,13 @@ public sealed class TvPersonalAreaTests : IDisposable
         return poll.Headers.GetValues("Set-Cookie").Single();
     }
 
-    private Task<HttpResponseMessage> UnlockAsync(string setCookie, string pin)
+    private Task<HttpResponseMessage> UnlockAsync(string setCookie, string code)
         => TvSendAsync(setCookie, HttpMethod.Post, "/api/tv/personal/unlock",
-            json: new { pin });
+            json: new { code });
 
     private async Task<string> UnlockTokenAsync(string setCookie)
     {
-        var response = await UnlockAsync(setCookie, Pin);
+        var response = await UnlockAsync(setCookie, Code);
         response.EnsureSuccessStatusCode();
         var dto = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         return dto.GetProperty("unlockToken").GetString()!;

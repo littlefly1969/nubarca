@@ -7,28 +7,49 @@ using NubArca.Api.Domain;
 
 namespace NubArca.Api.Tv;
 
-// TV Personal Area: per-user 6-digit PIN + per-TV-session unlock grants.
+// TV Personal Area: per-user access secret + per-TV-session unlock grants.
 //
 // Security model (mirrors PrivateVaultService):
-//   * The PIN is created ONLY from the authenticated web pairing-approval flow;
-//     it is hashed with the ASP.NET Core PasswordHasher (PBKDF2) and the
-//     plaintext never leaves the verify path — not stored, logged, or echoed.
-//   * The paired TV session authenticates the DEVICE; the PIN is a second,
+//   * The secret is created ONLY from the authenticated web account UI; it is
+//     hashed with the ASP.NET Core PasswordHasher (PBKDF2) and the plaintext
+//     never leaves the verify path — not stored, logged, or echoed.
+//   * The paired TV session authenticates the DEVICE; the secret is a second,
 //     local authorization step. Personal access always requires BOTH.
 //   * An unlock mints an opaque 256-bit grant; only its SHA-256 hex is stored,
-//     bound to (session, owner, PIN generation) with a bounded lifetime. The
+//     bound to (session, owner, secret generation) with a bounded lifetime. The
 //     primary lifecycle is the explicit lock on leaving the Personal Area.
-//   * Wrong PIN, malformed PIN, and "no PIN configured" all collapse into ONE
-//     generic Invalid outcome — a TV session must not learn PIN/account state
-//     from the error shape.
+//   * Wrong secret, malformed secret, and "none configured" all collapse into
+//     ONE generic Invalid outcome — a TV session must not learn credential or
+//     account state from the error shape.
 //   * Brute-force: per-session persisted counter with a progressive, bounded
 //     cooldown (see below) on top of the per-IP fixed-window rate limit policy
 //     applied at the endpoint.
+//
+// TWO SCHEMES, ONE CREDENTIAL ROW (see TvPersonalSecretSchemes). The current
+// scheme is the 9-symbol DIRECTIONAL code, entered blind on the remote: the TV
+// renders no symbol, no digit and no per-press highlight, so a person watching
+// the television learns nothing from the screen. The retired 6-digit numeric
+// PIN stays VERIFIABLE — an already-paired television must not stop working the
+// moment this ships — but nothing creates one any more, and no current client
+// offers numeric entry. The row's scheme decides which format is accepted; the
+// hash comparison itself is identical for both.
 public sealed class TvPersonalAreaService : ITvPersonalAreaService
 {
     public const string UnlockHeader = "X-Tv-Personal-Unlock";
 
+    // Retired numeric PIN (verify-only).
     public const int PinLength = 6;
+
+    // Directional code. Five symbols, nine presses:
+    //     5^9 = 1,953,125
+    // which is ~2x the 10^6 space of the numeric PIN it replaces, so the move to
+    // an alphabet the remote can enter blind does NOT weaken the secret. The
+    // alphabet is deliberately only the five buttons whose position a user finds
+    // without looking: the four directions and the centre. MENU/BACK/HOME, the
+    // microphone and the media transport keys are excluded — they carry system
+    // or navigation meaning and cannot be spent as secret symbols.
+    public const int DpadCodeLength = 9;
+    public const string DpadAlphabet = "UDLRS";
 
     // Grant lifetime: the secondary server-side cap. Long enough for an evening
     // of TV use; the explicit lock-on-exit is the primary lifecycle.
@@ -62,41 +83,51 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
         var row = await _db.TvPersonalPins
             .AsNoTracking()
             .Where(p => p.OwnerUserId == ownerUserId)
-            .Select(p => new { p.CreatedAt, p.UpdatedAt })
+            .Select(p => new { p.CreatedAt, p.UpdatedAt, p.Scheme })
             .FirstOrDefaultAsync(cancellationToken);
         return row is null
             ? new TvPersonalPinStatusDto(false)
-            : new TvPersonalPinStatusDto(true, row.UpdatedAt ?? row.CreatedAt);
+            : new TvPersonalPinStatusDto(true, row.UpdatedAt ?? row.CreatedAt, row.Scheme);
     }
 
-    public async Task<TvPersonalPinSetResult> SetPinAsync(
-        Guid ownerUserId, string? pin, string? confirmPin,
+    // Owner-authenticated set/change/reset of the DIRECTIONAL code. This is the
+    // only creation path: a legacy numeric row is REPLACED by it (same atomic
+    // transaction, same generation bump, same grant revocation), which is how an
+    // installation crosses over without ever holding two live schemes.
+    public async Task<TvPersonalPinSetResult> SetDpadCodeAsync(
+        Guid ownerUserId, string? code, string? confirmCode,
         CancellationToken cancellationToken = default)
     {
-        if (!IsValidPinFormat(pin))
+        if (!IsValidDpadCodeFormat(code))
         {
             return new TvPersonalPinSetResult(TvPersonalPinSetOutcome.InvalidPin);
         }
-        if (!string.Equals(pin, confirmPin, StringComparison.Ordinal))
+        // Compare the NORMALIZED forms. Two spellings that hash to the same
+        // secret are the same secret, so refusing them as a "mismatch" would be
+        // a false negative; comparing the raw inputs would produce exactly that.
+        if (!string.Equals(NormalizeDpadCode(code), NormalizeDpadCode(confirmCode), StringComparison.Ordinal))
         {
             return new TvPersonalPinSetResult(TvPersonalPinSetOutcome.PinMismatch);
         }
 
+        var normalized = NormalizeDpadCode(code)!;
         try
         {
-            return await SetValidatedPinAsync(ownerUserId, pin!, cancellationToken);
+            return await SetValidatedSecretAsync(
+                ownerUserId, normalized, TvPersonalSecretSchemes.Dpad, cancellationToken);
         }
         catch (DbUpdateException)
         {
             // Lost a create race (unique OwnerUserId; whole transaction rolled
             // back). The row now exists — retry once as a change.
             _db.ChangeTracker.Clear();
-            return await SetValidatedPinAsync(ownerUserId, pin!, cancellationToken);
+            return await SetValidatedSecretAsync(
+                ownerUserId, normalized, TvPersonalSecretSchemes.Dpad, cancellationToken);
         }
     }
 
-    private async Task<TvPersonalPinSetResult> SetValidatedPinAsync(
-        Guid ownerUserId, string pin, CancellationToken cancellationToken)
+    private async Task<TvPersonalPinSetResult> SetValidatedSecretAsync(
+        Guid ownerUserId, string secret, string scheme, CancellationToken cancellationToken)
     {
         // Create-or-change in ONE transaction: hash update, generation bump,
         // revocation of every outstanding grant of this owner, and reset of the
@@ -115,15 +146,20 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
             {
                 Id = Guid.NewGuid(),
                 OwnerUserId = ownerUserId,
+                Scheme = scheme,
                 Generation = 1,
                 CreatedAt = now,
             };
-            row.PinHash = _hasher.HashPassword(row, pin);
+            row.PinHash = _hasher.HashPassword(row, secret);
             _db.TvPersonalPins.Add(row);
         }
         else
         {
-            row.PinHash = _hasher.HashPassword(row, pin);
+            row.PinHash = _hasher.HashPassword(row, secret);
+            // Replacing a legacy numeric PIN with a directional code goes through
+            // exactly this path, so the crossover inherits the generation bump and
+            // the grant revocation below instead of needing its own migration.
+            row.Scheme = scheme;
             row.Generation += 1;
             row.UpdatedAt = now;
         }
@@ -147,13 +183,14 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
         await _db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return new TvPersonalPinSetResult(outcome, row.UpdatedAt ?? row.CreatedAt, grantsRevoked);
+        return new TvPersonalPinSetResult(
+            outcome, row.UpdatedAt ?? row.CreatedAt, grantsRevoked, row.Scheme);
     }
 
     // ── TV-side unlock / lock / status ──────────────────────────────────────
 
     public async Task<TvPersonalUnlockOutcome> UnlockAsync(
-        string? sessionToken, string? pin, CancellationToken cancellationToken = default)
+        string? sessionToken, string? secret, CancellationToken cancellationToken = default)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
         var session = await ResolveLiveSessionAsync(sessionToken, now, cancellationToken);
@@ -170,16 +207,20 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
                 TvSessionId: session.Id, OwnerUserId: session.OwnerUserId);
         }
 
-        var pinRow = IsValidPinFormat(pin)
-            ? await _db.TvPersonalPins.FirstOrDefaultAsync(
-                p => p.OwnerUserId == session.OwnerUserId, cancellationToken)
-            : null;
-        var verification = pinRow is null
+        // Load the row FIRST: which format is acceptable is a property of the
+        // stored scheme, not of what the client happened to send. A presented
+        // secret that does not fit the row's scheme fails exactly like a wrong
+        // one — same bucket, same cooldown, no probe of which scheme is in use.
+        var pinRow = await _db.TvPersonalPins.FirstOrDefaultAsync(
+            p => p.OwnerUserId == session.OwnerUserId, cancellationToken);
+        var presented = pinRow is null ? null : NormalizeForScheme(secret, pinRow.Scheme);
+        var verification = presented is null || pinRow is null
             ? PasswordVerificationResult.Failed
-            : _hasher.VerifyHashedPassword(pinRow, pinRow.PinHash, pin!);
+            : _hasher.VerifyHashedPassword(pinRow, pinRow.PinHash, presented);
         if (verification == PasswordVerificationResult.Failed)
         {
-            // One generic failure for wrong PIN / malformed PIN / no PIN row.
+            // One generic failure for a wrong secret / a malformed secret / a
+            // secret in the wrong scheme / no credential row at all.
             // Every failure counts toward the progressive cooldown.
             session.PersonalPinFailedAttempts += 1;
             if (session.PersonalPinFailedAttempts >= FreeAttempts)
@@ -202,7 +243,7 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
         session.PersonalPinLockedUntil = null;
         if (verification == PasswordVerificationResult.SuccessRehashNeeded)
         {
-            pinRow!.PinHash = _hasher.HashPassword(pinRow, pin!);
+            pinRow!.PinHash = _hasher.HashPassword(pinRow, presented!);
             pinRow.UpdatedAt = now;
         }
 
@@ -274,16 +315,23 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
             return null;
         }
 
-        // pinConfigured is a DESIGNED owner-private signal to the owner's own
-        // paired TV (drives "set up your PIN from the web app" UX); it is not
-        // reachable without a live paired session.
-        var pinConfigured = await _db.TvPersonalPins
+        // pinConfigured / scheme are DESIGNED owner-private signals to the
+        // owner's own paired TV. They drive two different messages and must not
+        // be conflated: NO row means the pairing is incomplete (the TV tears
+        // down), while a LEGACY row means the pairing is fine and only the
+        // credential needs upgrading ("configure the new TV code from your
+        // account"). Neither is reachable without a live paired session, and
+        // neither reveals hash, generation or attempt state.
+        var row = await _db.TvPersonalPins
             .AsNoTracking()
-            .AnyAsync(p => p.OwnerUserId == session.OwnerUserId, cancellationToken);
+            .Where(p => p.OwnerUserId == session.OwnerUserId)
+            .Select(p => new { p.Scheme })
+            .FirstOrDefaultAsync(cancellationToken);
+        var pinConfigured = row is not null;
         var unlocked = pinConfigured
             && await CheckGrantAsync(session, grantToken, now, cancellationToken)
                 == TvPersonalAccessStatus.Ok;
-        return new TvPersonalStatusDto(pinConfigured, unlocked);
+        return new TvPersonalStatusDto(pinConfigured, unlocked, row?.Scheme);
     }
 
     public async Task<TvPersonalAccessResult> ResolveAccessAsync(
@@ -318,6 +366,38 @@ public sealed class TvPersonalAreaService : ITvPersonalAreaService
 
     internal static bool IsValidPinFormat(string? pin)
         => pin is { Length: PinLength } && pin.All(char.IsAsciiDigit);
+
+    // A directional code is exactly DpadCodeLength symbols drawn from
+    // DpadAlphabet. Case is normalized (a client may send lowercase) but nothing
+    // else is: no whitespace stripping, no separators, no aliases. A permissive
+    // parser here would silently let two different keystroke sequences hash to
+    // the same secret.
+    internal static bool IsValidDpadCodeFormat(string? code)
+        => NormalizeDpadCode(code) is not null;
+
+    internal static string? NormalizeDpadCode(string? code)
+    {
+        if (code is not { Length: DpadCodeLength }) return null;
+        Span<char> buffer = stackalloc char[DpadCodeLength];
+        for (var i = 0; i < DpadCodeLength; i++)
+        {
+            var symbol = char.ToUpperInvariant(code[i]);
+            if (!DpadAlphabet.Contains(symbol, StringComparison.Ordinal)) return null;
+            buffer[i] = symbol;
+        }
+        return new string(buffer);
+    }
+
+    // The canonical secret string for a stored scheme, or null when the
+    // presented value does not belong to it. Verification hashes THIS, so the
+    // stored hash of a directional code is over its normalized upper-case form.
+    private static string? NormalizeForScheme(string? presented, string scheme) => scheme switch
+    {
+        TvPersonalSecretSchemes.Dpad => NormalizeDpadCode(presented),
+        TvPersonalSecretSchemes.LegacyPin => IsValidPinFormat(presented) ? presented : null,
+        // An unknown scheme is a corrupt row, not a permissive one: refuse.
+        _ => null,
+    };
 
     private async Task<TvSession?> ResolveLiveSessionAsync(
         string? sessionToken, DateTime now, CancellationToken cancellationToken)

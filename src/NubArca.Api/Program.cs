@@ -639,6 +639,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<ITvMediaService, TvMediaService>();
     builder.Services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
     builder.Services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();
+    builder.Services.AddScoped<ITvPersonalMediaService, TvPersonalMediaService>();
     builder.Services.AddScoped<IShareLinkService, ShareLinkService>();
     builder.Services.AddScoped<IAuditLogger, AuditLogger>();
     // Slice 84: short-lived Storage Stats cache (singleton; survives across the

@@ -111,8 +111,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             });
         approved.EnsureSuccessStatusCode();
 
@@ -147,7 +147,7 @@ public sealed class TvPairingTests : IDisposable
             $"/api/tv/pairing/{started.PublicCode}/approve",
             new { pairingSecret = started.PairingSecret });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("pin_required", await response.Content.ReadAsStringAsync());
+        Assert.Contains("code_required", await response.Content.ReadAsStringAsync());
 
         // Nothing committed: the pairing stays PENDING, the TV keeps polling
         // without ever receiving a session cookie, and no session row exists —
@@ -166,11 +166,11 @@ public sealed class TvPairingTests : IDisposable
     }
 
     [Theory]
-    [InlineData("12345", "12345", "invalid_pin")]     // too short
-    [InlineData("12345a", "12345a", "invalid_pin")]   // non-numeric
-    [InlineData("123456", "654321", "pin_mismatch")]  // mismatch
+    [InlineData("URDLSUDL", "URDLSUDL", "invalid_code")]      // eight symbols
+    [InlineData("URDLSUDL1", "URDLSUDL1", "invalid_code")]    // a digit is not a direction
+    [InlineData("URDLSUDLR", "SSSUUUDDD", "code_mismatch")]   // mismatch
     public async Task Malformed_Or_Mismatched_Pin_Leaves_The_Pairing_Pending(
-        string pin, string confirmation, string expectedError)
+        string code, string confirmation, string expectedError)
     {
         var (started, _) = await StartAsync();
         await _factory.SeedUserAsync();
@@ -181,8 +181,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = pin,
-                personalPinConfirmation = confirmation,
+                personalCode = code,
+                personalCodeConfirmation = confirmation,
             });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains(expectedError, await response.Content.ReadAsStringAsync());
@@ -205,8 +205,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             });
         response.EnsureSuccessStatusCode();
 
@@ -216,7 +216,7 @@ public sealed class TvPairingTests : IDisposable
             Assert.Equal(TvPairingStatuses.Approved, (await db.TvPairingRequests.SingleAsync()).Status);
             var pin = await db.TvPersonalPins.SingleAsync(p => p.OwnerUserId == userId);
             Assert.Equal(1, pin.Generation);
-            Assert.DoesNotContain("123456", pin.PinHash, StringComparison.Ordinal);
+            Assert.DoesNotContain("URDLSUDLR", pin.PinHash, StringComparison.Ordinal);
         }
 
         // The TV completes the pairing and gets its session.
@@ -231,7 +231,7 @@ public sealed class TvPairingTests : IDisposable
         await _factory.SeedUserAsync();
         var userClient = await _factory.LoginAsync();
         (await userClient.PostAsJsonAsync(
-            "/api/tv-personal/pin", new { pin = "654321", confirmPin = "654321" }))
+            "/api/tv-personal/tv-code", new { code = "SSSUUUDDD", confirmCode = "SSSUUUDDD" }))
             .EnsureSuccessStatusCode();
 
         string hashBefore;
@@ -249,8 +249,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "111111",
-                personalPinConfirmation = "111111",
+                personalCode = "UUUDDDLLL",
+                personalCodeConfirmation = "UUUDDDLLL",
             });
         response.EnsureSuccessStatusCode();
 
@@ -276,8 +276,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             })).EnsureSuccessStatusCode();
 
         using (var scope = _factory.Services.CreateScope())
@@ -385,8 +385,8 @@ public sealed class TvPairingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             })).EnsureSuccessStatusCode();
         var poll = await PollAsync(tvClient, started);
         poll.EnsureSuccessStatusCode();

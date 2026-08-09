@@ -518,10 +518,11 @@ public sealed class TvMediaBrowsingTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                // Atomic first pairing: approval creates the owner's PIN when
-                // missing; ignored for owners who already have one.
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                // Atomic first pairing: approval creates the owner's
+                // directional code when missing; ignored for owners who
+                // already have a credential.
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             })).EnsureSuccessStatusCode();
 
         var pollRequest = new HttpRequestMessage(

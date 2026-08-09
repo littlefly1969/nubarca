@@ -36,20 +36,42 @@ export function getTvPairingStatus(
   });
 }
 
-// Atomic approval. An owner who does not yet have a Personal Area PIN MUST
-// supply personalPin + personalPinConfirmation: the server commits the PIN and
-// the approval together (400 pin_required / invalid_pin / pin_mismatch leave
-// the pairing pending). An owner with an existing PIN omits them — supplied
-// values are ignored server-side, an existing PIN is never replaced here.
+// The TV Personal Area directional code — the secret a television's owner
+// enters BLIND on the remote. Five symbols the hand finds without looking
+// (four directions + centre), nine presses:
+//
+//     5^9 = 1,953,125
+//
+// which is ~2x the space of the 6-digit numeric PIN it replaces, so nothing is
+// traded away for the blind-entry property. These constants mirror
+// TvPersonalAreaService.DpadAlphabet / DpadCodeLength; the server is
+// authoritative and re-validates every submission.
+export const TV_CODE_SYMBOLS = ['U', 'D', 'L', 'R', 'S'] as const;
+export type TvCodeSymbol = (typeof TV_CODE_SYMBOLS)[number];
+export const TV_CODE_LENGTH = 9;
+
+export function isCompleteTvCode(code: string): boolean {
+  return (
+    code.length === TV_CODE_LENGTH &&
+    [...code].every((c) => (TV_CODE_SYMBOLS as readonly string[]).includes(c))
+  );
+}
+
+// Atomic approval. An owner who does not yet have a Personal Area credential
+// MUST supply personalCode + personalCodeConfirmation: the server commits the
+// credential and the approval together (400 code_required / invalid_code /
+// code_mismatch leave the pairing pending). An owner with an existing
+// credential omits them — supplied values are ignored server-side, an existing
+// credential is never replaced here.
 export function approveTvPairing(
   publicCode: string,
   pairingSecret: string,
-  personalPin?: string,
-  personalPinConfirmation?: string,
+  personalCode?: string,
+  personalCodeConfirmation?: string,
 ): Promise<TvPairingStatus> {
   return api<TvPairingStatus>(`/api/tv/pairing/${encodeURIComponent(publicCode)}/approve`, {
     method: 'POST',
-    json: { pairingSecret, personalPin, personalPinConfirmation },
+    json: { pairingSecret, personalCode, personalCodeConfirmation },
   });
 }
 
@@ -161,11 +183,11 @@ export function clearTvActiveFaceSearch(
 
 // --- TV Personal Area (limited TV session cookie) ---
 // The Personal Area is a second local authorization step on top of the paired
-// TV session: unlocking with the owner's 6-digit PIN returns an OPAQUE unlock
-// grant that must accompany every personal call in the X-Tv-Personal-Unlock
-// header. The grant is server-authoritative (bound to this session + owner,
-// revocable, bounded lifetime) and must be kept ONLY in application memory —
-// never localStorage/sessionStorage/cookies/URLs.
+// TV session: unlocking with the owner's directional code returns an OPAQUE
+// unlock grant that must accompany every personal call in the
+// X-Tv-Personal-Unlock header. The grant is server-authoritative (bound to this
+// session + owner, revocable, bounded lifetime) and must be kept ONLY in
+// application memory — never localStorage/sessionStorage/cookies/URLs.
 
 export const TV_PERSONAL_UNLOCK_HEADER = 'X-Tv-Personal-Unlock';
 
@@ -177,6 +199,11 @@ export interface TvPersonalUnlock {
 export interface TvPersonalStatus {
   pinConfigured: boolean;
   unlocked: boolean;
+  // Which credential the owner holds. 'pin-v1' means this television can no
+  // longer offer an entry surface — the owner must configure the directional
+  // code from their account. Null only when nothing is configured at all (an
+  // incomplete pairing, which is a different and more serious condition).
+  scheme: TvPersonalSecretScheme | null;
 }
 
 export interface TvPersonalHome {
@@ -184,10 +211,15 @@ export interface TvPersonalHome {
   galleryAvailable: boolean;
 }
 
-// 403 = wrong PIN (generic — deliberately indistinguishable from "no PIN
-// configured"); 429 = progressive cooldown; 401 = TV session invalid/revoked.
-export function unlockTvPersonal(pin: string, signal?: AbortSignal): Promise<TvPersonalUnlock> {
-  return api<TvPersonalUnlock>('/api/tv/personal/unlock', { method: 'POST', json: { pin }, signal });
+// 403 = wrong code (generic — deliberately indistinguishable from "nothing
+// configured" and from "wrong scheme"); 429 = progressive cooldown; 401 = TV
+// session invalid/revoked.
+export function unlockTvPersonal(code: string, signal?: AbortSignal): Promise<TvPersonalUnlock> {
+  return api<TvPersonalUnlock>('/api/tv/personal/unlock', {
+    method: 'POST',
+    json: { code },
+    signal,
+  });
 }
 
 // Idempotent; revokes every live grant of this TV session server-side.
@@ -759,30 +791,41 @@ export async function fetchTvBeautyLabMediaObjectUrl(
   return URL.createObjectURL(await response.blob());
 }
 
-// --- TV Personal Area PIN management (normal user auth, owner-side) ---
-// Deliberately NOT under /api/tv: the TV session can never call these. The PIN
-// is created exactly once from the authenticated pairing/approval flow and is
-// never returned by any endpoint.
+// --- TV Personal Area credential management (normal user auth, owner-side) ---
+// Deliberately NOT under /api/tv: the TV session can never call these. The
+// secret is chosen HERE, on an authenticated private page, and is never
+// returned by any endpoint.
+
+// 'dpad-v1' — the current directional code.
+// 'pin-v1'  — the retired 6-digit PIN. An owner still on it can still unlock an
+//             already-paired television, but no client offers numeric entry any
+//             more; the account page asks them to configure the new code.
+export type TvPersonalSecretScheme = 'dpad-v1' | 'pin-v1';
 
 export interface TvPersonalPinStatus {
   configured: boolean;
-  // Last time the PIN was set or changed; null when unconfigured. Never the
+  // Last time the secret was set or changed; null when unconfigured. Never the
   // hash, generation, attempt counters, or grant details.
   updatedAt: string | null;
+  scheme: TvPersonalSecretScheme | null;
 }
 
 export function getTvPersonalPinStatus(signal?: AbortSignal): Promise<TvPersonalPinStatus> {
   return api<TvPersonalPinStatus>('/api/tv-personal/pin', { signal });
 }
 
-// Owner-authenticated set/change/reset (no old PIN — the owner session IS the
-// authorization). Changing the PIN revokes every outstanding unlock grant of
-// this owner: all TVs must re-enter the new PIN; Party is unaffected.
-// 400 invalid_pin / pin_mismatch.
-export function setTvPersonalPin(pin: string, confirmPin: string): Promise<TvPersonalPinStatus> {
-  return api<TvPersonalPinStatus>('/api/tv-personal/pin', {
+// Owner-authenticated set/change/reset of the directional code (no old code —
+// the owner session IS the authorization). Changing it revokes every
+// outstanding unlock grant of this owner: all TVs must re-enter the new code;
+// Party is unaffected. An owner still holding a legacy numeric PIN crosses over
+// through this same call. 400 invalid_code / code_mismatch.
+export function setTvPersonalCode(
+  code: string,
+  confirmCode: string,
+): Promise<TvPersonalPinStatus> {
+  return api<TvPersonalPinStatus>('/api/tv-personal/tv-code', {
     method: 'POST',
-    json: { pin, confirmPin },
+    json: { code, confirmCode },
   });
 }
 

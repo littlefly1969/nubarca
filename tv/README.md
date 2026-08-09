@@ -23,7 +23,7 @@ only the limited TV pairing and `/api/tv/*` contracts.
 | iOS bundle identifier | — | `it.littlefly.nubarca` |
 | Expo slug | `nubarca-tv` | `nubarca` |
 | Deep-link scheme | `nubarca-tv` | `nubarca` |
-| Version / versionCode | `1.0.1` / `2` | — |
+| Version / versionCode | `1.0.2` / `3` | — |
 | OTA runtime series | `nubarca-tv-native-*` | — |
 | AsyncStorage session key | `nubarca.tv.session.cookie` | — |
 | Published artifact | `nubarca-tv.apk` | — |
@@ -389,7 +389,7 @@ dev default, cleartext enabled).
 The limited TV session cookie is persisted with
 `@react-native-async-storage/async-storage` under the key
 `nubarca.tv.session.cookie` (`src/api/client.ts`). This is the key already
-written by the 1.0.0 NubArca TV package; it remains byte-identical so the 1.0.1
+written by the 1.0.0 NubArca TV package; it remains byte-identical so later
 in-place upgrade does not sign the device out:
 
 - **Only** the `NubArca.TvSession` cookie string is stored — by construction
@@ -624,7 +624,7 @@ release procedure from the historical validation notes in this README.
 ## Remaining follow-ups (unvalidated / out of scope)
 
 - Future native releases require the physical Fire Stick in-place and OTA
-  cold-launch gates in `docs/tv-release.md`; the current 1.0.1 APK is canonical
+  cold-launch gates in `docs/tv-release.md`; the published APK is canonical
   and must be validated rather than rebuilt.
 - Automatic full-screen viewer takeover on an active party face-search (native
   currently filters the grid + banner; browser supersedes full-screen).

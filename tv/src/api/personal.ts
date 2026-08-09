@@ -27,6 +27,12 @@ export function clearPersonalGrant(): void {
 export interface TvPersonalStatus {
   pinConfigured: boolean;
   unlocked: boolean;
+  // Which credential the owner holds. 'dpad-v1' is the directional code this
+  // app can accept; 'pin-v1' is the retired numeric PIN, which this app has no
+  // entry surface for — it shows "configure the new code from your account"
+  // instead. Null only when nothing is configured, which is a DIFFERENT and
+  // more serious condition (an incomplete pairing → teardown).
+  scheme: 'dpad-v1' | 'pin-v1' | null;
 }
 
 export interface TvPersonalHome {
@@ -38,14 +44,17 @@ export function getTvPersonalStatus(): Promise<TvPersonalStatus> {
   return tvGet<TvPersonalStatus>('/api/tv/personal/status');
 }
 
-// Server-side PIN check. On success the returned grant is kept in module
-// memory (never persisted) and used by every subsequent personal call.
-// Failures: 403 = wrong PIN (generic — the server deliberately does not
-// distinguish "no PIN configured"); 429 = progressive cooldown; 401 = the TV
-// session itself is invalid/revoked.
-export async function unlockTvPersonal(pin: string): Promise<void> {
+// Server-side directional-code check. On success the returned grant is kept in
+// module memory (never persisted) and used by every subsequent personal call.
+// Failures: 403 = wrong code (generic — the server deliberately does not
+// distinguish "nothing configured" or "wrong scheme"); 429 = progressive
+// cooldown; 401 = the TV session itself is invalid/revoked.
+//
+// The code is passed straight through to the request body and is never stored
+// in this module, logged, or included in any debug line.
+export async function unlockTvPersonal(code: string): Promise<void> {
   const result = await tvPost<{ unlockToken: string; expiresAt: string }>(
-    '/api/tv/personal/unlock', { pin });
+    '/api/tv/personal/unlock', { code });
   _grant = result.unlockToken;
 }
 

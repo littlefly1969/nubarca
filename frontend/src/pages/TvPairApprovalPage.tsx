@@ -3,18 +3,23 @@ import {
   ApiError,
   approveTvPairing,
   getTvPersonalPinStatus,
+  isCompleteTvCode,
 } from '@nubarca/api-client';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { useI18n } from '../i18n';
-
-const PIN_PATTERN = /^\d{6}$/;
+import { TvCodeInput } from '../tv/TvCodeInput';
 
 // Owner-side pairing approval — ONE atomic flow. For an owner without a
-// Personal Area PIN the create+confirm fields are part of the SAME form as the
-// approval: the server commits the PIN and the approval together, so an
-// abandoned or failed PIN step leaves the pairing pending (never a paired TV
-// without a PIN). An owner with a PIN approves with one tap and is never asked
-// for a PIN here (an existing PIN is never replaced from this flow).
+// Personal Area credential the create+confirm fields are part of the SAME form
+// as the approval: the server commits the credential and the approval together,
+// so an abandoned or failed code step leaves the pairing pending (never a paired
+// TV without a credential). An owner who already has one approves with one tap
+// and is never asked for a code here (an existing credential is never replaced
+// from this flow — the account page owns that).
+//
+// The credential is the DIRECTIONAL remote code. It is shown while it is being
+// chosen because this is the owner's own authenticated device; the television
+// itself never renders a symbol. See TvCodeInput.
 export function TvPairApprovalPage() {
   const { t } = useI18n();
   const [params] = useSearchParams();
@@ -29,9 +34,9 @@ export function TvPairApprovalPage() {
   const [state, setState] = useState<
     'loading' | 'ready' | 'submitting' | 'approved' | 'statusError'
   >('loading');
-  const [needsPin, setNeedsPin] = useState(false);
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
+  const [needsCode, setNeedsCode] = useState(false);
+  const [code_, setCode] = useState('');
+  const [confirmCode, setConfirmCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
 
@@ -41,8 +46,11 @@ export function TvPairApprovalPage() {
     if (secret) navigate(`/tv/pair?code=${encodeURIComponent(code)}`, { replace: true });
   }, [code, navigate, secret]);
 
-  // The form depends on whether the owner already has a PIN, so resolve that
-  // BEFORE showing the approve action (never an approve that half-succeeds).
+  // The form depends on whether the owner already has a credential, so resolve
+  // that BEFORE showing the approve action (never an approve that
+  // half-succeeds). A LEGACY numeric row still counts as configured: this flow
+  // never replaces an existing credential, and upgrading it is the account
+  // page's job, not a pairing side effect.
   useEffect(() => {
     if (!valid) return;
     let cancelled = false;
@@ -50,7 +58,7 @@ export function TvPairApprovalPage() {
     getTvPersonalPinStatus()
       .then((status) => {
         if (cancelled) return;
-        setNeedsPin(!status.configured);
+        setNeedsCode(!status.configured);
         setState('ready');
       })
       .catch(() => {
@@ -62,13 +70,13 @@ export function TvPairApprovalPage() {
   }, [valid, reloadNonce]);
 
   async function approve() {
-    if (needsPin) {
-      if (!PIN_PATTERN.test(pin)) {
-        setError(t('tvPair.pinInvalid'));
+    if (needsCode) {
+      if (!isCompleteTvCode(code_)) {
+        setError(t('tvPair.codeInvalid'));
         return;
       }
-      if (pin !== confirmPin) {
-        setError(t('tvPair.pinMismatch'));
+      if (code_ !== confirmCode) {
+        setError(t('tvPair.codeMismatch'));
         return;
       }
     }
@@ -77,24 +85,24 @@ export function TvPairApprovalPage() {
     try {
       await approveTvPairing(
         code, secret,
-        needsPin ? pin : undefined,
-        needsPin ? confirmPin : undefined,
+        needsCode ? code_ : undefined,
+        needsCode ? confirmCode : undefined,
       );
       setState('approved');
     } catch (err) {
       const body = err instanceof ApiError ? (err.body as { error?: string } | null) : null;
-      if (body?.error === 'invalid_pin') setError(t('tvPair.pinInvalid'));
-      else if (body?.error === 'pin_mismatch') setError(t('tvPair.pinMismatch'));
-      else if (body?.error === 'pin_required') {
-        // Stale status (PIN removed meanwhile): show the PIN fields.
-        setNeedsPin(true);
-        setError(t('tvPair.pinInvalid'));
+      if (body?.error === 'invalid_code') setError(t('tvPair.codeInvalid'));
+      else if (body?.error === 'code_mismatch') setError(t('tvPair.codeMismatch'));
+      else if (body?.error === 'code_required') {
+        // Stale status (credential removed meanwhile): show the code fields.
+        setNeedsCode(true);
+        setError(t('tvPair.codeInvalid'));
       } else setError(t('tvPair.approveError'));
       setState('ready');
     } finally {
-      // The PIN never outlives the flow.
-      setPin('');
-      setConfirmPin('');
+      // The code never outlives the flow.
+      setCode('');
+      setConfirmCode('');
     }
   }
 
@@ -131,41 +139,29 @@ export function TvPairApprovalPage() {
             <p>{t('tvPair.approvePrompt')}</p>
             <div className="tv-code" aria-label={t('tv.pairingCode')}>{code}</div>
             <p className="muted">{t('tvPair.onlyApproveSeen')}</p>
-            {needsPin && (
+            {needsCode && (
               <>
-                <p>{t('tvPair.pinIntro')}</p>
-                <label>
-                  {t('tvPair.pinLabel')}
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    pattern="\d{6}"
-                    maxLength={6}
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                    disabled={state === 'submitting'}
-                  />
-                </label>
-                <label>
-                  {t('tvPair.pinConfirmLabel')}
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    pattern="\d{6}"
-                    maxLength={6}
-                    value={confirmPin}
-                    onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                    disabled={state === 'submitting'}
-                  />
-                </label>
+                <p>{t('tvPair.codeIntro')}</p>
+                <TvCodeInput
+                  id="tv-pair-code"
+                  label={t('tvPair.codeLabel')}
+                  value={code_}
+                  onChange={setCode}
+                  disabled={state === 'submitting'}
+                />
+                <TvCodeInput
+                  id="tv-pair-code-confirm"
+                  label={t('tvPair.codeConfirmLabel')}
+                  value={confirmCode}
+                  onChange={setConfirmCode}
+                  disabled={state === 'submitting'}
+                />
               </>
             )}
             <button type="submit" disabled={state === 'submitting'}>
               {state === 'submitting'
                 ? t('tvPair.approving')
-                : needsPin ? t('tvPair.approveWithPinButton') : t('tvPair.approveButton')}
+                : needsCode ? t('tvPair.approveWithCodeButton') : t('tvPair.approveButton')}
             </button>
             {error && <p role="alert">{error}</p>}
           </form>

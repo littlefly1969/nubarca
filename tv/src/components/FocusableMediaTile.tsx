@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useReducer, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -7,7 +7,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { colors } from '../theme';
-import type { TvMediaFocusTargets } from '../lib/mediaGridFocus';
+import type { TvFixedGridTargets } from '../lib/useTvFixedGridFocus';
+import { tvDebug } from '../debug';
 
 interface Props {
   onSelect: () => void;
@@ -17,13 +18,28 @@ interface Props {
   hasTVPreferredFocus?: boolean;
   onFocusChange?: (focused: boolean) => void;
   focusable?: boolean;
-  focusTargets?: TvMediaFocusTargets;
+  focusTargets?: TvFixedGridTargets;
+  // Flat index, for the development-only unresolved-link diagnostic below.
+  index?: number;
 }
 
 // Media-only focus surface. Unlike the generic FocusableTile, its focus rings
 // overlay the preview instead of reserving twelve layout pixels around every
-// unfocused item. This keeps the strong double-ring TV focus cue while allowing
-// adjacent photos/posters to use almost all of their justified tile box.
+// unfocused item, so adjacent photos/posters use almost all of their tile box.
+//
+// TARGET RESOLUTION. `nextFocus*` wants a mounted View, and a virtualized row
+// may mount after its neighbour renders. The previous version copied the
+// resolved Views into component STATE inside a layout effect, which put a
+// second render pass between "a neighbour mounted" and "the native link is
+// correct" — one of the two renders a fast auto-repeat could outrun (see
+// tvFixedGrid.ts).
+//
+// Now the Views are read straight from the ref objects during render. A tile
+// re-resolves when its row re-renders, when it receives focus, and once per
+// layout pass; nothing is copied into state, so no navigation-time render is
+// introduced. If a link is still unresolved at press time, the uniform grid's
+// geometric fallback names the SAME tile the link would have — which is exactly
+// what the fixed-column layout buys and what the justified wall could not offer.
 export function FocusableMediaTile({
   onSelect,
   children,
@@ -33,39 +49,39 @@ export function FocusableMediaTile({
   onFocusChange,
   focusable = true,
   focusTargets,
+  index,
 }: Props) {
   const [focused, setFocused] = useState(false);
-  const [resolvedTargets, setResolvedTargets] = useState<{
-    left?: View;
-    right?: View;
-    up?: View;
-    down?: View;
-  }>({});
+  // A bare re-render request. Bumped when this tile takes focus so its links
+  // pick up neighbours mounted since the last render. It carries no value, so
+  // it can never become a source of stale derived state.
+  const [, requestResolve] = useReducer((n: number) => n + 1, 0);
 
-  const refreshFocusTargets = useCallback(() => {
-    const next = {
-      left: focusTargets?.left?.current ?? undefined,
-      right: focusTargets?.right?.current ?? undefined,
-      up: focusTargets?.up?.current ?? undefined,
-      down: focusTargets?.down?.current ?? undefined,
-    };
-    setResolvedTargets((current) => (
-      current.left === next.left
-      && current.right === next.right
-      && current.up === next.up
-      && current.down === next.down
-        ? current
-        : next
-    ));
-  }, [focusTargets]);
+  // One resolve pass after mount, so a row that mounts alongside its neighbours
+  // commits real links on the very next frame.
+  useLayoutEffect(() => {
+    requestResolve();
+  }, []);
 
-  // Native refs are attached before layout effects. Resolve once after every
-  // row mount and once more when this tile receives focus, so virtualized rows
-  // mounted later are available before the next D-pad move.
-  useLayoutEffect(refreshFocusTargets, [refreshFocusTargets]);
+  const onFocus = useCallback(() => {
+    requestResolve();
+    setFocused(true);
+    onFocusChange?.(true);
+    if (__DEV__ && focusTargets !== undefined) {
+      // Development diagnostic: an unresolved link is an INVARIANT breach of the
+      // render-window sizing, not something to shrug at. It is reported rather
+      // than silently tolerated, and it names positions only — never an item id.
+      const missing = (['left', 'right', 'up', 'down'] as const).filter(
+        (d) => focusTargets[d] !== undefined && focusTargets[d]!.current === null,
+      );
+      if (missing.length > 0) {
+        tvDebug('grid nav', 'unmounted link target at index', index ?? -1, missing.join(','));
+      }
+    }
+  }, [onFocusChange, focusTargets, index]);
 
   // A tile that is not a focus destination must not keep painting a focus ring.
-  // While the MENU command rail owns focus the whole grid is switched to
+  // While a command rail or panel owns focus the whole grid is switched to
   // non-focusable, and exactly one element on screen may look focused.
   const showFocusRing = focused && focusable;
 
@@ -76,15 +92,11 @@ export function FocusableMediaTile({
       accessibilityLabel={accessibilityLabel}
       focusable={focusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
-      nextFocusLeft={resolvedTargets.left}
-      nextFocusRight={resolvedTargets.right}
-      nextFocusUp={resolvedTargets.up}
-      nextFocusDown={resolvedTargets.down}
-      onFocus={() => {
-        refreshFocusTargets();
-        setFocused(true);
-        onFocusChange?.(true);
-      }}
+      nextFocusLeft={focusTargets?.left?.current ?? undefined}
+      nextFocusRight={focusTargets?.right?.current ?? undefined}
+      nextFocusUp={focusTargets?.up?.current ?? undefined}
+      nextFocusDown={focusTargets?.down?.current ?? undefined}
+      onFocus={onFocus}
       onBlur={() => { setFocused(false); onFocusChange?.(false); }}
       onPress={onSelect}
       style={[styles.tile, style, showFocusRing && styles.tileFocused]}

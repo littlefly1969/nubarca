@@ -7,17 +7,24 @@ import type { PersonalHomeInfo } from '../personal/flow';
 
 interface Props {
   home: PersonalHomeInfo;
-  onOpenGallery: () => void;
-  onOpenVideos: () => void;
+  onOpenLibrary: () => void;
+  onOpenAlbums: () => void;
   // BACK from the Personal Area root: LOCK immediately (revoke the grant) and
   // return to mode selection. Also triggered by the explicit lock button.
   onLock: () => void;
 }
 
-// Personal Area home shell. This slice contains only the Gallery entry; it
-// proves the authenticated boundary (reachable only with a live unlock grant)
-// and the navigation/lock lifecycle. Initial focus is EXPLICITLY on Gallery.
-export function PersonalHomeScreen({ home, onOpenGallery, onOpenVideos, onLock }: Props) {
+// Personal Area home shell:
+//
+//     Library   — All / Photos / Videos, one unified surface
+//     Albums    — the owner's own albums
+//     Lock
+//
+// It used to offer "Gallery" and "Videos" as two separate destinations, which
+// was the navigation shape of two independent browsing implementations. One
+// Library entry replaces both; the kind tabs live inside it, where they belong.
+// Initial focus is EXPLICITLY on Library.
+export function PersonalHomeScreen({ home, onOpenLibrary, onOpenAlbums, onLock }: Props) {
   const { t } = useI18n();
 
   useEffect(() => {
@@ -35,10 +42,10 @@ export function PersonalHomeScreen({ home, onOpenGallery, onOpenVideos, onLock }
       <Text style={styles.owner}>{home.displayName}</Text>
       <View style={styles.options}>
         {home.galleryAvailable && (
-          <FocusableButton label={t('personal.gallery')} onPress={onOpenGallery} hasTVPreferredFocus />
+          <FocusableButton label={t('personal.library')} onPress={onOpenLibrary} hasTVPreferredFocus />
         )}
         {home.galleryAvailable && (
-          <FocusableButton label={t('personal.videos')} onPress={onOpenVideos} />
+          <FocusableButton label={t('personal.albums')} onPress={onOpenAlbums} />
         )}
         <FocusableButton
           label={t('personal.lock')}

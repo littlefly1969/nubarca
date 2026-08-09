@@ -357,21 +357,53 @@ a {
 .tv-pin-dots { display: flex; gap: 0.8rem; font-size: 2.2rem; letter-spacing: 0.2rem; }
 .tv-pin-dot { color: #a7b0bd; }
 .tv-pin-dot-filled { color: white; }
-.tv-pin-keypad {
-  display: grid; grid-template-columns: repeat(3, minmax(4.5rem, 6rem)); gap: 0.8rem;
-}
-.tv-pin-keypad button {
-  padding: 1rem 0; border: 2px solid transparent; border-radius: 0.8rem;
-  background: rgb(255 255 255 / 8%); color: inherit; cursor: pointer;
-  font-size: 1.6rem; font-weight: 600;
-}
-.tv-pin-keypad button:focus-visible,
-.tv-pin-keypad button:focus { outline: none; border-color: #0a84ff; box-shadow: 0 0 0 3px rgb(10 132 255 / 45%); }
 .tv-pin-hint { color: #a7b0bd; margin: 0; }
 .tv-personal-owner { font-size: 1.2rem; color: #a7b0bd; margin: 0; }
 .tv-pin-form { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1rem; }
 .tv-pin-form label { display: flex; flex-direction: column; gap: 0.3rem; text-align: left; }
-.tv-pin-form input { font-size: 1.4rem; letter-spacing: 0.4rem; text-align: center; }
+.tv-pin-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.8rem; }
+
+/* Static instructional remote diagram on the TV unlock screen. Nothing here
+   reacts to a key press: a highlight would leak the very symbol the blind
+   entry model exists to hide. */
+.tv-code-ring {
+  display: grid; grid-template-columns: repeat(3, 3rem); grid-template-rows: repeat(3, 3rem);
+  place-items: center; color: #a7b0bd; font-size: 1.8rem;
+}
+.tv-code-ring__up { grid-area: 1 / 2; }
+.tv-code-ring__left { grid-area: 2 / 1; }
+.tv-code-ring__center { grid-area: 2 / 2; color: white; }
+.tv-code-ring__right { grid-area: 2 / 3; }
+.tv-code-ring__down { grid-area: 3 / 2; }
+
+/* Owner-side directional-code capture. This one DOES show the symbols: it is
+   the authenticated private page where the owner chooses a secret they must
+   remember. The television never renders them. */
+.tv-code-input { display: flex; flex-direction: column; gap: 0.4rem; text-align: left; }
+.tv-code-input__label { font-weight: 600; }
+.tv-code-input__field {
+  display: flex; gap: 0.5rem; font-size: 1.8rem; padding: 0.5rem 0.7rem;
+  border: 2px solid rgb(0 0 0 / 20%); border-radius: 0.6rem; min-height: 3rem;
+  align-items: center;
+}
+.tv-code-input__field:focus-visible,
+.tv-code-input__field:focus {
+  outline: none; border-color: #0a84ff; box-shadow: 0 0 0 3px rgb(10 132 255 / 45%);
+}
+.tv-code-input__slot { color: #8a94a3; min-width: 1.2rem; text-align: center; }
+.tv-code-input__slot.is-filled { color: inherit; }
+.tv-code-input__hint { margin: 0; font-size: 0.9rem; }
+.tv-code-input__pad { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.tv-code-input__key {
+  min-width: 3rem; padding: 0.5rem 0.7rem; border: 2px solid transparent;
+  border-radius: 0.6rem; background: rgb(0 0 0 / 8%); color: inherit;
+  cursor: pointer; font-size: 1.2rem;
+}
+.tv-code-input__key--erase { min-width: 5rem; font-size: 1rem; }
+.tv-code-input__key:focus-visible,
+.tv-code-input__key:focus {
+  outline: none; border-color: #0a84ff; box-shadow: 0 0 0 3px rgb(10 132 255 / 45%);
+}
 
 /* Owner-side TV devices management page. */
 .tv-devices-header { display: flex; align-items: center; gap: 1rem; }

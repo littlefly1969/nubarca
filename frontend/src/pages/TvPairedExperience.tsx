@@ -4,6 +4,7 @@ import {
   getTvPersonalHome,
   getTvPersonalStatus,
   lockTvPersonal,
+  TV_CODE_LENGTH,
   unlockTvPersonal,
 } from '@nubarca/api-client';
 import { TvBrowser } from './TvBrowser';
@@ -48,9 +49,8 @@ type Mode =
   | { kind: 'galleryShell'; grant: string; displayName: string; galleryAvailable: boolean }
   | { kind: 'beautyLab'; grant: string; displayName: string };
 
-const PIN_LENGTH = 6;
 // While inside the Personal Area, re-validate the grant on this cadence so a
-// PIN change (or server-side revocation) evicts the TV promptly, not merely on
+// code change (or server-side revocation) evicts the TV promptly, not merely on
 // the next user action.
 const PERSONAL_REVALIDATE_MS = 15_000;
 
@@ -69,6 +69,10 @@ export function TvPairedExperience({
   const { t } = useI18n();
   // Every mount (page load, refresh, re-pair) starts on mode selection, locked.
   const [mode, setMode] = useState<Mode>({ kind: 'modeSelect', notice: null });
+  // The owner still holds the retired numeric PIN. Resolved when entering the
+  // unlock gate, and reset there — never remembered across visits, so
+  // configuring the new code from another device takes effect on the next try.
+  const [legacyCredential, setLegacyCredential] = useState(false);
 
   // Pairing revoked/expired: drop every bit of personal state BEFORE bubbling
   // up, so no personal UI can survive under a dead session.
@@ -101,12 +105,19 @@ export function TvPairedExperience({
 
   const openMode = useCallback(async (target: UnlockTarget) => {
     setMode({ kind: 'pin', target });
+    setLegacyCredential(false);
     try {
       const status = await getTvPersonalStatus();
-      if (!status.pinConfigured) associationIncomplete();
+      if (!status.pinConfigured) { associationIncomplete(); return; }
+      // Configured, but with the retired numeric PIN: this television has no
+      // numeric entry surface any more and must not pretend otherwise. Show the
+      // "configure the new code from your account" notice rather than a code
+      // field that can only ever fail. Deliberately NOT an incomplete
+      // association — the pairing is fine and Party keeps working.
+      setLegacyCredential(status.scheme === 'pin-v1');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) sessionInvalid();
-      // Transient error: the keypad still works — unlock re-checks server-side.
+      // Transient error: entry still works — unlock re-checks server-side.
     }
   }, [associationIncomplete, sessionInvalid]);
 
@@ -148,8 +159,19 @@ export function TvPairedExperience({
 
   if (mode.kind === 'pin') {
     const target = mode.target;
+    if (legacyCredential) {
+      return (
+        <div className="tv-pin-entry" data-testid="tv-code-upgrade-required">
+          <h2>{t('tv.codeTitle')}</h2>
+          <p role="status">{t('tv.codeUpgradeRequired')}</p>
+          <button type="button" onClick={() => setMode({ kind: 'modeSelect', notice: null })}>
+            {t('tv.personalBack')}
+          </button>
+        </div>
+      );
+    }
     return (
-      <TvPinEntry
+      <TvCodeEntry
         onBack={() => setMode({ kind: 'modeSelect', notice: null })}
         onUnlocked={(grant, displayName, galleryAvailable) =>
           unlocked(target, grant, displayName, galleryAvailable)}
@@ -231,12 +253,27 @@ export function TvPairedExperience({
   );
 }
 
-// 6-digit PIN entry. Keypad buttons for D-pad/arrow navigation plus direct
-// digit keys; Backspace deletes the last digit, and with no digits returns to
-// mode selection. Auto-submits at 6 digits. The entered digits live only in
-// component state and are cleared on failure and unmount; they are never
-// logged, persisted, or put in a URL.
-function TvPinEntry({
+// BLIND directional-code entry, on the same security model as the native TV
+// app: this surface is rendered ON a television, so nothing on screen may
+// identify a symbol the user is entering. There is no keypad, no symbol
+// glyph, no "last direction" echo and no per-press highlight — only neutral
+// progress dots that say HOW MANY moves have been entered, never which ones.
+//
+// Arrow keys and Enter/Space append; Backspace removes one move; Backspace on
+// an empty code (or Escape) returns to mode selection. Auto-submits at exactly
+// TV_CODE_LENGTH moves. The entered code lives only in component state and is
+// cleared on failure and unmount; it is never logged, persisted, or put in a
+// URL.
+const CODE_KEYS: Record<string, string> = {
+  ArrowUp: 'U',
+  ArrowDown: 'D',
+  ArrowLeft: 'L',
+  ArrowRight: 'R',
+  Enter: 'S',
+  ' ': 'S',
+};
+
+function TvCodeEntry({
   onBack,
   onUnlocked,
   onSessionInvalid,
@@ -246,15 +283,15 @@ function TvPinEntry({
   onSessionInvalid: () => void;
 }) {
   const { t } = useI18n();
-  const [digits, setDigits] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const firstKeyRef = useRef<HTMLButtonElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
 
-  const submit = useCallback(async (pin: string) => {
+  const submit = useCallback(async (value: string) => {
     setBusy(true);
     try {
-      const grant = await unlockTvPersonal(pin);
+      const grant = await unlockTvPersonal(value);
       const home = await getTvPersonalHome(grant.unlockToken);
       onUnlocked(grant.unlockToken, home.displayName, home.galleryAvailable);
     } catch (err) {
@@ -262,38 +299,36 @@ function TvPinEntry({
         onSessionInvalid();
         return;
       }
-      setDigits('');
+      setCode('');
       setError(err instanceof ApiError && err.status === 429
         ? t('tv.pinThrottled')
         : t('tv.pinError'));
       setBusy(false);
-      // Predictable focus after a failure: back to the first keypad key.
-      firstKeyRef.current?.focus();
+      surfaceRef.current?.focus();
     }
   }, [onUnlocked, onSessionInvalid, t]);
 
-  const addDigit = useCallback((d: string) => {
+  const append = useCallback((symbol: string) => {
     if (busy) return;
     setError(null);
-    setDigits((cur) => {
-      const next = (cur + d).slice(0, PIN_LENGTH);
-      if (next.length === PIN_LENGTH) void submit(next);
+    setCode((cur) => {
+      const next = (cur + symbol).slice(0, TV_CODE_LENGTH);
+      if (next.length === TV_CODE_LENGTH) void submit(next);
       return next;
     });
   }, [busy, submit]);
 
-  const deleteDigit = useCallback(() => {
-    if (busy) return;
-    setDigits((cur) => cur.slice(0, -1));
-  }, [busy]);
-
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (/^[0-9]$/.test(e.key)) {
+    const symbol = CODE_KEYS[e.key];
+    if (symbol !== undefined) {
       e.preventDefault();
-      addDigit(e.key);
-    } else if (e.key === 'Backspace') {
+      append(symbol);
+      return;
+    }
+    if (e.key === 'Backspace') {
       e.preventDefault();
-      if (digits.length > 0) deleteDigit();
+      if (busy) return;
+      if (code.length > 0) setCode((cur) => cur.slice(0, -1));
       else onBack();
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -302,40 +337,46 @@ function TvPinEntry({
   };
 
   useEffect(() => {
-    firstKeyRef.current?.focus();
+    surfaceRef.current?.focus();
   }, []);
 
   return (
-    <div className="tv-pin-entry" onKeyDown={onKeyDown} data-testid="tv-pin-entry">
-      <h2>{t('tv.pinTitle')}</h2>
-      <div className="tv-pin-dots" aria-label={t('tv.pinTitle')} aria-live="polite">
-        {Array.from({ length: PIN_LENGTH }, (_, i) => (
-          <span key={i} className={`tv-pin-dot${i < digits.length ? ' tv-pin-dot-filled' : ''}`}>
-            {i < digits.length ? '●' : '○'}
+    <div
+      className="tv-pin-entry"
+      ref={surfaceRef}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      data-testid="tv-code-entry"
+    >
+      <h2>{t('tv.codeTitle')}</h2>
+      <p className="tv-pin-hint">{t('tv.codePrompt')}</p>
+      {/* Count only. aria-live announces the COUNT, never a symbol — a screen
+          reader in the room must not read the secret out loud either. */}
+      <div
+        className="tv-pin-dots"
+        aria-label={t('tv.codeProgress', {
+          count: String(code.length),
+          total: String(TV_CODE_LENGTH),
+        })}
+        aria-live="polite"
+      >
+        {Array.from({ length: TV_CODE_LENGTH }, (_, i) => (
+          <span key={i} className={`tv-pin-dot${i < code.length ? ' tv-pin-dot-filled' : ''}`}>
+            {i < code.length ? '●' : '○'}
           </span>
         ))}
       </div>
-      <div className="tv-pin-keypad">
-        {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((d, i) => (
-          <button
-            key={d}
-            type="button"
-            ref={i === 0 ? firstKeyRef : undefined}
-            disabled={busy}
-            onClick={() => addDigit(d)}
-          >
-            {d}
-          </button>
-        ))}
-        <button type="button" disabled={busy} onClick={deleteDigit} aria-label={t('tv.pinDelete')}>
-          ⌫
-        </button>
-        <button type="button" disabled={busy} onClick={() => addDigit('0')}>0</button>
-        <button type="button" disabled={busy} onClick={onBack} aria-label={t('tv.personalBack')}>
-          ←
-        </button>
+      {/* Purely instructional remote diagram. It is STATIC: no element of it
+          ever reacts to a press, because a reactive arrow would leak exactly
+          what the missing keypad was removed to hide. */}
+      <div className="tv-code-ring" aria-hidden="true">
+        <span className="tv-code-ring__up">↑</span>
+        <span className="tv-code-ring__left">←</span>
+        <span className="tv-code-ring__center">●</span>
+        <span className="tv-code-ring__right">→</span>
+        <span className="tv-code-ring__down">↓</span>
       </div>
-      <p className="tv-pin-hint">{t('tv.pinHint')}</p>
+      <p className="tv-pin-hint">{t('tv.codeHint')}</p>
       {error && <p role="alert" data-testid="tv-pin-error">{error}</p>}
     </div>
   );

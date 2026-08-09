@@ -137,7 +137,7 @@ public sealed class TvPairingService : ITvPairingService
 
     public async Task<TvPairingApproveResult> ApproveAsync(
         string publicCode, string? pairingSecret, Guid ownerUserId,
-        string? personalPin, string? personalPinConfirmation,
+        string? personalCode, string? personalCodeConfirmation,
         CancellationToken cancellationToken = default)
     {
         var pairing = await FindPairingAsync(publicCode, pairingSecret, cancellationToken);
@@ -157,26 +157,35 @@ public sealed class TvPairingService : ITvPairingService
             return new TvPairingApproveResult(TvPairingApproveStatus.NotFound);
         }
 
-        // Atomic first pairing: an owner without a Personal Area PIN must create
-        // one HERE — the PIN row and the approval are committed by the SAME
-        // SaveChanges (one database transaction), so an abandoned or failed PIN
-        // step leaves the pairing pending and nothing partially associated. An
-        // owner who already has a PIN approves normally; any supplied PIN fields
-        // are deliberately ignored (an existing PIN is never replaced here).
+        // Atomic first pairing: an owner without a Personal Area credential must
+        // create one HERE — the credential row and the approval are committed by
+        // the SAME SaveChanges (one database transaction), so an abandoned or
+        // failed code step leaves the pairing pending and nothing partially
+        // associated. An owner who already has one approves normally; any
+        // supplied code fields are deliberately ignored (an existing credential
+        // is never replaced here — changing it is the account page's job).
+        //
+        // What gets created is always a DIRECTIONAL code: this is the only place
+        // besides SetDpadCodeAsync that writes a credential, and neither of them
+        // can produce a numeric PIN any more.
         var pinCreated = false;
         var hasPin = await _db.TvPersonalPins
             .AnyAsync(p => p.OwnerUserId == ownerUserId, cancellationToken);
         if (!hasPin)
         {
-            if (string.IsNullOrEmpty(personalPin))
+            if (string.IsNullOrEmpty(personalCode))
             {
                 return new TvPairingApproveResult(TvPairingApproveStatus.PinRequired);
             }
-            if (!TvPersonalAreaService.IsValidPinFormat(personalPin))
+            var normalized = TvPersonalAreaService.NormalizeDpadCode(personalCode);
+            if (normalized is null)
             {
                 return new TvPairingApproveResult(TvPairingApproveStatus.InvalidPin);
             }
-            if (!string.Equals(personalPin, personalPinConfirmation, StringComparison.Ordinal))
+            if (!string.Equals(
+                normalized,
+                TvPersonalAreaService.NormalizeDpadCode(personalCodeConfirmation),
+                StringComparison.Ordinal))
             {
                 return new TvPairingApproveResult(TvPairingApproveStatus.PinMismatch);
             }
@@ -185,10 +194,11 @@ public sealed class TvPairingService : ITvPairingService
             {
                 Id = Guid.NewGuid(),
                 OwnerUserId = ownerUserId,
+                Scheme = TvPersonalSecretSchemes.Dpad,
                 Generation = 1,
                 CreatedAt = now,
             };
-            pinRow.PinHash = _pinHasher.HashPassword(pinRow, personalPin);
+            pinRow.PinHash = _pinHasher.HashPassword(pinRow, normalized);
             _db.TvPersonalPins.Add(pinRow);
             pinCreated = true;
         }

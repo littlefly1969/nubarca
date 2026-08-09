@@ -5,12 +5,13 @@ public interface ITvPairingService
     Task<TvPairingStartedDto> StartAsync(string approvalBaseUrl, CancellationToken cancellationToken = default);
     Task<TvPairingPollResult?> PollAsync(string publicCode, string? pairingSecret, string? userAgent,
         CancellationToken cancellationToken = default);
-    // Atomic approval: for an owner WITHOUT a Personal Area PIN this validates
-    // and creates the PIN in the same commit as the approval (PinRequired /
-    // InvalidPin / PinMismatch leave the pairing pending and commit nothing);
-    // an owner WITH a PIN approves normally and the PIN fields are ignored.
+    // Atomic approval: for an owner WITHOUT a Personal Area credential this
+    // validates and creates the DIRECTIONAL code in the same commit as the
+    // approval (PinRequired / InvalidPin / PinMismatch leave the pairing pending
+    // and commit nothing); an owner WITH a credential approves normally and the
+    // code fields are ignored.
     Task<TvPairingApproveResult> ApproveAsync(string publicCode, string? pairingSecret, Guid ownerUserId,
-        string? personalPin, string? personalPinConfirmation,
+        string? personalCode, string? personalCodeConfirmation,
         CancellationToken cancellationToken = default);
     Task<TvSessionDto?> GetSessionAsync(string? sessionToken, bool heartbeat,
         CancellationToken cancellationToken = default);

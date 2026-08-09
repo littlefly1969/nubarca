@@ -7,19 +7,24 @@ public interface ITvPersonalAreaService
     Task<TvPersonalPinStatusDto> GetPinStatusAsync(
         Guid ownerUserId, CancellationToken cancellationToken = default);
 
-    // Owner-authenticated set/change/reset (no old PIN required — the owner
-    // session IS the authorization). Creating and replacing share one atomic
-    // operation: on replace the Generation is bumped, every outstanding grant
-    // of this owner is revoked, and all of the owner's TV-session cooldown
-    // state is cleared — in a single transaction.
-    Task<TvPersonalPinSetResult> SetPinAsync(
-        Guid ownerUserId, string? pin, string? confirmPin,
+    // Owner-authenticated set/change/reset of the DIRECTIONAL code (no old code
+    // required — the owner session IS the authorization). Creating and
+    // replacing share one atomic operation: on replace the Generation is
+    // bumped, every outstanding grant of this owner is revoked, and all of the
+    // owner's TV-session cooldown state is cleared — in a single transaction.
+    // Replacing a legacy numeric PIN row uses the SAME path, so an installation
+    // never holds two live schemes at once.
+    Task<TvPersonalPinSetResult> SetDpadCodeAsync(
+        Guid ownerUserId, string? code, string? confirmCode,
         CancellationToken cancellationToken = default);
 
     // --- TV-side (limited TV session cookie) ---
 
+    // `secret` is a directional code or (for a not-yet-upgraded installation) a
+    // legacy numeric PIN. Which one is acceptable is decided by the stored
+    // row's scheme, never by the shape of the input.
     Task<TvPersonalUnlockOutcome> UnlockAsync(
-        string? sessionToken, string? pin, CancellationToken cancellationToken = default);
+        string? sessionToken, string? secret, CancellationToken cancellationToken = default);
 
     // Revokes every live grant of the presenting session. Idempotent. Returns
     // the session id for auditing, or null when the cookie does not resolve to
@@ -49,7 +54,8 @@ public enum TvPersonalPinSetOutcome
 public sealed record TvPersonalPinSetResult(
     TvPersonalPinSetOutcome Outcome,
     DateTime? UpdatedAt = null,
-    int GrantsRevoked = 0);
+    int GrantsRevoked = 0,
+    string? Scheme = null);
 
 public enum TvPersonalUnlockStatus
 {

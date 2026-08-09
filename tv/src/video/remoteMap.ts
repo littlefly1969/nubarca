@@ -5,9 +5,21 @@
 //   photos (unchanged):  LEFT/RIGHT = prev/next photo · play/pause key =
 //     toggle slideshow · SELECT reserved (no-op) · MENU = overlay
 //   videos:              SELECT and the play/pause key = play/pause ·
-//     LEFT/RIGHT = seek −/+10 s · UP/DOWN = prev/next item (navigation moves
-//     off LEFT/RIGHT while seeking owns them) · MENU = overlay · advancing to
-//     the next item on video end is the player's job, not a remote event.
+//     REWIND / FAST_FORWARD = seek −/+10 s (the Fire TV media convention) ·
+//     LEFT/RIGHT = seek −/+10 s as well · UP/DOWN = prev/next item · MENU =
+//     overlay · advancing to the next item on video end is the player's job,
+//     not a remote event.
+//
+// D-pad LEFT/RIGHT may control seek ONLY because the viewer owns the ENTIRE
+// remote while it is up: it is a full-screen surface with no focusable grid
+// underneath, so the same event cannot also drive focus navigation. That is the
+// condition under which the double meaning is safe, and it is why the grid and
+// the viewer are separate input-ownership modes rather than one blended one.
+//
+// BACK is deliberately absent from this map. It is a NAVIGATION key handled by
+// the viewer's own BackHandler (leave playback → return to the grid), so it can
+// never be spent as a playback control. Same for HOME, which is a system action
+// the app must not intercept at all.
 
 export type ViewerRemoteAction =
   | 'prev'
@@ -42,9 +54,13 @@ export function mapViewerRemoteEvent(eventType: string, isVideo: boolean): Viewe
     case 'select':
     case 'playPause':
       return 'toggle-play';
+    // The dedicated transport keys are the Fire TV convention and must work on
+    // a remote that has them, independently of the D-pad mapping below.
+    case 'rewind':
     case 'left':
     case 'longLeft':
       return 'seek-back';
+    case 'fastForward':
     case 'right':
     case 'longRight':
       return 'seek-forward';

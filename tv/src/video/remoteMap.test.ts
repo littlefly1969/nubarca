@@ -34,7 +34,23 @@ test('video navigation moves to UP/DOWN while seeking owns LEFT/RIGHT', () => {
   assert.equal(mapViewerRemoteEvent('longDown', true), 'next');
 });
 
-test('unknown events are inert in both modes', () => {
+test('the Fire TV transport keys seek on a video and are inert on a photo', () => {
+  // REWIND / FAST_FORWARD are the platform's media convention: a remote that
+  // has them must seek with them, whatever the D-pad is doing. On a photo there
+  // is nothing to seek, so they stay inert rather than becoming a second,
+  // undiscoverable way to change picture.
+  assert.equal(mapViewerRemoteEvent('rewind', true), 'seek-back');
+  assert.equal(mapViewerRemoteEvent('fastForward', true), 'seek-forward');
+  assert.equal(mapViewerRemoteEvent('rewind', false), 'none');
   assert.equal(mapViewerRemoteEvent('fastForward', false), 'none');
-  assert.equal(mapViewerRemoteEvent('fastForward', true), 'none');
+});
+
+test('unknown and system events are inert in both modes', () => {
+  // BACK and HOME must never be spent as playback controls: BACK is navigation
+  // (handled by the viewer's own BackHandler) and HOME is a system action the
+  // app does not intercept at all.
+  for (const key of ['back', 'home', 'info', 'stop', 'guide']) {
+    assert.equal(mapViewerRemoteEvent(key, false), 'none');
+    assert.equal(mapViewerRemoteEvent(key, true), 'none');
+  }
 });

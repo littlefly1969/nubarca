@@ -14,6 +14,7 @@ import { getTvSession, type TvAlbum, type TvAlbumItem } from './src/api/tv';
 import {
   flowEffects,
   initialFlowState,
+  isPersonalState,
   tvFlowReducer,
   type TvFlowState,
 } from './src/personal/flow';
@@ -21,9 +22,10 @@ import { PairingScreen } from './src/screens/PairingScreen';
 import { ModeSelectScreen } from './src/screens/ModeSelectScreen';
 import { PinEntryScreen } from './src/screens/PinEntryScreen';
 import { PersonalHomeScreen } from './src/screens/PersonalHomeScreen';
-import { PersonalGalleryScreen } from './src/screens/PersonalGalleryScreen';
-import { PersonalVideosScreen } from './src/screens/PersonalVideosScreen';
+import { PersonalLibraryScreen } from './src/screens/PersonalLibraryScreen';
+import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
+import { exitTvApp } from './src/lib/tvPlatform';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
 import { ViewerScreen } from './src/screens/ViewerScreen';
@@ -50,6 +52,10 @@ type PartyScreen =
       partyUrl: string | null;
       partyUploadUrl: string | null;
     };
+
+// Module-level constant so the library screen's query identity is not rebuilt
+// on every App render (a new source object would restart the query).
+const LIBRARY_SOURCE = { kind: 'library' } as const;
 
 function resolveBaseUrl(): string {
   // Prefer the runtime EXPO_PUBLIC_* env var (inlined by Expo at build time), so
@@ -188,9 +194,9 @@ function AppInner(): React.JSX.Element {
   // any other 403 → plain lock; 401 → pairing.
   // The ONE 15s grant re-validation loop spans the Personal Area AND the Beauty
   // Lab (both live behind the same in-memory grant); no extra permanent timer.
-  const inPersonalArea =
-    flow.name === 'personalHome' || flow.name === 'personalGallery'
-    || flow.name === 'personalVideos' || flow.name === 'beautyLab';
+  // `isPersonalState` is the single predicate — a personal screen added without
+  // it would silently escape re-validation.
+  const inPersonalArea = isPersonalState(flow);
   useEffect(() => {
     if (!inPersonalArea) return;
     const timer = setInterval(() => {
@@ -219,9 +225,7 @@ function AppInner(): React.JSX.Element {
   // TV remote Back button inside Party: AlbumItemsScreen and ViewerScreen own
   // their OWN BackHandler (each hides its MENU overlay first, then navigates up
   // via onClose/onBack). On the album list (Party root) the handler below
-  // returns to MODE SELECTION (no PIN needed to come back to Party). On the
-  // mode selector is the navigation root: one final BACK explicitly finishes
-  // the Android activity (the platform default was not reliable on Fire TV).
+  // returns to MODE SELECTION (no code needed to come back to Party).
   useEffect(() => {
     if (flow.name !== 'party' || partyScreen.name !== 'albums') return;
     const onBackPress = () => {
@@ -232,10 +236,23 @@ function AppInner(): React.JSX.Element {
     return () => sub.remove();
   }, [flow.name, partyScreen.name]);
 
+  // THE NAVIGATION ROOT. Mode selection and pairing are the top of the stack:
+  // one more BACK must CLOSE NubArca TV.
+  //
+  // This used to call BackHandler.exitApp(), which maps to
+  // Activity.moveTaskToBack(true) — it BACKGROUNDS the task. On a physical Fire
+  // Stick that showed the launcher but left NubArca in the task list, and
+  // relaunching resumed the old Activity: the reported "final BACK does not
+  // remove the app" defect. exitTvApp() calls the native
+  // Activity.finishAndRemoveTask() instead (see lib/tvPlatform.ts).
+  //
+  // Nothing is playing at this point — the Personal Area viewer stops its player
+  // on BACK, and reaching the mode selector means every media screen has already
+  // unmounted and released.
   useEffect(() => {
     if (flow.name !== 'mode' && flow.name !== 'pairing') return;
     const onBackPress = () => {
-      BackHandler.exitApp();
+      void exitTvApp();
       return true;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
@@ -276,21 +293,38 @@ function AppInner(): React.JSX.Element {
       {flow.name === 'personalHome' && (
         <PersonalHomeScreen
           home={flow.home}
-          onOpenGallery={() => rawDispatch({ type: 'OPEN_GALLERY' })}
-          onOpenVideos={() => rawDispatch({ type: 'OPEN_VIDEOS' })}
+          onOpenLibrary={() => rawDispatch({ type: 'OPEN_LIBRARY' })}
+          onOpenAlbums={() => rawDispatch({ type: 'OPEN_ALBUMS' })}
           onLock={onLock}
         />
       )}
-      {flow.name === 'personalGallery' && (
-        <PersonalGalleryScreen
-          onBack={() => rawDispatch({ type: 'GALLERY_BACK' })}
+      {flow.name === 'personalLibrary' && (
+        <PersonalLibraryScreen
+          source={LIBRARY_SOURCE}
+          title={t('personal.library')}
+          onBack={() => rawDispatch({ type: 'LIBRARY_BACK' })}
           onGrantInvalid={onLock}
           onSessionInvalid={onSessionInvalid}
         />
       )}
-      {flow.name === 'personalVideos' && (
-        <PersonalVideosScreen
-          onBack={() => rawDispatch({ type: 'VIDEOS_BACK' })}
+      {flow.name === 'personalAlbums' && (
+        <PersonalAlbumsScreen
+          onOpenAlbum={(album) => rawDispatch({ type: 'OPEN_ALBUM', album })}
+          onBack={() => rawDispatch({ type: 'ALBUMS_BACK' })}
+          onGrantInvalid={onLock}
+          onSessionInvalid={onSessionInvalid}
+        />
+      )}
+      {flow.name === 'personalAlbumItems' && (
+        // The SAME library screen with an album source: one grid, one viewer,
+        // one navigation engine, one set of filter semantics. The only
+        // difference is the backend predicate — exactly the relationship the web
+        // has between the library and an album.
+        <PersonalLibraryScreen
+          key={flow.album.id}
+          source={{ kind: 'album', albumId: flow.album.id }}
+          title={flow.album.name}
+          onBack={() => rawDispatch({ type: 'ALBUM_BACK' })}
           onGrantInvalid={onLock}
           onSessionInvalid={onSessionInvalid}
         />

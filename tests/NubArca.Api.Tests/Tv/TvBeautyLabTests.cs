@@ -27,7 +27,9 @@ namespace NubArca.Api.Tests.Tv;
 // isolated from Party. The analysis feature stays behind the fake sidecar.
 public sealed class TvBeautyLabTests : IDisposable
 {
-    private const string Pin = "123456";
+    // A valid directional code in the current scheme; the value itself is
+    // arbitrary.
+    private const string Pin = "URDLSUDLR";
 
     private readonly SqliteWebApplicationFactory _factory = new(
         new Dictionary<string, string?>
@@ -465,7 +467,7 @@ public sealed class TvBeautyLabTests : IDisposable
 
         (await owner.PostAsJsonAsync(
             $"/api/tv/pairing/{started.PublicCode}/approve",
-            new { pairingSecret = started.PairingSecret, personalPin = Pin, personalPinConfirmation = Pin }))
+            new { pairingSecret = started.PairingSecret, personalCode = Pin, personalCodeConfirmation = Pin }))
             .EnsureSuccessStatusCode();
 
         var pollRequest = new HttpRequestMessage(
@@ -479,7 +481,7 @@ public sealed class TvBeautyLabTests : IDisposable
     private async Task<string> UnlockTokenAsync(string setCookie, SqliteWebApplicationFactory? factory = null)
     {
         var response = await TvSendAsync(
-            setCookie, HttpMethod.Post, "/api/tv/personal/unlock", json: new { pin = Pin }, factory: factory);
+            setCookie, HttpMethod.Post, "/api/tv/personal/unlock", json: new { code = Pin }, factory: factory);
         response.EnsureSuccessStatusCode();
         var dto = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         return dto.GetProperty("unlockToken").GetString()!;

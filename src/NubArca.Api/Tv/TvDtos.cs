@@ -14,21 +14,22 @@ public sealed record TvPairingStatusDto(string Status, DateTime ExpiresAt);
 // Italian if the owner row is somehow missing.
 public sealed record TvSessionDto(string Status, DateTime ExpiresAt, DateTime LastSeenAt, string Language);
 
-// Approval body. For an owner who does not yet have a Personal Area PIN the
-// approval is ATOMIC with first PIN creation: PersonalPin/-Confirmation are
-// REQUIRED and both the pairing approval and the PIN row commit together (or
-// not at all). An owner who already has a PIN omits them (values are ignored —
-// an existing PIN is never replaced from the pairing flow).
+// Approval body. For an owner who does not yet have a Personal Area credential
+// the approval is ATOMIC with creating the DIRECTIONAL code:
+// PersonalCode/-Confirmation are REQUIRED and both the pairing approval and the
+// credential row commit together (or not at all). An owner who already has one
+// omits them (values are ignored — an existing credential is never replaced
+// from the pairing flow).
 public sealed record TvPairingApprovalRequest(
     string PairingSecret,
-    string? PersonalPin = null,
-    string? PersonalPinConfirmation = null);
+    string? PersonalCode = null,
+    string? PersonalCodeConfirmation = null);
 
 public enum TvPairingApproveStatus
 {
     NotFound,
-    // Owner has no Personal Area PIN and none (or an invalid one) was supplied —
-    // pairing stays pending; nothing is committed.
+    // Owner has no Personal Area credential and none (or an invalid one) was
+    // supplied — pairing stays pending; nothing is committed.
     PinRequired,
     InvalidPin,
     PinMismatch,
@@ -116,20 +117,34 @@ public sealed record TvFaceSearchActiveDto(
 // the owner's display name only — no email, id, roles, or profile fields, and
 // never a PIN, hash, token hash, or storage/AI internals.
 
-public sealed record TvPersonalUnlockRequest(string Pin);
+// `Code` is the current directional secret; `Pin` is accepted only so an
+// already-installed television running the previous native contract keeps
+// unlocking until its APK is replaced. Which of the two is even eligible is
+// decided server-side by the stored scheme.
+public sealed record TvPersonalUnlockRequest(string? Code = null, string? Pin = null)
+{
+    public string? Secret => Code ?? Pin;
+}
 
 public sealed record TvPersonalUnlockDto(string UnlockToken, DateTime ExpiresAt);
 
-public sealed record TvPersonalStatusDto(bool PinConfigured, bool Unlocked);
+// `Scheme` tells the TV which credential the owner currently holds
+// ("dpad-v1" | "pin-v1"), so a television running the directional-only UI can
+// say "configure the new TV code from your account" instead of presenting an
+// entry surface that can never succeed. Null only when nothing is configured.
+public sealed record TvPersonalStatusDto(bool PinConfigured, bool Unlocked, string? Scheme = null);
 
 public sealed record TvPersonalHomeDto(string DisplayName, bool GalleryAvailable);
 
-// Owner-side (normal auth) PIN management. UpdatedAt is the last time the PIN
-// was set or changed (null when unconfigured) — never the hash, salt,
-// generation, attempt counters, or grant details.
-public sealed record TvPersonalPinStatusDto(bool Configured, DateTime? UpdatedAt = null);
+// Owner-side (normal auth) credential management. UpdatedAt is the last time
+// the secret was set or changed (null when unconfigured) — never the hash,
+// salt, generation, attempt counters, or grant details.
+public sealed record TvPersonalPinStatusDto(
+    bool Configured, DateTime? UpdatedAt = null, string? Scheme = null);
 
-public sealed record TvPersonalPinSetRequest(string Pin, string ConfirmPin);
+// Owner-side directional-code set/change/reset. The plaintext reaches only the
+// hash function; it is never stored, logged, audited or echoed back.
+public sealed record TvPersonalDpadCodeSetRequest(string Code, string ConfirmCode);
 
 // --- TV Personal Gallery (grant-gated projection of the owner image gallery) ---
 // Same query semantics as the authenticated web gallery (/api/images) via the
@@ -205,6 +220,59 @@ public sealed record TvPersonalPersonDto(Guid Id, string? Name, int FaceCount);
 // Album-picker options for the selection "add to album" action. Names/counts
 // only; ShowOnTv and party state are irrelevant here and deliberately omitted.
 public sealed record TvPersonalAlbumDto(Guid Id, string Name, int ItemCount);
+
+// --- Unified TV Personal media workspace ---
+// One DTO for photos AND videos, matching the web MediaItem discriminator so
+// the "Tutti" tab renders a mixed, server-ordered grid without the client
+// merging two lists. Kind-specific fields are null on the other kind. Every URL
+// is a grant-gated /api/tv/personal path; nothing storage-, blob- or AI-related
+// is present, and GPS is not exposed here at all.
+public sealed record TvPersonalMediaItemDto(
+    Guid Id,
+    // "image" | "video" — the discriminator the TV switches on.
+    string Kind,
+    // Title when the owner set one, else the file name (the shared
+    // MediaDisplayName rule, so the TV and the web label an item identically).
+    string DisplayName,
+    int? Width,
+    int? Height,
+    DateTime CreatedAt,
+    DateTime? TakenAt,
+    bool Favorite,
+    int? Rating,
+    int OccurrenceCount,
+    // Grid card image: small thumbnail (photo) or poster (video).
+    string CardImageUrl,
+    // Viewer image: medium preview (photo) or poster (video).
+    string ViewerImageUrl,
+    // ---- video-only (null on photos) ----
+    string? VideoUrl,
+    string? PreviewStripUrl,
+    double? DurationSeconds,
+    string? VideoCodec,
+    bool? HasAudio);
+
+public sealed record TvPersonalMediaPageDto(
+    IReadOnlyList<TvPersonalMediaItemDto> Items,
+    string? NextCursor,
+    bool HasMore,
+    // Server-authoritative total for the CURRENT query (paging-independent),
+    // plus the per-kind split so the All/Photos/Videos tabs can show counts
+    // without extra round-trips. On a single-kind query the other count is 0.
+    int TotalCount,
+    int PhotoCount,
+    int VideoCount);
+
+// Owner album card for the Personal Area album shelf. Counts and up to four
+// cover image URLs, all re-pointed at the grant-gated TV byte routes. No
+// ShowOnTv, no party token, no description, no storage internals.
+public sealed record TvPersonalAlbumCardDto(
+    Guid Id,
+    string Name,
+    int ItemCount,
+    int PhotoCount,
+    int VideoCount,
+    IReadOnlyList<string> CoverImageUrls);
 
 public sealed record TvPersonalFavoriteRequest(bool Favorite);
 

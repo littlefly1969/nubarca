@@ -48,41 +48,56 @@ test('a server-verified unlock is the ONLY way into a personal screen', () => {
   ]);
   assert.deepEqual(unlocked, { name: 'personalHome', home });
 
-  // OPEN_GALLERY does nothing while locked.
-  assert.deepEqual(tvFlowReducer(mode, { type: 'OPEN_GALLERY' }), mode);
+  // The library and the album shelf do nothing while locked.
+  assert.deepEqual(tvFlowReducer(mode, { type: 'OPEN_LIBRARY' }), mode);
+  assert.deepEqual(tvFlowReducer(mode, { type: 'OPEN_ALBUMS' }), mode);
 });
 
-test('gallery shell: BACK returns to personal home; BACK from home locks to mode selection', () => {
+test('library: BACK returns to personal home; BACK from home locks to mode selection', () => {
   const homeState = run([
     { type: 'SESSION_READY' }, { type: 'CHOOSE_PERSONAL' }, { type: 'UNLOCKED', home },
   ]);
-  const gallery = tvFlowReducer(homeState, { type: 'OPEN_GALLERY' });
-  assert.equal(gallery.name, 'personalGallery');
-  assert.deepEqual(tvFlowReducer(gallery, { type: 'GALLERY_BACK' }), homeState);
+  const library = tvFlowReducer(homeState, { type: 'OPEN_LIBRARY' });
+  assert.deepEqual(library, { name: 'personalLibrary', home });
+  assert.deepEqual(tvFlowReducer(library, { type: 'LIBRARY_BACK' }), homeState);
 
   const locked = tvFlowReducer(homeState, { type: 'LOCK' });
   assert.deepEqual(locked, mode);
-  // Re-entering requires the PIN again: only CHOOSE_PERSONAL → pin is offered.
-  assert.deepEqual(tvFlowReducer(locked, { type: 'OPEN_GALLERY' }), locked);
+  // Re-entering requires the code again: only CHOOSE_PERSONAL → pin is offered.
+  assert.deepEqual(tvFlowReducer(locked, { type: 'OPEN_LIBRARY' }), locked);
   assert.deepEqual(tvFlowReducer(locked, { type: 'CHOOSE_PERSONAL' }), { name: 'pin', target: 'personal' });
+  assert.equal(flowEffects(library, { type: 'LOCK' }).revokeGrant, true);
 });
 
-test('video library is grant-gated and BACK returns to personal home', () => {
+test('albums: reachable only from the shelf, and BACK returns to the shelf', () => {
   const homeState = run([
     { type: 'SESSION_READY' }, { type: 'CHOOSE_PERSONAL' }, { type: 'UNLOCKED', home },
   ]);
-  const videos = tvFlowReducer(homeState, { type: 'OPEN_VIDEOS' });
-  assert.deepEqual(videos, { name: 'personalVideos', home });
-  assert.deepEqual(tvFlowReducer(videos, { type: 'VIDEOS_BACK' }), homeState);
-  assert.deepEqual(tvFlowReducer(mode, { type: 'OPEN_VIDEOS' }), mode);
-  assert.equal(flowEffects(videos, { type: 'LOCK' }).revokeGrant, true);
+  const shelf = tvFlowReducer(homeState, { type: 'OPEN_ALBUMS' });
+  assert.deepEqual(shelf, { name: 'personalAlbums', home });
+
+  const album = { id: 'a-1', name: 'Vacanze' };
+  const inside = tvFlowReducer(shelf, { type: 'OPEN_ALBUM', album });
+  assert.deepEqual(inside, { name: 'personalAlbumItems', home, album });
+
+  // BACK from inside an album returns to the SHELF, not to the personal home:
+  // the user came from the shelf and expects it back.
+  assert.deepEqual(tvFlowReducer(inside, { type: 'ALBUM_BACK' }), shelf);
+  assert.deepEqual(tvFlowReducer(shelf, { type: 'ALBUMS_BACK' }), homeState);
+
+  // An album can never be entered from anywhere else — in particular not from a
+  // locked state, and not by skipping the shelf.
+  assert.deepEqual(tvFlowReducer(mode, { type: 'OPEN_ALBUM', album }), mode);
+  assert.deepEqual(tvFlowReducer(homeState, { type: 'OPEN_ALBUM', album }), homeState);
+  assert.equal(flowEffects(inside, { type: 'LOCK' }).revokeGrant, true);
 });
 
 test('a PIN change locks to mode selection with the notice — never back to pairing', () => {
   for (const from of [
     { name: 'personalHome', home } as TvFlowState,
-    { name: 'personalGallery', home } as TvFlowState,
-    { name: 'personalVideos', home } as TvFlowState,
+    { name: 'personalLibrary', home } as TvFlowState,
+    { name: 'personalAlbums', home } as TvFlowState,
+    { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } } as TvFlowState,
   ]) {
     const evicted = tvFlowReducer(from, { type: 'LOCK', reason: 'pinChanged' });
     assert.deepEqual(evicted, { name: 'mode', notice: 'pinChanged' });
@@ -98,13 +113,14 @@ test('a PIN change locks to mode selection with the notice — never back to pai
   );
 });
 
-test('a gallery without the capability flag cannot be opened', () => {
+test('a library without the capability flag cannot be opened', () => {
   const noGallery = { displayName: 'Owner', galleryAvailable: false };
   const state = run([
     { type: 'SESSION_READY' }, { type: 'CHOOSE_PERSONAL' },
     { type: 'UNLOCKED', home: noGallery },
   ]);
-  assert.deepEqual(tvFlowReducer(state, { type: 'OPEN_GALLERY' }), state);
+  assert.deepEqual(tvFlowReducer(state, { type: 'OPEN_LIBRARY' }), state);
+  assert.deepEqual(tvFlowReducer(state, { type: 'OPEN_ALBUMS' }), state);
 });
 
 test('pairing revocation tears down EVERY state, personal or not', () => {
@@ -114,8 +130,10 @@ test('pairing revocation tears down EVERY state, personal or not', () => {
     { name: 'party' },
     { name: 'pin', target: 'personal' },
     { name: 'personalHome', home },
-    { name: 'personalGallery', home },
-    { name: 'personalVideos', home },
+    { name: 'personalLibrary', home },
+    { name: 'personalAlbums', home },
+    { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } },
+    { name: 'beautyLab', home },
   ];
   for (const state of states) {
     assert.deepEqual(tvFlowReducer(state, { type: 'SESSION_INVALID' }), pairing);
@@ -131,8 +149,9 @@ test('an incomplete association (owner without PIN) exits every paired state to 
     { name: 'party' },
     { name: 'pin', target: 'personal' },
     { name: 'personalHome', home },
-    { name: 'personalGallery', home },
-    { name: 'personalVideos', home },
+    { name: 'personalLibrary', home },
+    { name: 'personalAlbums', home },
+    { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } },
   ];
   for (const state of pairedStates) {
     const next = tvFlowReducer(state, { type: 'ASSOCIATION_INCOMPLETE' });
@@ -157,9 +176,14 @@ test('LOCK revokes the grant server-side only when leaving a personal screen', (
   assert.equal(
     flowEffects({ name: 'personalHome', home }, { type: 'LOCK' }).revokeGrant, true);
   assert.equal(
-    flowEffects({ name: 'personalGallery', home }, { type: 'LOCK' }).revokeGrant, true);
+    flowEffects({ name: 'personalLibrary', home }, { type: 'LOCK' }).revokeGrant, true);
   assert.equal(
-    flowEffects({ name: 'personalVideos', home }, { type: 'LOCK' }).revokeGrant, true);
+    flowEffects({ name: 'personalAlbums', home }, { type: 'LOCK' }).revokeGrant, true);
+  assert.equal(
+    flowEffects(
+      { name: 'personalAlbumItems', home, album: { id: 'a-1', name: 'Vacanze' } },
+      { type: 'LOCK' },
+    ).revokeGrant, true);
   assert.equal(flowEffects(mode, { type: 'LOCK' }).revokeGrant, false);
   assert.equal(flowEffects({ name: 'party' }, { type: 'LOCK' }).revokeGrant, false);
 });
@@ -198,7 +222,8 @@ test('Party and Personal Area can never be active simultaneously', () => {
   const party = run([{ type: 'SESSION_READY' }, { type: 'CHOOSE_PARTY' }]);
   // Personal events are inert inside Party …
   assert.deepEqual(tvFlowReducer(party, { type: 'UNLOCKED', home }), party);
-  assert.deepEqual(tvFlowReducer(party, { type: 'OPEN_GALLERY' }), party);
+  assert.deepEqual(tvFlowReducer(party, { type: 'OPEN_LIBRARY' }), party);
+  assert.deepEqual(tvFlowReducer(party, { type: 'OPEN_ALBUMS' }), party);
   // … and Party events are inert inside the Personal Area.
   const personal = run([
     { type: 'SESSION_READY' }, { type: 'CHOOSE_PERSONAL' }, { type: 'UNLOCKED', home },

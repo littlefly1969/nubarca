@@ -195,8 +195,8 @@ public sealed class TvVideoHlsEndpointTests : IDisposable
             new
             {
                 pairingSecret = started.PairingSecret,
-                personalPin = "123456",
-                personalPinConfirmation = "123456",
+                personalCode = "URDLSUDLR",
+                personalCodeConfirmation = "URDLSUDLR",
             })).EnsureSuccessStatusCode();
 
         var pollRequest = new HttpRequestMessage(
