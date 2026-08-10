@@ -131,6 +131,26 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **Album membership is a physical filter, applied before ranking.** It lives in
   the query fingerprint, so a ranking built with the filter off can never be
   served with it on.
+- **There is ONE media-selection experience, and it is the Media Library.** A
+  shared album's "Add from library" navigates to `/media` with the album in
+  transient router state — never a URL, never a second route, never a fork of
+  `MediaWorkspace`. Only `AlbumPickerModal` then decides WHERE: owned albums
+  through `bulkAddAlbumItems`, shared Contributor/Editor albums through
+  `bulkContributeToSharedAlbum`, with the two groups rendered as separate
+  sections because whose album it is is a real difference. Viewer albums are
+  absent rather than disabled. The predecessor was a shared-album-only photo
+  grid, which is why "add a video to a shared album" was impossible and why the
+  reachable media depended on the page you started from. `SharedAlbumDetailPage`
+  deliberately keeps everything else: its album-scoped media URLs carry
+  membership authorization, `allowOriginalDownload`, `canWithdraw` and
+  revocation, none of which the owner's workspace knows about.
+- **A bulk contribution reports counts, never ids.** `ContributeManyAsync`
+  shares its authority check and its "contributable" query with the single-item
+  path rather than restating them; the role gate answers the whole request (a
+  Viewer gets `403`), and every per-file outcome — duplicate, already present,
+  foreign, deleted, excluded, vaulted, non-media — collapses into `skipped`,
+  because naming a skipped id would say whether it exists. Each item that lands
+  still leaves the audit row a single contribution would have.
 - **Video face analysis is generation-gated, not read-gated.**
   `Ai:VideoFaceAnalysis:Enabled` governs post-segmentation scheduling and
   backfill execution only. With it off, every persisted track, decision,

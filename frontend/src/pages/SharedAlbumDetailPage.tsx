@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import {
   ApiError,
   getSharedAlbum,
@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
 import { HlsVideoPlayer } from '../video/HlsVideoPlayer';
-import { ContributeToAlbumPanel } from '../albums/ContributeToAlbumPanel';
+import { sharedAlbumAddContext } from '../albums/sharedAlbumAddContext';
 import { AlbumDetailsEditor } from '../albums/AlbumDetailsEditor';
 import { AlbumSharedContentPanel } from '../albums/AlbumSharedContentPanel';
 import { computeJustifiedRows, type JustifiedLayoutItem } from '../media/layout/computeJustifiedRows';
@@ -30,6 +30,14 @@ import { MEDIA_WALL_GAP_PX, mediaWallRowParams } from '../media/layout/mediaWall
 // The video PLAYER, on the other hand, is the shared one — pointed at the
 // album-scoped route family. That is the part where a second implementation
 // would be a genuine liability.
+//
+// Media SELECTION is the one thing that is deliberately not here. There used to
+// be a shared-album-only photo grid; it was a second, worse media picker with no
+// tabs, no search, no filters and no videos. A Contributor now goes to the
+// ordinary Media Library, selects there exactly as they always do, and the
+// common destination picker opens with this album already chosen. What stays
+// here is what is genuinely album-scoped: the media URLs, the role-dependent
+// actions and withdrawal.
 
 type Status =
   | { kind: 'loading' }
@@ -44,13 +52,12 @@ export function SharedAlbumDetailPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const { state, invalidateAuth } = useAuth();
   const { t, tn } = useI18n();
+  const navigate = useNavigate();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [openIndex, setOpenIndex] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const lightboxRef = useRef<HTMLDivElement>(null);
   const wallRef = useRef<HTMLDivElement>(null);
-  const [contributeOpen, setContributeOpen] = useState(false);
-  const contributeButtonRef = useRef<HTMLButtonElement>(null);
   // A transient notice for state that changed under the user (role downgrade,
   // revocation, an item removed by the owner) — shown once, never as a loop.
   const [notice, setNotice] = useState<string | null>(null);
@@ -241,15 +248,20 @@ export function SharedAlbumDetailPage() {
                 </button>
               </>
             )}
+            {/* Offered to a Contributor and an Editor. It does not open a
+                picker: it hands the Library a transient "I am filling this
+                album" context and goes there, because there is exactly one
+                place in NubArca where media is chosen. */}
             {(album.role === 'contributor' || album.role === 'editor') && (
               <button
                 type="button"
-                ref={contributeButtonRef}
                 className="row-action"
                 data-testid="shared-album-add"
-                onClick={() => setContributeOpen(true)}
+                onClick={() => navigate('/media', {
+                  state: { sharedAlbumAdd: sharedAlbumAddContext(albumId, album.name) },
+                })}
               >
-                {t('sharedAlbum.addToAlbum')}
+                {t('sharedAlbum.addFromLibrary')}
               </button>
             )}
           </div>
@@ -327,16 +339,6 @@ export function SharedAlbumDetailPage() {
           albumId={albumId}
           onClose={() => { setCurateOpen(false); load(); }}
           returnFocusRef={curateButtonRef}
-        />
-      )}
-
-      {contributeOpen && (
-        <ContributeToAlbumPanel
-          albumId={albumId}
-          presentFileIds={new Set(items.map((i) => i.fileItemId))}
-          onContributed={load}
-          onClose={() => setContributeOpen(false)}
-          returnFocusRef={contributeButtonRef}
         />
       )}
 

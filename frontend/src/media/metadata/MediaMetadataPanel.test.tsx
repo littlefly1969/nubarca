@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import type { FileMetadata } from '@nubarca/api-client';
-import { AuthedWrapper, installFetchMock, jsonResponse } from '../../test-utils';
+import { AuthedWrapper, installFetchMock, jsonResponse, type MockHandler } from '../../test-utils';
 import { MediaMetadataPanel } from './MediaMetadataPanel';
 
 afterEach(() => {
@@ -48,6 +48,21 @@ function doc(overrides: Record<string, unknown> = {}): FileMetadata {
     },
     ...overrides,
   } as FileMetadata;
+}
+
+// The picker loads BOTH destination sets: the caller's own albums and the
+// shared albums they may contribute to. Every test here is about the owned
+// path, so the shared list is empty — but it must be answered, because a
+// missing route is a test mistake, not a product state.
+function mockAlbums(extra: Record<string, MockHandler> = {}) {
+  return installFetchMock({
+    'GET /api/albums': () => jsonResponse([
+      { id: 'a1', name: 'Holidays', description: null, itemCount: 3, showOnTv: false,
+        createdAt: 'x', updatedAt: 'x', photoCount: 3, videoCount: 0, excludedCount: 0, coverItems: [] },
+    ]),
+    'GET /api/shared-albums': () => jsonResponse([]),
+    ...extra,
+  });
 }
 
 function renderPanel(props: Partial<Parameters<typeof MediaMetadataPanel>[0]> = {}) {
@@ -104,12 +119,7 @@ describe('photo information drawer — actions', () => {
   });
 
   it('opens the shared album picker instead of an inline native select', async () => {
-    installFetchMock({
-      'GET /api/albums': () => jsonResponse([
-        { id: 'a1', name: 'Holidays', description: null, itemCount: 3, showOnTv: false,
-          createdAt: 'x', updatedAt: 'x', photoCount: 3, videoCount: 0, excludedCount: 0, coverItems: [] },
-      ]),
-    });
+    mockAlbums();
     renderPanel();
 
     // No inline album <select> in the drawer body any more.
@@ -117,9 +127,10 @@ describe('photo information drawer — actions', () => {
 
     await userEvent.setup().click(screen.getByTestId('add-to-album-btn'));
 
-    const dialog = await screen.findByRole('dialog', { name: 'Aggiungi ad album' });
-    // The same picker the bulk selection bar uses: pick existing or create new.
-    expect(await within(dialog).findByTestId('album-picker-select')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: /Aggiungi 1 elemento all/ });
+    // The same picker the bulk selection bar uses: pick a destination or create
+    // a new album.
+    expect(await within(dialog).findByTestId('album-picker-destination')).toBeInTheDocument();
     expect(within(dialog).getByTestId('album-picker-create')).toBeInTheDocument();
   });
 
@@ -132,23 +143,18 @@ describe('photo information drawer — actions', () => {
       if (e.key === 'Escape') behind();
     });
 
-    installFetchMock({
-      'GET /api/albums': () => jsonResponse([
-        { id: 'a1', name: 'Holidays', description: null, itemCount: 3, showOnTv: false,
-          createdAt: 'x', updatedAt: 'x', photoCount: 3, videoCount: 0, excludedCount: 0, coverItems: [] },
-      ]),
-    });
+    mockAlbums();
     renderPanel();
     const user = userEvent.setup();
 
     await user.click(screen.getByTestId('add-to-album-btn'));
-    await screen.findByTestId('album-picker-select');
+    await screen.findByTestId('album-picker-destination');
 
     await user.keyboard('{Escape}');
 
     // The picker closes…
     await waitFor(() =>
-      expect(screen.queryByTestId('album-picker-select')).not.toBeInTheDocument());
+      expect(screen.queryByTestId('album-picker-destination')).not.toBeInTheDocument());
     // …and the listener standing in for the viewer never saw the event.
     expect(behind).not.toHaveBeenCalled();
   });
@@ -156,22 +162,18 @@ describe('photo information drawer — actions', () => {
   it('adds the single open photo to the chosen album', async () => {
     let addedTo: string | null = null;
     let addedIds: unknown = null;
-    installFetchMock({
-      'GET /api/albums': () => jsonResponse([
-        { id: 'a1', name: 'Holidays', description: null, itemCount: 3, showOnTv: false,
-          createdAt: 'x', updatedAt: 'x', photoCount: 3, videoCount: 0, excludedCount: 0, coverItems: [] },
-      ]),
+    mockAlbums({
       'POST /api/albums/a1/items/bulk': (req) => {
         addedTo = 'a1';
         addedIds = JSON.parse(req.body ?? '{}');
-        return jsonResponse({ succeeded: 1, skipped: 0, failed: 0 });
+        return jsonResponse({ requested: 1, succeeded: 1, skipped: 0 });
       },
     });
     renderPanel();
     const user = userEvent.setup();
 
     await user.click(screen.getByTestId('add-to-album-btn'));
-    await screen.findByTestId('album-picker-select');
+    await user.click(await screen.findByTestId('album-picker-destination'));
     await user.click(screen.getByTestId('album-picker-add'));
 
     await waitFor(() => expect(addedTo).toBe('a1'));

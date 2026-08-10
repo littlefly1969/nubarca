@@ -1,4 +1,5 @@
 import { api, ApiError } from './client';
+import type { BulkAlbumItemsResult } from './albums';
 
 // SHARE-ALBUM-01: live album sharing between authenticated NubArca users.
 //
@@ -319,6 +320,23 @@ export async function contributeToSharedAlbum(
   await api<void>(`/api/shared-albums/${albumId}/contributions`, {
     method: 'POST',
     json: { fileItemId },
+    signal,
+  });
+}
+
+// The same link for a WHOLE selection, which is how media is chosen now: in the
+// caller's own Media Library, then sent as a set. Reuses the album bulk result
+// shape because it means exactly the same thing here — counts only, never which
+// ids were skipped. Duplicates, items already in the album and anything
+// ineligible are skipped rather than failing the request.
+export async function bulkContributeToSharedAlbum(
+  albumId: string,
+  fileItemIds: string[],
+  signal?: AbortSignal,
+): Promise<BulkAlbumItemsResult> {
+  return api<BulkAlbumItemsResult>(`/api/shared-albums/${albumId}/contributions/bulk`, {
+    method: 'POST',
+    json: { fileItemIds },
     signal,
   });
 }

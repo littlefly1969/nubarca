@@ -265,6 +265,95 @@ describe('MediaWorkspace', () => {
     expect(screen.queryByTestId('media-sel-restore')).not.toBeInTheDocument();
   });
 
+  it('files the whole selection through the common picker, then clears it', async () => {
+    // The one add flow: select in the Library (a photo AND a video), choose a
+    // destination, done. The workspace owns what happens after — the selection
+    // is spent, the picker is gone, and the outcome is stated where every other
+    // bulk result is.
+    let posted: unknown = null;
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(page([imageItem, videoItem])),
+      'GET /api/albums': () => jsonResponse([{
+        id: 'a1', name: 'Vacanze', description: null, itemCount: 0, showOnTv: false,
+        createdAt: 'x', updatedAt: 'x', photoCount: 0, videoCount: 0, excludedCount: 0,
+        coverItems: [],
+      }]),
+      'GET /api/shared-albums': () => jsonResponse([]),
+      'POST /api/albums/a1/items/bulk': (req) => {
+        posted = JSON.parse(req.body ?? '{}');
+        return jsonResponse({ requested: 2, succeeded: 2, skipped: 0 });
+      },
+    });
+    render(
+      <MemoryRouter>
+        <AuthedWrapper>
+          <MediaWorkspace
+            source={LIBRARY}
+            identity={emptyIdentity(LIBRARY)}
+            onIdentityChange={vi.fn()}
+            searchPlaceholder="Cerca"
+          />
+        </AuthedWrapper>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('photo.jpg');
+    const controls = screen.getAllByTestId('media-select-control');
+    await userEvent.click(controls[0]);
+    await userEvent.click(controls[1]);
+    await userEvent.click(await screen.findByTestId('media-sel-album'));
+
+    await userEvent.click(await screen.findByTestId('album-picker-destination'));
+    await userEvent.click(screen.getByTestId('album-picker-add'));
+
+    await waitFor(() => expect(posted).toEqual({ fileItemIds: ['i1', 'v1'] }));
+    await waitFor(() =>
+      expect(screen.queryByTestId('album-picker-add')).not.toBeInTheDocument());
+    expect(screen.queryByTestId('media-selection-bar')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('ws-notice')).toHaveTextContent(/Vacanze/);
+  });
+
+  it('preselects the shared album it was sent here to fill', async () => {
+    let posted: string | null = null;
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(page([imageItem])),
+      'GET /api/albums': () => jsonResponse([]),
+      'GET /api/shared-albums': () => jsonResponse([{
+        albumId: 'shr-1', name: 'Matrimonio', description: null, ownerDisplayName: 'Marco',
+        role: 'contributor', allowOriginalDownload: false, itemCount: 3,
+        sharedAt: '2026-02-01T00:00:00Z', coverItems: [],
+      }]),
+      'POST /api/shared-albums/shr-1/contributions/bulk': (req) => {
+        posted = req.url;
+        return jsonResponse({ requested: 1, succeeded: 1, skipped: 0 });
+      },
+    });
+    render(
+      <MemoryRouter>
+        <AuthedWrapper>
+          <MediaWorkspace
+            source={LIBRARY}
+            identity={emptyIdentity(LIBRARY)}
+            onIdentityChange={vi.fn()}
+            searchPlaceholder="Cerca"
+            preselectedAlbumId="shr-1"
+          />
+        </AuthedWrapper>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('photo.jpg');
+    await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
+    await userEvent.click(await screen.findByTestId('media-sel-album'));
+
+    const add = await screen.findByTestId('album-picker-add');
+    await waitFor(() => expect(add).not.toBeDisabled());
+    await userEvent.click(add);
+
+    await waitFor(() =>
+      expect(posted).toBe('/api/shared-albums/shr-1/contributions/bulk'));
+  });
+
   it('find-similar from the viewer sets a photo similarity anchor', async () => {
     const onIdentityChange = renderWorkspace(page([imageItem]));
     await screen.findByText('photo.jpg');

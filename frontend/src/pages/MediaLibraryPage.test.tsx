@@ -49,3 +49,52 @@ describe('MediaLibraryPage — filters actually apply', () => {
     });
   });
 });
+
+// Arriving from a shared album's "Add from library". The Library is the SAME
+// Library — the context adds a notice and a route back, and preselects the
+// destination in the common picker. It never becomes a special mode.
+describe('MediaLibraryPage — shared-album add context', () => {
+  function renderWithContext(state: unknown) {
+    const mock = installFetchMock({
+      'GET /api/media': () => jsonResponse(emptyPage),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    render(
+      <AuthedWrapper>
+        <MemoryRouter initialEntries={[{ pathname: '/media', state }]}>
+          <Routes>
+            <Route path="/media" element={<MediaLibraryPage scope="active" />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthedWrapper>,
+    );
+    return mock;
+  }
+
+  it('names the album it is filling and offers a way back', async () => {
+    renderWithContext({
+      sharedAlbumAdd: { albumId: 'shr-1', albumName: 'Vacanze', returnPath: '/shared-albums/shr-1' },
+    });
+
+    const notice = await screen.findByTestId('library-add-context');
+    expect(notice).toHaveTextContent('Vacanze');
+    expect(screen.getByRole('link', { name: /torna all’album/i }))
+      .toHaveAttribute('href', '/shared-albums/shr-1');
+
+    // The ordinary Library, undiminished: tabs, search and filters are all here.
+    expect(screen.getByTestId('ws-open-filters')).toBeInTheDocument();
+    expect(screen.getByTestId('ws-sticky-chrome')).toBeInTheDocument();
+  });
+
+  it('shows nothing at all on an ordinary visit', async () => {
+    renderWithContext(null);
+    await screen.findByTestId('ws-empty');
+    expect(screen.queryByTestId('library-add-context')).not.toBeInTheDocument();
+  });
+
+  it('ignores a malformed context rather than half-configuring a target', async () => {
+    renderWithContext({ sharedAlbumAdd: { albumId: 'shr-1' } });
+    await screen.findByTestId('ws-empty');
+    expect(screen.queryByTestId('library-add-context')).not.toBeInTheDocument();
+  });
+});

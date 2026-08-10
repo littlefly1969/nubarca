@@ -282,6 +282,234 @@ public sealed class AlbumContributionTests : IDisposable
         Assert.Equal(1, await CountAlbumItemsAsync(albumId));
     }
 
+    // ── Bulk contribution ───────────────────────────────────────────────────
+    //
+    // Media is chosen in the caller's own Media Library now, so a contribution
+    // arrives as a SET. Same authority, same eligibility, same ownership
+    // semantics as one at a time — the only difference is that per-file
+    // outcomes become counts, because naming a skipped id would say whether it
+    // exists.
+
+    [Fact]
+    public async Task Contributor_Bulk_Adds_Their_Own_Photos_And_Videos()
+    {
+        var (bobId, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+
+        // A photo and TWO videos: the library selection is mixed, and the old
+        // photo-only picker is exactly what this replaces.
+        var photo = await UploadPngAsync(bob, "bob-photo.png");
+        var videoA = await UploadPngAsync(bob, "bob-clip-a.png");
+        var videoB = await UploadPngAsync(bob, "bob-clip-b.png");
+        await MakeConfirmedVideoAsync(videoA);
+        await MakeConfirmedVideoAsync(videoB);
+
+        var (blobsBefore, filesBefore) = await StorageShapeAsync();
+
+        var counts = await BulkContributeAsync(bob, albumId, [photo, videoA, videoB]);
+        Assert.Equal(3, counts.GetProperty("requested").GetInt32());
+        Assert.Equal(3, counts.GetProperty("succeeded").GetInt32());
+        Assert.Equal(0, counts.GetProperty("skipped").GetInt32());
+        Assert.Equal(3, await CountAlbumItemsAsync(albumId));
+
+        // Everybody in the album sees all three, videos included.
+        var items = await owner.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items");
+        Assert.Equal(3, items.GetArrayLength());
+        Assert.Equal(2, items.EnumerateArray().Count(i => i.GetProperty("kind").GetString() == "video"));
+
+        // Nothing was copied and nothing changed hands: the same FileItems, the
+        // same blobs, still Bob's, and every album row records him as the adder.
+        Assert.Equal((blobsBefore, filesBefore), await StorageShapeAsync());
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        foreach (var fileId in new[] { photo, videoA, videoB })
+        {
+            var file = await db.FileItems.SingleAsync(f => f.Id == fileId);
+            Assert.Equal(bobId, file.OwnerUserId);
+            var row = await db.AlbumItems.SingleAsync(ai => ai.FileItemId == fileId);
+            Assert.Equal(bobId, row.AddedByUserId);
+        }
+    }
+
+    [Fact]
+    public async Task An_Editor_Can_Bulk_Contribute_Too()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "editor");
+
+        var counts = await BulkContributeAsync(bob, albumId,
+            [await UploadPngAsync(bob, "e1.png"), await UploadPngAsync(bob, "e2.png")]);
+        Assert.Equal(2, counts.GetProperty("succeeded").GetInt32());
+        Assert.Equal(2, await CountAlbumItemsAsync(albumId));
+    }
+
+    [Fact]
+    public async Task A_Viewer_Is_Refused_Outright_Rather_Than_Told_Everything_Was_Skipped()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "viewer");
+        var file = await UploadPngAsync(bob, "bob.png");
+
+        var response = await BulkContribute(bob, albumId, [file]);
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        Assert.Equal(0, await CountAlbumItemsAsync(albumId));
+    }
+
+    [Fact]
+    public async Task A_Stranger_And_A_Missing_Album_Are_Indistinguishable()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, carol) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        var carolFile = await UploadPngAsync(carol, "carol.png");
+
+        // Not a member of a real album, and an album that does not exist: one
+        // answer, so neither can be used to probe the other.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await BulkContribute(carol, albumId, [carolFile])).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await BulkContribute(carol, Guid.NewGuid(), [carolFile])).StatusCode);
+        Assert.Equal(0, await CountAlbumItemsAsync(albumId));
+    }
+
+    [Fact]
+    public async Task Bulk_Adds_The_Valid_Items_And_Skips_Everything_Ineligible()
+    {
+        var (bobId, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, carol) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+
+        var good = await UploadPngAsync(bob, "good.png");
+        var alreadyThere = await UploadPngAsync(bob, "already.png");
+        (await Contribute(bob, albumId, alreadyThere)).EnsureSuccessStatusCode();
+
+        var vaulted = await UploadPngAsync(bob, "vault.png");
+        var deleted = await UploadPngAsync(bob, "deleted.png");
+        var excluded = await UploadPngAsync(bob, "excluded.png");
+        await MoveIntoVaultAsync(bobId, vaulted);
+        (await bob.DeleteAsync($"/api/files/{deleted}")).EnsureSuccessStatusCode();
+        await ExcludeFromMediaLibraryAsync(excluded);
+        var foreign = await UploadPngAsync(carol, "carol.png");
+        var ownersOwn = await UploadPngAsync(owner, "alice.png");
+        var missing = Guid.NewGuid();
+
+        var counts = await BulkContributeAsync(bob, albumId,
+            [good, alreadyThere, vaulted, deleted, excluded, foreign, ownersOwn, missing]);
+
+        // One valid item survives seven ineligible ones — a bad id must never
+        // discard the rest of the batch.
+        Assert.Equal(8, counts.GetProperty("requested").GetInt32());
+        Assert.Equal(1, counts.GetProperty("succeeded").GetInt32());
+        Assert.Equal(7, counts.GetProperty("skipped").GetInt32());
+        Assert.Equal(2, await CountAlbumItemsAsync(albumId));
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var linked = await db.AlbumItems.Where(ai => ai.AlbumId == albumId)
+            .Select(ai => ai.FileItemId).ToListAsync();
+        Assert.Equal(new[] { alreadyThere, good }.Order(), linked.Order());
+    }
+
+    [Fact]
+    public async Task Duplicated_Ids_Are_Skipped_Rather_Than_Added_Twice()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+        var file = await UploadPngAsync(bob, "bob.png");
+
+        var counts = await BulkContributeAsync(bob, albumId, [file, file, file]);
+        Assert.Equal(3, counts.GetProperty("requested").GetInt32());
+        Assert.Equal(1, counts.GetProperty("succeeded").GetInt32());
+        Assert.Equal(2, counts.GetProperty("skipped").GetInt32());
+        Assert.Equal(1, await CountAlbumItemsAsync(albumId));
+    }
+
+    [Fact]
+    public async Task Bulk_Refuses_More_Than_A_Thousand_Ids()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+
+        var tooMany = Enumerable.Range(0, 1001).Select(_ => Guid.NewGuid()).ToArray();
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await BulkContribute(bob, albumId, tooMany)).StatusCode);
+        Assert.Equal(0, await CountAlbumItemsAsync(albumId));
+    }
+
+    [Fact]
+    public async Task The_Bulk_Result_Carries_Counts_And_Nothing_Else()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var (_, carol) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+        var mine = await UploadPngAsync(bob, "bob.png");
+        var foreign = await UploadPngAsync(carol, "carol.png");
+
+        var response = await BulkContribute(bob, albumId, [mine, foreign]);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync();
+        var counts = JsonDocument.Parse(body).RootElement;
+
+        Assert.Equal(
+            new[] { "requested", "skipped", "succeeded" },
+            counts.EnumerateObject().Select(p => p.Name).Order().ToArray());
+        // Not one id anywhere in the payload — which of them were skipped is
+        // exactly the fact that would leak whose files exist.
+        Assert.DoesNotContain(mine.ToString(), body, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(foreign.ToString(), body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Bulk_Audits_Exactly_What_Landed_And_Names_Nothing_Else()
+    {
+        var (bobId, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, carol) = await _factory.CreateAuthenticatedClientAsync(OtherEmail);
+        var albumId = await CreateAlbumAsync(owner, "Trip");
+        await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
+
+        var first = await UploadPngAsync(bob, "one.png");
+        var second = await UploadPngAsync(bob, "two.png");
+        var foreign = await UploadPngAsync(carol, "carol.png");
+        await BulkContributeAsync(bob, albumId, [first, second, foreign]);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var logs = await db.AuditLogs
+            .Where(a => a.Action == "album.contribution_add")
+            .ToListAsync();
+
+        // The same trail two single contributions would have left: one row each,
+        // naming the actor, the album and its owner — and nothing for the id
+        // that was skipped.
+        Assert.Equal(
+            new[] { first, second }.Order().ToList(),
+            logs.Select(a => a.EntityId!.Value).Order().ToList());
+        Assert.All(logs, a => Assert.Equal(bobId, a.UserId));
+        foreach (var log in logs)
+        {
+            var payload = log.MetadataJson ?? string.Empty;
+            Assert.Contains(ownerId.ToString(), payload, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(foreign.ToString(), payload, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(".png", payload, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(ContributorEmail, payload, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     // ── Withdrawal and owner removal ────────────────────────────────────────
 
     [Fact]
@@ -884,6 +1112,44 @@ public sealed class AlbumContributionTests : IDisposable
 
     private static Task<HttpResponseMessage> Withdraw(HttpClient c, Guid albumId, Guid fileId) =>
         c.DeleteAsync($"/api/shared-albums/{albumId}/contributions/{fileId}");
+
+    private static Task<HttpResponseMessage> BulkContribute(
+        HttpClient c, Guid albumId, IReadOnlyList<Guid> fileIds) =>
+        c.PostAsJsonAsync($"/api/shared-albums/{albumId}/contributions/bulk",
+            new { fileItemIds = fileIds });
+
+    private static async Task<JsonElement> BulkContributeAsync(
+        HttpClient c, Guid albumId, IReadOnlyList<Guid> fileIds)
+    {
+        var response = await BulkContribute(c, albumId, fileIds);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    // Blob and FileItem totals: a contribution is a REFERENCE, so both must be
+    // exactly what they were before it.
+    private async Task<(int Blobs, int Files)> StorageShapeAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return (await db.BlobObjects.CountAsync(),
+            await db.FileItems.IgnoreQueryFilters().CountAsync());
+    }
+
+    // Turns an uploaded PNG into a server-confirmed video without needing a real
+    // ffmpeg run — the same fixture shape AlbumSharingTests uses.
+    private async Task MakeConfirmedVideoAsync(Guid fileItemId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var file = await db.FileItems.FirstAsync(f => f.Id == fileItemId);
+        var meta = await db.BlobMetadata.FirstAsync(m => m.BlobObjectId == file.BlobObjectId);
+        meta.MediaCategory = MediaCategories.Video;
+        meta.DetectedContentType = "video/mp4";
+        meta.VideoExtractionStatus = "completed";
+        meta.VideoCodec = "h264";
+        await db.SaveChangesAsync();
+    }
 
     private static async Task<Guid> CreateAlbumAsync(HttpClient owner, string name)
     {

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using NubArca.Api.Albums;
 using NubArca.Api.Albums.Sharing;
 using NubArca.Api.Audit;
 using NubArca.Api.Files;
@@ -287,6 +288,10 @@ public static class AlbumSharingEndpoints
 
     // ── Contributor: linking and withdrawing own media ──────────────────────
 
+    // The same ceiling the owner's bulk album routes use: a contribution is the
+    // same kind of selection, sent by the same grid.
+    private const int MaxBulkContributions = 1000;
+
     private static void MapContribution(IEndpointRouteBuilder app)
     {
         app.MapPost("/api/shared-albums/{albumId:guid}/contributions", async (
@@ -337,6 +342,65 @@ public static class AlbumSharingEndpoints
                     return Results.NotFound();
             }
         }).WithName("ContributeToSharedAlbum").RequireAuthorization();
+
+        // The same contribution for a WHOLE selection, because media is now
+        // chosen in the caller's own Media Library and arrives as a set. One
+        // request, one role check, counts back — never which ids were skipped,
+        // which would say whether they exist.
+        app.MapPost("/api/shared-albums/{albumId:guid}/contributions/bulk", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] IAlbumSharingService sharing,
+            [FromServices] IAlbumAccessResolver access,
+            [FromServices] IAuditLogger audit,
+            [FromBody] BulkAlbumItemsRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            var actorUserId = httpContext.GetCurrentUserId()!.Value;
+            var ip = httpContext.Connection.RemoteIpAddress?.ToString();
+
+            if (body?.FileItemIds is null)
+            {
+                return Results.BadRequest(new { error = "Missing 'fileItemIds'." });
+            }
+            if (body.FileItemIds.Count > MaxBulkContributions)
+            {
+                return Results.BadRequest(
+                    new { error = $"At most {MaxBulkContributions} items per request." });
+            }
+
+            var (result, outcome) = await sharing.ContributeManyAsync(
+                actorUserId, albumId, body.FileItemIds, cancellationToken);
+            switch (result)
+            {
+                case AlbumBulkContributionResult.RoleNotPermitted:
+                    return Results.Forbid();
+                case AlbumBulkContributionResult.AlbumNotAccessible:
+                    // Same privacy-preserving answer as every other shared-album
+                    // route: a non-member never learns the album exists.
+                    return Results.NotFound();
+            }
+
+            // ONE audit row per file that actually landed — exactly the trail a
+            // sequence of single contributions would have left, so the record
+            // reads the same however the client chose to send them. Skipped,
+            // foreign and ineligible ids are never named.
+            var grant = await access.ResolveAsync(albumId, actorUserId, cancellationToken);
+            foreach (var fileItemId in outcome!.ContributedFileItemIds)
+            {
+                await audit.LogAsync(actorUserId, AuditActions.AlbumContributionAdd,
+                    AuditEntityTypes.AlbumContribution, fileItemId, ip,
+                    new
+                    {
+                        albumId,
+                        albumOwnerUserId = grant?.AlbumOwnerUserId,
+                        sourceOwnerUserId = actorUserId,
+                    },
+                    cancellationToken);
+            }
+
+            return Results.Ok(outcome.Counts);
+        }).WithName("BulkContributeToSharedAlbum").RequireAuthorization();
 
         // "Remove MY contribution" — never "delete the file". Allowed after a
         // downgrade to Viewer, and after revocation, because the right comes

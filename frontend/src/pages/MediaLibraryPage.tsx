@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router';
 import {
   addAestheticLabFromGallery,
   addPlateImagesFromGallery,
@@ -14,6 +14,7 @@ import {
   type MediaWorkspaceIdentity,
   type MediaWorkspaceSource,
 } from '../media/workspace/mediaWorkspaceQuery';
+import { readSharedAlbumAddContext } from '../albums/sharedAlbumAddContext';
 
 // The unified library page. `scope` comes from the route (/media vs
 // /media/excluded) and App gives each a distinct key so a scope switch remounts
@@ -30,7 +31,16 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const effectiveScope = scope === 'excluded' ? 'excluded' : 'active';
+
+  // "I arrived from a shared album to fill it." Read ONCE, on mount: router
+  // state belongs to the history entry that carried it, and every later
+  // navigation here (including this page's own replace-navigations for the
+  // query string) carries none — so the target cannot survive into an unrelated
+  // visit. Nothing about the Library changes because of it: it adds a notice and
+  // a way back, and preselects a destination in the shared picker.
+  const [addContext] = useState(() => readSharedAlbumAddContext(location.state));
 
   // Read the URL ONCE (on mount) to seed the applied identity; from then on the
   // in-memory identity is authoritative and the URL is written from it.
@@ -83,6 +93,13 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
     <section className="ws-page-outer" data-testid="media-library-page">
       <header className="ws-page-header">
         <h1>{t('mediaLib.title')}</h1>
+        {addContext && (
+          <p className="library-add-context" role="status" data-testid="library-add-context">
+            {t('mediaLib.addingToShared', { album: addContext.albumName })}
+            {' '}
+            <Link to={addContext.returnPath}>{t('mediaLib.backToSharedAlbum')}</Link>
+          </p>
+        )}
       </header>
       <MediaWorkspace
         source={LIBRARY_SOURCE}
@@ -90,6 +107,7 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
         onIdentityChange={onIdentityChange}
         searchPlaceholder={t('mediaWs.searchLibrary')}
         photoDestinations={photoDestinations}
+        preselectedAlbumId={addContext?.albumId}
       />
     </section>
   );

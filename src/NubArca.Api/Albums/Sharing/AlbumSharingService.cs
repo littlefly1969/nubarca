@@ -312,13 +312,16 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
     // ── Contribution ────────────────────────────────────────────────────────
 
-    public async Task<AlbumContributionResult> ContributeAsync(
-        Guid actorUserId, Guid albumId, Guid fileItemId,
-        CancellationToken cancellationToken = default)
+    // May this actor add media to this album at all? ONE definition, shared by
+    // the single-item and bulk paths, so the two can never drift on who is
+    // allowed to contribute.
+    //
+    // (1) + (2) The actor's own live grant on this album, which also establishes
+    // that the album exists and its owner is active. Reusing the resolver keeps
+    // "may I act on this album" in one place.
+    private async Task<AlbumContributionResult> ResolveContributionAuthorityAsync(
+        Guid actorUserId, Guid albumId, CancellationToken cancellationToken)
     {
-        // (1) + (2) The actor's own live grant on this album, which also
-        // establishes that the album exists and its owner is active. Reusing the
-        // resolver keeps "may I act on this album" in one place.
         var grant = await _access.ResolveAsync(albumId, actorUserId, cancellationToken);
         if (grant is null)
         {
@@ -334,27 +337,50 @@ public sealed class AlbumSharingService : IAlbumSharingService
             return AlbumContributionResult.RoleNotPermitted;
         }
 
-        if (!AlbumRoles.CanContribute(grant.Role))
-        {
-            return AlbumContributionResult.RoleNotPermitted;
-        }
+        return AlbumRoles.CanContribute(grant.Role)
+            ? AlbumContributionResult.Ok
+            : AlbumContributionResult.RoleNotPermitted;
+    }
 
-        // (3) + (4) + (5) The file must be the ACTOR's own, servable, and
-        // displayable media. _db.FileItems carries the global Private-Vault
-        // filter, so a vaulted file is invisible here and collapses into the
-        // same single failure value as every other ineligibility.
-        var eligible = await _db.FileItems
+    // (3) + (4) + (5) The ONE definition of "contributable media": the ACTOR's
+    // own, servable, displayable file. Returns the subset of the requested ids
+    // that qualifies — everything else simply does not come back, which is what
+    // makes "missing", "foreign", "deleted", "excluded", "vaulted" and "not
+    // media" indistinguishable to the caller. _db.FileItems carries the global
+    // Private-Vault filter, so a vaulted file is invisible here for free.
+    private async Task<HashSet<Guid>> ContributableFileIdsAsync(
+        Guid actorUserId, List<Guid> fileItemIds, CancellationToken cancellationToken)
+    {
+        var ids = await _db.FileItems
             .AsNoTracking()
-            .Where(f => f.Id == fileItemId
+            .Where(f => fileItemIds.Contains(f.Id)
                 && f.OwnerUserId == actorUserId
                 && f.DeletedAt == null
                 && f.MediaLibraryState == MediaLibraryState.Active)
             .Join(_db.BlobMetadata.AsNoTracking(),
                 f => f.BlobObjectId,
                 m => m.BlobObjectId,
-                (f, m) => m.MediaCategory)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (eligible is not (MediaCategories.Image or MediaCategories.Video))
+                (f, m) => new { f.Id, m.MediaCategory })
+            .Where(x => x.MediaCategory == MediaCategories.Image
+                || x.MediaCategory == MediaCategories.Video)
+            .Select(x => x.Id)
+            .ToListAsync(cancellationToken);
+        return [.. ids];
+    }
+
+    public async Task<AlbumContributionResult> ContributeAsync(
+        Guid actorUserId, Guid albumId, Guid fileItemId,
+        CancellationToken cancellationToken = default)
+    {
+        var authority = await ResolveContributionAuthorityAsync(actorUserId, albumId, cancellationToken);
+        if (authority != AlbumContributionResult.Ok)
+        {
+            return authority;
+        }
+
+        var contributable = await ContributableFileIdsAsync(
+            actorUserId, [fileItemId], cancellationToken);
+        if (!contributable.Contains(fileItemId))
         {
             return AlbumContributionResult.FileNotContributable;
         }
@@ -397,6 +423,84 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
         await BumpAlbumVersionAsync(albumId, cancellationToken);
         return AlbumContributionResult.Ok;
+    }
+
+    public async Task<(AlbumBulkContributionResult Result, BulkContributionOutcome? Outcome)> ContributeManyAsync(
+        Guid actorUserId, Guid albumId, IReadOnlyList<Guid> fileItemIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(fileItemIds);
+
+        // The role gate is answered ONCE for the whole batch, before any file is
+        // looked at: a Viewer must be refused outright rather than told that
+        // every one of their items was "skipped".
+        var authority = await ResolveContributionAuthorityAsync(actorUserId, albumId, cancellationToken);
+        if (authority == AlbumContributionResult.AlbumNotAccessible)
+        {
+            return (AlbumBulkContributionResult.AlbumNotAccessible, null);
+        }
+        if (authority != AlbumContributionResult.Ok)
+        {
+            return (AlbumBulkContributionResult.RoleNotPermitted, null);
+        }
+
+        // `Requested` is the RAW count, exactly like the owner's bulk add: a
+        // caller sending the same id twice sees the duplicate as skipped rather
+        // than as a second success.
+        var requested = fileItemIds.Count;
+        var distinct = fileItemIds.Distinct().ToList();
+        if (distinct.Count == 0)
+        {
+            return (AlbumBulkContributionResult.Ok,
+                new BulkContributionOutcome(new BulkAlbumItemsResult(requested, 0, requested), []));
+        }
+
+        var contributable = await ContributableFileIdsAsync(actorUserId, distinct, cancellationToken);
+
+        // Already in this album — by anyone. Skipped, never an error: one item a
+        // second device added between the picker opening and the request landing
+        // must not discard the rest of the batch.
+        var already = await _db.AlbumItems
+            .Where(ai => ai.AlbumId == albumId && distinct.Contains(ai.FileItemId))
+            .Select(ai => ai.FileItemId)
+            .ToListAsync(cancellationToken);
+        var alreadySet = already.ToHashSet();
+
+        // Request order preserved, so the album's curated order follows the order
+        // the contributor selected in.
+        var toAdd = distinct
+            .Where(id => contributable.Contains(id) && !alreadySet.Contains(id))
+            .ToList();
+
+        if (toAdd.Count > 0)
+        {
+            var now = _time.GetUtcNow().UtcDateTime;
+            var next = (await _db.AlbumItems
+                .Where(ai => ai.AlbumId == albumId)
+                .Select(ai => (int?)ai.SortOrder)
+                .MaxAsync(cancellationToken) ?? 0) + 1;
+            foreach (var id in toAdd)
+            {
+                _db.AlbumItems.Add(new AlbumItem
+                {
+                    Id = Guid.NewGuid(),
+                    AlbumId = albumId,
+                    FileItemId = id,
+                    AddedAt = now,
+                    // The invariant the resolver verifies: whoever added it owns it.
+                    AddedByUserId = actorUserId,
+                    SortOrder = next++,
+                });
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            await BumpAlbumVersionAsync(albumId, cancellationToken);
+        }
+
+        return (AlbumBulkContributionResult.Ok,
+            new BulkContributionOutcome(
+                new BulkAlbumItemsResult(requested, toAdd.Count, requested - toAdd.Count),
+                toAdd));
     }
 
     public async Task<AlbumItemRemovalResult> WithdrawContributionAsync(

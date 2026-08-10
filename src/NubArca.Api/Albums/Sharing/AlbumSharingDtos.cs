@@ -152,6 +152,19 @@ public enum AlbumContributionResult
     AlreadyPresent,
 }
 
+// The outcome of a BULK contribution. Deliberately narrower than
+// AlbumContributionResult: per-file outcomes are counts, not values, because
+// naming which ids were skipped would leak whether they exist. Only the two
+// whole-request refusals survive as distinct results.
+public enum AlbumBulkContributionResult
+{
+    Ok,
+    // Album missing, or the actor holds no active accepted membership on it.
+    AlbumNotAccessible,
+    // The actor's membership does not permit contributing (Viewer).
+    RoleNotPermitted,
+}
+
 public enum AlbumItemRemovalResult
 {
     Ok,

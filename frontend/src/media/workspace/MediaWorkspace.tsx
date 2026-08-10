@@ -66,6 +66,11 @@ interface Props {
   // Album-context callback so the page can refresh its header counts/cover after
   // a membership change. Ignored for the library source.
   onAlbumMembershipChanged?(): void;
+  // An album the destination picker should open already pointing at — set when
+  // the user arrived here from a shared album's "Add from library". It only
+  // preselects: the Library stays the ordinary Library, and every other
+  // destination is still offered.
+  preselectedAlbumId?: string;
 }
 
 export function MediaWorkspace({
@@ -75,6 +80,7 @@ export function MediaWorkspace({
   searchPlaceholder,
   photoDestinations = [],
   onAlbumMembershipChanged,
+  preselectedAlbumId,
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -584,7 +590,28 @@ export function MediaWorkspace({
       )}
 
       {pickerOpen && (
-        <AlbumPickerModal fileItemIds={[...selection.selected]} onClose={() => setPickerOpen(false)} />
+        <AlbumPickerModal
+          fileItemIds={[...selection.selected]}
+          preselectedAlbumId={preselectedAlbumId}
+          onClose={() => setPickerOpen(false)}
+          onAdded={(result, albumName) => {
+            // The selection has been filed: keeping it would invite the same
+            // media being added twice. The picker closes on the same beat and
+            // the outcome is reported here, where every other bulk result is.
+            selection.clear();
+            setPickerOpen(false);
+            const parts = [t('albumPicker.successAdded', { added: result.succeeded, album: albumName })];
+            if (result.skipped > 0) {
+              parts.push(t('albumPicker.successSkipped', { skipped: result.skipped }));
+            }
+            const msg = parts.join(' ');
+            setNotice(msg);
+            announce(msg);
+            // "Solo da organizzare" lists media with no album: what was just
+            // filed no longer belongs in the result.
+            if (identity.filters.common.albumMembership === 'unassigned') ws.refresh();
+          }}
+        />
       )}
 
       {moveToPersonal.isOpen && (

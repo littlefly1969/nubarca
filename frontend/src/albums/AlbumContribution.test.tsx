@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { AlbumSharePanel } from './AlbumSharePanel';
 import { AlbumSharedContentPanel } from './AlbumSharedContentPanel';
 import { SharedAlbumDetailPage } from '../pages/SharedAlbumDetailPage';
+import { readSharedAlbumAddContext } from './sharedAlbumAddContext';
 import {
   AuthedWrapper,
   emptyResponse,
@@ -333,12 +334,27 @@ function album(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+// A stand-in for the Media Library, so a test can see WHERE the shared album's
+// "Add from library" goes and WHAT transient context travelled with it.
+function LibraryProbe() {
+  const location = useLocation();
+  const context = readSharedAlbumAddContext(location.state);
+  return (
+    <div data-testid="library-probe">
+      <span data-testid="library-target">{context?.albumId ?? 'none'}</span>
+      <span data-testid="library-target-name">{context?.albumName ?? ''}</span>
+      <span data-testid="library-return">{context?.returnPath ?? ''}</span>
+    </div>
+  );
+}
+
 function renderShared() {
   return render(
     <AuthedWrapper>
       <MemoryRouter initialEntries={['/shared-albums/alb-1']}>
         <Routes>
           <Route path="/shared-albums/:albumId" element={<SharedAlbumDetailPage />} />
+          <Route path="/media" element={<LibraryProbe />} />
         </Routes>
       </MemoryRouter>
     </AuthedWrapper>,
@@ -346,14 +362,31 @@ function renderShared() {
 }
 
 describe('SharedAlbumDetailPage — contribution', () => {
-  it('offers "Add to album" to a Contributor', async () => {
+  // There is exactly ONE media-selection experience in NubArca, and it is the
+  // Media Library. What used to live here — a shared-album-only photo grid with
+  // no tabs, no search, no filters and no videos — is gone; this page's "Add"
+  // now hands the Library a transient context and goes there.
+
+  it('offers "Add from library" to a Contributor', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
       'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
     });
     renderShared();
 
-    expect(await screen.findByTestId('shared-album-add')).toHaveTextContent(/aggiungi all’album/i);
+    expect(await screen.findByTestId('shared-album-add'))
+      .toHaveTextContent(/aggiungi dalla libreria/i);
+  });
+
+  it('offers it to an Editor too', async () => {
+    installFetchMock({
+      'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'editor', canEdit: true })),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+    });
+    renderShared();
+
+    expect(await screen.findByTestId('shared-album-add'))
+      .toHaveTextContent(/aggiungi dalla libreria/i);
   });
 
   it('does NOT offer it to a Viewer', async () => {
@@ -367,82 +400,38 @@ describe('SharedAlbumDetailPage — contribution', () => {
     expect(screen.queryByTestId('shared-album-add')).not.toBeInTheDocument();
   });
 
-  it('picks only from the actor’s own library and states the linking contract', async () => {
+  it('goes to the ordinary Library carrying the album as transient context', async () => {
     const spy = installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
       'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
-      'GET /api/images': () => jsonResponse({
-        items: [
-          { id: 'mine-1', displayName: 'a.jpg' },
-          // Already in the album — must not be offered twice.
-          { id: 'f1', displayName: 'b.jpg' },
-        ],
-        nextCursor: null,
-      }),
     });
     renderShared();
 
     await userEvent.click(await screen.findByTestId('shared-album-add'));
-    await screen.findByTestId('contribute-panel');
 
-    // The picker reads the caller's OWN media endpoint — never a library route
-    // that could belong to somebody else.
-    expect(spy.calls.some((c) => c.url.startsWith('/api/images'))).toBe(true);
-    expect(spy.calls.every((c) => !c.url.includes('/api/albums/'))).toBe(true);
+    // /media — the normal Library route, not a shared-album-specific one.
+    await screen.findByTestId('library-probe');
+    expect(screen.getByTestId('library-target')).toHaveTextContent('alb-1');
+    expect(screen.getByTestId('library-target-name')).toHaveTextContent('Vacanze');
+    expect(screen.getByTestId('library-return')).toHaveTextContent('/shared-albums/alb-1');
 
-    const tiles = screen.getAllByTestId('contribute-tile');
-    expect(tiles).toHaveLength(1);
-    expect(screen.getByText(/resta nella tua libreria/i)).toBeInTheDocument();
+    // Nothing was fetched to open a picker: the button navigates, it does not
+    // load somebody's media.
+    expect(spy.calls.every((c) => !c.url.startsWith('/api/images'))).toBe(true);
   });
 
-  it('contributes the selected files and refreshes the album', async () => {
-    let contributed = false;
-    const spy = installFetchMock({
-      'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse(
-        contributed
-          ? [sharedItem(), sharedItem({ fileItemId: 'mine-1', canWithdraw: true })]
-          : [sharedItem()],
-      ),
-      'GET /api/images': () => jsonResponse({
-        items: [{ id: 'mine-1', displayName: 'a.jpg' }], nextCursor: null,
-      }),
-      'POST /api/shared-albums/alb-1/contributions': () => {
-        contributed = true;
-        return emptyResponse();
-      },
-    });
-    renderShared();
-
-    await userEvent.click(await screen.findByTestId('shared-album-add'));
-    await userEvent.click(await screen.findByTestId('contribute-tile'));
-    await userEvent.click(screen.getByTestId('contribute-submit'));
-
-    expect(await screen.findByTestId('shared-media-mine')).toBeInTheDocument();
-    const posted = spy.calls.find((c) => c.method === 'POST');
-    expect(JSON.parse(posted!.body!)).toEqual({ fileItemId: 'mine-1' });
-  });
-
-  it('closes the picker when the role is lost mid-session', async () => {
+  it('has no shared-album-specific media picker left at all', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
       'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
-      'GET /api/images': () => jsonResponse({
-        items: [{ id: 'mine-1', displayName: 'a.jpg' }], nextCursor: null,
-      }),
-      // Demoted to Viewer between opening the picker and submitting.
-      'POST /api/shared-albums/alb-1/contributions': () => errorResponse(403),
     });
     renderShared();
 
     await userEvent.click(await screen.findByTestId('shared-album-add'));
-    await userEvent.click(await screen.findByTestId('contribute-tile'));
-    await userEvent.click(screen.getByTestId('contribute-submit'));
 
-    // No dialog left offering an action the server refuses.
-    await vi.waitFor(() => {
-      expect(screen.queryByTestId('contribute-panel')).not.toBeInTheDocument();
-    });
+    expect(screen.queryByTestId('contribute-panel')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('contribute-grid')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('contribute-tile')).not.toBeInTheDocument();
   });
 
   it('marks only the caller’s own contributions and offers withdrawal for them', async () => {

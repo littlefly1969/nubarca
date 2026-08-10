@@ -131,6 +131,42 @@ authorises *before* playback instead of trying to authenticate the receiver.
   Developer Console registration. Chrome on iPhone and iPad is not supported by
   the Google Web Sender — every iOS browser is WebKit underneath.
 
+### Albums
+
+There is now exactly ONE way to choose photos and videos for an album: the
+Media Library, with the multi-selection it already had. The shared-album flow
+used to carry a second, smaller picker of its own — a photo-only grid with no
+tabs, no search, no filters and no videos — so which media a user could reach
+depended on which page they had started from.
+
+- **One destination picker** — "Add to album" opens a single dialog listing
+  *your albums* and, separately, the *shared albums you may contribute to*, each
+  with the cover mosaic the album card already returns. The two groups are never
+  flattened together: a shared row names the owner and the role held there,
+  because that difference is real. A Viewer's album is not offered at all —
+  a destination the server would refuse is worse offered than absent.
+- **The endpoint distinction is ours, not the user's** — one *Add* button files
+  into an owned album through the ordinary bulk membership route, and into a
+  shared album through a new bulk contribution route. Contribution semantics are
+  unchanged: a reference to media the contributor still owns, no copy, no
+  transfer, still withdrawable.
+- **`POST /api/shared-albums/{id}/contributions/bulk`** — up to 1000 ids, the
+  same ceiling the owned-album bulk routes use, sharing one definition of
+  "contributable" with the single-item endpoint rather than restating it. A
+  Viewer is refused outright; everything per-file becomes counts, because naming
+  a skipped id would say whether it exists. Duplicated, already-present, foreign,
+  deleted, excluded, vaulted and non-media ids are skipped, never a reason to
+  discard the valid ones. Each item that lands leaves the same audit row a single
+  contribution would have.
+- **A shared album's "Add from library"** goes to `/media` carrying the album as
+  transient router state — not a URL, because "I am filling this album" is a
+  moment in a session and not an addressable place. The Library stays the
+  ordinary Library: every tab, search, filter, sort and the normal grid, plus a
+  notice naming the album and a way back. The picker simply opens with that album
+  already chosen.
+- **Videos work** — media now comes from the library selection rather than a
+  photo-only list.
+
 ## 0.3.0
 
 NubArca `0.3.0` is the consolidated product baseline: one coherent identity

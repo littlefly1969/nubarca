@@ -6229,9 +6229,85 @@ video.lightbox-image {
 .filter-chip-remove:hover { background: color-mix(in srgb, var(--fg) 12%, transparent); }
 .gallery-active-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
 
-/* Album picker modal reuses the assign-modal shell; a couple of extras. */
-.album-picker-create { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.6rem; }
-.album-picker-modal .assign-modal-field { display: flex; flex-direction: column; gap: 0.4rem; }
+/* ── Album destination picker ─────────────────────────────────────────────
+   Lives inside the shared Overlay `Modal`, so it owns no backdrop, panel,
+   header or footer of its own — only the destination list. Owned and shared
+   albums are two SECTIONS rather than one list with a badge: they differ in who
+   owns the album, which is exactly the thing a flat list would blur. */
+.album-picker { display: flex; flex-direction: column; gap: 1rem; }
+.album-picker-search {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control, 8px);
+  background: var(--surface-base, var(--surface-raised));
+  color: inherit;
+  font: inherit;
+}
+.album-picker-section { display: flex; flex-direction: column; gap: 0.45rem; }
+.album-picker-section-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.album-picker-section-note { margin: 0; font-size: 0.8rem; }
+.album-picker-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+
+.album-dest {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control, 8px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.album-dest:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.album-dest:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.album-dest:disabled { cursor: default; opacity: 0.6; }
+.album-dest.is-selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/* The mosaic is decoration at this size: a fixed, small tile so a long list
+   stays scannable and the NAME is what the eye lands on. */
+.album-dest .album-cover {
+  flex: 0 0 auto;
+  width: 3.5rem;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.album-dest .album-cover-empty { font-size: 1.2rem; }
+.album-dest-text { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.album-dest-name { font-weight: 600; overflow-wrap: anywhere; }
+.album-dest-meta { font-size: 0.8rem; overflow-wrap: anywhere; }
+.album-dest-role { font-weight: 600; }
+
+/* Secondary by construction: creating an album is the exception, choosing one
+   is the rule. */
+.album-picker-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-default);
+}
+.album-picker-create input { flex: 1 1 12rem; min-width: 0; }
+
+@media (max-width: 40rem) {
+  .album-dest .album-cover { width: 3rem; }
+  .album-picker-create input { flex-basis: 100%; }
+}
 
 /* ── Plates (Targhe): owner-private, segregated image surface ──────────────── */
 .plates-intro { color: color-mix(in srgb, var(--fg) 65%, transparent); max-width: 60ch; }
@@ -6738,6 +6814,16 @@ video.lightbox-image {
 .ws-page-outer { display: flex; flex-direction: column; gap: 0.85rem; }
 .ws-page-header { display: flex; flex-direction: column; gap: 0.3rem; }
 .ws-page-header h1 { margin: 0; font-size: 1.45rem; }
+/* "You came here to fill a shared album." A notice, deliberately not a mode:
+   nothing about the Library below it is disabled or hidden. */
+.library-add-context {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-inline-start: 3px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  font-size: 0.9rem;
+}
 
 /* The workspace's own chrome, as ONE region rather than several independently
    pinned controls: kind tabs, the command bar, the applied-filter chips and the
@@ -7115,14 +7201,6 @@ video.lightbox-image {
 .album-content-unavailable { font-size: 0.78rem; color: var(--error); overflow-wrap: anywhere; }
 .album-content-row > .row-action { flex: 0 0 auto; }
 
-/* Contributor picker: the actor's OWN library only. */
-.contribute-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(6rem, 100%), 1fr)); gap: 0.4rem; }
-.contribute-tile { position: relative; width: 100%; aspect-ratio: 1; padding: 0; border: 2px solid transparent; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--fg) 8%, transparent); cursor: pointer; }
-.contribute-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.contribute-tile.is-selected { border-color: var(--accent); }
-.contribute-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.contribute-tick { position: absolute; top: 0.2rem; right: 0.25rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--accent); color: #fff; font-size: 0.8rem; line-height: 1.25rem; text-align: center; }
-
 /* "This one is mine" on the shared wall. No contributor identity is shown to a
    member — that provenance belongs to the owner's moderation surface. */
 .shared-media-mine-badge { position: absolute; left: 0.35rem; top: 0.35rem; font-size: 0.62rem; font-weight: 600; padding: 0.05rem 0.35rem; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, #000); color: #fff; }
@@ -7130,7 +7208,6 @@ video.lightbox-image {
 @media (max-width: 40rem) {
   .album-content-row { flex-wrap: wrap; }
   .album-content-row > .row-action { width: 100%; }
-  .contribute-grid { grid-template-columns: repeat(auto-fill, minmax(min(4.5rem, 100%), 1fr)); }
 }
 
 /* ── SHARE-COPY-01: detached album copies ──────────────────────────────────

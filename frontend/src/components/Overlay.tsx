@@ -41,9 +41,19 @@ interface OverlayProps {
   // the whole dialog.
   footer?: ReactNode;
   testId?: string;
+  // For an overlay opened ON TOP of another Escape-closable surface that also
+  // listens on `window` — the album picker opens from the media viewer's
+  // details drawer. Both listeners sit on the same target, and
+  // `stopPropagation` does not stop a SIBLING listener, so a single Escape used
+  // to dismiss the picker AND the viewer behind it, dropping the user out of
+  // the photo entirely. With this set the overlay listens in the capture phase
+  // and consumes the event: as the topmost surface, it owns Escape.
+  exclusiveEscape?: boolean;
 }
 
-function useOverlayBehaviour(onClose: () => void, dismissable: boolean) {
+function useOverlayBehaviour(
+  onClose: () => void, dismissable: boolean, exclusiveEscape: boolean,
+) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Lock the background scroll for as long as ANY overlay is open. Counted
@@ -80,14 +90,14 @@ function useOverlayBehaviour(onClose: () => void, dismissable: boolean) {
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape' && dismissable) {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== 'Escape' || !dismissable) return;
+      if (exclusiveEscape) e.stopImmediatePropagation();
+      else e.stopPropagation();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, dismissable]);
+    window.addEventListener('keydown', onKey, exclusiveEscape);
+    return () => window.removeEventListener('keydown', onKey, exclusiveEscape);
+  }, [onClose, dismissable, exclusiveEscape]);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Tab') return;
@@ -113,10 +123,11 @@ function useOverlayBehaviour(onClose: () => void, dismissable: boolean) {
 
 function OverlayShell({
   variant, title, subtitle, onClose, dismissable = true, children, footer, testId,
+  exclusiveEscape = false,
 }: OverlayProps & { variant: 'modal' | 'sheet' }) {
   const { t } = useI18n();
   const titleId = useId();
-  const { panelRef, onKeyDown } = useOverlayBehaviour(onClose, dismissable);
+  const { panelRef, onKeyDown } = useOverlayBehaviour(onClose, dismissable, exclusiveEscape);
 
   return createPortal(
     <div

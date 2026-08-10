@@ -5,11 +5,11 @@ import {
   createAlbum,
   deleteAlbum,
   listAlbums,
-  type AlbumCoverItem,
   type AlbumSummary,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
+import { AlbumCoverMosaic } from '../albums/AlbumCoverMosaic';
 
 type Status =
   | { kind: 'loading' }
@@ -21,20 +21,6 @@ type SortKey = 'updated' | 'name' | 'count';
 // Slice 5: modernized album list — cover mosaics + per-kind counts (from the
 // enriched AlbumSummary), name search and sort. Albums stay mixed; no new
 // derivatives are generated (the cover reuses existing thumbnails/posters).
-
-function CoverMosaic({ items, name }: { items: AlbumCoverItem[]; name: string }) {
-  const { t } = useI18n();
-  if (items.length === 0) {
-    return <div className="album-cover album-cover-empty" aria-hidden="true">🖼</div>;
-  }
-  return (
-    <div className={`album-cover album-cover-mosaic count-${Math.min(items.length, 4)}`} data-testid="album-cover">
-      {items.slice(0, 4).map((c) => (
-        <img key={c.fileItemId} src={c.thumbnailUrl} alt={t('albums.coverAlt', { name })} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
-      ))}
-    </div>
-  );
-}
 
 export function AlbumsPage() {
   const { invalidateAuth } = useAuth();
@@ -179,7 +165,7 @@ export function AlbumsPage() {
               return (
                 <li key={album.id} className="album-card" data-testid="album-card">
                   <Link to={`/albums/${album.id}`} className="album-card-link" aria-label={album.name}>
-                    <CoverMosaic items={album.coverItems} name={album.name} />
+                    <AlbumCoverMosaic items={album.coverItems} name={album.name} />
                   </Link>
                   <div className="album-card-body">
                     <div className="album-card-titlerow">

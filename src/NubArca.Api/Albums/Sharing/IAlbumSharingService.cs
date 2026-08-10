@@ -72,6 +72,19 @@ public interface IAlbumSharingService
         Guid actorUserId, Guid albumId, Guid fileItemId,
         CancellationToken cancellationToken = default);
 
+    // The same operation for a whole selection, sharing the SAME authority and
+    // eligibility rules as ContributeAsync — extracted rather than restated, so
+    // "contributable" has one definition.
+    //
+    // The role gate answers the whole request (a Viewer is refused outright);
+    // every per-file outcome collapses into counts. Duplicated, already-present,
+    // foreign and ineligible ids are SKIPPED, never a reason to discard the
+    // valid ones. `ContributedFileItemIds` is returned for the audit trail only
+    // — the endpoint reports counts.
+    Task<(AlbumBulkContributionResult Result, BulkContributionOutcome? Outcome)> ContributeManyAsync(
+        Guid actorUserId, Guid albumId, IReadOnlyList<Guid> fileItemIds,
+        CancellationToken cancellationToken = default);
+
     // The contributor taking their own contribution back. Permitted when the
     // actor both OWNS the file and ADDED it — independent of whether they
     // currently hold Contributor or have been downgraded to Viewer. Never
@@ -125,6 +138,13 @@ public interface IAlbumSharingService
     Task<IReadOnlyList<SharedAlbumItem>> ListSharedItemsAsync(
         AlbumAccessGrant grant, CancellationToken cancellationToken = default);
 }
+
+// What a bulk contribution actually did. `Counts` is the only part a client
+// ever sees; `ContributedFileItemIds` exists so the endpoint can leave the same
+// per-file audit trail a sequence of single contributions would have left.
+public sealed record BulkContributionOutcome(
+    BulkAlbumItemsResult Counts,
+    IReadOnlyList<Guid> ContributedFileItemIds);
 
 // What a revocation actually did, so the endpoint can audit the membership and
 // each automatic withdrawal separately.

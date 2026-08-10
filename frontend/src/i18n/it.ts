@@ -847,6 +847,8 @@ const it = {
 
   // --- Slice 5: unified media workspace (Libreria + Album) ---
   'mediaLib.title': 'Libreria',
+  'mediaLib.addingToShared': 'Seleziona foto e video da aggiungere a «{album}».',
+  'mediaLib.backToSharedAlbum': 'Torna all’album',
   'mediaWs.kindTabsAria': 'Tipo di media',
   'mediaWs.kindAll': 'Tutti',
   'mediaWs.kindImage': 'Foto',
@@ -1182,18 +1184,7 @@ const it = {
     'Impossibile accettare la copia. Nessun album parziale è stato creato.',
   'receivedCopies.declineError': 'Impossibile rifiutare la copia. Riprova.',
 
-  'sharedAlbum.addToAlbum': 'Aggiungi all’album',
-  'sharedAlbum.addHeading': 'Aggiungi all’album',
-  'sharedAlbum.addIntro':
-    'Scegli foto o video dalla tua libreria. Il file resta nella tua libreria ed è collegato all’album. Puoi ritirarlo in seguito.',
-  'sharedAlbum.addPickerEmpty': 'Non hai foto o video da aggiungere.',
-  'sharedAlbum.addPickerError': 'Impossibile caricare la tua libreria.',
-  'sharedAlbum.addSelected': 'Aggiungi {count} elementi',
-  'sharedAlbum.addSelectedOne': 'Aggiungi 1 elemento',
-  'sharedAlbum.adding': 'Aggiunta…',
-  'sharedAlbum.addError': 'Impossibile aggiungere alcuni elementi. Riprova.',
-  'sharedAlbum.addAlreadyPresent': 'Alcuni elementi erano già nell’album.',
-  'sharedAlbum.addNotAllowed': 'Non puoi più aggiungere elementi a questo album.',
+  'sharedAlbum.addFromLibrary': 'Aggiungi dalla libreria',
   'sharedAlbum.mine': 'Tuo contributo',
   'sharedAlbum.withdraw': 'Ritira il contributo',
   'sharedAlbum.withdrawAria': 'Ritira il tuo contributo',
@@ -2038,11 +2029,23 @@ const it = {
   'gallerySel.selectedTile': 'Selezionata',
 
   // --- Album picker (bulk add to album) ---
-  'albumPicker.title': 'Aggiungi ad album',
-  'albumPicker.chooseAlbum': 'Scegli un album',
+  'albumPicker.titleCount_one': 'Aggiungi {count} elemento all’album',
+  'albumPicker.titleCount_other': 'Aggiungi {count} elementi all’album',
+  'albumPicker.search': 'Cerca album…',
+  'albumPicker.ownedSection': 'I tuoi album',
+  'albumPicker.sharedSection': 'Condivisi con te',
+  'albumPicker.sharedBy': 'di {owner}',
+  'albumPicker.sharedNote':
+    'I file restano nella tua libreria: vengono collegati all’album e puoi ritirarli in seguito.',
+  'albumPicker.add': 'Aggiungi',
+  'albumPicker.noMatches': 'Nessun album corrisponde alla ricerca.',
+  'albumPicker.accessChanged':
+    'Il tuo accesso a questo album è cambiato. L’elenco è stato aggiornato.',
+  'albumPicker.albumGone': 'Questo album non è più disponibile. L’elenco è stato aggiornato.',
+  'albumPicker.createError': 'Impossibile creare l’album.',
+  'albumPicker.create': 'Crea',
   'albumPicker.createNew': 'Crea un nuovo album',
   'albumPicker.newAlbumName': 'Nome del nuovo album',
-  'albumPicker.createAndAdd': 'Crea e aggiungi',
   'albumPicker.adding': 'Aggiunta…',
   'albumPicker.noAlbums': 'Non hai ancora nessun album.',
   'albumPicker.loadError': 'Impossibile caricare gli album.',
