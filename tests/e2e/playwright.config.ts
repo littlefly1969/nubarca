@@ -18,11 +18,19 @@ import { WEB_URL } from './src/env';
 // the sidebar on a wide viewport and from the modal drawer on a narrow one: at an
 // effective 200% zoom the desktop projects cross that breakpoint, which is
 // exactly where a second, form-factor-specific navigation model would show up.
+// `album-picker` joined it for the modal's internal geometry rather than for the
+// stacking defect that prompted the spec — measured, that defect reproduced on
+// the desktop and mobile projects and NOT at 640x400, where the responsive
+// breakpoints happen to separate the dialog from the selection bar. What the
+// zoomed project does exercise is the smallest body the modal ever gets: a
+// couple of rows between a fixed header and a fixed footer, which is where
+// "only the body scrolls" stops being true first if that contract is weakened.
 
 const DESKTOP = { width: 1280, height: 800 };
 const ZOOMED_DESKTOP = { width: DESKTOP.width / 2, height: DESKTOP.height / 2 };
 
-const LAYOUT_SENSITIVE = /(shell|media-library|tv-browser|identity-access)\.spec\.ts/;
+const LAYOUT_SENSITIVE =
+  /(shell|media-library|tv-browser|identity-access|album-picker)\.spec\.ts/;
 
 export default defineConfig({
   testDir: './specs',

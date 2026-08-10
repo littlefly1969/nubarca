@@ -7407,10 +7407,25 @@ video.lightbox-image {
   justify-content: flex-end;
 }
 
+/* The WORKSPACE layer. The media workspace stacks its own fixed surfaces far
+   above the administration overlays — viewer 1000, selection bar 1100, filter
+   sheet 1200, confirmation 1300 — so an overlay opened from one of those must
+   join that scale. At the default 80 the album picker was painted underneath the
+   selection-bar pill that opened it: with a short list the modal cleared the
+   pill, with a realistic list its footer landed exactly behind it and the
+   primary action became unclickable. 1250 sits above the filter sheet and below
+   the confirmation, which stays the topmost decision a user can be asked to
+   make. Opt-in per consumer: an administration dialog stays on the app layer. */
+.overlay-backdrop--layer-workspace { z-index: 1250; }
+
 .overlay-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Makes the header/body/footer contract structural rather than a convention:
+     the panel itself never scrolls and never spills, so the only thing that can
+     move is the body below. */
+  overflow: hidden;
   background: var(--surface-raised);
   border: 1px solid var(--border-default);
   box-shadow: var(--shadow-lg);
@@ -7420,7 +7435,12 @@ video.lightbox-image {
 
 .overlay-panel--modal {
   width: min(680px, 100%);
-  /* Never taller than the viewport: the body scrolls inside instead. */
+  /* Never taller than the viewport: the body scrolls inside instead. The plain
+     vh line is the fallback and must come first — a browser that does not
+     understand dvh drops the second declaration entirely, and with NO
+     max-height a long list grows the panel until the footer, and its primary
+     action, are pushed off the bottom of the screen. */
+  max-height: 90vh;
   max-height: min(90dvh, 100%);
   border-radius: var(--radius-card);
 }
@@ -7432,11 +7452,12 @@ video.lightbox-image {
 }
 
 /* The header stays put while the body scrolls, so an administrator always knows
-   whose account they are editing. */
+   whose account they are editing — and a picker always shows how to leave.
+   `flex: 0 0 auto` rather than `position: sticky`: the head is a SIBLING of the
+   scroll container, not a child of it, so sticky never had anything to stick to.
+   Refusing to shrink is what actually keeps it, and the footer, on screen. */
 .overlay-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -7458,6 +7479,7 @@ video.lightbox-image {
   overflow-wrap: anywhere;
 }
 
+/* The ONLY vertically scrolling part of an overlay. */
 .overlay-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -7467,6 +7489,7 @@ video.lightbox-image {
 }
 
 .overlay-foot {
+  flex: 0 0 auto;
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
@@ -7482,6 +7505,11 @@ video.lightbox-image {
   .overlay-backdrop--modal { padding: 0; align-items: stretch; }
   .overlay-panel--modal {
     width: 100%;
+    /* vh first, dvh second — same reason as the desktop ceiling: without a
+       fallback a browser lacking dvh gets no bound at all, and full-screen is
+       exactly where an unbounded panel hides its own footer. */
+    max-height: 100vh;
+    height: 100vh;
     max-height: 100dvh;
     height: 100dvh;
     border-radius: 0;

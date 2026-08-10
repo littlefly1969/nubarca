@@ -286,6 +286,11 @@ export function AlbumPickerModal({
       // Opened from the media viewer's details drawer, which listens for Escape
       // on the same target. As the topmost surface this one owns the key.
       exclusiveEscape
+      // …and it is opened from the workspace's own fixed surfaces — the
+      // selection bar, and the viewer's drawer — so it has to stack on their
+      // scale. On the default layer the selection-bar pill is painted over this
+      // dialog's footer, which is what made the Add button unpressable.
+      layer="workspace"
       footer={(
         <>
           <button

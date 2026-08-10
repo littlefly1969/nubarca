@@ -49,7 +49,20 @@ interface OverlayProps {
   // the photo entirely. With this set the overlay listens in the capture phase
   // and consumes the event: as the topmost surface, it owns Escape.
   exclusiveEscape?: boolean;
+  // Which stacking scale this overlay belongs to.
+  //
+  // `app` (the default) is the administration layer these overlays were built
+  // for: nothing else on those screens is `position: fixed`, so a low z-index is
+  // enough. The media workspace is a different world — it stacks its own fixed
+  // surfaces an order of magnitude higher (viewer, selection bar, filter sheet,
+  // confirmation), so an overlay OPENED FROM one of those has to join that scale
+  // or it is painted underneath the very control that opened it. Opt in per
+  // consumer rather than raising every overlay: an administration dialog has no
+  // business above the media viewer.
+  layer?: OverlayLayer;
 }
+
+export type OverlayLayer = 'app' | 'workspace';
 
 function useOverlayBehaviour(
   onClose: () => void, dismissable: boolean, exclusiveEscape: boolean,
@@ -123,7 +136,7 @@ function useOverlayBehaviour(
 
 function OverlayShell({
   variant, title, subtitle, onClose, dismissable = true, children, footer, testId,
-  exclusiveEscape = false,
+  exclusiveEscape = false, layer = 'app',
 }: OverlayProps & { variant: 'modal' | 'sheet' }) {
   const { t } = useI18n();
   const titleId = useId();
@@ -131,7 +144,9 @@ function OverlayShell({
 
   return createPortal(
     <div
-      className={`overlay-backdrop overlay-backdrop--${variant}`}
+      className={
+        `overlay-backdrop overlay-backdrop--${variant} overlay-backdrop--layer-${layer}`
+      }
       data-testid={testId ? `${testId}-backdrop` : undefined}
       onMouseDown={(e) => {
         // mousedown, not click: a click whose press started INSIDE the panel
