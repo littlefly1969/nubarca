@@ -90,7 +90,10 @@ public sealed class PersonFaceReferenceService
             {
                 // Freed slots are committed BEFORE new ones are inserted, so a
                 // refilled ordinal can never collide with the row it replaces.
-                await _db.SaveChangesAsync(cancellationToken);
+                if (!await TrySaveAsync(cancellationToken))
+                {
+                    return await ReadPersistedAsync(ownerUserId, personId, profileId, cancellationToken);
+                }
             }
         }
 
@@ -102,7 +105,13 @@ public sealed class PersonFaceReferenceService
 
         var candidates = await LoadCandidatesAsync(ownerUserId, personId, profileId, cancellationToken);
         var selected = PersonReferenceSelector.Select(candidates, coverageThreshold, keptCandidates);
-        await PersistAdditionsAsync(ownerUserId, personId, profileId, kept, selected, cancellationToken);
+        if (!await PersistAdditionsAsync(ownerUserId, personId, profileId, kept, selected, cancellationToken))
+        {
+            // A concurrent request bootstrapped the same person first — two
+            // similar-face requests overlap on any double click or slider drag.
+            // Its set is just as valid, so read it rather than failing the search.
+            return await ReadPersistedAsync(ownerUserId, personId, profileId, cancellationToken);
+        }
 
         var byId = candidates.ToDictionary(c => c.FaceDetectionId, c => c.Vector);
         foreach (var c in keptCandidates)
@@ -141,7 +150,10 @@ public sealed class PersonFaceReferenceService
         if (moved.Count > 0)
         {
             _db.PersonFaceReferences.RemoveRange(moved);
-            await _db.SaveChangesAsync(cancellationToken);
+            if (!await TrySaveAsync(cancellationToken))
+            {
+                return; // another writer got there first; Ensure repairs the rest
+            }
         }
 
         var existing = await _db.PersonFaceReferences
@@ -191,6 +203,8 @@ public sealed class PersonFaceReferenceService
             }
 
             var selected = PersonReferenceSelector.Select(candidates, coverageThreshold, seed);
+            // Best effort: a lost race here just means the next search's Ensure
+            // does the folding instead. Maintenance must never fail an assignment.
             await PersistAdditionsAsync(ownerUserId, personId, group.Key, rows, selected, cancellationToken);
         }
     }
@@ -230,7 +244,51 @@ public sealed class PersonFaceReferenceService
 
     // ---- internals -------------------------------------------------------
 
-    private async Task PersistAdditionsAsync(
+    // The persisted set, re-read after losing a race. Only faces that are still
+    // eligible are returned, so a winner's stale row cannot steer this search.
+    private async Task<IReadOnlyList<PersonReferenceVector>> ReadPersistedAsync(
+        Guid ownerUserId, Guid personId, Guid profileId, CancellationToken cancellationToken)
+    {
+        var rows = await _db.PersonFaceReferences.AsNoTracking()
+            .Where(r => r.OwnerUserId == ownerUserId && r.PersonId == personId && r.ProfileId == profileId)
+            .OrderBy(r => r.Ordinal)
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+        {
+            return Array.Empty<PersonReferenceVector>();
+        }
+
+        var usable = await LoadEligibleAsync(
+            ownerUserId, personId, profileId, rows.Select(r => r.FaceDetectionId).ToList(), cancellationToken);
+        return rows
+            .Where(r => usable.ContainsKey(r.FaceDetectionId))
+            .Select(r => new PersonReferenceVector(r.FaceDetectionId, usable[r.FaceDetectionId].Vector))
+            .ToList();
+    }
+
+    // Save, treating a lost race as an outcome rather than an error. The reference
+    // set is DERIVED: when a concurrent request already wrote (or already removed)
+    // these rows there is nothing to repair, so the pending changes are discarded
+    // and the caller re-reads. Failing here would turn overlapping reads of the
+    // People page into a 500 on a cache fill.
+    private async Task<bool> TrySaveAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            foreach (var entry in _db.ChangeTracker.Entries<PersonFaceReference>().ToList())
+            {
+                entry.State = EntityState.Detached;
+            }
+            return false;
+        }
+    }
+
+    private async Task<bool> PersistAdditionsAsync(
         Guid ownerUserId, Guid personId, Guid profileId, IReadOnlyList<PersonFaceReference> kept,
         IReadOnlyList<Guid> selected, CancellationToken cancellationToken)
     {
@@ -238,7 +296,7 @@ public sealed class PersonFaceReferenceService
         var additions = selected.Where(id => !existingIds.Contains(id)).ToList();
         if (additions.Count == 0)
         {
-            return;
+            return true;
         }
 
         var usedOrdinals = kept.Select(r => r.Ordinal).ToHashSet();
@@ -271,7 +329,7 @@ public sealed class PersonFaceReferenceService
             });
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        return await TrySaveAsync(cancellationToken);
     }
 
     // The person's confirmed faces that could serve as a reference, best quality

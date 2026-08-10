@@ -466,6 +466,44 @@ public sealed class PersonFaceReferenceTests
         Assert.DoesNotContain(covered.FaceId, ids);
     }
 
+    // Overlapping similar-face requests both try to bootstrap the same person —
+    // a double click or a slider drag is enough. The loser must read the winner's
+    // set, never fail the search on a unique-index violation.
+    [Fact]
+    public async Task Concurrent_Bootstraps_Do_Not_Fail_And_Leave_One_Valid_Set()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var faceIds = new List<Guid>();
+        for (var i = 0; i < 8; i++)
+        {
+            faceIds.Add((await SeedFaceAsync(f, ownerId, profileId, OneHot(i))).FaceId);
+        }
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, faceIds.ToArray());
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(async _ =>
+        {
+            using var scope = f.Services.CreateScope();
+            var references = scope.ServiceProvider.GetRequiredService<PersonFaceReferenceService>();
+            return await references.EnsureAsync(ownerId, personId, profileId, 0.9);
+        }));
+
+        // Every caller got a usable, capped set…
+        Assert.All(results, r =>
+        {
+            Assert.NotEmpty(r);
+            Assert.InRange(r.Count, 1, PersonFaceReferenceService.MaxPersonReferenceFaces);
+        });
+
+        // …and exactly one set is persisted, with unique faces and ordinals.
+        var rows = await ReferenceRowsAsync(f, personId);
+        Assert.InRange(rows.Count, 1, PersonFaceReferenceService.MaxPersonReferenceFaces);
+        Assert.Equal(rows.Count, rows.Select(r => r.FaceDetectionId).Distinct().Count());
+        Assert.Equal(rows.Count, rows.Select(r => r.Ordinal).Distinct().Count());
+    }
+
     // ---- pure selection ---------------------------------------------------
 
     [Fact]
