@@ -435,14 +435,27 @@ public sealed class AlbumContributionTests : IDisposable
     }
 
     [Fact]
-    public async Task Bulk_Refuses_More_Than_A_Thousand_Ids()
+    public async Task Bulk_Accepts_The_Batch_Ceiling_And_Refuses_One_More()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var (_, bob) = await _factory.CreateAuthenticatedClientAsync(ContributorEmail);
         var albumId = await CreateAlbumAsync(owner, "Trip");
         await InviteAcceptAsync(owner, bob, albumId, ContributorEmail, "contributor");
 
-        var tooMany = Enumerable.Range(0, 1001).Select(_ => Guid.NewGuid()).ToArray();
+        // The ceiling is a REQUEST-SIZE limit, not an album-capacity one, so it
+        // can be pinned with ids that exist nowhere: at the limit the request is
+        // accepted and every id is simply skipped, one over it is refused before
+        // any file is looked at. Deliberately no 3000 real uploads — that would
+        // test the fixture, not the boundary.
+        var atLimit = Enumerable.Range(0, 3000).Select(_ => Guid.NewGuid()).ToArray();
+        var accepted = await BulkContribute(bob, albumId, atLimit);
+        accepted.EnsureSuccessStatusCode();
+        var counts = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(3000, counts.GetProperty("requested").GetInt32());
+        Assert.Equal(0, counts.GetProperty("succeeded").GetInt32());
+        Assert.Equal(3000, counts.GetProperty("skipped").GetInt32());
+
+        var tooMany = Enumerable.Range(0, 3001).Select(_ => Guid.NewGuid()).ToArray();
         Assert.Equal(HttpStatusCode.BadRequest,
             (await BulkContribute(bob, albumId, tooMany)).StatusCode);
         Assert.Equal(0, await CountAlbumItemsAsync(albumId));

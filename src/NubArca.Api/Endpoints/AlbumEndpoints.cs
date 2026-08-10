@@ -22,7 +22,7 @@ public static class AlbumEndpoints
 {
     // Bulk add/remove of many gallery-selected items to/from an album. Metadata
     // carries safe counts only (requested/succeeded/skipped), never file ids en masse.
-    private const int MaxBulkAlbumItems = 1000;
+    private const int MaxBulkAlbumItems = 3000;
 
     public static IEndpointRouteBuilder MapAlbumEndpoints(this IEndpointRouteBuilder app)
     {

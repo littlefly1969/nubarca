@@ -290,7 +290,7 @@ public static class AlbumSharingEndpoints
 
     // The same ceiling the owner's bulk album routes use: a contribution is the
     // same kind of selection, sent by the same grid.
-    private const int MaxBulkContributions = 1000;
+    private const int MaxBulkContributions = 3000;
 
     private static void MapContribution(IEndpointRouteBuilder app)
     {
