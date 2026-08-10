@@ -25,8 +25,8 @@ public sealed class PeopleService
     private readonly IAiProfileRegistry _registry;
     private readonly IOptions<AiOptions> _options;
     private readonly IFaceSettingsProvider _settings;
-    private readonly IAiVectorSerializer _serializer;
     private readonly FaceVectorIndexService _vectors;
+    private readonly PersonFaceReferenceService _references;
     private readonly TimeProvider _clock;
 
     public PeopleService(
@@ -34,16 +34,16 @@ public sealed class PeopleService
         IAiProfileRegistry registry,
         IOptions<AiOptions> options,
         IFaceSettingsProvider settings,
-        IAiVectorSerializer serializer,
         FaceVectorIndexService vectors,
+        PersonFaceReferenceService references,
         TimeProvider clock)
     {
         _db = db;
         _registry = registry;
         _options = options;
         _settings = settings;
-        _serializer = serializer;
         _vectors = vectors;
+        _references = references;
         _clock = clock;
     }
 
@@ -127,6 +127,10 @@ public sealed class PeopleService
             .Where(a => a.OwnerUserId == ownerUserId && a.PersonId == personId)
             .ToListAsync(cancellationToken);
         _db.PersonFaceAssignments.RemoveRange(assignments);
+
+        // Archiving drops the confirmed assignments the references point at, so the
+        // reference set goes with them (derived state, never a source of truth).
+        await _references.DropForPersonAsync(ownerUserId, personId, cancellationToken);
 
         var clusters = await _db.FaceClusters
             .Where(c => c.OwnerUserId == ownerUserId && c.PersonId == personId)
@@ -240,6 +244,7 @@ public sealed class PeopleService
         cluster.UpdatedAt = now;
         person.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+        await _references.MaintainAfterAssignAsync(ownerUserId, person.Id, memberFaceIds, cancellationToken);
 
         return await GetPersonAsync(ownerUserId, person.Id, cancellationToken);
     }
@@ -282,6 +287,7 @@ public sealed class PeopleService
             .Where(a => a.OwnerUserId == ownerUserId && surfaceable.Contains(a.FaceDetectionId))
             .ToListAsync(cancellationToken);
         _db.PersonFaceAssignments.RemoveRange(assignments);
+        await _references.DropForFacesAsync(ownerUserId, surfaceable, cancellationToken);
 
         var alreadyIgnored = (await _db.IgnoredFaces.AsNoTracking()
             .Where(i => i.OwnerUserId == ownerUserId && surfaceable.Contains(i.FaceDetectionId))
@@ -384,6 +390,7 @@ public sealed class PeopleService
         cluster.UpdatedAt = now;
         person.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+        await _references.MaintainAfterAssignAsync(ownerUserId, personId, toAssign, cancellationToken);
 
         return new ClusterAssignSummaryDto(
             assignedCount, skippedAlreadyAssigned, skippedIgnored, skippedIneligible, cluster.Status);
@@ -445,6 +452,7 @@ public sealed class PeopleService
 
         await AssignFacesAsync(ownerUserId, personId, new List<Guid> { faceDetectionId }, PersonFaceAssignmentSources.ManualAdd, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await _references.MaintainAfterAssignAsync(ownerUserId, personId, new List<Guid> { faceDetectionId }, cancellationToken);
         return true;
     }
 
@@ -459,6 +467,7 @@ public sealed class PeopleService
         }
 
         _db.PersonFaceAssignments.Remove(assignment);
+        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -506,6 +515,8 @@ public sealed class PeopleService
         await AssignFacesAsync(ownerUserId, person.Id, new List<Guid> { faceDetectionId }, PersonFaceAssignmentSources.ManualAdd, cancellationToken);
         person.UpdatedAt = _clock.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(cancellationToken);
+        // A move also takes the face's reference away from the person it left.
+        await _references.MaintainAfterAssignAsync(ownerUserId, person.Id, new List<Guid> { faceDetectionId }, cancellationToken);
 
         return await GetPersonAsync(ownerUserId, person.Id, cancellationToken);
     }
@@ -522,6 +533,7 @@ public sealed class PeopleService
             return false;
         }
         _db.PersonFaceAssignments.Remove(assignment);
+        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -543,6 +555,7 @@ public sealed class PeopleService
             .Where(a => a.OwnerUserId == ownerUserId && a.FaceDetectionId == faceDetectionId)
             .ToListAsync(cancellationToken);
         _db.PersonFaceAssignments.RemoveRange(assignments);
+        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
 
         var already = await _db.IgnoredFaces.AnyAsync(
             i => i.OwnerUserId == ownerUserId && i.FaceDetectionId == faceDetectionId, cancellationToken);
@@ -812,7 +825,6 @@ public sealed class PeopleService
             return new SimilarFacesPage(false, threshold, Array.Empty<SimilarFaceDto>(), null, false, "no-active-profile");
         }
 
-        // Query vector = the person's representative assigned face embedding.
         var assignedFaceIds = await _db.PersonFaceAssignments.AsNoTracking()
             .Where(a => a.OwnerUserId == ownerUserId && a.PersonId == personId)
             .Select(a => a.FaceDetectionId)
@@ -822,36 +834,57 @@ public sealed class PeopleService
             return new SimilarFacesPage(true, threshold, Array.Empty<SimilarFaceDto>(), null, false, null);
         }
 
-        var source = await _db.FaceEmbeddings.AsNoTracking()
-            .Where(e => e.ProfileId == profile.Id
-                && e.EmbeddingStatus == AiArtifactStatuses.Completed
-                && assignedFaceIds.Contains(e.FaceDetectionId))
-            .Select(e => new { e.FaceDetectionId, e.EmbeddingBytes })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (source is null)
+        // Query template = the person's 1..6 PERSISTENT reference faces, not one
+        // arbitrary assigned embedding. A person photographed across decades does
+        // not live at a single point in the embedding space, and a single source
+        // made every suggestion depend on which face happened to come back first.
+        // The set is bootstrapped lazily here and reused afterwards.
+        //
+        // The coverage boundary is the CONFIGURED default search threshold, never
+        // the caller's slider: the reference set is persisted, so it must not
+        // depend on whichever threshold happened to trigger the bootstrap.
+        var references = await _references.EnsureAsync(
+            ownerUserId, personId, profile.Id,
+            settings.ClampSearchThreshold(settings.SearchDefaultSimilarityThreshold), cancellationToken);
+        if (references.Count == 0)
         {
             return new SimilarFacesPage(true, threshold, Array.Empty<SimilarFaceDto>(), null, false, "not-indexed");
         }
 
-        float[] vector;
-        try { vector = _serializer.Deserialize(source.EmbeddingBytes); }
-        catch { return new SimilarFacesPage(true, threshold, Array.Empty<SimilarFaceDto>(), null, false, "not-indexed"); }
-
-        var neighbors = await _vectors.SearchAsync(
-            profile.Id, vector, ownerUserId, source.FaceDetectionId, threshold, SimilarFetchCap, cancellationToken);
-        if (neighbors is null)
+        // At most MaxPersonReferenceFaces ANN searches, at the SAME threshold as
+        // before. A candidate's score is the BEST similarity across the references,
+        // so a face matching only the young reference ranks on that match alone.
+        var assignedSet = assignedFaceIds.ToHashSet();
+        var best = new Dictionary<Guid, FaceNeighbor>();
+        foreach (var reference in references)
         {
-            // pgvector unavailable → face search not available in this deployment.
-            return new SimilarFacesPage(false, threshold, Array.Empty<SimilarFaceDto>(), null, false, "vector-backend-unavailable");
+            var neighbors = await _vectors.SearchAsync(
+                profile.Id, reference.Vector, ownerUserId, reference.FaceDetectionId,
+                threshold, SimilarFetchCap, cancellationToken);
+            if (neighbors is null)
+            {
+                // pgvector unavailable → face search not available in this deployment.
+                return new SimilarFacesPage(false, threshold, Array.Empty<SimilarFaceDto>(), null, false, "vector-backend-unavailable");
+            }
+
+            foreach (var n in neighbors)
+            {
+                // Faces already on THIS person are excluded exactly as before;
+                // faces on ANOTHER person are deliberately kept (§ enrichment
+                // below) because they are how a past mistake gets corrected.
+                if (assignedSet.Contains(n.FaceDetectionId))
+                {
+                    continue;
+                }
+                if (!best.TryGetValue(n.FaceDetectionId, out var current) || n.Score > current.Score)
+                {
+                    best[n.FaceDetectionId] = n;
+                }
+            }
         }
 
-        // Exclude faces already assigned to THIS person; dedupe by face keeping the
-        // best score; order (score desc, faceId asc); apply keyset cursor + limit.
-        var assignedSet = assignedFaceIds.ToHashSet();
-        var ordered = neighbors
-            .Where(n => !assignedSet.Contains(n.FaceDetectionId))
-            .GroupBy(n => n.FaceDetectionId)
-            .Select(g => g.OrderByDescending(x => x.Score).First())
+        // Order (score desc, faceId asc); apply keyset cursor + limit.
+        var ordered = best.Values
             .OrderByDescending(n => n.Score).ThenBy(n => n.FaceDetectionId)
             .ToList();
 
@@ -868,14 +901,21 @@ public sealed class PeopleService
         var hasMore = pageRows.Count > pageSize;
         var window = pageRows.Take(pageSize).ToList();
 
-        // Resolve boxes/file refs for the window (owner-visible only).
-        var refs = await ResolveFaceRefsAsync(ownerUserId, window.Select(w => w.FaceDetectionId).ToList(), cancellationToken);
+        // Resolve boxes/file refs for the window (owner-visible only), plus the
+        // person each candidate is ALREADY on, so the UI can offer an explicit
+        // move instead of an add that silently steals the face.
+        var windowIds = window.Select(w => w.FaceDetectionId).ToList();
+        var refs = await ResolveFaceRefsAsync(ownerUserId, windowIds, cancellationToken);
+        var assignedTo = await AssignedPeopleByFaceAsync(ownerUserId, windowIds, cancellationToken);
         var items = window
             .Where(w => refs.ContainsKey(w.FaceDetectionId))
             .Select(w =>
             {
                 var r = refs[w.FaceDetectionId];
-                return new SimilarFaceDto(w.FaceDetectionId, r.FileItemId, r.Name, r.Box, Math.Round(w.Score, 4));
+                var heldBy = assignedTo.GetValueOrDefault(w.FaceDetectionId);
+                return new SimilarFaceDto(
+                    w.FaceDetectionId, r.FileItemId, r.Name, r.Box, Math.Round(w.Score, 4),
+                    heldBy?.PersonId, heldBy?.DisplayName);
             })
             .ToList();
 
@@ -1073,6 +1113,31 @@ public sealed class PeopleService
         return result;
     }
 
+    // The owner's own person each of these faces is assigned to (if any). Owner
+    // scoped on BOTH the assignment and the person, so a face another account has
+    // named can never contribute a name here.
+    private async Task<Dictionary<Guid, PersonRef>> AssignedPeopleByFaceAsync(
+        Guid ownerUserId, IReadOnlyList<Guid> faceIds, CancellationToken cancellationToken)
+    {
+        if (faceIds.Count == 0)
+        {
+            return new Dictionary<Guid, PersonRef>();
+        }
+
+        var rows = await (
+            from a in _db.PersonFaceAssignments.AsNoTracking()
+            where a.OwnerUserId == ownerUserId && faceIds.Contains(a.FaceDetectionId)
+            join p in _db.People.AsNoTracking() on a.PersonId equals p.Id
+            where p.OwnerUserId == ownerUserId && !p.IsArchived
+            select new { a.FaceDetectionId, p.Id, p.DisplayName }).ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => r.FaceDetectionId)
+            .ToDictionary(g => g.Key, g => new PersonRef(g.First().Id, g.First().DisplayName));
+    }
+
+    private sealed record PersonRef(Guid PersonId, string? DisplayName);
+
     private async Task<FaceRefDto?> FirstSurfaceableMemberRefAsync(
         Guid ownerUserId, Guid clusterId, CancellationToken cancellationToken)
     {
@@ -1216,7 +1281,13 @@ public sealed record PersonPhotoFace(Guid FaceId, FaceBoxDto Box);
 
 public sealed record PersonPhotoDto(Guid FileItemId, string Name, IReadOnlyList<PersonPhotoFace> Faces);
 
-public sealed record SimilarFaceDto(Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, double Score);
+// A similar-face proposal. AssignedPersonId/Name are null for a free candidate and
+// name the person the face is ALREADY on otherwise — always the SAME owner's
+// person, resolved through owner-scoped assignments, so nothing cross-owner can
+// appear here.
+public sealed record SimilarFaceDto(
+    Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, double Score,
+    Guid? AssignedPersonId = null, string? AssignedPersonName = null);
 
 public sealed record UnassignedFaceDto(
     Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, bool HasEmbedding, double? DetectionScore);

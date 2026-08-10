@@ -1417,6 +1417,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'person.noMoreSimilar': 'No other similar faces.',
   'person.similarityScore': 'Similarity {pct}%',
   'person.add': 'Add',
+  'person.alreadyAssignedTo': 'Already assigned to: {name}',
+  'person.moveHere': 'Move here',
 
   // --- Person detail: video results (VFACE-02) ---
   'person.videosAria': 'Videos with this person',

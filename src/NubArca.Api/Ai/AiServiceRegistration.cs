@@ -122,6 +122,8 @@ public static class AiServiceRegistration
         services.AddScoped<FaceCoverageService>();
         services.AddScoped<FaceDiagnosticsService>();
         services.AddScoped<FaceClusteringService>();
+        // Lazily-bootstrapped multi-reference person templates (max 6/person/profile).
+        services.AddScoped<PersonFaceReferenceService>();
         services.AddScoped<PeopleService>();
         // UI-only high-quality face crops (derived cache; never an embedding source).
         services.AddScoped<FacePreviewService>();

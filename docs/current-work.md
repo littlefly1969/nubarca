@@ -160,6 +160,32 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **Nothing automated writes a person decision.** Suggestions are advisory and
   never persisted; there is no auto-assignment job and no way to create a person
   from a track.
+- **A person is a TEMPLATE of 1–6 reference faces, not one arbitrary face.**
+  Similar-face search once queried with whichever completed assigned embedding
+  came back first, so suggestions for someone photographed across decades
+  depended on a coin flip. `PersonFaceReference` persists up to
+  `MaxPersonReferenceFaces` = 6 confirmed faces per (person, profile); the search
+  runs one ANN query per reference at the SAME threshold and takes the **best**
+  score per candidate. Three things are easy to undo by accident. The set is
+  built by embedding DIVERSITY (`novelty * (0.5 + 0.5 * quality)`, stopping at
+  candidates already covered above the configured default search threshold) —
+  never by classifying age, film or colour, which would need a model that does
+  not exist here; an ordinary person therefore settles at 1–3 references and only
+  a genuinely wide appearance span reaches 6. It is bootstrapped **lazily** on
+  the first search and maintained incrementally at assign time, so the only
+  historical embedding scans are bootstrap and replenishment — a deploy starts no
+  background face work and a normal search reads zero history, zero photos and
+  runs zero inference. And the table is DERIVED: `PersonFaceAssignments` stays
+  authoritative, an empty table is valid, and a reference that stops being a
+  confirmed, surfaceable, embedded face of that person is dropped rather than
+  trusted.
+- **A similar-face proposal already on ANOTHER person is kept, and says so.**
+  Only the CURRENT person's faces are excluded. A candidate the owner filed under
+  someone else is exactly how a past mistake gets corrected, so `SimilarFaceDto`
+  carries `AssignedPersonId`/`AssignedPersonName` (owner-scoped on both the
+  assignment and the person) and the UI labels it and offers "Sposta qui" instead
+  of "Aggiungi" — the backend already moves the assignment, and the action must
+  not pretend it is an ordinary add.
 - **Co-presence requires temporal overlap within one canonical analysis**, with a
   strict half-open predicate and deliberately no tolerance derived from the
   sampling interval — a query about persisted evidence must not change answer

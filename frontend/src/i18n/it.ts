@@ -1428,6 +1428,8 @@ const it = {
   'person.noMoreSimilar': 'Nessun altro volto simile.',
   'person.similarityScore': 'Similarità {pct}%',
   'person.add': 'Aggiungi',
+  'person.alreadyAssignedTo': 'Già assegnato a: {name}',
+  'person.moveHere': 'Sposta qui',
 
   // --- Dettaglio persona: risultati video (VFACE-02) ---
   'person.videosAria': 'Video con questa persona',

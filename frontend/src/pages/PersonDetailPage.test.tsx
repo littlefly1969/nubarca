@@ -35,10 +35,29 @@ function similar(available: boolean): MockHandler {
     jsonResponse({
       profileAvailable: available,
       threshold: 0.35,
-      items: available ? [{ faceId: 'f-2', fileItemId: 'file-2', name: 'b.png', box, score: 0.8 }] : [],
+      items: available
+        ? [{ faceId: 'f-2', fileItemId: 'file-2', name: 'b.png', box, score: 0.8, assignedPersonId: null, assignedPersonName: null }]
+        : [],
       nextCursor: null,
       hasMore: false,
       unavailableReason: available ? null : 'vector-backend-unavailable',
+    });
+}
+
+// A proposal that already belongs to another person: kept on purpose, so it must
+// be labelled and offer a MOVE rather than a plain add.
+function similarAssignedElsewhere(): MockHandler {
+  return () =>
+    jsonResponse({
+      profileAvailable: true,
+      threshold: 0.35,
+      items: [
+        { faceId: 'f-2', fileItemId: 'file-2', name: 'b.png', box, score: 0.8, assignedPersonId: null, assignedPersonName: null },
+        { faceId: 'f-3', fileItemId: 'file-3', name: 'c.png', box, score: 0.7, assignedPersonId: 'p-2', assignedPersonName: 'Maria' },
+      ],
+      nextCursor: null,
+      hasMore: false,
+      unavailableReason: null,
     });
 }
 
@@ -152,6 +171,39 @@ it('adds a similar face to the person', async () => {
   );
   await screen.findByText(/80%/);
   await userEvent.click(screen.getByRole('button', { name: 'Aggiungi' }));
+  await waitFor(() =>
+    expect(mock.calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/people/p-1/faces'))).toBe(true),
+  );
+});
+
+it('labels a proposal already assigned to another person and offers a move', async () => {
+  const mock = installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/similar-faces': similarAssignedElsewhere(),
+    'POST /api/people/p-1/faces': () => emptyResponse(),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  // The assigned candidate names its current person…
+  expect(await screen.findByText('Già assegnato a: Maria')).toBeTruthy();
+  // …and its action says it MOVES the face, never a plain "Aggiungi".
+  const move = screen.getByRole('button', { name: 'Sposta qui' });
+  expect(move).toBeTruthy();
+  // The free candidate keeps the ordinary add action.
+  expect(screen.getByRole('button', { name: 'Aggiungi' })).toBeTruthy();
+
+  // The move goes through the same one-person-per-face assign endpoint.
+  await userEvent.click(move);
   await waitFor(() =>
     expect(mock.calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/people/p-1/faces'))).toBe(true),
   );

@@ -48,6 +48,12 @@ export interface SimilarFace {
   name: string;
   box: FaceBox;
   score: number;
+  // The person this candidate is ALREADY assigned to, when it is not free.
+  // Proposals on another person are kept on purpose — they are how a wrong
+  // earlier classification gets corrected — so the UI must say so and offer a
+  // move rather than a plain add. Always one of the caller's own people.
+  assignedPersonId: string | null;
+  assignedPersonName: string | null;
 }
 
 export interface SimilarFacesPage {

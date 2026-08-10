@@ -111,6 +111,11 @@ public class AppDbContext : DbContext
     public DbSet<FaceClusterMember> FaceClusterMembers => Set<FaceClusterMember>();
     public DbSet<PersonFaceAssignment> PersonFaceAssignments => Set<PersonFaceAssignment>();
     public DbSet<IgnoredFace> IgnoredFaces => Set<IgnoredFace>();
+
+    // Derived, cacheable multi-reference template per (person, profile): the 1..6
+    // confirmed faces similar-face search queries with. Rebuilt lazily from
+    // PersonFaceAssignments; an empty table is always valid.
+    public DbSet<PersonFaceReference> PersonFaceReferences => Set<PersonFaceReference>();
     public DbSet<AiSetting> AiSettings => Set<AiSetting>();
 
     // UI-only derived face crops (cache; regenerable). Never an embedding source.

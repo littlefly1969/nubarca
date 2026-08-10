@@ -113,6 +113,142 @@ public sealed class PeopleSimilarFacesPgIntegrationTests : IAsyncLifetime
         }
     }
 
+    // The multi-reference template in the real ANN path: a person confirmed with
+    // two very different appearances gets TWO references, and a candidate that
+    // matches only the SECOND one still comes back — which the previous
+    // single-arbitrary-source query could not do. Also proves the merge is a MAX
+    // over references, that a neighbour seen by both references appears once, that
+    // the person's own faces stay excluded, and that a candidate already on
+    // another person is RETAINED and named.
+    [SkippableFact]
+    public async Task Multi_Reference_Search_Merges_By_Max_Score_And_Names_Assigned_Candidates()
+    {
+        Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
+
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var profileKey = $"face-multiref-{suffix}";
+        var settings = new Dictionary<string, string?>
+        {
+            ["Ai:Enabled"] = "true",
+            ["Ai:FaceProfileKey"] = profileKey,
+        };
+        await using var factory = new PostgresWebApplicationFactory(_fixture.ConnectionString!, settings);
+
+        Guid owner, personId, otherPersonId, profileId;
+        Guid youngFace, oldFace, matchesYoung, matchesOld, seenByBoth, onOtherPerson;
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var users = scope.ServiceProvider.GetRequiredService<IUserService>();
+            var ser = scope.ServiceProvider.GetRequiredService<IAiVectorSerializer>();
+            var vectors = scope.ServiceProvider.GetRequiredService<FaceVectorIndexService>();
+
+            owner = (await users.CreateAsync($"mr-{suffix}@example.com", "M")).Id;
+            var model = AddModel(db, $"m-{suffix}");
+            profileId = AddProfile(db, profileKey, model.Id).Id;
+
+            // Two ORTHOGONAL confirmed appearances ⇒ cosine 0 between them, so both
+            // are selected as references (neither covers the other).
+            youngFace = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+            oldFace = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(1), null)).FaceId;
+
+            // Candidates: one on each reference's axis, plus one at 45° that BOTH
+            // reference searches return (cosine ~0.707 to each).
+            matchesYoung = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+            matchesOld = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(1), null)).FaceId;
+            seenByBoth = (await AddFaceAsync(db, ser, vectors, owner, profileId, Diagonal(), null)).FaceId;
+            onOtherPerson = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(1), null)).FaceId;
+
+            var person = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Alice", CreatedAt = DateTime.UtcNow };
+            var other = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Maria", CreatedAt = DateTime.UtcNow };
+            db.People.AddRange(person, other);
+            Assign(db, owner, person.Id, youngFace);
+            Assign(db, owner, person.Id, oldFace);
+            Assign(db, owner, other.Id, onOtherPerson);
+            personId = person.Id;
+            otherPersonId = other.Id;
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            var page = await people.FindSimilarFacesAsync(owner, personId, 0.5, 50, null);
+            Assert.NotNull(page);
+            Assert.True(page!.ProfileAvailable);
+
+            var byFace = page.Items.ToDictionary(i => i.FaceId);
+
+            // A candidate on EITHER reference's axis is returned — with one
+            // arbitrary source, only one of these two could have been.
+            Assert.Contains(matchesYoung, byFace.Keys);
+            Assert.Contains(matchesOld, byFace.Keys);
+
+            // Score is the BEST similarity across references, not the last one.
+            Assert.Equal(1.0, byFace[matchesYoung].Score, 3);
+            Assert.Equal(1.0, byFace[matchesOld].Score, 3);
+            Assert.Equal(Math.Sqrt(0.5), byFace[seenByBoth].Score, 3);
+
+            // Seen by both reference searches, listed once.
+            Assert.Single(page.Items, i => i.FaceId == seenByBoth);
+            Assert.Equal(page.Items.Count, page.Items.Select(i => i.FaceId).Distinct().Count());
+
+            // The person's own confirmed faces stay excluded, exactly as before.
+            Assert.DoesNotContain(youngFace, byFace.Keys);
+            Assert.DoesNotContain(oldFace, byFace.Keys);
+
+            // A face on ANOTHER person is kept — it is how a past mistake is
+            // corrected — and says so.
+            Assert.Contains(onOtherPerson, byFace.Keys);
+            Assert.Equal(otherPersonId, byFace[onOtherPerson].AssignedPersonId);
+            Assert.Equal("Maria", byFace[onOtherPerson].AssignedPersonName);
+
+            // A free candidate carries no assignment.
+            Assert.Null(byFace[matchesYoung].AssignedPersonId);
+            Assert.Null(byFace[matchesYoung].AssignedPersonName);
+        }
+
+        // The reference set was persisted, is at most 6, and is reused unchanged.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rows = await db.PersonFaceReferences.AsNoTracking()
+                .Where(r => r.PersonId == personId).OrderBy(r => r.Ordinal).ToListAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.True(rows.Count <= PersonFaceReferenceService.MaxPersonReferenceFaces);
+            Assert.All(rows, r => Assert.Equal(profileId, r.ProfileId));
+            Assert.Equal(new[] { youngFace, oldFace }.OrderBy(x => x), rows.Select(r => r.FaceDetectionId).OrderBy(x => x));
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            var again = await people.FindSimilarFacesAsync(owner, personId, 0.5, 50, null);
+            Assert.NotNull(again);
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var rows = await db.PersonFaceReferences.AsNoTracking().Where(r => r.PersonId == personId).ToListAsync();
+            Assert.Equal(2, rows.Count); // reused, not re-derived into duplicates
+        }
+    }
+
+    private static void Assign(AppDbContext db, Guid owner, Guid personId, Guid faceId) =>
+        db.PersonFaceAssignments.Add(new PersonFaceAssignment
+        {
+            Id = Guid.NewGuid(), OwnerUserId = owner, PersonId = personId, FaceDetectionId = faceId,
+            Source = PersonFaceAssignmentSources.UserConfirmed, CreatedAt = DateTime.UtcNow,
+        });
+
+    // 45° between OneHot(0) and OneHot(1): cosine sqrt(0.5) to each, so BOTH
+    // reference searches return it above a 0.5 threshold.
+    private static float[] Diagonal()
+    {
+        var v = new float[Dim];
+        v[0] = 1f;
+        v[1] = 1f;
+        return v;
+    }
+
     private static async Task<List<Guid>> CollectAsync(PeopleService people, Guid owner, Guid personId, double threshold)
     {
         var ids = new List<Guid>();

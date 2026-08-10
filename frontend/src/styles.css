@@ -5929,6 +5929,15 @@ video.lightbox-image {
 }
 .people-card-link { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; text-decoration: none; color: inherit; }
 .people-card-name { font-weight: 600; text-align: center; word-break: break-word; }
+/* A similar-face proposal that already belongs to another person. It stays in
+   the list on purpose — that is how an earlier mistake gets corrected — so it
+   must read as a DIFFERENT thing from a free proposal, not as decoration. */
+.people-card-assigned { border-color: var(--warning-border, #f59e0b); }
+.people-card-badge {
+  font-size: 0.75rem; font-weight: 600; text-align: center; word-break: break-word;
+  padding: 0.15rem 0.4rem; border-radius: 6px;
+  background: var(--warning-bg, #fef3c7); color: var(--warning-fg, #92400e);
+}
 .face-crop { border-radius: 8px; background: #f1f5f9; }
 .face-crop-empty { width: 96px; height: 96px; display: inline-block; }
 .people-assign { display: flex; gap: 0.35rem; width: 100%; }

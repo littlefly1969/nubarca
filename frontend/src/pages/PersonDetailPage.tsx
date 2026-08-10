@@ -266,19 +266,31 @@ function SimilarFacesSection({
       {status === 'ready' && items.length === 0 && <p className="muted">{t('person.noMoreSimilar')}</p>}
       {status === 'ready' && items.length > 0 && (
         <ul className="people-grid">
-          {items.map((face) => (
-            <li key={face.faceId} className="people-card">
-              <FaceCrop
-                faceId={face.faceId}
-                fileItemId={face.fileItemId}
-                box={face.box}
-                alt={face.name}
-                onClick={() => onOpenFace(items.map((it) => it.faceId), items.findIndex((it) => it.faceId === face.faceId))}
-              />
-              <span className="muted">{t('person.similarityScore', { pct: Math.round(face.score * 100) })}</span>
-              <button type="button" onClick={() => void add(face.faceId)}>{t('person.add')}</button>
-            </li>
-          ))}
+          {items.map((face) => {
+            // A candidate already on another person is deliberately still
+            // proposed (it is how a past mistake is corrected), so it must never
+            // look like a free one: it carries the current name and its action
+            // says it MOVES the face rather than adding it.
+            const assignedTo = face.assignedPersonId !== null ? face.assignedPersonName ?? t('people.unnamed') : null;
+            return (
+              <li key={face.faceId} className={assignedTo !== null ? 'people-card people-card-assigned' : 'people-card'}>
+                <FaceCrop
+                  faceId={face.faceId}
+                  fileItemId={face.fileItemId}
+                  box={face.box}
+                  alt={face.name}
+                  onClick={() => onOpenFace(items.map((it) => it.faceId), items.findIndex((it) => it.faceId === face.faceId))}
+                />
+                <span className="muted">{t('person.similarityScore', { pct: Math.round(face.score * 100) })}</span>
+                {assignedTo !== null && (
+                  <span className="people-card-badge">{t('person.alreadyAssignedTo', { name: assignedTo })}</span>
+                )}
+                <button type="button" onClick={() => void add(face.faceId)}>
+                  {assignedTo !== null ? t('person.moveHere') : t('person.add')}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
