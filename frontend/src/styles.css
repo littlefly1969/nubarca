@@ -5929,6 +5929,16 @@ video.lightbox-image {
 }
 .people-card-link { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; text-decoration: none; color: inherit; }
 .people-card-name { font-weight: 600; text-align: center; word-break: break-word; }
+/* The person's persisted reference template — a compact, deliberately quiet
+   strip that wraps on narrow viewports. It is observability, not a control
+   surface, so it never competes with the photos or the similar-face grid. */
+.reference-faces-grid {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: 0.5rem;
+}
+.reference-face { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.reference-face-slot { font-size: 0.7rem; font-weight: 600; color: var(--muted, #6b7280); }
+
 /* A similar-face proposal that already belongs to another person. It stays in
    the list on purpose — that is how an earlier mistake gets corrected — so it
    must read as a DIFFERENT thing from a free proposal, not as decoration. */

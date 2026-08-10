@@ -802,6 +802,58 @@ public sealed class PeopleService
             .ToList();
     }
 
+    // ---- reference faces (owner-private, read-only observability) --------
+
+    // The person's PERSISTED reference faces for the active profile — the same
+    // rows the multi-reference search queries with, in Ordinal order.
+    //
+    // Strictly a WINDOW on existing state: it never bootstraps, never scans
+    // embeddings and never writes. A person whose set has not been built yet
+    // answers with an empty list, not with a freshly-derived one, because the
+    // panel must show what the matcher would actually use rather than what it
+    // would pick if asked right now. Null = generic 404 (missing / archived /
+    // cross-owner person).
+    public async Task<IReadOnlyList<PersonReferenceFaceDto>?> GetPersonReferenceFacesAsync(
+        Guid ownerUserId, Guid personId, CancellationToken cancellationToken = default)
+    {
+        var exists = await _db.People.AnyAsync(
+            p => p.Id == personId && p.OwnerUserId == ownerUserId && !p.IsArchived, cancellationToken);
+        if (!exists)
+        {
+            return null;
+        }
+
+        var profile = await ResolveActiveProfileAsync(cancellationToken);
+        if (profile is null)
+        {
+            return Array.Empty<PersonReferenceFaceDto>();
+        }
+
+        var rows = await _db.PersonFaceReferences.AsNoTracking()
+            .Where(r => r.OwnerUserId == ownerUserId && r.PersonId == personId && r.ProfileId == profile.Id)
+            .OrderBy(r => r.Ordinal)
+            .Select(r => new { r.FaceDetectionId, r.Ordinal })
+            .ToListAsync(cancellationToken);
+        if (rows.Count == 0)
+        {
+            return Array.Empty<PersonReferenceFaceDto>();
+        }
+
+        // Same owner-visible, non-vault resolution as every other face surface —
+        // a reference whose photo is no longer surfaceable is omitted rather than
+        // leaked. (The search path drops such a row on its next Ensure.)
+        var refs = await ResolveFaceRefsAsync(
+            ownerUserId, rows.Select(r => r.FaceDetectionId).ToList(), cancellationToken);
+        return rows
+            .Where(r => refs.ContainsKey(r.FaceDetectionId))
+            .Select(r =>
+            {
+                var f = refs[r.FaceDetectionId];
+                return new PersonReferenceFaceDto(f.FaceId, f.FileItemId, f.Name, f.Box, r.Ordinal);
+            })
+            .ToList();
+    }
+
     // ---- similar faces (owner-private, threshold, pgvector) --------------
 
     public async Task<SimilarFacesPage?> FindSimilarFacesAsync(
@@ -1288,6 +1340,11 @@ public sealed record PersonPhotoDto(Guid FileItemId, string Name, IReadOnlyList<
 public sealed record SimilarFaceDto(
     Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, double Score,
     Guid? AssignedPersonId = null, string? AssignedPersonName = null);
+
+// One persisted reference face of a person. Ordinal is the slot the matcher
+// stored it in (0-based); no vector, score, distance or storage identifier.
+public sealed record PersonReferenceFaceDto(
+    Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, int Ordinal);
 
 public sealed record UnassignedFaceDto(
     Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box, bool HasEmbedding, double? DetectionScore);

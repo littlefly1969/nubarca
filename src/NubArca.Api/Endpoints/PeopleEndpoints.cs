@@ -147,6 +147,21 @@ public static class PeopleEndpoints
             return photos is null ? Results.NotFound() : Results.Ok(photos);
         }).WithName("GetPersonPhotos").RequirePermission(Permissions.PeopleAccess);
 
+        // The person's persisted reference faces (the multi-reference template the
+        // similar-face search queries with), in Ordinal order. READ-ONLY: it never
+        // bootstraps a set, so an unsearched person answers [] rather than paying
+        // for a derivation nobody asked for.
+        app.MapGet("/api/people/{personId:guid}/reference-faces", async (
+            Guid personId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.PeopleService people,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var faces = await people.GetPersonReferenceFacesAsync(ownerUserId, personId, cancellationToken);
+            return faces is null ? Results.NotFound() : Results.Ok(faces);
+        }).WithName("GetPersonReferenceFaces").RequirePermission(Permissions.PeopleAccess);
+
         app.MapGet("/api/people/{personId:guid}/similar-faces", async (
             Guid personId,
             [FromQuery] double? minSimilarity,

@@ -1430,6 +1430,11 @@ const it = {
   'person.add': 'Aggiungi',
   'person.alreadyAssignedTo': 'Già assegnato a: {name}',
   'person.moveHere': 'Sposta qui',
+  'person.referenceFacesAria': 'Volti di riferimento',
+  'person.referenceFacesHeading': 'Volti di riferimento · {count}/{max}',
+  'person.referenceFacesEmpty': 'Volti di riferimento non ancora generati.',
+  'person.referenceFacesEmptyHint': 'Verranno scelti alla prima ricerca di volti simili.',
+  'person.referenceFaceSlot': 'Riferimento {n}',
 
   // --- Dettaglio persona: risultati video (VFACE-02) ---
   'person.videosAria': 'Video con questa persona',

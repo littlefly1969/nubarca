@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PersonDetailPage } from './PersonDetailPage';
@@ -59,6 +59,20 @@ function similarAssignedElsewhere(): MockHandler {
       hasMore: false,
       unavailableReason: null,
     });
+}
+
+// The persisted reference template (person_face_references), in slot order.
+function referenceFaceRows(count: number) {
+  return Array.from({ length: count }, (_, i) => ({
+    faceId: `ref-${i}`,
+    fileItemId: `file-ref-${i}`,
+    name: `ref${i}.png`,
+    box,
+    ordinal: i,
+  }));
+}
+function referenceFaces(count: number): MockHandler {
+  return () => jsonResponse(referenceFaceRows(count));
 }
 
 function renderDetail(handlers: Record<string, MockHandler>) {
@@ -174,6 +188,79 @@ it('adds a similar face to the person', async () => {
   await waitFor(() =>
     expect(mock.calls.some((c) => c.method === 'POST' && c.url.endsWith('/api/people/p-1/faces'))).toBe(true),
   );
+});
+
+// ---- reference faces panel -------------------------------------------------
+
+it('shows the persisted reference faces with their count and slot order', async () => {
+  renderDetail({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': referenceFaces(4),
+    'GET /api/people/p-1/similar-faces': similar(true),
+  });
+
+  expect(await screen.findByText('Volti di riferimento · 4/6')).toBeTruthy();
+  const panel = screen.getByLabelText('Volti di riferimento');
+  // One thumbnail per persisted slot, numbered from ordinal + 1, in order.
+  const slots = within(panel).getAllByText(/^#\d$/).map((el) => el.textContent);
+  expect(slots).toEqual(['#1', '#2', '#3', '#4']);
+});
+
+it('explains the empty reference set instead of erroring, and does not search', async () => {
+  const mock = installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': referenceFaces(0),
+    'GET /api/people/p-1/similar-faces': similar(true),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  expect(await screen.findByText('Volti di riferimento · 0/6')).toBeTruthy();
+  expect(screen.getByText(/Volti di riferimento non ancora generati/)).toBeTruthy();
+  expect(screen.getByText(/Verranno scelti alla prima ricerca di volti simili/)).toBeTruthy();
+  // No error surface, and the panel itself never triggers a reference build.
+  expect(screen.queryByRole('alert')).toBeNull();
+  const refCalls = mock.calls.filter((c) => c.url.includes('/reference-faces'));
+  expect(refCalls.every((c) => c.method === 'GET')).toBe(true);
+});
+
+it('refetches the reference faces after a successful similar-face search', async () => {
+  let refCall = 0;
+  const mock = installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    // First read is pre-bootstrap; the search builds the set, so the next read
+    // sees it — the panel must go from 0/6 to 5/6 with no page refresh.
+    'GET /api/people/p-1/reference-faces': () => {
+      refCall += 1;
+      return jsonResponse(referenceFaceRows(refCall === 1 ? 0 : 5));
+    },
+    'GET /api/people/p-1/similar-faces': similar(true),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  expect(await screen.findByText('Volti di riferimento · 5/6')).toBeTruthy();
+  expect(mock.calls.filter((c) => c.url.includes('/reference-faces')).length).toBeGreaterThan(1);
 });
 
 it('labels a proposal already assigned to another person and offers a move', async () => {

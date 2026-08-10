@@ -56,6 +56,21 @@ export interface SimilarFace {
   assignedPersonName: string | null;
 }
 
+// One persisted reference face of a person — a slot in the template the
+// multi-reference matcher actually queries with. `ordinal` is 0-based.
+export interface PersonReferenceFace {
+  faceId: string;
+  fileItemId: string;
+  name: string;
+  box: FaceBox;
+  ordinal: number;
+}
+
+// Mirrors PersonReferenceSelector.MaxPersonReferenceFaces. The endpoint returns
+// only the stored slots, so the denominator of "N/6" lives here; it is a display
+// constant, never an input to selection.
+export const MAX_PERSON_REFERENCE_FACES = 6;
+
 export interface SimilarFacesPage {
   profileAvailable: boolean;
   threshold: number;
@@ -252,6 +267,17 @@ export function getUnassignedFaces(
   if (opts.sort) params.set('sort', opts.sort);
   const qs = params.toString();
   return api<UnassignedFacesPage>(`/api/people/unassigned-faces${qs ? `?${qs}` : ''}`, { signal });
+}
+
+// Read-only: this never causes the reference set to be built.
+export function getPersonReferenceFaces(
+  personId: string,
+  signal?: AbortSignal,
+): Promise<PersonReferenceFace[]> {
+  return api<PersonReferenceFace[]>(
+    `/api/people/${encodeURIComponent(personId)}/reference-faces`,
+    { signal },
+  );
 }
 
 export function getPersonSimilarFaces(

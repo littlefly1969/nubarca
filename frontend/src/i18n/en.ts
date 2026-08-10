@@ -1419,6 +1419,11 @@ const en: Partial<Record<MessageKey, string>> = {
   'person.add': 'Add',
   'person.alreadyAssignedTo': 'Already assigned to: {name}',
   'person.moveHere': 'Move here',
+  'person.referenceFacesAria': 'Reference faces',
+  'person.referenceFacesHeading': 'Reference faces · {count}/{max}',
+  'person.referenceFacesEmpty': 'Reference faces not generated yet.',
+  'person.referenceFacesEmptyHint': 'They are chosen on the first similar-face search.',
+  'person.referenceFaceSlot': 'Reference {n}',
 
   // --- Person detail: video results (VFACE-02) ---
   'person.videosAria': 'Videos with this person',

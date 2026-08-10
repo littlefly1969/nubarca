@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Ai;
@@ -502,6 +504,171 @@ public sealed class PersonFaceReferenceTests
         Assert.InRange(rows.Count, 1, PersonFaceReferenceService.MaxPersonReferenceFaces);
         Assert.Equal(rows.Count, rows.Select(r => r.FaceDetectionId).Distinct().Count());
         Assert.Equal(rows.Count, rows.Select(r => r.Ordinal).Distinct().Count());
+    }
+
+    // ---- read-only reference-faces surface --------------------------------
+
+    [Fact]
+    public async Task Reference_Faces_Are_Returned_In_Ordinal_Order()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var faceIds = new List<Guid>();
+        for (var i = 0; i < 9; i++)
+        {
+            faceIds.Add((await SeedFaceAsync(f, ownerId, profileId, OneHot(i))).FaceId);
+        }
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, faceIds.ToArray());
+        await EnsureAsync(f, ownerId, personId, profileId);
+
+        var stored = await ReferenceRowsAsync(f, personId);
+        Assert.Equal(PersonFaceReferenceService.MaxPersonReferenceFaces, stored.Count);
+
+        using var scope = f.Services.CreateScope();
+        var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+        var surfaced = await people.GetPersonReferenceFacesAsync(ownerId, personId);
+
+        Assert.NotNull(surfaced);
+        // Exactly the persisted rows, in slot order — never a second selection.
+        Assert.Equal(stored.Select(r => r.FaceDetectionId), surfaced!.Select(r => r.FaceId));
+        Assert.Equal(stored.Select(r => r.Ordinal), surfaced.Select(r => r.Ordinal));
+        Assert.Equal(surfaced.Select(r => r.Ordinal).OrderBy(x => x), surfaced.Select(r => r.Ordinal));
+        Assert.All(surfaced, r => Assert.InRange(r.Ordinal, 0, PersonFaceReferenceService.MaxPersonReferenceFaces - 1));
+    }
+
+    [Fact]
+    public async Task Reference_Faces_Get_Does_Not_Bootstrap()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+        var face = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, face.FaceId);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            // The person HAS an eligible confirmed embedding, so a bootstrapping
+            // read would happily invent a set here. It must not.
+            var surfaced = await people.GetPersonReferenceFacesAsync(ownerId, personId);
+            Assert.NotNull(surfaced);
+            Assert.Empty(surfaced!);
+        }
+        Assert.Empty(await ReferenceRowsAsync(f, personId));
+
+        // Only the search builds it; the same read then reports it.
+        await EnsureAsync(f, ownerId, personId, profileId);
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            var surfaced = await people.GetPersonReferenceFacesAsync(ownerId, personId);
+            Assert.Single(surfaced!);
+            Assert.Equal(face.FaceId, surfaced![0].FaceId);
+            Assert.Equal(0, surfaced[0].Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task Reference_Faces_Foreign_Or_Archived_Person_Is_404()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f, "a@example.com");
+        var otherId = await CreateOwnerAsync(f, "b@example.com");
+        var face = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, face.FaceId);
+        await EnsureAsync(f, ownerId, personId, profileId);
+
+        using var scope = f.Services.CreateScope();
+        var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+
+        // Another owner cannot read this person's template at all.
+        Assert.Null(await people.GetPersonReferenceFacesAsync(otherId, personId));
+        // Nor can anybody read a person that does not exist.
+        Assert.Null(await people.GetPersonReferenceFacesAsync(ownerId, Guid.NewGuid()));
+
+        Assert.True(await people.ArchivePersonAsync(ownerId, personId));
+        Assert.Null(await people.GetPersonReferenceFacesAsync(ownerId, personId));
+    }
+
+    [Fact]
+    public async Task Reference_Face_That_Is_No_Longer_Surfaceable_Is_Not_Leaked()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+        var visible = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.9);
+        var hidden = await SeedFaceAsync(f, ownerId, profileId, OneHot(1), quality: 0.8);
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, visible.FaceId, hidden.FaceId);
+        await EnsureAsync(f, ownerId, personId, profileId);
+        Assert.Equal(2, (await ReferenceRowsAsync(f, personId)).Count);
+
+        // Vault the second reference's photo: the row survives (the search path
+        // repairs it) but the read must not surface a face the owner cannot see.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var vault = new PrivateVault
+            {
+                Id = Guid.NewGuid(), OwnerUserId = ownerId, DisplayName = "Private",
+                PasswordHash = "x", EncryptionMode = PrivateVaultEncryptionModes.None, CreatedAt = DateTime.UtcNow,
+            };
+            db.PrivateVaults.Add(vault);
+            var file = await db.FileItems.FirstAsync(x => x.Id == hidden.FileId);
+            file.PrivateVaultId = vault.Id;
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            var surfaced = await people.GetPersonReferenceFacesAsync(ownerId, personId);
+            Assert.Single(surfaced!);
+            Assert.Equal(visible.FaceId, surfaced![0].FaceId);
+            Assert.DoesNotContain(hidden.FaceId, surfaced.Select(r => r.FaceId));
+        }
+    }
+
+    [Fact]
+    public async Task Reference_Faces_Endpoint_Is_Owner_Scoped_And_Leaks_Nothing()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var (ownerId, client) = await f.CreateAuthenticatedClientAsync("a@example.com");
+        var (_, other) = await f.CreateAuthenticatedClientAsync("b@example.com");
+        var face = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, face.FaceId);
+
+        // Before any search: 200 with an empty list, and still no rows written.
+        var empty = await client.GetAsync($"/api/people/{personId}/reference-faces");
+        Assert.Equal(HttpStatusCode.OK, empty.StatusCode);
+        Assert.Empty((await empty.Content.ReadFromJsonAsync<List<PersonReferenceFaceDto>>())!);
+        Assert.Empty(await ReferenceRowsAsync(f, personId));
+
+        await EnsureAsync(f, ownerId, personId, profileId);
+        var resp = await client.GetAsync($"/api/people/{personId}/reference-faces");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var raw = await resp.Content.ReadAsStringAsync();
+        var items = await resp.Content.ReadFromJsonAsync<List<PersonReferenceFaceDto>>();
+        Assert.Single(items!);
+        Assert.Equal(face.FaceId, items![0].FaceId);
+        foreach (var forbidden in new[]
+                 {
+                     "EmbeddingBytes", "embeddingBytes", "StorageKey", "storageKey", "BlobObjectId",
+                     "blobObjectId", "Sha256", "sha256", "/storage/objects/", "PrivateVaultId",
+                     "privateVaultId", "ProfileId", "profileId", "score", "distance", "at NubArca.",
+                 })
+        {
+            Assert.DoesNotContain(forbidden, raw, StringComparison.Ordinal);
+        }
+
+        // Cross-owner and unknown person are the same generic 404; anonymous 401.
+        Assert.Equal(HttpStatusCode.NotFound, (await other.GetAsync($"/api/people/{personId}/reference-faces")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/people/{Guid.NewGuid()}/reference-faces")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await f.CreateClient().GetAsync($"/api/people/{personId}/reference-faces")).StatusCode);
     }
 
     // ---- pure selection ---------------------------------------------------

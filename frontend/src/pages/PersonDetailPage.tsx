@@ -2,16 +2,19 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router';
 import {
   ApiError,
+  MAX_PERSON_REFERENCE_FACES,
   addFaceToPerson,
   archivePerson,
   getPerson,
   getPersonPhotos,
+  getPersonReferenceFaces,
   getPersonSimilarFaces,
   listPeople,
   removeFaceFromPerson,
   renamePerson,
   type Person,
   type PersonPhoto,
+  type PersonReferenceFace,
   type SimilarFace,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
@@ -48,6 +51,23 @@ export function PersonDetailPage() {
   const [phase, setPhase] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
   const [renaming, setRenaming] = useState('');
   const [viewer, setViewer] = useState<{ faceIds: string[]; index: number } | null>(null);
+  // The persisted reference template. Read-only: loading it never builds it, so
+  // the panel reports 0/6 for a person nobody has searched yet.
+  const [references, setReferences] = useState<PersonReferenceFace[] | null>(null);
+
+  const loadReferences = useCallback(async () => {
+    if (personId === undefined) return;
+    try {
+      setReferences(await getPersonReferenceFaces(personId));
+    } catch {
+      // Observability panel — never break the page over it.
+    }
+  }, [personId]);
+
+  // Stable identity: SimilarFacesSection keeps this in its search effect's
+  // dependencies, so a new function each render would re-run the search on every
+  // parent render — including the one this callback itself causes.
+  const handleSearched = useCallback(() => { void loadReferences(); }, [loadReferences]);
 
   const load = useCallback(async () => {
     if (personId === undefined) return;
@@ -68,6 +88,7 @@ export function PersonDetailPage() {
   }, [personId, invalidateAuth]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadReferences(); }, [loadReferences]);
 
   async function handleRename() {
     if (personId === undefined || renaming.trim().length === 0) return;
@@ -169,9 +190,17 @@ export function PersonDetailPage() {
       )}
 
       {personId !== undefined && (
+        <ReferenceFacesSection
+          references={references}
+          onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
+        />
+      )}
+
+      {personId !== undefined && (
         <SimilarFacesSection
           personId={personId}
           onAssigned={() => void load()}
+          onSearched={handleSearched}
           onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
           invalidateAuth={invalidateAuth}
         />
@@ -189,11 +218,58 @@ export function PersonDetailPage() {
   );
 }
 
+// A window on person_face_references — the faces the matcher actually queries
+// with, in their stored slot order. It shows persisted state and nothing else:
+// it never triggers the bootstrap, which is why an unsearched person reads 0/6
+// with an explanation rather than an error.
+function ReferenceFacesSection({
+  references, onOpenFace,
+}: {
+  references: PersonReferenceFace[] | null;
+  onOpenFace: (faceIds: string[], index: number) => void;
+}) {
+  const { t } = useI18n();
+  if (references === null) {
+    return null; // not loaded yet — say nothing rather than flash "0/6"
+  }
+
+  const faceIds = references.map((r) => r.faceId);
+  return (
+    <section className="reference-faces" aria-label={t('person.referenceFacesAria')}>
+      <h3>{t('person.referenceFacesHeading', { count: references.length, max: MAX_PERSON_REFERENCE_FACES })}</h3>
+      {references.length === 0 ? (
+        <p className="muted">
+          {t('person.referenceFacesEmpty')} {t('person.referenceFacesEmptyHint')}
+        </p>
+      ) : (
+        <ul className="reference-faces-grid">
+          {references.map((face, i) => (
+            <li key={face.faceId} className="reference-face">
+              <FaceCrop
+                faceId={face.faceId}
+                fileItemId={face.fileItemId}
+                box={face.box}
+                size={72}
+                alt={face.name}
+                onClick={() => onOpenFace(faceIds, i)}
+              />
+              <span className="reference-face-slot" aria-label={t('person.referenceFaceSlot', { n: face.ordinal + 1 })}>
+                #{face.ordinal + 1}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function SimilarFacesSection({
-  personId, onAssigned, onOpenFace, invalidateAuth,
+  personId, onAssigned, onSearched, onOpenFace, invalidateAuth,
 }: {
   personId: string;
   onAssigned: () => void;
+  onSearched: () => void;
   onOpenFace: (faceIds: string[], index: number) => void;
   invalidateAuth: () => void;
 }) {
@@ -222,6 +298,9 @@ function SimilarFacesSection({
         }
         setItems(page.items);
         setStatus('ready');
+        // The search is what BUILDS the reference set on first use, so this is
+        // the moment the panel above can stop saying 0/6.
+        onSearched();
       } catch (err) {
         if (controller.signal.aborted) return;
         if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -229,7 +308,7 @@ function SimilarFacesSection({
       }
     })();
     return () => controller.abort();
-  }, [personId, debounced, invalidateAuth]);
+  }, [personId, debounced, invalidateAuth, onSearched]);
 
   async function add(faceId: string) {
     try {
