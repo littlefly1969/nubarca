@@ -7,18 +7,28 @@ namespace NubArca.Api.Ai.Faces;
 
 // Owner-private lifecycle of a Person's persistent reference faces (max 6 per
 // person/profile). This is the ONLY place that reads a person's historical
-// embeddings, and it does so on exactly two occasions:
+// embeddings, and it does so on exactly three occasions:
 //
 //   * BOOTSTRAP  — the first similar-face request for a person/profile that has
 //                  no reference set yet;
 //   * REPLENISH  — a request that found one of its references no longer eligible
-//                  (unassigned, moved to another person, ignored, vaulted,
-//                  deleted) and has a free slot to refill.
+//                  (vaulted, deleted, embedding gone) and has a free slot;
+//   * REBUILD    — the owner CORRECTED the person: a reference was removed, moved
+//                  to somebody else, or ignored. See below.
 //
 // An ordinary request with a healthy set costs ZERO historical scans, zero photo
 // reads and zero inference: the persisted references are read back and reused.
 // New assignments are folded in INCREMENTALLY at write time (MaintainAfterAssign),
 // so a growing person never re-derives its set from every historical face.
+//
+// Why a correction rebuilds the WHOLE set rather than freeing one slot: the
+// selection is GLOBAL over quality, diversity and coverage — reference #3 is only
+// optimal given #1, #2, #4… Dropping the row for a face the owner just disowned
+// would leave the remaining five frozen in an arrangement that was chosen partly
+// BECAUSE of the face that turned out to be somebody else. So evidence leaving a
+// set invalidates the entire (person, profile) set, which is then reselected from
+// scratch from the assignments that remain. The result is 1..6 references — not
+// necessarily 6 again, because the selector stops when the person is covered.
 //
 // Nothing here exposes a vector, a blob id, a SHA, a storage key or a path; the
 // vectors it returns stay inside the search path.
@@ -49,6 +59,11 @@ public sealed class PersonFaceReferenceService
     // One reference face and the vector a search queries with. Owner-private and
     // never surfaced through a DTO.
     public readonly record struct PersonReferenceVector(Guid FaceDetectionId, float[] Vector);
+
+    // One reference set: a person's template for ONE face profile. Reference sets
+    // are per-profile, so a correction invalidates every profile's set the face
+    // took part in, and each is rebuilt on its own.
+    public readonly record struct PersonReferenceSetKey(Guid PersonId, Guid ProfileId);
 
     // The person's current reference vectors for this profile, bootstrapping or
     // replenishing them if needed. Empty = the person has no usable confirmed
@@ -124,9 +139,14 @@ public sealed class PersonFaceReferenceService
             .ToList();
     }
 
-    // Fold newly assigned faces into an EXISTING reference set without touching
-    // history. Also drops references that the assignment invalidated: a face moved
-    // to another person stops being that person's reference.
+    // Fold newly assigned faces into the TARGET person's EXISTING reference set
+    // without touching history.
+    //
+    // This is the gaining side only. What the faces LEFT behind — the sets of the
+    // people they used to belong to — is handled by
+    // InvalidateSetsContainingFacesAsync + RebuildAsync, which the caller runs
+    // around the assignment itself, because a departure invalidates a whole set
+    // and a rebuild must not see the assignment mid-flight.
     //
     // When the target person has no reference set yet, this does nothing on
     // purpose — the next similar-face request bootstraps it lazily, so an import
@@ -141,20 +161,6 @@ public sealed class PersonFaceReferenceService
         }
 
         var distinct = faceIds.Distinct().ToList();
-
-        // These faces now belong to `personId`; any reference they held elsewhere
-        // is stale. (The target person's own rows are left alone.)
-        var moved = await _db.PersonFaceReferences
-            .Where(r => r.OwnerUserId == ownerUserId && r.PersonId != personId && distinct.Contains(r.FaceDetectionId))
-            .ToListAsync(cancellationToken);
-        if (moved.Count > 0)
-        {
-            _db.PersonFaceReferences.RemoveRange(moved);
-            if (!await TrySaveAsync(cancellationToken))
-            {
-                return; // another writer got there first; Ensure repairs the rest
-            }
-        }
 
         var existing = await _db.PersonFaceReferences
             .Where(r => r.OwnerUserId == ownerUserId && r.PersonId == personId)
@@ -209,23 +215,116 @@ public sealed class PersonFaceReferenceService
         }
     }
 
-    // Drop every reference held by these faces (any person, this owner). Used when
-    // a face is unassigned, ignored, or otherwise stops being confirmed evidence.
-    public async Task DropForFacesAsync(
-        Guid ownerUserId, IReadOnlyList<Guid> faceIds, CancellationToken cancellationToken = default)
+    // Evidence is leaving: these faces are about to stop being confirmed faces of
+    // the person whose reference set they belong to (removed, moved elsewhere, or
+    // ignored). Every (person, profile) set that contains ANY of them is
+    // invalidated ENTIRELY — not just the offending row — and the keys of those
+    // sets are returned so the caller can rebuild each one after committing the
+    // authoritative mutation.
+    //
+    // The deletes are QUEUED on the caller's unit of work rather than saved here,
+    // so "the reference set no longer claims this face" and "the assignment is
+    // gone" land in the same transaction. Rebuilding before that commit would
+    // reselect the very face being removed, which is why RebuildAsync is a
+    // separate call the caller makes AFTER SaveChanges.
+    //
+    // `keepPersonId` is the TARGET of a move: that person is gaining the face, so
+    // its own set is maintained incrementally as usual and must not be torn down.
+    public async Task<IReadOnlyList<PersonReferenceSetKey>> InvalidateSetsContainingFacesAsync(
+        Guid ownerUserId, IReadOnlyList<Guid> faceIds, Guid? keepPersonId = null,
+        CancellationToken cancellationToken = default)
     {
         if (faceIds.Count == 0)
         {
-            return;
+            return Array.Empty<PersonReferenceSetKey>();
         }
 
-        var rows = await _db.PersonFaceReferences
-            .Where(r => r.OwnerUserId == ownerUserId && faceIds.Contains(r.FaceDetectionId))
+        var distinct = faceIds.Distinct().ToList();
+        var affected = await _db.PersonFaceReferences.AsNoTracking()
+            .Where(r => r.OwnerUserId == ownerUserId && distinct.Contains(r.FaceDetectionId)
+                && (keepPersonId == null || r.PersonId != keepPersonId))
+            .Select(r => new { r.PersonId, r.ProfileId })
+            .Distinct()
             .ToListAsync(cancellationToken);
+        if (affected.Count == 0)
+        {
+            return Array.Empty<PersonReferenceSetKey>();
+        }
+
+        var keys = affected.Select(a => new PersonReferenceSetKey(a.PersonId, a.ProfileId)).ToList();
+        var personIds = keys.Select(k => k.PersonId).Distinct().ToList();
+        var profileIds = keys.Select(k => k.ProfileId).Distinct().ToList();
+
+        // One bounded query for the whole-set tear-down; the in-memory filter keeps
+        // an unrelated (person, profile) pair out when several sets are involved.
+        var keySet = keys.ToHashSet();
+        var rows = (await _db.PersonFaceReferences
+            .Where(r => r.OwnerUserId == ownerUserId
+                && personIds.Contains(r.PersonId) && profileIds.Contains(r.ProfileId))
+            .ToListAsync(cancellationToken))
+            .Where(r => keySet.Contains(new PersonReferenceSetKey(r.PersonId, r.ProfileId)))
+            .ToList();
         if (rows.Count > 0)
         {
             _db.PersonFaceReferences.RemoveRange(rows);
         }
+
+        return keys;
+    }
+
+    // Reselect a person's reference set from ZERO for one profile, using only the
+    // confirmed assignments that remain and the embeddings already persisted for
+    // them. No photo read, no detection, no inference, no clustering.
+    //
+    // Returns the persisted face ids in Ordinal order, or null for a missing /
+    // archived / cross-owner person. An empty result is a valid outcome (the person
+    // has no usable confirmed embedding left) and is strictly better than leaving a
+    // partial stale set behind: the next EnsureAsync sees zero rows and bootstraps.
+    public async Task<IReadOnlyList<Guid>?> RebuildAsync(
+        Guid ownerUserId, Guid personId, Guid profileId, CancellationToken cancellationToken = default)
+    {
+        var person = await _db.People.AsNoTracking().AnyAsync(
+            p => p.Id == personId && p.OwnerUserId == ownerUserId && !p.IsArchived, cancellationToken);
+        if (!person)
+        {
+            return null;
+        }
+
+        // Anything still persisted for this set goes first: a rebuild replaces the
+        // set, it does not top it up.
+        var stale = await _db.PersonFaceReferences
+            .Where(r => r.OwnerUserId == ownerUserId && r.PersonId == personId && r.ProfileId == profileId)
+            .ToListAsync(cancellationToken);
+        if (stale.Count > 0)
+        {
+            _db.PersonFaceReferences.RemoveRange(stale);
+            if (!await TrySaveAsync(cancellationToken))
+            {
+                // A concurrent writer already rewrote this set. Derived state: its
+                // version is as valid as ours, so read it back rather than fail.
+                return await ReadPersistedIdsAsync(ownerUserId, personId, profileId, cancellationToken);
+            }
+        }
+
+        var settings = await _settings.GetAsync(cancellationToken);
+        var coverageThreshold = settings.ClampSearchThreshold(settings.SearchDefaultSimilarityThreshold);
+
+        var candidates = await LoadCandidatesAsync(ownerUserId, personId, profileId, cancellationToken);
+        // No seed: the whole point is that the surviving references are chosen
+        // against each other again, not anchored to the arrangement they had.
+        var selected = PersonReferenceSelector.Select(candidates, coverageThreshold);
+        if (selected.Count == 0)
+        {
+            return Array.Empty<Guid>();
+        }
+
+        if (!await PersistAdditionsAsync(
+                ownerUserId, personId, profileId, Array.Empty<PersonFaceReference>(), selected, cancellationToken))
+        {
+            return await ReadPersistedIdsAsync(ownerUserId, personId, profileId, cancellationToken);
+        }
+
+        return selected;
     }
 
     // Drop a person's whole reference set (archive). Queued on the caller's unit of
@@ -243,6 +342,15 @@ public sealed class PersonFaceReferenceService
     }
 
     // ---- internals -------------------------------------------------------
+
+    // The persisted set's face ids in slot order, re-read after losing a race.
+    private async Task<IReadOnlyList<Guid>> ReadPersistedIdsAsync(
+        Guid ownerUserId, Guid personId, Guid profileId, CancellationToken cancellationToken)
+        => await _db.PersonFaceReferences.AsNoTracking()
+            .Where(r => r.OwnerUserId == ownerUserId && r.PersonId == personId && r.ProfileId == profileId)
+            .OrderBy(r => r.Ordinal)
+            .Select(r => r.FaceDetectionId)
+            .ToListAsync(cancellationToken);
 
     // The persisted set, re-read after losing a race. Only faces that are still
     // eligible are returned, so a winner's stale row cannot steer this search.

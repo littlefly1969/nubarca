@@ -1424,6 +1424,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'person.referenceFacesEmpty': 'Reference faces not generated yet.',
   'person.referenceFacesEmptyHint': 'They are chosen on the first similar-face search.',
   'person.referenceFaceSlot': 'Reference {n}',
+  'person.rebuildReferences': 'Recompute references',
+  'person.rebuildingReferences': 'Recomputing…',
+  'person.rebuildReferencesHelp':
+    'Recompute the sample faces from this person’s confirmed assignments.',
 
   // --- Person detail: video results (VFACE-02) ---
   'person.videosAria': 'Videos with this person',

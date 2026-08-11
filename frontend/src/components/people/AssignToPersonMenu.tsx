@@ -5,8 +5,10 @@ import {
   assignFace,
   ignoreFace,
   removeFaceAssignment,
+  unignoreFace,
   type Person,
 } from '@nubarca/api-client';
+import { isModalOwnedKey } from '../keyboardOwnership';
 import { useI18n } from '../../i18n';
 
 // Owner-private "Assign to person…" control for a single face. Reusable from face
@@ -23,14 +25,26 @@ import { useI18n } from '../../i18n';
 //   * unassigned  → search existing / create new.
 //   * assigned    → shows "Già assegnato a: <name>", move (search/create), and
 //                   "Rimuovi dalla persona".
-// Emits onChanged(personId | null) after a successful assign/move/remove/ignore.
+//   * ignored     → offers "Ripristina" instead of "Ignora volto": the viewer
+//                   opens from the Ignorati tab too, and an Ignore action on an
+//                   already-ignored face is an action that does nothing.
+//
+// Emits onChanged(personId | null) after a successful assign/move/remove.
+// Ignore and restore are reported through their OWN callbacks when the caller
+// supplies them, because "this face is gone from the pool" and "this face moved
+// to another person" are different events for the surface underneath: a viewer
+// has to drop the face from its sequence, a grid has to drop the card. Callers
+// that do not care fall back to onChanged(null), which is what they always got.
 export function AssignToPersonMenu({
   faceId,
   people,
   currentPersonId = null,
   currentPersonName = null,
   allowIgnore = false,
+  isIgnored = false,
   onChanged,
+  onIgnored,
+  onRestored,
   invalidateAuth,
 }: {
   faceId: string;
@@ -38,7 +52,10 @@ export function AssignToPersonMenu({
   currentPersonId?: string | null;
   currentPersonName?: string | null;
   allowIgnore?: boolean;
+  isIgnored?: boolean;
   onChanged: (personId: string | null) => void;
+  onIgnored?: (faceId: string) => void;
+  onRestored?: (faceId: string) => void;
   invalidateAuth?: () => void;
 }) {
   const { t } = useI18n();
@@ -62,15 +79,22 @@ export function AssignToPersonMenu({
     return list.filter((p) => (p.name ?? '').toLowerCase().includes(q)).slice(0, 8);
   }, [people, query, currentPersonId]);
 
-  // Escape (capture phase) closes only this modal and stops the event so an outer
-  // viewer's window Escape handler does not also fire. Also focus the search input.
+  // While this modal is open it is the TOPMOST surface, so it owns the keyboard.
+  // Escape closes only this modal, and the navigation keys are consumed here
+  // rather than reaching the viewer's `window` shortcuts underneath — a right
+  // arrow typed while correcting the search text must move the caret, not the
+  // photo behind the modal.
+  //
+  // Capture phase on `window`, because `stopPropagation` from a listener on the
+  // same target does not stop a SIBLING listener. Nothing is preventDefault-ed:
+  // caret movement, selection and typing are the browser's business and stay
+  // exactly as they are.
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        close();
-      }
+      if (!isModalOwnedKey(e.key)) return;
+      e.stopPropagation();
+      if (e.key === 'Escape') close();
     }
     window.addEventListener('keydown', onKey, true);
     const id = window.setTimeout(() => searchRef.current?.focus(), 0);
@@ -86,6 +110,23 @@ export function AssignToPersonMenu({
       await fn();
       close();
       onChanged(resultPersonId);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth?.();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Ignore / restore: `notify` is the specific callback when the caller wants
+  // it, and onChanged(null) otherwise — never both, so a surface that handles
+  // the specific event does not also get a generic refresh it did not ask for.
+  async function runIgnoreChange(fn: () => Promise<unknown>, notify?: (faceId: string) => void) {
+    setBusy(true);
+    try {
+      await fn();
+      close();
+      if (notify) notify(faceId);
+      else onChanged(null);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) invalidateAuth?.();
     } finally {
@@ -209,16 +250,25 @@ export function AssignToPersonMenu({
                     {t('face.removeFromPerson')}
                   </button>
                 )}
-                {allowIgnore && (
+                {allowIgnore && (isIgnored ? (
+                  <button
+                    type="button"
+                    className="assign-modal-restore"
+                    disabled={busy}
+                    onClick={() => void runIgnoreChange(() => unignoreFace(faceId), onRestored)}
+                  >
+                    {t('face.restore')}
+                  </button>
+                ) : (
                   <button
                     type="button"
                     className="assign-modal-ignore"
                     disabled={busy}
-                    onClick={() => void run(() => ignoreFace(faceId), null)}
+                    onClick={() => void runIgnoreChange(() => ignoreFace(faceId), onIgnored)}
                   >
                     {t('face.ignoreFace')}
                   </button>
-                )}
+                ))}
                 <button type="button" className="assign-modal-cancel" disabled={busy} onClick={close}>
                   {t('common.cancel')}
                 </button>

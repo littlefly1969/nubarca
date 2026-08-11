@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, type KeyboardEvent, type ReactNo
 import { createPortal } from 'react-dom';
 import { useI18n } from '../i18n';
 import { Icon } from './icons/Icon';
+import { isModalOwnedKey } from './keyboardOwnership';
 
 // The two overlay surfaces the administration screens use, over one behaviour.
 //
@@ -41,14 +42,18 @@ interface OverlayProps {
   // the whole dialog.
   footer?: ReactNode;
   testId?: string;
-  // For an overlay opened ON TOP of another Escape-closable surface that also
-  // listens on `window` — the album picker opens from the media viewer's
-  // details drawer. Both listeners sit on the same target, and
-  // `stopPropagation` does not stop a SIBLING listener, so a single Escape used
-  // to dismiss the picker AND the viewer behind it, dropping the user out of
-  // the photo entirely. With this set the overlay listens in the capture phase
-  // and consumes the event: as the topmost surface, it owns Escape.
-  exclusiveEscape?: boolean;
+  // For an overlay opened ON TOP of a surface with its own `window` shortcuts —
+  // the album picker opens from the media viewer's details drawer. Both
+  // listeners sit on the same target, and `stopPropagation` does not stop a
+  // SIBLING listener, so a single Escape used to dismiss the picker AND the
+  // viewer behind it, dropping the user out of the photo entirely; and an arrow
+  // pressed to move the caret in the picker's search field paged the photo
+  // underneath. With this set the overlay listens in the capture phase and
+  // consumes those keys: as the topmost surface, it owns the keyboard.
+  //
+  // Only the keys a surface below might act on (see keyboardOwnership.ts).
+  // Typing, Tab and the browser's own caret handling are never touched.
+  ownsKeyboard?: boolean;
   // Which stacking scale this overlay belongs to.
   //
   // `app` (the default) is the administration layer these overlays were built
@@ -65,7 +70,7 @@ interface OverlayProps {
 export type OverlayLayer = 'app' | 'workspace';
 
 function useOverlayBehaviour(
-  onClose: () => void, dismissable: boolean, exclusiveEscape: boolean,
+  onClose: () => void, dismissable: boolean, ownsKeyboard: boolean,
 ) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -103,14 +108,24 @@ function useOverlayBehaviour(
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
+      if (ownsKeyboard) {
+        if (!isModalOwnedKey(e.key)) return;
+        // Consumed whatever happens next, so nothing underneath acts on a key
+        // aimed at this panel. Notably ALSO when `dismissable` is false: an
+        // Escape during a request must not close the viewer behind an overlay
+        // that is refusing to close itself.
+        if (e.key === 'Escape') e.stopImmediatePropagation();
+        else e.stopPropagation();
+        if (e.key === 'Escape' && dismissable) onClose();
+        return;
+      }
       if (e.key !== 'Escape' || !dismissable) return;
-      if (exclusiveEscape) e.stopImmediatePropagation();
-      else e.stopPropagation();
+      e.stopPropagation();
       onClose();
     };
-    window.addEventListener('keydown', onKey, exclusiveEscape);
-    return () => window.removeEventListener('keydown', onKey, exclusiveEscape);
-  }, [onClose, dismissable, exclusiveEscape]);
+    window.addEventListener('keydown', onKey, ownsKeyboard);
+    return () => window.removeEventListener('keydown', onKey, ownsKeyboard);
+  }, [onClose, dismissable, ownsKeyboard]);
 
   const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'Tab') return;
@@ -136,11 +151,11 @@ function useOverlayBehaviour(
 
 function OverlayShell({
   variant, title, subtitle, onClose, dismissable = true, children, footer, testId,
-  exclusiveEscape = false, layer = 'app',
+  ownsKeyboard = false, layer = 'app',
 }: OverlayProps & { variant: 'modal' | 'sheet' }) {
   const { t } = useI18n();
   const titleId = useId();
-  const { panelRef, onKeyDown } = useOverlayBehaviour(onClose, dismissable, exclusiveEscape);
+  const { panelRef, onKeyDown } = useOverlayBehaviour(onClose, dismissable, ownsKeyboard);
 
   return createPortal(
     <div

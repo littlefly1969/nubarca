@@ -9,9 +9,13 @@ import { useI18n } from '../../i18n';
 // the server FaceCrop preview; shows no storage internals.
 export function IgnoredFacesTab({
   onOpenFace,
+  excludeFaceIds = [],
   invalidateAuth,
 }: {
   onOpenFace: (faceIds: string[], index: number) => void;
+  // Faces restored from the context viewer: they are no longer ignored, so the
+  // card goes at once without refetching from the first page.
+  excludeFaceIds?: readonly string[];
   invalidateAuth: () => void;
 }) {
   const { t } = useI18n();
@@ -69,6 +73,10 @@ export function IgnoredFacesTab({
     );
   }
 
+  const shown = excludeFaceIds.length === 0
+    ? items
+    : items.filter((i) => !excludeFaceIds.includes(i.faceId));
+
   return (
     <div className="ignored-faces" aria-label={t('face.ignoredFacesAria')}>
       <p className="muted">
@@ -76,19 +84,19 @@ export function IgnoredFacesTab({
       </p>
       {status === 'loading' ? (
         <p className="muted" role="status">{t('common.loading')}</p>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="muted">{t('face.noIgnored')}</p>
       ) : (
         <>
           <ul className="people-grid">
-            {items.map((fc, idx) => (
+            {shown.map((fc, idx) => (
               <li key={fc.faceId} className="people-card">
                 <FaceCrop
                   faceId={fc.faceId}
                   fileItemId={fc.fileItemId}
                   box={fc.box}
                   alt={t('face.ignoredFaceAlt')}
-                  onClick={() => onOpenFace(items.map((i) => i.faceId), idx)}
+                  onClick={() => onOpenFace(shown.map((i) => i.faceId), idx)}
                 />
                 <button type="button" onClick={() => void restore(fc.faceId)}>{t('face.restore')}</button>
               </li>

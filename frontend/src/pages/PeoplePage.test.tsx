@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PeoplePage } from './PeoplePage';
@@ -182,6 +182,155 @@ it('lists ignored faces and restores one', async () => {
   await waitFor(() =>
     expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/faces/if-1/ignore'))).toBe(true),
   );
+  await waitFor(() => expect(screen.queryByLabelText('Volto ignorato')).toBeNull());
+});
+
+// ---- "Ignora volto" from inside the viewer --------------------------------
+//
+// The action used to persist and then leave the screen exactly as it was: the
+// card stayed in the grid, and the viewer stayed on a face that is no longer a
+// candidate — only a page reload made the change visible. What must happen now
+// is the whole thing, without one.
+
+it('drops an ignored face from the grid and moves the viewer to the next one', async () => {
+  const box = { x: 0.2, y: 0.2, width: 0.15, height: 0.15 };
+  const face = (id: string, file: string, name: string, ignored = false) => () =>
+    jsonResponse({
+      fileItemId: file, fileName: name, selectedFaceId: id, selectedBox: box,
+      faces: [{ faceId: id, box }], personId: null, personName: null, isIgnored: ignored,
+    });
+  const mock = installFetchMock({
+    'GET /api/people/suggested-groups': group(3),
+    'GET /api/people': () => jsonResponse([]),
+    'GET /api/people/unassigned-faces': () =>
+      jsonResponse({
+        items: [
+          { faceId: 'u-1', fileItemId: 'file-1', name: 'a.png', box, hasEmbedding: true, detectionScore: 0.9 },
+          { faceId: 'u-2', fileItemId: 'file-2', name: 'b.png', box, hasEmbedding: true, detectionScore: 0.8 },
+        ],
+        nextCursor: null,
+        profileAvailable: true,
+      }),
+    'GET /api/people/faces/u-1/context': face('u-1', 'file-1', 'first.jpg'),
+    'GET /api/people/faces/u-2/context': face('u-2', 'file-2', 'second.jpg'),
+    'POST /api/people/faces/u-1/ignore': () => emptyResponse(),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people']}>
+        <Routes>
+          <Route path="/people" element={<PeoplePage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  await screen.findByText('3 volti');
+  await userEvent.click(screen.getByRole('button', { name: 'Volti non assegnati' }));
+  expect((await screen.findAllByLabelText('Volto non assegnato')).length).toBe(2);
+
+  // Open the first face in the context viewer and ignore it from there.
+  await userEvent.click(screen.getAllByLabelText('Volto non assegnato')[0]);
+  expect(await screen.findByText('first.jpg')).toBeTruthy();
+  // Scoped to the viewer: every unassigned card carries the same trigger.
+  const viewer = screen.getByRole('dialog', { name: 'Visualizzatore volto' });
+  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Ignora volto' }));
+
+  await waitFor(() =>
+    expect(mock.calls.some((c) => c.method === 'POST' && c.url.includes('/faces/u-1/ignore'))).toBe(true),
+  );
+
+  // The viewer moved to the face that took its place — it did not stay on the
+  // one that was just dismissed.
+  expect(await screen.findByText('second.jpg')).toBeTruthy();
+  // The source grid lost the card, with no page reload.
+  await waitFor(() => expect(screen.getAllByLabelText('Volto non assegnato').length).toBe(1));
+  // And it is not asked for again.
+  const contextCalls = mock.calls.filter((c) => c.url.includes('/faces/u-1/context')).length;
+  expect(contextCalls).toBe(1);
+});
+
+it('closes the viewer when the ignored face was the only one left', async () => {
+  const box = { x: 0.2, y: 0.2, width: 0.15, height: 0.15 };
+  installFetchMock({
+    'GET /api/people/suggested-groups': group(3),
+    'GET /api/people': () => jsonResponse([]),
+    'GET /api/people/unassigned-faces': () =>
+      jsonResponse({
+        items: [{ faceId: 'u-1', fileItemId: 'file-1', name: 'a.png', box, hasEmbedding: true, detectionScore: 0.9 }],
+        nextCursor: null,
+        profileAvailable: true,
+      }),
+    'GET /api/people/faces/u-1/context': () =>
+      jsonResponse({
+        fileItemId: 'file-1', fileName: 'only.jpg', selectedFaceId: 'u-1', selectedBox: box,
+        faces: [{ faceId: 'u-1', box }], personId: null, personName: null, isIgnored: false,
+      }),
+    'POST /api/people/faces/u-1/ignore': () => emptyResponse(),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people']}>
+        <Routes>
+          <Route path="/people" element={<PeoplePage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  await screen.findByText('3 volti');
+  await userEvent.click(screen.getByRole('button', { name: 'Volti non assegnati' }));
+  await userEvent.click(await screen.findByLabelText('Volto non assegnato'));
+  await screen.findByText('only.jpg');
+  const viewer = screen.getByRole('dialog', { name: 'Visualizzatore volto' });
+  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(await screen.findByRole('button', { name: 'Ignora volto' }));
+
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Visualizzatore volto' })).toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText('Volto non assegnato')).toBeNull());
+});
+
+it('offers Restore, not Ignore, on a face opened from the Ignorati tab', async () => {
+  const box = { x: 0.2, y: 0.2, width: 0.15, height: 0.15 };
+  const mock = installFetchMock({
+    'GET /api/people/suggested-groups': group(3),
+    'GET /api/people': () => jsonResponse([]),
+    'GET /api/people/ignored-faces': () =>
+      jsonResponse({ items: [{ faceId: 'if-1', fileItemId: 'file-1', name: 'a.png', box }], nextCursor: null }),
+    'GET /api/people/faces/if-1/context': () =>
+      jsonResponse({
+        fileItemId: 'file-1', fileName: 'dismissed.jpg', selectedFaceId: 'if-1', selectedBox: box,
+        faces: [{ faceId: 'if-1', box }], personId: null, personName: null, isIgnored: true,
+      }),
+    'DELETE /api/people/faces/if-1/ignore': () => emptyResponse(),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people']}>
+        <Routes>
+          <Route path="/people" element={<PeoplePage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  await screen.findByText('3 volti');
+  await userEvent.click(screen.getByRole('button', { name: 'Ignorati' }));
+  await userEvent.click(await screen.findByLabelText('Volto ignorato'));
+  await screen.findByText('dismissed.jpg');
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+
+  // An "Ignora volto" here would be an action that does nothing.
+  const dialog = await screen.findByRole('dialog', { name: 'Assegna a persona' });
+  expect(within(dialog).queryByRole('button', { name: 'Ignora volto' })).toBeNull();
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Ripristina' }));
+
+  await waitFor(() =>
+    expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/faces/if-1/ignore'))).toBe(true),
+  );
+  // Restored → it leaves the recovery tab, and the viewer has nothing to show.
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Visualizzatore volto' })).toBeNull());
   await waitFor(() => expect(screen.queryByLabelText('Volto ignorato')).toBeNull());
 });
 

@@ -7,6 +7,7 @@ import {
   type ClusterAssignSummary,
   type Person,
 } from '@nubarca/api-client';
+import { isModalOwnedKey } from '../keyboardOwnership';
 import { useI18n } from '../../i18n';
 
 // Owner-private "Associa cluster a persona…" dialog. Search/select an existing
@@ -41,9 +42,15 @@ export function ClusterAssignDialog({
     ? people.slice(0, 8)
     : people.filter((p) => (p.name ?? '').toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8);
 
+  // Topmost modal owns the keyboard: Escape closes only this dialog, and the
+  // navigation keys are consumed here so no global shortcut underneath acts on a
+  // keystroke aimed at this search field. Nothing is preventDefault-ed — the
+  // caret behaves normally. See keyboardOwnership.ts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+      if (!isModalOwnedKey(e.key)) return;
+      e.stopPropagation();
+      if (e.key === 'Escape') onClose();
     }
     window.addEventListener('keydown', onKey, true);
     const id = window.setTimeout(() => searchRef.current?.focus(), 0);

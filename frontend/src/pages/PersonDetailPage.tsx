@@ -10,6 +10,7 @@ import {
   getPersonReferenceFaces,
   getPersonSimilarFaces,
   listPeople,
+  rebuildPersonReferenceFaces,
   removeFaceFromPerson,
   renamePerson,
   type Person,
@@ -21,6 +22,7 @@ import { useAuth } from '../auth/useAuth';
 import { FaceCrop } from '../components/people/FaceCrop';
 import { FaceContextViewer } from '../components/people/FaceContextViewer';
 import { AssignToPersonMenu } from '../components/people/AssignToPersonMenu';
+import { withoutFace, type FaceViewerSequence } from '../components/people/faceViewerSequence';
 import { PersonVideosSection } from '../components/people/PersonVideosSection';
 import { useI18n } from '../i18n';
 import { FACES_FALLBACK_RETURN, resolveFacesReturn } from './facesTabs';
@@ -50,10 +52,15 @@ export function PersonDetailPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [phase, setPhase] = useState<'loading' | 'ready' | 'notfound' | 'error'>('loading');
   const [renaming, setRenaming] = useState('');
-  const [viewer, setViewer] = useState<{ faceIds: string[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<FaceViewerSequence | null>(null);
   // The persisted reference template. Read-only: loading it never builds it, so
   // the panel reports 0/6 for a person nobody has searched yet.
   const [references, setReferences] = useState<PersonReferenceFace[] | null>(null);
+  // Bumped by anything that changes which faces this person is made of. The
+  // similar-face search reads it, because a correction changes the reference
+  // template and therefore the suggestions — leaving them on screen would offer
+  // matches computed from evidence the owner has just disowned.
+  const [correctionTick, setCorrectionTick] = useState(0);
 
   const loadReferences = useCallback(async () => {
     if (personId === undefined) return;
@@ -90,6 +97,25 @@ export function PersonDetailPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void loadReferences(); }, [loadReferences]);
 
+  // One refresh for every correction, because a correction moves all of it at
+  // once: the person's own counts, its photos, the reference template the
+  // backend has just rebuilt, and the suggestions that template produces.
+  // Reloading only the photos was what left "Volti di riferimento · 6/6" on
+  // screen next to a reference the owner had removed a moment earlier.
+  const refreshAfterCorrection = useCallback(() => {
+    void load();
+    void loadReferences();
+    setCorrectionTick((n) => n + 1);
+  }, [load, loadReferences]);
+
+  // A face the owner ignored (or moved away) stops being part of this person:
+  // it leaves the open viewer's sequence — which advances, or closes when that
+  // was the last face — and the page reloads around it.
+  const dismissFromViewer = useCallback((faceId: string) => {
+    setViewer((v) => withoutFace(v, faceId));
+    refreshAfterCorrection();
+  }, [refreshAfterCorrection]);
+
   async function handleRename() {
     if (personId === undefined || renaming.trim().length === 0) return;
     try {
@@ -114,7 +140,8 @@ export function PersonDetailPage() {
     if (personId === undefined) return;
     try {
       await removeFaceFromPerson(personId, faceId);
-      await load();
+      setViewer((v) => withoutFace(v, faceId));
+      refreshAfterCorrection();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) invalidateAuth();
     }
@@ -157,15 +184,19 @@ export function PersonDetailPage() {
           traversal match what the eye sees. */}
       {personId !== undefined && (
         <ReferenceFacesSection
+          personId={personId}
           references={references}
           onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
+          onRebuilt={(next) => { setReferences(next); setCorrectionTick((n) => n + 1); }}
+          invalidateAuth={invalidateAuth}
         />
       )}
 
       {personId !== undefined && (
         <SimilarFacesSection
           personId={personId}
-          onAssigned={() => void load()}
+          correctionTick={correctionTick}
+          onAssigned={refreshAfterCorrection}
           onSearched={handleSearched}
           onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
           invalidateAuth={invalidateAuth}
@@ -197,7 +228,7 @@ export function PersonDetailPage() {
                       people={people}
                       currentPersonId={personId ?? null}
                       currentPersonName={person?.name ?? null}
-                      onChanged={() => void load()}
+                      onChanged={refreshAfterCorrection}
                       invalidateAuth={invalidateAuth}
                     />
                   </li>
@@ -218,6 +249,8 @@ export function PersonDetailPage() {
           index={viewer.index}
           onIndexChange={(next) => setViewer((v) => (v ? { ...v, index: next } : v))}
           onClose={() => setViewer(null)}
+          onFaceIgnored={dismissFromViewer}
+          onFaceRestored={dismissFromViewer}
         />
       )}
     </section>
@@ -228,13 +261,34 @@ export function PersonDetailPage() {
 // with, in their stored slot order. It shows persisted state and nothing else:
 // it never triggers the bootstrap, which is why an unsearched person reads 0/6
 // with an explanation rather than an error.
+//
+// The one thing it can DO is ask for the template to be reselected. Corrections
+// already rebuild it automatically, so this is the safety net for a set that
+// looks wrong: no confirmation, because the reference set is derived state and
+// the confirmed assignments are not touched.
 function ReferenceFacesSection({
-  references, onOpenFace,
+  personId, references, onOpenFace, onRebuilt, invalidateAuth,
 }: {
+  personId: string;
   references: PersonReferenceFace[] | null;
   onOpenFace: (faceIds: string[], index: number) => void;
+  onRebuilt: (next: PersonReferenceFace[]) => void;
+  invalidateAuth: () => void;
 }) {
   const { t } = useI18n();
+  const [rebuilding, setRebuilding] = useState(false);
+
+  async function rebuild() {
+    setRebuilding(true);
+    try {
+      onRebuilt(await rebuildPersonReferenceFaces(personId));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth();
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
   if (references === null) {
     return null; // not loaded yet — say nothing rather than flash "0/6"
   }
@@ -242,7 +296,18 @@ function ReferenceFacesSection({
   const faceIds = references.map((r) => r.faceId);
   return (
     <section className="reference-faces" aria-label={t('person.referenceFacesAria')}>
-      <h3>{t('person.referenceFacesHeading', { count: references.length, max: MAX_PERSON_REFERENCE_FACES })}</h3>
+      <div className="reference-faces-head">
+        <h3>{t('person.referenceFacesHeading', { count: references.length, max: MAX_PERSON_REFERENCE_FACES })}</h3>
+        <button
+          type="button"
+          className="reference-faces-rebuild linklike"
+          disabled={rebuilding}
+          title={t('person.rebuildReferencesHelp')}
+          onClick={() => void rebuild()}
+        >
+          {rebuilding ? t('person.rebuildingReferences') : t('person.rebuildReferences')}
+        </button>
+      </div>
       {references.length === 0 ? (
         <p className="muted">
           {t('person.referenceFacesEmpty')} {t('person.referenceFacesEmptyHint')}
@@ -271,9 +336,13 @@ function ReferenceFacesSection({
 }
 
 function SimilarFacesSection({
-  personId, onAssigned, onSearched, onOpenFace, invalidateAuth,
+  personId, correctionTick, onAssigned, onSearched, onOpenFace, invalidateAuth,
 }: {
   personId: string;
+  // Bumped whenever the person's confirmed faces change. The suggestions come
+  // from the reference template, which the backend has just rebuilt, so they
+  // have to be re-asked for rather than left on screen.
+  correctionTick: number;
   onAssigned: () => void;
   onSearched: () => void;
   onOpenFace: (faceIds: string[], index: number) => void;
@@ -314,7 +383,7 @@ function SimilarFacesSection({
       }
     })();
     return () => controller.abort();
-  }, [personId, debounced, invalidateAuth, onSearched]);
+  }, [personId, debounced, correctionTick, invalidateAuth, onSearched]);
 
   async function add(faceId: string) {
     try {

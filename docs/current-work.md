@@ -103,6 +103,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the pagination sentinel's `IntersectionObserver` is rooted in it, because a root
   margin never expands an intermediate clip and a document-rooted observer would
   lose its whole 1400px preload lead to `.app-main`'s overflow clip.
+- **The topmost modal owns the keyboard.** Viewers (media, face context, vault)
+  register their shortcuts on `window` so the photo answers arrows wherever focus
+  is — which means a modal opened on top of one used to page the photo behind it
+  with the arrows meant for its search field, and one Escape closed both.
+  `keyboardOwnership.ts` states the rule from both ends: a topmost modal consumes
+  `isModalOwnedKey` keys in the CAPTURE phase (`stopPropagation` from a listener
+  on the same target does not stop a SIBLING listener), and a viewer ignores any
+  key whose nearest `[role="dialog"][aria-modal="true"]` ancestor is not its own
+  root — compared against the root, because a bare "is there an aria-modal" check
+  would match the viewer itself — plus arrows from an `isEditableKeyboardTarget`.
+  Nothing is ever `preventDefault`-ed: caret movement, selection, typing and IME
+  stay the browser's. `Tab` is deliberately NOT owned, so focus traps keep
+  working. `Overlay`'s `ownsKeyboard` consumes Escape even when `dismissable` is
+  false, since an overlay refusing to close must not close the viewer behind it.
 - **A new result identity starts at the top; a presentation change never moves the
   scroll.** The media workspace resets `.app-main.scrollTop` when the query
   fingerprint changes — tab, scope, search, filters, sort — and only then.
@@ -179,6 +193,32 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   authoritative, an empty table is valid, and a reference that stops being a
   confirmed, surfaceable, embedded face of that person is dropped rather than
   trusted.
+- **A correction invalidates the WHOLE reference set, which is then reselected
+  from zero.** The selection is global over quality, diversity and coverage — #3
+  is only optimal given #1, #2, #4 — so deleting the one row the owner disowned
+  and topping the set back up leaves the survivors frozen in an arrangement
+  chosen partly BECAUSE of a face that turned out to be somebody else. Every
+  mutation that takes evidence away (remove from person, remove assignment,
+  ignore, move to another person, group ignore, cluster assign with
+  `moveAssigned`) calls `InvalidateSetsContainingFacesAsync` BEFORE the
+  authoritative write — it queues the whole-set delete on the caller's unit of
+  work and returns the affected `(PersonId, ProfileId)` keys, deduped — and
+  `RebuildAsync` AFTER `SaveChanges`, so the reselection sees the assignments
+  that actually remain. `MaintainAfterAssignAsync` is the GAINING side only. The
+  result is 1–6 references, not necessarily 6 again: the selector stops when the
+  person is covered, so 4/6 after a correction is a correct answer. A rebuild
+  reads existing embeddings and writes at most six rows — no detection, no
+  inference, no re-embedding, no reclustering — and leaving a set EMPTY on a lost
+  race is deliberate, because the next `EnsureAsync` bootstraps it, whereas a
+  partial stale set would never be repaired.
+  `POST /api/people/{id}/reference-faces/rebuild` is the same path on demand.
+- **An ignored face is not a candidate ANYWHERE.** It must not come back through
+  similar-face search (filtered on the deduped ANN candidate ids, BEFORE ordering
+  and paging, so a page is never short and a cursor never skips), as a suggested
+  or review group's persisted representative (replaced read-side by the lowest-id
+  surfaceable non-ignored member — displaying a list must not become a write), or
+  in the group viewer. It stays owner-private and reversible: the row is an
+  `IgnoredFace`, never a deletion of the detection, the embedding or the vector.
 - **A similar-face proposal already on ANOTHER person is kept, and says so.**
   Only the CURRENT person's faces are excluded. A candidate the owner filed under
   someone else is exactly how a past mistake gets corrected, so `SimilarFaceDto`

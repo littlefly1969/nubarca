@@ -10,6 +10,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
+import { isEditableKeyboardTarget } from '../components/keyboardOwnership';
 import { HlsVideoPlayer } from '../video/HlsVideoPlayer';
 import { sharedAlbumAddContext } from '../albums/sharedAlbumAddContext';
 import { AlbumDetailsEditor } from '../albums/AlbumDetailsEditor';
@@ -102,6 +103,8 @@ export function SharedAlbumDetailPage() {
     if (openIndex === null) return;
     function onKey(e: globalThis.KeyboardEvent) {
       if (e.key === 'Escape') { setOpenIndex(null); return; }
+      // Arrows inside a text field move the caret, never the photo.
+      if (isEditableKeyboardTarget(e.target)) return;
       if (e.key === 'ArrowRight') {
         setOpenIndex((i) => (i === null ? null : Math.min(i + 1, items.length - 1)));
       }

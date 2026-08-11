@@ -232,6 +232,128 @@ public sealed class PeopleSimilarFacesPgIntegrationTests : IAsyncLifetime
         }
     }
 
+    // An IGNORED face is not a candidate — including in "Cerca volti simili",
+    // which was the one surface that kept proposing faces the owner had already
+    // dismissed. Also pins the two things that must NOT change with it: a face on
+    // ANOTHER person stays proposed (that is how a past mistake is corrected), and
+    // the filter runs BEFORE paging, so a page is never short and a cursor never
+    // walks past a candidate.
+    [SkippableFact]
+    public async Task Similar_Faces_Exclude_Ignored_Candidates_Before_Paging()
+    {
+        Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
+
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var profileKey = $"face-ignored-{suffix}";
+        var settings = new Dictionary<string, string?>
+        {
+            ["Ai:Enabled"] = "true",
+            ["Ai:FaceProfileKey"] = profileKey,
+        };
+        await using var factory = new PostgresWebApplicationFactory(_fixture.ConnectionString!, settings);
+
+        const int freeCount = 6;
+        const int ignoredCount = 4;
+        Guid owner, personId, otherPersonId;
+        Guid onOtherPerson, ignoredOnOtherPerson;
+        var freeIds = new List<Guid>();
+        var ignoredIds = new List<Guid>();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var users = scope.ServiceProvider.GetRequiredService<IUserService>();
+            var ser = scope.ServiceProvider.GetRequiredService<IAiVectorSerializer>();
+            var vectors = scope.ServiceProvider.GetRequiredService<FaceVectorIndexService>();
+
+            owner = (await users.CreateAsync($"ig-{suffix}@example.com", "I")).Id;
+            var model = AddModel(db, $"m-{suffix}");
+            var profileId = AddProfile(db, profileKey, model.Id).Id;
+
+            // One confirmed face is the whole template; every candidate below is
+            // identical to it, so all of them clear any threshold and the only
+            // thing that can remove one is the ignore filter.
+            var query = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+            for (var i = 0; i < freeCount; i++)
+            {
+                freeIds.Add((await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId);
+            }
+            for (var i = 0; i < ignoredCount; i++)
+            {
+                ignoredIds.Add((await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId);
+            }
+            onOtherPerson = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+            ignoredOnOtherPerson = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+
+            var person = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Alice", CreatedAt = DateTime.UtcNow };
+            var other = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Maria", CreatedAt = DateTime.UtcNow };
+            db.People.AddRange(person, other);
+            Assign(db, owner, person.Id, query);
+            Assign(db, owner, other.Id, onOtherPerson);
+            Assign(db, owner, other.Id, ignoredOnOtherPerson);
+            personId = person.Id;
+            otherPersonId = other.Id;
+
+            foreach (var faceId in ignoredIds.Append(ignoredOnOtherPerson))
+            {
+                db.IgnoredFaces.Add(new IgnoredFace
+                {
+                    Id = Guid.NewGuid(), OwnerUserId = owner, FaceDetectionId = faceId, CreatedAt = DateTime.UtcNow,
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+
+            // Paged four at a time, so a filter applied to an already-cut window
+            // would show up as a short page or a skipped candidate.
+            var all = await CollectAsync(people, owner, personId, 0.5);
+
+            Assert.All(ignoredIds, id => Assert.DoesNotContain(id, all));
+            Assert.DoesNotContain(ignoredOnOtherPerson, all);
+            Assert.All(freeIds, id => Assert.Contains(id, all));
+            // A candidate on ANOTHER person is retained and named — unchanged.
+            Assert.Contains(onOtherPerson, all);
+            Assert.Equal(freeCount + 1, all.Count);
+            Assert.Equal(all.Count, all.Distinct().Count());
+
+            // Every full page really is full: the ignored rows were gone before
+            // the window was cut, not removed from it afterwards.
+            string? cursor = null;
+            var pages = new List<int>();
+            for (var guard = 0; guard < 20; guard++)
+            {
+                var page = await people.FindSimilarFacesAsync(owner, personId, 0.5, 4, cursor);
+                Assert.NotNull(page);
+                pages.Add(page!.Items.Count);
+                if (!page.HasMore || page.NextCursor is null) break;
+                Assert.Equal(4, page.Items.Count);
+                cursor = page.NextCursor;
+            }
+            Assert.Equal(freeCount + 1, pages.Sum());
+
+            var named = Assert.Single(
+                (await people.FindSimilarFacesAsync(owner, personId, 0.5, 50, null))!.Items,
+                i => i.FaceId == onOtherPerson);
+            Assert.Equal(otherPersonId, named.AssignedPersonId);
+            Assert.Equal("Maria", named.AssignedPersonName);
+        }
+
+        // Restoring an ignored face makes it a candidate again — ignore is a
+        // reversible owner decision, not a deletion.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.UnignoreFaceAsync(owner, ignoredIds[0]));
+            var all = await CollectAsync(people, owner, personId, 0.5);
+            Assert.Contains(ignoredIds[0], all);
+            Assert.Equal(freeCount + 2, all.Count);
+        }
+    }
+
     private static void Assign(AppDbContext db, Guid owner, Guid personId, Guid faceId) =>
         db.PersonFaceAssignments.Add(new PersonFaceAssignment
         {

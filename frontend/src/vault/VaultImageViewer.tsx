@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VaultFile } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { isEditableKeyboardTarget, ownsKeyboardEvent } from '../components/keyboardOwnership';
 import { useVaultMediaObjectUrl } from './useVaultMediaObjectUrl';
 import { VaultMediaInfoPanel } from './VaultMediaInfoPanel';
 
@@ -63,11 +64,16 @@ export function VaultImageViewer({
     [],
   );
 
+  // Same ownership rule as the other viewers: a modal stacked on top owns the
+  // keyboard, and arrows inside an editable target are caret moves.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (!ownsKeyboardEvent(dialogRef.current, e.target)) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (isEditableKeyboardTarget(e.target)) {
+        return;
       } else if (e.key === 'ArrowLeft') {
         goPrev();
       } else if (e.key === 'ArrowRight') {

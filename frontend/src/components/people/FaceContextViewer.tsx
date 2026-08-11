@@ -3,6 +3,7 @@ import { ApiError, getFaceContext, listPeople, type FaceContext, type Person } f
 import { mediumPreviewUrl } from '../files/types';
 import { useAuth } from '../../auth/useAuth';
 import { AssignToPersonMenu } from './AssignToPersonMenu';
+import { isEditableKeyboardTarget, ownsKeyboardEvent } from '../keyboardOwnership';
 import { useI18n } from '../../i18n';
 
 const MIN_ZOOM = 1;
@@ -12,16 +13,27 @@ const MAX_ZOOM = 8;
 // preview with the selected face highlighted (others subtle), supports
 // zoom/pan/fit/focus, and previous/next navigation across the opening list.
 // Never loads the original bytes; never renders internals.
+//
+// `onFaceIgnored` / `onFaceRestored` report a face LEAVING or REJOINING the pool
+// the caller opened this with. The caller owns `faceIds`, so it is the only place
+// that can drop the face from the sequence and from the grid behind — which is
+// why this is an explicit typed callback and not a refresh the viewer does to
+// itself. See faceViewerSequence.ts for the shared "what happens to the list"
+// rule both People surfaces use.
 export function FaceContextViewer({
   faceIds,
   index,
   onIndexChange,
   onClose,
+  onFaceIgnored,
+  onFaceRestored,
 }: {
   faceIds: string[];
   index: number;
   onIndexChange: (next: number) => void;
   onClose: () => void;
+  onFaceIgnored?: (faceId: string) => void;
+  onFaceRestored?: (faceId: string) => void;
 }) {
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
@@ -33,6 +45,7 @@ export function FaceContextViewer({
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
 
   // The displayed face follows the nav list unless the user clicks another box.
@@ -85,9 +98,15 @@ export function FaceContextViewer({
   const hasPrev = index > 0;
   const hasNext = index < faceIds.length - 1;
 
+  // Shortcuts live on `window` so the photo answers arrows wherever focus is —
+  // which means this viewer must decide for itself when a key is NOT its own.
+  // A modal opened on top of it (assign/move) owns the keyboard entirely, and an
+  // editable target owns its arrows as caret moves. See keyboardOwnership.ts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (!ownsKeyboardEvent(rootRef.current, e.target)) return;
       if (e.key === 'Escape') onClose();
+      else if (isEditableKeyboardTarget(e.target)) return;
       else if (e.key === 'ArrowLeft' && hasPrev) onIndexChange(index - 1);
       else if (e.key === 'ArrowRight' && hasNext) onIndexChange(index + 1);
     }
@@ -112,7 +131,7 @@ export function FaceContextViewer({
   }
 
   return (
-    <div className="face-viewer" role="dialog" aria-modal="true" aria-label={t('face.viewerAria')}>
+    <div className="face-viewer" role="dialog" aria-modal="true" aria-label={t('face.viewerAria')} ref={rootRef}>
       <button type="button" className="face-viewer-backdrop" aria-label={t('common.close')} onClick={onClose} />
 
       <div
@@ -167,7 +186,19 @@ export function FaceContextViewer({
               currentPersonId={ctx.personId}
               currentPersonName={ctx.personName}
               allowIgnore
+              isIgnored={ctx.isIgnored}
               onChanged={() => { setRefreshTick((t) => t + 1); loadPeople(); }}
+              onIgnored={(id) => {
+                // No refetch of the face we just removed from the pool: the
+                // caller drops it from the sequence and this viewer either
+                // advances or closes.
+                if (onFaceIgnored) onFaceIgnored(id);
+                else setRefreshTick((t) => t + 1);
+              }}
+              onRestored={(id) => {
+                if (onFaceRestored) onFaceRestored(id);
+                else setRefreshTick((t) => t + 1);
+              }}
               invalidateAuth={invalidateAuth}
             />
           )}

@@ -234,6 +234,126 @@ it('shows the persisted reference faces with their count and slot order', async 
   expect(slots).toEqual(['#1', '#2', '#3', '#4']);
 });
 
+// ---- a correction moves the WHOLE page ------------------------------------
+//
+// Removing / moving / ignoring a face changes what this person IS: the backend
+// reselects the reference template from what is left, and the suggestions come
+// from that template. Reloading only the photos left "6/6" on screen next to a
+// reference the owner had just disowned, and kept offering matches computed
+// from evidence that no longer existed.
+
+it('refetches the references and the suggestions after a face is removed', async () => {
+  let referenceCount = 4;
+  const mock = installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': () => jsonResponse(referenceFaceRows(referenceCount)),
+    'GET /api/people/p-1/similar-faces': similar(true),
+    'DELETE /api/people/p-1/faces/f-1': () => { referenceCount = 3; return emptyResponse(); },
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  expect(await screen.findByText('Volti di riferimento · 4/6')).toBeTruthy();
+  const similarBefore = mock.calls.filter((c) => c.url.includes('/similar-faces')).length;
+
+  await userEvent.click(await screen.findByRole('button', { name: 'Rimuovi volto' }));
+
+  // The panel adopts the rebuilt set — it does not stay on the old count until
+  // the page is reloaded.
+  expect(await screen.findByText('Volti di riferimento · 3/6')).toBeTruthy();
+  // …and the suggestions are asked for again, because the template changed.
+  await waitFor(() =>
+    expect(mock.calls.filter((c) => c.url.includes('/similar-faces')).length)
+      .toBeGreaterThan(similarBefore),
+  );
+  // No full page reload was needed to see any of it.
+  expect(screen.getByRole('heading', { name: 'Alice' })).toBeTruthy();
+});
+
+it('recomputes the reference set on demand and adopts the new one', async () => {
+  let referenceCount = 6;
+  const mock = installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': () => jsonResponse(referenceFaceRows(referenceCount)),
+    'GET /api/people/p-1/similar-faces': similar(true),
+    // The selector decides four references are enough: 4/6 is a correct answer,
+    // not a failure to reach six.
+    'POST /api/people/p-1/reference-faces/rebuild': () => {
+      referenceCount = 4;
+      return jsonResponse(referenceFaceRows(4));
+    },
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  expect(await screen.findByText('Volti di riferimento · 6/6')).toBeTruthy();
+  const similarBefore = mock.calls.filter((c) => c.url.includes('/similar-faces')).length;
+
+  await userEvent.click(screen.getByRole('button', { name: 'Ricalcola riferimenti' }));
+
+  await waitFor(() =>
+    expect(mock.calls.some((c) =>
+      c.method === 'POST' && c.url.endsWith('/api/people/p-1/reference-faces/rebuild'))).toBe(true),
+  );
+  expect(await screen.findByText('Volti di riferimento · 4/6')).toBeTruthy();
+  await waitFor(() =>
+    expect(mock.calls.filter((c) => c.url.includes('/similar-faces')).length)
+      .toBeGreaterThan(similarBefore),
+  );
+});
+
+it('marks the recompute action busy while the request is in flight', async () => {
+  let release: (() => void) | null = null;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  installFetchMock({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': referenceFaces(6),
+    'GET /api/people/p-1/similar-faces': similar(true),
+    'POST /api/people/p-1/reference-faces/rebuild': async () => {
+      await pending;
+      return jsonResponse(referenceFaceRows(4));
+    },
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={['/people/p-1']}>
+        <Routes>
+          <Route path="/people/:personId" element={<PersonDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+
+  await screen.findByText('Volti di riferimento · 6/6');
+  await userEvent.click(screen.getByRole('button', { name: 'Ricalcola riferimenti' }));
+
+  const busy = await screen.findByRole('button', { name: 'Ricalcolo…' });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
+
+  release!();
+  expect(await screen.findByRole('button', { name: 'Ricalcola riferimenti' })).toBeTruthy();
+});
+
 it('explains the empty reference set instead of erroring, and does not search', async () => {
   const mock = installFetchMock({
     'GET /api/people/p-1': person('Alice'),

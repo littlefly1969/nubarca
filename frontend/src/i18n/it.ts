@@ -1435,6 +1435,10 @@ const it = {
   'person.referenceFacesEmpty': 'Volti di riferimento non ancora generati.',
   'person.referenceFacesEmptyHint': 'Verranno scelti alla prima ricerca di volti simili.',
   'person.referenceFaceSlot': 'Riferimento {n}',
+  'person.rebuildReferences': 'Ricalcola riferimenti',
+  'person.rebuildingReferences': 'Ricalcolo…',
+  'person.rebuildReferencesHelp':
+    'Ricalcola i volti campione dalle associazioni confermate di questa persona.',
 
   // --- Dettaglio persona: risultati video (VFACE-02) ---
   'person.videosAria': 'Video con questa persona',

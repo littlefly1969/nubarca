@@ -56,6 +56,17 @@ public sealed class PersonFaceReferenceTests
         return v;
     }
 
+    // An explicit point in the (e_a, e_b) plane, so a fixture can place candidates
+    // at CHOSEN cosine distances from each other rather than at whatever a blend
+    // happens to produce.
+    private static float[] Plane(int a, int b, double x, double y)
+    {
+        var v = new float[Dim];
+        v[a] = (float)x;
+        v[b] = (float)y;
+        return v;
+    }
+
     private sealed record SeededFace(Guid FaceId, Guid FileId, Guid BlobId);
 
     private static async Task<SeededFace> SeedFaceAsync(
@@ -142,6 +153,26 @@ public sealed class PersonFaceReferenceTests
         var (ownerId, _) = await f.CreateAuthenticatedClientAsync(email);
         return ownerId;
     }
+
+    private static async Task<IReadOnlyList<Guid>?> RebuildAsync(
+        SqliteWebApplicationFactory f, Guid ownerId, Guid personId, Guid profileId)
+    {
+        using var scope = f.Services.CreateScope();
+        var references = scope.ServiceProvider.GetRequiredService<PersonFaceReferenceService>();
+        return await references.RebuildAsync(ownerId, personId, profileId);
+    }
+
+    private static async Task<List<Guid>> AssignedFaceIdsAsync(SqliteWebApplicationFactory f, Guid personId)
+    {
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PersonFaceAssignments.AsNoTracking()
+            .Where(a => a.PersonId == personId).Select(a => a.FaceDetectionId).ToListAsync();
+    }
+
+    // The effective coverage boundary a rebuild uses: the CONFIGURED default
+    // search threshold, never a caller's slider (AiOptions.Face defaults to 0.35).
+    private const double DefaultCoverage = 0.35;
 
     // ---- bootstrap --------------------------------------------------------
 
@@ -504,6 +535,377 @@ public sealed class PersonFaceReferenceTests
         Assert.InRange(rows.Count, 1, PersonFaceReferenceService.MaxPersonReferenceFaces);
         Assert.Equal(rows.Count, rows.Select(r => r.FaceDetectionId).Distinct().Count());
         Assert.Equal(rows.Count, rows.Select(r => r.Ordinal).Distinct().Count());
+    }
+
+    // ---- correction rebuilds the WHOLE set --------------------------------
+    //
+    // A reference set is chosen GLOBALLY: quality, diversity and coverage decide
+    // the set as a whole, so which faces are optimal depends on which other faces
+    // are in it. When the owner says "#3 is not this person", deleting row #3 and
+    // topping the set back up leaves the survivors frozen in an arrangement that
+    // was partly chosen BECAUSE of the face that turned out to be somebody else.
+    // Every one of these covers the same rule: the set is invalidated whole and
+    // reselected from what remains.
+
+    [Fact]
+    public async Task Removing_A_Reference_Face_Reselects_The_Whole_Set()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var faces = new List<SeededFace>();
+        for (var i = 0; i < 8; i++)
+        {
+            faces.Add(await SeedFaceAsync(f, ownerId, profileId, OneHot(i), quality: 0.5 + (i * 0.01)));
+        }
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, faces.Select(x => x.FaceId).ToArray());
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+
+        var before = await ReferenceRowsAsync(f, personId);
+        Assert.Equal(PersonFaceReferenceService.MaxPersonReferenceFaces, before.Count);
+        var victim = before[2].FaceDetectionId; // a face that IS a reference
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.RemoveFaceFromPersonAsync(ownerId, personId, victim));
+        }
+
+        var after = await ReferenceRowsAsync(f, personId);
+        var assigned = (await AssignedFaceIdsAsync(f, personId)).ToHashSet();
+
+        Assert.DoesNotContain(victim, assigned);
+        Assert.DoesNotContain(victim, after.Select(r => r.FaceDetectionId));
+        Assert.InRange(after.Count, 1, PersonFaceReferenceService.MaxPersonReferenceFaces);
+        Assert.All(after, r => Assert.Contains(r.FaceDetectionId, assigned));
+        // Reselected, not patched: every row is new, and the slots are a clean
+        // 0..n-1 rather than the old ordinals with a hole punched in them.
+        Assert.Empty(after.Select(r => r.Id).Intersect(before.Select(r => r.Id)));
+        Assert.Equal(Enumerable.Range(0, after.Count), after.Select(r => r.Ordinal));
+    }
+
+    // The distinguishing case. The fixture is built so that removing ONE
+    // reference changes which of the OTHERS belong in the set:
+    //
+    //   A  (quality .99) is the best face and anchors the original set;
+    //   B  sits at cosine .30 to A — just OUTSIDE coverage, so it earns slot 2;
+    //   C  sits at cosine .70 to A — INSIDE coverage, so it is never selected…
+    //      …but at cosine .89 to B, and it outranks B on quality.
+    //
+    // Original set: [A, B]. Take A away and a full reselection picks C first,
+    // which then COVERS B — so the surviving reference B drops out entirely.
+    // A "fill the empty slot" implementation would keep B and answer [B].
+    [Fact]
+    public async Task Rebuild_Is_A_Full_Reselection_Not_A_Slot_Fill()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var va = Plane(0, 1, 1.0, 0.0);
+        var vb = Plane(0, 1, 0.3, 0.9539392);
+        var vc = Plane(0, 1, 0.7, 0.7141428);
+
+        var a = await SeedFaceAsync(f, ownerId, profileId, va, quality: 0.99);
+        var b = await SeedFaceAsync(f, ownerId, profileId, vb, quality: 0.30);
+        var c = await SeedFaceAsync(f, ownerId, profileId, vc, quality: 0.80);
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, a.FaceId, b.FaceId, c.FaceId);
+
+        // Guard the fixture's geometry, so a change to the vectors fails here with
+        // an explanation rather than in the assertion below.
+        Assert.True(PersonReferenceSelector.CosineSimilarity(va, vb) < DefaultCoverage);
+        Assert.True(PersonReferenceSelector.CosineSimilarity(va, vc) > DefaultCoverage);
+        Assert.True(PersonReferenceSelector.CosineSimilarity(vb, vc) > DefaultCoverage);
+
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+        var before = (await ReferenceRowsAsync(f, personId)).Select(r => r.FaceDetectionId).ToList();
+        Assert.Equal(new[] { a.FaceId, b.FaceId }, before);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.RemoveFaceFromPersonAsync(ownerId, personId, a.FaceId));
+        }
+
+        var after = (await ReferenceRowsAsync(f, personId)).Select(r => r.FaceDetectionId).ToList();
+
+        // Exactly what a fresh selection over the REMAINING candidates produces.
+        var fresh = PersonReferenceSelector.Select(
+            new[]
+            {
+                new PersonReferenceSelector.ReferenceCandidate(b.FaceId, vb, 0.30),
+                new PersonReferenceSelector.ReferenceCandidate(c.FaceId, vc, 0.80),
+            },
+            DefaultCoverage);
+        Assert.Equal(fresh, after);
+
+        // …which is NOT the survivors-plus-a-filler a slot fill would give.
+        Assert.Equal(new[] { c.FaceId }, after);
+        Assert.DoesNotContain(b.FaceId, after);
+    }
+
+    [Fact]
+    public async Task Moving_A_Reference_Face_Rebuilds_The_Source_And_Leaves_The_Target_Valid()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        // Alice: four confirmed faces, one of which is really Maria.
+        var alice1 = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.9);
+        var alice2 = await SeedFaceAsync(f, ownerId, profileId, OneHot(1), quality: 0.8);
+        var alice3 = await SeedFaceAsync(f, ownerId, profileId, OneHot(2), quality: 0.7);
+        var reallyMaria = await SeedFaceAsync(f, ownerId, profileId, OneHot(3), quality: 0.95);
+        var aliceId = await CreatePersonWithFacesAsync(
+            f, ownerId, alice1.FaceId, alice2.FaceId, alice3.FaceId, reallyMaria.FaceId);
+        await EnsureAsync(f, ownerId, aliceId, profileId, coverage: DefaultCoverage);
+        Assert.Contains(reallyMaria.FaceId, (await ReferenceRowsAsync(f, aliceId)).Select(r => r.FaceDetectionId));
+
+        Guid mariaId;
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            var dto = await people.AssignFaceAsync(ownerId, reallyMaria.FaceId, personId: null, newPersonName: "Maria");
+            mariaId = dto!.PersonId;
+        }
+
+        var aliceRows = await ReferenceRowsAsync(f, aliceId);
+        var aliceAssigned = (await AssignedFaceIdsAsync(f, aliceId)).ToHashSet();
+        Assert.DoesNotContain(reallyMaria.FaceId, aliceRows.Select(r => r.FaceDetectionId));
+        Assert.DoesNotContain(reallyMaria.FaceId, aliceAssigned);
+        // Alice was REBUILT from what is left — not left one short.
+        Assert.Equal(3, aliceRows.Count);
+        Assert.All(aliceRows, r => Assert.Contains(r.FaceDetectionId, aliceAssigned));
+        Assert.Equal(Enumerable.Range(0, aliceRows.Count), aliceRows.Select(r => r.Ordinal));
+
+        // Maria owns the face and bootstraps her own template lazily, unchanged.
+        Assert.Contains(reallyMaria.FaceId, await AssignedFaceIdsAsync(f, mariaId));
+        var maria = await EnsureAsync(f, ownerId, mariaId, profileId, coverage: DefaultCoverage);
+        Assert.Single(maria);
+        Assert.Equal(reallyMaria.FaceId, maria[0].FaceDetectionId);
+    }
+
+    [Fact]
+    public async Task Ignoring_A_Reference_Face_Rebuilds_The_Set_Without_It()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var keep1 = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.9);
+        var keep2 = await SeedFaceAsync(f, ownerId, profileId, OneHot(1), quality: 0.8);
+        var stranger = await SeedFaceAsync(f, ownerId, profileId, OneHot(2), quality: 0.95);
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, keep1.FaceId, keep2.FaceId, stranger.FaceId);
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+        Assert.Equal(3, (await ReferenceRowsAsync(f, personId)).Count);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.IgnoreFaceAsync(ownerId, stranger.FaceId));
+        }
+
+        var rows = await ReferenceRowsAsync(f, personId);
+        Assert.Equal(2, rows.Count);
+        Assert.DoesNotContain(stranger.FaceId, rows.Select(r => r.FaceDetectionId));
+        Assert.Equal(
+            new[] { keep1.FaceId, keep2.FaceId }.OrderBy(x => x),
+            rows.Select(r => r.FaceDetectionId).OrderBy(x => x));
+
+        // An ignored face is no longer assigned, so a rebuild cannot pick it back.
+        Assert.DoesNotContain(stranger.FaceId, await AssignedFaceIdsAsync(f, personId));
+    }
+
+    // The other half of the rule: a face that was NOT a reference costs nothing.
+    // Removing it must not churn a healthy set — no invalidation, no reselection.
+    [Fact]
+    public async Task Removing_A_Non_Reference_Face_Leaves_The_Set_Untouched()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        // One appearance repeated: the first face becomes the only reference and
+        // the rest are covered, so they are confirmed faces but not references.
+        var reference = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.9);
+        var alsoCovered = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.5);
+        var spare = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.4);
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, reference.FaceId, alsoCovered.FaceId, spare.FaceId);
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+
+        var before = await ReferenceRowsAsync(f, personId);
+        Assert.Single(before);
+        Assert.Equal(reference.FaceId, before[0].FaceDetectionId);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.RemoveFaceFromPersonAsync(ownerId, personId, spare.FaceId));
+        }
+
+        var after = await ReferenceRowsAsync(f, personId);
+        // The SAME rows, not equivalent ones: nothing was rewritten.
+        Assert.Equal(before.Select(r => r.Id), after.Select(r => r.Id));
+        Assert.Equal(before.Select(r => r.FaceDetectionId), after.Select(r => r.FaceDetectionId));
+        Assert.Equal(before.Select(r => r.Ordinal), after.Select(r => r.Ordinal));
+    }
+
+    [Fact]
+    public async Task Rebuild_Performs_No_Inference_And_Uses_Only_Completed_Embeddings()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var good1 = await SeedFaceAsync(f, ownerId, profileId, OneHot(0), quality: 0.9);
+        var good2 = await SeedFaceAsync(f, ownerId, profileId, OneHot(1), quality: 0.8);
+        var failed = await SeedFaceAsync(
+            f, ownerId, profileId, OneHot(2), quality: 0.99, embeddingStatus: AiArtifactStatuses.Failed);
+        var noEmbedding = await SeedFaceAsync(f, ownerId, profileId, vector: null, quality: 0.99);
+        var personId = await CreatePersonWithFacesAsync(
+            f, ownerId, good1.FaceId, good2.FaceId, failed.FaceId, noEmbedding.FaceId);
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+
+        int detectionsBefore, embeddingsBefore;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            detectionsBefore = await db.FaceDetections.CountAsync();
+            embeddingsBefore = await db.FaceEmbeddings.CountAsync();
+        }
+
+        var rebuilt = await RebuildAsync(f, ownerId, personId, profileId);
+
+        Assert.NotNull(rebuilt);
+        Assert.DoesNotContain(failed.FaceId, rebuilt!);
+        Assert.DoesNotContain(noEmbedding.FaceId, rebuilt);
+        Assert.Equal(new[] { good1.FaceId, good2.FaceId }.OrderBy(x => x), rebuilt.OrderBy(x => x));
+
+        // No detection, no embedding, no re-embedding: a rebuild is a read of what
+        // already exists plus at most six rows.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(detectionsBefore, await db.FaceDetections.CountAsync());
+            Assert.Equal(embeddingsBefore, await db.FaceEmbeddings.CountAsync());
+        }
+    }
+
+    // Derived state under contention: a rebuild racing the reference reads a
+    // similar-face request makes must never turn into a 500, and must never leave
+    // duplicate faces or duplicate slots behind.
+    [Fact]
+    public async Task Concurrent_Rebuild_And_Reference_Reads_Leave_One_Valid_Set()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var ownerId = await CreateOwnerAsync(f);
+
+        var faceIds = new List<Guid>();
+        for (var i = 0; i < 8; i++)
+        {
+            faceIds.Add((await SeedFaceAsync(f, ownerId, profileId, OneHot(i), quality: 0.5 + (i * 0.01))).FaceId);
+        }
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, faceIds.ToArray());
+        await EnsureAsync(f, ownerId, personId, profileId, coverage: DefaultCoverage);
+
+        var exceptions = new List<Exception>();
+        await Task.WhenAll(Enumerable.Range(0, 6).Select(async i =>
+        {
+            try
+            {
+                using var scope = f.Services.CreateScope();
+                var references = scope.ServiceProvider.GetRequiredService<PersonFaceReferenceService>();
+                if (i % 2 == 0)
+                {
+                    await references.RebuildAsync(ownerId, personId, profileId);
+                }
+                else
+                {
+                    await references.EnsureAsync(ownerId, personId, profileId, DefaultCoverage);
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (exceptions) { exceptions.Add(ex); }
+            }
+        }));
+
+        Assert.Empty(exceptions);
+
+        var rows = await ReferenceRowsAsync(f, personId);
+        var assigned = (await AssignedFaceIdsAsync(f, personId)).ToHashSet();
+        Assert.InRange(rows.Count, 0, PersonFaceReferenceService.MaxPersonReferenceFaces);
+        Assert.Equal(rows.Count, rows.Select(r => r.FaceDetectionId).Distinct().Count());
+        Assert.Equal(rows.Count, rows.Select(r => r.Ordinal).Distinct().Count());
+        Assert.All(rows, r => Assert.Contains(r.FaceDetectionId, assigned));
+        Assert.All(rows, r => Assert.InRange(r.Ordinal, 0, PersonFaceReferenceService.MaxPersonReferenceFaces - 1));
+    }
+
+    [Fact]
+    public async Task Rebuild_Endpoint_Reselects_The_Set_And_Is_Owner_Scoped()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var (ownerId, client) = await f.CreateAuthenticatedClientAsync("a@example.com");
+        var (_, other) = await f.CreateAuthenticatedClientAsync("b@example.com");
+
+        var faces = new List<SeededFace>();
+        for (var i = 0; i < 4; i++)
+        {
+            faces.Add(await SeedFaceAsync(f, ownerId, profileId, OneHot(i), quality: 0.5 + (i * 0.01)));
+        }
+        var personId = await CreatePersonWithFacesAsync(f, ownerId, faces.Select(x => x.FaceId).ToArray());
+
+        // Nothing bootstrapped yet: the manual rebuild BUILDS the set (unlike the
+        // read-only GET, which deliberately does not).
+        Assert.Empty(await ReferenceRowsAsync(f, personId));
+        var resp = await client.PostAsync($"/api/people/{personId}/reference-faces/rebuild", null);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var raw = await resp.Content.ReadAsStringAsync();
+        var items = (await resp.Content.ReadFromJsonAsync<List<PersonReferenceFaceDto>>())!;
+
+        Assert.Equal(4, items.Count);
+        Assert.Equal(items.Select(r => r.Ordinal).OrderBy(x => x), items.Select(r => r.Ordinal));
+        Assert.Equal(Enumerable.Range(0, items.Count), items.Select(r => r.Ordinal));
+        var assigned = (await AssignedFaceIdsAsync(f, personId)).ToHashSet();
+        Assert.All(items, r => Assert.Contains(r.FaceId, assigned));
+
+        // Same set through the ordinary read.
+        var read = (await client.GetFromJsonAsync<List<PersonReferenceFaceDto>>(
+            $"/api/people/{personId}/reference-faces"))!;
+        Assert.Equal(items.Select(r => r.FaceId), read.Select(r => r.FaceId));
+
+        // No internals in the response.
+        foreach (var forbidden in new[]
+                 {
+                     "EmbeddingBytes", "embeddingBytes", "StorageKey", "storageKey", "BlobObjectId",
+                     "blobObjectId", "Sha256", "sha256", "/storage/objects/", "PrivateVaultId",
+                     "privateVaultId", "ProfileId", "profileId", "score", "distance", "at NubArca.",
+                 })
+        {
+            Assert.DoesNotContain(forbidden, raw, StringComparison.Ordinal);
+        }
+
+        // The confirmed assignments are untouched — this is derived state only.
+        Assert.Equal(4, (await AssignedFaceIdsAsync(f, personId)).Count);
+
+        // Cross-owner, unknown and archived are the same generic 404; anonymous 401.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await other.PostAsync($"/api/people/{personId}/reference-faces/rebuild", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.PostAsync($"/api/people/{Guid.NewGuid()}/reference-faces/rebuild", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await f.CreateClient().PostAsync($"/api/people/{personId}/reference-faces/rebuild", null)).StatusCode);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+            Assert.True(await people.ArchivePersonAsync(ownerId, personId));
+        }
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await client.PostAsync($"/api/people/{personId}/reference-faces/rebuild", null)).StatusCode);
     }
 
     // ---- read-only reference-faces surface --------------------------------

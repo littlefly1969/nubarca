@@ -162,6 +162,10 @@ export interface FaceContext {
   faces: { faceId: string; box: FaceBox }[];
   personId: string | null;
   personName: string | null;
+  // The owner has already dismissed this face. The viewer opens from the
+  // "Ignorati" tab too, so it offers Restore rather than an Ignore that would
+  // mean nothing.
+  isIgnored: boolean;
 }
 
 export function getFaceContext(faceId: string, signal?: AbortSignal): Promise<FaceContext> {
@@ -277,6 +281,20 @@ export function getPersonReferenceFaces(
   return api<PersonReferenceFace[]>(
     `/api/people/${encodeURIComponent(personId)}/reference-faces`,
     { signal },
+  );
+}
+
+// Reselect the person's reference template from scratch out of the confirmed
+// assignments it has right now, and answer with the new set. Not destructive:
+// the assignments themselves are untouched — the reference set is derived state.
+// Costs no face detection, no inference and no re-embedding.
+export function rebuildPersonReferenceFaces(
+  personId: string,
+  signal?: AbortSignal,
+): Promise<PersonReferenceFace[]> {
+  return api<PersonReferenceFace[]>(
+    `/api/people/${encodeURIComponent(personId)}/reference-faces/rebuild`,
+    { method: 'POST', signal },
   );
 }
 

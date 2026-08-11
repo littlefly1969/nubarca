@@ -162,6 +162,27 @@ public static class PeopleEndpoints
             return faces is null ? Results.NotFound() : Results.Ok(faces);
         }).WithName("GetPersonReferenceFaces").RequirePermission(Permissions.PeopleAccess);
 
+        // Reselect the person's reference template from ZERO for the active face
+        // profile, from the confirmed assignments that exist right now. Owner-
+        // private; the corrections the owner makes already do this automatically,
+        // so this is the explicit safety net for a template that went wrong.
+        //
+        // Not destructive: PersonFaceAssignments are untouched, the reference set is
+        // derived state. Costs no detection, no inference, no re-embedding and no
+        // clustering — it reads embeddings that already exist and writes at most six
+        // rows. Answers with the new set in Ordinal order; generic 404 on
+        // missing / archived / cross-owner.
+        app.MapPost("/api/people/{personId:guid}/reference-faces/rebuild", async (
+            Guid personId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.PeopleService people,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var faces = await people.RebuildPersonReferenceFacesAsync(ownerUserId, personId, cancellationToken);
+            return faces is null ? Results.NotFound() : Results.Ok(faces);
+        }).WithName("RebuildPersonReferenceFaces").RequirePermission(Permissions.PeopleAccess);
+
         app.MapGet("/api/people/{personId:guid}/similar-faces", async (
             Guid personId,
             [FromQuery] double? minSimilarity,

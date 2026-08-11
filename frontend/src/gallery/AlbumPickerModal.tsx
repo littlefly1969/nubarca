@@ -284,8 +284,10 @@ export function AlbumPickerModal({
       dismissable={!busy}
       testId="album-picker"
       // Opened from the media viewer's details drawer, which listens for Escape
-      // on the same target. As the topmost surface this one owns the key.
-      exclusiveEscape
+      // and the arrow keys on the same target. As the topmost surface this one
+      // owns the keyboard: Escape closes only the picker, and an arrow typed in
+      // the search field moves the caret instead of paging the photo behind it.
+      ownsKeyboard
       // …and it is opened from the workspace's own fixed surfaces — the
       // selection bar, and the viewer's drawer — so it has to stack on their
       // scale. On the default layer the selection-bar pill is painted over this

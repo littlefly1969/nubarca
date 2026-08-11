@@ -16,9 +16,15 @@ import { useI18n } from '../../i18n';
 // server FaceCrop preview; shows no storage internals.
 export function UnassignedFacesTab({
   onOpenFace,
+  excludeFaceIds = [],
   invalidateAuth,
 }: {
   onOpenFace: (faceIds: string[], index: number) => void;
+  // Faces acted on elsewhere (ignored from the context viewer). Filtered out of
+  // the already-loaded page so the card disappears immediately, without
+  // refetching from the top and losing the position of somebody working
+  // through a long pool. Later fetches never return them anyway.
+  excludeFaceIds?: readonly string[];
   invalidateAuth: () => void;
 }) {
   const { t } = useI18n();
@@ -82,6 +88,10 @@ export function UnassignedFacesTab({
     );
   }
 
+  const shown = excludeFaceIds.length === 0
+    ? items
+    : items.filter((i) => !excludeFaceIds.includes(i.faceId));
+
   return (
     <div className="unassigned-faces" aria-label={t('people.tabUnassigned')}>
       <div className="unassigned-toolbar">
@@ -97,19 +107,19 @@ export function UnassignedFacesTab({
 
       {status === 'loading' ? (
         <p className="muted" role="status">{t('common.loading')}</p>
-      ) : items.length === 0 ? (
+      ) : shown.length === 0 ? (
         <p className="muted">{t('face.noUnassigned')}</p>
       ) : (
         <>
           <ul className="people-grid">
-            {items.map((fc, idx) => (
+            {shown.map((fc, idx) => (
               <li key={fc.faceId} className="people-card unassigned-card">
                 <FaceCrop
                   faceId={fc.faceId}
                   fileItemId={fc.fileItemId}
                   box={fc.box}
                   alt={t('face.unassignedFaceAlt')}
-                  onClick={() => onOpenFace(items.map((i) => i.faceId), idx)}
+                  onClick={() => onOpenFace(shown.map((i) => i.faceId), idx)}
                 />
                 <AssignToPersonMenu
                   faceId={fc.faceId}

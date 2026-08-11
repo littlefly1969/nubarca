@@ -5932,6 +5932,17 @@ video.lightbox-image {
 /* The person's persisted reference template — a compact, deliberately quiet
    strip that wraps on narrow viewports. It is observability, not a control
    surface, so it never competes with the photos or the similar-face grid. */
+/* Heading row: the count, and the one action the panel offers. The recompute
+   control is a link-weight button on the same baseline — the corrections the
+   owner makes already rebuild the set, so this is a quiet safety net and not a
+   step anybody should feel invited to take. */
+.reference-faces-head {
+  display: flex; align-items: baseline; flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+.reference-faces-head h3 { margin: 0; }
+.reference-faces-rebuild { font-size: 0.85rem; }
+.reference-faces-rebuild[disabled] { opacity: 0.6; cursor: default; }
 .reference-faces-grid {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-wrap: wrap; gap: 0.5rem;
@@ -6052,7 +6063,10 @@ video.lightbox-image {
 .assign-modal-empty { padding: 0.4rem 0.5rem; font-size: 0.85rem; }
 .assign-modal-create { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
 .assign-modal-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.assign-modal-remove, .assign-modal-ignore, .assign-modal-cancel { font-size: 0.85rem; }
+/* `.assign-modal-restore` takes `.assign-modal-ignore`'s place on a face that is
+   already dismissed — same weight, because it is the same slot in the row. */
+.assign-modal-remove, .assign-modal-ignore, .assign-modal-restore,
+.assign-modal-cancel { font-size: 0.85rem; }
 .assign-modal-help { margin: 0.6rem 0 0; font-size: 0.78rem; line-height: 1.35; }
 .assign-modal-confirm { font-weight: 600; }
 .cluster-assign-target { margin: 0 0 0.5rem; font-size: 0.9rem; }

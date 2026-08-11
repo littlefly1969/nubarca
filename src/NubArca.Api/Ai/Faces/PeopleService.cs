@@ -172,6 +172,11 @@ public sealed class PeopleService
         var repFaceIds = clusters.Where(c => c.RepresentativeFaceDetectionId.HasValue)
             .Select(c => c.RepresentativeFaceDetectionId!.Value).Distinct().ToList();
         var refs = await ResolveFaceRefsAsync(ownerUserId, repFaceIds, cancellationToken);
+        // A persisted representative the owner has since ignored must not stay the
+        // face of the group. Fixed on the READ side: the stored representative is a
+        // clustering output, and rewriting it just to render would make displaying a
+        // list a write.
+        var ignoredReps = await IgnoredAmongAsync(ownerUserId, repFaceIds, cancellationToken);
 
         // Surfaceable member counts per cluster (excludes vaulted/hidden faces).
         var clusterIds = clusters.Select(c => c.Id).ToList();
@@ -185,8 +190,8 @@ public sealed class PeopleService
             {
                 continue; // every member is hidden (e.g. all vaulted) → don't surface
             }
-            FaceRefDto? rep = c.RepresentativeFaceDetectionId.HasValue
-                ? refs.GetValueOrDefault(c.RepresentativeFaceDetectionId.Value)
+            FaceRefDto? rep = c.RepresentativeFaceDetectionId is Guid repId && !ignoredReps.Contains(repId)
+                ? refs.GetValueOrDefault(repId)
                 : null;
             rep ??= await FirstSurfaceableMemberRefAsync(ownerUserId, c.Id, cancellationToken);
             result.Add(new SuggestedGroupDto(c.Id, rep, count, c.ConfidenceAggregate, c.Status));
@@ -236,6 +241,12 @@ public sealed class PeopleService
             .Select(m => m.FaceDetectionId)
             .ToListAsync(cancellationToken);
 
+        // Members already on someone else are moved here, so those people lose the
+        // references they held on them. Deduped to one invalidation and one rebuild
+        // per set, however many of their faces this group takes.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, memberFaceIds, keepPersonId: person.Id, cancellationToken: cancellationToken);
+
         await AssignFacesAsync(ownerUserId, person.Id, memberFaceIds, PersonFaceAssignmentSources.ClusterConfirmed, cancellationToken);
 
         var now = _clock.GetUtcNow().UtcDateTime;
@@ -244,6 +255,7 @@ public sealed class PeopleService
         cluster.UpdatedAt = now;
         person.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         await _references.MaintainAfterAssignAsync(ownerUserId, person.Id, memberFaceIds, cancellationToken);
 
         return await GetPersonAsync(ownerUserId, person.Id, cancellationToken);
@@ -282,12 +294,16 @@ public sealed class PeopleService
             return 0;
         }
 
-        // Ignore wins over assignment (as in IgnoreFaceAsync).
+        // Ignore wins over assignment (as in IgnoreFaceAsync). Every reference set
+        // that any of these faces belonged to is invalidated once and rebuilt once,
+        // no matter how many of its members this group carries away.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, surfaceable, cancellationToken: cancellationToken);
+
         var assignments = await _db.PersonFaceAssignments
             .Where(a => a.OwnerUserId == ownerUserId && surfaceable.Contains(a.FaceDetectionId))
             .ToListAsync(cancellationToken);
         _db.PersonFaceAssignments.RemoveRange(assignments);
-        await _references.DropForFacesAsync(ownerUserId, surfaceable, cancellationToken);
 
         var alreadyIgnored = (await _db.IgnoredFaces.AsNoTracking()
             .Where(i => i.OwnerUserId == ownerUserId && surfaceable.Contains(i.FaceDetectionId))
@@ -313,6 +329,7 @@ public sealed class PeopleService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         return added;
     }
 
@@ -382,6 +399,12 @@ public sealed class PeopleService
         {
             toAssign.AddRange(onOther);
         }
+
+        // Only a move (moveAssigned) can take a reference off another person; `free`
+        // faces belong to nobody. Deduped to one rebuild per affected set.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, toAssign, keepPersonId: personId, cancellationToken: cancellationToken);
+
         await AssignFacesAsync(ownerUserId, personId, toAssign, PersonFaceAssignmentSources.ClusterConfirmed, cancellationToken);
 
         var now = _clock.GetUtcNow().UtcDateTime;
@@ -390,6 +413,7 @@ public sealed class PeopleService
         cluster.UpdatedAt = now;
         person.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         await _references.MaintainAfterAssignAsync(ownerUserId, personId, toAssign, cancellationToken);
 
         return new ClusterAssignSummaryDto(
@@ -399,6 +423,10 @@ public sealed class PeopleService
     // All surfaceable (owner-visible, non-vault) faces of a suggested/review group,
     // so the whole group can be reviewed face-by-face in the context viewer (not
     // just the representative photo). Representative first, then the rest.
+    //
+    // Individually-ignored members are excluded: the group's count already excludes
+    // them, so a viewer that still paged through them contradicted the card that
+    // opened it — and re-offered a face the owner had explicitly dismissed.
     // Null = generic 404 (cross-owner / missing group).
     public async Task<IReadOnlyList<FaceRefDto>?> GetGroupFacesAsync(
         Guid ownerUserId, Guid groupId, CancellationToken cancellationToken = default)
@@ -413,7 +441,8 @@ public sealed class PeopleService
         }
 
         var memberFaceIds = await _db.FaceClusterMembers.AsNoTracking()
-            .Where(m => m.FaceClusterId == groupId)
+            .Where(m => m.FaceClusterId == groupId
+                && !_db.IgnoredFaces.Any(i => i.OwnerUserId == ownerUserId && i.FaceDetectionId == m.FaceDetectionId))
             .OrderBy(m => m.FaceDetectionId)
             .Select(m => m.FaceDetectionId)
             .ToListAsync(cancellationToken);
@@ -450,8 +479,15 @@ public sealed class PeopleService
             return false;
         }
 
+        // "Sposta qui" on a similar-face candidate lands here too, so this is also
+        // a move: the person the face is leaving loses its whole template.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, new List<Guid> { faceDetectionId }, keepPersonId: personId,
+            cancellationToken: cancellationToken);
+
         await AssignFacesAsync(ownerUserId, personId, new List<Guid> { faceDetectionId }, PersonFaceAssignmentSources.ManualAdd, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         await _references.MaintainAfterAssignAsync(ownerUserId, personId, new List<Guid> { faceDetectionId }, cancellationToken);
         return true;
     }
@@ -466,9 +502,11 @@ public sealed class PeopleService
             return false;
         }
 
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken: cancellationToken);
         _db.PersonFaceAssignments.Remove(assignment);
-        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         return true;
     }
 
@@ -511,11 +549,19 @@ public sealed class PeopleService
             _db.People.Add(person);
         }
 
+        // A move takes the face away from whoever held it: that person's template
+        // was chosen with this face in it, so the whole set is invalidated here and
+        // reselected below from the assignments that survive. The TARGET keeps its
+        // usual incremental maintenance.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, new List<Guid> { faceDetectionId }, keepPersonId: person.Id,
+            cancellationToken: cancellationToken);
+
         await RemoveIgnoreRowsAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
         await AssignFacesAsync(ownerUserId, person.Id, new List<Guid> { faceDetectionId }, PersonFaceAssignmentSources.ManualAdd, cancellationToken);
         person.UpdatedAt = _clock.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(cancellationToken);
-        // A move also takes the face's reference away from the person it left.
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         await _references.MaintainAfterAssignAsync(ownerUserId, person.Id, new List<Guid> { faceDetectionId }, cancellationToken);
 
         return await GetPersonAsync(ownerUserId, person.Id, cancellationToken);
@@ -532,9 +578,11 @@ public sealed class PeopleService
         {
             return false;
         }
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken: cancellationToken);
         _db.PersonFaceAssignments.Remove(assignment);
-        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         return true;
     }
 
@@ -551,11 +599,16 @@ public sealed class PeopleService
             return false;
         }
 
+        // An ignored face is no longer a candidate ANYWHERE, so it cannot keep
+        // steering a person's template either: the sets it belonged to are
+        // invalidated whole and rebuilt from what is left after the ignore lands.
+        var affected = await _references.InvalidateSetsContainingFacesAsync(
+            ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken: cancellationToken);
+
         var assignments = await _db.PersonFaceAssignments
             .Where(a => a.OwnerUserId == ownerUserId && a.FaceDetectionId == faceDetectionId)
             .ToListAsync(cancellationToken);
         _db.PersonFaceAssignments.RemoveRange(assignments);
-        await _references.DropForFacesAsync(ownerUserId, new List<Guid> { faceDetectionId }, cancellationToken);
 
         var already = await _db.IgnoredFaces.AnyAsync(
             i => i.OwnerUserId == ownerUserId && i.FaceDetectionId == faceDetectionId, cancellationToken);
@@ -570,6 +623,7 @@ public sealed class PeopleService
             });
         }
         await _db.SaveChangesAsync(cancellationToken);
+        await RebuildReferenceSetsAsync(ownerUserId, affected, cancellationToken);
         return true;
     }
 
@@ -854,6 +908,42 @@ public sealed class PeopleService
             .ToList();
     }
 
+    // Reselect the person's reference set for the ACTIVE face profile from zero,
+    // using only the confirmed assignments that exist right now and the embeddings
+    // already persisted for them. The owner's safety net for a template that went
+    // wrong — and the same code path a correction runs automatically.
+    //
+    // No face detection, no inference, no re-embedding, no clustering: it is a read
+    // of existing vectors plus at most six rows. PersonFaceAssignments are NOT
+    // touched — the reference set is derived state, so this is not destructive and
+    // needs no confirmation. Null = generic 404 (missing / archived / cross-owner).
+    public async Task<IReadOnlyList<PersonReferenceFaceDto>?> RebuildPersonReferenceFacesAsync(
+        Guid ownerUserId, Guid personId, CancellationToken cancellationToken = default)
+    {
+        var exists = await _db.People.AsNoTracking().AnyAsync(
+            p => p.Id == personId && p.OwnerUserId == ownerUserId && !p.IsArchived, cancellationToken);
+        if (!exists)
+        {
+            return null;
+        }
+
+        var profile = await ResolveActiveProfileAsync(cancellationToken);
+        if (profile is null)
+        {
+            return Array.Empty<PersonReferenceFaceDto>();
+        }
+
+        if (await _references.RebuildAsync(ownerUserId, personId, profile.Id, cancellationToken) is null)
+        {
+            return null;
+        }
+
+        // Read the persisted set back through the ordinary window, so the response
+        // is exactly what the panel would show on its next load — including the
+        // owner-visible, non-vault resolution.
+        return await GetPersonReferenceFacesAsync(ownerUserId, personId, cancellationToken);
+    }
+
     // ---- similar faces (owner-private, threshold, pgvector) --------------
 
     public async Task<SimilarFacesPage?> FindSimilarFacesAsync(
@@ -932,6 +1022,24 @@ public sealed class PeopleService
                 {
                     best[n.FaceDetectionId] = n;
                 }
+            }
+        }
+
+        // An IGNORED face is not a candidate — not here either. "Ignora volto" is
+        // the owner saying this face is not worth deciding about; a suggestion list
+        // that keeps offering it makes the action useless.
+        //
+        // Filtered on the DEDUPED candidate ids (bounded by references ×
+        // SimilarFetchCap), not by joining IgnoredFaces into the HNSW query, which
+        // would put a second table in front of the ANN index. And filtered BEFORE
+        // ordering and paging, so a page is never short — or a cursor never skips —
+        // because ignored rows were removed from an already-cut window.
+        if (best.Count > 0)
+        {
+            var ignored = await IgnoredAmongAsync(ownerUserId, best.Keys.ToList(), cancellationToken);
+            foreach (var faceId in ignored)
+            {
+                best.Remove(faceId);
             }
         }
 
@@ -1033,12 +1141,54 @@ public sealed class PeopleService
             where !p.IsArchived
             select new { p.Id, p.DisplayName }).FirstOrDefaultAsync(cancellationToken);
 
+        // Whether the owner has already dismissed this face. The viewer opens from
+        // the Ignorati tab too, where offering "Ignora volto" on an already-ignored
+        // face is an action that means nothing; it offers "Ripristina" instead.
+        var ignored = await _db.IgnoredFaces.AsNoTracking().AnyAsync(
+            i => i.OwnerUserId == ownerUserId && i.FaceDetectionId == faceId, cancellationToken);
+
         return new FaceContextDto(
             file.Id, file.Name, faceId, selected.Box, faces,
-            person?.Id, person?.DisplayName);
+            person?.Id, person?.DisplayName, ignored);
     }
 
     // ---- internals -------------------------------------------------------
+
+    // Reselect each invalidated reference set from scratch, AFTER the authoritative
+    // mutation has been committed — so the rebuild sees the assignments that
+    // actually remain. Already deduped by (person, profile), so a bulk operation
+    // that takes twenty faces off one person still rebuilds that person once.
+    //
+    // Derived state: a rebuild that loses a race leaves the set empty rather than
+    // failing the mutation the owner asked for. The next similar-face request sees
+    // zero rows and bootstraps — which is exactly the empty-set invariant, and
+    // strictly better than a partial set nobody would ever repair.
+    private async Task RebuildReferenceSetsAsync(
+        Guid ownerUserId,
+        IReadOnlyList<PersonFaceReferenceService.PersonReferenceSetKey> keys,
+        CancellationToken cancellationToken)
+    {
+        foreach (var key in keys)
+        {
+            await _references.RebuildAsync(ownerUserId, key.PersonId, key.ProfileId, cancellationToken);
+        }
+    }
+
+    // Which of these faces the owner has individually ignored. Always bounded by
+    // the ids passed in — never the owner's whole ignore list.
+    private async Task<HashSet<Guid>> IgnoredAmongAsync(
+        Guid ownerUserId, IReadOnlyList<Guid> faceIds, CancellationToken cancellationToken)
+    {
+        if (faceIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+        var rows = await _db.IgnoredFaces.AsNoTracking()
+            .Where(i => i.OwnerUserId == ownerUserId && faceIds.Contains(i.FaceDetectionId))
+            .Select(i => i.FaceDetectionId)
+            .ToListAsync(cancellationToken);
+        return rows.ToHashSet();
+    }
 
     private async Task<AiProfile?> ResolveActiveProfileAsync(CancellationToken cancellationToken)
     {
@@ -1190,11 +1340,15 @@ public sealed class PeopleService
 
     private sealed record PersonRef(Guid PersonId, string? DisplayName);
 
+    // A deterministic stand-in representative: the lowest-id member that is
+    // surfaceable (owner-visible, non-vault) AND not individually ignored. Null
+    // when the group has none — the caller then does not surface the group at all.
     private async Task<FaceRefDto?> FirstSurfaceableMemberRefAsync(
         Guid ownerUserId, Guid clusterId, CancellationToken cancellationToken)
     {
         var memberFaceIds = await _db.FaceClusterMembers.AsNoTracking()
-            .Where(m => m.FaceClusterId == clusterId)
+            .Where(m => m.FaceClusterId == clusterId
+                && !_db.IgnoredFaces.Any(i => i.OwnerUserId == ownerUserId && i.FaceDetectionId == m.FaceDetectionId))
             .OrderBy(m => m.FaceDetectionId)
             .Select(m => m.FaceDetectionId)
             .Take(50)
@@ -1383,4 +1537,5 @@ public sealed record FaceContextDto(
     FaceBoxDto SelectedBox,
     IReadOnlyList<FaceBoxRef> Faces,
     Guid? PersonId,
-    string? PersonName);
+    string? PersonName,
+    bool IsIgnored);

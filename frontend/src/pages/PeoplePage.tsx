@@ -20,6 +20,7 @@ import { UnassignedFacesTab } from '../components/people/UnassignedFacesTab';
 import { IgnoredFacesTab } from '../components/people/IgnoredFacesTab';
 import { VideoFaceReviewTab } from '../components/people/VideoFaceReviewTab';
 import { ClusterAssignDialog } from '../components/people/ClusterAssignDialog';
+import { withoutFace, type FaceViewerSequence } from '../components/people/faceViewerSequence';
 import { useI18n } from '../i18n';
 import { type FacesTab, resolveFacesTab } from './facesTabs';
 
@@ -64,7 +65,13 @@ export function PeoplePage() {
   const [groups, setGroups] = useState<SuggestedGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const [viewer, setViewer] = useState<{ faceIds: string[]; index: number } | null>(null);
+  const [viewer, setViewer] = useState<FaceViewerSequence | null>(null);
+  // Faces the owner has just ignored/restored from the viewer. The self-loading
+  // tabs filter their already-loaded cards through this, so the card disappears
+  // at once without refetching from the first page and losing the position of
+  // somebody working through a long pool. A later fetch never returns them
+  // anyway — the server excludes them.
+  const [dismissedFaceIds, setDismissedFaceIds] = useState<string[]>([]);
 
   const reload = useCallback(async (which: Tab) => {
     setLoading(true);
@@ -102,6 +109,19 @@ export function PeoplePage() {
     } else {
       setLoading(false);
     }
+    // A tab change refetches from the server, which already applies the ignore
+    // state — the local hint has done its job and must not accumulate.
+    setDismissedFaceIds([]);
+  }, [tab, reload]);
+
+  // A face left (ignore) or rejoined (restore) the pool the viewer was opened
+  // from: drop it from the sequence — advancing to the next face, or closing
+  // when it was the last — and hide its card in the grid behind. The suggested
+  // and review grids are server-derived (group counts change), so those reload.
+  const dismissFromViewer = useCallback((faceId: string) => {
+    setViewer((v) => withoutFace(v, faceId));
+    setDismissedFaceIds((prev) => (prev.includes(faceId) ? prev : [...prev, faceId]));
+    if (tab === 'suggested' || tab === 'review') void reload(tab);
   }, [tab, reload]);
 
   return (
@@ -125,11 +145,19 @@ export function PeoplePage() {
       {tab === 'settings' ? (
         <FaceAISettings />
       ) : tab === 'unassigned' ? (
-        <UnassignedFacesTab onOpenFace={openFaces} invalidateAuth={invalidateAuth} />
+        <UnassignedFacesTab
+          onOpenFace={openFaces}
+          excludeFaceIds={dismissedFaceIds}
+          invalidateAuth={invalidateAuth}
+        />
       ) : tab === 'videoFaces' ? (
         <VideoFaceReviewTab invalidateAuth={invalidateAuth} />
       ) : tab === 'ignored' ? (
-        <IgnoredFacesTab onOpenFace={openFaces} invalidateAuth={invalidateAuth} />
+        <IgnoredFacesTab
+          onOpenFace={openFaces}
+          excludeFaceIds={dismissedFaceIds}
+          invalidateAuth={invalidateAuth}
+        />
       ) : error ? (
         <div className="folder-error" role="alert">
           {t('people.loadError')} <button type="button" className="retry-button" onClick={() => void reload(tab)}>{t('common.tryAgain')}</button>
@@ -154,6 +182,8 @@ export function PeoplePage() {
           index={viewer.index}
           onIndexChange={(next) => setViewer((v) => (v ? { ...v, index: next } : v))}
           onClose={() => setViewer(null)}
+          onFaceIgnored={dismissFromViewer}
+          onFaceRestored={dismissFromViewer}
         />
       )}
     </section>

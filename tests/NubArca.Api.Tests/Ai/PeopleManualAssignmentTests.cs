@@ -462,6 +462,84 @@ public sealed class PeopleManualAssignmentTests
         Assert.Empty(after!);
     }
 
+    // ---- an ignored face is not a candidate ANYWHERE ----------------------
+    //
+    // "Ignora volto" means the face stops being something the owner is asked to
+    // decide about. The group surfaces are where it used to come back: the
+    // clustering run persisted it as a group's representative face, and the group
+    // viewer paged through every member regardless.
+
+    [Fact]
+    public async Task Ignored_Representative_Is_Replaced_And_Ignored_Members_Leave_The_Group_Viewer()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var (ownerId, client) = await f.CreateAuthenticatedClientAsync();
+        // Three identical faces → one suggested group of three.
+        var a = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        var b = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        var c = await SeedFaceAsync(f, ownerId, profileId, OneHot(0));
+        await ClusterAsync(f, ownerId, profileId);
+
+        Guid groupId, representative;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var cluster = await db.FaceClusters.AsNoTracking().FirstAsync(x => x.OwnerUserId == ownerId);
+            groupId = cluster.Id;
+            representative = cluster.RepresentativeFaceDetectionId!.Value;
+        }
+        var members = new[] { a.FaceId, b.FaceId, c.FaceId };
+        Assert.Contains(representative, members);
+
+        // The group viewer starts with the representative and shows every member.
+        var before = (await client.GetFromJsonAsync<List<FaceRefDto>>($"/api/people/groups/{groupId}/faces"))!;
+        Assert.Equal(3, before.Count);
+        Assert.Equal(representative, before[0].FaceId);
+
+        // Ignore exactly the face the group is currently REPRESENTED by.
+        (await client.PostAsync($"/api/people/faces/{representative}/ignore", null)).EnsureSuccessStatusCode();
+
+        // The group is still worth reviewing (two members left) but no longer wears
+        // the face the owner dismissed — and the stand-in is a real member.
+        var groups = (await client.GetFromJsonAsync<List<SuggestedGroupDto>>("/api/people/suggested-groups"))!;
+        var group = Assert.Single(groups, g => g.GroupId == groupId);
+        Assert.Equal(2, group.FaceCount);
+        Assert.NotNull(group.Representative);
+        Assert.NotEqual(representative, group.Representative!.FaceId);
+        Assert.Contains(group.Representative.FaceId, members);
+
+        // The viewer pages through the surfaceable members only, representative
+        // first, and never re-offers the ignored one.
+        var after = (await client.GetFromJsonAsync<List<FaceRefDto>>($"/api/people/groups/{groupId}/faces"))!;
+        Assert.Equal(2, after.Count);
+        Assert.DoesNotContain(representative, after.Select(x => x.FaceId));
+        Assert.Equal(group.Representative.FaceId, after[0].FaceId);
+        Assert.Equal(after.Count, after.Select(x => x.FaceId).Distinct().Count());
+
+        // Ignore what is left: no members to review → the group is not surfaced at
+        // all, and its viewer has nothing to open.
+        foreach (var faceId in members.Where(x => x != representative))
+        {
+            (await client.PostAsync($"/api/people/faces/{faceId}/ignore", null)).EnsureSuccessStatusCode();
+        }
+        var hidden = (await client.GetFromJsonAsync<List<SuggestedGroupDto>>("/api/people/suggested-groups"))!;
+        Assert.DoesNotContain(hidden, g => g.GroupId == groupId);
+        var empty = await client.GetAsync($"/api/people/groups/{groupId}/faces");
+        Assert.Equal(HttpStatusCode.OK, empty.StatusCode);
+        Assert.Empty((await empty.Content.ReadFromJsonAsync<List<FaceRefDto>>())!);
+        AssertNoLeak(await empty.Content.ReadAsStringAsync());
+
+        // Restoring one puts it back in the queue: ignore is reversible.
+        (await client.DeleteAsync($"/api/people/faces/{a.FaceId}/ignore")).EnsureSuccessStatusCode();
+        var restored = (await client.GetFromJsonAsync<List<SuggestedGroupDto>>("/api/people/suggested-groups"))!;
+        var back = Assert.Single(restored, g => g.GroupId == groupId);
+        Assert.Equal(1, back.FaceCount);
+        Assert.Equal(a.FaceId, back.Representative!.FaceId);
+        var faces = (await client.GetFromJsonAsync<List<FaceRefDto>>($"/api/people/groups/{groupId}/faces"))!;
+        Assert.Equal(new[] { a.FaceId }, faces.Select(x => x.FaceId));
+    }
+
     [Fact]
     public async Task Ignore_Group_CrossOwner_Is_404()
     {

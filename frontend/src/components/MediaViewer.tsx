@@ -6,6 +6,7 @@ import { HlsVideoPlayer, type VideoPlayerHandle } from '../video/HlsVideoPlayer'
 import { CastVideoControl } from '../cast/CastVideoControl';
 import { useCast } from '../cast/useCast';
 import { resolveViewerSummary } from './mediaViewerSummary';
+import { isEditableKeyboardTarget, ownsKeyboardEvent } from './keyboardOwnership';
 
 // Slice 86: a reusable, clean full-screen media viewer for images and videos.
 // The media is centered on a dark backdrop with minimal chrome that auto-hides
@@ -86,6 +87,7 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   // NUBARCA-GOOGLE-CAST-01: the player bridge. The viewer never reaches into
   // the player's DOM; it asks the handle for the position and to stop.
   const playerRef = useRef<VideoPlayerHandle | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const cast = useCast();
 
   useEffect(() => { setImageFailed(false); }, [index]);
@@ -131,10 +133,15 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   const goPrev = useCallback(() => { if (hasPrev) onIndexChange(index - 1); }, [hasPrev, index, onIndexChange]);
   const goNext = useCallback(() => { if (hasNext) onIndexChange(index + 1); }, [hasNext, index, onIndexChange]);
 
-  // Keyboard: Escape closes, arrows navigate.
+  // Keyboard: Escape closes, arrows navigate — but only when this viewer is the
+  // surface the key belongs to. A drawer here opens real modals on top (the album
+  // picker, the vault move dialog), and a `window` listener cannot tell whose
+  // keystroke it is without asking. See keyboardOwnership.ts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (!ownsKeyboardEvent(rootRef.current, e.target)) return;
       if (e.key === 'Escape') { onClose(); return; }
+      if (isEditableKeyboardTarget(e.target)) return;
       if (e.key === 'ArrowLeft') { goPrev(); showChrome(); }
       else if (e.key === 'ArrowRight') { goNext(); showChrome(); }
     }
@@ -185,6 +192,7 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
       role="dialog"
       aria-modal="true"
       aria-label={t('mediaViewer.viewerAria', { name: item.displayName })}
+      ref={rootRef}
       onMouseMove={showChrome}
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
