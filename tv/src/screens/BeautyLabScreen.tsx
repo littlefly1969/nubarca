@@ -182,6 +182,7 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
 
   const renderGridRow = useCallback(({
     item: row,
+    index: rowIndex,
   }: ListRenderItemInfo<TvMediaGridRow<BeautyLabItem>>) => {
     const rowReady = gridFocus.isRowReady(row.key);
     return (
@@ -199,6 +200,9 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
               focusTargets={gridFocus.targetsFor(item.id)}
               accessibilityLabel={item.originalFileName}
               style={{ width: tileWidth }}
+              onFocusChange={(focused) => {
+                if (focused) gridFocus.prepareRowAfter(rowIndex);
+              }}
             >
               <View style={[styles.thumbBox, { height: tileHeight }]}>
                 <MediaTilePreview
@@ -323,6 +327,8 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={11}
+          removeClippedSubviews={false}
+          additionalRenderRegions={gridFocus.additionalRenderRegions}
           ListFooterComponent={nextCursor ? (
             <FocusableButton label={t('beautyLab.loadMore')} onPress={() => void load(nextCursor, true)} />
           ) : null}

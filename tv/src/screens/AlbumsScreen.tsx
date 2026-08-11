@@ -83,6 +83,7 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
 
   const renderRow = useCallback(({
     item: row,
+    index: rowIndex,
   }: ListRenderItemInfo<TvMediaGridRow<TvAlbum>>) => {
     const rowReady = gridFocus.isRowReady(row.key);
     return (
@@ -102,6 +103,9 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
               focusable={rowReady}
               focusTargets={gridFocus.targetsFor(album.id)}
               onSelect={() => onOpenAlbum(album)}
+              onFocusChange={(focused) => {
+                if (focused) gridFocus.prepareRowAfter(rowIndex);
+              }}
             >
               <MediaTilePreview
                 kind="image"
@@ -156,6 +160,8 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
         initialNumToRender={6}
         maxToRenderPerBatch={4}
         windowSize={11}
+        removeClippedSubviews={false}
+        additionalRenderRegions={gridFocus.additionalRenderRegions}
       />
     </View>
   );

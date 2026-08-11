@@ -92,6 +92,7 @@ const ItemTile = memo(function ItemTile({
   focusable,
   focusTargets,
   rowKey,
+  rowIndex,
   onPreviewReady,
   onOpen,
   onFocusIndex,
@@ -107,11 +108,12 @@ const ItemTile = memo(function ItemTile({
   focusable: boolean;
   focusTargets: TvMediaGridTargets;
   rowKey: string;
+  rowIndex: number;
   onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (index: number) => void;
   // Reports which tile the remote is on (index + id), so a later transition can
   // restore focus to the SAME item even after the list/rows change.
-  onFocusIndex: (index: number, id: string) => void;
+  onFocusIndex: (index: number, id: string, rowIndex: number) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const isVideo = item.mediaType === 'video';
@@ -128,7 +130,7 @@ const ItemTile = memo(function ItemTile({
       focusTargets={focusTargets}
       index={index}
       onSelect={() => onOpen(index)}
-      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
+      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id, rowIndex); }}
     >
       <MediaTilePreview
         kind={isVideo ? 'video' : 'image'}
@@ -368,9 +370,10 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   );
   const gridFocus = useTvMediaGridFocus(rows);
 
-  const onTileFocus = useCallback((index: number, id: string) => {
+  const onTileFocus = useCallback((index: number, id: string, rowIndex: number) => {
     rememberFocusedTile(index, id);
-  }, [rememberFocusedTile]);
+    gridFocus.prepareRowAfter(rowIndex);
+  }, [rememberFocusedTile, gridFocus.prepareRowAfter]);
 
   // Face-filter transitions preserve the user's position: keep focus on the
   // focused photo when it is still shown in the new display list, otherwise
@@ -400,7 +403,10 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
     });
   }, [album.id, onOpenItem]);
 
-  const renderRow = useCallback(({ item: row }: ListRenderItemInfo<TvMediaGridRow<TvAlbumItem>>) => {
+  const renderRow = useCallback(({
+    item: row,
+    index: rowIndex,
+  }: ListRenderItemInfo<TvMediaGridRow<TvAlbumItem>>) => {
     const rowReady = gridFocus.isRowReady(row.key);
     return (
       <View style={styles.row}>
@@ -419,6 +425,7 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
               focusable={gridFocusable && rowReady}
               focusTargets={gridFocus.targetsFor(item.id)}
               rowKey={row.key}
+              rowIndex={rowIndex}
               onPreviewReady={gridFocus.onPreviewReady}
               onOpen={openAt}
               onFocusIndex={onTileFocus}
@@ -454,6 +461,8 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={11}
+          removeClippedSubviews={false}
+          additionalRenderRegions={gridFocus.additionalRenderRegions}
         />
       )}
 

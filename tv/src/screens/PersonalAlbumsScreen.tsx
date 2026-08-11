@@ -62,7 +62,9 @@ const AlbumTile = memo(function AlbumTile({
   focusTargets,
   focusable,
   rowKey,
+  rowIndex,
   onPreviewReady,
+  onRowFocused,
   onOpen,
 }: {
   album: TvPersonalAlbumCard;
@@ -73,7 +75,9 @@ const AlbumTile = memo(function AlbumTile({
   focusTargets: TvMediaGridTargets;
   focusable: boolean;
   rowKey: string;
+  rowIndex: number;
   onPreviewReady: (rowKey: string, id: string) => void;
+  onRowFocused: (rowIndex: number) => void;
   onOpen: (album: TvPersonalAlbumCard) => void;
 }) {
   const { t } = useI18n();
@@ -90,6 +94,9 @@ const AlbumTile = memo(function AlbumTile({
       focusTargets={focusTargets}
       focusable={focusable}
       onSelect={() => onOpen(album)}
+      onFocusChange={(focused) => {
+        if (focused) onRowFocused(rowIndex);
+      }}
     >
       <MediaTilePreview
         kind="image"
@@ -175,7 +182,7 @@ export function PersonalAlbumsScreen({
   }, [onOpenAlbum]);
 
   const renderRow = useCallback((
-    { item: row }: ListRenderItemInfo<TvMediaGridRow<TvPersonalAlbumCard>>,
+    { item: row, index: rowIndex }: ListRenderItemInfo<TvMediaGridRow<TvPersonalAlbumCard>>,
   ) => {
     const rowReady = gridFocus.isRowReady(row.key);
     return (
@@ -193,7 +200,9 @@ export function PersonalAlbumsScreen({
               focusTargets={gridFocus.targetsFor(album.id)}
               focusable={rowReady}
               rowKey={row.key}
+              rowIndex={rowIndex}
               onPreviewReady={gridFocus.onPreviewReady}
+              onRowFocused={gridFocus.prepareRowAfter}
               onOpen={open}
             />
           );
@@ -238,6 +247,8 @@ export function PersonalAlbumsScreen({
           initialNumToRender={8}
           maxToRenderPerBatch={4}
           windowSize={11}
+          removeClippedSubviews={false}
+          additionalRenderRegions={gridFocus.additionalRenderRegions}
         />
       )}
     </View>

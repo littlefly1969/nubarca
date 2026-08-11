@@ -201,15 +201,10 @@ test('BACK closes the overlay first and does not navigate away', () => {
 });
 
 test('no media wall detaches rows that vertical focus links point at', () => {
-  // `removeClippedSubviews` detaches already-rendered rows just outside the
-  // viewport; a detached row cannot be resolved as an explicit nextFocusDown
-  // target, so vertical navigation falls back to geometric focus search.
   for (const [name, source] of Object.entries(SCREENS)) {
-    // Anchored to a JSX prop line, so the comments explaining the removal do
-    // not satisfy the assertion by accident.
-    assert.doesNotMatch(source, /^\s*removeClippedSubviews\s*(\{|$)/m, name);
-    // Windowing stays on. Nearby rows mount their previews progressively, and
-    // the focus barrier blocks any row that has not settled yet.
+    // Android defaults clipping to true. Keep prepared focus targets attached
+    // while retaining normal row windowing for the rest of the list.
+    assert.match(source, /removeClippedSubviews=\{false\}/, name);
     assert.match(source, /windowSize=\{11\}/, name);
   }
 });

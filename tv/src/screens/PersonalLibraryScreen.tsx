@@ -356,12 +356,13 @@ export function PersonalLibraryScreen({
 
   const onTileFocus = useCallback((index: number, id: string, rowIndex: number) => {
     rememberFocusedTile(index, id);
+    gridFocus.prepareRowAfter(rowIndex);
     if (focusedRowRef.current !== rowIndex) {
       focusedRowRef.current = rowIndex;
       setFocusedIndex(index);
     }
     tvDebug('grid nav', 'row', rowIndex);
-  }, [rememberFocusedTile]);
+  }, [rememberFocusedTile, gridFocus.prepareRowAfter]);
 
   const openAt = useCallback((index: number) => {
     hideOverlay();
@@ -468,6 +469,8 @@ export function PersonalLibraryScreen({
           initialNumToRender={8}
           maxToRenderPerBatch={4}
           windowSize={11}
+          removeClippedSubviews={false}
+          additionalRenderRegions={gridFocus.additionalRenderRegions}
           onEndReachedThreshold={2}
           onEndReached={loadMore}
         />

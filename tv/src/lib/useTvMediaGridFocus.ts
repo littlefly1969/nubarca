@@ -49,6 +49,7 @@ export function useTvMediaGridFocus<T extends { id: string }>(
 
   const model = useMemo(() => buildTvMediaGridModel(rows, itemId), [rows]);
   const [readyRows, setReadyRows] = useState<ReadonlySet<string>>(() => new Set());
+  const [preparedRow, setPreparedRow] = useState(0);
 
   useEffect(() => {
     const liveIds = new Set(rows.flatMap((row) => row.tiles.map((tile) => tile.item.id)));
@@ -68,6 +69,9 @@ export function useTvMediaGridFocus<T extends { id: string }>(
     ));
   }, [rows]);
 
+  const firstRowKey = rows[0]?.key;
+  useEffect(() => { setPreparedRow(0); }, [firstRowKey]);
+
   const onPreviewReady = useCallback((rowKey: string, id: string) => {
     readyIds.current.add(id);
     const row = rowsRef.current.find((candidate) => candidate.key === rowKey);
@@ -79,6 +83,17 @@ export function useTvMediaGridFocus<T extends { id: string }>(
   }, []);
 
   const isRowReady = useCallback((rowKey: string) => readyRows.has(rowKey), [readyRows]);
+
+  const prepareRowAfter = useCallback((rowIndex: number) => {
+    const next = Math.min(Math.max(0, rowIndex + 1), Math.max(0, rowsRef.current.length - 1));
+    setPreparedRow((current) => (current === next ? current : next));
+  }, []);
+
+  const additionalRenderRegions = useMemo(() => (
+    rows.length === 0
+      ? []
+      : [{ first: Math.min(preparedRow, rows.length - 1), last: Math.min(preparedRow, rows.length - 1) }]
+  ), [preparedRow, rows.length]);
 
   const targetsFor = useCallback((id: string): TvMediaGridTargets => {
     const self = refFor(id);
@@ -95,7 +110,7 @@ export function useTvMediaGridFocus<T extends { id: string }>(
   }, [model, readyRows, refFor]);
 
   return useMemo(
-    () => ({ targetsFor, isRowReady, onPreviewReady }),
-    [targetsFor, isRowReady, onPreviewReady],
+    () => ({ targetsFor, isRowReady, onPreviewReady, prepareRowAfter, additionalRenderRegions }),
+    [targetsFor, isRowReady, onPreviewReady, prepareRowAfter, additionalRenderRegions],
   );
 }

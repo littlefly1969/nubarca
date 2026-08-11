@@ -42,6 +42,16 @@ test('unready and unmounted directions are trapped on the current tile', () => {
   assert.match(preview, /onReady\?\.\(\)/);
 });
 
+test('every wall prepares one next row before focus can enter it', () => {
+  for (const screen of screens) {
+    assert.match(screen, /prepareRowAfter/);
+    assert.match(screen, /additionalRenderRegions=\{gridFocus\.additionalRenderRegions\}/);
+    assert.match(screen, /removeClippedSubviews=\{false\}/);
+  }
+  assert.match(focusHook, /rowIndex \+ 1/);
+  assert.match(focusHook, /\[\{ first: .*last:/);
+});
+
 test('All, Photos and Videos live in MENU, not above the library grid', () => {
   assert.doesNotMatch(library, /styles\.tabs/);
   const menu = library.slice(library.indexOf('{overlayVisible && gridInteractive'));
