@@ -190,6 +190,32 @@ it('adds a similar face to the person', async () => {
   );
 });
 
+// The page is ordered for the frequent job: see the template, run the search,
+// judge the suggestions — without scrolling past the collection the person
+// already has. Asserted on real DOM position, so a CSS `order:` trick (which
+// leaves keyboard and screen-reader traversal in the old sequence) would fail.
+it('puts reference faces and the similar-face search before the assigned faces', async () => {
+  renderDetail({
+    'GET /api/people/p-1': person('Alice'),
+    'GET /api/people/p-1/photos': photos(),
+    'GET /api/people/p-1/videos': videos(),
+    'GET /api/people/p-1/reference-faces': referenceFaces(4),
+    'GET /api/people/p-1/similar-faces': similar(true),
+  });
+
+  const references = await screen.findByText('Volti di riferimento · 4/6');
+  const search = await screen.findByRole('heading', { name: 'Cerca volti simili' });
+  const suggestion = await screen.findByText(/80%/);
+  const assigned = await screen.findByText('Foto (1)');
+
+  const precedes = (a: Node, b: Node) =>
+    Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  expect(precedes(references, search)).toBe(true);
+  expect(precedes(search, suggestion)).toBe(true);
+  expect(precedes(suggestion, assigned)).toBe(true);
+});
+
 // ---- reference faces panel -------------------------------------------------
 
 it('shows the persisted reference faces with their count and slot order', async () => {

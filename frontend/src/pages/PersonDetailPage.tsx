@@ -149,6 +149,29 @@ export function PersonDetailPage() {
         <button type="button" onClick={() => void handleArchive()}>{t('person.removePerson')}</button>
       </div>
 
+      {/* The frequent job on this page is finding and adding NEW faces, so the
+          template and the search come first. The already-assigned collection is
+          long by nature — putting it above the search meant scrolling past
+          everything the person already is to reach the one control that grows
+          them. This is DOM order, not `order:`, so keyboard and screen-reader
+          traversal match what the eye sees. */}
+      {personId !== undefined && (
+        <ReferenceFacesSection
+          references={references}
+          onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
+        />
+      )}
+
+      {personId !== undefined && (
+        <SimilarFacesSection
+          personId={personId}
+          onAssigned={() => void load()}
+          onSearched={handleSearched}
+          onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
+          invalidateAuth={invalidateAuth}
+        />
+      )}
+
       <h3>{t('person.photosHeading', { count: photos.length })}</h3>
       {photos.length === 0 ? (
         <p className="muted">{t('person.noPhotos')}</p>
@@ -187,23 +210,6 @@ export function PersonDetailPage() {
 
       {personId !== undefined && (
         <PersonVideosSection personId={personId} invalidateAuth={invalidateAuth} />
-      )}
-
-      {personId !== undefined && (
-        <ReferenceFacesSection
-          references={references}
-          onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
-        />
-      )}
-
-      {personId !== undefined && (
-        <SimilarFacesSection
-          personId={personId}
-          onAssigned={() => void load()}
-          onSearched={handleSearched}
-          onOpenFace={(ids, i) => setViewer({ faceIds: ids, index: i })}
-          invalidateAuth={invalidateAuth}
-        />
       )}
 
       {viewer && (
