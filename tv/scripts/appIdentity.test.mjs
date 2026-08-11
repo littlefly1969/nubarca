@@ -204,10 +204,7 @@ async function applyFireTvManifest() {
           $: { 'android:name': '.MainActivity' },
           'intent-filter': [{
             action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
-            category: [
-              { $: { 'android:name': 'android.intent.category.LAUNCHER' } },
-              { $: { 'android:name': 'android.intent.category.LEANBACK_LAUNCHER' } },
-            ],
+            category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }],
           }],
         }],
       }],

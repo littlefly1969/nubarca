@@ -116,22 +116,26 @@ const withActivityBanner = (config) =>
     // This binary is TV-only. If the ordinary launcher category remains beside
     // LEANBACK_LAUNCHER, Fire OS may register the square phone icon instead of
     // the TV banner. Keep MAIN, but expose it only through Leanback.
-    let hasLeanbackLauncher = false;
+    let hasMainIntent = false;
     for (const filter of activity['intent-filter'] ?? []) {
       const isMain = (filter.action ?? []).some(
         (action) => action.$?.['android:name'] === 'android.intent.action.MAIN',
       );
       if (!isMain) continue;
+      hasMainIntent = true;
       const categories = filter.category ?? [];
-      hasLeanbackLauncher ||= categories.some(
+      const hasLeanbackLauncher = categories.some(
         (category) => category.$?.['android:name'] === LEANBACK_LAUNCHER,
       );
       filter.category = categories.filter(
         (category) => category.$?.['android:name'] !== LAUNCHER,
       );
+      if (!hasLeanbackLauncher) {
+        filter.category.push({ $: { 'android:name': LEANBACK_LAUNCHER } });
+      }
     }
-    if (!hasLeanbackLauncher) {
-      throw new Error('withFireTvBanner: MainActivity has no LEANBACK_LAUNCHER intent');
+    if (!hasMainIntent) {
+      throw new Error('withFireTvBanner: MainActivity has no MAIN intent');
     }
     return manifestConfig;
   });
