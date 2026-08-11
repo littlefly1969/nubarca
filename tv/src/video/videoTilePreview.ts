@@ -66,25 +66,3 @@ export function videoTilePreview(sources: VideoTileSources): VideoTilePreview {
 function nonEmpty(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }
-
-// Prefetch priority for a tile, by distance from the focused one. Warming every
-// poster in a library is what made the grid feel slow and the download pool
-// thrash; warming none makes every move look broken. The bands below are
-// deliberately narrow — the global concurrency cap in api/client.ts still
-// applies on top, and 'none' means the tile simply loads when it mounts.
-export type TvPreviewPriority = 'high' | 'normal' | 'low' | 'none';
-
-export function previewPriority(
-  index: number,
-  focusedIndex: number,
-  columns: number,
-): TvPreviewPriority {
-  if (focusedIndex < 0) return index < columns * 2 ? 'normal' : 'none';
-  const distance = Math.abs(index - focusedIndex);
-  if (distance === 0) return 'high';
-  // The focused row and its immediate neighbours: what the user can see.
-  if (distance <= columns) return 'normal';
-  // One more row ahead/behind, so a row transition is not a wall of placeholders.
-  if (distance <= columns * 2) return 'low';
-  return 'none';
-}

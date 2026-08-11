@@ -321,19 +321,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reimplemented. `tv/src/personal/mediaWorkspaceQuery.ts` mirrors the web model
   field-for-field; the two packages cannot share code, so the SERVER is the
   safety net.
-- **Fire TV D-pad determinism comes from a UNIFORM grid, not from a debounce.**
-  The justified wall made Android's geometric focus search disagree with the
-  column the user believed they were in; the lane (`preferredX`) that patched it
-  made the focus graph depend on React committing between two key presses, which
-  is why fast and slow navigation diverged. `tv/src/lib/tvFixedGrid.ts` is a pure
-  function of `(itemCount, columns)`: nothing re-renders during a burst, and
-  because the tiles are uniform Android's own fallback names the SAME tile the
-  explicit link does — so a momentarily unmounted neighbour degrades to an
-  equivalent answer instead of a lateral drift. Never reintroduce a repeat
-  debounce: the auto-repeat stream is valid input and every accepted repeat must
-  be exactly one step. Note that `additionalRenderRegions` is documented in the
-  react-native-tvos README but is NOT implemented in the shipped 0.85.3-3
-  JavaScript; a wide `windowSize` is what keeps neighbours mounted.
+- **Fire TV D-pad navigation has ONE authority: native focus.** Every media
+  wall uses the same proportional-row layout, computed before render from the
+  dimensions in its DTO; loading and error placeholders occupy that exact box,
+  so bitmap arrival never changes geometry. Row and item keys come only from
+  stable content identity. A native focus guide traps LEFT/RIGHT inside each
+  row; the vertical list uses item snap and `scrollAnimationEnabled={false}`, so
+  a held D-pad produces native one-step repeats without cross-row lateral jumps
+  or queued scroll animations. Never add a parallel JavaScript focus graph or
+  repeat debounce, gate focus or paging on bitmap readiness, or move
+  `additionalRenderRegions` with the focused row: virtualization and focus
+  retention remain native concerns.
 - **`BackHandler.exitApp()` does not close an Android app.** It maps to
   `Activity.moveTaskToBack(true)` — it BACKGROUNDS the task, which on a Fire
   Stick left NubArca in recents and resumed the old Activity on relaunch. The

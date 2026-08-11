@@ -5,6 +5,7 @@ import {
   FlatList,
   StyleSheet,
   Text,
+  TVFocusGuideView,
   View,
   useTVEventHandler,
   useWindowDimensions,
@@ -32,11 +33,13 @@ import { sameItemIds } from '../lib/liveItems';
 import {
   buildTvMediaGridRows,
   tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_BATCH_ROWS,
   TV_MEDIA_GRID_FOCUS_BLEED,
   TV_MEDIA_GRID_GAP,
+  TV_MEDIA_GRID_INITIAL_ROWS,
+  TV_MEDIA_GRID_WINDOW_SIZE,
   type TvMediaGridRow,
 } from '../lib/tvMediaGrid';
-import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
 import { getTvMediaAspectRatio } from '../lib/mediaAspectRatio';
 import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { remapFocusIndexById } from '../lib/focusRemap';
@@ -90,10 +93,6 @@ const ItemTile = memo(function ItemTile({
   height,
   preferred,
   focusable,
-  focusTargets,
-  rowKey,
-  rowIndex,
-  onPreviewReady,
   onOpen,
   onFocusIndex,
 }: {
@@ -106,14 +105,10 @@ const ItemTile = memo(function ItemTile({
   // False while the MENU command rail owns focus: the grid must not stay a
   // focus destination underneath it.
   focusable: boolean;
-  focusTargets: TvMediaGridTargets;
-  rowKey: string;
-  rowIndex: number;
-  onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (index: number) => void;
   // Reports which tile the remote is on (index + id), so a later transition can
   // restore focus to the SAME item even after the list/rows change.
-  onFocusIndex: (index: number, id: string, rowIndex: number) => void;
+  onFocusIndex: (index: number, id: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const isVideo = item.mediaType === 'video';
@@ -127,17 +122,14 @@ const ItemTile = memo(function ItemTile({
       style={{ width }}
       hasTVPreferredFocus={preferred}
       focusable={focusable}
-      focusTargets={focusTargets}
-      index={index}
       onSelect={() => onOpen(index)}
-      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id, rowIndex); }}
+      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
     >
       <MediaTilePreview
         kind={isVideo ? 'video' : 'image'}
         path={path}
         fallbackPath={fallbackPath}
         style={{ width: '100%', height, borderRadius: 8 }}
-        onReady={() => onPreviewReady(rowKey, item.id)}
       />
       {isVideo && <Text style={styles.badge}>▶</Text>}
       {focused && focusable && (
@@ -368,12 +360,9 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
     }),
     [displayItems, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvMediaGridFocus(rows);
-
-  const onTileFocus = useCallback((index: number, id: string, rowIndex: number) => {
+  const onTileFocus = useCallback((index: number, id: string) => {
     rememberFocusedTile(index, id);
-    gridFocus.prepareRowAfter(rowIndex);
-  }, [rememberFocusedTile, gridFocus.prepareRowAfter]);
+  }, [rememberFocusedTile]);
 
   // Face-filter transitions preserve the user's position: keep focus on the
   // focused photo when it is still shown in the new display list, otherwise
@@ -405,11 +394,14 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
 
   const renderRow = useCallback(({
     item: row,
-    index: rowIndex,
   }: ListRenderItemInfo<TvMediaGridRow<TvAlbumItem>>) => {
-    const rowReady = gridFocus.isRowReady(row.key);
     return (
-      <View style={styles.row}>
+      <TVFocusGuideView
+        style={styles.row}
+        scrollSnapAlign="start"
+        trapFocusLeft
+        trapFocusRight
+      >
         {row.tiles.map((tile) => {
           const { item, originalIndex: index, width, height: tileHeight } = tile;
           return (
@@ -421,20 +413,16 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
               width={width}
               height={tileHeight}
               // No tile holds preferred focus while the overlay owns it.
-              preferred={gridFocusable && rowReady && restoreIndex !== null && index === restoreIndex}
-              focusable={gridFocusable && rowReady}
-              focusTargets={gridFocus.targetsFor(item.id)}
-              rowKey={row.key}
-              rowIndex={rowIndex}
-              onPreviewReady={gridFocus.onPreviewReady}
+              preferred={gridFocusable && restoreIndex !== null && index === restoreIndex}
+              focusable={gridFocusable}
               onOpen={openAt}
               onFocusIndex={onTileFocus}
             />
           );
         })}
-      </View>
+      </TVFocusGuideView>
     );
-  }, [openAt, total, gridFocusable, restoreIndex, gridFocus, onTileFocus]);
+  }, [openAt, total, gridFocusable, restoreIndex, onTileFocus]);
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
@@ -456,13 +444,14 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          // Only nearby rows mount and download. A row becomes a focus target
-          // only after its previews settle; distant rows stay virtualized.
-          initialNumToRender={6}
-          maxToRenderPerBatch={4}
-          windowSize={11}
+          // Geometry is known before thumbnails decode. Native TV focus owns
+          // navigation, while the bounded window keeps the next rows mounted.
+          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
           removeClippedSubviews={false}
-          additionalRenderRegions={gridFocus.additionalRenderRegions}
+          snapToAlignment="item"
+          scrollAnimationEnabled={false}
         />
       )}
 

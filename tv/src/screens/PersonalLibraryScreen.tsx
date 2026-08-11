@@ -5,6 +5,7 @@ import {
   FlatList,
   StyleSheet,
   Text,
+  TVFocusGuideView,
   View,
   useTVEventHandler,
   useWindowDimensions,
@@ -28,19 +29,19 @@ import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import {
   buildTvMediaGridRows,
   tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_BATCH_ROWS,
   TV_MEDIA_GRID_FOCUS_BLEED,
   TV_MEDIA_GRID_GAP,
+  TV_MEDIA_GRID_INITIAL_ROWS,
+  TV_MEDIA_GRID_WINDOW_SIZE,
   type TvMediaGridRow,
 } from '../lib/tvMediaGrid';
-import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
 import {
   normalizeTvMediaAspectRatio,
   PHOTO_FALLBACK_ASPECT_RATIO,
   VIDEO_FALLBACK_ASPECT_RATIO,
 } from '../lib/mediaAspectRatio';
-import { previewPriority } from '../video/videoTilePreview';
 import { useI18n } from '../i18n';
-import { tvDebug } from '../debug';
 import {
   activeFilterCount,
   emptyIdentity,
@@ -65,9 +66,9 @@ import {
 // the same screen with a different predicate — which is exactly the relationship
 // the web has between the library and an album.
 //
-// NAVIGATION. Every row uses the media dimensions already present in the DTO.
-// Native links are static, and an adjacent row cannot receive focus until all
-// its previews have rendered or reached a terminal placeholder.
+// NAVIGATION. Every row and placeholder uses the media dimensions already
+// present in the DTO. The native TV list owns directional focus and scrolling;
+// image decode is presentation work and never blocks navigation.
 //
 // INPUT OWNERSHIP is explicit and never shared:
 //   GRID          → the native focus engine owns the D-pad; MENU toggles the
@@ -81,7 +82,6 @@ import {
 
 const PAGE_SIZE = 50;
 const GRID_GAP = TV_MEDIA_GRID_GAP;
-const PREVIEW_BAND = 6;
 
 type Phase = 'loadingInitial' | 'ready' | 'loadingMore' | 'errorInitial' | 'errorMore' | 'end';
 type Panel = 'none' | 'filters';
@@ -124,12 +124,7 @@ const LibraryTile = memo(function LibraryTile({
   width,
   height,
   preferred,
-  focusTargets,
   focusable,
-  priority,
-  rowKey,
-  rowIndex,
-  onPreviewReady,
   onOpen,
   onFocusIndex,
 }: {
@@ -139,34 +134,25 @@ const LibraryTile = memo(function LibraryTile({
   width: number;
   height: number;
   preferred: boolean;
-  focusTargets: TvMediaGridTargets;
   focusable: boolean;
-  priority: ReturnType<typeof previewPriority>;
-  rowKey: string;
-  rowIndex: number;
-  onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (index: number) => void;
-  onFocusIndex: (index: number, id: string, rowIndex: number) => void;
+  onFocusIndex: (index: number, id: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
   return (
     <FocusableMediaTile
       accessibilityLabel={item.displayName}
       style={{ width }}
-      index={index}
       hasTVPreferredFocus={preferred}
-      focusTargets={focusTargets}
       focusable={focusable}
       onSelect={() => onOpen(index)}
-      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id, rowIndex); }}
+      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
     >
       <MediaTilePreview
         kind={item.kind}
         path={item.cardImageUrl}
         personal
-        priority={priority}
         style={{ width: '100%', height, borderRadius: 8 }}
-        onReady={() => onPreviewReady(rowKey, item.id)}
       />
       {item.kind === 'video' && (
         <View style={styles.videoBadge} pointerEvents="none">
@@ -209,6 +195,7 @@ export function PersonalLibraryScreen({
   } = useMenuOverlay();
 
   const generationRef = useRef(0);
+  const requestedCursorRef = useRef<string | null>(null);
   const loadRef = useRef(load);
   loadRef.current = load;
   const identityRef = useRef(identity);
@@ -247,6 +234,7 @@ export function PersonalLibraryScreen({
 
   useEffect(() => {
     generationRef.current += 1;
+    requestedCursorRef.current = null;
     const gen = generationRef.current;
     const previousItems = loadRef.current.items;
     const previousFocus = readGridFocus();
@@ -283,21 +271,35 @@ export function PersonalLibraryScreen({
     const current = loadRef.current;
     if (current.nextCursor === null) return;
     if (current.phase !== 'ready' && current.phase !== 'errorMore') return;
+    if (requestedCursorRef.current === current.nextCursor) return;
+    requestedCursorRef.current = current.nextCursor;
     const gen = generationRef.current;
     setLoad((s) => ({ ...s, phase: 'loadingMore' }));
     listPersonalMedia(identityRef.current, current.nextCursor, PAGE_SIZE)
       .then((page) => {
-        setLoad((s) => (s.generation !== gen ? s : {
-          ...s,
-          items: [...s.items, ...page.items],
-          nextCursor: page.nextCursor,
-          totalCount: page.totalCount,
-          phase: page.hasMore ? 'ready' : 'end',
-        }));
+        setLoad((s) => {
+          if (s.generation !== gen) return s;
+          const known = new Set(s.items.map((item) => item.id));
+          const appended = page.items.filter((item) => {
+            if (known.has(item.id)) return false;
+            known.add(item.id);
+            return true;
+          });
+          return {
+            ...s,
+            items: [...s.items, ...appended],
+            nextCursor: page.nextCursor,
+            totalCount: page.totalCount,
+            phase: page.hasMore ? 'ready' : 'end',
+          };
+        });
       })
       .catch((err: unknown) => {
         if (handleAuthError(err)) return;
         setLoad((s) => (s.generation !== gen ? s : { ...s, phase: 'errorMore' }));
+      })
+      .finally(() => {
+        if (generationRef.current === gen) requestedCursorRef.current = null;
       });
   }, [handleAuthError]);
 
@@ -349,20 +351,9 @@ export function PersonalLibraryScreen({
     }),
     [items, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvMediaGridFocus(rows);
-
-  const [focusedIndex, setFocusedIndex] = useState(-1);
-  const focusedRowRef = useRef(-1);
-
-  const onTileFocus = useCallback((index: number, id: string, rowIndex: number) => {
+  const onTileFocus = useCallback((index: number, id: string) => {
     rememberFocusedTile(index, id);
-    gridFocus.prepareRowAfter(rowIndex);
-    if (focusedRowRef.current !== rowIndex) {
-      focusedRowRef.current = rowIndex;
-      setFocusedIndex(index);
-    }
-    tvDebug('grid nav', 'row', rowIndex);
-  }, [rememberFocusedTile, gridFocus.prepareRowAfter]);
+  }, [rememberFocusedTile]);
 
   const openAt = useCallback((index: number) => {
     hideOverlay();
@@ -391,11 +382,15 @@ export function PersonalLibraryScreen({
   }, [hideOverlay]);
 
   const renderRow = useCallback((
-    { item: row, index: rowIndex }: ListRenderItemInfo<TvMediaGridRow<TvPersonalMediaItem>>,
+    { item: row }: ListRenderItemInfo<TvMediaGridRow<TvPersonalMediaItem>>,
   ) => {
-    const rowReady = gridFocus.isRowReady(row.key);
     return (
-      <View style={styles.gridRow}>
+      <TVFocusGuideView
+        style={styles.gridRow}
+        scrollSnapAlign="start"
+        trapFocusLeft
+        trapFocusRight
+      >
         {row.tiles.map((tile) => {
           const { item, originalIndex: index, width, height: tileHeight } = tile;
           return (
@@ -406,21 +401,16 @@ export function PersonalLibraryScreen({
               total={total}
               width={width}
               height={tileHeight}
-              preferred={gridFocusable && rowReady && restoreIndex !== null && index === restoreIndex}
-              focusTargets={gridFocus.targetsFor(item.id)}
-              focusable={gridFocusable && rowReady}
-              priority={previewPriority(index, focusedIndex, PREVIEW_BAND)}
-              rowKey={row.key}
-              rowIndex={rowIndex}
-              onPreviewReady={gridFocus.onPreviewReady}
+              preferred={gridFocusable && restoreIndex !== null && index === restoreIndex}
+              focusable={gridFocusable}
               onOpen={openAt}
               onFocusIndex={onTileFocus}
             />
           );
         })}
-      </View>
+      </TVFocusGuideView>
     );
-  }, [total, gridFocusable, restoreIndex, gridFocus, focusedIndex, openAt, onTileFocus]);
+  }, [total, gridFocusable, restoreIndex, openAt, onTileFocus]);
 
   const filterCount = activeFilterCount(identity);
   const emptyLabel = filterCount > 0 ? t('gallery.noResults') : t('gallery.empty');
@@ -464,13 +454,12 @@ export function PersonalLibraryScreen({
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          // Keep nearby rows mounted for progressive preview loading. Distant
-          // rows remain virtualized, and the focus barrier never targets them.
-          initialNumToRender={8}
-          maxToRenderPerBatch={4}
-          windowSize={11}
+          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
           removeClippedSubviews={false}
-          additionalRenderRegions={gridFocus.additionalRenderRegions}
+          snapToAlignment="item"
+          scrollAnimationEnabled={false}
           onEndReachedThreshold={2}
           onEndReached={loadMore}
         />

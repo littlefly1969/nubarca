@@ -5,6 +5,7 @@ import {
   FlatList,
   StyleSheet,
   Text,
+  TVFocusGuideView,
   View,
   useWindowDimensions,
   type ListRenderItemInfo,
@@ -18,11 +19,14 @@ import { MediaTilePreview } from '../components/MediaTilePreview';
 import {
   buildTvMediaGridRows,
   tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_BATCH_ROWS,
   TV_MEDIA_GRID_FOCUS_BLEED,
   TV_MEDIA_GRID_GAP,
+  TV_MEDIA_GRID_INITIAL_ROWS,
+  TV_MEDIA_GRID_WINDOW_SIZE,
   type TvMediaGridRow,
 } from '../lib/tvMediaGrid';
-import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { useI18n } from '../i18n';
 import type { PersonalAlbumRef } from '../personal/flow';
 
@@ -40,8 +44,8 @@ import type { PersonalAlbumRef } from '../personal/flow';
 // poor album administration console, and adding those operations here would
 // mean maintaining a second, weaker editor for the one on the web.
 //
-// The shelf uses the same proportional grid and focus barrier as every media
-// wall, with a stable 16:10 card ratio because album DTOs have no cover size.
+// The shelf uses the same proportional native-focus grid as every media wall,
+// with a stable 16:10 card ratio because album DTOs have no cover size.
 
 const GRID_GAP = TV_MEDIA_GRID_GAP;
 const TILE_ASPECT = 16 / 10;
@@ -59,12 +63,7 @@ const AlbumTile = memo(function AlbumTile({
   width,
   height,
   preferred,
-  focusTargets,
-  focusable,
-  rowKey,
-  rowIndex,
-  onPreviewReady,
-  onRowFocused,
+  onFocused,
   onOpen,
 }: {
   album: TvPersonalAlbumCard;
@@ -72,12 +71,7 @@ const AlbumTile = memo(function AlbumTile({
   width: number;
   height: number;
   preferred: boolean;
-  focusTargets: TvMediaGridTargets;
-  focusable: boolean;
-  rowKey: string;
-  rowIndex: number;
-  onPreviewReady: (rowKey: string, id: string) => void;
-  onRowFocused: (rowIndex: number) => void;
+  onFocused: (index: number, id: string) => void;
   onOpen: (album: TvPersonalAlbumCard) => void;
 }) {
   const { t } = useI18n();
@@ -89,13 +83,10 @@ const AlbumTile = memo(function AlbumTile({
     <FocusableMediaTile
       accessibilityLabel={album.name}
       style={{ width }}
-      index={index}
       hasTVPreferredFocus={preferred}
-      focusTargets={focusTargets}
-      focusable={focusable}
       onSelect={() => onOpen(album)}
       onFocusChange={(focused) => {
-        if (focused) onRowFocused(rowIndex);
+        if (focused) onFocused(index, album.id);
       }}
     >
       <MediaTilePreview
@@ -103,7 +94,6 @@ const AlbumTile = memo(function AlbumTile({
         path={cover}
         personal
         style={{ width: '100%', height, borderRadius: 8 }}
-        onReady={() => onPreviewReady(rowKey, album.id)}
       />
       <View style={styles.caption} pointerEvents="none">
         <Text style={styles.captionName} numberOfLines={1}>{album.name}</Text>
@@ -171,7 +161,7 @@ export function PersonalAlbumsScreen({
     }),
     [list, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvMediaGridFocus(rows);
+  const { restoreIndex, onTileFocused } = useTvGridFocusMemory(false, list);
   const openedRef = useRef(false);
 
   const open = useCallback((album: TvPersonalAlbumCard) => {
@@ -182,11 +172,15 @@ export function PersonalAlbumsScreen({
   }, [onOpenAlbum]);
 
   const renderRow = useCallback((
-    { item: row, index: rowIndex }: ListRenderItemInfo<TvMediaGridRow<TvPersonalAlbumCard>>,
+    { item: row }: ListRenderItemInfo<TvMediaGridRow<TvPersonalAlbumCard>>,
   ) => {
-    const rowReady = gridFocus.isRowReady(row.key);
     return (
-      <View style={styles.gridRow}>
+      <TVFocusGuideView
+        style={styles.gridRow}
+        scrollSnapAlign="start"
+        trapFocusLeft
+        trapFocusRight
+      >
         {row.tiles.map((tile) => {
           const { item: album, originalIndex: index, width, height: tileHeight } = tile;
           return (
@@ -196,20 +190,15 @@ export function PersonalAlbumsScreen({
               index={index}
               width={width}
               height={tileHeight}
-              preferred={rowReady && index === 0}
-              focusTargets={gridFocus.targetsFor(album.id)}
-              focusable={rowReady}
-              rowKey={row.key}
-              rowIndex={rowIndex}
-              onPreviewReady={gridFocus.onPreviewReady}
-              onRowFocused={gridFocus.prepareRowAfter}
+              preferred={restoreIndex !== null && index === restoreIndex}
+              onFocused={onTileFocused}
               onOpen={open}
             />
           );
         })}
-      </View>
+      </TVFocusGuideView>
     );
-  }, [gridFocus, open]);
+  }, [onTileFocused, open, restoreIndex]);
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
@@ -244,11 +233,12 @@ export function PersonalAlbumsScreen({
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          initialNumToRender={8}
-          maxToRenderPerBatch={4}
-          windowSize={11}
+          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
           removeClippedSubviews={false}
-          additionalRenderRegions={gridFocus.additionalRenderRegions}
+          snapToAlignment="item"
+          scrollAnimationEnabled={false}
         />
       )}
     </View>

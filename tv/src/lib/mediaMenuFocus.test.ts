@@ -124,19 +124,40 @@ test('the grid starts by asking for focus on its first tile', () => {
 // there is silent (the app still builds, focus just leaks again). These assert
 // the wiring itself, the way appBackNavigation.test.ts asserts App.tsx.
 
-const SCREENS = {
+const MEDIA_WALLS = {
+  'AlbumsScreen.tsx': readFileSync(new URL('../screens/AlbumsScreen.tsx', import.meta.url), 'utf8'),
   'AlbumItemsScreen.tsx': readFileSync(new URL('../screens/AlbumItemsScreen.tsx', import.meta.url), 'utf8'),
+  'PersonalAlbumsScreen.tsx': readFileSync(new URL('../screens/PersonalAlbumsScreen.tsx', import.meta.url), 'utf8'),
   'PersonalLibraryScreen.tsx': readFileSync(new URL('../screens/PersonalLibraryScreen.tsx', import.meta.url), 'utf8'),
+  'BeautyLabScreen.tsx': readFileSync(new URL('../screens/BeautyLabScreen.tsx', import.meta.url), 'utf8'),
 };
 
-test('every native media wall uses the one shared focus graph + focus memory', () => {
-  for (const [name, source] of Object.entries(SCREENS)) {
-    assert.match(source, /useTvMediaGridFocus\(/, name);
-    assert.match(source, /gridFocus\.targetsFor\(item\.id\)/, name);
-    assert.match(source, /useTvGridFocusMemory\(/, name);
-    // No screen may keep its own vertical-geometry rules, and none may bring
-    // back the lane state whose re-render the key-press path could outrun.
+const MENU_SCREENS = {
+  'AlbumItemsScreen.tsx': MEDIA_WALLS['AlbumItemsScreen.tsx'],
+  'PersonalLibraryScreen.tsx': MEDIA_WALLS['PersonalLibraryScreen.tsx'],
+};
+
+test('every native media wall leaves D-pad routing and scrolling to the TV list', () => {
+  const focusTile = readFileSync(new URL('../components/FocusableMediaTile.tsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(focusTile, /nextFocus(?:Left|Right|Up|Down)|focusTargets/);
+  for (const [name, source] of Object.entries(MEDIA_WALLS)) {
+    assert.doesNotMatch(source, /\buseTvMediaGridFocus\b|\bgridFocus\b|\bfocusTargets\b/, name);
+    assert.doesNotMatch(source, /isRowReady|rowReady|onPreviewReady|prepareRowAfter/, name);
+    assert.doesNotMatch(source, /additionalRenderRegions/, name);
+    assert.match(source, /<TVFocusGuideView/, name);
+    assert.match(source, /trapFocusLeft/, name);
+    assert.match(source, /trapFocusRight/, name);
+    assert.match(source, /scrollSnapAlign="start"/, name);
+    assert.match(source, /snapToAlignment="item"/, name);
+    assert.match(source, /scrollAnimationEnabled=\{false\}/, name);
+    assert.match(source, /removeClippedSubviews=\{false\}/, name);
     assert.doesNotMatch(source, /buildTvMediaFocusLinks|verticalTarget|preferredX/, name);
+  }
+});
+
+test('menu-enabled media walls retain the shared focus memory', () => {
+  for (const [name, source] of Object.entries(MENU_SCREENS)) {
+    assert.match(source, /useTvGridFocusMemory\(/, name);
   }
 });
 
@@ -145,7 +166,7 @@ test('no media wall debounces or throttles the D-pad', () => {
   // repeat must perform exactly one predictable step. Swallowing repeats would
   // hide the divergence instead of removing it, and would make a held button
   // feel broken.
-  for (const [name, source] of Object.entries(SCREENS)) {
+  for (const [name, source] of Object.entries(MEDIA_WALLS)) {
     assert.doesNotMatch(source, /debounce|throttle/i, name);
     // A timer gating navigation is the same mistake wearing a different name.
     assert.doesNotMatch(source, /setTimeout\([^)]*(?:navigate|move|focus)/i, name);
@@ -174,23 +195,23 @@ test('every focusable command overlay is a trapping focus scope', () => {
 });
 
 test('the grid stops being a focus destination while the rail owns focus', () => {
-  assert.match(SCREENS['AlbumItemsScreen.tsx'], /const gridFocusable = !overlayVisible;/);
+  assert.match(MENU_SCREENS['AlbumItemsScreen.tsx'], /const gridFocusable = !overlayVisible;/);
   assert.match(
-    SCREENS['PersonalLibraryScreen.tsx'],
+    MENU_SCREENS['PersonalLibraryScreen.tsx'],
     /const gridFocusable = gridInteractive && !overlayVisible;/,
   );
   for (const name of ['AlbumItemsScreen.tsx', 'PersonalLibraryScreen.tsx']) {
-    const source = SCREENS[name as keyof typeof SCREENS];
-    assert.match(source, /focusable=\{gridFocusable && rowReady\}/, name);
+    const source = MENU_SCREENS[name as keyof typeof MENU_SCREENS];
+    assert.match(source, /focusable=\{gridFocusable\}/, name);
     // A tile may only ASK for focus when it could accept it — a preferred-focus
     // flag on a tile behind the rail is exactly how focus used to leak back.
-    assert.match(source, /preferred=\{gridFocusable && rowReady && restoreIndex !== null/, name);
+    assert.match(source, /preferred=\{gridFocusable && restoreIndex !== null/, name);
   }
 });
 
 test('BACK closes the overlay first and does not navigate away', () => {
   for (const name of ['AlbumItemsScreen.tsx', 'PersonalLibraryScreen.tsx']) {
-    const source = SCREENS[name as keyof typeof SCREENS];
+    const source = MENU_SCREENS[name as keyof typeof MENU_SCREENS];
     assert.match(
       source,
       /if \(overlayVisibleRef\.current\) \{\s*hideOverlay\(\);\s*return true;/,
@@ -200,11 +221,13 @@ test('BACK closes the overlay first and does not navigate away', () => {
   }
 });
 
-test('no media wall detaches rows that vertical focus links point at', () => {
-  for (const [name, source] of Object.entries(SCREENS)) {
-    // Android defaults clipping to true. Keep prepared focus targets attached
-    // while retaining normal row windowing for the rest of the list.
+test('every media wall keeps native item snapping stable under D-pad repeat', () => {
+  for (const [name, source] of Object.entries(MEDIA_WALLS)) {
     assert.match(source, /removeClippedSubviews=\{false\}/, name);
-    assert.match(source, /windowSize=\{11\}/, name);
+    assert.match(source, /trapFocusLeft[\s\S]*trapFocusRight/, name);
+    assert.match(source, /scrollSnapAlign="start"/, name);
+    assert.match(source, /snapToAlignment="item"/, name);
+    assert.match(source, /scrollAnimationEnabled=\{false\}/, name);
+    assert.doesNotMatch(source, /additionalRenderRegions/, name);
   }
 });

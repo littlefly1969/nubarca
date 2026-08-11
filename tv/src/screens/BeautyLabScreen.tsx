@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TVFocusGuideView,
   View,
   useTVEventHandler,
   useWindowDimensions,
@@ -35,14 +36,17 @@ import { MediaTilePreview } from '../components/MediaTilePreview';
 import { MenuCommandRail } from '../components/MenuCommandRail';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import {
   buildTvMediaGridRows,
   tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_BATCH_ROWS,
   TV_MEDIA_GRID_FOCUS_BLEED,
   TV_MEDIA_GRID_GAP,
+  TV_MEDIA_GRID_INITIAL_ROWS,
+  TV_MEDIA_GRID_WINDOW_SIZE,
   type TvMediaGridRow,
 } from '../lib/tvMediaGrid';
-import { useTvMediaGridFocus } from '../lib/useTvMediaGridFocus';
 import {
   normalizeTvMediaAspectRatio,
   PHOTO_FALLBACK_ASPECT_RATIO,
@@ -93,6 +97,7 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const overlay = useMenuOverlay();
+  const loadInFlightRef = useRef(false);
   const viewRef = useRef<LabView['kind']>('grid');
   viewRef.current = view.kind;
   const selectionModeRef = useRef(false);
@@ -111,15 +116,26 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   }, [onLock, onSessionInvalid]);
 
   const load = useCallback(async (cursor: string | null, append: boolean) => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     setLoading(true);
     try {
       const page = await listBeautyLabItems(cursor, 50);
-      setItems((prev) => (append ? [...prev, ...page.items] : page.items));
+      setItems((prev) => {
+        if (!append) return page.items;
+        const known = new Set(prev.map((item) => item.id));
+        return [...prev, ...page.items.filter((item) => {
+          if (known.has(item.id)) return false;
+          known.add(item.id);
+          return true;
+        })];
+      });
       setNextCursor(page.nextCursor);
       setError(null);
     } catch (err) {
       if (!handleError(err)) setError(t('beautyLab.loadError'));
     } finally {
+      loadInFlightRef.current = false;
       setLoading(false);
     }
   }, [handleError, t]);
@@ -178,30 +194,32 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
     }),
     [items, contentWidth, height],
   );
-  const gridFocus = useTvMediaGridFocus(rows);
+  const gridFocusable = !overlay.visible;
+  const { restoreIndex, onTileFocused } = useTvGridFocusMemory(overlay.visible, items);
 
   const renderGridRow = useCallback(({
     item: row,
-    index: rowIndex,
   }: ListRenderItemInfo<TvMediaGridRow<BeautyLabItem>>) => {
-    const rowReady = gridFocus.isRowReady(row.key);
     return (
-      <View style={styles.gridRow}>
+      <TVFocusGuideView
+        style={styles.gridRow}
+        scrollSnapAlign="start"
+        trapFocusLeft
+        trapFocusRight
+      >
         {row.tiles.map((tile) => {
           const { item, originalIndex: index, width: tileWidth, height: tileHeight } = tile;
           const isSelected = selected.has(item.id);
           return (
             <FocusableMediaTile
               key={item.id}
-              index={index}
               onSelect={() => onTilePress(item)}
-              hasTVPreferredFocus={!overlay.visible && rowReady && index === 0}
-              focusable={!overlay.visible && rowReady}
-              focusTargets={gridFocus.targetsFor(item.id)}
+              hasTVPreferredFocus={gridFocusable && restoreIndex !== null && index === restoreIndex}
+              focusable={gridFocusable}
               accessibilityLabel={item.originalFileName}
               style={{ width: tileWidth }}
               onFocusChange={(focused) => {
-                if (focused) gridFocus.prepareRowAfter(rowIndex);
+                if (focused) onTileFocused(index, item.id);
               }}
             >
               <View style={[styles.thumbBox, { height: tileHeight }]}>
@@ -210,7 +228,6 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
                   path={item.thumbnailUrl}
                   personal
                   style={styles.thumb}
-                  onReady={() => gridFocus.onPreviewReady(row.key, item.id)}
                 />
                 {isSelected && (
                   <View style={styles.selectedBadge}><Text style={styles.badgeText}>✓</Text></View>
@@ -228,9 +245,9 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
             </FocusableMediaTile>
           );
         })}
-      </View>
+      </TVFocusGuideView>
     );
-  }, [gridFocus, onTilePress, overlay.visible, selected, t]);
+  }, [gridFocusable, onTileFocused, onTilePress, restoreIndex, selected, t]);
 
   const startAnalysis = useCallback(async () => {
     overlay.hide();
@@ -324,13 +341,23 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
           keyExtractor={(row) => row.key}
           contentContainerStyle={styles.grid}
           renderItem={renderGridRow}
-          initialNumToRender={6}
-          maxToRenderPerBatch={4}
-          windowSize={11}
+          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
           removeClippedSubviews={false}
-          additionalRenderRegions={gridFocus.additionalRenderRegions}
+          snapToAlignment="item"
+          scrollAnimationEnabled={false}
           ListFooterComponent={nextCursor ? (
-            <FocusableButton label={t('beautyLab.loadMore')} onPress={() => void load(nextCursor, true)} />
+            <TVFocusGuideView
+              scrollSnapAlign="start"
+              trapFocusLeft
+              trapFocusRight
+            >
+              <FocusableButton
+                label={t('beautyLab.loadMore')}
+                onPress={() => void load(nextCursor, true)}
+              />
+            </TVFocusGuideView>
           ) : null}
         />
       )}

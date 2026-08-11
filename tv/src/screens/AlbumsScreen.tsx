@@ -4,6 +4,7 @@ import {
   FlatList,
   StyleSheet,
   Text,
+  TVFocusGuideView,
   View,
   useWindowDimensions,
   type ListRenderItemInfo,
@@ -16,11 +17,14 @@ import { MediaTilePreview } from '../components/MediaTilePreview';
 import {
   buildTvMediaGridRows,
   tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_BATCH_ROWS,
   TV_MEDIA_GRID_FOCUS_BLEED,
   TV_MEDIA_GRID_GAP,
+  TV_MEDIA_GRID_INITIAL_ROWS,
+  TV_MEDIA_GRID_WINDOW_SIZE,
   type TvMediaGridRow,
 } from '../lib/tvMediaGrid';
-import { useTvMediaGridFocus } from '../lib/useTvMediaGridFocus';
+import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { useI18n } from '../i18n';
 
 const GRID_GAP = TV_MEDIA_GRID_GAP;
@@ -79,39 +83,38 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
     }),
     [list, contentWidth, height],
   );
-  const gridFocus = useTvMediaGridFocus(rows);
+  const { restoreIndex, onTileFocused } = useTvGridFocusMemory(false, list);
 
   const renderRow = useCallback(({
     item: row,
-    index: rowIndex,
   }: ListRenderItemInfo<TvMediaGridRow<TvAlbum>>) => {
-    const rowReady = gridFocus.isRowReady(row.key);
     return (
-      <View style={styles.gridRow}>
+      <TVFocusGuideView
+        style={styles.gridRow}
+        scrollSnapAlign="start"
+        trapFocusLeft
+        trapFocusRight
+      >
         {row.tiles.map((tile) => {
           const { item: album, originalIndex: index, width: tileWidth, height: tileHeight } = tile;
           return (
             <FocusableMediaTile
               key={album.id}
-              index={index}
               accessibilityLabel={t('albums.tileAccessibility', {
                 name: album.name,
                 count: album.itemCount,
               })}
               style={{ width: tileWidth }}
-              hasTVPreferredFocus={rowReady && index === 0}
-              focusable={rowReady}
-              focusTargets={gridFocus.targetsFor(album.id)}
+              hasTVPreferredFocus={restoreIndex !== null && index === restoreIndex}
               onSelect={() => onOpenAlbum(album)}
               onFocusChange={(focused) => {
-                if (focused) gridFocus.prepareRowAfter(rowIndex);
+                if (focused) onTileFocused(index, album.id);
               }}
             >
               <MediaTilePreview
                 kind="image"
                 path={album.coverThumbnailUrl}
                 style={{ width: '100%', height: tileHeight, borderRadius: 8 }}
-                onReady={() => gridFocus.onPreviewReady(row.key, album.id)}
               />
               <View style={styles.caption} pointerEvents="none">
                 <Text style={styles.name} numberOfLines={1}>{album.name}</Text>
@@ -120,9 +123,9 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
             </FocusableMediaTile>
           );
         })}
-      </View>
+      </TVFocusGuideView>
     );
-  }, [gridFocus, onOpenAlbum, t, tn]);
+  }, [onOpenAlbum, onTileFocused, restoreIndex, t, tn]);
 
   if (error) {
     return (
@@ -157,11 +160,12 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
         renderItem={renderRow}
         keyExtractor={(row) => row.key}
         contentContainerStyle={styles.grid}
-        initialNumToRender={6}
-        maxToRenderPerBatch={4}
-        windowSize={11}
+        initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+        maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+        windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
         removeClippedSubviews={false}
-        additionalRenderRegions={gridFocus.additionalRenderRegions}
+        snapToAlignment="item"
+        scrollAnimationEnabled={false}
       />
     </View>
   );

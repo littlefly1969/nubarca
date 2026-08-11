@@ -29,6 +29,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import { tvDebug } from '../debug';
+import { isSoleLease, oldestEvictableIndex } from '../media/mediaCachePolicy';
 
 // AsyncStorage key for the persisted limited TV session cookie. Bumping this
 // string invalidates any previously persisted session.
@@ -226,14 +227,18 @@ export interface LoadTvMediaOptions {
   // Low-priority requests only get a download slot when no high-priority
   // request is waiting.
   priority?: TvMediaPriority;
-  // Checked after the request leaves the queue: lets an unmounted tile / a left
-  // album drop its queued download instead of wasting the network slot.
-  shouldAbort?: () => boolean;
   // Personal Gallery media: also send the in-memory Personal Area unlock grant
   // header (provider registered by api/personal.ts — read at REQUEST time, so a
   // re-unlock is picked up and a dropped grant sends nothing). The server
   // re-validates session + grant on every byte request regardless.
   personal?: boolean;
+}
+
+export interface TvMediaLease {
+  readonly uri: string;
+  retain: () => TvMediaLease | null;
+  invalidate: () => boolean;
+  release: () => void;
 }
 
 // Registered by api/personal.ts (which imports this module — the provider
@@ -244,19 +249,18 @@ export function setPersonalMediaHeaderProvider(provider: () => Record<string, st
   _personalHeaderProvider = provider;
 }
 
-// Thrown (never memoized as a failure) when shouldAbort() cancels a queued load.
-export class MediaAborted extends Error {
-  constructor() {
-    super('TV media load aborted');
-    this.name = 'MediaAborted';
-  }
-}
-
 let _mediaDir: Directory | null = null;
 // Dedupe concurrent loads of the same media (e.g. a grid mounting many tiles).
 const _mediaInflight = new Map<string, Promise<string>>();
 // Insertion/last-use order of cache keys currently on disk, for bounded eviction.
 let _mediaOrder: string[] = [];
+// Files currently handed to a mounted image. Eviction may temporarily exceed the
+// soft limit rather than deleting bytes from under a live file:// URI.
+const _mediaLeases = new Map<string, number>();
+// Invalidates every queued/active cache task when a session clear deletes the
+// directory. Old tasks may finish their network request, but can never write or
+// mutate the new generation.
+let _mediaEpoch = 0;
 // Recent failures by cache key → timestamp (see MEDIA_FAILURE_MEMO_MS).
 const _mediaFailures = new Map<string, number>();
 // Two-level async semaphore for the download pool: high-priority waiters are
@@ -326,15 +330,26 @@ function ensureMediaDir(): Directory {
   return dir;
 }
 
-function rememberCacheEntry(key: string): void {
-  const at = _mediaOrder.indexOf(key);
-  if (at >= 0) _mediaOrder.splice(at, 1);
-  _mediaOrder.push(key);
+function deleteCacheEntry(key: string): void {
+  _mediaOrder = _mediaOrder.filter((candidate) => candidate !== key);
+  _mediaFailures.delete(key);
+  if (!_mediaDir) return;
+  try {
+    const stale = new File(_mediaDir, `${key}.img`);
+    if (stale.exists) stale.delete();
+  } catch {
+    // best effort
+  }
+}
+
+function trimMediaCache(protectedKey?: string): void {
   while (_mediaOrder.length > MEDIA_CACHE_MAX_ENTRIES) {
-    const evict = _mediaOrder.shift();
-    if (!evict || !_mediaDir) continue;
+    const at = oldestEvictableIndex(_mediaOrder, _mediaLeases, protectedKey);
+    if (at < 0) return;
+    const [key] = _mediaOrder.splice(at, 1);
+    if (!_mediaDir) continue;
     try {
-      const stale = new File(_mediaDir, `${evict}.img`);
+      const stale = new File(_mediaDir, `${key}.img`);
       if (stale.exists) stale.delete();
     } catch {
       // best effort
@@ -342,10 +357,60 @@ function rememberCacheEntry(key: string): void {
   }
 }
 
+function rememberCacheEntry(key: string): void {
+  const at = _mediaOrder.indexOf(key);
+  if (at >= 0) _mediaOrder.splice(at, 1);
+  _mediaOrder.push(key);
+  trimMediaCache(key);
+}
+
+function retainMediaKey(key: string): void {
+  _mediaLeases.set(key, (_mediaLeases.get(key) ?? 0) + 1);
+}
+
+function releaseMediaKey(key: string): void {
+  const count = _mediaLeases.get(key) ?? 0;
+  if (count <= 1) _mediaLeases.delete(key);
+  else _mediaLeases.set(key, count - 1);
+  trimMediaCache();
+}
+
+function mediaLease(key: string, uri: string, epoch: number): TvMediaLease {
+  let active = true;
+  return {
+    uri,
+    retain: () => {
+      if (!active || epoch !== _mediaEpoch) return null;
+      retainMediaKey(key);
+      return mediaLease(key, uri, epoch);
+    },
+    // The caller still owns its lease here. Refuse to remove bytes when any
+    // other mounted consumer also owns this exact local file.
+    invalidate: () => {
+      if (!active || epoch !== _mediaEpoch || !isSoleLease(_mediaLeases, key)) return false;
+      deleteCacheEntry(key);
+      return true;
+    },
+    release: () => {
+      if (!active) return;
+      active = false;
+      if (epoch === _mediaEpoch) releaseMediaKey(key);
+    },
+  };
+}
+
+class MediaCacheReset extends Error {
+  constructor() {
+    super('TV media cache generation changed');
+    this.name = 'MediaCacheReset';
+  }
+}
+
 async function downloadTvMedia(
   url: string,
   key: string,
   opts: LoadTvMediaOptions,
+  epoch: number,
 ): Promise<string> {
   const variant = mediaVariant(url);
   const dir = ensureMediaDir();
@@ -366,9 +431,7 @@ async function downloadTvMedia(
   await acquireDownloadSlot(opts.priority ?? 'high');
   const startedAt = Date.now();
   try {
-    // The consumer may have unmounted (tile scrolled away, album left) while we
-    // waited in the queue — drop the download instead of wasting the slot.
-    if (opts.shouldAbort?.()) throw new MediaAborted();
+    if (epoch !== _mediaEpoch) throw new MediaCacheReset();
     const headers: Record<string, string> = opts.personal
       ? { ...(_personalHeaderProvider?.() ?? {}) }
       : {};
@@ -378,12 +441,14 @@ async function downloadTvMedia(
     // rehydrated. Derived previews are bounded server-side; concurrency is also
     // capped above, so writing the response bytes does not fan out unbounded.
     const response = await fetch(url, { headers, credentials: 'include' });
+    if (epoch !== _mediaEpoch) throw new MediaCacheReset();
     captureCookie(response.headers.get('set-cookie'));
     if (!response.ok) throw new ApiError(response.status, `GET TV media → ${response.status}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength <= 0) {
       throw new ApiError(0, 'TV media download produced no bytes');
     }
+    if (epoch !== _mediaEpoch) throw new MediaCacheReset();
     dest.create({ intermediates: true, overwrite: true });
     dest.write(bytes);
     const file = dest;
@@ -396,23 +461,51 @@ async function downloadTvMedia(
     );
     return file.uri;
   } catch (err) {
-    if (err instanceof MediaAborted) {
-      tvDebug('media', variant, key, 'aborted', 'wait', startedAt - queuedAt);
-    } else {
-      // Memoize the failure so remounting tiles do not retry in a loop. The memo
-      // is per exact URL (key includes the variant), so a failed thumbnail never
-      // poisons the same item's preview.
-      _mediaFailures.set(key, Date.now());
-      tvDebug(
-        'media', variant, key, 'fail',
-        'wait', startedAt - queuedAt, 'dl', Date.now() - startedAt,
-        err instanceof ApiError ? `status=${err.status}` : (err as Error).name ?? 'error',
-      );
+    if (err instanceof MediaCacheReset || epoch !== _mediaEpoch) {
+      tvDebug('media', variant, key, 'cache-reset');
+      throw err instanceof MediaCacheReset ? err : new MediaCacheReset();
     }
+    // Memoize the failure so remounting tiles do not retry in a loop. The memo
+    // is per exact URL (key includes the variant), so a failed thumbnail never
+    // poisons the same item's preview.
+    _mediaFailures.set(key, Date.now());
+    tvDebug(
+      'media', variant, key, 'fail',
+      'wait', startedAt - queuedAt, 'dl', Date.now() - startedAt,
+      err instanceof ApiError ? `status=${err.status}` : (err as Error).name ?? 'error',
+    );
     throw err;
   } finally {
     releaseDownloadSlot();
   }
+}
+
+function loadResolvedTvMedia(
+  url: string,
+  key: string,
+  opts: LoadTvMediaOptions,
+): Promise<string> {
+  const inflight = _mediaInflight.get(key);
+  if (inflight) return inflight;
+  const failedAt = _mediaFailures.get(key);
+  if (failedAt !== undefined) {
+    if (Date.now() - failedAt < MEDIA_FAILURE_MEMO_MS) {
+      return Promise.reject(new ApiError(0, 'TV media recently failed'));
+    }
+    _mediaFailures.delete(key);
+  }
+  const epoch = _mediaEpoch;
+  let task: Promise<string>;
+  task = downloadTvMedia(url, key, opts, epoch)
+    .then((uri) => {
+      if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+      return uri;
+    })
+    .finally(() => {
+      if (_mediaInflight.get(key) === task) _mediaInflight.delete(key);
+    });
+  _mediaInflight.set(key, task);
+  return task;
 }
 
 // Load a derived TV media file and return a local file:// URI for <Image>.
@@ -427,25 +520,42 @@ export function loadTvMedia(path: string, opts: LoadTvMediaOptions = {}): Promis
     return Promise.reject(err);
   }
   const key = mediaCacheKey(url);
-  const inflight = _mediaInflight.get(key);
-  if (inflight) return inflight;
-  const failedAt = _mediaFailures.get(key);
-  if (failedAt !== undefined) {
-    if (Date.now() - failedAt < MEDIA_FAILURE_MEMO_MS) {
-      return Promise.reject(new ApiError(0, 'TV media recently failed'));
-    }
-    _mediaFailures.delete(key);
+  return loadResolvedTvMedia(url, key, opts);
+}
+
+// Acquire ownership BEFORE joining/starting the shared task. That closes the
+// Promise-resolution gap in which another completed download could otherwise
+// evict a file before the mounted consumer retained it.
+export async function loadTvMediaLeased(
+  path: string,
+  opts: LoadTvMediaOptions = {},
+): Promise<TvMediaLease> {
+  let url: string;
+  try {
+    url = resolveTvMediaUrl(path);
+  } catch (err) {
+    return Promise.reject(err);
   }
-  const task = downloadTvMedia(url, key, opts).finally(() => _mediaInflight.delete(key));
-  _mediaInflight.set(key, task);
-  return task;
+  const key = mediaCacheKey(url);
+  const epoch = _mediaEpoch;
+  retainMediaKey(key);
+  try {
+    const uri = await loadResolvedTvMedia(url, key, opts);
+    if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+    return mediaLease(key, uri, epoch);
+  } catch (err) {
+    if (epoch === _mediaEpoch) releaseMediaKey(key);
+    throw err;
+  }
 }
 
 // Purge all cached derived media (called when the TV session is cleared/revoked/
 // expired). Best-effort: drops in-flight tracking and deletes the cache dir.
 export function clearTvMediaCache(): void {
+  _mediaEpoch += 1;
   _mediaInflight.clear();
   _mediaFailures.clear();
+  _mediaLeases.clear();
   _mediaOrder = [];
   try {
     const dir = _mediaDir ?? new Directory(Paths.cache, MEDIA_CACHE_DIRNAME);

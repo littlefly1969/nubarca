@@ -5,51 +5,48 @@ import test from 'node:test';
 const source = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
 
 const screens = [
-  source('../screens/AlbumsScreen.tsx'),
-  source('../screens/AlbumItemsScreen.tsx'),
-  source('../screens/PersonalAlbumsScreen.tsx'),
-  source('../screens/PersonalLibraryScreen.tsx'),
-  source('../screens/BeautyLabScreen.tsx'),
-];
+  ['AlbumsScreen.tsx', source('../screens/AlbumsScreen.tsx')],
+  ['AlbumItemsScreen.tsx', source('../screens/AlbumItemsScreen.tsx')],
+  ['PersonalAlbumsScreen.tsx', source('../screens/PersonalAlbumsScreen.tsx')],
+  ['PersonalLibraryScreen.tsx', source('../screens/PersonalLibraryScreen.tsx')],
+  ['BeautyLabScreen.tsx', source('../screens/BeautyLabScreen.tsx')],
+] as const;
+const screenSources = screens.map(([, screen]) => screen);
 const preview = source('../components/MediaTilePreview.tsx');
 const focusTile = source('../components/FocusableMediaTile.tsx');
-const focusHook = source('./useTvMediaGridFocus.ts');
-const library = screens[3];
+const library = screens[3][1];
 
-test('every TV wall uses the same proportional layout and readiness-gated focus', () => {
-  for (const screen of screens) {
-    assert.match(screen, /buildTvMediaGridRows/);
-    assert.match(screen, /useTvMediaGridFocus/);
-    assert.match(screen, /isRowReady/);
-    assert.match(screen, /onPreviewReady/);
-    assert.doesNotMatch(screen, /tvFixedGrid|numColumns/);
+test('every TV wall uses the same proportional layout and native TV focus', () => {
+  for (const [name, screen] of screens) {
+    assert.match(screen, /buildTvMediaGridRows/, name);
+    assert.match(screen, /<FocusableMediaTile/, name);
+    assert.doesNotMatch(screen, /\buseTvMediaGridFocus\b|\bgridFocus\b|\bfocusTargets\b/, name);
+    assert.doesNotMatch(screen, /isRowReady|rowReady|onPreviewReady|prepareRowAfter/, name);
+    assert.doesNotMatch(screen, /additionalRenderRegions/, name);
+    assert.doesNotMatch(screen, /tvFixedGrid|numColumns/, name);
+  }
+  assert.doesNotMatch(focusTile, /nextFocus(?:Left|Right|Up|Down)|focusTargets/);
+  assert.doesNotMatch(preview, /onReady/);
+});
+
+test('every TV wall uses the installed native item-snap scrolling contract', () => {
+  for (const [name, screen] of screens) {
+    assert.match(screen, /<TVFocusGuideView/, name);
+    assert.match(screen, /trapFocusLeft/, name);
+    assert.match(screen, /trapFocusRight/, name);
+    assert.match(screen, /scrollSnapAlign="start"/, name);
+    assert.match(screen, /snapToAlignment="item"/, name);
+    assert.match(screen, /scrollAnimationEnabled=\{false\}/, name);
+    assert.match(screen, /removeClippedSubviews=\{false\}/, name);
   }
 });
 
 test('media walls use DTO dimensions and album shelves use one stable card ratio', () => {
-  assert.match(screens[1], /getAspectRatio: getTvMediaAspectRatio/);
+  assert.match(screenSources[1], /getAspectRatio: getTvMediaAspectRatio/);
   assert.match(library, /normalizeTvMediaAspectRatio/);
-  assert.match(screens[4], /normalizeTvMediaAspectRatio/);
-  assert.match(screens[0], /getAspectRatio: \(\) => TILE_ASPECT/);
-  assert.match(screens[2], /getAspectRatio: \(\) => TILE_ASPECT/);
-});
-
-test('unready and unmounted directions are trapped on the current tile', () => {
-  assert.match(focusHook, /readyRows\.has\(targetRow\)/);
-  assert.match(focusHook, /: self/);
-  assert.match(focusTile, /focusTargets\?\.self\.current \?\? undefined/);
-  assert.match(preview, /onLoad=\{\(\) => setDecoded\(true\)\}/);
-  assert.match(preview, /onReady\?\.\(\)/);
-});
-
-test('every wall prepares one next row before focus can enter it', () => {
-  for (const screen of screens) {
-    assert.match(screen, /prepareRowAfter/);
-    assert.match(screen, /additionalRenderRegions=\{gridFocus\.additionalRenderRegions\}/);
-    assert.match(screen, /removeClippedSubviews=\{false\}/);
-  }
-  assert.match(focusHook, /rowIndex \+ 1/);
-  assert.match(focusHook, /\[\{ first: .*last:/);
+  assert.match(screenSources[4], /normalizeTvMediaAspectRatio/);
+  assert.match(screenSources[0], /getAspectRatio: \(\) => TILE_ASPECT/);
+  assert.match(screenSources[2], /getAspectRatio: \(\) => TILE_ASPECT/);
 });
 
 test('All, Photos and Videos live in MENU, not above the library grid', () => {
@@ -58,8 +55,16 @@ test('All, Photos and Videos live in MENU, not above the library grid', () => {
   assert.match(menu, /\(\['all', 'image', 'video'\] as const\)\.map/);
 });
 
+test('paged walls serialize appends and reject duplicate item ids', () => {
+  assert.match(library, /requestedCursorRef\.current === current\.nextCursor/);
+  assert.match(library, /known\.has\(item\.id\)/);
+  const beauty = screenSources[4];
+  assert.match(beauty, /if \(loadInFlightRef\.current\) return/);
+  assert.match(beauty, /known\.has\(item\.id\)/);
+});
+
 test('video tiles remain still-image previews with one viewer player', () => {
-  for (const screen of screens) {
+  for (const screen of screenSources) {
     assert.doesNotMatch(screen, /VideoView|useVideoPlayer/);
     assert.doesNotMatch(screen, /previewStripUrl/);
   }

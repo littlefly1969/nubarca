@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useReducer, useState } from 'react';
+import { useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -7,8 +7,6 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { colors } from '../theme';
-import type { TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
-import { tvDebug } from '../debug';
 
 interface Props {
   onSelect: () => void;
@@ -18,18 +16,16 @@ interface Props {
   hasTVPreferredFocus?: boolean;
   onFocusChange?: (focused: boolean) => void;
   focusable?: boolean;
-  focusTargets?: TvMediaGridTargets;
-  // Flat index, for the development-only unresolved-link diagnostic below.
-  index?: number;
 }
 
 // Media-only focus surface. Unlike the generic FocusableTile, its focus rings
 // overlay the preview instead of reserving twelve layout pixels around every
 // unfocused item, so adjacent photos/posters use almost all of their tile box.
 //
-// Views are read straight from refs. An unresolved or deliberately blocked
-// direction resolves to SELF, so Android never falls back to a random geometric
-// target outside the loaded rows.
+// Directional focus deliberately stays native. react-native-tvos wraps each
+// virtualized list in a focus guide and keeps the last-focused viewport alive;
+// attaching JS-managed native tags here races row virtualization under key
+// repeat and creates stale destinations.
 export function FocusableMediaTile({
   onSelect,
   children,
@@ -38,37 +34,8 @@ export function FocusableMediaTile({
   hasTVPreferredFocus,
   onFocusChange,
   focusable = true,
-  focusTargets,
-  index,
 }: Props) {
   const [focused, setFocused] = useState(false);
-  // A bare re-render request. Bumped when this tile takes focus so its links
-  // pick up neighbours mounted since the last render. It carries no value, so
-  // it can never become a source of stale derived state.
-  const [, requestResolve] = useReducer((n: number) => n + 1, 0);
-
-  // One resolve pass after mount, so a row that mounts alongside its neighbours
-  // commits real links on the very next frame.
-  useLayoutEffect(() => {
-    requestResolve();
-  }, []);
-
-  const onFocus = useCallback(() => {
-    requestResolve();
-    setFocused(true);
-    onFocusChange?.(true);
-    if (__DEV__ && focusTargets !== undefined) {
-      // Development diagnostic: an unresolved link is an INVARIANT breach of the
-      // render-window sizing, not something to shrug at. It is reported rather
-      // than silently tolerated, and it names positions only — never an item id.
-      const missing = (['left', 'right', 'up', 'down'] as const).filter(
-        (d) => focusTargets[d] !== undefined && focusTargets[d]!.current === null,
-      );
-      if (missing.length > 0) {
-        tvDebug('grid nav', 'unmounted link target at index', index ?? -1, missing.join(','));
-      }
-    }
-  }, [onFocusChange, focusTargets, index]);
 
   // A tile that is not a focus destination must not keep painting a focus ring.
   // While a command rail or panel owns focus the whole grid is switched to
@@ -77,16 +44,11 @@ export function FocusableMediaTile({
 
   return (
     <Pressable
-      ref={focusTargets?.self}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       focusable={focusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
-      nextFocusLeft={focusTargets?.left.current ?? focusTargets?.self.current ?? undefined}
-      nextFocusRight={focusTargets?.right.current ?? focusTargets?.self.current ?? undefined}
-      nextFocusUp={focusTargets?.up.current ?? focusTargets?.self.current ?? undefined}
-      nextFocusDown={focusTargets?.down.current ?? focusTargets?.self.current ?? undefined}
-      onFocus={onFocus}
+      onFocus={() => { setFocused(true); onFocusChange?.(true); }}
       onBlur={() => { setFocused(false); onFocusChange?.(false); }}
       onPress={onSelect}
       style={[styles.tile, style, showFocusRing && styles.tileFocused]}

@@ -10,6 +10,7 @@ import {
 import { colors, font, spacing } from '../theme';
 import { useTvMedia } from '../media/useTvMedia';
 import { useI18n } from '../i18n';
+import type { TvMediaLease } from '../api/client';
 
 // Cinematic slideshow image. Renders the DERIVED preview (never an original,
 // never an upscaled thumbnail) in two layers so aspect ratio is always preserved:
@@ -83,35 +84,85 @@ interface Props {
   personal?: boolean;
 }
 
+interface SlideSlot {
+  uri: string;
+  sourcePath: string | null;
+  lease: TvMediaLease;
+}
+
 export function SlideImage({ path, personal = false }: Props) {
   const { t } = useI18n();
-  const { uri, state, markFailed } = useTvMedia(path, { personal });
+  const { uri, state, lease, markFailed } = useTvMedia(path, { personal });
   // Two-slot stage: `shown` is on screen, `incoming` decodes offscreen.
-  const [shown, setShown] = useState<string | null>(null);
-  const [incoming, setIncoming] = useState<string | null>(null);
+  const [shown, setShown] = useState<SlideSlot | null>(null);
+  const [incoming, setIncoming] = useState<SlideSlot | null>(null);
+  const shownRef = useRef<SlideSlot | null>(null);
+  const incomingRef = useRef<SlideSlot | null>(null);
+
+  const replaceShown = useCallback((next: SlideSlot | null) => {
+    if (shownRef.current === next) return;
+    shownRef.current?.lease.release();
+    shownRef.current = next;
+    setShown(next);
+  }, []);
+
+  const replaceIncoming = useCallback((next: SlideSlot | null) => {
+    if (incomingRef.current === next) return;
+    incomingRef.current?.lease.release();
+    incomingRef.current = next;
+    setIncoming(next);
+  }, []);
+
+  useEffect(() => () => {
+    shownRef.current?.lease.release();
+    incomingRef.current?.lease.release();
+    shownRef.current = null;
+    incomingRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (state === 'failed') {
       // Failure replaces the stage with the explicit placeholder; also forget
       // the previous slide so navigating onward doesn't flash a stale photo.
-      setShown(null);
-      setIncoming(null);
+      replaceShown(null);
+      replaceIncoming(null);
       return;
     }
-    if (!uri || state !== 'ready') return;
-    if (uri === shown) {
+    // An incoming slot that belongs to the previous navigation must never
+    // promote after the requested path has changed.
+    if (incoming && incoming.sourcePath !== path) replaceIncoming(null);
+    if (!uri || !lease || state !== 'ready') return;
+    if (uri === shown?.uri) {
       // Navigated back to the slide that is still on screen: nothing to decode.
-      setIncoming(null);
+      replaceIncoming(null);
       return;
     }
-    setIncoming(uri);
-  }, [uri, state, shown]);
+    if (incoming?.uri === uri && incoming.sourcePath === path) return;
+    const held = lease.retain();
+    if (held) replaceIncoming({ uri, sourcePath: path, lease: held });
+  }, [uri, state, lease, path, shown?.uri, incoming, replaceShown, replaceIncoming]);
 
   // The incoming foreground finished decoding → swap it in front.
-  const promote = useCallback((u: string) => {
-    setShown(u);
-    setIncoming((cur) => (cur === u ? null : cur));
-  }, []);
+  const promote = useCallback((slot: SlideSlot) => {
+    if (incomingRef.current !== slot || slot.sourcePath !== path) return;
+    // Transfer ownership to `shown`: detach without releasing this token.
+    incomingRef.current = null;
+    setIncoming(null);
+    replaceShown(slot);
+  }, [path, replaceShown]);
+
+  const failSlot = useCallback((slot: SlideSlot) => {
+    const ownsIncoming = incomingRef.current === slot;
+    const ownsShown = shownRef.current === slot;
+    if (!ownsIncoming && !ownsShown) return;
+    const isCurrentSource = slot.sourcePath === path && lease?.uri === slot.uri;
+    if (!isCurrentSource) slot.lease.invalidate();
+    if (ownsIncoming) replaceIncoming(null);
+    if (ownsShown) replaceShown(null);
+    // Releasing the slot above leaves the hook as the sole owner when this is
+    // the current source, so its exact-source handler may safely retry once.
+    if (isCurrentSource) markFailed();
+  }, [path, lease, markFailed, replaceIncoming, replaceShown]);
 
   const failed = state === 'failed';
   // Loading is visible ONLY while nothing is on screen yet (first slide still
@@ -121,15 +172,20 @@ export function SlideImage({ path, personal = false }: Props) {
   return (
     <View style={styles.stage}>
       {!failed && shown !== null && (
-        <SlideLayers key={shown} uri={shown} visible onFgError={markFailed} />
-      )}
-      {!failed && incoming !== null && incoming !== shown && (
         <SlideLayers
-          key={incoming}
-          uri={incoming}
+          key={shown.uri}
+          uri={shown.uri}
+          visible
+          onFgError={() => failSlot(shown)}
+        />
+      )}
+      {!failed && incoming !== null && incoming.uri !== shown?.uri && (
+        <SlideLayers
+          key={incoming.uri}
+          uri={incoming.uri}
           visible={false}
           onFgReady={() => promote(incoming)}
-          onFgError={markFailed}
+          onFgError={() => failSlot(incoming)}
         />
       )}
       {failed ? (

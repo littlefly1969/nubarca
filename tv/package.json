@@ -21,7 +21,7 @@
     "cleanup:ota": "node scripts/ota.mjs cleanup",
     "test:ota": "node --test src/ota/updateLifecycle.test.ts scripts/ota.test.mjs",
     "test:personal": "node --test src/personal/flow.test.ts",
-    "test": "node --test scripts/appIdentity.test.mjs src/ota/updateLifecycle.test.ts scripts/ota.test.mjs src/personal/flow.test.ts src/personal/appBackNavigation.test.ts src/personal/dpadCode.test.ts src/personal/mediaWorkspaceQuery.test.ts src/lib/keepAwake.test.ts src/lib/mediaAspectRatio.test.ts src/lib/tvMediaGrid.test.ts src/lib/tvMediaGridWiring.test.ts src/lib/mediaMenuFocus.test.ts src/lib/focusRemap.test.ts src/video/probeClassify.test.ts src/video/remoteMap.test.ts src/video/videoTilePreview.test.ts",
+    "test": "node --test scripts/appIdentity.test.mjs src/ota/updateLifecycle.test.ts scripts/ota.test.mjs src/personal/flow.test.ts src/personal/appBackNavigation.test.ts src/personal/dpadCode.test.ts src/personal/mediaWorkspaceQuery.test.ts src/lib/keepAwake.test.ts src/lib/mediaAspectRatio.test.ts src/lib/tvMediaGrid.test.ts src/lib/tvMediaGridWiring.test.ts src/lib/mediaMenuFocus.test.ts src/lib/focusRemap.test.ts src/media/mediaCachePolicy.test.ts src/video/probeClassify.test.ts src/video/remoteMap.test.ts src/video/videoTilePreview.test.ts",
     "ios": "expo run:ios"
   },
   "dependencies": {

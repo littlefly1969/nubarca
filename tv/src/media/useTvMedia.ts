@@ -1,5 +1,9 @@
-import { useEffect, useState } from 'react';
-import { loadTvMedia, type TvMediaPriority } from '../api/client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  loadTvMediaLeased,
+  type TvMediaLease,
+  type TvMediaPriority,
+} from '../api/client';
 import { tvDebug } from '../debug';
 
 // Shared hook for loading a derived TV media file (thumbnail / preview / poster)
@@ -45,8 +49,14 @@ interface UseTvMediaOptions {
 interface TvMediaResult {
   uri: string | null;
   state: TvMediaState;
+  lease: TvMediaLease | null;
   // Let a consumer demote a decoded-but-broken <Image> to the failed state.
   markFailed: () => void;
+}
+
+interface ActiveLease {
+  sourceKey: string;
+  lease: TvMediaLease;
 }
 
 export function useTvMedia(
@@ -55,10 +65,36 @@ export function useTvMedia(
 ): TvMediaResult {
   const [uri, setUri] = useState<string | null>(null);
   const [state, setState] = useState<TvMediaState>('loading');
+  const [active, setActive] = useState<ActiveLease | null>(null);
+  const [decodeRetry, setDecodeRetry] = useState(0);
+  const priorityRef = useRef(priority);
+  priorityRef.current = priority;
+  const leaseRef = useRef<TvMediaLease | null>(null);
+  const retriedDecode = useRef(false);
+  const sourceKey = `${path ?? ''}|${fallbackPath ?? ''}|${personal ? '1' : '0'}`;
+  const sourceKeyRef = useRef(sourceKey);
+  if (sourceKeyRef.current !== sourceKey) {
+    sourceKeyRef.current = sourceKey;
+    retriedDecode.current = false;
+  }
+
+  const replaceLease = useCallback((next: ActiveLease | null) => {
+    const nextLease = next?.lease ?? null;
+    if (leaseRef.current === nextLease) return;
+    leaseRef.current?.release();
+    leaseRef.current = nextLease;
+    setActive(next);
+  }, []);
+
+  useEffect(() => () => {
+    leaseRef.current?.release();
+    leaseRef.current = null;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    const shouldAbort = () => cancelled;
+    const loadSourceKey = sourceKey;
+    replaceLease(null);
     setUri(null);
     setState('loading');
     if (!path) {
@@ -67,9 +103,15 @@ export function useTvMedia(
     }
     const run = async () => {
       try {
-        const primary = await loadTvMedia(path, { priority, shouldAbort, personal });
-        if (!cancelled) {
-          setUri(primary);
+        const primary = await loadTvMediaLeased(path, {
+          priority: priorityRef.current,
+          personal,
+        });
+        if (cancelled) {
+          primary.release();
+        } else {
+          replaceLease({ sourceKey: loadSourceKey, lease: primary });
+          setUri(primary.uri);
           setState('ready');
         }
         return;
@@ -82,11 +124,18 @@ export function useTvMedia(
           if (cancelled) return;
           try {
             const secondary = await withFallbackGate(() =>
-              loadTvMedia(fallbackPath, { priority: 'low', shouldAbort, personal }));
-            if (!cancelled) {
-              tvDebug('media', 'fallback-used');
-              setUri(secondary);
-              setState('ready');
+              cancelled
+                ? Promise.resolve(null)
+                : loadTvMediaLeased(fallbackPath, { priority: 'low', personal }));
+            if (secondary !== null) {
+              if (cancelled) {
+                secondary.release();
+              } else {
+                tvDebug('media', 'fallback-used');
+                replaceLease({ sourceKey: loadSourceKey, lease: secondary });
+                setUri(secondary.uri);
+                setState('ready');
+              }
             }
             return;
           } catch {
@@ -100,7 +149,34 @@ export function useTvMedia(
     return () => {
       cancelled = true;
     };
-  }, [path, fallbackPath, priority, personal]);
+  }, [path, fallbackPath, personal, decodeRetry, replaceLease, sourceKey]);
 
-  return { uri, state, markFailed: () => setState('failed') };
+  const currentLease = active?.sourceKey === sourceKey ? active.lease : null;
+
+  const markFailed = useCallback(() => {
+    // An onError from an Image belonging to the previous source must never
+    // invalidate whichever path has become current since that Image mounted.
+    if (!currentLease
+      || leaseRef.current !== currentLease
+      || active?.sourceKey !== sourceKeyRef.current) return;
+    // With one owner this removes corrupt bytes before retrying. With shared
+    // owners it deliberately leaves the file in place and retries only the
+    // local decoder, so one view can never delete another view's live URI.
+    currentLease.invalidate();
+    replaceLease(null);
+    setUri(null);
+    if (!retriedDecode.current) {
+      retriedDecode.current = true;
+      setDecodeRetry((current) => current + 1);
+    } else {
+      setState('failed');
+    }
+  }, [active?.sourceKey, currentLease, replaceLease]);
+
+  return {
+    uri: currentLease ? uri : null,
+    state: currentLease || state === 'failed' ? state : 'loading',
+    lease: currentLease,
+    markFailed,
+  };
 }

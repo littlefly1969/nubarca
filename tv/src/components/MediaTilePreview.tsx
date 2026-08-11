@@ -1,4 +1,3 @@
-import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -11,16 +10,14 @@ import {
 import { colors, font, spacing } from '../theme';
 import { useTvMedia } from '../media/useTvMedia';
 import { useI18n } from '../i18n';
-import { videoTilePreview, type TvPreviewPriority } from '../video/videoTilePreview';
+import { videoTilePreview } from '../video/videoTilePreview';
 
 // Grid-tile media preview for the unified library.
 //
-// Cinematic framing, same as the slideshow's SlideImage but single-slot and
-// cheap enough for a virtualized grid: a blurred COVER backdrop + dim behind an
-// aspect-preserving CONTAIN foreground, both referencing the SAME downloaded
-// local file:// URI (one download). The whole photo/poster is always visible and
-// never cropped, and the tile box is fixed by the layout so the placeholder
-// never changes size.
+// One aspect-preserving still image per tile. The slideshow may afford a
+// cinematic blurred backdrop; a virtualized wall may contain dozens of mounted
+// tiles, so duplicating every decoder and blur surface here is needlessly costly
+// on a Fire TV. The tile box is fixed by layout and never changes size.
 //
 // For VIDEOS this component is the only preview path, and it is a STILL IMAGE
 // path: no VideoView, no player, no decode of the original. Its fallback ladder
@@ -38,12 +35,6 @@ interface Props {
   fallbackPath?: string | null;
   style?: StyleProp<ViewStyle>;
   personal?: boolean;
-  priority?: TvPreviewPriority;
-  // Ambient blur radius. Kept modest for Fire TV.
-  blurRadius?: number;
-  // The row may accept focus only after every preview has either rendered or
-  // reached its explicit terminal placeholder.
-  onReady?: () => void;
 }
 
 export function MediaTilePreview({
@@ -52,60 +43,30 @@ export function MediaTilePreview({
   fallbackPath,
   style,
   personal = false,
-  priority = 'high',
-  blurRadius = 12,
-  onReady,
 }: Props) {
   const { t } = useI18n();
   const resolved = kind === 'video'
     ? videoTilePreview({ posterUrl: path, stillFallbackUrl: fallbackPath })
     : ({ kind: 'poster', path, fallbackPath: fallbackPath ?? null } as const);
 
-  // 'none' means "do not warm this tile" — it is not a reason to skip loading
-  // when the tile is actually mounted and on screen, so it maps to the lowest
-  // real priority rather than to no request.
-  const loadPriority = priority === 'high' ? 'high' : 'low';
   const primary = resolved.kind === 'placeholder' ? null : resolved.path;
   const secondary = resolved.kind === 'placeholder' ? null : resolved.fallbackPath;
   const { uri, state, markFailed } = useTvMedia(primary, {
     fallbackPath: secondary,
     personal,
-    priority: loadPriority,
   });
 
   const failed = resolved.kind === 'placeholder' || state === 'failed';
-  const sourceKey = `${primary ?? ''}|${secondary ?? ''}`;
-  const [decoded, setDecoded] = useState(false);
-  const reportedSource = useRef<string | null>(null);
-
-  useEffect(() => { setDecoded(false); }, [sourceKey]);
-  useEffect(() => {
-    if ((!decoded && !failed) || reportedSource.current === sourceKey) return;
-    reportedSource.current = sourceKey;
-    onReady?.();
-  }, [decoded, failed, onReady, sourceKey]);
 
   return (
     <View style={[styles.frame, style]}>
       {uri && state === 'ready' ? (
-        <>
-          {/* Ambient blurred fill (same local file) — decorative, non-focusable. */}
-          <Image
-            source={{ uri }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="cover"
-            blurRadius={blurRadius}
-          />
-          <View style={styles.dim} />
-          {/* Aspect-preserving foreground: the whole frame, never cropped. */}
-          <Image
-            source={{ uri }}
-            style={StyleSheet.absoluteFill}
-            resizeMode="contain"
-            onLoad={() => setDecoded(true)}
-            onError={markFailed}
-          />
-        </>
+        <Image
+          source={{ uri }}
+          style={StyleSheet.absoluteFill}
+          resizeMode="contain"
+          onError={markFailed}
+        />
       ) : failed ? (
         // The explicit placeholder. A video says so with a play glyph, because
         // "no preview available" on a video tile is a normal, temporary state
@@ -130,14 +91,6 @@ const styles = StyleSheet.create({
   frame: {
     overflow: 'hidden',
     backgroundColor: '#05070b',
-  },
-  dim: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.28)',
   },
   placeholder: {
     position: 'absolute',

@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  buildTvMediaGridModel,
   buildTvMediaGridRows,
   TV_MEDIA_GRID_GAP,
-  type TvMediaGridRow,
 } from './tvMediaGrid.ts';
 
 interface Item { id: string; ratio: number }
@@ -38,12 +36,20 @@ test('full rows fill the surface while every tile keeps its aspect ratio', () =>
   assert.ok(rows.some((row) => new Set(row.tiles.map((tile) => tile.width)).size > 1));
 });
 
-test('an incomplete last row stays left aligned and row identity includes its contents', () => {
-  const first = build([{ id: 'a', ratio: 1 }]);
-  const second = build([{ id: 'a', ratio: 1 }, { id: 'b', ratio: 1 }]);
-  assert.equal(first[0].tiles[0].height, 200);
-  assert.ok(first[0].tiles[0].width < 1200);
-  assert.notEqual(first[0].key, second[0].key);
+test('appending an item that completes the last row preserves its identity', () => {
+  const incomplete = Array.from({ length: 5 }, (_, index) => ({
+    id: String.fromCharCode('a'.charCodeAt(0) + index),
+    ratio: 1,
+  }));
+  const first = build(incomplete);
+  const second = build([...incomplete, { id: 'f', ratio: 1 }]);
+  assert.equal(first[0].tiles.length, 5);
+  assert.equal(second[0].tiles.length, 6);
+  assert.equal(first[0].key, second[0].key);
+  assert.deepEqual(
+    second[0].tiles.slice(0, incomplete.length).map((tile) => tile.item.id),
+    incomplete.map((item) => item.id),
+  );
 });
 
 test('invalid dimensions degrade to positive square geometry', () => {
@@ -56,46 +62,4 @@ test('invalid dimensions degrade to positive square geometry', () => {
     assert.ok(tile.width > 0);
     assert.ok(tile.height > 0);
   }
-});
-
-function row(ids: string[], widths: number[], start: number): TvMediaGridRow<Item> {
-  return {
-    key: ids.join('|'),
-    height: 100,
-    isLast: false,
-    tiles: ids.map((id, index) => ({
-      item: { id, ratio: widths[index] / 100 },
-      originalIndex: start + index,
-      width: widths[index],
-      height: 100,
-    })),
-  };
-}
-
-test('vertical links are static, adjacent-row and deterministic under a burst', () => {
-  const rows = [
-    row(['a', 'b'], [300, 896], 0),
-    row(['c', 'd', 'e'], [250, 500, 442], 2),
-    row(['f', 'g'], [700, 496], 5),
-  ];
-  const links = buildTvMediaGridModel(rows, (item) => item.id).links;
-  const walk = (start: string, directions: Array<'up' | 'down'>) => directions.reduce(
-    (id, direction) => links.get(id)?.[direction] ?? id,
-    start,
-  );
-  assert.equal(links.get('a')?.down, 'c');
-  assert.equal(links.get('c')?.down, 'f');
-  assert.equal(walk('a', ['down', 'down']), 'f');
-  assert.equal(walk('a', ['down', 'down']), 'f');
-  assert.ok(new Set(['c', 'd', 'e']).has(links.get('a')?.down ?? ''));
-  assert.ok(new Set(['f', 'g']).has(links.get('c')?.down ?? ''));
-});
-
-test('horizontal links never wrap into another row', () => {
-  const rows = [row(['a', 'b'], [500, 696], 0), row(['c'], [1200], 2)];
-  const links = buildTvMediaGridModel(rows, (item) => item.id).links;
-  assert.equal(links.get('a')?.left, undefined);
-  assert.equal(links.get('a')?.right, 'b');
-  assert.equal(links.get('b')?.right, undefined);
-  assert.equal(links.get('c')?.left, undefined);
 });

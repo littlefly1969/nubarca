@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { previewPriority, videoTilePreview } from './videoTilePreview.ts';
+import { videoTilePreview } from './videoTilePreview.ts';
 
 const POSTER = '/api/tv/personal/media/1/poster';
 const STILL = '/api/tv/personal/media/1/thumbnail';
@@ -47,28 +47,4 @@ test('a fallback identical to the primary is dropped', () => {
     videoTilePreview({ posterUrl: POSTER, stillFallbackUrl: POSTER }),
     { kind: 'poster', path: POSTER, fallbackPath: null },
   );
-});
-
-test('preview warming is bounded to the neighbourhood of the focused tile', () => {
-  const columns = 5;
-  const focused = 20; // row 4, column 0
-  assert.equal(previewPriority(20, focused, columns), 'high');
-  // Same row and the rows immediately above/below: visible.
-  assert.equal(previewPriority(22, focused, columns), 'normal');
-  assert.equal(previewPriority(25, focused, columns), 'normal');
-  assert.equal(previewPriority(15, focused, columns), 'normal');
-  // One more row out: warm at low priority so a row change is not a wall of
-  // placeholders.
-  assert.equal(previewPriority(29, focused, columns), 'low');
-  assert.equal(previewPriority(11, focused, columns), 'low');
-  // Far away: not warmed at all. Warming a whole library is what made the grid
-  // thrash the bounded download pool.
-  assert.equal(previewPriority(60, focused, columns), 'none');
-  assert.equal(previewPriority(0, focused, columns), 'none');
-});
-
-test('before anything is focused only the first rows are warmed', () => {
-  assert.equal(previewPriority(0, -1, 5), 'normal');
-  assert.equal(previewPriority(9, -1, 5), 'normal');
-  assert.equal(previewPriority(10, -1, 5), 'none');
 });
