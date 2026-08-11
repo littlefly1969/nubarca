@@ -7,7 +7,9 @@ import {
   Text,
   View,
   useTVEventHandler,
+  useWindowDimensions,
   type HWEvent,
+  type ListRenderItemInfo,
 } from 'react-native';
 import { colors, font, spacing } from '../theme';
 import { ApiError, getBaseUrl } from '../api/client';
@@ -28,13 +30,21 @@ import {
 } from '../api/aesthetics';
 import { AuthedImage } from '../components/AuthedImage';
 import { FocusableButton } from '../components/FocusableButton';
-import { FocusableTile } from '../components/FocusableTile';
+import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { MenuCommandRail } from '../components/MenuCommandRail';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
+import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
+import {
+  buildTvGridRows,
+  tvGridColumns,
+  tvGridTileWidth,
+  type TvGridRow,
+} from '../lib/tvFixedGrid';
+import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
 import { useI18n, type TvMessageKey } from '../i18n';
 
-const GRID_COLUMNS = 4;
+const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
 const QR_POLL_MS = 4_000;
 const METRIC_GROUPS = ['face', 'appearance', 'environment', 'overall'] as const;
 
@@ -68,6 +78,7 @@ function statusLabel(t: (k: TvMessageKey) => string, status: string | null): str
 // and TV projection API the web lab uses. Derived media only (never originals).
 export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   const { t } = useI18n();
+  const { width } = useWindowDimensions();
   const [items, setItems] = useState<BeautyLabItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,6 +157,50 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
     if (selectionMode) toggleSelect(item.id);
     else setView({ kind: 'detail', id: item.id });
   }, [selectionMode, toggleSelect]);
+
+  const contentWidth = Math.max(1, width - 2 * spacing.lg);
+  const columns = tvGridColumns(contentWidth);
+  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
+  const rows = useMemo(
+    () => buildTvGridRows(items, columns, (item) => item.id),
+    [items, columns],
+  );
+  const gridFocus = useTvFixedGridFocus(items.length, columns);
+
+  const renderGridRow = useCallback(({
+    item: row,
+  }: ListRenderItemInfo<TvGridRow<BeautyLabItem>>) => (
+    <View style={styles.gridRow}>
+      {row.items.map((item, offset) => {
+        const index = row.firstIndex + offset;
+        const isSelected = selected.has(item.id);
+        return (
+          <FocusableMediaTile
+            key={item.id}
+            index={index}
+            onSelect={() => onTilePress(item)}
+            hasTVPreferredFocus={!overlay.visible && index === 0}
+            focusable={!overlay.visible}
+            focusTargets={gridFocus.targetsFor(index)}
+            accessibilityLabel={item.originalFileName}
+            style={{ width: tileWidth }}
+          >
+            <View style={[styles.thumbBox, { height: tileWidth }]}>
+              <AuthedImage path={item.thumbnailUrl} personal style={styles.thumb} />
+              {isSelected && <View style={styles.selectedBadge}><Text style={styles.badgeText}>✓</Text></View>}
+            </View>
+            <View style={styles.tileMeta}>
+              <Text style={styles.tileStatus} numberOfLines={1}>{statusLabel(t, item.latestRunStatus)}</Text>
+              {item.overallScore != null && (
+                <Text style={styles.tileScore}>{item.overallScore.toFixed(1)}/10</Text>
+              )}
+              {item.latestRunErrorCode && <Text style={styles.tileError}>!</Text>}
+            </View>
+          </FocusableMediaTile>
+        );
+      })}
+    </View>
+  ), [gridFocus, onTilePress, overlay.visible, selected, t, tileWidth]);
 
   const startAnalysis = useCallback(async () => {
     overlay.hide();
@@ -235,33 +290,13 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
         <Text style={styles.empty}>{t('beautyLab.empty')}</Text>
       ) : (
         <FlatList
-          data={items}
-          keyExtractor={(i) => i.id}
-          numColumns={GRID_COLUMNS}
+          data={rows}
+          keyExtractor={(row) => row.key}
           contentContainerStyle={styles.grid}
-          renderItem={({ item, index }) => {
-            const isSelected = selected.has(item.id);
-            return (
-              <FocusableTile
-                onSelect={() => onTilePress(item)}
-                hasTVPreferredFocus={index === 0}
-                accessibilityLabel={item.originalFileName}
-                style={styles.tile}
-              >
-                <View style={styles.thumbBox}>
-                  <AuthedImage path={item.thumbnailUrl} personal style={styles.thumb} />
-                  {isSelected && <View style={styles.selectedBadge}><Text style={styles.badgeText}>✓</Text></View>}
-                </View>
-                <View style={styles.tileMeta}>
-                  <Text style={styles.tileStatus} numberOfLines={1}>{statusLabel(t, item.latestRunStatus)}</Text>
-                  {item.overallScore != null && (
-                    <Text style={styles.tileScore}>{item.overallScore.toFixed(1)}/10</Text>
-                  )}
-                  {item.latestRunErrorCode && <Text style={styles.tileError}>!</Text>}
-                </View>
-              </FocusableTile>
-            );
-          }}
+          renderItem={renderGridRow}
+          initialNumToRender={6}
+          maxToRenderPerBatch={4}
+          windowSize={11}
           ListFooterComponent={nextCursor ? (
             <FocusableButton label={t('beautyLab.loadMore')} onPress={() => void load(nextCursor, true)} />
           ) : null}
@@ -568,9 +603,14 @@ const styles = StyleSheet.create({
   notice: { color: colors.muted, fontSize: font.caption, marginBottom: spacing.sm },
   error: { color: colors.danger, fontSize: font.body, marginVertical: spacing.xs },
   empty: { color: colors.muted, fontSize: font.body, textAlign: 'center', marginTop: spacing.xl },
-  grid: { gap: spacing.md },
-  tile: { flex: 1 / GRID_COLUMNS, margin: spacing.xs },
-  thumbBox: { width: '100%', aspectRatio: 1, backgroundColor: colors.panel, borderRadius: 8, overflow: 'hidden' },
+  grid: { gap: GRID_GAP },
+  gridRow: {
+    flexDirection: 'row',
+    gap: GRID_GAP,
+    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    overflow: 'visible',
+  },
+  thumbBox: { width: '100%', backgroundColor: colors.panel, borderRadius: 8, overflow: 'hidden' },
   thumb: { width: '100%', height: '100%' },
   selectedBadge: { position: 'absolute', top: 8, right: 8, backgroundColor: colors.accent, borderRadius: 16, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: colors.text, fontSize: font.body, fontWeight: '700' },

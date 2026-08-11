@@ -1,11 +1,30 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+  type ListRenderItemInfo,
+} from 'react-native';
 import { colors, font, spacing } from '../theme';
 import { listTvAlbums, type TvAlbum } from '../api/tv';
 import { ApiError } from '../api/client';
-import { FocusableTile } from '../components/FocusableTile';
+import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { AuthedImage } from '../components/AuthedImage';
+import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
+import {
+  buildTvGridRows,
+  tvGridColumns,
+  tvGridTileWidth,
+  type TvGridRow,
+} from '../lib/tvFixedGrid';
+import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
 import { useI18n } from '../i18n';
+
+const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
+const TILE_ASPECT = 16 / 10;
 
 interface Props {
   onOpenAlbum: (album: TvAlbum) => void;
@@ -17,6 +36,7 @@ interface Props {
 // album the owner disables disappears without restarting the app.
 export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
   const { t, tn } = useI18n();
+  const { width } = useWindowDimensions();
   const [albums, setAlbums] = useState<TvAlbum[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -47,6 +67,45 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
     };
   }, [onSessionInvalid]);
 
+  const list = albums ?? [];
+  const contentWidth = Math.max(1, width - 2 * spacing.lg);
+  const columns = tvGridColumns(contentWidth);
+  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
+  const tileHeight = Math.round(tileWidth / TILE_ASPECT);
+  const rows = useMemo(
+    () => buildTvGridRows(list, columns, (album) => album.id),
+    [list, columns],
+  );
+  const gridFocus = useTvFixedGridFocus(list.length, columns);
+
+  const renderRow = useCallback(({
+    item: row,
+  }: ListRenderItemInfo<TvGridRow<TvAlbum>>) => (
+    <View style={styles.gridRow}>
+      {row.items.map((album, offset) => {
+        const index = row.firstIndex + offset;
+        return (
+          <FocusableMediaTile
+            key={album.id}
+            index={index}
+            accessibilityLabel={t('albums.tileAccessibility', {
+              name: album.name,
+              count: album.itemCount,
+            })}
+            style={{ width: tileWidth, padding: spacing.sm }}
+            hasTVPreferredFocus={index === 0}
+            focusTargets={gridFocus.targetsFor(index)}
+            onSelect={() => onOpenAlbum(album)}
+          >
+            <AuthedImage path={album.coverThumbnailUrl} style={[styles.cover, { height: tileHeight }]} />
+            <Text style={styles.name} numberOfLines={1}>{album.name}</Text>
+            <Text style={styles.count}>{tn(album.itemCount, 'albums.itemCount')}</Text>
+          </FocusableMediaTile>
+        );
+      })}
+    </View>
+  ), [gridFocus, onOpenAlbum, t, tileHeight, tileWidth, tn]);
+
   if (error) {
     return (
       <View style={styles.centered}>
@@ -75,21 +134,15 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
   return (
     <View style={styles.container}>
       <Text style={styles.heading}>{t('albums.title')}</Text>
-      <ScrollView contentContainerStyle={styles.grid}>
-        {albums.map((album, i) => (
-          <FocusableTile
-            key={album.id}
-            accessibilityLabel={t('albums.tileAccessibility', { name: album.name, count: album.itemCount })}
-            style={styles.tile}
-            hasTVPreferredFocus={i === 0}
-            onSelect={() => onOpenAlbum(album)}
-          >
-            <AuthedImage path={album.coverThumbnailUrl} style={styles.cover} />
-            <Text style={styles.name} numberOfLines={1}>{album.name}</Text>
-            <Text style={styles.count}>{tn(album.itemCount, 'albums.itemCount')}</Text>
-          </FocusableTile>
-        ))}
-      </ScrollView>
+      <FlatList
+        data={rows}
+        renderItem={renderRow}
+        keyExtractor={(row) => row.key}
+        contentContainerStyle={styles.grid}
+        initialNumToRender={6}
+        maxToRenderPerBatch={4}
+        windowSize={11}
+      />
     </View>
   );
 }
@@ -105,9 +158,14 @@ const styles = StyleSheet.create({
   },
   heading: { color: colors.text, fontSize: font.heading, fontWeight: '700', marginBottom: spacing.md },
   body: { color: colors.muted, fontSize: font.body, marginTop: spacing.md, textAlign: 'center' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md },
-  tile: { width: 300, padding: spacing.sm },
-  cover: { width: '100%', height: 220, borderRadius: 10 },
+  grid: { gap: GRID_GAP },
+  gridRow: {
+    flexDirection: 'row',
+    gap: GRID_GAP,
+    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    overflow: 'visible',
+  },
+  cover: { width: '100%', borderRadius: 10 },
   name: { color: colors.text, fontSize: font.body, fontWeight: '600', marginTop: spacing.xs },
   count: { color: colors.muted, fontSize: font.caption },
 });

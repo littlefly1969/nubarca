@@ -16,7 +16,7 @@ import type { PersonalHomeInfo } from '../personal/flow';
 import {
   DPAD_CODE_LENGTH,
   dpadCodeReducer,
-  dpadSymbolForKey,
+  dpadSymbolForEvent,
   EMPTY_DPAD_ENTRY,
   isComplete,
 } from '../personal/dpadCode';
@@ -62,7 +62,7 @@ interface Props {
 //
 // The anchor's onPress is deliberately a no-op. CENTER must produce exactly one
 // symbol, and it already does through useTVEventHandler → 'select' →
-// dpadSymbolForKey; appending there too would enter two.
+// dpadSymbolForEvent; appending there too would enter two.
 //
 // BACK removes one symbol; BACK on an empty code returns to mode selection.
 // Submission is automatic at exactly DPAD_CODE_LENGTH symbols and happens once.
@@ -141,14 +141,13 @@ export function PinEntryScreen({
       });
   }, [onUnlocked, onSessionInvalid]);
 
-  // The single D-pad owner on this screen. Only key-DOWN is acted on
-  // (eventKeyAction 0 is the press; RN reports the release too), so one press is
-  // one symbol. Auto-repeat from a held button is valid input and appends
-  // normally — it is never debounced.
+  // The single D-pad owner on this screen. Android TV always emits key-UP;
+  // key-DOWN is disabled by default in react-native-tvos. Consume the release
+  // and ignore an optional down event, so one physical press is one symbol.
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction !== 0) return;
+    if (!evt) return;
     if (upgradeRef.current) return;
-    const symbol = dpadSymbolForKey(evt.eventType);
+    const symbol = dpadSymbolForEvent(evt.eventType, evt.eventKeyAction);
     if (symbol === null) return;
     setError(null);
     const next = dpadCodeReducer(entryRef.current, { type: 'SYMBOL', symbol });

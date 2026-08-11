@@ -56,6 +56,18 @@ export function dpadSymbolForKey(eventType: string): DpadSymbol | null {
   }
 }
 
+// Android TV always dispatches ACTION_UP (1), while ACTION_DOWN (0) is behind
+// React Native TV's disabled-by-default enableKeyDownEvents flag. Consume the
+// release so one physical press produces one symbol in either configuration.
+// An absent action is accepted for TV runtimes that do not expose the optional
+// eventKeyAction field.
+export function dpadSymbolForEvent(
+  eventType: string,
+  eventKeyAction: number | undefined,
+): DpadSymbol | null {
+  return eventKeyAction === 0 ? null : dpadSymbolForKey(eventType);
+}
+
 export interface DpadCodeEntry {
   // The symbols entered so far. NEVER rendered, logged or persisted.
   code: string;

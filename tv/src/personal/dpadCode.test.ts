@@ -5,6 +5,7 @@ import {
   DPAD_CODE_SPACE,
   DPAD_SYMBOLS,
   dpadCodeReducer,
+  dpadSymbolForEvent,
   dpadSymbolForKey,
   EMPTY_DPAD_ENTRY,
   isComplete,
@@ -49,6 +50,15 @@ test('each accepted press appends exactly one symbol', () => {
   const state = enter(['up', 'right', 'select']);
   assert.equal(state.code, 'URS');
   assert.equal(state.code.length, 3);
+});
+
+test('Android TV key-up produces one symbol and optional key-down is ignored', () => {
+  assert.equal(dpadSymbolForEvent('up', 0), null, 'ACTION_DOWN must not duplicate the press');
+  assert.equal(dpadSymbolForEvent('up', 1), 'U', 'ACTION_UP is the event Android always emits');
+});
+
+test('TV runtimes without eventKeyAction still produce one symbol', () => {
+  assert.equal(dpadSymbolForEvent('select', undefined), 'S');
 });
 
 test('non-symbol keys leave the code untouched', () => {
