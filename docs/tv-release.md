@@ -8,7 +8,7 @@ must never be committed.
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
 non-secret native release contract. The current release is NubArca TV 1.0.2,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 3, runtime
+package `it.littlefly.nubarca.tv`, Android `versionCode` 4, runtime
 `nubarca-tv-native-3`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
@@ -207,10 +207,18 @@ runtime/channel and equality of the embedded/supplied OTA certificate.
 
 ## 12. APK publication
 
-Before replacing the public artifact, `adb install -r` over the installed
-release must prove that application data and pairing survive. Then, from the
-repository root, set operator-provided `NUBARCA_PRODUCTION_SSH` and
-`NUBARCA_TV_APK_DIR` and run:
+When an authorized physical device is reachable from the build host, prefer to
+run `adb install -r` before replacing the public artifact and prove that
+application data and pairing survive.
+
+When no device is reachable and the public APK is the delivery path needed to
+install it, remote-first publication is allowed only after the relevant source
+tests, the release build and §11 validation have all passed. Record physical
+acceptance as **pending**, publish the validated bytes, and perform §13 as soon
+as the APK can be installed. Never report pending acceptance as passed.
+
+From the repository root, set operator-provided
+`NUBARCA_PRODUCTION_SSH` and `NUBARCA_TV_APK_DIR` and run:
 
 ```bash
 ./deploy/publish-tv-apk.sh <validated-apk>
@@ -221,10 +229,11 @@ name, atomically replaces APK/checksum and compares the remote/local SHA-256.
 
 ## 13. Native installation acceptance
 
-Confirm package, signer and version before `adb install -r`; launch, verify
-pairing/session persistence, media playback and OTA cold-launch behavior on a
-physical device. A changed applicationId cannot update in place and requires a
-fresh install/re-pair.
+Confirm package, signer and version before installation. Use `adb install -r`
+when ADB is available; after a remote-first publication, install the public APK
+through the device instead. Launch and verify pairing/session persistence,
+media playback and OTA cold-launch behavior on a physical device. A changed
+applicationId cannot update in place and requires a fresh install/re-pair.
 
 ## 14. OTA trust rotation — do not use for normal releases
 
