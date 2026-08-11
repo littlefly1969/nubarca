@@ -131,8 +131,8 @@ const SCREENS = {
 
 test('every native media wall uses the one shared focus graph + focus memory', () => {
   for (const [name, source] of Object.entries(SCREENS)) {
-    assert.match(source, /useTvFixedGridFocus\(/, name);
-    assert.match(source, /gridFocus\.targetsFor\(index\)/, name);
+    assert.match(source, /useTvMediaGridFocus\(/, name);
+    assert.match(source, /gridFocus\.targetsFor\(item\.id\)/, name);
     assert.match(source, /useTvGridFocusMemory\(/, name);
     // No screen may keep its own vertical-geometry rules, and none may bring
     // back the lane state whose re-render the key-press path could outrun.
@@ -181,10 +181,10 @@ test('the grid stops being a focus destination while the rail owns focus', () =>
   );
   for (const name of ['AlbumItemsScreen.tsx', 'PersonalLibraryScreen.tsx']) {
     const source = SCREENS[name as keyof typeof SCREENS];
-    assert.match(source, /focusable=\{gridFocusable\}/, name);
+    assert.match(source, /focusable=\{gridFocusable && rowReady\}/, name);
     // A tile may only ASK for focus when it could accept it — a preferred-focus
     // flag on a tile behind the rail is exactly how focus used to leak back.
-    assert.match(source, /preferred=\{gridFocusable && restoreIndex !== null/, name);
+    assert.match(source, /preferred=\{gridFocusable && rowReady && restoreIndex !== null/, name);
   }
 });
 
@@ -208,11 +208,8 @@ test('no media wall detaches rows that vertical focus links point at', () => {
     // Anchored to a JSX prop line, so the comments explaining the removal do
     // not satisfy the assertion by accident.
     assert.doesNotMatch(source, /^\s*removeClippedSubviews\s*(\{|$)/m, name);
-    // Windowing itself stays ON — a library must never render thousands of
-    // tiles — but the window is wide, because `additionalRenderRegions` is
-    // documented in the react-native-tvos README and NOT implemented in the
-    // shipped 0.85.3-3 JavaScript, so this is what keeps the focused row's
-    // immediate neighbours mounted during an auto-repeat burst.
+    // Windowing stays on. Nearby rows mount their previews progressively, and
+    // the focus barrier blocks any row that has not settled yet.
     assert.match(source, /windowSize=\{11\}/, name);
   }
 });

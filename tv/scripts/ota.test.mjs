@@ -81,7 +81,7 @@ const dependencies = () => ({
   nodeVersion: '22.22.0',
   gitRunner: gitRunner(),
   runExport: fakeExport,
-  readPublicExpoConfig: () => ({ version: '1.0.2' }),
+  readPublicExpoConfig: () => ({ version: '1.0.3' }),
 });
 
 function publication(id = randomUUID(), createdAt = new Date().toISOString(), overrides = {}) {
@@ -116,7 +116,7 @@ function publication(id = randomUUID(), createdAt = new Date().toISOString(), ov
 
 test('release context derives runtime, channel, and update URL from the tracked contract', () => {
   const context = resolveReleaseContext(env);
-  assert.equal(context.runtimeVersion, 'nubarca-tv-native-3');
+  assert.equal(context.runtimeVersion, 'nubarca-tv-native-4');
   assert.equal(context.channel, 'production');
   assert.equal(context.updateUrl, `${origin}/api/tv-app/updates`);
   assert.throws(() => resolveReleaseContext({ ...env, NUBARCA_PUBLIC_ORIGIN: 'http://nubarca.example.com' }), /https/i);

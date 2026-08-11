@@ -54,6 +54,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const BANNER_RESOURCE = 'tv_banner';
+const LAUNCHER = 'android.intent.category.LAUNCHER';
+const LEANBACK_LAUNCHER = 'android.intent.category.LEANBACK_LAUNCHER';
 // Density buckets the config-tv plugin populates, and the approved asset that
 // genuinely belongs in each. `null` means "delete it and let Android downscale
 // from the next larger bucket" — never "leave a wrong-size bitmap there".
@@ -110,6 +112,27 @@ const withActivityBanner = (config) =>
     // square android:icon without it).
     application.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
     activity.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
+
+    // This binary is TV-only. If the ordinary launcher category remains beside
+    // LEANBACK_LAUNCHER, Fire OS may register the square phone icon instead of
+    // the TV banner. Keep MAIN, but expose it only through Leanback.
+    let hasLeanbackLauncher = false;
+    for (const filter of activity['intent-filter'] ?? []) {
+      const isMain = (filter.action ?? []).some(
+        (action) => action.$?.['android:name'] === 'android.intent.action.MAIN',
+      );
+      if (!isMain) continue;
+      const categories = filter.category ?? [];
+      hasLeanbackLauncher ||= categories.some(
+        (category) => category.$?.['android:name'] === LEANBACK_LAUNCHER,
+      );
+      filter.category = categories.filter(
+        (category) => category.$?.['android:name'] !== LAUNCHER,
+      );
+    }
+    if (!hasLeanbackLauncher) {
+      throw new Error('withFireTvBanner: MainActivity has no LEANBACK_LAUNCHER intent');
+    }
     return manifestConfig;
   });
 

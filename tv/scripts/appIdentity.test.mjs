@@ -193,6 +193,41 @@ test('the TV app stays a leanback app that does not require a touchscreen', () =
   assert.match(configTv[1].androidTVBanner, /nubarca-android-tv-banner-320x180\.png$/);
 });
 
+const withFireTvBanner = require(resolve(tvRoot, 'plugins/withFireTvBanner.js'));
+
+async function applyFireTvManifest() {
+  const manifest = {
+    manifest: {
+      application: [{
+        $: { 'android:name': '.MainApplication' },
+        activity: [{
+          $: { 'android:name': '.MainActivity' },
+          'intent-filter': [{
+            action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
+            category: [
+              { $: { 'android:name': 'android.intent.category.LAUNCHER' } },
+              { $: { 'android:name': 'android.intent.category.LEANBACK_LAUNCHER' } },
+            ],
+          }],
+        }],
+      }],
+    },
+  };
+  const { mods } = withFireTvBanner({});
+  const applied = await mods.android.manifest({ modResults: manifest });
+  return applied.modResults.manifest.application[0];
+}
+
+test('the Fire TV activity exposes the rectangular banner through Leanback only', async () => {
+  const application = await applyFireTvManifest();
+  const activity = application.activity[0];
+  const categories = activity['intent-filter'][0].category
+    .map((category) => category.$['android:name']);
+  assert.equal(application.$['android:banner'], '@drawable/tv_banner');
+  assert.equal(activity.$['android:banner'], '@drawable/tv_banner');
+  assert.deepEqual(categories, ['android.intent.category.LEANBACK_LAUNCHER']);
+});
+
 // --- native generation -------------------------------------------------------
 
 // The exact React Native template text that prebuild writes. The plugin rewrites

@@ -15,14 +15,14 @@ import { listPersonalAlbums, type TvPersonalAlbumCard } from '../api/personalMed
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { FocusableButton } from '../components/FocusableButton';
 import { MediaTilePreview } from '../components/MediaTilePreview';
-import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
 import {
-  buildTvGridRows,
-  tvGridColumns,
-  tvGridTileWidth,
-  type TvGridRow,
-} from '../lib/tvFixedGrid';
-import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
+  buildTvMediaGridRows,
+  tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_FOCUS_BLEED,
+  TV_MEDIA_GRID_GAP,
+  type TvMediaGridRow,
+} from '../lib/tvMediaGrid';
+import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
 import { useI18n } from '../i18n';
 import type { PersonalAlbumRef } from '../personal/flow';
 
@@ -40,10 +40,10 @@ import type { PersonalAlbumRef } from '../personal/flow';
 // poor album administration console, and adding those operations here would
 // mean maintaining a second, weaker editor for the one on the web.
 //
-// The shelf is the SAME deterministic fixed-column grid as the library, so
-// navigation behaves identically in both — one engine, one set of guarantees.
+// The shelf uses the same proportional grid and focus barrier as every media
+// wall, with a stable 16:10 card ratio because album DTOs have no cover size.
 
-const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
+const GRID_GAP = TV_MEDIA_GRID_GAP;
 const TILE_ASPECT = 16 / 10;
 
 interface Props {
@@ -60,6 +60,9 @@ const AlbumTile = memo(function AlbumTile({
   height,
   preferred,
   focusTargets,
+  focusable,
+  rowKey,
+  onPreviewReady,
   onOpen,
 }: {
   album: TvPersonalAlbumCard;
@@ -67,7 +70,10 @@ const AlbumTile = memo(function AlbumTile({
   width: number;
   height: number;
   preferred: boolean;
-  focusTargets: ReturnType<ReturnType<typeof useTvFixedGridFocus>['targetsFor']>;
+  focusTargets: TvMediaGridTargets;
+  focusable: boolean;
+  rowKey: string;
+  onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (album: TvPersonalAlbumCard) => void;
 }) {
   const { t } = useI18n();
@@ -82,6 +88,7 @@ const AlbumTile = memo(function AlbumTile({
       index={index}
       hasTVPreferredFocus={preferred}
       focusTargets={focusTargets}
+      focusable={focusable}
       onSelect={() => onOpen(album)}
     >
       <MediaTilePreview
@@ -89,6 +96,7 @@ const AlbumTile = memo(function AlbumTile({
         path={cover}
         personal
         style={{ width: '100%', height, borderRadius: 8 }}
+        onReady={() => onPreviewReady(rowKey, album.id)}
       />
       <View style={styles.caption} pointerEvents="none">
         <Text style={styles.captionName} numberOfLines={1}>{album.name}</Text>
@@ -144,16 +152,19 @@ export function PersonalAlbumsScreen({
   }, [onBack]);
 
   const contentWidth = Math.max(1, width - 2 * inset.x);
-  const columns = tvGridColumns(contentWidth);
-  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
-  const tileHeight = Math.round(tileWidth / TILE_ASPECT);
 
   const list = albums ?? [];
   const rows = useMemo(
-    () => buildTvGridRows(list, columns, (album) => album.id),
-    [list, columns],
+    () => buildTvMediaGridRows({
+      items: list,
+      contentWidth,
+      targetRowHeight: tvMediaGridTargetHeight(height - 2 * inset.y),
+      getAspectRatio: () => TILE_ASPECT,
+      getId: (album) => album.id,
+    }),
+    [list, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvFixedGridFocus(list.length, columns);
+  const gridFocus = useTvMediaGridFocus(rows);
   const openedRef = useRef(false);
 
   const open = useCallback((album: TvPersonalAlbumCard) => {
@@ -164,26 +175,32 @@ export function PersonalAlbumsScreen({
   }, [onOpenAlbum]);
 
   const renderRow = useCallback((
-    { item: row }: ListRenderItemInfo<TvGridRow<TvPersonalAlbumCard>>,
-  ) => (
-    <View style={styles.gridRow}>
-      {row.items.map((album, offset) => {
-        const index = row.firstIndex + offset;
-        return (
-          <AlbumTile
-            key={album.id}
-            album={album}
-            index={index}
-            width={tileWidth}
-            height={tileHeight}
-            preferred={index === 0}
-            focusTargets={gridFocus.targetsFor(index)}
-            onOpen={open}
-          />
-        );
-      })}
-    </View>
-  ), [tileWidth, tileHeight, gridFocus, open]);
+    { item: row }: ListRenderItemInfo<TvMediaGridRow<TvPersonalAlbumCard>>,
+  ) => {
+    const rowReady = gridFocus.isRowReady(row.key);
+    return (
+      <View style={styles.gridRow}>
+        {row.tiles.map((tile) => {
+          const { item: album, originalIndex: index, width, height: tileHeight } = tile;
+          return (
+            <AlbumTile
+              key={album.id}
+              album={album}
+              index={index}
+              width={width}
+              height={tileHeight}
+              preferred={rowReady && index === 0}
+              focusTargets={gridFocus.targetsFor(album.id)}
+              focusable={rowReady}
+              rowKey={row.key}
+              onPreviewReady={gridFocus.onPreviewReady}
+              onOpen={open}
+            />
+          );
+        })}
+      </View>
+    );
+  }, [gridFocus, open]);
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
@@ -241,7 +258,7 @@ const styles = StyleSheet.create({
   gridRow: {
     flexDirection: 'row',
     gap: GRID_GAP,
-    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    paddingVertical: TV_MEDIA_GRID_FOCUS_BLEED,
     overflow: 'visible',
   },
   caption: {

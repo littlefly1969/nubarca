@@ -31,20 +31,25 @@ import {
 import { AuthedImage } from '../components/AuthedImage';
 import { FocusableButton } from '../components/FocusableButton';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
+import { MediaTilePreview } from '../components/MediaTilePreview';
 import { MenuCommandRail } from '../components/MenuCommandRail';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
-import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
 import {
-  buildTvGridRows,
-  tvGridColumns,
-  tvGridTileWidth,
-  type TvGridRow,
-} from '../lib/tvFixedGrid';
-import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
+  buildTvMediaGridRows,
+  tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_FOCUS_BLEED,
+  TV_MEDIA_GRID_GAP,
+  type TvMediaGridRow,
+} from '../lib/tvMediaGrid';
+import { useTvMediaGridFocus } from '../lib/useTvMediaGridFocus';
+import {
+  normalizeTvMediaAspectRatio,
+  PHOTO_FALLBACK_ASPECT_RATIO,
+} from '../lib/mediaAspectRatio';
 import { useI18n, type TvMessageKey } from '../i18n';
 
-const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
+const GRID_GAP = TV_MEDIA_GRID_GAP;
 const QR_POLL_MS = 4_000;
 const METRIC_GROUPS = ['face', 'appearance', 'environment', 'overall'] as const;
 
@@ -78,7 +83,7 @@ function statusLabel(t: (k: TvMessageKey) => string, status: string | null): str
 // and TV projection API the web lab uses. Derived media only (never originals).
 export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   const { t } = useI18n();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [items, setItems] = useState<BeautyLabItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,48 +164,69 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   }, [selectionMode, toggleSelect]);
 
   const contentWidth = Math.max(1, width - 2 * spacing.lg);
-  const columns = tvGridColumns(contentWidth);
-  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
   const rows = useMemo(
-    () => buildTvGridRows(items, columns, (item) => item.id),
-    [items, columns],
+    () => buildTvMediaGridRows({
+      items,
+      contentWidth,
+      targetRowHeight: tvMediaGridTargetHeight(height - 2 * spacing.lg),
+      getAspectRatio: (item) => normalizeTvMediaAspectRatio(
+        item.width,
+        item.height,
+        PHOTO_FALLBACK_ASPECT_RATIO,
+      ),
+      getId: (item) => item.id,
+    }),
+    [items, contentWidth, height],
   );
-  const gridFocus = useTvFixedGridFocus(items.length, columns);
+  const gridFocus = useTvMediaGridFocus(rows);
 
   const renderGridRow = useCallback(({
     item: row,
-  }: ListRenderItemInfo<TvGridRow<BeautyLabItem>>) => (
-    <View style={styles.gridRow}>
-      {row.items.map((item, offset) => {
-        const index = row.firstIndex + offset;
-        const isSelected = selected.has(item.id);
-        return (
-          <FocusableMediaTile
-            key={item.id}
-            index={index}
-            onSelect={() => onTilePress(item)}
-            hasTVPreferredFocus={!overlay.visible && index === 0}
-            focusable={!overlay.visible}
-            focusTargets={gridFocus.targetsFor(index)}
-            accessibilityLabel={item.originalFileName}
-            style={{ width: tileWidth }}
-          >
-            <View style={[styles.thumbBox, { height: tileWidth }]}>
-              <AuthedImage path={item.thumbnailUrl} personal style={styles.thumb} />
-              {isSelected && <View style={styles.selectedBadge}><Text style={styles.badgeText}>✓</Text></View>}
-            </View>
-            <View style={styles.tileMeta}>
-              <Text style={styles.tileStatus} numberOfLines={1}>{statusLabel(t, item.latestRunStatus)}</Text>
-              {item.overallScore != null && (
-                <Text style={styles.tileScore}>{item.overallScore.toFixed(1)}/10</Text>
-              )}
-              {item.latestRunErrorCode && <Text style={styles.tileError}>!</Text>}
-            </View>
-          </FocusableMediaTile>
-        );
-      })}
-    </View>
-  ), [gridFocus, onTilePress, overlay.visible, selected, t, tileWidth]);
+  }: ListRenderItemInfo<TvMediaGridRow<BeautyLabItem>>) => {
+    const rowReady = gridFocus.isRowReady(row.key);
+    return (
+      <View style={styles.gridRow}>
+        {row.tiles.map((tile) => {
+          const { item, originalIndex: index, width: tileWidth, height: tileHeight } = tile;
+          const isSelected = selected.has(item.id);
+          return (
+            <FocusableMediaTile
+              key={item.id}
+              index={index}
+              onSelect={() => onTilePress(item)}
+              hasTVPreferredFocus={!overlay.visible && rowReady && index === 0}
+              focusable={!overlay.visible && rowReady}
+              focusTargets={gridFocus.targetsFor(item.id)}
+              accessibilityLabel={item.originalFileName}
+              style={{ width: tileWidth }}
+            >
+              <View style={[styles.thumbBox, { height: tileHeight }]}>
+                <MediaTilePreview
+                  kind="image"
+                  path={item.thumbnailUrl}
+                  personal
+                  style={styles.thumb}
+                  onReady={() => gridFocus.onPreviewReady(row.key, item.id)}
+                />
+                {isSelected && (
+                  <View style={styles.selectedBadge}><Text style={styles.badgeText}>✓</Text></View>
+                )}
+              </View>
+              <View style={styles.tileMeta}>
+                <Text style={styles.tileStatus} numberOfLines={1}>
+                  {statusLabel(t, item.latestRunStatus)}
+                </Text>
+                {item.overallScore != null && (
+                  <Text style={styles.tileScore}>{item.overallScore.toFixed(1)}/10</Text>
+                )}
+                {item.latestRunErrorCode && <Text style={styles.tileError}>!</Text>}
+              </View>
+            </FocusableMediaTile>
+          );
+        })}
+      </View>
+    );
+  }, [gridFocus, onTilePress, overlay.visible, selected, t]);
 
   const startAnalysis = useCallback(async () => {
     overlay.hide();
@@ -607,7 +633,7 @@ const styles = StyleSheet.create({
   gridRow: {
     flexDirection: 'row',
     gap: GRID_GAP,
-    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    paddingVertical: TV_MEDIA_GRID_FOCUS_BLEED,
     overflow: 'visible',
   },
   thumbBox: { width: '100%', backgroundColor: colors.panel, borderRadius: 8, overflow: 'hidden' },

@@ -7,19 +7,17 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.2,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 4, runtime
-`nubarca-tv-native-3`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.3,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 5, runtime
+`nubarca-tv-native-4`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.2 is a NATIVE release: it adds the `NubArcaTvPlatform` module
-(`Activity.finishAndRemoveTask()`, wired by
-[`tv/plugins/withTvPlatformModule.js`](../tv/plugins/withTvPlatformModule.js)),
-so the runtime had to increment. No dependency was upgraded for it —
-`react-native-tvos` resolves to 0.85.3-3, which already carries the Fire TV IME
-and Android list fixes.
+1.0.3 is a NATIVE release: its TV-only activity is exposed solely through
+`LEANBACK_LAUNCHER`, forcing Fire OS to use the rectangular activity banner
+instead of registering the square phone launcher icon. The manifest contract
+changed, so the runtime and Android versionCode both incremented.
 
-Runtime `nubarca-tv-native-3` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-4` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.

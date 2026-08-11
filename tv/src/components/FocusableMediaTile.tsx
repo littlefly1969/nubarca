@@ -7,7 +7,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { colors } from '../theme';
-import type { TvFixedGridTargets } from '../lib/useTvFixedGridFocus';
+import type { TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
 import { tvDebug } from '../debug';
 
 interface Props {
@@ -18,7 +18,7 @@ interface Props {
   hasTVPreferredFocus?: boolean;
   onFocusChange?: (focused: boolean) => void;
   focusable?: boolean;
-  focusTargets?: TvFixedGridTargets;
+  focusTargets?: TvMediaGridTargets;
   // Flat index, for the development-only unresolved-link diagnostic below.
   index?: number;
 }
@@ -27,19 +27,9 @@ interface Props {
 // overlay the preview instead of reserving twelve layout pixels around every
 // unfocused item, so adjacent photos/posters use almost all of their tile box.
 //
-// TARGET RESOLUTION. `nextFocus*` wants a mounted View, and a virtualized row
-// may mount after its neighbour renders. The previous version copied the
-// resolved Views into component STATE inside a layout effect, which put a
-// second render pass between "a neighbour mounted" and "the native link is
-// correct" — one of the two renders a fast auto-repeat could outrun (see
-// tvFixedGrid.ts).
-//
-// Now the Views are read straight from the ref objects during render. A tile
-// re-resolves when its row re-renders, when it receives focus, and once per
-// layout pass; nothing is copied into state, so no navigation-time render is
-// introduced. If a link is still unresolved at press time, the uniform grid's
-// geometric fallback names the SAME tile the link would have — which is exactly
-// what the fixed-column layout buys and what the justified wall could not offer.
+// Views are read straight from refs. An unresolved or deliberately blocked
+// direction resolves to SELF, so Android never falls back to a random geometric
+// target outside the loaded rows.
 export function FocusableMediaTile({
   onSelect,
   children,
@@ -92,10 +82,10 @@ export function FocusableMediaTile({
       accessibilityLabel={accessibilityLabel}
       focusable={focusable}
       hasTVPreferredFocus={hasTVPreferredFocus}
-      nextFocusLeft={focusTargets?.left?.current ?? undefined}
-      nextFocusRight={focusTargets?.right?.current ?? undefined}
-      nextFocusUp={focusTargets?.up?.current ?? undefined}
-      nextFocusDown={focusTargets?.down?.current ?? undefined}
+      nextFocusLeft={focusTargets?.left.current ?? focusTargets?.self.current ?? undefined}
+      nextFocusRight={focusTargets?.right.current ?? focusTargets?.self.current ?? undefined}
+      nextFocusUp={focusTargets?.up.current ?? focusTargets?.self.current ?? undefined}
+      nextFocusDown={focusTargets?.down.current ?? focusTargets?.self.current ?? undefined}
       onFocus={onFocus}
       onBlur={() => { setFocused(false); onFocusChange?.(false); }}
       onPress={onSelect}

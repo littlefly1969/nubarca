@@ -12,18 +12,18 @@ import { colors, font, spacing } from '../theme';
 import { listTvAlbums, type TvAlbum } from '../api/tv';
 import { ApiError } from '../api/client';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
-import { AuthedImage } from '../components/AuthedImage';
-import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
+import { MediaTilePreview } from '../components/MediaTilePreview';
 import {
-  buildTvGridRows,
-  tvGridColumns,
-  tvGridTileWidth,
-  type TvGridRow,
-} from '../lib/tvFixedGrid';
-import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
+  buildTvMediaGridRows,
+  tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_FOCUS_BLEED,
+  TV_MEDIA_GRID_GAP,
+  type TvMediaGridRow,
+} from '../lib/tvMediaGrid';
+import { useTvMediaGridFocus } from '../lib/useTvMediaGridFocus';
 import { useI18n } from '../i18n';
 
-const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
+const GRID_GAP = TV_MEDIA_GRID_GAP;
 const TILE_ASPECT = 16 / 10;
 
 interface Props {
@@ -36,7 +36,7 @@ interface Props {
 // album the owner disables disappears without restarting the app.
 export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
   const { t, tn } = useI18n();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const [albums, setAlbums] = useState<TvAlbum[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -69,42 +69,56 @@ export function AlbumsScreen({ onOpenAlbum, onSessionInvalid }: Props) {
 
   const list = albums ?? [];
   const contentWidth = Math.max(1, width - 2 * spacing.lg);
-  const columns = tvGridColumns(contentWidth);
-  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
-  const tileHeight = Math.round(tileWidth / TILE_ASPECT);
   const rows = useMemo(
-    () => buildTvGridRows(list, columns, (album) => album.id),
-    [list, columns],
+    () => buildTvMediaGridRows({
+      items: list,
+      contentWidth,
+      targetRowHeight: tvMediaGridTargetHeight(height - 2 * spacing.lg),
+      getAspectRatio: () => TILE_ASPECT,
+      getId: (album) => album.id,
+    }),
+    [list, contentWidth, height],
   );
-  const gridFocus = useTvFixedGridFocus(list.length, columns);
+  const gridFocus = useTvMediaGridFocus(rows);
 
   const renderRow = useCallback(({
     item: row,
-  }: ListRenderItemInfo<TvGridRow<TvAlbum>>) => (
-    <View style={styles.gridRow}>
-      {row.items.map((album, offset) => {
-        const index = row.firstIndex + offset;
-        return (
-          <FocusableMediaTile
-            key={album.id}
-            index={index}
-            accessibilityLabel={t('albums.tileAccessibility', {
-              name: album.name,
-              count: album.itemCount,
-            })}
-            style={{ width: tileWidth, padding: spacing.sm }}
-            hasTVPreferredFocus={index === 0}
-            focusTargets={gridFocus.targetsFor(index)}
-            onSelect={() => onOpenAlbum(album)}
-          >
-            <AuthedImage path={album.coverThumbnailUrl} style={[styles.cover, { height: tileHeight }]} />
-            <Text style={styles.name} numberOfLines={1}>{album.name}</Text>
-            <Text style={styles.count}>{tn(album.itemCount, 'albums.itemCount')}</Text>
-          </FocusableMediaTile>
-        );
-      })}
-    </View>
-  ), [gridFocus, onOpenAlbum, t, tileHeight, tileWidth, tn]);
+  }: ListRenderItemInfo<TvMediaGridRow<TvAlbum>>) => {
+    const rowReady = gridFocus.isRowReady(row.key);
+    return (
+      <View style={styles.gridRow}>
+        {row.tiles.map((tile) => {
+          const { item: album, originalIndex: index, width: tileWidth, height: tileHeight } = tile;
+          return (
+            <FocusableMediaTile
+              key={album.id}
+              index={index}
+              accessibilityLabel={t('albums.tileAccessibility', {
+                name: album.name,
+                count: album.itemCount,
+              })}
+              style={{ width: tileWidth }}
+              hasTVPreferredFocus={rowReady && index === 0}
+              focusable={rowReady}
+              focusTargets={gridFocus.targetsFor(album.id)}
+              onSelect={() => onOpenAlbum(album)}
+            >
+              <MediaTilePreview
+                kind="image"
+                path={album.coverThumbnailUrl}
+                style={{ width: '100%', height: tileHeight, borderRadius: 8 }}
+                onReady={() => gridFocus.onPreviewReady(row.key, album.id)}
+              />
+              <View style={styles.caption} pointerEvents="none">
+                <Text style={styles.name} numberOfLines={1}>{album.name}</Text>
+                <Text style={styles.count}>{tn(album.itemCount, 'albums.itemCount')}</Text>
+              </View>
+            </FocusableMediaTile>
+          );
+        })}
+      </View>
+    );
+  }, [gridFocus, onOpenAlbum, t, tn]);
 
   if (error) {
     return (
@@ -162,10 +176,18 @@ const styles = StyleSheet.create({
   gridRow: {
     flexDirection: 'row',
     gap: GRID_GAP,
-    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    paddingVertical: TV_MEDIA_GRID_FOCUS_BLEED,
     overflow: 'visible',
   },
-  cover: { width: '100%', borderRadius: 10 },
-  name: { color: colors.text, fontSize: font.body, fontWeight: '600', marginTop: spacing.xs },
+  caption: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: spacing.xs,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  name: { color: colors.text, fontSize: font.body, fontWeight: '600' },
   count: { color: colors.muted, fontSize: font.caption },
 });

@@ -25,15 +25,19 @@ import { LibraryFilterPanel } from './library/LibraryFilterPanel';
 import { PersonalMediaViewer } from './library/PersonalMediaViewer';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
-import { useTvFixedGridFocus } from '../lib/useTvFixedGridFocus';
 import {
-  buildTvGridRows,
-  tvGridColumns,
-  tvGridRowOf,
-  tvGridTileWidth,
-  type TvGridRow,
-} from '../lib/tvFixedGrid';
-import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
+  buildTvMediaGridRows,
+  tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_FOCUS_BLEED,
+  TV_MEDIA_GRID_GAP,
+  type TvMediaGridRow,
+} from '../lib/tvMediaGrid';
+import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
+import {
+  normalizeTvMediaAspectRatio,
+  PHOTO_FALLBACK_ASPECT_RATIO,
+  VIDEO_FALLBACK_ASPECT_RATIO,
+} from '../lib/mediaAspectRatio';
 import { previewPriority } from '../video/videoTilePreview';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
@@ -61,11 +65,9 @@ import {
 // the same screen with a different predicate — which is exactly the relationship
 // the web has between the library and an album.
 //
-// NAVIGATION. The grid is a UNIFORM fixed-column matrix with a static
-// index-based focus graph (see lib/tvFixedGrid.ts). Nothing re-renders while the
-// user navigates, so a held D-pad and a series of taps produce the same walk;
-// that is the fix for the "fast and slow behave differently" defect, and it is
-// proved by the burst tests rather than by tuning.
+// NAVIGATION. Every row uses the media dimensions already present in the DTO.
+// Native links are static, and an adjacent row cannot receive focus until all
+// its previews have rendered or reached a terminal placeholder.
 //
 // INPUT OWNERSHIP is explicit and never shared:
 //   GRID          → the native focus engine owns the D-pad; MENU toggles the
@@ -78,10 +80,8 @@ import {
 // album shelf when browsing an album).
 
 const PAGE_SIZE = 50;
-const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
-// Tile aspect. Uniform boxes are what make the geometric focus fallback agree
-// with the explicit graph; the media inside is contained, never cropped.
-const TILE_ASPECT = 16 / 10;
+const GRID_GAP = TV_MEDIA_GRID_GAP;
+const PREVIEW_BAND = 6;
 
 type Phase = 'loadingInitial' | 'ready' | 'loadingMore' | 'errorInitial' | 'errorMore' | 'end';
 type Panel = 'none' | 'filters';
@@ -127,6 +127,9 @@ const LibraryTile = memo(function LibraryTile({
   focusTargets,
   focusable,
   priority,
+  rowKey,
+  rowIndex,
+  onPreviewReady,
   onOpen,
   onFocusIndex,
 }: {
@@ -136,11 +139,14 @@ const LibraryTile = memo(function LibraryTile({
   width: number;
   height: number;
   preferred: boolean;
-  focusTargets: ReturnType<ReturnType<typeof useTvFixedGridFocus>['targetsFor']>;
+  focusTargets: TvMediaGridTargets;
   focusable: boolean;
   priority: ReturnType<typeof previewPriority>;
+  rowKey: string;
+  rowIndex: number;
+  onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (index: number) => void;
-  onFocusIndex: (index: number, id: string) => void;
+  onFocusIndex: (index: number, id: string, rowIndex: number) => void;
 }) {
   const [focused, setFocused] = useState(false);
   return (
@@ -152,7 +158,7 @@ const LibraryTile = memo(function LibraryTile({
       focusTargets={focusTargets}
       focusable={focusable}
       onSelect={() => onOpen(index)}
-      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
+      onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id, rowIndex); }}
     >
       <MediaTilePreview
         kind={item.kind}
@@ -160,6 +166,7 @@ const LibraryTile = memo(function LibraryTile({
         personal
         priority={priority}
         style={{ width: '100%', height, borderRadius: 8 }}
+        onReady={() => onPreviewReady(rowKey, item.id)}
       />
       {item.kind === 'video' && (
         <View style={styles.videoBadge} pointerEvents="none">
@@ -325,35 +332,36 @@ export function PersonalLibraryScreen({
   // ---------------------------------------------------------------- layout
 
   const contentWidth = Math.max(1, width - 2 * inset.x);
-  const columns = tvGridColumns(contentWidth);
-  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
-  const tileHeight = Math.round(tileWidth / TILE_ASPECT);
 
   const items = load.items;
   const total = load.totalCount ?? items.length;
   const rows = useMemo(
-    () => buildTvGridRows(items, columns, (item) => item.id),
-    [items, columns],
+    () => buildTvMediaGridRows({
+      items,
+      contentWidth,
+      targetRowHeight: tvMediaGridTargetHeight(height - 2 * inset.y),
+      getAspectRatio: (item) => normalizeTvMediaAspectRatio(
+        item.width,
+        item.height,
+        item.kind === 'video' ? VIDEO_FALLBACK_ASPECT_RATIO : PHOTO_FALLBACK_ASPECT_RATIO,
+      ),
+      getId: (item) => item.id,
+    }),
+    [items, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvFixedGridFocus(items.length, columns);
+  const gridFocus = useTvMediaGridFocus(rows);
 
-  const listRef = useRef<FlatList<TvGridRow<TvPersonalMediaItem>>>(null);
-  const focusedIndexRef = useRef(-1);
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const focusedRowRef = useRef(-1);
 
-  const onTileFocus = useCallback((index: number, id: string) => {
+  const onTileFocus = useCallback((index: number, id: string, rowIndex: number) => {
     rememberFocusedTile(index, id);
-    focusedIndexRef.current = index;
-    // ONLY the poster-warming band reads this. Moving within a row leaves the
-    // band unchanged, so the state is left alone: a re-render here would sit on
-    // the key-press path, which is exactly what must stay empty. Navigation
-    // itself never depends on it — the focus graph is static.
-    setFocusedIndex((current) =>
-      tvGridRowOf(current, columns) === tvGridRowOf(index, columns) && current >= 0
-        ? current
-        : index);
-    tvDebug('grid nav', 'row', tvGridRowOf(index, columns), 'col', index % columns);
-  }, [rememberFocusedTile, columns]);
+    if (focusedRowRef.current !== rowIndex) {
+      focusedRowRef.current = rowIndex;
+      setFocusedIndex(index);
+    }
+    tvDebug('grid nav', 'row', rowIndex);
+  }, [rememberFocusedTile]);
 
   const openAt = useCallback((index: number) => {
     hideOverlay();
@@ -382,54 +390,42 @@ export function PersonalLibraryScreen({
   }, [hideOverlay]);
 
   const renderRow = useCallback((
-    { item: row }: ListRenderItemInfo<TvGridRow<TvPersonalMediaItem>>,
-  ) => (
-    <View style={styles.gridRow}>
-      {row.items.map((item, offset) => {
-        const index = row.firstIndex + offset;
-        return (
-          <LibraryTile
-            key={item.id}
-            item={item}
-            index={index}
-            total={total}
-            width={tileWidth}
-            height={tileHeight}
-            preferred={gridFocusable && restoreIndex !== null && index === restoreIndex}
-            focusTargets={gridFocus.targetsFor(index)}
-            focusable={gridFocusable}
-            priority={previewPriority(index, focusedIndex, columns)}
-            onOpen={openAt}
-            onFocusIndex={onTileFocus}
-          />
-        );
-      })}
-    </View>
-  ), [
-    total, tileWidth, tileHeight, gridFocusable, restoreIndex,
-    gridFocus, focusedIndex, columns, openAt, onTileFocus,
-  ]);
+    { item: row, index: rowIndex }: ListRenderItemInfo<TvMediaGridRow<TvPersonalMediaItem>>,
+  ) => {
+    const rowReady = gridFocus.isRowReady(row.key);
+    return (
+      <View style={styles.gridRow}>
+        {row.tiles.map((tile) => {
+          const { item, originalIndex: index, width, height: tileHeight } = tile;
+          return (
+            <LibraryTile
+              key={item.id}
+              item={item}
+              index={index}
+              total={total}
+              width={width}
+              height={tileHeight}
+              preferred={gridFocusable && rowReady && restoreIndex !== null && index === restoreIndex}
+              focusTargets={gridFocus.targetsFor(item.id)}
+              focusable={gridFocusable && rowReady}
+              priority={previewPriority(index, focusedIndex, PREVIEW_BAND)}
+              rowKey={row.key}
+              rowIndex={rowIndex}
+              onPreviewReady={gridFocus.onPreviewReady}
+              onOpen={openAt}
+              onFocusIndex={onTileFocus}
+            />
+          );
+        })}
+      </View>
+    );
+  }, [total, gridFocusable, restoreIndex, gridFocus, focusedIndex, openAt, onTileFocus]);
 
   const filterCount = activeFilterCount(identity);
   const emptyLabel = filterCount > 0 ? t('gallery.noResults') : t('gallery.empty');
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
-      {/* Kind tabs. Always visible: they are the primary in-screen navigation,
-          not a hidden menu action. */}
-      <View style={styles.tabs}>
-        {(['all', 'image', 'video'] as const).map((kind) => (
-          <FocusableButton
-            key={kind}
-            label={tabLabel(kind, load, t)}
-            onPress={() => setKind(kind)}
-            // The active tab is NOT the focus default: focus belongs to the
-            // grid, and a tab stealing it on every filter change would fight
-            // the restore.
-          />
-        ))}
-      </View>
-
       {load.phase === 'loadingInitial' ? (
         <View style={styles.stateBox}>
           <ActivityIndicator size="large" color={colors.accent} />
@@ -463,22 +459,12 @@ export function PersonalLibraryScreen({
         </View>
       ) : (
         <FlatList
-          ref={listRef}
           data={rows}
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          // `removeClippedSubviews` is deliberately NOT set: it DETACHES
-          // already-rendered rows just outside the viewport, and a detached row
-          // cannot be resolved as an explicit nextFocus target.
-          //
-          // The window is sized generously on purpose. `additionalRenderRegions`
-          // is documented in the react-native-tvos README but is NOT implemented
-          // in the shipped 0.85.3-3 JavaScript, so a wide window is what keeps
-          // the immediate vertical neighbours of the focused row mounted during
-          // an auto-repeat burst. Virtualization is NOT disabled — distant rows
-          // stay unmounted, and the uniform grid's geometric fallback names the
-          // same tile the link would if one is briefly unresolved.
+          // Keep nearby rows mounted for progressive preview loading. Distant
+          // rows remain virtualized, and the focus barrier never targets them.
           initialNumToRender={8}
           maxToRenderPerBatch={4}
           windowSize={11}
@@ -515,22 +501,30 @@ export function PersonalLibraryScreen({
           <View style={[styles.titleRow, { top: inset.y }]} pointerEvents="none">
             <View style={styles.titlePill}>
               <Text style={styles.titleText} numberOfLines={1}>
-                {title} · {total}
+                {title} · {tabLabel(identity.mediaKind, load, t)} · {total}
               </Text>
             </View>
           </View>
           <MenuCommandRail
             style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}
           >
-            <FocusableButton
-              label={t('gallery.backToHome')}
-              onPress={onBack}
-              onFocusChange={(f) => { if (f) bumpOverlay(); }}
-              hasTVPreferredFocus
-            />
+            {(['all', 'image', 'video'] as const).map((kind) => (
+              <FocusableButton
+                key={kind}
+                label={tabLabel(kind, load, t)}
+                onPress={() => setKind(kind)}
+                onFocusChange={(f) => { if (f) bumpOverlay(); }}
+                hasTVPreferredFocus={kind === identity.mediaKind}
+              />
+            ))}
             <FocusableButton
               label={t('filters.title')}
               onPress={() => { hideOverlay(); setPanel('filters'); }}
+              onFocusChange={(f) => { if (f) bumpOverlay(); }}
+            />
+            <FocusableButton
+              label={t('gallery.backToHome')}
+              onPress={onBack}
               onFocusChange={(f) => { if (f) bumpOverlay(); }}
             />
           </MenuCommandRail>
@@ -596,18 +590,13 @@ function formatDuration(seconds: number): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  tabs: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
   body: { color: colors.muted, fontSize: font.body, textAlign: 'center' },
   stateBox: { marginTop: spacing.xl, alignItems: 'center', gap: spacing.md },
   grid: { gap: GRID_GAP },
   gridRow: {
     flexDirection: 'row',
     gap: GRID_GAP,
-    paddingVertical: MEDIA_GRID_FOCUS_BLEED,
+    paddingVertical: TV_MEDIA_GRID_FOCUS_BLEED,
     overflow: 'visible',
   },
   videoBadge: {

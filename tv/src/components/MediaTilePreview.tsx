@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -40,6 +41,9 @@ interface Props {
   priority?: TvPreviewPriority;
   // Ambient blur radius. Kept modest for Fire TV.
   blurRadius?: number;
+  // The row may accept focus only after every preview has either rendered or
+  // reached its explicit terminal placeholder.
+  onReady?: () => void;
 }
 
 export function MediaTilePreview({
@@ -50,6 +54,7 @@ export function MediaTilePreview({
   personal = false,
   priority = 'high',
   blurRadius = 12,
+  onReady,
 }: Props) {
   const { t } = useI18n();
   const resolved = kind === 'video'
@@ -69,6 +74,16 @@ export function MediaTilePreview({
   });
 
   const failed = resolved.kind === 'placeholder' || state === 'failed';
+  const sourceKey = `${primary ?? ''}|${secondary ?? ''}`;
+  const [decoded, setDecoded] = useState(false);
+  const reportedSource = useRef<string | null>(null);
+
+  useEffect(() => { setDecoded(false); }, [sourceKey]);
+  useEffect(() => {
+    if ((!decoded && !failed) || reportedSource.current === sourceKey) return;
+    reportedSource.current = sourceKey;
+    onReady?.();
+  }, [decoded, failed, onReady, sourceKey]);
 
   return (
     <View style={[styles.frame, style]}>
@@ -87,6 +102,7 @@ export function MediaTilePreview({
             source={{ uri }}
             style={StyleSheet.absoluteFill}
             resizeMode="contain"
+            onLoad={() => setDecoded(true)}
             onError={markFailed}
           />
         </>

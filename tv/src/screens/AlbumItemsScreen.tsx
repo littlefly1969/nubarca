@@ -30,13 +30,14 @@ import { OverlayQrCorners } from '../components/OverlayQrCorners';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { sameItemIds } from '../lib/liveItems';
 import {
-  buildTvGridRows,
-  tvGridColumns,
-  tvGridTileWidth,
-  type TvGridRow,
-} from '../lib/tvFixedGrid';
-import { MEDIA_GRID_FOCUS_BLEED, MEDIA_GRID_VISUAL_GAP } from '../lib/mediaGridPresentation';
-import { useTvFixedGridFocus, type TvFixedGridTargets } from '../lib/useTvFixedGridFocus';
+  buildTvMediaGridRows,
+  tvMediaGridTargetHeight,
+  TV_MEDIA_GRID_FOCUS_BLEED,
+  TV_MEDIA_GRID_GAP,
+  type TvMediaGridRow,
+} from '../lib/tvMediaGrid';
+import { useTvMediaGridFocus, type TvMediaGridTargets } from '../lib/useTvMediaGridFocus';
+import { getTvMediaAspectRatio } from '../lib/mediaAspectRatio';
 import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { remapFocusIndexById } from '../lib/focusRemap';
 import { useI18n } from '../i18n';
@@ -55,12 +56,8 @@ const FACE_SEARCH_POLL_MS = 6_000;
 // vertical tile). The target row height is derived from the surface height so a
 // 1080p-class layout shows ~3.5-4 rows and a 720p-class layout at least 3. The
 // FlatList virtualizes ROWS, so only tiles near the viewport mount (and download).
-const GRID_GAP = MEDIA_GRID_VISUAL_GAP;
-const ROW_FOCUS_BLEED = MEDIA_GRID_FOCUS_BLEED;
-// Uniform tile box. Equal boxes are what let Android's geometric focus search
-// agree with the explicit link graph; the media inside is contained, never
-// cropped, so a vertical video still shows in full.
-const TILE_ASPECT = 16 / 10;
+const GRID_GAP = TV_MEDIA_GRID_GAP;
+const ROW_FOCUS_BLEED = TV_MEDIA_GRID_FOCUS_BLEED;
 
 interface Props {
   album: TvAlbum;
@@ -94,20 +91,23 @@ const ItemTile = memo(function ItemTile({
   preferred,
   focusable,
   focusTargets,
+  rowKey,
+  onPreviewReady,
   onOpen,
   onFocusIndex,
 }: {
   item: TvAlbumItem;
   index: number;
   total: number;
-  // Outer tile box from the uniform fixed-column layout.
   width: number;
   height: number;
   preferred: boolean;
   // False while the MENU command rail owns focus: the grid must not stay a
   // focus destination underneath it.
   focusable: boolean;
-  focusTargets: TvFixedGridTargets;
+  focusTargets: TvMediaGridTargets;
+  rowKey: string;
+  onPreviewReady: (rowKey: string, id: string) => void;
   onOpen: (index: number) => void;
   // Reports which tile the remote is on (index + id), so a later transition can
   // restore focus to the SAME item even after the list/rows change.
@@ -126,6 +126,7 @@ const ItemTile = memo(function ItemTile({
       hasTVPreferredFocus={preferred}
       focusable={focusable}
       focusTargets={focusTargets}
+      index={index}
       onSelect={() => onOpen(index)}
       onFocusChange={(f) => { setFocused(f); if (f) onFocusIndex(index, item.id); }}
     >
@@ -134,6 +135,7 @@ const ItemTile = memo(function ItemTile({
         path={path}
         fallbackPath={fallbackPath}
         style={{ width: '100%', height, borderRadius: 8 }}
+        onReady={() => onPreviewReady(rowKey, item.id)}
       />
       {isVideo && <Text style={styles.badge}>▶</Text>}
       {focused && focusable && (
@@ -352,22 +354,19 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   // all. A tile may only ASK for focus when it could accept it.
   const gridFocusable = !overlayVisible;
 
-  // The SAME deterministic fixed-column grid the Personal Library uses. Party
-  // and Personal are separate products but there is exactly ONE navigation
-  // engine: a second one is how the two drift into behaving differently under a
-  // held D-pad, which is the defect this replaced. See lib/tvFixedGrid.ts for
-  // why a uniform matrix removes the fast-vs-slow divergence rather than hiding
-  // it.
   const contentWidth = Math.max(1, width - 2 * inset.x);
-  const columns = tvGridColumns(contentWidth);
-  const tileWidth = tvGridTileWidth(contentWidth, columns, GRID_GAP);
-  const tileHeight = Math.round(tileWidth / TILE_ASPECT);
   const total = displayItems.length;
   const rows = useMemo(
-    () => buildTvGridRows(displayItems, columns, (it) => it.id),
-    [displayItems, columns],
+    () => buildTvMediaGridRows({
+      items: displayItems,
+      contentWidth,
+      targetRowHeight: tvMediaGridTargetHeight(height - 2 * inset.y),
+      getAspectRatio: getTvMediaAspectRatio,
+      getId: (item) => item.id,
+    }),
+    [displayItems, contentWidth, height, inset.y],
   );
-  const gridFocus = useTvFixedGridFocus(displayItems.length, columns);
+  const gridFocus = useTvMediaGridFocus(rows);
 
   const onTileFocus = useCallback((index: number, id: string) => {
     rememberFocusedTile(index, id);
@@ -401,31 +400,34 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
     });
   }, [album.id, onOpenItem]);
 
-  const renderRow = useCallback(({ item: row }: ListRenderItemInfo<TvGridRow<TvAlbumItem>>) => (
-    <View style={styles.row}>
-      {row.items.map((item, offset) => {
-        const index = row.firstIndex + offset;
-        return (
-          <ItemTile
-            key={item.id}
-            item={item}
-            index={index}
-            total={total}
-            width={tileWidth}
-            height={tileHeight}
-            // No tile holds the preferred flag while the overlay is up (the rail
-            // owns focus); on close the restore tile flips false→true, pulling
-            // focus back to exactly where the user was.
-            preferred={gridFocusable && restoreIndex !== null && index === restoreIndex}
-            focusable={gridFocusable}
-            focusTargets={gridFocus.targetsFor(index)}
-            onOpen={openAt}
-            onFocusIndex={onTileFocus}
-          />
-        );
-      })}
-    </View>
-  ), [openAt, total, tileWidth, tileHeight, gridFocusable, restoreIndex, gridFocus, onTileFocus]);
+  const renderRow = useCallback(({ item: row }: ListRenderItemInfo<TvMediaGridRow<TvAlbumItem>>) => {
+    const rowReady = gridFocus.isRowReady(row.key);
+    return (
+      <View style={styles.row}>
+        {row.tiles.map((tile) => {
+          const { item, originalIndex: index, width, height: tileHeight } = tile;
+          return (
+            <ItemTile
+              key={item.id}
+              item={item}
+              index={index}
+              total={total}
+              width={width}
+              height={tileHeight}
+              // No tile holds preferred focus while the overlay owns it.
+              preferred={gridFocusable && rowReady && restoreIndex !== null && index === restoreIndex}
+              focusable={gridFocusable && rowReady}
+              focusTargets={gridFocus.targetsFor(item.id)}
+              rowKey={row.key}
+              onPreviewReady={gridFocus.onPreviewReady}
+              onOpen={openAt}
+              onFocusIndex={onTileFocus}
+            />
+          );
+        })}
+      </View>
+    );
+  }, [openAt, total, gridFocusable, restoreIndex, gridFocus, onTileFocus]);
 
   return (
     <View style={[styles.container, { paddingTop: inset.y, paddingHorizontal: inset.x }]}>
@@ -447,19 +449,8 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           renderItem={renderRow}
           keyExtractor={(row) => row.key}
           contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          // Virtualization: mount (and download media for) only ROWS near the
-          // viewport, progressively — never the whole album at once. Tuned for
-          // rows (~3.5-4 visible) rather than the old per-column count.
-          //
-          // `removeClippedSubviews` is deliberately NOT set. It is not part of
-          // windowing: it DETACHES already-rendered rows that fall outside the
-          // scroll viewport (`removeViewInLayout`, react-native's
-          // ReactViewGroup.updateSubviewClipStatus, which spares only the
-          // currently focused child). A detached row cannot be resolved by
-          // `findViewById`, so the explicit nextFocusDown into the row just
-          // below the fold silently fell back to Android's geometric focus
-          // search — the exact case the lane model exists to replace. Windowing
-          // below still keeps distant rows unmounted.
+          // Only nearby rows mount and download. A row becomes a focus target
+          // only after its previews settle; distant rows stay virtualized.
           initialNumToRender={6}
           maxToRenderPerBatch={4}
           windowSize={11}
