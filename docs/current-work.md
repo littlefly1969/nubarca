@@ -174,6 +174,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **Nothing automated writes a person decision.** Suggestions are advisory and
   never persisted; there is no auto-assignment job and no way to create a person
   from a track.
+- **Reclustering exists twice, at two scopes, on ONE algorithm.**
+  `ai-faces-cluster-backfill` is the administrator's: it walks every eligible
+  owner. `ai.faces.cluster.owner` is the owner's own, started from the Cloud hub,
+  and clusters EXACTLY the account that asked — no owner enumeration, no
+  `SELECT DISTINCT OwnerUserId`, one job = one `ClusterOwnerAsync`. The owner id
+  lives in the job payload, is written only server-side from the authenticated
+  caller, and is re-read from that payload to decide who may watch the job, so
+  the boundary travels with the work rather than with whoever asks about it. The
+  status endpoint answers for one owner's own job and 404s (never 403) for
+  anything else, so watching your own recluster never needs
+  `admin.jobs.manage`. Refusing with 409 when the installation cannot cluster —
+  AI off, clustering off, no face profile — is deliberate: a queued job that is
+  certain to no-op would "succeed" and change nothing. `people.cluster.rebuild`
+  is a FEATURE permission with `people.access` as its Parent, so Member carries
+  it (derived from the non-administrative keys) and it grants no administration
+  surface whatsoever.
 - **A person is a TEMPLATE of 1–6 reference faces, not one arbitrary face.**
   Similar-face search once queried with whichever completed assigned embedding
   came back first, so suggestions for someone photographed across decades

@@ -1365,6 +1365,21 @@ const it = {
   'cloud.organizeHint': 'La procedura guidata mostra un’anteprima completa prima di spostare qualsiasi file.',
   'cloud.dedupe': 'Rimuovi duplicati multimediali esatti',
   'cloud.dedupeDesc': 'Sposta nel Cestino le copie ridondanti di foto e video con contenuto esattamente identico, conservando il file acquisito per primo.',
+  'cloud.faceCluster': 'Ricalcola cluster volti',
+  'cloud.faceClusterDesc': 'Ricostruisce da zero i gruppi automatici di volti del tuo account, mantenendo le persone confermate e i volti ignorati.',
+
+  // --- Cloud: ricalcolo cluster volti (owner-scoped) ---
+  'faceCluster.explain': 'Ricostruisce i gruppi automatici "Suggeriti" e "Da revisionare" usando i volti del tuo account.',
+  'faceCluster.preserved': 'Le persone gi\u00e0 confermate e i volti ignorati non vengono modificati.',
+  'faceCluster.action': 'Ricalcola cluster',
+  'faceCluster.confirmTitle': 'Ricalcolare il cluster dei volti?',
+  'faceCluster.confirmBody': 'I gruppi automatici Suggeriti e Da revisionare verranno ricreati per il tuo account.',
+  'faceCluster.queued': 'In coda\u2026',
+  'faceCluster.running': 'Ricalcolo in corso\u2026',
+  'faceCluster.done': 'Cluster ricalcolato.',
+  'faceCluster.failed': 'Ricalcolo non completato.',
+  'faceCluster.failedWithCode': 'Ricalcolo non completato ({code}).',
+  'faceCluster.unavailable': 'Il ricalcolo dei volti non \u00e8 disponibile in questo ambiente.',
   'cloud.dedupeHint': 'Considera solo foto e video riconosciuti da NubArca. Non confronta nomi, metadati o somiglianza visiva.',
   'cloud.dedupeTrashNote': 'Le copie rimosse vengono spostate nel Cestino e possono essere ripristinate.',
   'cloud.dedupeConfirm': 'Rimuovere i duplicati esatti di foto e video? Le copie ridondanti verranno spostate nel Cestino.',
@@ -2369,6 +2384,7 @@ const it = {
   'roles.restricted': 'Limitato',
 
   'perm.peopleAccess': 'Persone',
+  'perm.peopleClusterRebuild': 'Ricalcolo cluster volti',
   'perm.semanticSearchAccess': 'Ricerca semantica',
   'perm.laboratoryAccess': 'Laboratorio',
   'perm.laboratoryPlates': 'Laboratorio — Targhe',
@@ -2518,6 +2534,7 @@ const it = {
 
   'perm.adminRolesManage': 'Amministrazione \u2014 Ruoli',
   'permDesc.peopleAccess': 'Raggruppamento di volti e persone, e le viste Volti.',
+  'permDesc.peopleClusterRebuild': 'Consente di ricostruire i suggerimenti automatici dei volti del proprio account.',
   'permDesc.semanticSearchAccess': 'Cerca foto e video per quello che mostrano.',
   'permDesc.laboratoryAccess': 'Accesso al Laboratorio.',
   'permDesc.laboratoryPlates': 'Rilevamento e oscuramento delle targhe.',

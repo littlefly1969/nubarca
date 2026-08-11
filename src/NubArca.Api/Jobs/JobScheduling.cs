@@ -70,6 +70,11 @@ public static class JobScheduling
         JobTypes.AiFacesDetectBackfill => Compute,
         JobTypes.AiFacesEmbeddingsBackfill => Compute,
         JobTypes.AiFacesClusterBackfill => Compute,
+        // One owner's recluster, started by that owner and watched on screen.
+        // Still Compute — it is the same clustering work and must yield to
+        // foreground imports — but it is a single owner rather than every one,
+        // so it does not sit behind a whole-installation walk.
+        JobTypes.AiFacesClusterOwner => Compute,
         JobTypes.AiTagsGenerateBackfill => Compute,
         // Video segmentation decodes whole files: the heaviest AI backfill, and
         // the one that must yield most readily.

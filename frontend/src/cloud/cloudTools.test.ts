@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest';
+import { PERMISSIONS, type PermissionKey } from '@nubarca/api-client';
 import {
   CLOUD_TOOLS,
   DEFAULT_CLOUD_TOOL,
   cloudToolFromParams,
   cloudToolUrl,
   findCloudTool,
+  resolveCloudTool,
   toCloudToolId,
+  visibleCloudTools,
 } from './cloudTools';
+
+// A permission oracle: `held` is what this notional user carries.
+const holding = (...held: PermissionKey[]) => (p: PermissionKey) => held.includes(p);
 
 describe('Cloud Functions tool model', () => {
   it('offers the normal-user tools in order', () => {
     expect(CLOUD_TOOLS.map((tool) => tool.id)).toEqual([
-      'upload', 'organize', 'dedupe', 'archive', 'tv-devices',
+      'upload', 'organize', 'dedupe', 'archive', 'tv-devices', 'face-cluster',
     ]);
   });
 
@@ -69,5 +75,46 @@ describe('Cloud Functions tool model', () => {
       expect(tool.descriptionKey).toBeTruthy();
       expect(tool.icon).toBeTruthy();
     }
+  });
+});
+
+// A tool may need an authority beyond "may reach the hub". Getting this wrong is
+// not a cosmetic bug: the tablist's roving-tabindex arithmetic is computed from
+// the list, so an index that belongs to a hidden tool focuses nothing.
+describe('Cloud Functions tool visibility', () => {
+  it('hides a tool whose permission the user does not hold', () => {
+    const withoutIt = visibleCloudTools(holding()).map((tool) => tool.id);
+    expect(withoutIt).not.toContain('face-cluster');
+    // …and hides nothing else.
+    expect(withoutIt).toEqual(['upload', 'organize', 'dedupe', 'archive', 'tv-devices']);
+
+    const withIt = visibleCloudTools(holding(PERMISSIONS.peopleClusterRebuild)).map((t) => t.id);
+    expect(withIt).toContain('face-cluster');
+  });
+
+  it('states which permission each gated tool needs', () => {
+    expect(findCloudTool('face-cluster').requiredPermission).toBe(PERMISSIONS.peopleClusterRebuild);
+    // The ordinary tools are open to anyone who can reach the hub.
+    for (const id of ['upload', 'organize', 'dedupe', 'archive', 'tv-devices'] as const) {
+      expect(findCloudTool(id).requiredPermission).toBeUndefined();
+    }
+  });
+
+  it('falls back rather than opening a tool the user may not use', () => {
+    const params = new URLSearchParams('tool=face-cluster');
+
+    // Deep link honoured for somebody who holds it…
+    expect(resolveCloudTool(params, visibleCloudTools(holding(PERMISSIONS.peopleClusterRebuild))))
+      .toBe('face-cluster');
+    // …and falls back to the default for somebody who does not, rather than
+    // rendering the protected panel while a check catches up.
+    expect(resolveCloudTool(params, visibleCloudTools(holding()))).toBe(DEFAULT_CLOUD_TOOL);
+  });
+
+  it('falls back to the first permitted tool when the default itself is gone', () => {
+    const onlyFaceCluster = CLOUD_TOOLS.filter((tool) => tool.id === 'face-cluster');
+    expect(resolveCloudTool(new URLSearchParams(), onlyFaceCluster)).toBe('face-cluster');
+    // Nothing to offer at all is null, not a tool nobody may open.
+    expect(resolveCloudTool(new URLSearchParams('tool=upload'), [])).toBeNull();
   });
 });

@@ -14,6 +14,14 @@ public static class Permissions
 {
     public const string PeopleAccess = "people.access";
 
+    // Rebuilding one's OWN automatic face groups from the Cloud hub. It is a
+    // capability over the holder's own People data, not an administration
+    // surface: the job it starts clusters exactly one owner — the caller — and
+    // the global `ai-faces-cluster-backfill` command, which walks every owner,
+    // stays behind admin.jobs.manage where it belongs. Meaningless without
+    // people.access, which is why the catalogue makes that its Parent.
+    public const string PeopleClusterRebuild = "people.cluster.rebuild";
+
     public const string SemanticSearchAccess = "semantic-search.access";
 
     // The Laboratory shell plus its two independent sections. A section always

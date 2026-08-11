@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router';
 import { CloudFunctionsPage } from './CloudFunctionsPage';
 import { LegacyCloudToolRedirect } from '../cloud/LegacyCloudToolRedirect';
+import { PERMISSIONS } from '@nubarca/api-client';
 import { AuthedWrapper, installFetchMock, jsonResponse, emptyResponse } from '../test-utils';
 
 afterEach(() => {
@@ -86,13 +87,14 @@ describe('Cloud Functions hub — tools', () => {
     const tablist = screen.getByRole('tablist', { name: 'Strumenti delle funzioni cloud' });
     expect(tablist).toBeInTheDocument();
     const all = tabs().getAllByRole('tab');
-    expect(all).toHaveLength(5);
+    expect(all).toHaveLength(6);
     expect(all.map((t) => t.textContent)).toEqual([
       'Caricamento in blocco',
       'Organizza le foto per data',
       'Rimuovi duplicati multimediali esatti',
       'Scarica archivio foto',
       'Dispositivi TV',
+      'Ricalcola cluster volti',
     ]);
   });
 
@@ -219,7 +221,7 @@ describe('Cloud Functions hub — keyboard', () => {
     expect(screen.getByTestId('cf-tool-organize')).toHaveFocus();
 
     await user.keyboard('{End}');
-    expect(screen.getByTestId('cf-tool-tv-devices')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('cf-tool-face-cluster')).toHaveAttribute('aria-selected', 'true');
 
     await user.keyboard('{Home}');
     expect(screen.getByTestId('cf-tool-upload')).toHaveAttribute('aria-selected', 'true');
@@ -340,5 +342,72 @@ describe('legacy Cloud Functions routes', () => {
     expect(screen.getByTestId('cloud-tool-panel')).toHaveAttribute('data-tool', 'tv-devices');
     expect(screen.getByTestId('cf-tool-tv-devices')).toHaveAttribute('aria-selected', 'true');
     expect(await screen.findByText('Living room TV')).toBeInTheDocument();
+  });
+});
+
+// Reaching the hub is one authority; a tool may need another. Everything the
+// page computes — which tabs exist, which one a deep link opens, where an arrow
+// key lands — has to work on the VISIBLE list, or a user is shown a door that
+// answers 403, or an arrow focuses nothing.
+describe('Cloud Functions hub — permission gating', () => {
+  function renderAs(permissions: readonly string[], initialEntries = ['/cloud-functions']) {
+    installFetchMock(toolHandlers());
+    return render(
+      <AuthedWrapper permissions={permissions}>
+        <MemoryRouter initialEntries={initialEntries}>
+          <Routes>
+            <Route path="/cloud-functions" element={<CloudFunctionsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthedWrapper>,
+    );
+  }
+
+  const WITHOUT = [PERMISSIONS.cloudFunctionsAccess, PERMISSIONS.tvManage];
+  const WITH = [...WITHOUT, PERMISSIONS.peopleAccess, PERMISSIONS.peopleClusterRebuild];
+
+  it('offers the face-cluster tool to a user who holds the permission', () => {
+    renderAs(WITH);
+    expect(screen.getByTestId('cf-tool-face-cluster')).toBeInTheDocument();
+  });
+
+  it('does not render the tool at all without the permission', () => {
+    renderAs(WITHOUT);
+    expect(screen.queryByTestId('cf-tool-face-cluster')).toBeNull();
+    // The other tools are untouched — this gates one tool, not the hub.
+    expect(screen.getByTestId('cf-tool-upload')).toBeInTheDocument();
+    expect(tabs().getAllByRole('tab')).toHaveLength(5);
+  });
+
+  it('falls back safely when an unauthorized deep link names the tool', () => {
+    renderAs(WITHOUT, ['/cloud-functions?tool=face-cluster']);
+
+    // Not the protected panel, not even for a frame.
+    expect(screen.queryByTestId('face-cluster-rebuild')).toBeNull();
+    expect(screen.getByTestId('cloud-tool-panel')).toHaveAttribute('data-tool', 'upload');
+  });
+
+  it('honours the same deep link for a user who may use it', async () => {
+    renderAs(WITH, ['/cloud-functions?tool=face-cluster']);
+
+    expect(screen.getByTestId('cloud-tool-panel')).toHaveAttribute('data-tool', 'face-cluster');
+    expect(await screen.findByTestId('face-cluster-rebuild')).toBeInTheDocument();
+  });
+
+  it('walks only the visible tabs with the keyboard', async () => {
+    renderAs(WITHOUT);
+    const user = userEvent.setup();
+
+    // End must land on the last VISIBLE tool. Computed from the full catalogue
+    // it would land on a hidden index and focus nothing.
+    screen.getByTestId('cf-tool-upload').focus();
+    await user.keyboard('{End}');
+    expect(screen.getByTestId('cf-tool-tv-devices')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('cf-tool-tv-devices')).toHaveFocus();
+
+    // …and wrapping forward from the last one returns to the first.
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByTestId('cf-tool-upload')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('cf-tool-upload')).toHaveFocus();
   });
 });

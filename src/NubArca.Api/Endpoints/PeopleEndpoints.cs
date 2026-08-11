@@ -38,6 +38,68 @@ public static class PeopleEndpoints
             return Results.Created($"/api/people/{dto.PersonId}", dto);
         }).WithName("CreatePerson").RequirePermission(Permissions.PeopleAccess);
 
+        // Rebuild THIS owner's automatic face groups (Suggeriti / Da revisionare).
+        //
+        // The clustering itself is far too heavy for a request, so this enqueues
+        // one owner-scoped job and answers immediately. The owner id is taken
+        // from the authenticated principal and from nowhere else: there is no
+        // request body, so there is nothing a caller could put an id into.
+        //
+        // 409 rather than a queued job when the installation cannot cluster —
+        // AI off, face clustering off, or no face-embedding profile. Accepting
+        // work that is certain to do nothing would show the owner a run that
+        // "succeeds" and changes nothing.
+        app.MapPost("/api/people/cluster-rebuild", async (
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.FaceClusterRebuildService rebuilds,
+            [FromServices] NubArca.Api.Audit.IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var started = await rebuilds.StartAsync(ownerUserId, cancellationToken);
+            if (!started.Accepted)
+            {
+                return Results.Json(
+                    new { error = "face-clustering-unavailable", reason = started.UnavailableReason },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await audit.LogAsync(
+                userId: ownerUserId,
+                action: NubArca.Api.Audit.AuditActions.PeopleFaceClusterRebuild,
+                entityType: NubArca.Api.Audit.AuditEntityTypes.User,
+                entityId: ownerUserId,
+                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                metadata: new { jobId = started.JobId, alreadyQueued = started.AlreadyQueued },
+                cancellationToken: cancellationToken);
+
+            return Results.Ok(new
+            {
+                jobId = started.JobId,
+                status = started.Status,
+                alreadyQueued = started.AlreadyQueued,
+            });
+        })
+            .WithName("RebuildOwnerFaceClusters")
+            .RequirePeopleClusterRebuild();
+
+        // The owner's own view of their recluster, so watching it finish never
+        // requires admin.jobs.manage. A job of another type, or one belonging to
+        // somebody else, is the same 404 — a status endpoint must not confirm
+        // that another account's job id exists.
+        app.MapGet("/api/people/cluster-rebuild/{jobId:guid}", async (
+            Guid jobId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.FaceClusterRebuildService rebuilds,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var status = await rebuilds.GetStatusAsync(ownerUserId, jobId, cancellationToken);
+            return status is null ? Results.NotFound() : Results.Ok(status);
+        })
+            .WithName("GetOwnerFaceClusterRebuild")
+            .RequirePeopleClusterRebuild();
+
         app.MapGet("/api/people/suggested-groups", async (
             [FromQuery] bool? review,
             HttpContext httpContext,

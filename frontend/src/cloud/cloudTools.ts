@@ -1,3 +1,4 @@
+import { PERMISSIONS, type PermissionKey } from '@nubarca/api-client';
 import type { MessageKey } from '../i18n';
 import type { IconName } from '../components/icons/Icon';
 
@@ -8,14 +9,21 @@ import type { IconName } from '../components/icons/Icon';
 // one of them: it is a primary-navigation destination (/private), not an
 // operational tool, and listing it in both places was the duplication this
 // slice removes.
+//
+// A tool may name a `requiredPermission`. Reaching the hub is one authority
+// (cloud-functions.access); what a given tool DOES can be another, and a tool
+// whose endpoint would answer 403 must not be offered. The filtering here is
+// UX only — the server remains the authority on every call the tool makes.
 
-export type CloudToolId = 'upload' | 'organize' | 'dedupe' | 'archive' | 'tv-devices';
+export type CloudToolId = 'upload' | 'organize' | 'dedupe' | 'archive' | 'tv-devices' | 'face-cluster';
 
 export interface CloudTool {
   id: CloudToolId;
   titleKey: MessageKey;
   descriptionKey: MessageKey;
   icon: IconName;
+  // Absent = available to anyone who can reach the hub at all.
+  requiredPermission?: PermissionKey;
 }
 
 export const CLOUD_TOOLS: readonly CloudTool[] = [
@@ -24,9 +32,42 @@ export const CLOUD_TOOLS: readonly CloudTool[] = [
   { id: 'dedupe', titleKey: 'cloud.dedupe', descriptionKey: 'cloud.dedupeDesc', icon: 'trash' },
   { id: 'archive', titleKey: 'cloud.downloadArchive', descriptionKey: 'cloud.downloadArchiveDesc', icon: 'archive' },
   { id: 'tv-devices', titleKey: 'cloud.tvDevices', descriptionKey: 'cloud.tvDevicesDesc', icon: 'tv' },
+  {
+    id: 'face-cluster',
+    titleKey: 'cloud.faceCluster',
+    descriptionKey: 'cloud.faceClusterDesc',
+    icon: 'people',
+    requiredPermission: PERMISSIONS.peopleClusterRebuild,
+  },
 ];
 
 export const DEFAULT_CLOUD_TOOL: CloudToolId = 'upload';
+
+// The tools this user may actually use, in declaration order.
+export function visibleCloudTools(has: (permission: PermissionKey) => boolean): readonly CloudTool[] {
+  return CLOUD_TOOLS.filter((tool) => tool.requiredPermission === undefined || has(tool.requiredPermission));
+}
+
+// Which tool to show, given the URL and what this user may use.
+//
+// A deep link to a tool the user cannot use falls back rather than rendering —
+// so `?tool=face-cluster` without the permission shows the default tool, and
+// never the protected panel for a frame while a check catches up. The fallback
+// is the default tool when that is permitted, else the first permitted one, and
+// null when the hub has nothing to offer at all.
+export function resolveCloudTool(
+  params: URLSearchParams,
+  visible: readonly CloudTool[],
+): CloudToolId | null {
+  const requested = toCloudToolId(params.get(CLOUD_TOOL_PARAM));
+  if (requested !== null && visible.some((tool) => tool.id === requested)) {
+    return requested;
+  }
+  if (visible.some((tool) => tool.id === DEFAULT_CLOUD_TOOL)) {
+    return DEFAULT_CLOUD_TOOL;
+  }
+  return visible[0]?.id ?? null;
+}
 
 // The query-string parameter that makes a tool deep-linkable.
 export const CLOUD_TOOL_PARAM = 'tool';

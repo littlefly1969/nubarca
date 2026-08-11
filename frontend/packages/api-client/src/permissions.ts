@@ -8,6 +8,10 @@
 
 export const PERMISSIONS = {
   peopleAccess: 'people.access',
+  // Rebuilding one's OWN automatic face groups from the Cloud hub. A capability
+  // over the holder's own People data, never an administration surface: the job
+  // it starts clusters exactly one owner. Requires people.access as well.
+  peopleClusterRebuild: 'people.cluster.rebuild',
   semanticSearchAccess: 'semantic-search.access',
   laboratoryAccess: 'laboratory.access',
   laboratoryPlates: 'laboratory.plates',

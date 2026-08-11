@@ -12,6 +12,7 @@ afterEach(() => {
 
 const MEMBER_KEYS = [
   PERMISSIONS.peopleAccess,
+  PERMISSIONS.peopleClusterRebuild,
   PERMISSIONS.semanticSearchAccess,
   PERMISSIONS.laboratoryAccess,
   PERMISSIONS.laboratoryPlates,
@@ -78,6 +79,13 @@ const usedCustom: Role = {
 
 const PERMISSION_CATALOG = [
   { key: PERMISSIONS.peopleAccess, group: 'features', administrative: false, parent: null, assignable: true },
+  {
+    key: PERMISSIONS.peopleClusterRebuild,
+    group: 'features',
+    administrative: false,
+    parent: PERMISSIONS.peopleAccess,
+    assignable: true,
+  },
   { key: PERMISSIONS.semanticSearchAccess, group: 'features', administrative: false, parent: null, assignable: true },
   { key: PERMISSIONS.laboratoryAccess, group: 'features', administrative: false, parent: null, assignable: true },
   {
@@ -138,7 +146,7 @@ describe('AdminRolesPage', () => {
     const admin = card(ROLES.administrator);
     expect(within(admin).getByText('Di sistema')).toBeInTheDocument();
     expect(within(admin).getByTestId('role-user-count')).toHaveTextContent('1 utente');
-    expect(within(admin).getByTestId('role-permission-total')).toHaveTextContent('14 permessi');
+    expect(within(admin).getByTestId('role-permission-total')).toHaveTextContent('15 permessi');
 
     const lab = card('custom:lab');
     expect(within(lab).getByText('Personalizzato')).toBeInTheDocument();
@@ -297,9 +305,9 @@ describe('AdminRolesPage', () => {
       expect(within(editor).getByTestId('role-readonly-note')).toBeInTheDocument();
       expect(within(editor).queryByTestId('role-save')).toBeNull();
       expect(within(editor).queryByTestId('permission-editor')).toBeNull();
-      // It still explains what the role contains — all thirteen.
+      // It still explains what the role contains — the whole catalogue.
       const preview = within(editor).getByTestId('role-permission-preview');
-      expect(preview.querySelectorAll('[data-included="yes"]')).toHaveLength(13);
+      expect(preview.querySelectorAll('[data-included="yes"]')).toHaveLength(PERMISSION_CATALOG.length);
     });
 
     it('reports the Laboratory dependency refusal in words', async () => {

@@ -18,6 +18,11 @@ public static class PermissionPolicies
     public const string LaboratoryPlates = Prefix + "laboratory:plates+access";
     public const string LaboratoryAesthetics = Prefix + "laboratory:aesthetics+access";
 
+    // Rebuilding one's own face clusters requires People itself as well, on the
+    // same principle: a capability over a surface the caller cannot otherwise
+    // reach would be authority without a use for it.
+    public const string PeopleClusterRebuild = Prefix + "people:cluster-rebuild+access";
+
     // READING the role catalogue. Both administrative editors need it — the
     // Users editor to show what a role means before it is assigned, the Roles
     // editor to edit it — so the read is "either authority" while every role
@@ -51,6 +56,13 @@ public static class PermissionPolicies
                 Permissions.LaboratoryAccess, Permissions.LaboratoryAesthetics));
         });
 
+        options.AddPolicy(PeopleClusterRebuild, policy =>
+        {
+            policy.RequireAuthenticatedUser();
+            policy.AddRequirements(new PermissionRequirement(
+                Permissions.PeopleAccess, Permissions.PeopleClusterRebuild));
+        });
+
         options.AddPolicy(RolesRead, policy =>
         {
             policy.RequireAuthenticatedUser();
@@ -76,6 +88,10 @@ public static class PermissionEndpointExtensions
     public static TBuilder RequireLaboratoryAesthetics<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
         => builder.RequireAuthorization(PermissionPolicies.LaboratoryAesthetics);
+
+    public static TBuilder RequirePeopleClusterRebuild<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.PeopleClusterRebuild);
 
     public static TBuilder RequireRolesRead<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder

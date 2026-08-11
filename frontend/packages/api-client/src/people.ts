@@ -298,6 +298,47 @@ export function rebuildPersonReferenceFaces(
   );
 }
 
+// ---- owner face-cluster rebuild -------------------------------------------
+
+export interface FaceClusterRebuildStart {
+  jobId: string;
+  status: string;
+  // The request joined a run that was already queued or running rather than
+  // starting a second one for the same account.
+  alreadyQueued: boolean;
+}
+
+// The owner's own view of their recluster job. Deliberately narrow: no payload,
+// no owner id, no worker identity — watching your own job must not require the
+// administration job console.
+export interface FaceClusterRebuildStatus {
+  jobId: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  progressCurrent: number | null;
+  progressTotal: number | null;
+  progressMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  lastErrorCode: string | null;
+}
+
+// Rebuild THIS account's automatic face groups. No body: the owner is the
+// authenticated caller and cannot be named by the client. 409 when the
+// installation cannot cluster at all (AI off, clustering off, no face profile).
+export function startFaceClusterRebuild(signal?: AbortSignal): Promise<FaceClusterRebuildStart> {
+  return api<FaceClusterRebuildStart>('/api/people/cluster-rebuild', { method: 'POST', signal });
+}
+
+export function getFaceClusterRebuildStatus(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<FaceClusterRebuildStatus> {
+  return api<FaceClusterRebuildStatus>(
+    `/api/people/cluster-rebuild/${encodeURIComponent(jobId)}`,
+    { signal },
+  );
+}
+
 export function getPersonSimilarFaces(
   personId: string,
   minSimilarity: number,

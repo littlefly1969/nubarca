@@ -35,6 +35,8 @@ public static class PermissionCatalog
     public static readonly IReadOnlyList<PermissionDefinition> All =
     [
         new(Permissions.PeopleAccess, PermissionGroups.Features, false),
+        new(Permissions.PeopleClusterRebuild, PermissionGroups.Features, false,
+            Parent: Permissions.PeopleAccess),
         new(Permissions.SemanticSearchAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryAccess, PermissionGroups.Features, false),
         new(Permissions.LaboratoryPlates, PermissionGroups.Features, false,

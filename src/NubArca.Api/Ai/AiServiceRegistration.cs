@@ -122,6 +122,9 @@ public static class AiServiceRegistration
         services.AddScoped<FaceCoverageService>();
         services.AddScoped<FaceDiagnosticsService>();
         services.AddScoped<FaceClusteringService>();
+        // Owner-facing entry point to the same clustering: enqueue + owner-safe
+        // status for the Cloud hub's "Ricalcola cluster volti".
+        services.AddScoped<FaceClusterRebuildService>();
         // Lazily-bootstrapped multi-reference person templates (max 6/person/profile).
         services.AddScoped<PersonFaceReferenceService>();
         services.AddScoped<PeopleService>();
@@ -144,6 +147,7 @@ public static class AiServiceRegistration
         services.AddScoped<IJobHandler, AiFacesDetectBackfillJobHandler>();
         services.AddScoped<IJobHandler, AiFacesEmbeddingsBackfillJobHandler>();
         services.AddScoped<IJobHandler, AiFacesClusterBackfillJobHandler>();
+        services.AddScoped<IJobHandler, AiFacesClusterOwnerJobHandler>();
         services.AddScoped<IJobHandler, AiTagsGenerateBackfillJobHandler>();
 
         // VSEM-01: canonical video temporal substrate. The service graph and the

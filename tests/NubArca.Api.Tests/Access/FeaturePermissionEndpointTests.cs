@@ -30,6 +30,11 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
     {
         { "/api/people", Permissions.PeopleAccess },
         { "/api/people/suggested-groups", Permissions.PeopleAccess },
+        // Owner-scoped face-cluster rebuild: the STATUS read. A permitted caller
+        // gets 404 for an id that does not exist — not refused, which is the
+        // property this theory checks.
+        { "/api/people/cluster-rebuild/00000000-0000-0000-0000-000000000000",
+            Permissions.PeopleClusterRebuild },
         { "/api/plates/images", Permissions.LaboratoryPlates },
         { "/api/aesthetics-lab/items", Permissions.LaboratoryAesthetics },
         { "/api/private-vault", Permissions.PrivateVaultAccess },
@@ -66,10 +71,15 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         // that carries it. A Laboratory section needs the shell permission too —
         // that is the composite policy, and the role editor refuses to store a
         // section without it.
-        string[] permissions = permissionKey is Permissions.LaboratoryPlates
-            or Permissions.LaboratoryAesthetics
-            ? [Permissions.LaboratoryAccess, permissionKey]
-            : [permissionKey];
+        // A composite policy needs its parent too, and the role editor refuses
+        // to store the child alone.
+        string[] permissions = permissionKey switch
+        {
+            Permissions.LaboratoryPlates or Permissions.LaboratoryAesthetics =>
+                [Permissions.LaboratoryAccess, permissionKey],
+            Permissions.PeopleClusterRebuild => [Permissions.PeopleAccess, permissionKey],
+            _ => [permissionKey],
+        };
 
         var (_, client) = await _factory.CreatePermissionClientAsync(
             $"granted-{Guid.NewGuid():N}@example.com", permissions);

@@ -198,6 +198,7 @@ export const ALL_PERMISSIONS: readonly string[] = Object.values(PERMISSIONS);
 
 export const MEMBER_PERMISSIONS: readonly string[] = [
   PERMISSIONS.peopleAccess,
+  PERMISSIONS.peopleClusterRebuild,
   PERMISSIONS.semanticSearchAccess,
   PERMISSIONS.laboratoryAccess,
   PERMISSIONS.laboratoryPlates,

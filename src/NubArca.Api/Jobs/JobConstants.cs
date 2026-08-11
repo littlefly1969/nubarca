@@ -62,6 +62,14 @@ public static class JobTypes
     public const string AiFacesClusterBackfill = "ai.faces.cluster.backfill";
     public const string AiTagsGenerateBackfill = "ai.tags.generate.backfill";
 
+    // ONE owner's face clustering, started by that owner from the Cloud hub.
+    // Deliberately a separate type from AiFacesClusterBackfill rather than a
+    // flag on it: the backfill's whole shape is "walk every eligible owner",
+    // and a payload field that switched that off would leave a job whose name
+    // and checkpoint no longer described what it does. The payload names the
+    // owner, and only the server ever writes it — see FaceOwnerClusterJobPayload.
+    public const string AiFacesClusterOwner = "ai.faces.cluster.owner";
+
     // VSEM-01: canonical video temporal manifest (scene segments + representative
     // sample timestamps). Blob-level and owner-free; the payload carries only an
     // optional blob id, an optional segmentation version, and flags. Scheduled

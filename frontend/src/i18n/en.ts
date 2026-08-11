@@ -1354,6 +1354,21 @@ const en: Partial<Record<MessageKey, string>> = {
   'cloud.organizeHint': 'The wizard shows a full preview before any file is moved.',
   'cloud.dedupe': 'Remove exact media duplicates',
   'cloud.dedupeDesc': 'Move redundant photos and videos with exactly identical content to Trash, retaining the file ingested first.',
+  'cloud.faceCluster': 'Rebuild face clusters',
+  'cloud.faceClusterDesc': 'Rebuilds your account\u2019s automatic face groups from scratch, keeping confirmed people and ignored faces.',
+
+  // --- Cloud: owner-scoped face cluster rebuild ---
+  'faceCluster.explain': 'Rebuilds the automatic "Suggested" and "Needs review" groups from the faces in your account.',
+  'faceCluster.preserved': 'People you have already confirmed and faces you have ignored are not changed.',
+  'faceCluster.action': 'Rebuild clusters',
+  'faceCluster.confirmTitle': 'Rebuild face clusters?',
+  'faceCluster.confirmBody': 'The automatic Suggested and Needs review groups will be recreated for your account.',
+  'faceCluster.queued': 'Queued\u2026',
+  'faceCluster.running': 'Rebuilding\u2026',
+  'faceCluster.done': 'Clusters rebuilt.',
+  'faceCluster.failed': 'The rebuild did not complete.',
+  'faceCluster.failedWithCode': 'The rebuild did not complete ({code}).',
+  'faceCluster.unavailable': 'Face clustering is not available in this environment.',
   'cloud.dedupeHint': 'Only photos and videos conclusively detected by NubArca are considered. Names, metadata, and visual similarity are not compared.',
   'cloud.dedupeTrashNote': 'Removed copies are moved to Trash and can be restored.',
   'cloud.dedupeConfirm': 'Remove exact duplicate photos and videos? Redundant copies will be moved to Trash.',
@@ -2353,6 +2368,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'roles.restricted': 'Restricted',
 
   'perm.peopleAccess': 'People',
+  'perm.peopleClusterRebuild': 'Face cluster rebuild',
   'perm.semanticSearchAccess': 'Semantic search',
   'perm.laboratoryAccess': 'Laboratory',
   'perm.laboratoryPlates': 'Laboratory \u2014 Plates',
@@ -2500,6 +2516,7 @@ const en: Partial<Record<MessageKey, string>> = {
 
   'perm.adminRolesManage': 'Administration \u2014 Roles',
   'permDesc.peopleAccess': 'Face and person grouping, and the People views.',
+  'permDesc.peopleClusterRebuild': 'Allows rebuilding the automatic face suggestions for one\u2019s own account.',
   'permDesc.semanticSearchAccess': 'Search photos and videos by what they show.',
   'permDesc.laboratoryAccess': 'Access to the Laboratory shell.',
   'permDesc.laboratoryPlates': 'Licence-plate detection and redaction.',

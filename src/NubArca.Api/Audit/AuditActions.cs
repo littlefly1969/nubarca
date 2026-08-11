@@ -279,6 +279,14 @@ public static class AuditActions
     // longer than anything else that touches it.
     public const string CastGrantCreate = "cast.grant.create";
     public const string CastGrantRevoke = "cast.grant.revoke";
+
+    // An owner rebuilt their OWN automatic face groups from the Cloud hub.
+    // Worth recording because it replaces a whole derived layer of that
+    // account's People — but the metadata is the job id and whether the request
+    // joined a run already in flight, nothing more. Not the profile (a model
+    // internal), not a count of faces, and never an id of a face, a person or a
+    // file: an audit trail says that something was rebuilt, not what was in it.
+    public const string PeopleFaceClusterRebuild = "people.face_cluster.rebuild";
 }
 
 public static class AuditEntityTypes

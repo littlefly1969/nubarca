@@ -1,17 +1,18 @@
-import { useRef, type KeyboardEvent } from 'react';
+import { useMemo, useRef, type KeyboardEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { useI18n } from '../i18n';
+import { usePermissions } from '../auth/usePermissions';
 import { Icon } from '../components/icons/Icon';
 import { PhotoArchiveExportPanel } from '../components/PhotoArchiveExportPanel';
 import { OrganizeByDatePanel } from '../cloud/OrganizeByDatePanel';
 import { StagingUploadPanel } from '../cloud/StagingUploadPanel';
 import { TvDevicesPanel } from '../cloud/TvDevicesPanel';
 import { ExactMediaDuplicatesPanel } from '../cloud/ExactMediaDuplicatesPanel';
+import { FaceClusterRebuildPanel } from '../cloud/FaceClusterRebuildPanel';
 import {
-  CLOUD_TOOLS,
   CLOUD_TOOL_PARAM,
-  cloudToolFromParams,
-  findCloudTool,
+  resolveCloudTool,
+  visibleCloudTools,
   type CloudToolId,
 } from '../cloud/cloudTools';
 
@@ -23,6 +24,12 @@ import {
 // whose selection lives in the URL (?tool=…), so a tool is deep-linkable and
 // browser back/forward moves between tools.
 //
+// Reaching this hub is one authority; a given tool may need another. Everything
+// below works on the VISIBLE list, never the full catalogue — including the
+// roving-tabindex arithmetic, which would otherwise land on an index that
+// renders nothing, and the deep link, which must fall back rather than show a
+// protected panel to somebody who may not use it.
+//
 // Private Vault is intentionally absent — it is a primary-navigation
 // destination, not an operational tool.
 
@@ -30,12 +37,16 @@ const PANEL_ID = 'cloud-tool-panel';
 
 export function CloudFunctionsPage() {
   const { t } = useI18n();
+  const perms = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  // An unrecognised ?tool= value falls back to the default tool.
-  const active = cloudToolFromParams(searchParams);
-  const activeTool = findCloudTool(active);
+  const tools = useMemo(() => visibleCloudTools(perms.has), [perms]);
+
+  // An unrecognised — or unauthorized — ?tool= value falls back to a tool this
+  // user may actually use.
+  const active = resolveCloudTool(searchParams, tools);
+  const activeTool = tools.find((tool) => tool.id === active) ?? null;
 
   // A push (not replace) so back/forward walks the tools the user visited.
   const select = (id: CloudToolId) => {
@@ -45,15 +56,16 @@ export function CloudFunctionsPage() {
   };
 
   function onKeyDown(e: KeyboardEvent<HTMLButtonElement>, index: number) {
+    if (tools.length === 0) return;
     let nextIndex = index;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (index + 1) % CLOUD_TOOLS.length;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nextIndex = (index + 1) % tools.length;
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      nextIndex = (index - 1 + CLOUD_TOOLS.length) % CLOUD_TOOLS.length;
+      nextIndex = (index - 1 + tools.length) % tools.length;
     } else if (e.key === 'Home') nextIndex = 0;
-    else if (e.key === 'End') nextIndex = CLOUD_TOOLS.length - 1;
+    else if (e.key === 'End') nextIndex = tools.length - 1;
     else return;
     e.preventDefault();
-    select(CLOUD_TOOLS[nextIndex].id);
+    select(tools[nextIndex].id);
     refs.current[nextIndex]?.focus();
   }
 
@@ -71,7 +83,7 @@ export function CloudFunctionsPage() {
         aria-label={t('cloud.toolTabsAria')}
         data-testid="cloud-tool-tabs"
       >
-        {CLOUD_TOOLS.map((tool, i) => {
+        {tools.map((tool, i) => {
           const selected = tool.id === active;
           return (
             <button
@@ -97,27 +109,30 @@ export function CloudFunctionsPage() {
         })}
       </div>
 
-      <div
-        id={PANEL_ID}
-        role="tabpanel"
-        aria-labelledby={`cloud-tool-tab-${active}`}
-        className="cloud-tool-panel"
-        data-testid="cloud-tool-panel"
-        data-tool={active}
-      >
-        <div className="cloud-tool-panel__intro">
-          <h2>{t(activeTool.titleKey)}</h2>
-          <p className="muted">{t(activeTool.descriptionKey)}</p>
-        </div>
+      {activeTool !== null && (
+        <div
+          id={PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={`cloud-tool-tab-${activeTool.id}`}
+          className="cloud-tool-panel"
+          data-testid="cloud-tool-panel"
+          data-tool={activeTool.id}
+        >
+          <div className="cloud-tool-panel__intro">
+            <h2>{t(activeTool.titleKey)}</h2>
+            <p className="muted">{t(activeTool.descriptionKey)}</p>
+          </div>
 
-        {/* The COMPLETE tool, in this page. A key per tool so switching tools
-            resets the panel's internal state instead of leaking it across. */}
-        {active === 'upload' && <StagingUploadPanel key="upload" />}
-        {active === 'organize' && <OrganizeByDatePanel key="organize" />}
-        {active === 'dedupe' && <ExactMediaDuplicatesPanel key="dedupe" />}
-        {active === 'archive' && <PhotoArchiveExportPanel key="archive" />}
-        {active === 'tv-devices' && <TvDevicesPanel key="tv-devices" />}
-      </div>
+          {/* The COMPLETE tool, in this page. A key per tool so switching tools
+              resets the panel's internal state instead of leaking it across. */}
+          {active === 'upload' && <StagingUploadPanel key="upload" />}
+          {active === 'organize' && <OrganizeByDatePanel key="organize" />}
+          {active === 'dedupe' && <ExactMediaDuplicatesPanel key="dedupe" />}
+          {active === 'archive' && <PhotoArchiveExportPanel key="archive" />}
+          {active === 'tv-devices' && <TvDevicesPanel key="tv-devices" />}
+          {active === 'face-cluster' && <FaceClusterRebuildPanel key="face-cluster" />}
+        </div>
+      )}
     </section>
   );
 }

@@ -22,6 +22,10 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.peopleAccess',
     descriptionKey: 'permDesc.peopleAccess',
   },
+  [PERMISSIONS.peopleClusterRebuild]: {
+    labelKey: 'perm.peopleClusterRebuild',
+    descriptionKey: 'permDesc.peopleClusterRebuild',
+  },
   [PERMISSIONS.semanticSearchAccess]: {
     labelKey: 'perm.semanticSearchAccess',
     descriptionKey: 'permDesc.semanticSearchAccess',
