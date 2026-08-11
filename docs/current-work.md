@@ -332,6 +332,14 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   repeat debounce, gate focus or paging on bitmap readiness, or move
   `additionalRenderRegions` with the focused row: virtualization and focus
   retention remain native concerns.
+- **A TV media download is owned by its current subscribers, not by its first
+  caller.** A tile leaving the virtualized window releases its pending demand
+  and cache reservation immediately. Work for the same URL remains shared while
+  any consumer is live; when a download slot opens, every orphaned waiter ahead
+  of the current viewport is discarded in that same handoff and is never
+  recorded as a media failure. Stale work therefore cannot block the current
+  viewport after the next slot handoff, without reviving the first-consumer
+  cancellation race that made live previews vanish.
 - **`BackHandler.exitApp()` does not close an Android app.** It maps to
   `Activity.moveTaskToBack(true)` — it BACKGROUNDS the task, which on a Fire
   Stick left NubArca in recents and resumed the old Activity on relaunch. The

@@ -29,7 +29,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import { tvDebug } from '../debug';
-import { isSoleLease, oldestEvictableIndex } from '../media/mediaCachePolicy';
+import {
+  createMediaSubscribers,
+  handoffFirstLive,
+  isSoleLease,
+  oldestEvictableIndex,
+  type MediaWaiter,
+} from '../media/mediaCachePolicy';
 
 // AsyncStorage key for the persisted limited TV session cookie. Bumping this
 // string invalidates any previously persisted session.
@@ -241,6 +247,11 @@ export interface TvMediaLease {
   release: () => void;
 }
 
+export interface TvMediaLeaseRequest {
+  readonly result: Promise<TvMediaLease>;
+  cancel: () => void;
+}
+
 // Registered by api/personal.ts (which imports this module — the provider
 // indirection avoids the import cycle). Returns {} when locked.
 let _personalHeaderProvider: (() => Record<string, string>) | null = null;
@@ -251,7 +262,11 @@ export function setPersonalMediaHeaderProvider(provider: () => Record<string, st
 
 let _mediaDir: Directory | null = null;
 // Dedupe concurrent loads of the same media (e.g. a grid mounting many tiles).
-const _mediaInflight = new Map<string, Promise<string>>();
+interface MediaInflight {
+  readonly subscribers: ReturnType<typeof createMediaSubscribers>;
+  task: Promise<string>;
+}
+const _mediaInflight = new Map<string, MediaInflight>();
 // Insertion/last-use order of cache keys currently on disk, for bounded eviction.
 let _mediaOrder: string[] = [];
 // Files currently handed to a mounted image. Eviction may temporarily exceed the
@@ -266,24 +281,38 @@ const _mediaFailures = new Map<string, number>();
 // Two-level async semaphore for the download pool: high-priority waiters are
 // always served before low-priority ones.
 let _mediaActive = 0;
-const _hiWaiters: Array<() => void> = [];
-const _loWaiters: Array<() => void> = [];
+const _hiWaiters: MediaWaiter[] = [];
+const _loWaiters: MediaWaiter[] = [];
 
-function acquireDownloadSlot(priority: TvMediaPriority): Promise<void> {
+function acquireDownloadSlot(
+  priority: TvMediaPriority,
+  canStart: () => boolean,
+  orphan: () => void,
+): Promise<boolean> {
+  if (!canStart()) {
+    orphan();
+    return Promise.resolve(false);
+  }
   if (_mediaActive < MEDIA_MAX_CONCURRENT) {
     _mediaActive += 1;
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
-  return new Promise<void>((resolve) => {
-    (priority === 'high' ? _hiWaiters : _loWaiters).push(resolve);
+  return new Promise<boolean>((resolve) => {
+    (priority === 'high' ? _hiWaiters : _loWaiters).push({
+      canStart,
+      start: () => { resolve(true); },
+      discard: () => {
+        orphan();
+        resolve(false);
+      },
+    });
   });
 }
 
 function releaseDownloadSlot(): void {
-  const next = _hiWaiters.shift() ?? _loWaiters.shift();
-  if (next) {
-    next(); // hand the active slot straight to the next waiter (count unchanged)
-  } else {
+  // A handoff keeps the active count unchanged. If every waiter is stale, the
+  // helper discards them in this same turn and the slot is actually released.
+  if (!handoffFirstLive(_hiWaiters, _loWaiters)) {
     _mediaActive = Math.max(0, _mediaActive - 1);
   }
 }
@@ -406,11 +435,15 @@ class MediaCacheReset extends Error {
   }
 }
 
+const MEDIA_WITHOUT_SUBSCRIBERS = new Error('TV media request has no subscribers');
+
 async function downloadTvMedia(
   url: string,
   key: string,
   opts: LoadTvMediaOptions,
   epoch: number,
+  hasSubscribers: () => boolean,
+  orphan: () => void,
 ): Promise<string> {
   const variant = mediaVariant(url);
   const dir = ensureMediaDir();
@@ -428,10 +461,21 @@ async function downloadTvMedia(
   // Throttle concurrent network downloads so a large grid loads progressively
   // instead of flooding the downloader; high-priority (visible) media first.
   const queuedAt = Date.now();
-  await acquireDownloadSlot(opts.priority ?? 'high');
+  const acquired = await acquireDownloadSlot(
+    opts.priority ?? 'high',
+    () => epoch === _mediaEpoch && hasSubscribers(),
+    orphan,
+  );
+  if (!acquired) {
+    throw epoch === _mediaEpoch ? MEDIA_WITHOUT_SUBSCRIBERS : new MediaCacheReset();
+  }
   const startedAt = Date.now();
   try {
     if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+    if (!hasSubscribers()) {
+      orphan();
+      throw MEDIA_WITHOUT_SUBSCRIBERS;
+    }
     const headers: Record<string, string> = opts.personal
       ? { ...(_personalHeaderProvider?.() ?? {}) }
       : {};
@@ -442,6 +486,10 @@ async function downloadTvMedia(
     // capped above, so writing the response bytes does not fan out unbounded.
     const response = await fetch(url, { headers, credentials: 'include' });
     if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+    if (!hasSubscribers()) {
+      orphan();
+      throw MEDIA_WITHOUT_SUBSCRIBERS;
+    }
     captureCookie(response.headers.get('set-cookie'));
     if (!response.ok) throw new ApiError(response.status, `GET TV media → ${response.status}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -449,6 +497,10 @@ async function downloadTvMedia(
       throw new ApiError(0, 'TV media download produced no bytes');
     }
     if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+    if (!hasSubscribers()) {
+      orphan();
+      throw MEDIA_WITHOUT_SUBSCRIBERS;
+    }
     dest.create({ intermediates: true, overwrite: true });
     dest.write(bytes);
     const file = dest;
@@ -461,6 +513,13 @@ async function downloadTvMedia(
     );
     return file.uri;
   } catch (err) {
+    if (err === MEDIA_WITHOUT_SUBSCRIBERS || !hasSubscribers()) {
+      // An orphan is lifecycle, not a media/server failure. Never poison the
+      // URL's retry window: a late/new subscriber must start a fresh task.
+      orphan();
+      tvDebug('media', variant, key, 'no-subscribers');
+      throw MEDIA_WITHOUT_SUBSCRIBERS;
+    }
     if (err instanceof MediaCacheReset || epoch !== _mediaEpoch) {
       tvDebug('media', variant, key, 'cache-reset');
       throw err instanceof MediaCacheReset ? err : new MediaCacheReset();
@@ -480,32 +539,50 @@ async function downloadTvMedia(
   }
 }
 
-function loadResolvedTvMedia(
+interface ResolvedMediaSubscription {
+  readonly result: Promise<string>;
+  release: () => void;
+}
+
+function subscribeResolvedTvMedia(
   url: string,
   key: string,
   opts: LoadTvMediaOptions,
-): Promise<string> {
+): ResolvedMediaSubscription {
   const inflight = _mediaInflight.get(key);
-  if (inflight) return inflight;
+  if (inflight) {
+    return { result: inflight.task, release: inflight.subscribers.acquire() };
+  }
   const failedAt = _mediaFailures.get(key);
   if (failedAt !== undefined) {
     if (Date.now() - failedAt < MEDIA_FAILURE_MEMO_MS) {
-      return Promise.reject(new ApiError(0, 'TV media recently failed'));
+      return {
+        result: Promise.reject(new ApiError(0, 'TV media recently failed')),
+        release: () => {},
+      };
     }
     _mediaFailures.delete(key);
   }
   const epoch = _mediaEpoch;
-  let task: Promise<string>;
-  task = downloadTvMedia(url, key, opts, epoch)
+  const subscribers = createMediaSubscribers();
+  const release = subscribers.acquire();
+  const entry: MediaInflight = {
+    subscribers,
+    task: Promise.resolve(''),
+  };
+  const orphan = () => {
+    if (_mediaInflight.get(key) === entry) _mediaInflight.delete(key);
+  };
+  entry.task = downloadTvMedia(url, key, opts, epoch, subscribers.hasAny, orphan)
     .then((uri) => {
       if (epoch !== _mediaEpoch) throw new MediaCacheReset();
       return uri;
     })
     .finally(() => {
-      if (_mediaInflight.get(key) === task) _mediaInflight.delete(key);
+      if (_mediaInflight.get(key) === entry) _mediaInflight.delete(key);
     });
-  _mediaInflight.set(key, task);
-  return task;
+  _mediaInflight.set(key, entry);
+  return { result: entry.task, release };
 }
 
 // Load a derived TV media file and return a local file:// URI for <Image>.
@@ -520,33 +597,63 @@ export function loadTvMedia(path: string, opts: LoadTvMediaOptions = {}): Promis
     return Promise.reject(err);
   }
   const key = mediaCacheKey(url);
-  return loadResolvedTvMedia(url, key, opts);
+  // Warm-up is a real, temporary subscriber: it keeps shared work alive only
+  // until its own promise settles.
+  const subscription = subscribeResolvedTvMedia(url, key, opts);
+  return subscription.result.finally(subscription.release);
 }
 
-// Acquire ownership BEFORE joining/starting the shared task. That closes the
-// Promise-resolution gap in which another completed download could otherwise
-// evict a file before the mounted consumer retained it.
-export async function loadTvMediaLeased(
+// Reserve cache ownership and subscribe synchronously. `cancel` releases both
+// immediately on unmount; it never aborts work still owned by another tile.
+export function loadTvMediaLeased(
   path: string,
   opts: LoadTvMediaOptions = {},
-): Promise<TvMediaLease> {
+): TvMediaLeaseRequest {
   let url: string;
   try {
     url = resolveTvMediaUrl(path);
   } catch (err) {
-    return Promise.reject(err);
+    return { result: Promise.reject(err), cancel: () => {} };
   }
   const key = mediaCacheKey(url);
   const epoch = _mediaEpoch;
   retainMediaKey(key);
-  try {
-    const uri = await loadResolvedTvMedia(url, key, opts);
-    if (epoch !== _mediaEpoch) throw new MediaCacheReset();
-    return mediaLease(key, uri, epoch);
-  } catch (err) {
+  const subscription = subscribeResolvedTvMedia(url, key, opts);
+  let reserved = true;
+  let cancelled = false;
+  let resolvedLease: TvMediaLease | null = null;
+
+  const releaseReservation = () => {
+    if (!reserved) return;
+    reserved = false;
     if (epoch === _mediaEpoch) releaseMediaKey(key);
-    throw err;
-  }
+  };
+  const result = (async () => {
+    try {
+      const uri = await subscription.result;
+      subscription.release();
+      if (cancelled) throw MEDIA_WITHOUT_SUBSCRIBERS;
+      if (epoch !== _mediaEpoch) throw new MediaCacheReset();
+      reserved = false; // the returned token owns the existing reservation
+      resolvedLease = mediaLease(key, uri, epoch);
+      return resolvedLease;
+    } catch (err) {
+      subscription.release();
+      releaseReservation();
+      throw err;
+    }
+  })();
+
+  return {
+    result,
+    cancel: () => {
+      if (cancelled) return;
+      cancelled = true;
+      subscription.release();
+      if (resolvedLease) resolvedLease.release();
+      else releaseReservation();
+    },
+  };
 }
 
 // Purge all cached derived media (called when the TV session is cleared/revoked/

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   loadTvMediaLeased,
   type TvMediaLease,
+  type TvMediaLeaseRequest,
   type TvMediaPriority,
 } from '../api/client';
 import { tvDebug } from '../debug';
+import { handoffFirstLive, type MediaWaiter } from './mediaCachePolicy';
 
 // Shared hook for loading a derived TV media file (thumbnail / preview / poster)
 // into a local file:// URI. Used by the grid thumbnail component and the
@@ -19,19 +21,29 @@ export type TvMediaState = 'loading' | 'ready' | 'failed';
 // fallback fan-out is what made the grid feel slow).
 const FALLBACK_DEFER_MS = 400;
 let _fallbackBusy = false;
-const _fallbackQueue: Array<() => void> = [];
+const _fallbackQueue: MediaWaiter[] = [];
 
-async function withFallbackGate<T>(fn: () => Promise<T>): Promise<T> {
+async function withFallbackGate<T>(
+  isLive: () => boolean,
+  fn: () => Promise<T>,
+): Promise<T | null> {
   if (_fallbackBusy) {
-    await new Promise<void>((resolve) => { _fallbackQueue.push(resolve); });
+    const acquired = await new Promise<boolean>((resolve) => {
+      _fallbackQueue.push({
+        canStart: isLive,
+        start: () => { resolve(true); },
+        discard: () => { resolve(false); },
+      });
+    });
+    if (!acquired) return null;
+  } else {
+    if (!isLive()) return null;
+    _fallbackBusy = true;
   }
-  _fallbackBusy = true;
   try {
-    return await fn();
+    return isLive() ? await fn() : null;
   } finally {
-    const next = _fallbackQueue.shift();
-    if (next) next(); // hand the gate to the next waiter
-    else _fallbackBusy = false;
+    if (!handoffFirstLive(_fallbackQueue, [])) _fallbackBusy = false;
   }
 }
 
@@ -93,6 +105,7 @@ export function useTvMedia(
 
   useEffect(() => {
     let cancelled = false;
+    let pendingRequest: TvMediaLeaseRequest | null = null;
     const loadSourceKey = sourceKey;
     replaceLease(null);
     setUri(null);
@@ -101,12 +114,24 @@ export function useTvMedia(
       setState('failed');
       return;
     }
+    const acquire = async (
+      mediaPath: string,
+      requestPriority: TvMediaPriority,
+    ): Promise<TvMediaLease> => {
+      const request = loadTvMediaLeased(mediaPath, {
+        priority: requestPriority,
+        personal,
+      });
+      pendingRequest = request;
+      try {
+        return await request.result;
+      } finally {
+        if (pendingRequest === request) pendingRequest = null;
+      }
+    };
     const run = async () => {
       try {
-        const primary = await loadTvMediaLeased(path, {
-          priority: priorityRef.current,
-          personal,
-        });
+        const primary = await acquire(path, priorityRef.current);
         if (cancelled) {
           primary.release();
         } else {
@@ -123,10 +148,10 @@ export function useTvMedia(
           await new Promise<void>((resolve) => { setTimeout(resolve, FALLBACK_DEFER_MS); });
           if (cancelled) return;
           try {
-            const secondary = await withFallbackGate(() =>
-              cancelled
-                ? Promise.resolve(null)
-                : loadTvMediaLeased(fallbackPath, { priority: 'low', personal }));
+            const secondary = await withFallbackGate(
+              () => !cancelled,
+              () => acquire(fallbackPath, 'low'),
+            );
             if (secondary !== null) {
               if (cancelled) {
                 secondary.release();
@@ -148,6 +173,8 @@ export function useTvMedia(
     void run();
     return () => {
       cancelled = true;
+      pendingRequest?.cancel();
+      pendingRequest = null;
     };
   }, [path, fallbackPath, personal, decodeRetry, replaceLease, sourceKey]);
 
