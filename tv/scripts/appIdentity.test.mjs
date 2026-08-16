@@ -180,8 +180,8 @@ test('the OTA certificate path is normalized relative to the TV project', () => 
 });
 
 test('the installed session storage identity remains unchanged', () => {
-  const client = readFileSync(resolve(tvRoot, 'src/api/client.ts'), 'utf8');
-  assert.match(client, /const SESSION_STORAGE_KEY = 'nubarca\.tv\.session\.cookie'/);
+  const sessionCookie = readFileSync(resolve(tvRoot, 'src/api/sessionCookie.ts'), 'utf8');
+  assert.match(sessionCookie, /TV_SESSION_STORAGE_KEY = 'nubarca\.tv\.session\.cookie'/);
 });
 
 test('the TV app stays a leanback app that does not require a touchscreen', () => {

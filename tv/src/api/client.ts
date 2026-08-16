@@ -5,11 +5,10 @@
 // exactly. The package-local AsyncStorage key is the released TV identity and is
 // immutable for in-place upgrades. Changing any of the three un-pairs the fleet.
 //
-// Cookie handling: React Native's fetch does not maintain a browser-style
-// cookie jar. The limited TV session is a SESSION COOKIE ("NubArca.TvSession",
-// HttpOnly, path-scoped to /api/tv) set by the pairing-poll response. We capture
-// Set-Cookie (RN exposes it, unlike browsers) and forward it manually via the
-// Cookie request header on subsequent /api/tv calls.
+// Cookie handling deliberately has one authority. The limited TV session is a
+// SESSION COOKIE ("NubArca.TvSession", HttpOnly, path-scoped to /api/tv) set by
+// the pairing-poll response. We capture its exact name=value, persist it, and
+// forward it manually; native fetch's separate cookie jar is disabled.
 //
 // This is NOT token auth: there is no JWT/bearer. The cookie is held in memory
 // and PERSISTED (unencrypted) across app restarts via AsyncStorage — see below.
@@ -18,7 +17,7 @@
 // owner APIs and never sends the normal NubArca.Auth cookie.
 //
 // Persistence scope (deliberately narrow): only the limited NubArca.TvSession
-// cookie string is persisted. By construction _cookieJar can hold nothing else —
+// cookie string is persisted. By construction the session store holds nothing else —
 // /api/tv responses only ever Set-Cookie the TV session; the owner NubArca.Auth
 // cookie is never received here, the pairing secret travels in a header (never a
 // cookie), and party tokens live in URLs (never cookies). Storage is AsyncStorage
@@ -29,6 +28,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths } from 'expo-file-system';
 import { tvDebug } from '../debug';
+import { TvSessionCookieStore } from './sessionCookie';
 import {
   createMediaSubscribers,
   handoffFirstLive,
@@ -37,9 +37,6 @@ import {
   type MediaWaiter,
 } from '../media/mediaCachePolicy';
 
-// AsyncStorage key for the persisted limited TV session cookie. Bumping this
-// string invalidates any previously persisted session.
-//
 // There is deliberately NO migration from the pre-NubArca key. That key only
 // ever existed inside the retired TV package (named in tv/README.md), and an
 // Android applicationId change gives the new package its own private storage
@@ -49,10 +46,8 @@ import {
 // The cookie this holds is still named NubArca.TvSession: that is the backend
 // wire contract with /api/tv/*, not a user-visible name, and renaming it would
 // invalidate live sessions. It stays on the compatibility allowlist.
-const SESSION_STORAGE_KEY = 'nubarca.tv.session.cookie';
-
 let _baseUrl = '';
-let _cookieJar: string | null = null;
+const sessionCookie = new TvSessionCookieStore(AsyncStorage);
 
 export function configure(baseUrl: string): void {
   _baseUrl = baseUrl.replace(/\/$/, '');
@@ -63,7 +58,7 @@ export function getBaseUrl(): string {
 }
 
 export function hasSession(): boolean {
-  return _cookieJar !== null;
+  return sessionCookie.current !== null;
 }
 
 // Video-hls slice 4: request headers carrying the limited TV session cookie,
@@ -73,7 +68,7 @@ export function hasSession(): boolean {
 // explicitly. Only ever pass these to URLs vetted by resolveTvMediaUrl —
 // the same /api/tv-only boundary every other consumer obeys.
 export function getTvSessionHeaders(): Record<string, string> {
-  return _cookieJar ? { cookie: _cookieJar } : {};
+  return sessionCookie.current ? { cookie: sessionCookie.current } : {};
 }
 
 // Headers for native media consumers. Personal video playback needs the same
@@ -81,7 +76,7 @@ export function getTvSessionHeaders(): Record<string, string> {
 // the fetch client, so both headers must be attached to master + HLS children.
 export function getTvMediaHeaders(personal = false): Record<string, string> {
   const headers = personal ? { ...(_personalHeaderProvider?.() ?? {}) } : {};
-  if (_cookieJar) headers.cookie = _cookieJar;
+  if (sessionCookie.current) headers.cookie = sessionCookie.current;
   return headers;
 }
 
@@ -90,16 +85,7 @@ export function getTvMediaHeaders(personal = false): Record<string, string> {
 // GET /api/tv/session before trusting it). Best-effort: any storage error is
 // swallowed and treated as "no persisted session".
 export async function restoreSession(): Promise<boolean> {
-  try {
-    const stored = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
-    if (stored) {
-      _cookieJar = stored;
-      return true;
-    }
-  } catch {
-    // No usable persisted session (storage unavailable / corrupt) → pair fresh.
-  }
-  return false;
+  return sessionCookie.restore();
 }
 
 // Drop the in-memory cookie AND remove the persisted copy, so a revoked/expired
@@ -107,9 +93,15 @@ export async function restoreSession(): Promise<boolean> {
 // revoked session cannot keep showing previously-fetched thumbnails/previews.
 // Synchronous for callers; the storage/disk removals are fire-and-forget.
 export function clearSession(): void {
-  _cookieJar = null;
-  void AsyncStorage.removeItem(SESSION_STORAGE_KEY).catch(() => { /* best effort */ });
+  sessionCookie.clear();
   clearTvMediaCache();
+}
+
+// Pairing is not complete until the exact limited-session cookie is durable.
+// A failed first write is retried here before the UI leaves the pairing screen.
+export async function ensureSessionPersisted(): Promise<() => boolean> {
+  const generation = await sessionCookie.ensure();
+  return () => sessionCookie.isCurrent(generation);
 }
 
 export class ApiError extends Error {
@@ -130,39 +122,32 @@ function assertTvPath(path: string): void {
   }
 }
 
-function captureCookie(setCookie: string | null): void {
-  if (!setCookie) return;
-  // Keep only name=value pairs, strip directives (HttpOnly, Path, SameSite…).
-  _cookieJar = setCookie
-    .split(',')
-    .map((c) => c.split(';')[0].trim())
-    .filter((c) => c.length > 0)
-    .join('; ');
-  // Persist the refreshed TV session cookie so it survives an app restart.
-  // Fire-and-forget: a storage failure only means the session is not persisted.
-  void AsyncStorage.setItem(SESSION_STORAGE_KEY, _cookieJar).catch(() => { /* best effort */ });
+async function captureCookie(setCookie: string | null): Promise<void> {
+  await sessionCookie.capture(setCookie);
 }
 
 interface RequestOptions {
   method?: string;
   json?: unknown;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   assertTvPath(path);
   const headers: Record<string, string> = { ...opts.headers };
   if (opts.json !== undefined) headers['content-type'] = 'application/json';
-  if (_cookieJar) headers['cookie'] = _cookieJar;
+  if (sessionCookie.current) headers['cookie'] = sessionCookie.current;
 
   const res = await fetch(`${_baseUrl}${path}`, {
     method: opts.method ?? 'GET',
     headers,
     body: opts.json !== undefined ? JSON.stringify(opts.json) : undefined,
-    credentials: 'include',
+    credentials: 'omit',
+    signal: opts.signal,
   });
 
-  captureCookie(res.headers.get('set-cookie'));
+  await captureCookie(res.headers.get('set-cookie'));
 
   if (res.status === 204) return undefined as T;
 
@@ -180,12 +165,21 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return parsed as T;
 }
 
-export function tvGet<T>(path: string, headers?: Record<string, string>): Promise<T> {
-  return request<T>(path, { headers });
+export function tvGet<T>(
+  path: string,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return request<T>(path, { headers, signal });
 }
 
-export function tvPost<T>(path: string, json?: unknown, headers?: Record<string, string>): Promise<T> {
-  return request<T>(path, { method: 'POST', json, headers });
+export function tvPost<T>(
+  path: string,
+  json?: unknown,
+  headers?: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<T> {
+  return request<T>(path, { method: 'POST', json, headers, signal });
 }
 
 export function tvPut<T>(path: string, json?: unknown, headers?: Record<string, string>): Promise<T> {
@@ -204,10 +198,8 @@ export function tvDelete<T>(path: string, headers?: Record<string, string>): Pro
 // usable data URI on the Fire TV / Hermes runtime — so images silently rendered
 // blank even on HTTP 200. We still use authenticated fetch, but write its bytes
 // to the app-private cache and hand <Image> a local file:// URI. This matters
-// after a process restart: React Native's fetch retains the native HttpOnly
-// session cookie, while expo-file-system's separate downloader does not share
-// that cookie jar and would return 401 if the manually persisted cookie was
-// unavailable.
+// after a process restart: the session store rehydrates the exact manual cookie,
+// while expo-file-system's separate downloader would otherwise return 401.
 //
 // Only ever used for DERIVED media served under /api/tv/media — never original
 // full-resolution bytes. Every URL is validated to stay on the configured API
@@ -479,18 +471,17 @@ async function downloadTvMedia(
     const headers: Record<string, string> = opts.personal
       ? { ...(_personalHeaderProvider?.() ?? {}) }
       : {};
-    if (_cookieJar) headers.cookie = _cookieJar;
-    // Use the same authenticated fetch stack as the JSON API so the native
-    // HttpOnly cookie jar is honored even when `_cookieJar` could not be
-    // rehydrated. Derived previews are bounded server-side; concurrency is also
-    // capped above, so writing the response bytes does not fan out unbounded.
-    const response = await fetch(url, { headers, credentials: 'include' });
+    if (sessionCookie.current) headers.cookie = sessionCookie.current;
+    // Use the same single-authority manual cookie as the JSON API. Derived
+    // previews are bounded server-side; concurrency is also capped above, so
+    // writing the response bytes does not fan out unbounded.
+    const response = await fetch(url, { headers, credentials: 'omit' });
     if (epoch !== _mediaEpoch) throw new MediaCacheReset();
     if (!hasSubscribers()) {
       orphan();
       throw MEDIA_WITHOUT_SUBSCRIBERS;
     }
-    captureCookie(response.headers.get('set-cookie'));
+    await captureCookie(response.headers.get('set-cookie'));
     if (!response.ok) throw new ApiError(response.status, `GET TV media → ${response.status}`);
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength <= 0) {

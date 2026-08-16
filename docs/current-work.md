@@ -295,6 +295,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   talks to. `NUBARCA_PUBLIC_ORIGIN` is required under `NODE_ENV=production`;
   API base URL and OTA URL are derived from it plus `tv/release-contract.json`.
   APK keystore credentials remain a Gradle-only gate and are never OTA inputs.
+- **A TV is paired only after its limited session is both valid and durable.**
+  The native client extracts exactly `NubArca.TvSession=name-value` from
+  `Set-Cookie` (never by splitting on the comma inside `Expires`), serializes
+  local remove/write operations and uses that manual cookie as the sole fetch
+  authority. A `paired` status alone never opens the menu: `/api/tv/session`
+  must succeed and the exact cookie must finish writing to app-private storage;
+  transient network/storage failures retry the same approved pairing until its
+  deadline; pairing/session requests are aborted after 10 seconds and on screen
+  exit or absolute expiry. A missing/invalid claim cookie requires an explicit
+  new QR instead of claiming a connection that will disappear on the next cold
+  launch.
+  A legacy install whose session survived only in the native HTTP cookie jar
+  (and not under the unchanged AsyncStorage key) therefore re-pairs once; JS
+  cannot safely extract that HttpOnly value into the durable single authority.
 - **OTA isolation is structural.** Publications and channel pointers are keyed by
   runtime version, so bundles built for one native contract cannot be offered to
   a device asking for another.

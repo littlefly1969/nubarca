@@ -3,14 +3,24 @@ import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-na
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import { colors, font } from './src/theme';
-import { ApiError, clearSession, configure, restoreSession } from './src/api/client';
+import {
+  ApiError,
+  clearSession,
+  configure,
+  restoreSession,
+} from './src/api/client';
 import {
   clearPersonalGrant,
   getTvPersonalHome,
   getTvPersonalStatus,
   lockTvPersonal,
 } from './src/api/personal';
-import { getTvSession, type TvAlbum, type TvAlbumItem } from './src/api/tv';
+import {
+  getTvSession,
+  type TvAlbum,
+  type TvAlbumItem,
+  type TvSessionStatus,
+} from './src/api/tv';
 import {
   flowEffects,
   initialFlowState,
@@ -117,15 +127,9 @@ function AppInner(): React.JSX.Element {
     };
   }, [setLanguage]);
 
-  const onPaired = useCallback(() => {
-    // Just paired: the session cookie is set — adopt the owner's UI language
-    // before showing mode selection (best-effort; defaults to Italian).
-    getTvSession()
-      .then((session) => {
-        const lang = toLanguage(session.language);
-        if (lang) setLanguage(lang);
-      })
-      .catch(() => { /* keep the current/default language */ });
+  const onPaired = useCallback((session: TvSessionStatus) => {
+    const lang = toLanguage(session.language);
+    if (lang) setLanguage(lang);
     rawDispatch({ type: 'SESSION_READY' });
   }, [setLanguage]);
 

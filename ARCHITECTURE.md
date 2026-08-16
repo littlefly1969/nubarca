@@ -1089,6 +1089,8 @@ The TV Personal Area creates a short-lived owner-scoped upload session. Only the
 
 A TV starts a pairing request and displays a public code. An authenticated owner approves it. Approval atomically creates the limited TV session and ensures Personal Area PIN state is complete. The TV stores the returned cookie and validates it on launch.
 
+The native client treats the server's `paired` status as provisional: it extracts only the exact limited-session cookie, persists it through serialized device-local storage writes, and validates `/api/tv/session` before entering mode selection. Native fetch's separate cookie jar is not a second authority. Transient validation/storage failures retry the same approved pairing until its deadline; pairing requests are bounded and aborted on timeout, expiry, or screen exit. A missing one-shot claim cookie requires a new pairing instead of presenting a connection that cannot survive a cold launch. A legacy install that retained the session only in the native HttpOnly jar therefore re-pairs once, because the JS OTA cannot safely migrate that value into app-private storage.
+
 A TV session can access only TV projection endpoints: Party albums/media and the pairing/session contract. It is not equivalent to the owner's browser session and cannot call arbitrary owner APIs.
 
 Owners can list and revoke paired devices. Revocation or expiry causes clients to clear session state, personal grant, and cached protected media and return to pairing.

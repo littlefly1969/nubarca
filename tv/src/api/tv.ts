@@ -62,22 +62,23 @@ export interface TvAlbumItems {
   partyUploadUrl: string | null;
 }
 
-export function startTvPairing(): Promise<TvPairingStarted> {
-  return tvPost<TvPairingStarted>('/api/tv/pairing/start');
+export function startTvPairing(signal?: AbortSignal): Promise<TvPairingStarted> {
+  return tvPost<TvPairingStarted>('/api/tv/pairing/start', undefined, undefined, signal);
 }
 
 export function getTvPairingStatus(
   publicCode: string,
   pairingSecret: string,
+  signal?: AbortSignal,
 ): Promise<TvPairingStatus> {
   // The pairing secret travels in a header, never the URL (matches the web flow).
   return tvGet<TvPairingStatus>(`/api/tv/pairing/${encodeURIComponent(publicCode)}/status`, {
     'X-Tv-Pairing-Secret': pairingSecret,
-  });
+  }, signal);
 }
 
-export function getTvSession(): Promise<TvSessionStatus> {
-  return tvGet<TvSessionStatus>('/api/tv/session');
+export function getTvSession(signal?: AbortSignal): Promise<TvSessionStatus> {
+  return tvGet<TvSessionStatus>('/api/tv/session', undefined, signal);
 }
 
 export function listTvAlbums(): Promise<TvAlbum[]> {

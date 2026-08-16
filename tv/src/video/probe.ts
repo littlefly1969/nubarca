@@ -25,7 +25,7 @@ export async function probeTvVideo(path: string, personal = false): Promise<TvVi
   try {
     const res = await fetch(url, {
       headers: { ...getTvMediaHeaders(personal), Range: 'bytes=0-0' },
-      credentials: 'include',
+      credentials: 'omit',
     });
     return classifyVideoProbe(res.status, res.headers.get('content-type'));
   } catch {
