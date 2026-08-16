@@ -38,7 +38,7 @@ const PARTY_ITEMS_POLL_MS = 15_000;
 // After this idle period (no key / pointer activity) the 10-foot chrome — the
 // corner QR codes and the header/viewer command bar — fades away, like the
 // native TV overlay; any activity brings it straight back.
-const CHROME_IDLE_MS = 6_000;
+const CHROME_IDLE_MS = 10_000;
 
 // Moves keyboard/D-pad focus between the ALBUM tiles (uniform list) by a linear
 // delta. The justified item grid uses spatial navigation instead (findNextTvGridItem).
@@ -745,8 +745,8 @@ function TvFaceIndicator({
   );
 }
 
-// The two party QRs sit in the TOP corners (view/download top-left, upload
-// top-right) and fade with the rest of the chrome after an idle period.
+// The two party QRs sit in the BOTTOM corners (view/download left, upload
+// right) and fade with the rest of the chrome after an idle period.
 function PartyQrOverlay({
   partyQr,
   uploadQr,

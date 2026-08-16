@@ -8,19 +8,20 @@ import {
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 
+// Temporary product gate. Keep the activation implementation in place so it
+// can be restored deliberately; the server independently rejects old clients.
+const PARTY_FACE_TV_ACTIVATION_ENABLED: boolean = false;
+
 // Public, anonymous "find your face" panel on the party landing page. A guest
 // picks/takes a selfie; the backend detects the most prominent face, matches it
 // against THIS party album, and returns party-safe media. The full selfie is
-// never stored server-side (only a small detected-face crop backs the TV
-// indicator while a search is shown on the TV). The response carries NO names,
+// never stored server-side. The response carries NO names,
 // scores, face/person ids, or vectors — only a safe status code + matching
 // media items.
 //
-// Completing a search only FILTERS THIS PHONE (via onFilterChange); the TV is
-// untouched until the guest explicitly presses "Show these photos on TV",
-// which the backend bridges to the paired TV. "Cancel search" clears the local
-// filter AND deletes the search server-side (deactivating the TV if this very
-// search was active — the server protects newer searches from stale cancels).
+// Completing a search only FILTERS THIS PHONE (via onFilterChange). The dormant
+// TV activation path below is intentionally gated off for now. "Cancel search"
+// clears the local filter and deletes the short-lived search server-side.
 type FaceState =
   | { kind: 'idle' }
   | { kind: 'searching' }
@@ -245,9 +246,7 @@ export function PartyFaceSearch({
         </div>
       );
     }
-    // ready: the matching photos are shown by the page grid (local filter). Here
-    // only the count + the two explicit actions. "Show on TV" stays disabled for
-    // an empty result — an empty search must never reach the TV.
+    // ready: the matching photos are shown by the page grid (local filter).
     const empty = res.items.length === 0;
     return (
       <div className="party-face-result">
@@ -266,17 +265,19 @@ export function PartyFaceSearch({
           >
             {t('partyFace.cancelSearch')}
           </button>
-          <button
-            type="button"
-            className="party-face-tv"
-            data-testid="party-face-show-tv"
-            disabled={empty || !res.searchId || tvState === 'activating'}
-            onClick={showOnTv}
-          >
-            {tvState === 'active' ? t('partyFace.showingOnTv') : t('partyFace.showOnTv')}
-          </button>
+          {PARTY_FACE_TV_ACTIVATION_ENABLED && (
+            <button
+              type="button"
+              className="party-face-tv"
+              data-testid="party-face-show-tv"
+              disabled={empty || !res.searchId || tvState === 'activating'}
+              onClick={showOnTv}
+            >
+              {tvState === 'active' ? t('partyFace.showingOnTv') : t('partyFace.showOnTv')}
+            </button>
+          )}
         </div>
-        {tvState === 'error' && (
+        {PARTY_FACE_TV_ACTIVATION_ENABLED && tvState === 'error' && (
           <p role="alert" data-testid="party-face-tv-error">{t('partyFace.tvError')}</p>
         )}
       </div>

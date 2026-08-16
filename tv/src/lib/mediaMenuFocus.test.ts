@@ -10,6 +10,8 @@ import {
   tvGridFocusRestoreTo,
   type TvGridFocusMemory,
 } from './mediaMenuFocus.ts';
+import { overlayQrSize } from '../theme.ts';
+import { OVERLAY_IDLE_MS } from './useMenuOverlay.ts';
 
 const ITEMS = [{ id: 'p0' }, { id: 'p1' }, { id: 'p2' }, { id: 'p3' }, { id: 'p4' }];
 
@@ -118,6 +120,22 @@ test('the grid starts by asking for focus on its first tile', () => {
   assert.equal(INITIAL_TV_GRID_FOCUS.restoreIndex, 0);
   assert.equal(INITIAL_TV_GRID_FOCUS.menuOwnsFocus, false);
   assert.equal(INITIAL_TV_GRID_FOCUS.id, null);
+});
+
+test('the Party overlay uses the requested QR scale, bottom corners and idle window', () => {
+  assert.equal(overlayQrSize(540), 210);
+  assert.equal(overlayQrSize(1080), 420);
+  assert.equal(OVERLAY_IDLE_MS, 10_000);
+
+  const overlay = readFileSync(new URL('../components/OverlayQrCorners.tsx', import.meta.url), 'utf8');
+  assert.match(overlay, /left: insetX, bottom: insetY/);
+  assert.match(overlay, /right: insetX, bottom: insetY/);
+  assert.doesNotMatch(overlay, /(?:left|right): insetX, top: insetY/);
+
+  const album = readFileSync(new URL('../screens/AlbumItemsScreen.tsx', import.meta.url), 'utf8');
+  const viewer = readFileSync(new URL('../screens/ViewerScreen.tsx', import.meta.url), 'utf8');
+  assert.match(album, /styles\.commandBar, \{ top: inset\.y \+ 64 \}/);
+  assert.match(viewer, /styles\.counterPill, \{ top: inset\.y \}/);
 });
 
 // The remaining contract is wiring: it lives in the screens, and a regression

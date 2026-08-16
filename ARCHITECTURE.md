@@ -820,7 +820,7 @@ Party is a separate public projection over an owner album. Its capability model 
 - a distinct anonymous upload flow;
 - owner-side upload moderation (visible/hidden/approved/rejected/restored states);
 - public face search within the party-visible album;
-- explicit activation of one search on paired TV clients;
+- optional, configuration-gated activation of one search on paired TV clients;
 - event slideshow and proportional media grids.
 
 Party token validation always derives the currently visible item set from owner, album membership, file state, moderation, and expiry/revocation. Stored Party search results do not permanently grant access: result visibility is re-derived when read.
@@ -831,7 +831,9 @@ Anonymous uploads are bounded by Party-specific size and rate limits, ingest thr
 
 ### 14.5 Party face search privacy
 
-The public client uploads a temporary selfie. The service detects/embeds it, compares only against faces belonging to the currently visible Party album, persists a short-lived search session and ranked file references, and discards query material. The database does not store the selfie bytes or query vector. Sessions expire, can be deleted, and can be explicitly activated for TV display.
+The public client uploads a temporary selfie. The service detects/embeds it, compares only against faces belonging to the currently visible Party album, persists a short-lived search session and ranked file references, and discards query material. The database does not store the selfie bytes or query vector. Sessions expire and can be deleted.
+
+TV activation is a separate, default-off capability (`Party:FaceSearch:TvActivationEnabled`): local Party search remains available while activation requests are rejected and TV polling projects `active: false`. When disabled, new searches do not persist the otherwise TV-only face-indicator crop. If enabled deliberately, activation is album-global rather than device-targeted: every paired TV for the same owner that is presenting that Party album observes the same active search, and clearing it on one TV clears it for the others.
 
 ## 15. Ingestion, organization, and export
 
@@ -980,7 +982,7 @@ Model weights are deployment inputs and are not part of the repository. Provider
 | Face detection | Implemented, blob/profile scoped, post-ingest and backfill paths |
 | Face embeddings | Implemented, tied to the same face-package profile as detection |
 | Face clustering and People | Implemented, owner/profile scoped, preserves confirmed and ignored decisions |
-| Party face search | Implemented, short-lived and album-constrained |
+| Party face search | Implemented, short-lived and album-constrained; TV activation default-off |
 | Document text extraction | Schema/job/provider seam only; skeleton/no-op product path |
 | Document embeddings | Schema/job/provider seam only; skeleton/no-op product path |
 | Automatic AI tagging | Schema/job/provider seam only; skeleton/no-op product path |

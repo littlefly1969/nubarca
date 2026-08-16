@@ -67,7 +67,7 @@ describe('PartyFaceSearch (public "find your face")', () => {
     ).toBeInTheDocument();
   });
 
-  it('a completed search only filters the phone: reports the filter, shows the actions, calls no TV activation', async () => {
+  it('a completed search filters only the phone and offers no TV activation', async () => {
     const calls: string[] = [];
     installFetchMock({
       'POST /api/party/tok-1/face-search': () => { calls.push('search'); return jsonResponse(readyBody); },
@@ -79,31 +79,13 @@ describe('PartyFaceSearch (public "find your face")', () => {
     expect(await screen.findByTestId('party-face-count')).toHaveTextContent('1 foto trovata');
     // The local phone filter carries the search id + matched ids in rank order.
     expect(onFilterChange).toHaveBeenLastCalledWith({ searchId: 's1', itemIds: ['f1'] });
-    // Both explicit actions present; "show on TV" enabled for a non-empty result.
+    // The local cancel action remains; the temporary TV bridge is absent.
     expect(screen.getByTestId('party-face-cancel')).toBeEnabled();
-    expect(screen.getByTestId('party-face-show-tv')).toBeEnabled();
-    // Nothing was sent to the TV automatically.
+    expect(screen.queryByTestId('party-face-show-tv')).not.toBeInTheDocument();
     expect(calls).toEqual(['search']);
   });
 
-  it('"Show these photos on TV" activates the search explicitly', async () => {
-    let activated = 0;
-    installFetchMock({
-      'POST /api/party/tok-1/face-search': () => jsonResponse(readyBody),
-      'POST /api/party/tok-1/face-search/s1/activate-tv': () => {
-        activated += 1;
-        return jsonResponse({ searchId: 's1', activationVersion: 1 });
-      },
-    });
-    renderPanel();
-    await openAndSubmit();
-    await userEvent.setup().click(await screen.findByTestId('party-face-show-tv'));
-
-    await waitFor(() => expect(activated).toBe(1));
-    expect(await screen.findByTestId('party-face-show-tv')).toHaveTextContent('Ora sulla TV');
-  });
-
-  it('an empty result shows the empty state and disables TV activation', async () => {
+  it('an empty result stays local and cancellable', async () => {
     installFetchMock({
       'POST /api/party/tok-1/face-search': () =>
         jsonResponse({ status: 'ready', searchId: 's-empty', resultCount: 0, items: [] }),
@@ -115,7 +97,7 @@ describe('PartyFaceSearch (public "find your face")', () => {
     expect(await screen.findByTestId('party-face-empty')).toHaveTextContent(
       'Nessuna foto trovata con questo volto.',
     );
-    expect(screen.getByTestId('party-face-show-tv')).toBeDisabled();
+    expect(screen.queryByTestId('party-face-show-tv')).not.toBeInTheDocument();
     // No local filter for an empty result; it stays cancellable.
     expect(onFilterChange).toHaveBeenLastCalledWith(null);
     expect(screen.getByTestId('party-face-cancel')).toBeEnabled();

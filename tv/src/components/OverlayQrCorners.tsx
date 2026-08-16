@@ -5,9 +5,9 @@ import { QrCode } from './QrCode';
 import { useI18n } from '../i18n';
 
 // Party QR corner cards for the MENU overlay (grid + slideshow): the first
-// available QR goes TOP-LEFT, the second TOP-RIGHT. With only one QR it stays
-// consistently top-left. Cards sit inside the overscan insets, are sized
-// responsively by the caller (~120-140 physical px on 1080p), never take focus
+// available QR goes BOTTOM-LEFT, the second BOTTOM-RIGHT. With only one QR it
+// stays consistently bottom-left. Cards sit inside the overscan insets, are
+// sized responsively by the caller, never take focus
 // (plain <Image>-based QR + pointerEvents none), and never resize the photo or
 // grid underneath (absolute positioning).
 interface Props {
@@ -35,7 +35,7 @@ export function OverlayQrCorners({ partyUrl, partyUploadUrl, insetX, insetY, qrS
       pointerEvents="none"
       style={[
         styles.card,
-        corner === 'left' ? { left: insetX, top: insetY } : { right: insetX, top: insetY },
+        corner === 'left' ? { left: insetX, bottom: insetY } : { right: insetX, bottom: insetY },
       ]}
     >
       <QrCode

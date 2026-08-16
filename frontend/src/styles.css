@@ -758,13 +758,13 @@ a {
    fl: the whole photo is contained, never cropped or blown up past the frame. */
 .tv-viewer-media { max-width: 100%; max-height: 100%; min-width: 0; min-height: 0; object-fit: contain; }
 .tv-viewer-topbar {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+  position: absolute; top: 5rem; left: 0; right: 0; z-index: 10;
   display: flex; justify-content: center;
 }
 .tv-viewer-bar {
-  position: absolute; bottom: 0; left: 0; right: 0; z-index: 10;
+  position: absolute; top: 0; left: 0; right: 0; z-index: 10;
   display: flex; align-items: center; gap: 1rem; padding: 1rem 1.25rem;
-  background: linear-gradient(to top, rgb(0 0 0 / 80%), rgb(0 0 0 / 32%) 62%, transparent);
+  background: linear-gradient(to bottom, rgb(0 0 0 / 80%), rgb(0 0 0 / 32%) 62%, transparent);
 }
 .tv-viewer-caption { color: #cbd5e1; font-size: 1.05rem; overflow-wrap: anywhere; }
 .tv-face-banner { display: flex; align-items: center; justify-content: center; gap: 1rem; padding: 0.75rem 1rem; background: rgb(59 130 246 / 22%); color: #e8ebf1; font-size: 1.1rem; }
@@ -831,15 +831,15 @@ a {
 .party-lightbox-bar { display: flex; gap: 0.75rem; justify-content: center; }
 .party-download { display: inline-block; padding: 0.5rem 1rem; background: #3b82f6; color: #fff; border-radius: 6px; text-decoration: none; }
 
-/* TV party QR codes (10-foot): pinned to the TOP corners — view/download
-   top-left, upload top-right — and faded with the rest of the chrome on idle. */
+/* TV party QR codes (10-foot): pinned to the BOTTOM corners — view/download
+   left, upload right — and faded with the rest of the chrome on idle. */
 .tv-chrome { transition: opacity 260ms ease; }
 .tv-chrome-hidden { opacity: 0; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .tv-chrome { transition: none; } }
 
 .tv-party-corner {
   position: fixed;
-  top: max(1rem, env(safe-area-inset-top));
+  bottom: max(1rem, env(safe-area-inset-bottom));
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -875,15 +875,29 @@ a {
 .party-upload-progress-label { margin: 0; font-weight: 600; }
 .party-upload-warning { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: rgb(255 193 7 / 16%); border: 1px solid rgb(255 193 7 / 35%); color: #ffd873; font-weight: 600; }
 .party-upload-status { margin-top: 1rem; }
-.tv-party-qr { background: #fff; padding: 0.5rem; border-radius: 8px; width: 160px; height: 160px; }
+.tv-party-qr {
+  box-sizing: border-box;
+  background: #fff;
+  padding: 0.5rem;
+  border-radius: 8px;
+  width: min(480px, calc(50vw - 2.5rem), calc(100vh - 9rem));
+  height: min(480px, calc(50vw - 2.5rem), calc(100vh - 9rem));
+}
 .tv-party-qr svg { width: 100%; height: 100%; display: block; }
 .tv-party-caption { color: #fff; margin: 0; font-size: 1rem; font-weight: 600; text-align: center; }
 
-@media (max-width: 700px) {
+/* Low-height TV browsers cannot fit two 480px cards plus the command chrome.
+   Use the compact 3x target (3 * 96px) and reclaim the redundant page title;
+   the album/viewer controls then stay fully above the bottom cards. */
+@media (max-width: 700px), (max-height: 700px) {
+  .tv-browse-title { display: none; }
   .tv-party-corner { padding: 0.5rem; gap: 0.35rem; }
   .tv-party-corner-left { left: 0.5rem; }
   .tv-party-corner-right { right: 0.5rem; }
-  .tv-party-qr { width: 96px; height: 96px; }
+  .tv-party-qr {
+    width: min(288px, calc(50vw - 1.5rem), calc(100vh - 7rem));
+    height: min(288px, calc(50vw - 1.5rem), calc(100vh - 7rem));
+  }
   .tv-party-caption { font-size: 0.8rem; }
 }
 

@@ -41,6 +41,7 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
     private readonly TimeProvider _clock;
 
     private readonly bool _enabled;
+    private readonly bool _tvActivationEnabled;
     private readonly long _maxBytes;
     private readonly int _maxDimension;
     private readonly int _ttlMinutes;
@@ -66,6 +67,7 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         _clock = clock;
 
         _enabled = config.GetValue<bool?>("Party:FaceSearch:Enabled") ?? true;
+        _tvActivationEnabled = config.GetValue<bool?>("Party:FaceSearch:TvActivationEnabled") ?? false;
         var bytes = config.GetValue<long?>("Party:FaceSearch:MaxUploadBytes");
         _maxBytes = bytes is > 0 ? bytes.Value : DefaultMaxUploadBytes;
         var dim = config.GetValue<int?>("Party:FaceSearch:MaxImageDimension");
@@ -261,12 +263,10 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
             .ToList();
 
         // 6) Persist the short-lived session + ranked matches (file ids only). No
-        //    selfie, no query vector, no score. When there ARE matches, also store
-        //    the small detected-face crop (never the full selfie) so an activated
-        //    TV filter can show the indicator thumbnail; a crop failure is
-        //    tolerated (the search works, the indicator just has no image).
+        //    selfie, no query vector, no score. Only while TV activation is
+        //    enabled do we store the small indicator crop (never the full selfie).
         var now = _clock.GetUtcNow().UtcDateTime;
-        Guid? faceCropBlobId = ranked.Count > 0
+        Guid? faceCropBlobId = _tvActivationEnabled && ranked.Count > 0
             ? await TryStoreFaceCropAsync(selfieBytes, largest, cancellationToken)
             : null;
         var session = new PartyFaceSearchSession
@@ -331,6 +331,11 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
     public async Task<PartyFaceSearchActivationResult> ActivateForTvAsync(
         Guid ownerUserId, Guid albumId, Guid searchId, CancellationToken cancellationToken = default)
     {
+        if (!_tvActivationEnabled)
+        {
+            return new PartyFaceSearchActivationResult(PartyFaceSearchActivationStatus.NotFound);
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var session = await _db.PartyFaceSearchSessions
             .FirstOrDefaultAsync(
@@ -425,6 +430,14 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         // of a party never pins its crop blob forever.
         await CleanupExpiredQuietlyAsync(ownerUserId, albumId, cancellationToken);
 
+        if (!_tvActivationEnabled)
+        {
+            // Suppression is authoritative and non-resurrecting: preserve the
+            // guest's local search/results, but clear the album-global TV state.
+            await DeactivateAllAsync(ownerUserId, albumId, cancellationToken);
+            return null;
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         // Only EXPLICITLY activated searches ever reach the TV; the highest
         // server-assigned activation version is the album's active filter.
@@ -463,14 +476,18 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
 
         // Deactivate only — the searches themselves stay usable on the guests'
         // phones until they expire or are deleted explicitly.
-        await _db.PartyFaceSearchSessions
+        await DeactivateAllAsync(ownerUserId, albumId, cancellationToken);
+        return true;
+    }
+
+    private Task<int> DeactivateAllAsync(
+        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken) =>
+        _db.PartyFaceSearchSessions
             .Where(s => s.OwnerUserId == ownerUserId && s.AlbumId == albumId
                 && s.TvActivationVersion != null)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(s => s.TvActivationVersion, (long?)null)
                 .SetProperty(s => s.TvActivatedAt, (DateTime?)null), cancellationToken);
-        return true;
-    }
 
     public async Task<bool> DeleteForTvAsync(
         Guid ownerUserId, Guid albumId, Guid searchId, CancellationToken cancellationToken = default)
@@ -487,6 +504,11 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
     public async Task<ThumbnailContent?> OpenFaceCropAsync(
         Guid ownerUserId, Guid albumId, Guid searchId, CancellationToken cancellationToken = default)
     {
+        if (!_tvActivationEnabled)
+        {
+            return null;
+        }
+
         if (!await IsOwnerTvAlbumAsync(ownerUserId, albumId, cancellationToken))
         {
             return null;

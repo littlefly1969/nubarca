@@ -340,6 +340,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   recorded as a media failure. Stale work therefore cannot block the current
   viewport after the next slot handoff, without reviving the first-consumer
   cancellation race that made live previews vanish.
+- **Party face search is phone-local by default.**
+  `Party:FaceSearch:TvActivationEnabled` is independent from the search switch:
+  while it is false, local matching and cancellation keep working, old clients
+  cannot activate a TV, TV polls return the normal inactive projection, and no
+  TV-only face crop is stored. The dormant activation implementation is retained.
+  If it is deliberately re-enabled, it targets one `owner + album` state, not a
+  device: every paired TV showing that Party album receives it, and clearing it
+  on one clears it for the others.
+- **A Party browser upload requests Screen Wake Lock only while its XHR is in
+  flight.** The first request stays inside the upload click for WebKit, a visible
+  in-flight page reacquires after `visibilitychange`, and completion/unmount
+  releases it. This is best-effort screen control, never a promise of background
+  execution: explicit screen-off, browser closure, battery policy or OS page
+  suspension can still interrupt the upload.
 - **`BackHandler.exitApp()` does not close an Android app.** It maps to
   `Activity.moveTaskToBack(true)` — it BACKGROUNDS the task, which on a Fire
   Stick left NubArca in recents and resumed the old Activity on relaunch. The

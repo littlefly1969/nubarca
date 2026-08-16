@@ -60,11 +60,11 @@ interface Props {
 //  - Overlay HIDDEN (default): ONLY the photo. LEFT = previous, RIGHT = next,
 //    MENU = show the overlay, BACK = exit to the grid, play/pause media key =
 //    toggle auto-advance. SELECT is deliberately RESERVED (no-op).
-//  - Overlay VISIBLE: purely INFORMATIONAL — party QR cards top-left/top-right
-//    and a small centered playback-state + "current / total" pill at the bottom
+//  - Overlay VISIBLE: purely INFORMATIONAL — party QR cards bottom-left/right
+//    and a small centered playback-state + "current / total" pill at the top
 //    (no buttons or filenames, nothing that can clip).
 //    LEFT/RIGHT keep changing the photo (the counter updates live), MENU hides
-//    it, BACK hides it first, and it auto-hides after ~6s of inactivity.
+//    it, BACK hides it first, and it auto-hides after ~10s of inactivity.
 //
 // Images use the aspect-preserving SlideImage (MEDIUM preview / poster, never
 // the original). When playing, advances every SLIDE_MS and loops; manual
@@ -385,7 +385,7 @@ export function ViewerScreen({
               while face-filter mode is active. Non-focusable, top-center —
               nothing existing moves. */}
           {faceFilter !== null && (
-            <View style={[styles.faceIndicatorRow, { top: inset.y }]} pointerEvents="none">
+            <View style={[styles.faceIndicatorRow, { top: inset.y + 56 }]} pointerEvents="none">
               <FaceFilterIndicator
                 faceThumbnailUrl={faceFilter.faceThumbnailUrl}
                 albumName={albumName ?? ''}
@@ -393,11 +393,11 @@ export function ViewerScreen({
             </View>
           )}
 
-          {/* The ONLY bottom chrome: playback state plus "current / total".
+          {/* The ONLY top chrome: playback state plus "current / total".
               It reflects the same `playing` state toggled by the media key and
               stays non-focusable, so remote semantics do not change. */}
           {displayItems.length > 0 && (
-            <View style={[styles.counterPill, { bottom: inset.y }]} pointerEvents="none">
+            <View style={[styles.counterPill, { top: inset.y }]} pointerEvents="none">
               <Text style={[styles.playbackText, playing ? styles.playingText : styles.pausedText]} numberOfLines={1}>
                 {playing ? t('viewer.playing') : t('viewer.paused')}
               </Text>

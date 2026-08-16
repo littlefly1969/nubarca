@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyUploadPage } from './PartyUploadPage';
@@ -39,8 +39,31 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  Reflect.deleteProperty(navigator, 'wakeLock');
+  Reflect.deleteProperty(document, 'visibilityState');
   vi.unstubAllGlobals();
 });
+
+function installWakeLock() {
+  const releases: Array<ReturnType<typeof vi.fn>> = [];
+  const request = vi.fn(async () => {
+    const release = vi.fn(async () => {});
+    releases.push(release);
+    return {
+      released: false,
+      release,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      onrelease: null,
+    } as unknown as WakeLockSentinel;
+  });
+  Object.defineProperty(navigator, 'wakeLock', {
+    configurable: true,
+    value: { request },
+  });
+  return { request, releases };
+}
 
 function wrapper(token = 'uptok-1') {
   return (
@@ -89,6 +112,107 @@ describe('PartyUploadPage (public anonymous upload)', () => {
 
     // No login or album-browsing surface on the upload page.
     expect(screen.queryByText(/sign in|log in|password/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the screen awake only while the Party upload is active', async () => {
+    installFetchMock({ 'GET /api/party/uptok-1': () => errorResponse(404) });
+    const wake = installWakeLock();
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+
+    await waitFor(() => expect(wake.request).toHaveBeenCalledWith('screen'));
+    expect(wake.releases).toHaveLength(1);
+    expect(wake.releases[0]).not.toHaveBeenCalled();
+
+    act(() => { MockXHR.last!.finish(); });
+    await screen.findByTestId('upload-result');
+    await waitFor(() => expect(wake.releases[0]).toHaveBeenCalledOnce());
+  });
+
+  it('reacquires the wake lock after visibility returns during an upload', async () => {
+    installFetchMock({ 'GET /api/party/uptok-1': () => errorResponse(404) });
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    const wake = installWakeLock();
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+    await waitFor(() => expect(wake.request).toHaveBeenCalledTimes(1));
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(() => expect(wake.releases[0]).toHaveBeenCalledOnce());
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(() => expect(wake.request).toHaveBeenCalledTimes(2));
+
+    act(() => { MockXHR.last!.finish(); });
+    await waitFor(() => expect(wake.releases[1]).toHaveBeenCalledOnce());
+  });
+
+  it('retries when visibility returns before the hidden request has settled', async () => {
+    installFetchMock({ 'GET /api/party/uptok-1': () => errorResponse(404) });
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    let rejectFirst!: (reason: unknown) => void;
+    const first = new Promise<WakeLockSentinel>((_resolve, reject) => { rejectFirst = reject; });
+    const release = vi.fn(async () => {});
+    const second = {
+      released: false,
+      release,
+      addEventListener: vi.fn(),
+    } as unknown as WakeLockSentinel;
+    const request = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockResolvedValueOnce(second);
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: { request },
+    });
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+    expect(request).toHaveBeenCalledTimes(1);
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    await act(async () => { rejectFirst(new DOMException('Hidden', 'NotAllowedError')); });
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    act(() => { MockXHR.last!.finish(); });
+    await waitFor(() => expect(release).toHaveBeenCalledOnce());
+  });
+
+  it('continues uploading when the browser denies the wake lock', async () => {
+    installFetchMock({ 'GET /api/party/uptok-1': () => errorResponse(404) });
+    const request = vi.fn().mockRejectedValue(new DOMException('Denied', 'NotAllowedError'));
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: { request },
+    });
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+    await waitFor(() => expect(request).toHaveBeenCalledOnce());
+    act(() => { MockXHR.last!.finish(); });
+    expect(await screen.findByTestId('upload-result')).toHaveTextContent(/Caricate 2 foto/i);
   });
 
   it('shows an unavailable message when the upload link is revoked (404 on POST)', async () => {

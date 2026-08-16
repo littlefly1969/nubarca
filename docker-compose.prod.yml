@@ -300,6 +300,8 @@ services:
       # Party face search (public "find your face") — public endpoint tunables.
       # Selfies are downscaled client-side, so the caps are generous safety bounds.
       Party__FaceSearch__Enabled: ${Party__FaceSearch__Enabled:-true}
+      # Local search stays available; sending its result to TV is off by default.
+      Party__FaceSearch__TvActivationEnabled: ${Party__FaceSearch__TvActivationEnabled:-false}
       Party__FaceSearch__MaxUploadBytes: ${Party__FaceSearch__MaxUploadBytes:-15728640}
       Party__FaceSearch__MaxImageDimension: ${Party__FaceSearch__MaxImageDimension:-12000}
       Party__FaceSearch__SessionTtlMinutes: ${Party__FaceSearch__SessionTtlMinutes:-20}

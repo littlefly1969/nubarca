@@ -171,6 +171,35 @@ describe('styles.css parses', () => {
     expect(decls).toBeGreaterThan(2000);
   });
 
+  it('pins the TV Party QR cards at the bottom at three times their old side', () => {
+    const root = postcss.parse(CSS, { from: CSS_PATH });
+    const declarations = (selector: string) => {
+      const values = new Map<string, string>();
+      root.walkRules(selector, (rule) => {
+        if (rule.parent?.type === 'root') {
+          rule.walkDecls((decl) => { values.set(decl.prop, decl.value); });
+        }
+      });
+      return values;
+    };
+
+    const corner = declarations('.tv-party-corner');
+    expect(corner.get('bottom')).toBe('max(1rem, env(safe-area-inset-bottom))');
+    expect(corner.has('top')).toBe(false);
+    const qr = declarations('.tv-party-qr');
+    expect(qr.get('width')).toBe('min(480px, calc(50vw - 2.5rem), calc(100vh - 9rem))');
+    expect(qr.get('height')).toBe('min(480px, calc(50vw - 2.5rem), calc(100vh - 9rem))');
+    expect(qr.get('box-sizing')).toBe('border-box');
+
+    const compact = root.nodes.find((node): node is postcss.AtRule =>
+      node.type === 'atrule'
+      && node.name === 'media'
+      && node.params === '(max-width: 700px), (max-height: 700px)');
+    expect(compact, 'compact TV QR media rule').toBeDefined();
+    expect(compact!.toString()).toContain('.tv-browse-title { display: none; }');
+    expect(compact!.toString()).toContain('width: min(288px, calc(50vw - 1.5rem), calc(100vh - 7rem))');
+  });
+
   // UX-02 §3: ONE layout system. The shell used to centre every page in a
   // 64rem column and let media-wall pages opt out, which is how a 2560px
   // display ended up using a third of its width for a grid.

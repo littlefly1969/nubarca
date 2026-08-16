@@ -147,7 +147,7 @@ describe('TvBrowser party chrome (QR corners + idle auto-hide)', () => {
     });
   }
 
-  it('pins the view QR to the top-left and the upload QR to the top-right', async () => {
+  it('pins the view QR left and the upload QR right', async () => {
     mockPartyTv();
     await openAlbum();
     const view = await screen.findByTestId('tv-party-qr');
@@ -174,8 +174,12 @@ describe('TvBrowser party chrome (QR corners + idle auto-hide)', () => {
       const qr = screen.getByTestId('tv-party-qr');
       expect(qr).not.toHaveClass('tv-chrome-hidden');
 
-      // Idle past the threshold → chrome fades (stays in the DOM, opacity 0).
-      await act(async () => { await vi.advanceTimersByTimeAsync(6_100); });
+      // The old six-second threshold no longer hides the menu.
+      await act(async () => { await vi.advanceTimersByTimeAsync(9_900); });
+      expect(screen.getByTestId('tv-party-qr')).not.toHaveClass('tv-chrome-hidden');
+
+      // Ten seconds idle → chrome fades (stays in the DOM, opacity 0).
+      await act(async () => { await vi.advanceTimersByTimeAsync(200); });
       expect(screen.getByTestId('tv-party-qr')).toHaveClass('tv-chrome-hidden');
 
       // Any key activity brings it straight back.

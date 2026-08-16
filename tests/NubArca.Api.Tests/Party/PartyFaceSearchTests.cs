@@ -39,6 +39,13 @@ public sealed class PartyFaceSearchTests
         ("Ai:Enabled", "true"),
         ("Ai:FaceDetectionEnabled", "true"),
         ("Ai:FaceEmbeddingsEnabled", "true"),
+        ("Party:FaceSearch:TvActivationEnabled", "true"),
+        ("Ai:Face:SearchDefaultSimilarityThreshold", "0.9"));
+
+    private static SqliteWebApplicationFactory FacesLocalOnlyFactory() => Factory(
+        ("Ai:Enabled", "true"),
+        ("Ai:FaceDetectionEnabled", "true"),
+        ("Ai:FaceEmbeddingsEnabled", "true"),
         ("Ai:Face:SearchDefaultSimilarityThreshold", "0.9"));
 
     private static SqliteWebApplicationFactory Factory(params (string Key, string Value)[] settings)
@@ -365,6 +372,51 @@ public sealed class PartyFaceSearchTests
 
         var active = await TvJsonAsync(f, cookie, $"/api/tv/albums/{albumId}/face-search/active");
         Assert.False(active.GetProperty("active").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Tv_Activation_Switch_Off_Leaves_Face_Search_Local()
+    {
+        using var f = FacesLocalOnlyFactory();
+        await SeedProfilesAsync(f);
+        var (_, owner) = await f.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner, "Party");
+        await AddPngAsync(owner, albumId, "m.png", Png(16));
+        var status = await EnablePartyAsync(owner, albumId);
+        var viewToken = ViewTokenFromStatus(status);
+        var cookie = await PairTvAsync(f, owner);
+        await RunFaceJobsAsync(f);
+
+        var anon = f.CreateClient();
+        var search = await ReadJsonAsync(await FaceSearchAsync(anon, viewToken, Png(16)));
+        Assert.Equal("ready", search.GetProperty("status").GetString());
+        Assert.Equal(1, search.GetProperty("resultCount").GetInt32());
+        var searchId = search.GetProperty("searchId").GetGuid();
+
+        // Local re-read still works, but even an old client cannot activate TV.
+        Assert.Equal(HttpStatusCode.OK,
+            (await anon.GetAsync($"/api/party/{viewToken}/face-search/{searchId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await anon.PostAsync($"/api/party/{viewToken}/face-search/{searchId}/activate-tv", null)).StatusCode);
+        Assert.Null(await FaceCropBlobIdAsync(f, searchId));
+
+        // A pre-existing activation row is also suppressed while the switch is
+        // off, so all TV clients receive the normal inactive projection.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var session = await db.PartyFaceSearchSessions.FirstAsync(s => s.Id == searchId);
+            session.TvActivationVersion = 1;
+            session.TvActivatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        var active = await TvJsonAsync(f, cookie, $"/api/tv/albums/{albumId}/face-search/active");
+        Assert.False(active.GetProperty("active").GetBoolean());
+        using var verify = f.Services.CreateScope();
+        var cleared = await verify.ServiceProvider.GetRequiredService<AppDbContext>()
+            .PartyFaceSearchSessions.AsNoTracking().FirstAsync(s => s.Id == searchId);
+        Assert.Null(cleared.TvActivationVersion);
+        Assert.Null(cleared.TvActivatedAt);
     }
 
     [Fact]

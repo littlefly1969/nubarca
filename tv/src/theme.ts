@@ -39,10 +39,8 @@ export function overscan(width: number, height: number): { x: number; y: number 
   };
 }
 
-// Responsive party-QR edge for the MENU overlays: ~13% of the window height
-// (≈70dp on the usual 960×540dp TV layout → ~140 physical px at 1080p, and
-// proportionally smaller on 720p panels). Phones scan this fine up close and it
-// no longer dominates the picture.
+// The requested Party QR edge is exactly three times the previous responsive
+// size. On the usual 960×540dp TV layout this is 210dp (~420 physical px).
 export function overlayQrSize(height: number): number {
-  return Math.min(140, Math.max(64, Math.round(height * 0.13)));
+  return 3 * Math.min(140, Math.max(64, Math.round(height * 0.13)));
 }

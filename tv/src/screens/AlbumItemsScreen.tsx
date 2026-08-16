@@ -147,9 +147,10 @@ const ItemTile = memo(function ItemTile({
 // Interaction model (consistent with the slideshow):
 //  - Default: NO chrome — no header, no QR, no menu. The grid owns the screen;
 //    SELECT on the focused tile opens the photo/slideshow.
-//  - MENU shows the overlay: party QR top-left, album title top-center, party
-//    upload QR top-right, and a compact command bar (Albums / Slideshow) at the
-//    bottom — all inside the overscan safe area, auto-hidden after ~6s idle.
+//  - MENU shows the overlay: party QR bottom-left, album title top-center, party
+//    upload QR bottom-right, and a compact command bar (Albums / Slideshow) at
+//    the top centre — all inside the overscan safe area, auto-hidden after
+//    ~10s idle.
 //    The bar is a MODAL focus scope: focus moves to the first command, LEFT and
 //    RIGHT move between commands, SELECT activates one, and no direction can
 //    leave the bar — grid navigation is suspended while it is open. MENU hides
@@ -455,8 +456,8 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
         />
       )}
 
-      {/* MENU overlay: QR corners + centered album title on top, compact command
-          bar at the bottom. Absolute-positioned — it never reflows or shrinks the
+      {/* MENU overlay: QR corners + centered album title and command bar on top.
+          Absolute-positioned — it never reflows or shrinks the
           grid. The bar is a real focus SCOPE (MenuCommandRail): the first
           command takes focus, the four traps keep every direction inside it, and
           the grid below is switched non-focusable, so nothing there — including a
@@ -484,7 +485,7 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
               visible only while face-filter mode is active AND the overlay is
               up. Non-focusable; below the title row so nothing existing moves. */}
           {faceFilter !== null && (
-            <View style={[styles.faceIndicatorRow, { top: inset.y + 56 }]} pointerEvents="none">
+            <View style={[styles.faceIndicatorRow, { top: inset.y + 148 }]} pointerEvents="none">
               <FaceFilterIndicator
                 faceThumbnailUrl={faceFilter.faceThumbnailUrl}
                 albumName={album.name}
@@ -493,7 +494,7 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           )}
 
           <MenuCommandRail
-            style={[styles.commandBar, { left: inset.x, right: inset.x, bottom: inset.y }]}
+            style={[styles.commandBar, { top: inset.y + 64 }]}
           >
             <FocusableButton
               label={t('items.backToAlbums')}
@@ -562,6 +563,7 @@ const styles = StyleSheet.create({
   titleText: { color: colors.text, fontSize: font.heading, fontWeight: '700' },
   commandBar: {
     position: 'absolute',
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,

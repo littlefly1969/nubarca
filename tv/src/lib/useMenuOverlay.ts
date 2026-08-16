@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
-// The controls/QR overlay auto-hides after this idle window (requirement: ~6s).
-export const OVERLAY_IDLE_MS = 6000;
+// The controls/QR overlay auto-hides after this idle window (6s + 4s).
+export const OVERLAY_IDLE_MS = 10_000;
 
 // Shared controller for the remote-MENU overlay used by BOTH the album grid and
 // the slideshow, so the interaction model stays consistent:
