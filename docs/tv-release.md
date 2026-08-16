@@ -178,6 +178,8 @@ environment).
 ```bash
 cd tv
 export NODE_ENV=production
+export ANDROID_HOME='<android-sdk>'
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
 export NUBARCA_PUBLIC_ORIGIN='https://<installation-origin>'
 export NUBARCA_TV_OTA_CERTIFICATE='<host-ota-certificate.pem>'
 npm ci --include=dev
@@ -188,6 +190,8 @@ cd android
 
 `--include=dev` is mandatory because Expo config plugins are build-time
 devDependencies even though the generated application is a production build.
+The SDK variables are explicit because the clean prebuild replaces the Android
+tree, including any untracked `local.properties`.
 
 The Gradle plugin fails `assembleRelease`, `bundleRelease` and `packageRelease`
 closed if the release keystore or credentials are missing; it never falls back
