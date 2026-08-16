@@ -7,17 +7,18 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.3,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 5, runtime
-`nubarca-tv-native-4`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.4,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 6, runtime
+`nubarca-tv-native-5`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.3 is a NATIVE release: its TV-only activity is exposed solely through
-`LEANBACK_LAUNCHER`, forcing Fire OS to use the rectangular activity banner
-instead of registering the square phone launcher icon. The manifest contract
-changed, so the runtime and Android versionCode both incremented.
+1.0.4 is a NATIVE release: its config plugin now makes Leanback manifest
+generation self-contained, adding `LEANBACK_LAUNCHER` to the TV activity even
+when the upstream template supplies only the ordinary launcher category. The
+build-time manifest contract changed, so the runtime and Android versionCode
+both incremented.
 
-Runtime `nubarca-tv-native-4` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-5` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.
