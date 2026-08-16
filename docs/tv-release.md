@@ -180,11 +180,14 @@ cd tv
 export NODE_ENV=production
 export NUBARCA_PUBLIC_ORIGIN='https://<installation-origin>'
 export NUBARCA_TV_OTA_CERTIFICATE='<host-ota-certificate.pem>'
-npm ci
+npm ci --include=dev
 npm run tv:prebuild
 cd android
 ./gradlew assembleRelease
 ```
+
+`--include=dev` is mandatory because Expo config plugins are build-time
+devDependencies even though the generated application is a production build.
 
 The Gradle plugin fails `assembleRelease`, `bundleRelease` and `packageRelease`
 closed if the release keystore or credentials are missing; it never falls back
