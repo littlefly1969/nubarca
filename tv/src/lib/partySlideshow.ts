@@ -103,15 +103,80 @@ export function onVideoEnded(state: VideoRotation): RotationStep {
 
 // ------------------------------------------------------------------ preparing
 
-// Whether the slideshow should start the preparing grace window. Only an
-// AUTOPLAYING party slideshow skips a video it cannot play: a paused or
-// manually-driven viewer must stay exactly where the user put it, because there
-// the user is the one deciding when to move on.
+// Whether the slideshow should start the preparing grace window. Only a
+// ROTATING party slideshow skips a video it cannot play: a paused viewer, or a
+// video the user opened from the grid to watch, must stay exactly where they
+// put it, because there the user is the one deciding when to move on.
 export function shouldArmPreparingGrace(input: {
+  slideshowMode: boolean;
   partyEnabled: boolean;
   playing: boolean;
   isVideo: boolean;
   videoReady: boolean;
 }): boolean {
-  return input.partyEnabled && input.playing && input.isVideo && !input.videoReady;
+  return input.slideshowMode && input.partyEnabled && input.playing
+    && input.isVideo && !input.videoReady;
+}
+
+// --------------------------------------------------- playback authority
+
+// A viewer session is one of two things, and conflating them is what let the
+// slideshow's PAUSE and the video player's PAUSE drift apart:
+//
+//   SLIDESHOW  — opened with autoplay (or promoted by the play key). The
+//                rotation is running, so ONE state governs both the photo
+//                countdown and the video player.
+//   MANUAL     — one item opened from the grid to look at. There is no
+//                rotation to govern, so the remote drives the player directly
+//                and the party slideshow's cap does not apply.
+
+export type PlayPauseAction =
+  // Flip the slideshow's own play state; in slideshow mode this is the ONLY
+  // authority, for photos and videos alike.
+  | 'toggle-slideshow'
+  // Manual video: talk to the player, because nothing is rotating.
+  | 'toggle-video-player'
+  // Manual photo: the play key starts a slideshow from here. This is the
+  // historical behaviour of the photo viewer and is preserved deliberately.
+  | 'promote-to-slideshow';
+
+export function resolvePlayPause(input: {
+  slideshowMode: boolean;
+  isVideo: boolean;
+}): PlayPauseAction {
+  if (input.slideshowMode) return 'toggle-slideshow';
+  return input.isVideo ? 'toggle-video-player' : 'promote-to-slideshow';
+}
+
+// What the video player is handed. `playing: undefined` means "not controlled"
+// — the player keeps its own autoplay-and-remote behaviour, which is what a
+// manually opened video needs.
+export interface VideoPlaybackProps {
+  readonly maxPlaybackSeconds: number | null;
+  readonly playing: boolean | undefined;
+}
+
+export function videoPlaybackProps(input: {
+  slideshowMode: boolean;
+  partyEnabled: boolean;
+  playing: boolean;
+  timing: PartySlideshowTiming | null;
+}): VideoPlaybackProps {
+  return {
+    // The cap bounds ROTATION, so it applies only to a party slideshow. A guest
+    // who picks a video off the grid to watch is not holding the wall hostage
+    // and must be allowed to watch all of it.
+    maxPlaybackSeconds: input.slideshowMode && input.partyEnabled
+      ? videoCapSeconds(input.timing)
+      : null,
+    playing: input.slideshowMode ? input.playing : undefined,
+  };
+}
+
+// Whether the photo dwell timer should be running.
+export function photoRotationActive(input: {
+  slideshowMode: boolean;
+  playing: boolean;
+}): boolean {
+  return input.slideshowMode && input.playing;
 }

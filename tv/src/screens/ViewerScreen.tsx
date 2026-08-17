@@ -30,8 +30,8 @@ import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
 import { remapIndexById, sameItemIds } from '../lib/liveItems';
 import {
-  photoSlideMs, shouldArmPreparingGrace, videoCapSeconds,
-  VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
+  photoRotationActive, photoSlideMs, resolvePlayPause, shouldArmPreparingGrace,
+  videoPlaybackProps, VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
 } from '../lib/partySlideshow';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
@@ -97,6 +97,13 @@ export function ViewerScreen({
   const [items, setItems] = useState(initialItems);
   const [index, setIndex] = useState(startIndex);
   const [playing, setPlaying] = useState(autoPlay);
+  // Which KIND of session this is. Opening with autoplay starts a rotating
+  // slideshow; selecting one tile opens a manual view of it. The distinction
+  // decides who owns playback — see lib/partySlideshow. A manual PHOTO viewer
+  // can still be promoted with the play key, which is how it has always
+  // behaved, but that is now an explicit transition rather than something
+  // inferred from `playing` happening to become true.
+  const [slideshowMode, setSlideshowMode] = useState(autoPlay);
   // Face-filter mode (polled below): while active, LEFT/RIGHT/auto-advance
   // navigate ONLY the matching subset; the search id is needed to delete the
   // search on BACK. Starting the slideshow from a filtered grid lands here too
@@ -140,6 +147,8 @@ export function ViewerScreen({
   // through this ref while a video is mounted.
   const isVideoRef = useRef(false);
   isVideoRef.current = item?.mediaType === 'video';
+  const slideshowModeRef = useRef(slideshowMode);
+  slideshowModeRef.current = slideshowMode;
   const videoControlsRef = useRef<TvVideoControls | null>(null);
 
   const goNext = useCallback(() => {
@@ -205,8 +214,22 @@ export function ViewerScreen({
       case 'next': goNext(); break;
       case 'prev': goPrev(); break;
       case 'toggle-play':
-        if (isVideo && videoControlsRef.current) videoControlsRef.current.togglePlay();
-        else togglePlay();
+        // In a slideshow there is exactly ONE play state, and it governs the
+        // photo countdown and the video player alike. Talking to the player
+        // directly here is what previously let a video sit paused under a pill
+        // still reading "playing" — and then made the next photo auto-advance.
+        switch (resolvePlayPause({ slideshowMode: slideshowModeRef.current, isVideo })) {
+          case 'toggle-slideshow':
+            togglePlay();
+            break;
+          case 'toggle-video-player':
+            videoControlsRef.current?.togglePlay();
+            break;
+          case 'promote-to-slideshow':
+            setSlideshowMode(true);
+            setPlaying(true);
+            break;
+        }
         break;
       case 'seek-back':
         videoControlsRef.current?.seekBy(-TV_VIDEO_SEEK_SECONDS);
@@ -260,8 +283,9 @@ export function ViewerScreen({
   // onEnded → goNext), never mid-play.
   const currentIsVideo = item?.mediaType === 'video';
   const photoMs = photoSlideMs(partyEnabled ? timing : null);
+  const rotating = photoRotationActive({ slideshowMode, playing });
   useEffect(() => {
-    if (!playing || displayItems.length === 0 || currentIsVideo) return;
+    if (!rotating || displayItems.length === 0 || currentIsVideo) return;
     const timer = setTimeout(() => {
       const len = displayItemsRef.current.length;
       setIndex((i) => (len === 0 ? 0 : (i + 1) % len));
@@ -269,13 +293,14 @@ export function ViewerScreen({
     return () => clearTimeout(timer);
     // `photoMs` is a dependency, so a timing change re-arms the CURRENT photo's
     // timer in place rather than moving to another item.
-  }, [playing, index, displayItems.length, currentIsVideo, photoMs]);
+  }, [rotating, index, displayItems.length, currentIsVideo, photoMs]);
 
   // A video that cannot become playable must not freeze an autoplaying party
   // wall. The grace window is armed only while the slideshow is actually
   // rotating; paused or manual viewing keeps whatever the user is looking at,
   // and the item is retried normally the next time round.
   const armPreparingGrace = shouldArmPreparingGrace({
+    slideshowMode,
     partyEnabled,
     playing,
     isVideo: currentIsVideo,
@@ -396,12 +421,11 @@ export function ViewerScreen({
           posterPath={item.posterUrl ?? null}
           onEnded={goNext}
           onCapReached={goNext}
-          // Party caps how long ONE video may hold the wall; the stored file is
-          // untouched and still plays in full everywhere else.
-          maxPlaybackSeconds={partyEnabled ? videoCapSeconds(timing) : null}
-          // In a rotating slideshow the viewer's play state governs the player,
-          // so PAUSE stops the video as well as the photo countdown.
-          playing={partyEnabled ? playing : undefined}
+          // The cap bounds ROTATION and the controlled play state exists only
+          // while something is rotating, so a video opened from the grid to
+          // watch keeps its own controls and plays to its end. Both decisions
+          // come from one tested policy rather than from `partyEnabled` alone.
+          {...videoPlaybackProps({ slideshowMode, partyEnabled, playing, timing })}
           onReadyStateChange={setVideoReady}
           controlsRef={videoControlsRef}
         />

@@ -681,4 +681,148 @@ public sealed class PartyMixedMediaTests : IDisposable
         response.EnsureSuccessStatusCode();
         return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
+
+    // --- AUTHORITATIVE PER-KIND SIZE (regression: cross-kind MIME bypass) ---
+
+    [Fact]
+    public async Task An_Oversized_Image_Cannot_Buy_The_Video_Allowance_By_Declaring_Video()
+    {
+        // Image cap deliberately tiny, video cap deliberately generous: the whole
+        // point is that the two differ, which is what made the bypass profitable.
+        using var factory = SmallImageCapFactory();
+        var (token, albumId) = await PartyAsync(factory);
+        var anon = factory.CreateClient();
+
+        // A REAL JPEG — it passes every authenticity check — but far larger than
+        // the image cap, announced as video/mp4. The cheap pre-gate believes the
+        // declaration and lets it through the 10 MiB video allowance; the server
+        // then classifies it as an Image. Before the fix it was accepted here,
+        // silently defeating the image cap.
+        var jpeg = ImageFixtures.JpegWithExif();
+        Assert.True(jpeg.Length > 512, "the fixture must exceed the configured image cap");
+
+        var body = await UploadJsonAsync(anon, token, ("actually-a-photo.mp4", jpeg, "video/mp4"));
+        Assert.Equal(0, body.GetProperty("accepted").GetInt32());
+        Assert.Equal(1, body.GetProperty("rejected").GetInt32());
+        // Rejected for SIZE, not as a quota refusal — the guest keeps their slots.
+        Assert.Equal(0, body.GetProperty("quotaRejectedPhotos").GetInt32());
+        Assert.Equal(0, body.GetProperty("quotaRejectedVideos").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // Nothing became visible anywhere…
+        Assert.Equal(0, await db.AlbumItems.CountAsync(ai => ai.AlbumId == albumId));
+        Assert.Equal(0, await db.PartyUploadItems.CountAsync());
+        // …and it cost the guest nothing, because the size gate runs before the
+        // quota claim.
+        var participant = await db.PartyParticipants.SingleOrDefaultAsync();
+        Assert.Equal(0, participant?.AcceptedPhotoCount ?? 0);
+        Assert.Equal(0, participant?.AcceptedVideoCount ?? 0);
+    }
+
+    [Fact]
+    public async Task The_Same_Oversized_Image_Is_Also_Rejected_When_Declared_Honestly()
+    {
+        // The control: declaring image/jpeg fails at the cheap pre-gate instead.
+        // Both routes must refuse it, which is the property that actually matters.
+        using var factory = SmallImageCapFactory();
+        var (token, albumId) = await PartyAsync(factory);
+        var anon = factory.CreateClient();
+
+        var body = await UploadJsonAsync(
+            anon, token, ("photo.jpg", ImageFixtures.JpegWithExif(), "image/jpeg"));
+        Assert.Equal(0, body.GetProperty("accepted").GetInt32());
+        Assert.Equal(1, body.GetProperty("rejected").GetInt32());
+        await AssertAlbumIsEmptyAsync(factory, albumId);
+    }
+
+    [Fact]
+    public async Task A_Real_Video_Within_The_Video_Cap_Is_Still_Accepted()
+    {
+        // The fix must not turn the video allowance into the image allowance: a
+        // genuine video that only fits under the larger cap still goes through.
+        using var factory = SmallImageCapFactory();
+        var (token, albumId) = await PartyAsync(factory);
+        var anon = factory.CreateClient();
+
+        var body = await UploadJsonAsync(anon, token, ("clip.mp4", ImageFixtures.MinimalMp4(), "video/mp4"));
+        Assert.Equal(1, body.GetProperty("acceptedVideos").GetInt32());
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(1, await db.AlbumItems.CountAsync(ai => ai.AlbumId == albumId));
+    }
+
+    [Fact]
+    public async Task A_Video_Over_The_Video_Cap_Is_Rejected_On_Its_Authoritative_Size()
+    {
+        // The mirror case: a real video larger than the VIDEO cap. The declared
+        // length could have been understated, so the decision is made on the size
+        // the server recorded while storing the bytes.
+        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["Party:MaxImageUploadBytes"] = "10485760",
+            ["Party:MaxVideoUploadBytes"] = "8",
+        });
+        factory.EnsureDatabaseCreated();
+        var (token, albumId) = await PartyAsync(factory);
+        var anon = factory.CreateClient();
+
+        var body = await UploadJsonAsync(anon, token, ("clip.mp4", ImageFixtures.MinimalMp4(), "video/mp4"));
+        Assert.Equal(0, body.GetProperty("accepted").GetInt32());
+        await AssertAlbumIsEmptyAsync(factory, albumId);
+    }
+
+    [Fact]
+    public async Task The_Historical_Party_MaxUploadBytes_Key_Still_Governs_Images()
+    {
+        // Backward compatibility: an installation that configured the original
+        // photo-oriented key must see exactly the behaviour it configured.
+        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["Party:MaxUploadBytes"] = "16",
+        });
+        factory.EnsureDatabaseCreated();
+        var (token, albumId) = await PartyAsync(factory);
+        var anon = factory.CreateClient();
+
+        // Declared as video to skip the cheap gate — the authoritative image cap
+        // must still come from the legacy key.
+        var body = await UploadJsonAsync(
+            anon, token, ("sneaky.mp4", ImageFixtures.JpegWithExif(), "video/mp4"));
+        Assert.Equal(0, body.GetProperty("accepted").GetInt32());
+        await AssertAlbumIsEmptyAsync(factory, albumId);
+    }
+
+    private static SqliteWebApplicationFactory SmallImageCapFactory()
+    {
+        var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["Party:MaxImageUploadBytes"] = "512",
+            ["Party:MaxVideoUploadBytes"] = "10485760",
+        });
+        factory.EnsureDatabaseCreated();
+        return factory;
+    }
+
+    // Overloads taking an explicit factory, for the limit tests that need their
+    // own configuration.
+    private async Task<(string UploadToken, Guid AlbumId)> PartyAsync(SqliteWebApplicationFactory factory)
+    {
+        var (_, owner) = await factory.CreateAuthenticatedClientAsync();
+        var response = await owner.PostAsJsonAsync("/api/albums", new { name = "Party" });
+        response.EnsureSuccessStatusCode();
+        var albumId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var enable = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", new { enabled = true });
+        enable.EnsureSuccessStatusCode();
+        return (UploadTokenFromStatus(await enable.Content.ReadFromJsonAsync<JsonElement>()), albumId);
+    }
+
+    private static async Task AssertAlbumIsEmptyAsync(SqliteWebApplicationFactory factory, Guid albumId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(0, await db.AlbumItems.CountAsync(ai => ai.AlbumId == albumId));
+    }
+
 }

@@ -88,9 +88,13 @@ public sealed class PartyUploadService : IPartyUploadService
             return PartyUploadOutcome.RejectedType;
         }
 
-        // Size is gated per KIND, using the declared type. A liar can only ever
-        // buy itself the smaller allowance or fail the authoritative gate later;
-        // the global Storage:MaxUploadBytes still bounds the stream regardless.
+        // CHEAP pre-gate only: reject a declared length that cannot fit the kind
+        // the client CLAIMS to be sending, so an obviously-oversized upload is
+        // refused before a byte is stored. It is NOT the size decision — a client
+        // that declares video/mp4 buys itself the larger allowance here no matter
+        // what it is really sending, so the authoritative per-kind cap is applied
+        // after classification below. The global Storage:MaxUploadBytes bounds
+        // the stream throughout regardless.
         if (declaredLength > (declaredVideo ? _maxVideoBytes : _maxImageBytes))
         {
             return PartyUploadOutcome.RejectedTooLarge;
@@ -144,6 +148,24 @@ public sealed class PartyUploadService : IPartyUploadService
         {
             await _files.SoftDeleteAsync(ownerUserId, created.Id, cancellationToken);
             return PartyUploadOutcome.RejectedNotMedia;
+        }
+
+        // AUTHORITATIVE per-kind size gate. The cheap gate above ran against the
+        // CLAIMED kind, and the two caps differ by an order of magnitude, so a
+        // real 100 MiB photo announced as video/mp4 sailed through the 512 MiB
+        // video allowance and was then accepted as an image — bypassing the image
+        // cap entirely by lying about the type. Now that the server has decided
+        // what the bytes ARE, the matching cap is applied to the size the server
+        // itself recorded while storing them; `declaredLength` is not consulted.
+        //
+        // This runs BEFORE the quota claim, the album membership and the
+        // moderation row, so an over-limit upload costs the guest nothing, never
+        // becomes visible, and schedules no post-ingestion work.
+        var authoritativeMax = isVideo ? _maxVideoBytes : _maxImageBytes;
+        if (created.SizeBytes > authoritativeMax)
+        {
+            await _files.SoftDeleteAsync(ownerUserId, created.Id, cancellationToken);
+            return PartyUploadOutcome.RejectedTooLarge;
         }
 
         // The quota category is only knowable HERE — after the server decided
