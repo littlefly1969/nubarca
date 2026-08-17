@@ -118,6 +118,24 @@ export function emptyMediaFilters(): MediaWorkspaceFilters {
   };
 }
 
+// A DRAFT that shares nothing with what it was cloned from. The filter panel
+// opens on one of these, every editor writes into it, and only Apply hands it
+// back — so a cancelled panel, or an editor the user backed out of, leaves the
+// committed query and its results untouched. The array copies are the part that
+// matters: a spread of PhotoMediaFilters alone would leave the draft and the
+// committed query pointing at the SAME people arrays.
+export function cloneMediaFilters(filters: MediaWorkspaceFilters): MediaWorkspaceFilters {
+  return {
+    common: { ...filters.common },
+    photo: {
+      ...filters.photo,
+      includePeople: [...filters.photo.includePeople],
+      excludePeople: [...filters.photo.excludePeople],
+    },
+    video: { ...filters.video },
+  };
+}
+
 export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdentity {
   return {
     source,
@@ -342,4 +360,21 @@ export function minutesToSeconds(minutes: number | null): number | null {
 
 export function secondsToMinutes(seconds: number | null): number | null {
   return seconds === null ? null : Math.round(seconds / 60);
+}
+
+// The date bounds are stored as ISO-8601 UTC INSTANTS but entered as calendar
+// days. These are the web sheet's two conversions, character for character
+// (mediaWorkspaceQuery.dateInputToIso / isoToDateInput on the frontend): both
+// bounds anchor at midnight UTC, so a TV and a browser that pick the same day
+// produce the same instant and therefore the same result set. A TV-local
+// interpretation of "that day" would quietly shift the boundary by the set-top
+// box's timezone.
+export function dateInputToIso(value: string): string {
+  if (value.length === 0) return '';
+  const withTime = value.length === 10 ? `${value}T00:00` : value;
+  return new Date(`${withTime}:00Z`).toISOString();
+}
+
+export function isoToDateInput(iso: string): string {
+  return iso.length >= 10 ? iso.slice(0, 10) : '';
 }

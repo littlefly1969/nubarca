@@ -44,6 +44,7 @@ import {
 import { useI18n } from '../i18n';
 import {
   activeFilterCount,
+  clearActiveFilters,
   emptyIdentity,
   queryFingerprint,
   withMediaKind,
@@ -189,10 +190,18 @@ export function PersonalLibraryScreen({
   const {
     visible: overlayVisible,
     visibleRef: overlayVisibleRef,
+    show: showOverlay,
     toggle: toggleOverlay,
     hide: hideOverlay,
     bump: bumpOverlay,
   } = useMenuOverlay();
+
+  // Which command the rail should open on. The rail is unmounted while hidden,
+  // so this only decides the landing spot at its next mount: the active tab
+  // normally, and the Filters command when the user just came BACK out of the
+  // filter panel — leaving the panel returns the remote to the control that
+  // opened it, not to wherever the grid happened to be.
+  const [railFocus, setRailFocus] = useState<'kind' | 'filters'>('kind');
 
   const generationRef = useRef(0);
   const requestedCursorRef = useRef<string | null>(null);
@@ -310,8 +319,13 @@ export function PersonalLibraryScreen({
   const onTVEvent = useCallback((evt: HWEvent) => {
     if (!evt || evt.eventKeyAction === 0) return;
     if (panelRef.current !== 'none' || viewerOpenRef.current) return;
-    if (evt.eventType === 'menu') toggleOverlay();
-    else bumpOverlay();
+    if (evt.eventType === 'menu') {
+      // A MENU press is a fresh entry into the rail, so it always lands on the
+      // active tab — never on a landing spot left over from a filter panel the
+      // user backed out of some time ago.
+      setRailFocus('kind');
+      toggleOverlay();
+    } else bumpOverlay();
   }, [toggleOverlay, bumpOverlay]);
   useTVEventHandler(onTVEvent);
 
@@ -367,17 +381,29 @@ export function PersonalLibraryScreen({
     setViewerIndex(null);
   }, [restoreTo]);
 
+  // Apply commits the draft and goes straight to the RESULTS: the point of
+  // applying is to see them, so no overlay comes back over the grid.
   const applyFilters = useCallback((
     filters: MediaWorkspaceFilters,
     sort: MediaSortField,
     direction: MediaSortDirection,
   ) => {
     setPanel('none');
+    setRailFocus('kind');
     setIdentity((current) => ({ ...current, filters, sort, direction }));
   }, []);
 
+  // BACK/Cancel discards the draft and returns to where the panel was opened
+  // from, with the remote on the Filters command — one level back, exactly.
+  const cancelFilters = useCallback(() => {
+    setPanel('none');
+    setRailFocus('filters');
+    showOverlay();
+  }, [showOverlay]);
+
   const setKind = useCallback((kind: MediaKindScope) => {
     hideOverlay();
+    setRailFocus('kind');
     setIdentity((current) => withMediaKind(current, kind));
   }, [hideOverlay]);
 
@@ -438,7 +464,12 @@ export function PersonalLibraryScreen({
           {filterCount > 0 && (
             <FocusableButton
               label={t('gallery.clearFilters')}
-              onPress={() => setIdentity(emptyIdentity(source))}
+              // Clears the FILTERS, which is what the label promises. It used to
+              // rebuild the whole identity, silently taking the tab back to
+              // "Tutti" and the order back to newest-first as well.
+              onPress={() => setIdentity((current) => ({
+                ...current, filters: clearActiveFilters(current),
+              }))}
               hasTVPreferredFocus={gridInteractive}
             />
           )}
@@ -506,13 +537,14 @@ export function PersonalLibraryScreen({
                 label={tabLabel(kind, load, t)}
                 onPress={() => setKind(kind)}
                 onFocusChange={(f) => { if (f) bumpOverlay(); }}
-                hasTVPreferredFocus={kind === identity.mediaKind}
+                hasTVPreferredFocus={railFocus === 'kind' && kind === identity.mediaKind}
               />
             ))}
             <FocusableButton
               label={t('filters.title')}
               onPress={() => { hideOverlay(); setPanel('filters'); }}
               onFocusChange={(f) => { if (f) bumpOverlay(); }}
+              hasTVPreferredFocus={railFocus === 'filters'}
             />
             <FocusableButton
               label={t('gallery.backToHome')}
@@ -528,7 +560,8 @@ export function PersonalLibraryScreen({
           applied={identity}
           resultCount={total}
           onApply={applyFilters}
-          onCancel={() => setPanel('none')}
+          onCancel={cancelFilters}
+          onAuthError={handleAuthError}
         />
       )}
 

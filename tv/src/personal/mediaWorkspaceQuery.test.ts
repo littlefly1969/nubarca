@@ -4,7 +4,10 @@ import {
   activeFilterCount,
   buildFilterChips,
   clearActiveFilters,
+  cloneMediaFilters,
+  dateInputToIso,
   emptyIdentity,
+  isoToDateInput,
   minutesToSeconds,
   queryFingerprint,
   queryToWire,
@@ -12,6 +15,7 @@ import {
   withMediaKind,
   type MediaWorkspaceIdentity,
 } from './mediaWorkspaceQuery.ts';
+import { isValidDateInput } from '../lib/dateInput.ts';
 
 const library = () => emptyIdentity({ kind: 'library' });
 const album = () => emptyIdentity({ kind: 'album', albumId: 'a-1' });
@@ -276,4 +280,58 @@ test('a cursor and a non-default limit reach the wire', () => {
   assert.equal(wire.limit, '24');
   // An empty cursor is "first page", not a cursor.
   assert.equal(queryToWire(library(), '').cursor, undefined);
+});
+
+test('calendar days convert to the same UTC instants the web sends', () => {
+  // Both bounds anchor at midnight UTC, exactly as the web sheet's
+  // dateInputToIso does. A set-top box in any timezone that picks 1 May must
+  // produce the instant a browser in any timezone produces for 1 May, or the
+  // same range would return different results on the two clients.
+  assert.equal(dateInputToIso('2026-05-01'), '2026-05-01T00:00:00.000Z');
+  assert.equal(dateInputToIso('2026-12-31'), '2026-12-31T00:00:00.000Z');
+  assert.equal(dateInputToIso(''), '');
+
+  // And back, so the From/To rows show the day the user entered.
+  assert.equal(isoToDateInput('2026-05-01T00:00:00.000Z'), '2026-05-01');
+  assert.equal(isoToDateInput(''), '');
+  assert.equal(
+    isoToDateInput(dateInputToIso('2024-02-29')), '2024-02-29',
+    'a real leap day must round-trip',
+  );
+
+  // dateInputToIso is a converter, not a validator: 29 February in a non-leap
+  // year rolls silently forward to 1 March. What keeps that off the wire is the
+  // date keyboard, which will not enable OK for a day that does not exist — so
+  // the two have to stay a matched pair.
+  assert.equal(isValidDateInput('2026-02-29'), false);
+  assert.equal(isValidDateInput('2024-02-29'), true);
+  assert.equal(isoToDateInput(dateInputToIso('2026-02-29')), '2026-03-01');
+});
+
+test('both date bounds reach the wire independently', () => {
+  // The upper bound had no editor on the television, so `dateTakenTo` could
+  // never be anything but empty from a remote — the wire test that would have
+  // caught it is this one.
+  const onlyTo = withFilters(library(), (i) => {
+    i.filters.common.dateTakenTo = dateInputToIso('2026-06-01');
+  });
+  const wire = queryToWire(onlyTo, null);
+  assert.equal(wire.dateTakenTo, '2026-06-01T00:00:00.000Z');
+  assert.equal(wire.dateTakenFrom, undefined);
+  assert.equal(activeFilterCount(onlyTo), 1);
+});
+
+test('a draft clone shares no state with the query it was taken from', () => {
+  const committed = withFilters(library(), (i) => {
+    i.filters.photo.includePeople = ['p1'];
+  });
+  const draft = cloneMediaFilters(committed.filters);
+  draft.photo.includePeople.push('p2');
+  draft.photo.excludePeople.push('p3');
+  draft.common.favorite = true;
+
+  assert.deepEqual(committed.filters.photo.includePeople, ['p1'],
+    'editing a draft must not reach into the committed query');
+  assert.deepEqual(committed.filters.photo.excludePeople, []);
+  assert.equal(committed.filters.common.favorite, null);
 });

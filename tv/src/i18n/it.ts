@@ -275,8 +275,37 @@ const it = {
   'filters.any': 'Qualsiasi',
   'filters.none': '—',
   'filters.apply': 'Applica',
+  'filters.applyCount': 'Applica · {count}',
   'filters.reset': 'Azzera',
+  'filters.resetAll': 'Azzera tutti',
+  'filters.back': '← Indietro',
   'filters.currentCount': '{count} elementi con i filtri attuali',
+  'filters.activeCount': '{count} filtri attivi',
+  'filters.noneActive': 'Nessun filtro attivo',
+
+  // Row semantics. The focusable control is the whole row, so what it announces
+  // must be the whole row: name, current value and whether it is filtering.
+  'filters.rowA11y': '{label}, {value}',
+  'filters.rowA11yActive': '{label}, {value}, filtro attivo',
+
+  'filters.peopleLoading': 'Caricamento delle persone…',
+  'filters.peopleNone': 'Nessuna persona selezionata',
+  'filters.peopleSelected': '{count} selezionate',
+  'filters.peopleIncluded': '{count} incluse',
+  'filters.peopleExcluded': '{count} escluse',
+  'filters.peopleMode': 'Corrispondenza',
+  'filters.peopleModeAllShort': 'tutte',
+  'filters.peopleModeAnyShort': 'qualsiasi',
+  'filters.peopleClear': 'Azzera selezione',
+
+  'filters.periodTitle': 'Periodo di scatto',
+  'filters.periodFrom': 'Dal giorno',
+  'filters.periodTo': 'Al giorno',
+  'filters.periodPresets': 'SCORCIATOIE',
+  'filters.periodLast30': 'Ultimi 30 giorni',
+  'filters.periodLast365': 'Ultimo anno',
+  'filters.periodClear': 'Azzera periodo',
+  'filters.periodInverted': 'La data iniziale è successiva a quella finale.',
 
   'viewer.navHint': '◀ ▶ cambia foto · MENU comandi',
   'viewer.playing': '▶ Riproduzione',

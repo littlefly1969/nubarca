@@ -384,3 +384,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the viewer exactly one `VideoPlayer` exists at a time (keyed by source), with
   an explicit Android buffer budget — the platform default byte budget is
   UNLIMITED, which on a constrained Fire Stick is a memory climb with no ceiling.
+- **The TV filter panel renders from a CATALOG, not from hand-written rows.**
+  `tv/src/personal/tvFilterCatalog.ts` decides which filters apply to the
+  current tab and source, how the remote edits each one, and whether each is
+  active; `LibraryFilterPanel` draws what it returns. It holds no filter values
+  — `MediaWorkspaceFilters` remains the single source of truth — and exists
+  because the panel used to BE the list of filters, so a row written as a
+  read-only summary (people: clearable, never settable) was a filter the
+  television could not operate and nothing could notice. Two rules keep that
+  from recurring: `TV_FILTER_OWNER` claims every field of
+  `MediaWorkspaceFilters` through a `satisfies`, so a new domain filter does not
+  compile until a TV row owns it, and `TvFilterEditor` has no read-only member,
+  so a row the remote cannot operate is not expressible. The panel's half is a
+  `Record<TvFilterId, RowView>`, so a row the catalog offers and the panel
+  cannot draw is also a build failure. Applicability and
+  `queryToWire`'s emission rules are two independent barriers over the same
+  rule and are checked against each other in `tvFilterCatalog.test.ts` — a
+  filter that is hidden must also be unsendable.
