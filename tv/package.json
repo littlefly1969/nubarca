@@ -1,6 +1,6 @@
 {
   "name": "nubarca-tv",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "main": "index.js",
   "private": true,
   "engines": {
@@ -19,9 +19,9 @@
     "verify:ota": "node scripts/ota.mjs verify",
     "rollback-pointer:ota": "node scripts/ota.mjs rollback-pointer",
     "cleanup:ota": "node scripts/ota.mjs cleanup",
-    "test:ota": "node --test src/ota/updateLifecycle.test.ts scripts/ota.test.mjs",
+    "test:ota": "node --test src/ota/updateLifecycle.test.ts src/ota/nativeRelease.test.ts src/ota/updatesWiring.test.ts scripts/ota.test.mjs scripts/releaseDescriptor.test.mjs",
     "test:personal": "node --test src/personal/flow.test.ts",
-    "test": "node --test scripts/appIdentity.test.mjs src/api/sessionCookie.test.ts src/ota/updateLifecycle.test.ts scripts/ota.test.mjs src/personal/flow.test.ts src/personal/appBackNavigation.test.ts src/personal/dpadCode.test.ts src/personal/mediaWorkspaceQuery.test.ts src/personal/tvFilterCatalog.test.ts src/lib/keepAwake.test.ts src/lib/mediaAspectRatio.test.ts src/lib/tvMediaGrid.test.ts src/lib/tvMediaGridWiring.test.ts src/lib/mediaMenuFocus.test.ts src/lib/partySlideshow.test.ts src/lib/liveItems.test.ts src/lib/focusRemap.test.ts src/media/mediaCachePolicy.test.ts src/video/probeClassify.test.ts src/video/remoteMap.test.ts src/video/videoTilePreview.test.ts",
+    "test": "node --test scripts/appIdentity.test.mjs scripts/releaseDescriptor.test.mjs src/api/sessionCookie.test.ts src/ota/updateLifecycle.test.ts src/ota/nativeRelease.test.ts src/ota/updatesWiring.test.ts scripts/ota.test.mjs src/personal/flow.test.ts src/personal/appBackNavigation.test.ts src/personal/dpadCode.test.ts src/personal/mediaWorkspaceQuery.test.ts src/personal/tvFilterCatalog.test.ts src/lib/keepAwake.test.ts src/lib/mediaAspectRatio.test.ts src/lib/tvMediaGrid.test.ts src/lib/tvMediaGridWiring.test.ts src/lib/mediaMenuFocus.test.ts src/lib/partySlideshow.test.ts src/lib/liveItems.test.ts src/lib/focusRemap.test.ts src/media/mediaCachePolicy.test.ts src/video/probeClassify.test.ts src/video/remoteMap.test.ts src/video/videoTilePreview.test.ts",
     "ios": "expo run:ios"
   },
   "dependencies": {

@@ -43,7 +43,41 @@ const it = {
   'mode.party': 'Party',
   'mode.personal': 'Area personale 🔒',
   'mode.beautyLab': 'Laboratorio bellezza 🔒',
+  'mode.updates': 'Aggiornamenti',
   'mode.pinChangedNotice': 'Il PIN è stato modificato. Inserisci il nuovo PIN.',
+
+  // Updates: the ONE update surface. No PIN, no personal data — it shows the
+  // running release and applies updates this TV is already entitled to receive.
+  'updates.title': 'Aggiornamenti',
+  'updates.checking': 'Verifica aggiornamenti…',
+  'updates.upToDate': 'NubArca TV è aggiornata',
+  'updates.otaReady': 'Aggiornamento pronto',
+  'updates.installNow': 'Installa ora',
+  'updates.otaApplying': 'Installazione aggiornamento…',
+  'updates.nativeAvailable': 'Nuova versione NubArca TV',
+  'updates.versionChange': '{current} → {available}',
+  'updates.downloadAndInstall': 'Scarica e installa',
+  'updates.downloading': 'Download in corso…',
+  'updates.downloadingPercent': 'Download in corso… {percent}%',
+  'updates.needsPermission':
+    'NubArca TV ha bisogno del tuo permesso per installare i propri aggiornamenti ufficiali.',
+  'updates.authorize': 'Autorizza',
+  'updates.installerHandoff': 'Completa l’installazione nella schermata Fire TV.',
+  'updates.checkAgain': 'Controlla di nuovo',
+  'updates.back': '← Indietro',
+  'updates.currentVersion': 'Versione attuale',
+  'updates.runtime': 'Runtime',
+  'updates.updateId': 'Aggiornamento in uso',
+
+  // Sanitized failures. None of these ever carries a path, a native message or
+  // a stack trace.
+  'updates.error.check': 'Impossibile verificare gli aggiornamenti.',
+  'updates.error.download': 'Download non riuscito. Controlla la connessione.',
+  'updates.error.invalid': 'Il file di aggiornamento non è valido e non è stato installato.',
+  'updates.error.notNewer': 'Questa TV ha già la versione più recente.',
+  'updates.error.permission': 'Permesso di installazione non concesso.',
+  'updates.error.installer': 'Fire TV non ha completato l’installazione.',
+  'updates.error.unavailable': 'Aggiornamenti non disponibili su questo dispositivo.',
 
   // TV "Beauty Lab" (Laboratorio bellezza) — grant-gated Aesthetics Lab.
   'beautyLab.title': 'Laboratorio bellezza',

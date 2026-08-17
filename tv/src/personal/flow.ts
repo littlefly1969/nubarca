@@ -3,6 +3,8 @@
 //
 //   loading ── SESSION_READY ──▶ mode ── CHOOSE_PARTY ──▶ party
 //      │                          │  ◀── PARTY_EXIT ───────┘
+//      │                          ├── CHOOSE_UPDATES ──▶ updates
+//      │                          │  ◀── UPDATES_BACK ─────┘
 //      │                          └── CHOOSE_PERSONAL ──▶ pin
 //      │                                 │  ◀── PIN_CANCELLED
 //      │                                 └── UNLOCKED ──▶ personalHome
@@ -36,7 +38,12 @@
 //     atomic pairing flow cannot produce it) is an INCOMPLETE association:
 //     neither Party nor Personal may run under it; the TV returns to pairing
 //     with the "pairing is incomplete" notice;
-//   * Party and Personal Area can never be active simultaneously.
+//   * Party and Personal Area can never be active simultaneously;
+//   * `updates` is a PLAIN top-level mode, deliberately NOT a personal state: it
+//     needs no PIN, holds no grant, calls no owner-private API and touches no
+//     cached media. It talks only to the OTA endpoint the app already uses and to
+//     the public APK/release-descriptor path. Adding it to `isPersonalState`
+//     would make BACK from it revoke a grant it never held.
 
 export interface PersonalHomeInfo {
   displayName: string;
@@ -65,6 +72,7 @@ export type TvFlowState =
   | { name: 'pairing'; incomplete: boolean }
   | { name: 'mode'; notice: ModeNotice }
   | { name: 'party' }
+  | { name: 'updates' }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
   | { name: 'personalLibrary'; home: PersonalHomeInfo }
@@ -79,6 +87,8 @@ export type TvFlowEvent =
   | { type: 'CHOOSE_PARTY' }
   | { type: 'CHOOSE_PERSONAL' }
   | { type: 'CHOOSE_BEAUTY_LAB' }
+  | { type: 'CHOOSE_UPDATES' }
+  | { type: 'UPDATES_BACK' }
   | { type: 'PIN_CANCELLED' }
   | { type: 'UNLOCKED'; home: PersonalHomeInfo }
   | { type: 'OPEN_LIBRARY' }
@@ -113,6 +123,13 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
         : state;
     case 'CHOOSE_PARTY':
       return state.name === 'mode' ? { name: 'party' } : state;
+    case 'CHOOSE_UPDATES':
+      // No PIN gate: the update surface exposes nothing owner-private. It shows
+      // the running release identity and applies updates the device is already
+      // entitled to receive.
+      return state.name === 'mode' ? { name: 'updates' } : state;
+    case 'UPDATES_BACK':
+      return state.name === 'updates' ? { name: 'mode', notice: null } : state;
     case 'CHOOSE_PERSONAL':
       return state.name === 'mode' ? { name: 'pin', target: 'personal' } : state;
     case 'CHOOSE_BEAUTY_LAB':

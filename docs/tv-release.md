@@ -7,18 +7,19 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.4,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 6, runtime
-`nubarca-tv-native-5`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.5,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 7, runtime
+`nubarca-tv-native-6`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.4 is a NATIVE release: its config plugin now makes Leanback manifest
-generation self-contained, adding `LEANBACK_LAUNCHER` to the TV activity even
-when the upstream template supplies only the ordinary launcher category. The
-build-time manifest contract changed, so the runtime and Android versionCode
-both incremented.
+1.0.5 is a NATIVE release, and specifically the **in-app updater bootstrap**: it
+adds the `REQUEST_INSTALL_PACKAGES` permission and a PackageInstaller path to the
+existing `NubArcaTvPlatform` bridge. Neither can arrive by OTA, so 1.0.5 is the
+one APK that must still be installed the old way. Once it is installed, both
+update kinds are reachable from **Mode Select → Aggiornamenti / Updates** with no
+ADB, PC or file manager.
 
-Runtime `nubarca-tv-native-5` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-6` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.
@@ -270,8 +271,49 @@ From the repository root, set operator-provided
 ./deploy/publish-tv-apk.sh <validated-apk>
 ```
 
-Publication calls the dedicated local validator first, uploads under a temporary
-name, atomically replaces APK/checksum and compares the remote/local SHA-256.
+Publication calls the dedicated local validator first, then publishes in a
+FAIL-CLOSED order:
+
+1. the immutable `nubarca-tv-v<versionCode>.apk`, uploaded under a temporary
+   name and moved into place;
+2. a remote/local SHA-256 comparison of those bytes;
+3. the canonical `nubarca-tv.apk` and `nubarca-tv.apk.sha256` — the manual
+   sideload contract, unchanged;
+4. `nubarca-tv.release.json` **last**.
+
+The release descriptor is the ACTIVATION POINTER: an installed TV reads it and
+offers to install the bytes it names, so it must never be visible before those
+bytes exist and have been verified on the server. `set -e` means any failure in
+steps 1-3 aborts before step 4, leaving the previous descriptor intact and
+devices still being offered the release that is fully published. Every field in
+the descriptor is generated from `tv/release-contract.json` plus the real SHA-256
+and byte count of the APK by `tv/scripts/release-descriptor.cjs`; none of it is
+hand-maintained. Older versioned APKs are deliberately not cleaned up here.
+
+## 12.1 In-app updates (from 1.0.5 onwards)
+
+**Mode Select → Aggiornamenti / Updates** is the one update surface. It has no
+PIN, holds no personal grant and calls no owner-private API.
+
+It evaluates the native release descriptor FIRST. A published `versionCode`
+higher than the installed one wins outright — an OTA belonging to the runtime the
+device is leaving is neither offered nor applied. An equal `versionCode` leaves
+the ordinary OTA flow in charge; a lower one is treated as stale and never
+downgrades.
+
+A native update downloads the APK from `/download/tv/<apkFile>`, composed from
+the pinned production origin and a file name the client requires to equal
+`nubarca-tv-v<versionCode>.apk` — the descriptor never carries a URL. Before an
+install session exists, the native bridge re-verifies, against the RUNNING
+install: SHA-256, that the archive parses, package name, that the candidate
+`versionCode` equals the advertised one AND is strictly higher than the installed
+one, and that the signing-certificate SHA-256 digests are identical. Only then is
+the APK streamed into a `PackageInstaller` session committed with
+`USER_ACTION_REQUIRED`; Fire OS shows its own confirmation, which the design
+deliberately keeps. There is no silent, root or device-owner install path.
+
+This changes nothing about how a release is BUILT, VALIDATED or PUBLISHED —
+§10-§12 remain the procedure.
 
 ## 13. Native installation acceptance
 

@@ -36,6 +36,7 @@ import { PersonalHomeScreen } from './src/screens/PersonalHomeScreen';
 import { PersonalLibraryScreen } from './src/screens/PersonalLibraryScreen';
 import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
+import { UpdateScreen } from './src/screens/UpdateScreen';
 import { exitTvApp } from './src/lib/tvPlatform';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
@@ -228,6 +229,18 @@ function AppInner(): React.JSX.Element {
     rawDispatch({ type: 'CHOOSE_PARTY' });
   }, []);
 
+  // BACK from the Updates screen returns to mode selection. Updates holds no
+  // grant and no session state, so there is nothing to tear down on the way out.
+  useEffect(() => {
+    if (flow.name !== 'updates') return;
+    const onBackPress = () => {
+      rawDispatch({ type: 'UPDATES_BACK' });
+      return true;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+    return () => sub.remove();
+  }, [flow.name]);
+
   // TV remote Back button inside Party: AlbumItemsScreen and ViewerScreen own
   // their OWN BackHandler (each hides its MENU overlay first, then navigates up
   // via onClose/onBack). On the album list (Party root) the handler below
@@ -285,7 +298,14 @@ function AppInner(): React.JSX.Element {
           onChooseParty={onChooseParty}
           onChoosePersonal={() => rawDispatch({ type: 'CHOOSE_PERSONAL' })}
           onChooseBeautyLab={() => rawDispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
+          onChooseUpdates={() => rawDispatch({ type: 'CHOOSE_UPDATES' })}
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
+        />
+      )}
+      {flow.name === 'updates' && (
+        <UpdateScreen
+          baseUrl={resolveBaseUrl()}
+          onBack={() => rawDispatch({ type: 'UPDATES_BACK' })}
         />
       )}
       {flow.name === 'pin' && (

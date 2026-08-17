@@ -23,10 +23,12 @@ only the limited TV pairing and `/api/tv/*` contracts.
 | iOS bundle identifier | — | `it.littlefly.nubarca` |
 | Expo slug | `nubarca-tv` | `nubarca` |
 | Deep-link scheme | `nubarca-tv` | `nubarca` |
-| Version / versionCode | `1.0.4` / `6` | — |
+| Version / versionCode | `1.0.5` / `7` | — |
 | OTA runtime series | `nubarca-tv-native-*` | — |
 | AsyncStorage session key | `nubarca.tv.session.cookie` | — |
 | Published artifact | `nubarca-tv.apk` | — |
+| Immutable artifact | `nubarca-tv-v<versionCode>.apk` | — |
+| Release descriptor | `nubarca-tv.release.json` | — |
 
 `tv/scripts/appIdentity.test.mjs` pins every value in the left column.
 
