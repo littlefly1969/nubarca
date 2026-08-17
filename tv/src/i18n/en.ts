@@ -286,6 +286,7 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'filters.peopleLoading': 'Loading people…',
   'filters.peopleNone': 'No people selected',
   'filters.peopleSelected': '{count} selected',
+  'filters.peopleSelectedStale': '{count} selected · {stale} no longer available',
   'filters.peopleIncluded': '{count} included',
   'filters.peopleExcluded': '{count} excluded',
   'filters.peopleMode': 'Match',

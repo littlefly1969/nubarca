@@ -259,6 +259,30 @@ test('a removed row hands focus to the nearest surviving row', () => {
   assert.equal(resolveTvFilterFocus('albumMembership', albumRows), 'period');
 });
 
+test('resolving focus is idempotent — re-feeding the answer changes nothing', () => {
+  // The panel resolves focus during render and writes the answer back to the
+  // ref it just read, so the resolver sees its own output on the next render
+  // (and on a discarded one, under StrictMode or a concurrent re-render). That
+  // is only safe because a resolved key is always a fixed point: it is either a
+  // static control or a row that is present. Without this, a render that did
+  // not commit could walk the focus target away from where the remote is.
+  const photo = identityFor(LIBRARY, 'image');
+  const photoRows = tvFilterRows(photo, photo.filters);
+  const videoRows = tvFilterRows(identityFor(LIBRARY, 'video'), emptyIdentity(LIBRARY).filters);
+  const albumRows = tvFilterRows(identityFor(ALBUM, 'all'), emptyIdentity(ALBUM).filters);
+
+  const starts: (TvFilterId | 'sort' | 'apply' | null)[] = [
+    null, 'people', 'hasGps', 'albumMembership', 'codec', 'sort', 'apply',
+  ];
+  for (const rows of [photoRows, videoRows, albumRows, []]) {
+    for (const start of starts) {
+      const once = resolveTvFilterFocus(start, rows);
+      assert.equal(resolveTvFilterFocus(once, rows), once,
+        `resolving ${String(start)} twice moved the target`);
+    }
+  }
+});
+
 test('focus never resolves to nothing', () => {
   // The static controls exist on every tab, so they always survive…
   for (const key of ['sort', 'direction', 'reset', 'apply', 'cancel'] as const) {

@@ -165,6 +165,18 @@ export function LibraryPeoplePanel({
   const showMode = includeCount >= 2;
   const showClear = selectedCount > 0;
 
+  // A selected person the projection no longer returns — deleted, merged into
+  // another person, or reclustered away between applying the filter and
+  // reopening this picker. The id stays in the draft: dropping it silently
+  // would edit a filter the user did not ask to change, and the next Apply
+  // would quietly return different results. But the count then exceeds the
+  // selected rows on screen with nothing to explain the difference, so the
+  // difference is stated instead. "Azzera selezione" below is already the way
+  // out, and it is shown whenever anything is selected — including when every
+  // remaining selection is a stale one.
+  const known = new Set(people.map((person) => person.id));
+  const staleCount = [...include, ...exclude].filter((id) => !known.has(id)).length;
+
   // Deterministic landing spot: the row the remote was on when it still exists,
   // otherwise the first person. Never "no row".
   const wanted = focusRef.current;
@@ -181,7 +193,11 @@ export function LibraryPeoplePanel({
         <Text style={styles.hint}>
           {selectedCount === 0
             ? t('filters.peopleNone')
-            : t('filters.peopleSelected', { count: String(selectedCount) })}
+            : staleCount === 0
+              ? t('filters.peopleSelected', { count: String(selectedCount) })
+              : t('filters.peopleSelectedStale', {
+                count: String(selectedCount), stale: String(staleCount),
+              })}
         </Text>
 
         {showMode && (

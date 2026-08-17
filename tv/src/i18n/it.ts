@@ -291,6 +291,7 @@ const it = {
   'filters.peopleLoading': 'Caricamento delle persone…',
   'filters.peopleNone': 'Nessuna persona selezionata',
   'filters.peopleSelected': '{count} selezionate',
+  'filters.peopleSelectedStale': '{count} selezionate · {stale} non più disponibili',
   'filters.peopleIncluded': '{count} incluse',
   'filters.peopleExcluded': '{count} escluse',
   'filters.peopleMode': 'Corrispondenza',
