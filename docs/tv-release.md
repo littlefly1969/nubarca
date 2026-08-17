@@ -76,6 +76,46 @@ The publisher writes directly to `TV_OTA_STORAGE_ROOT`; it does not upload over
 SSH. Run it on the host owning that storage, or one with the same filesystem
 safely mounted read/write.
 
+### 4.1 Locating the signing material on an installation
+
+All four publisher values are operator configuration and are never committed, so
+ask the operator for them. When you have to locate them on a host you have
+access to, two things make the search misleading:
+
+- **The private key is not necessarily beside the storage root or the trust
+  certificate.** It is commonly kept next to the deployment checkout under a
+  `secrets/` directory that is git-ignored — often through
+  `.git/info/exclude` rather than a tracked `.gitignore`, so it is invisible to
+  `git status` AND absent from the repository, and a search limited to the
+  storage mount will not find it. Check the checkout as well as the storage
+  root, and confirm the exclusion with `git check-ignore -v secrets/`.
+- **More than one keypair may be present, and the obvious one can be retired.**
+  A rotation or a product rename leaves the previous pair on disk. A retired
+  pair is internally consistent — its key matches its own certificate — so it
+  validates against itself and looks correct right up to the point where the API
+  and every device reject the signature. A directory named after an older
+  runtime is a strong hint, and so is a certificate `CN` that does not match the
+  current product name.
+
+Therefore: before publishing, prove the key belongs to the trust root that is
+actually in force. The API-mounted certificate is the authority, because that is
+what verifies the manifest, and §3 requires the APK-embedded certificate to be
+the same one.
+
+```bash
+# SPKI of the certificate the API serves against (the authority)
+openssl x509 -in <host-ota-certificate.pem> -noout -pubkey \
+  | openssl pkey -pubin -outform DER | sha256sum
+
+# SPKI of the candidate private key — these two MUST be identical
+openssl pkey -in <candidate-private-key.pem> -pubout -outform DER | sha256sum
+```
+
+`npm run status:ota` prints both the certificate SHA-256 and the OTA public-key
+SPKI SHA-256 for the configured values, so it is the quickest confirmation once
+the four variables are exported. A mismatch is §3's stop condition: do not
+generate a replacement, and do not rotate.
+
 The API loads the certificate once into its singleton update store. Ordinary
 OTA publication needs no container rebuild or API restart. The first certificate
 mount or a changed certificate path needs one API recreate/restart. Certificate

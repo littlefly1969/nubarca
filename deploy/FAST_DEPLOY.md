@@ -55,6 +55,16 @@ on a new backward-compatible backend API, deploy and verify that backend first,
 then use the TV runbook. A native TV release also uses that runbook; do not add a
 second APK/OTA command sequence here.
 
+An OTA needs its own four operator-supplied values, none of which appear in this
+runbook or in the production `.env`: `TV_OTA_STORAGE_ROOT`,
+`NUBARCA_TV_OTA_CERTIFICATE`, `TV_OTA_PRIVATE_KEY_PATH` and
+`NUBARCA_PUBLIC_ORIGIN`. Obtain them from the operator. The signing key in
+particular is NOT necessarily beside the publication storage, more than one
+keypair may exist on a host with the retired one looking perfectly valid, and
+publishing with the wrong one produces a signature every device rejects — see
+[`../docs/tv-release.md`](../docs/tv-release.md) §4.1 for where to look and the
+SPKI check that settles it before publishing.
+
 Never source `.env`. Let Compose read it through `--env-file .env`; sourcing it
 can truncate the semicolon-delimited PostgreSQL connection string.
 
