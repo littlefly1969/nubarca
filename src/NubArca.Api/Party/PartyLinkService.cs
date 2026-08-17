@@ -161,7 +161,12 @@ public sealed class PartyLinkService : IPartyLinkService
                 && p.Enabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
             .OrderByDescending(p => p.CreatedAt)
-            .Select(p => new { p.Id, p.UploadEnabled, p.UploadTokenHash, p.RequireUploadApproval })
+            .Select(p => new
+            {
+                p.Id, p.UploadEnabled, p.UploadTokenHash, p.RequireUploadApproval,
+                p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
+                p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+            })
             .FirstOrDefaultAsync(cancellationToken);
 
         // Party requires ShowOnTv; a link on a no-longer-ShowOnTv album is inert.
@@ -171,7 +176,50 @@ public sealed class PartyLinkService : IPartyLinkService
         var uploadUrl = uploadOn ? BuildUploadUrl(DeriveUploadToken(active!.Id)) : null;
         var requireApproval = partyMode && active!.RequireUploadApproval;
         return new AlbumPartyStatusDto(
-            albumId, album.ShowOnTv, partyMode, viewUrl, uploadOn, uploadUrl, requireApproval);
+            albumId, album.ShowOnTv, partyMode, viewUrl, uploadOn, uploadUrl, requireApproval,
+            // Defaults when no link exists yet, so the settings panel renders the
+            // values a first enable would actually produce.
+            active?.PhotoSlideSeconds ?? PartySlideshowDefaults.PhotoSeconds,
+            active?.MaxVideoSlideSeconds ?? PartySlideshowDefaults.MaxVideoSeconds,
+            active?.MaxPhotoUploadsPerParticipant ?? 0,
+            active?.MaxVideoUploadsPerParticipant ?? 0);
+    }
+
+    public async Task<bool> UpdateSlideshowSettingsAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        int? photoSlideSeconds,
+        int? maxVideoSlideSeconds,
+        int? maxPhotoUploadsPerParticipant,
+        int? maxVideoUploadsPerParticipant,
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        // The ACTIVE link only. A revoked/superseded row is inert and must not
+        // be edited back into relevance.
+        var link = await _db.PartyAlbumLinks
+            .Where(p => p.AlbumId == albumId && p.OwnerUserId == ownerUserId
+                && p.Enabled && p.RevokedAt == null
+                && (p.ExpiresAt == null || p.ExpiresAt > now))
+            .OrderByDescending(p => p.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (link is null)
+        {
+            return false;
+        }
+
+        // Only what was supplied changes. Nothing here touches TokenHash,
+        // UploadTokenHash, Enabled, UploadEnabled or RequireUploadApproval, so a
+        // guest holding the QR keeps working across a settings change — and the
+        // participant counters are in another table entirely, so lowering a
+        // quota leaves what people already uploaded exactly where it is.
+        if (photoSlideSeconds is int photo) link.PhotoSlideSeconds = photo;
+        if (maxVideoSlideSeconds is int video) link.MaxVideoSlideSeconds = video;
+        if (maxPhotoUploadsPerParticipant is int maxPhotos) link.MaxPhotoUploadsPerParticipant = maxPhotos;
+        if (maxVideoUploadsPerParticipant is int maxVideos) link.MaxVideoUploadsPerParticipant = maxVideos;
+        link.UpdatedAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
     }
 
     public async Task<IReadOnlyDictionary<Guid, PartyLinkUrls>> GetActivePartyUrlsAsync(
@@ -196,7 +244,11 @@ public sealed class PartyLinkService : IPartyLinkService
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
             .Join(_db.Albums.AsNoTracking().Where(a => a.OwnerUserId == ownerUserId && a.ShowOnTv),
                 p => p.AlbumId, a => a.Id,
-                (p, a) => new { p.AlbumId, p.Id, p.CreatedAt, p.UploadEnabled, p.UploadTokenHash })
+                (p, a) => new
+                {
+                    p.AlbumId, p.Id, p.CreatedAt, p.UploadEnabled, p.UploadTokenHash,
+                    p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
+                })
             .ToListAsync(cancellationToken);
 
         foreach (var group in rows.GroupBy(r => r.AlbumId))
@@ -205,7 +257,10 @@ public sealed class PartyLinkService : IPartyLinkService
             var uploadUrl = latest.UploadEnabled && latest.UploadTokenHash is not null
                 ? BuildUploadUrl(DeriveUploadToken(latest.Id))
                 : null;
-            result[group.Key] = new PartyLinkUrls(BuildPartyUrl(DeriveToken(latest.Id)), uploadUrl);
+            result[group.Key] = new PartyLinkUrls(
+                BuildPartyUrl(DeriveToken(latest.Id)),
+                uploadUrl,
+                new PartySlideshowTimingDto(latest.PhotoSlideSeconds, latest.MaxVideoSlideSeconds));
         }
         return result;
     }
@@ -262,7 +317,11 @@ public sealed class PartyLinkService : IPartyLinkService
             .Where(p => p.UploadTokenHash == hash
                 && p.Enabled && p.UploadEnabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
-            .Select(p => new { p.Id, p.OwnerUserId, p.AlbumId, p.RequireUploadApproval })
+            .Select(p => new
+            {
+                p.Id, p.OwnerUserId, p.AlbumId, p.RequireUploadApproval,
+                p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+            })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
         {
@@ -274,7 +333,9 @@ public sealed class PartyLinkService : IPartyLinkService
             .AnyAsync(a => a.Id == link.AlbumId && a.OwnerUserId == link.OwnerUserId && a.ShowOnTv,
                 cancellationToken);
         return albumOk
-            ? new PartyAccess(link.OwnerUserId, link.AlbumId, link.Id, link.RequireUploadApproval)
+            ? new PartyAccess(
+                link.OwnerUserId, link.AlbumId, link.Id, link.RequireUploadApproval,
+                link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant)
             : null;
     }
 

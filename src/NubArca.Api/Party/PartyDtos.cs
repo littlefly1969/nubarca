@@ -1,3 +1,5 @@
+using NubArca.Api.Domain;
+
 namespace NubArca.Api.Party;
 
 // Owner-facing party status for an album. Carries the derived public party URL
@@ -12,16 +14,58 @@ public sealed record AlbumPartyStatusDto(
     string? UploadUrl,
     // When true, new anonymous uploads wait for owner approval before appearing
     // on the public party page / TV. Default false (immediate visibility).
-    bool RequireUploadApproval);
+    bool RequireUploadApproval,
+    // Slideshow timing + per-participant quotas. Owner-facing, so the settings
+    // panel can render the CURRENT values rather than guessing the defaults.
+    // Quotas use the domain's 0 = unlimited.
+    int PhotoSlideSeconds = PartySlideshowDefaults.PhotoSeconds,
+    int MaxVideoSlideSeconds = PartySlideshowDefaults.MaxVideoSeconds,
+    int MaxPhotoUploadsPerParticipant = 0,
+    int MaxVideoUploadsPerParticipant = 0);
 
 // Derived public URLs for an active party link (relative, e.g. "/party/{token}"
 // and "/party/{token}/upload"). Never a token hash. UploadUrl is null when the
 // upload sub-switch is off.
-public sealed record PartyLinkUrls(string ViewUrl, string? UploadUrl);
+// `Slideshow` is null only when there is no active link. Carried here rather
+// than as loose scalars so the TV context stays one nested object and the
+// timing travels with the link it belongs to — resolved in the SAME query that
+// derives the URLs, so no N+1 appears.
+public sealed record PartyLinkUrls(
+    string ViewUrl,
+    string? UploadUrl,
+    PartySlideshowTimingDto? Slideshow = null);
+
+// TV-facing slideshow timing for an active party link. Seconds, not
+// milliseconds, matching the owner-facing contract.
+public sealed record PartySlideshowTimingDto(int PhotoSeconds, int MaxVideoSeconds);
 
 // Safe result of an anonymous party upload batch — counts + safe codes only.
 // Never storage keys, blob ids, SHA, paths, stack traces, or created file ids.
-public sealed record PartyUploadResultDto(int Accepted, int Rejected);
+//
+// `Accepted` remains the TOTAL accepted count so an existing client keeps
+// working; the per-kind breakdown and the quota fields are additive. Remaining
+// values are null when that kind is unlimited, so a client can render
+// "illimitate" without having to know that 0 means something special.
+public sealed record PartyUploadResultDto(
+    int Accepted,
+    int Rejected,
+    int AcceptedPhotos = 0,
+    int AcceptedVideos = 0,
+    int QuotaRejectedPhotos = 0,
+    int QuotaRejectedVideos = 0,
+    int? RemainingPhotos = null,
+    int? RemainingVideos = null);
+
+// What a guest may still upload on this link, for the upload page's header.
+// Deliberately carries NO participant id and no token — the identity lives in
+// an HttpOnly cookie the page never reads.
+public sealed record PartyUploadSessionDto(
+    int? MaxPhotos,
+    int? MaxVideos,
+    int UsedPhotos,
+    int UsedVideos,
+    int? RemainingPhotos,
+    int? RemainingVideos);
 
 // Result of enabling party mode: the same status plus a convenience flag that
 // the frontend can use to surface the (re)generated link.
@@ -39,7 +83,11 @@ public sealed record PartyAccess(
     Guid OwnerUserId,
     Guid AlbumId,
     Guid? PartyAlbumLinkId = null,
-    bool RequireUploadApproval = false);
+    bool RequireUploadApproval = false,
+    // Per-participant quotas carried straight off the resolved link (0 =
+    // unlimited), so the upload path needs no second query to learn them.
+    int MaxPhotoUploadsPerParticipant = 0,
+    int MaxVideoUploadsPerParticipant = 0);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,

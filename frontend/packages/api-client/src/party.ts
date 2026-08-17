@@ -17,6 +17,40 @@ export interface AlbumPartyStatus {
   // When true, new guest uploads wait for owner approval before appearing on the
   // public party page / TV. Default false (immediate visibility).
   requireUploadApproval: boolean;
+  // Slideshow timing (seconds) and per-participant quotas (0 = unlimited)
+  // for the ACTIVE link. Present on every status response.
+  photoSlideSeconds: number;
+  maxVideoSlideSeconds: number;
+  maxPhotoUploadsPerParticipant: number;
+  maxVideoUploadsPerParticipant: number;
+}
+
+// Ranges the server validates. Duplicated here so the panel can refuse a bad
+// value before a round-trip; the SERVER remains the validator.
+export const PARTY_SLIDESHOW_RANGES = {
+  photoSeconds: { min: 3, max: 60 },
+  maxVideoSeconds: { min: 5, max: 600 },
+  quota: { min: 0, max: 10000 },
+} as const;
+
+// Saves ONLY the four numeric settings. Deliberately a different endpoint from
+// setAlbumPartyMode so saving them cannot rotate a token, toggle party/upload,
+// or change approval mode as a side effect.
+export function setPartySlideshowSettings(
+  albumId: string,
+  settings: {
+    photoSlideSeconds?: number;
+    maxVideoSlideSeconds?: number;
+    maxPhotoUploadsPerParticipant?: number;
+    maxVideoUploadsPerParticipant?: number;
+  },
+  signal?: AbortSignal,
+): Promise<AlbumPartyStatus> {
+  return api<AlbumPartyStatus>(`/api/albums/${albumId}/party-slideshow-settings`, {
+    method: 'PATCH',
+    json: settings,
+    signal,
+  });
 }
 
 export function getAlbumPartySettings(
@@ -118,8 +152,60 @@ export function getPartyItems(token: string, signal?: AbortSignal): Promise<Part
 // --- Public party UPLOAD (anonymous, upload-token scoped) ---
 
 export interface PartyUploadResult {
+  // Total accepted, kept for compatibility with the pre-video contract.
   accepted: number;
   rejected: number;
+  // Per-kind breakdown and quota state. Optional so an older server response
+  // still parses; the page treats a missing field as "not reported".
+  acceptedPhotos?: number;
+  acceptedVideos?: number;
+  quotaRejectedPhotos?: number;
+  quotaRejectedVideos?: number;
+  // null = that kind is unlimited (never 0-means-unlimited on the wire).
+  remainingPhotos?: number | null;
+  remainingVideos?: number | null;
+}
+
+// What this guest may still upload on this link. Created or reused server-side;
+// the participant identity itself lives in an HttpOnly cookie this code cannot
+// read, which is the point — a quota the client could see is a quota the client
+// could edit.
+export interface PartyUploadSession {
+  maxPhotos: number | null;
+  maxVideos: number | null;
+  usedPhotos: number;
+  usedVideos: number;
+  remainingPhotos: number | null;
+  remainingVideos: number | null;
+}
+
+// Idempotent. Safe to call on every page load: it mints a session the first
+// time and reuses it afterwards.
+export function startPartyUploadSession(
+  uploadToken: string,
+  signal?: AbortSignal,
+): Promise<PartyUploadSession> {
+  return api<PartyUploadSession>(
+    `/api/party/${encodeURIComponent(uploadToken)}/upload-session`,
+    { method: 'POST', signal },
+  );
+}
+
+// Declared types the party upload endpoint will consider. The SERVER decides
+// what a file really is after ingest; this only keeps the picker and the
+// obviously-pointless-upload check honest.
+export const PARTY_VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'] as const;
+
+export type PartyMediaKind = 'photo' | 'video' | 'unsupported';
+
+// Best-effort client classification from the browser-reported type. UX only:
+// it decides which counter a file is charged against locally and which files
+// are obviously over quota, never whether the upload is allowed.
+export function classifyPartyFile(file: File): PartyMediaKind {
+  const type = (file.type || '').toLowerCase();
+  if (type.startsWith('image/')) return 'photo';
+  if ((PARTY_VIDEO_TYPES as readonly string[]).includes(type)) return 'video';
+  return 'unsupported';
 }
 
 // Uploads one or more image files to a party album using the separate upload

@@ -5,6 +5,8 @@ import {
   deleteAlbum,
   getAlbumPartySettings,
   setAlbumPartyMode,
+  setPartySlideshowSettings,
+  PARTY_SLIDESHOW_RANGES,
   setAlbumTvVisibility,
   updateAlbum,
   type AlbumDetail,
@@ -41,6 +43,55 @@ export function AlbumSettingsPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [tvSaving, setTvSaving] = useState(false);
   const [partySaving, setPartySaving] = useState(false);
+  // The four numeric settings are edited as a DRAFT and saved explicitly. A
+  // PATCH per keypress would send a partially-typed "1" while the user is on
+  // their way to "15", and every one of those is a real config change the TV
+  // would adopt on its next poll.
+  const [slideshowDraft, setSlideshowDraft] = useState({
+    photoSlideSeconds: '', maxVideoSlideSeconds: '',
+    maxPhotoUploadsPerParticipant: '', maxVideoUploadsPerParticipant: '',
+  });
+  const [slideshowStatus, setSlideshowStatus] = useState<'idle' | 'saved' | 'invalid' | 'failed'>('idle');
+
+  // Seed the draft from the server whenever the panel learns the current values.
+  useEffect(() => {
+    if (!party) return;
+    setSlideshowDraft({
+      photoSlideSeconds: String(party.photoSlideSeconds),
+      maxVideoSlideSeconds: String(party.maxVideoSlideSeconds),
+      maxPhotoUploadsPerParticipant: String(party.maxPhotoUploadsPerParticipant),
+      maxVideoUploadsPerParticipant: String(party.maxVideoUploadsPerParticipant),
+    });
+  }, [party?.albumId, party?.photoSlideSeconds, party?.maxVideoSlideSeconds,
+    party?.maxPhotoUploadsPerParticipant, party?.maxVideoUploadsPerParticipant]);
+
+  const inRange = (raw: string, range: { min: number; max: number }) => {
+    const value = Number(raw);
+    return Number.isInteger(value) && value >= range.min && value <= range.max;
+  };
+
+  const slideshowValid =
+    inRange(slideshowDraft.photoSlideSeconds, PARTY_SLIDESHOW_RANGES.photoSeconds)
+    && inRange(slideshowDraft.maxVideoSlideSeconds, PARTY_SLIDESHOW_RANGES.maxVideoSeconds)
+    && inRange(slideshowDraft.maxPhotoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
+    && inRange(slideshowDraft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
+
+  async function saveSlideshowSettings() {
+    if (!slideshowValid) { setSlideshowStatus('invalid'); return; }
+    setPartySaving(true);
+    setSlideshowStatus('idle');
+    try {
+      onPartyUpdated(await setPartySlideshowSettings(albumId, {
+        photoSlideSeconds: Number(slideshowDraft.photoSlideSeconds),
+        maxVideoSlideSeconds: Number(slideshowDraft.maxVideoSlideSeconds),
+        maxPhotoUploadsPerParticipant: Number(slideshowDraft.maxPhotoUploadsPerParticipant),
+        maxVideoUploadsPerParticipant: Number(slideshowDraft.maxVideoUploadsPerParticipant),
+      }));
+      setSlideshowStatus('saved');
+    } catch {
+      setSlideshowStatus('failed');
+    } finally { setPartySaving(false); }
+  }
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -201,6 +252,84 @@ export function AlbumSettingsPanel({
                   {party.requireUploadApproval ? ` (${t('albumDetail.approvalRequired')})` : ''}
                 </Link>
               </p>
+            </div>
+          )}
+
+          {party?.partyMode && (
+            <div className="album-party-slideshow" data-testid="party-slideshow-settings">
+              <h4>{t('party.slideshowSettingsTitle')}</h4>
+
+              <label className="album-party-number">
+                <span>{t('party.photoSlideSeconds')}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={PARTY_SLIDESHOW_RANGES.photoSeconds.min}
+                  max={PARTY_SLIDESHOW_RANGES.photoSeconds.max}
+                  value={slideshowDraft.photoSlideSeconds}
+                  disabled={partySaving}
+                  aria-label={t('party.photoSlideSeconds')}
+                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, photoSlideSeconds: e.target.value }))}
+                />
+                <span className="muted">{t('party.secondsSuffix')}</span>
+              </label>
+
+              <label className="album-party-number">
+                <span>{t('party.maxVideoSlideSeconds')}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={PARTY_SLIDESHOW_RANGES.maxVideoSeconds.min}
+                  max={PARTY_SLIDESHOW_RANGES.maxVideoSeconds.max}
+                  value={slideshowDraft.maxVideoSlideSeconds}
+                  disabled={partySaving}
+                  aria-label={t('party.maxVideoSlideSeconds')}
+                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxVideoSlideSeconds: e.target.value }))}
+                />
+                <span className="muted">{t('party.secondsSuffix')}</span>
+              </label>
+
+              <label className="album-party-number">
+                <span>{t('party.maxPhotosPerParticipant')}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={PARTY_SLIDESHOW_RANGES.quota.min}
+                  max={PARTY_SLIDESHOW_RANGES.quota.max}
+                  value={slideshowDraft.maxPhotoUploadsPerParticipant}
+                  disabled={partySaving}
+                  aria-label={t('party.maxPhotosPerParticipant')}
+                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxPhotoUploadsPerParticipant: e.target.value }))}
+                />
+                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
+              </label>
+
+              <label className="album-party-number">
+                <span>{t('party.maxVideosPerParticipant')}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={PARTY_SLIDESHOW_RANGES.quota.min}
+                  max={PARTY_SLIDESHOW_RANGES.quota.max}
+                  value={slideshowDraft.maxVideoUploadsPerParticipant}
+                  disabled={partySaving}
+                  aria-label={t('party.maxVideosPerParticipant')}
+                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxVideoUploadsPerParticipant: e.target.value }))}
+                />
+                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
+              </label>
+
+              <button
+                type="button"
+                data-testid="party-slideshow-save"
+                disabled={partySaving || !slideshowValid}
+                onClick={() => void saveSlideshowSettings()}
+              >
+                {t('party.saveSettings')}
+              </button>
+              {slideshowStatus === 'saved' && <p className="muted" role="status">{t('party.settingsSaved')}</p>}
+              {slideshowStatus === 'invalid' && <p className="inline-error" role="alert">{t('party.settingsInvalid')}</p>}
+              {slideshowStatus === 'failed' && <p className="inline-error" role="alert">{t('party.settingsFailed')}</p>}
             </div>
           )}
         </fieldset>

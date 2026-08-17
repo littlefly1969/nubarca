@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Audit;
+using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
 
@@ -174,6 +175,7 @@ public static class PartyEndpoints
             HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromServices] NubArca.Api.Party.IPartyUploadService uploads,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
             [FromServices] IAuditLogger audit,
             CancellationToken cancellationToken) =>
         {
@@ -196,8 +198,18 @@ public static class PartyEndpoints
                 return Results.BadRequest(new { error = "No files were uploaded." });
             }
 
-            var accepted = 0;
+            // Resolve the participant SERVER-side rather than trusting anything in
+            // the request body: a client-supplied id would be a quota the client
+            // can reset. Works even when the page never called /upload-session —
+            // the session is created here instead.
+            var participant = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+
+            var acceptedPhotos = 0;
+            var acceptedVideos = 0;
             var rejected = 0;
+            var quotaRejectedPhotos = 0;
+            var quotaRejectedVideos = 0;
             foreach (var file in files)
             {
                 NubArca.Api.Party.PartyUploadOutcome outcome;
@@ -207,7 +219,9 @@ public static class PartyEndpoints
                     outcome = await uploads.UploadAsync(
                         access.OwnerUserId, access.AlbumId,
                         file.FileName, file.ContentType, file.Length, stream,
-                        access.PartyAlbumLinkId, access.RequireUploadApproval, cancellationToken);
+                        access.PartyAlbumLinkId, access.RequireUploadApproval,
+                        participant, access.MaxPhotoUploadsPerParticipant,
+                        access.MaxVideoUploadsPerParticipant, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -218,22 +232,84 @@ public static class PartyEndpoints
                     outcome = NubArca.Api.Party.PartyUploadOutcome.Failed;
                 }
 
-                if (outcome == NubArca.Api.Party.PartyUploadOutcome.Accepted) accepted++;
-                else rejected++;
+                switch (outcome)
+                {
+                    case NubArca.Api.Party.PartyUploadOutcome.AcceptedPhoto: acceptedPhotos++; break;
+                    case NubArca.Api.Party.PartyUploadOutcome.AcceptedVideo: acceptedVideos++; break;
+                    case NubArca.Api.Party.PartyUploadOutcome.QuotaPhotoExhausted:
+                        quotaRejectedPhotos++; rejected++; break;
+                    case NubArca.Api.Party.PartyUploadOutcome.QuotaVideoExhausted:
+                        quotaRejectedVideos++; rejected++; break;
+                    default: rejected++; break;
+                }
             }
 
-            // Aggregate-only audit (no token/hash, no file names, no storage internals).
+            var accepted = acceptedPhotos + acceptedVideos;
+
+            // Aggregate-only audit (no token/hash, no file names, no participant
+            // id, no storage internals).
             await audit.LogAsync(
                 userId: null,
                 action: AuditActions.PartyUpload,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.AlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                metadata: new { accepted, rejected },
+                metadata: new
+                {
+                    accepted,
+                    rejected,
+                    acceptedPhotos,
+                    acceptedVideos,
+                    quotaRejectedPhotos,
+                    quotaRejectedVideos,
+                },
                 cancellationToken: cancellationToken);
 
-            return Results.Ok(new NubArca.Api.Party.PartyUploadResultDto(accepted, rejected));
+            var quota = participant is Guid id && access.PartyAlbumLinkId is Guid linkId
+                ? await participants.GetQuotaAsync(linkId, id, cancellationToken)
+                : null;
+            return Results.Ok(new NubArca.Api.Party.PartyUploadResultDto(
+                accepted, rejected, acceptedPhotos, acceptedVideos,
+                quotaRejectedPhotos, quotaRejectedVideos,
+                Remaining(quota?.MaxPhotos ?? 0, quota?.UsedPhotos ?? 0),
+                Remaining(quota?.MaxVideos ?? 0, quota?.UsedVideos ?? 0)));
         }).WithName("PartyUpload").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
+
+        // PUBLIC party UPLOAD SESSION (anonymous, upload-token scoped). Idempotent:
+        // it validates the upload token exactly like /upload does, then creates or
+        // reuses this guest's participant session and reports what they may still
+        // upload. The response carries NO participant id and NO token — the
+        // identity lives only in an HttpOnly cookie the page cannot read.
+        app.MapPost("/api/party/{token}/upload-session", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolveUploadAsync(token, cancellationToken);
+            if (access is null || access.PartyAlbumLinkId is not Guid linkId)
+            {
+                return Results.NotFound();
+            }
+
+            var participantId = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            if (participantId is not Guid id)
+            {
+                return Results.NotFound();
+            }
+
+            var quota = await participants.GetQuotaAsync(linkId, id, cancellationToken);
+            return Results.Ok(new NubArca.Api.Party.PartyUploadSessionDto(
+                Unlimited(quota.MaxPhotos),
+                Unlimited(quota.MaxVideos),
+                quota.UsedPhotos,
+                quota.UsedVideos,
+                Remaining(quota.MaxPhotos, quota.UsedPhotos),
+                Remaining(quota.MaxVideos, quota.UsedVideos)));
+        }).WithName("PartyUploadSession").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
 
         // PUBLIC party FACE SEARCH (anonymous, VIEW-token scoped). A guest uploads one
         // selfie; the backend detects the most prominent face, embeds it with the SAME
@@ -496,6 +572,56 @@ public static class PartyEndpoints
             return status is null ? Results.NotFound() : Results.Ok(status);
         }).WithName("SetAlbumPartyMode").RequireAuthorization();
 
+        // Owner-only party SLIDESHOW/QUOTA settings. Deliberately a separate route
+        // from party-settings: these four numbers are saved as a draft from the
+        // owner panel and must never be able to rotate a token, flip the party or
+        // upload switch, or change approval mode as a side effect. Validated
+        // server-side against the SAME ranges the client shows; an out-of-range
+        // value is a 400, never a silent clamp. Requires an active party link.
+        app.MapMethods("/api/albums/{id:guid}/party-slideshow-settings", ["PATCH"], async (
+            Guid id,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromBody] SetPartySlideshowSettingsRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            if (body is null)
+            {
+                return Results.BadRequest(new { error = "Missing request body." });
+            }
+
+            if (body.PhotoSlideSeconds is int photo && !PartySlideshowDefaults.IsValidPhotoSeconds(photo))
+            {
+                return Results.BadRequest(new { error = "photoSlideSeconds out of range." });
+            }
+            if (body.MaxVideoSlideSeconds is int video && !PartySlideshowDefaults.IsValidMaxVideoSeconds(video))
+            {
+                return Results.BadRequest(new { error = "maxVideoSlideSeconds out of range." });
+            }
+            if (body.MaxPhotoUploadsPerParticipant is int maxPhotos && !PartySlideshowDefaults.IsValidQuota(maxPhotos))
+            {
+                return Results.BadRequest(new { error = "maxPhotoUploadsPerParticipant out of range." });
+            }
+            if (body.MaxVideoUploadsPerParticipant is int maxVideos && !PartySlideshowDefaults.IsValidQuota(maxVideos))
+            {
+                return Results.BadRequest(new { error = "maxVideoUploadsPerParticipant out of range." });
+            }
+
+            var ok = await party.UpdateSlideshowSettingsAsync(
+                ownerUserId, id,
+                body.PhotoSlideSeconds, body.MaxVideoSlideSeconds,
+                body.MaxPhotoUploadsPerParticipant, body.MaxVideoUploadsPerParticipant,
+                cancellationToken);
+            if (!ok)
+            {
+                return Results.NotFound();
+            }
+
+            var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
+            return status is null ? Results.NotFound() : Results.Ok(status);
+        }).WithName("SetPartySlideshowSettings").RequireAuthorization();
+
         // Owner-side moderation of anonymous party uploads. Owner-authenticated (normal
         // user session). Lets the owner see guest-uploaded items and their moderation
         // state, hide/remove unwanted ones from the public party/TV surfaces, and
@@ -674,6 +800,57 @@ public static class PartyEndpoints
     // Duplicated from Program.cs's local `SetNoStore` / `SetPrivateDerivativeCache`
     // helpers (used by dozens of other still-inline endpoints there, so they stay
     // put) — same logic.
+    // Cookie name for the anonymous guest's participant session. ONE name for
+    // every party: the cookie is PATH-scoped to this upload token's API prefix,
+    // so a guest attending two parties holds two cookies the browser keeps apart
+    // by path, and neither party can see or spend the other's allowance. Scoping
+    // by name instead would have meant either leaking a link id into the cookie
+    // name or overwriting the first party's session on arrival at the second.
+    private const string PartyParticipantCookieName = "NubArca.PartyGuest";
+
+    // Resolve (or mint) the guest's participant session and make sure the cookie
+    // is set. The raw token exists for exactly one response; only its hash is
+    // stored. Never reads a participant id from the request body or query — the
+    // whole point is an identity the client did not choose.
+    private static async Task<Guid?> ResolvePartyParticipantAsync(
+        HttpContext context,
+        NubArca.Api.Party.IPartyParticipantService participants,
+        Guid? partyAlbumLinkId,
+        string uploadToken,
+        CancellationToken cancellationToken)
+    {
+        if (partyAlbumLinkId is not Guid linkId)
+        {
+            return null;
+        }
+
+        context.Request.Cookies.TryGetValue(PartyParticipantCookieName, out var existing);
+        var resolution = await participants.ResolveOrCreateAsync(linkId, existing, cancellationToken);
+        if (resolution.NewRawToken is string issued)
+        {
+            context.Response.Cookies.Append(PartyParticipantCookieName, issued, new CookieOptions
+            {
+                HttpOnly = true,
+                // Secure only over HTTPS: a party is often demoed over plain
+                // http on a LAN, and an unconditional Secure flag would silently
+                // drop the cookie there, handing every upload a fresh quota.
+                Secure = context.Request.IsHttps,
+                SameSite = SameSiteMode.Lax,
+                // Narrowest path that still covers this link's upload calls.
+                Path = $"/api/party/{uploadToken}",
+                Expires = DateTimeOffset.UtcNow.AddDays(30),
+                IsEssential = true,
+            });
+        }
+        return resolution.ParticipantId;
+    }
+
+    // Domain 0 means unlimited; the public DTO says null so a client cannot read
+    // "no limit" as "no slots left".
+    private static int? Unlimited(int max) => max > 0 ? max : null;
+
+    private static int? Remaining(int max, int used) => max > 0 ? Math.Max(0, max - used) : null;
+
     private static void SetNoStore(HttpContext context)
     {
         context.Response.Headers.CacheControl = "no-store";
@@ -689,3 +866,12 @@ public static class PartyEndpoints
 // Party request bodies. Moved from Program.cs's top-level records — used
 // exclusively by the SetAlbumPartyMode endpoint above.
 public sealed record SetAlbumPartyModeRequest(bool Enabled, bool? UploadEnabled = null, bool? RequireUploadApproval = null);
+
+// Owner-side slideshow timing + per-participant quotas. Every field is optional
+// so the panel can save just what changed, and NONE of them touches the party
+// tokens, the party/upload switches or the approval mode.
+public sealed record SetPartySlideshowSettingsRequest(
+    int? PhotoSlideSeconds = null,
+    int? MaxVideoSlideSeconds = null,
+    int? MaxPhotoUploadsPerParticipant = null,
+    int? MaxVideoUploadsPerParticipant = null);

@@ -44,6 +44,21 @@ public interface IPartyLinkService
     // Validates a public VIEW token: returns the owner+album it unlocks when the
     // link is enabled, not revoked, not expired, AND its album still belongs to
     // the owner and is ShowOnTv. Null otherwise (generic 404 upstream).
+    // Updates the slideshow timing / per-participant quotas on the album's
+    // ACTIVE link. Deliberately separate from EnableAsync: these four values
+    // must be changeable without minting a link, rotating the view/upload
+    // tokens, toggling party or upload, changing approval mode, or resetting a
+    // single participant counter. Returns false when there is no active link or
+    // the album is not the caller's. Out-of-range values are rejected upstream.
+    Task<bool> UpdateSlideshowSettingsAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        int? photoSlideSeconds,
+        int? maxVideoSlideSeconds,
+        int? maxPhotoUploadsPerParticipant,
+        int? maxVideoUploadsPerParticipant,
+        CancellationToken cancellationToken = default);
+
     Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default);
 

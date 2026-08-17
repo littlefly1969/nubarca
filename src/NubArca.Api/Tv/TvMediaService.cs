@@ -180,7 +180,12 @@ public sealed class TvMediaService : ITvMediaService
             album.Id, album.Name, items,
             PartyEnabled: party is not null,
             PartyUrl: party?.ViewUrl,
-            PartyUploadUrl: party?.UploadUrl);
+            PartyUploadUrl: party?.UploadUrl,
+            // Same active-link resolution that produced the URLs, so the timing
+            // costs no extra query.
+            PartySlideshow: party?.Slideshow is { } timing
+                ? new TvPartySlideshowDto(timing.PhotoSeconds, timing.MaxVideoSeconds)
+                : null);
     }
 
     public async Task<bool> IsMediaVisibleAsync(

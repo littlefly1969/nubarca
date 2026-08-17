@@ -19,6 +19,7 @@ import {
   getTvSession,
   type TvAlbum,
   type TvAlbumItem,
+  type TvPartySlideshow,
   type TvSessionStatus,
 } from './src/api/tv';
 import {
@@ -61,6 +62,7 @@ type PartyScreen =
       partyEnabled: boolean;
       partyUrl: string | null;
       partyUploadUrl: string | null;
+      partySlideshow: TvPartySlideshow | null;
     };
 
 // Module-level constant so the library screen's query identity is not rebuilt
@@ -358,6 +360,7 @@ function AppInner(): React.JSX.Element {
               partyEnabled: ctx.partyEnabled,
               partyUrl: ctx.partyUrl,
               partyUploadUrl: ctx.partyUploadUrl,
+              partySlideshow: ctx.partySlideshow,
             })}
           onSessionInvalid={onSessionInvalid}
         />
@@ -372,6 +375,7 @@ function AppInner(): React.JSX.Element {
           partyEnabled={partyScreen.partyEnabled}
           partyUrl={partyScreen.partyUrl}
           partyUploadUrl={partyScreen.partyUploadUrl}
+          partySlideshow={partyScreen.partySlideshow}
           onClose={() => setPartyScreen({ name: 'items', album: partyScreen.album })}
           onSessionInvalid={onSessionInvalid}
         />

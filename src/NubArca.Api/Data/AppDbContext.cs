@@ -81,6 +81,7 @@ public class AppDbContext : DbContext
 
     // Owner-side moderation state for anonymous party uploads (visibility only).
     public DbSet<PartyUploadItem> PartyUploadItems => Set<PartyUploadItem>();
+    public DbSet<PartyParticipant> PartyParticipants => Set<PartyParticipant>();
 
     // Short-lived anonymous "find your face" searches within a party album, and
     // their ranked (visibility-re-derived) matches. No selfie/query vector stored.

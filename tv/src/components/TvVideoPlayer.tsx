@@ -3,6 +3,7 @@ import { AppState, StyleSheet, Text, View, type AppStateStatus } from 'react-nat
 import { VideoView, useVideoPlayer, type VideoSource } from 'expo-video';
 import { getTvMediaHeaders, resolveTvMediaUrl } from '../api/client';
 import { probeTvVideo, type TvVideoMode } from '../video/probe';
+import { beginVideoRotation, onVideoEnded, onVideoProgress } from '../lib/partySlideshow';
 import { VIDEO_SEEK_SECONDS } from '../video/remoteMap';
 import { SlideImage } from './SlideImage';
 import { useI18n } from '../i18n';
@@ -89,13 +90,42 @@ interface Props {
   onEnded: () => void;
   controlsRef: MutableRefObject<TvVideoControls | null>;
   personal?: boolean;
+  // Party slideshow cap, in seconds of PLAYBACK. null (the default) means play
+  // to the natural end, which is every non-party slideshow.
+  maxPlaybackSeconds?: number | null;
+  // Fired once when the cap is reached. The viewer owns what "advance" means;
+  // this component only reports that the cap was crossed.
+  onCapReached?: () => void;
+  // Slideshow play state. When provided, it GOVERNS the player: a paused
+  // slideshow must not have audio coming out of it, and the historical
+  // unconditional play() on mount would have done exactly that. Undefined keeps
+  // the manual viewer's autoplay-on-open behaviour untouched.
+  playing?: boolean;
+  // Typed readiness for the viewer's preparing-grace policy. The POLICY lives
+  // in the viewer; this only reports the state.
+  onReadyStateChange?: (state: TvVideoReadyState) => void;
 }
+
+// What the viewer needs to know about playability, and nothing more.
+export type TvVideoReadyState = 'probing' | 'preparing' | 'ready' | 'error';
 
 export function TvVideoPlayer({
   videoPath, posterPath, onEnded, controlsRef, personal = false,
+  maxPlaybackSeconds = null, onCapReached, playing, onReadyStateChange,
 }: Props) {
   const { t } = useI18n();
   const [mode, setMode] = useState<TvVideoMode | 'probing'>('probing');
+
+  // Report readiness upward so the viewer can run its grace window. 'hls' and
+  // 'direct' both mean "a player can be mounted", which is what ready means here.
+  useEffect(() => {
+    if (!onReadyStateChange) return;
+    onReadyStateChange(
+      mode === 'hls' || mode === 'direct' ? 'ready'
+        : mode === 'preparing' ? 'preparing'
+          : mode === 'error' ? 'error' : 'probing',
+    );
+  }, [mode, onReadyStateChange]);
 
   // Probe on mount / item change; keep polling while the ladder is prepared.
   useEffect(() => {
@@ -135,6 +165,9 @@ export function TvVideoPlayer({
         onEnded={onEnded}
         controlsRef={controlsRef}
         personal={personal}
+        maxPlaybackSeconds={maxPlaybackSeconds}
+        onCapReached={onCapReached}
+        playing={playing}
         onFatalError={() => setMode('error')}
       />
     );
@@ -156,25 +189,37 @@ export function TvVideoPlayer({
 // Mounted only once the mode is known, so useVideoPlayer gets its real source
 // immediately (no null-source replace dance), and remounted per video so there
 // is never more than one live native player.
-function ReadyPlayer({ videoPath, mode, onEnded, controlsRef, onFatalError, personal }: {
+function ReadyPlayer({
+  videoPath, mode, onEnded, controlsRef, onFatalError, personal,
+  maxPlaybackSeconds, onCapReached, playing,
+}: {
   videoPath: string;
   mode: 'hls' | 'direct';
   onEnded: () => void;
   controlsRef: MutableRefObject<TvVideoControls | null>;
   onFatalError: () => void;
   personal: boolean;
+  maxPlaybackSeconds: number | null;
+  onCapReached?: () => void;
+  playing?: boolean;
 }) {
   const source: VideoSource = {
     uri: resolveTvMediaUrl(videoPath),
     headers: getTvMediaHeaders(personal),
     contentType: mode === 'hls' ? 'hls' : 'progressive',
   };
+  const capSeconds = maxPlaybackSeconds;
   const player = useVideoPlayer(source, (p) => {
     p.loop = false;
-    p.timeUpdateEventInterval = 0; // no periodic events needed
+    // Periodic time updates ONLY when a cap is in force. The cap is measured in
+    // the video's own clock, so it needs the player's position rather than a
+    // timer — and a slideshow with no cap should not pay for the events.
+    p.timeUpdateEventInterval = capSeconds === null ? 0 : 0.5;
     // Replace Android's unlimited byte budget before playback starts.
     p.bufferOptions = BUFFER_OPTIONS;
-    p.play();
+    // `playing === false` means the slideshow is paused: starting playback here
+    // would put audio in the room under a PAUSED pill.
+    if (playing !== false) p.play();
   });
 
   // Whether the user has playback going. Consulted when returning from the
@@ -249,16 +294,61 @@ function ReadyPlayer({ videoPath, mode, onEnded, controlsRef, onFatalError, pers
     onFatalError();
   }, [onFatalError]);
 
+  // The event interval is set in the player initializer from the cap known at
+  // mount. Party mode can be switched on mid-video, so keep it in sync — without
+  // this the latch below would be subscribed to a stream that never fires.
   useEffect(() => {
-    const ended = player.addListener('playToEnd', onEnded);
+    try {
+      player.timeUpdateEventInterval = capSeconds === null ? 0 : 0.5;
+    } catch {
+      // Released mid-update; the next mount sets it from the initializer.
+    }
+  }, [player, capSeconds]);
+
+  // ONE latch decides whether this video may advance the slideshow, so a cap
+  // crossing and a natural end on the same frame cannot advance twice. The
+  // rules are the pure, tested ones in lib/partySlideshow.
+  const rotationRef = useRef(beginVideoRotation(capSeconds));
+  useEffect(() => { rotationRef.current = beginVideoRotation(capSeconds); }, [capSeconds]);
+
+  useEffect(() => {
+    const ended = player.addListener('playToEnd', () => {
+      const step = onVideoEnded(rotationRef.current);
+      rotationRef.current = step.state;
+      if (step.advance) onEnded();
+    });
     const status = player.addListener('statusChange', ({ status: s, error }) => {
       if (s === 'error') reportError(error?.message);
     });
+    // Only subscribed when a cap exists. `currentTime` is the video's own clock:
+    // paused and buffering time never arrives, so it cannot consume the cap.
+    const progress = capSeconds === null ? null : player.addListener(
+      'timeUpdate',
+      ({ currentTime }) => {
+        const step = onVideoProgress(rotationRef.current, currentTime);
+        rotationRef.current = step.state;
+        if (step.advance) (onCapReached ?? onEnded)();
+      },
+    );
     return () => {
       ended.remove();
       status.remove();
+      progress?.remove();
     };
-  }, [player, onEnded, reportError]);
+  }, [player, onEnded, onCapReached, reportError, capSeconds]);
+
+  // The slideshow's play state GOVERNS the player while the viewer supplies
+  // one. Without this the pill could read PAUSED while audio kept playing.
+  useEffect(() => {
+    if (playing === undefined) return;
+    try {
+      if (playing && !player.playing) player.play();
+      else if (!playing && player.playing) player.pause();
+      wasPlayingRef.current = playing;
+    } catch {
+      // Released mid-transition; the next mount starts from the correct state.
+    }
+  }, [playing, player]);
 
   // Belt-and-braces release: expo-video releases the native player when the
   // hook unmounts, but pausing first guarantees no audio survives the frame in

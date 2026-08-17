@@ -20,6 +20,7 @@ import {
   type TvAlbum,
   type TvAlbumItem,
   type TvAlbumItems,
+  type TvPartySlideshow,
 } from '../api/tv';
 import { ApiError } from '../api/client';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
@@ -74,6 +75,7 @@ interface Props {
       partyEnabled: boolean;
       partyUrl: string | null;
       partyUploadUrl: string | null;
+      partySlideshow: TvPartySlideshow | null;
     },
   ) => void;
   // The limited TV session was revoked/expired (401) → return to pairing.
@@ -390,6 +392,7 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
       partyEnabled: d.partyEnabled,
       partyUrl: d.partyUrl,
       partyUploadUrl: d.partyUploadUrl,
+      partySlideshow: d.partySlideshow,
     });
   }, [album.id, onOpenItem]);
 

@@ -31,6 +31,14 @@ public class PartyUploadItem
     // The uploaded logical file. Unique — one moderation record per guest upload.
     public Guid FileItemId { get; set; }
 
+    // Which participant session contributed this upload. Nullable, and
+    // deliberately NOT backfilled: rows created before per-participant sessions
+    // existed have no participant identity, and inventing one would attribute a
+    // stranger's photo to somebody. Every NEW accepted guest upload sets it.
+    // Owner-facing moderation DTOs never expose it — the owner moderates
+    // content, and grouping a party's guests is not a feature.
+    public Guid? PartyParticipantId { get; set; }
+
     // Moderation state (see PartyUploadStatuses). Only "approved" is public/TV
     // visible; "pending" (awaiting owner approval), "hidden" (owner removed a
     // previously-visible item), "rejected" (owner declined a pending item), and

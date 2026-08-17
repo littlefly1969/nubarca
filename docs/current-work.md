@@ -401,3 +401,27 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `queryToWire`'s emission rules are two independent barriers over the same
   rule and are checked against each other in `tvFilterCatalog.test.ts` — a
   filter that is hidden must also be unsendable.
+- **A party guest's quota is a server-issued participant session, and the claim
+  is one SQL statement.** The party upload token is shared by everyone holding
+  the QR, so it identifies the PARTY, not a person. `PartyParticipant` supplies
+  the missing identity without fingerprinting: the server mints a random token,
+  returns it as an HttpOnly cookie PATH-scoped to `/api/party/{uploadToken}`
+  (which is what keeps two parties' allowances apart with one cookie name), and
+  stores only its SHA-256. IP, User-Agent and any client-supplied id were all
+  rejected — the first two are not identities and the third is a quota the
+  client can reset. The counter is claimed by a conditional
+  `UPDATE … WHERE Id = @id AND (@max = 0 OR Count < @max)` inside the upload's
+  transaction, never COUNT-then-INSERT: two phones racing for the last slot both
+  read "one free" but only one can win a row lock. Photo and video quotas are
+  independent, `0` means unlimited in the domain (`null` on the wire), invalid
+  media consumes nothing because the slot is claimed only AFTER the server
+  decides what the bytes are, and moderation never refunds — hiding a photo is a
+  visibility decision, and giving the slot back would let a guest re-upload the
+  thing the owner just hid.
+- **The party video cap is media time, not wall clock.** `PartyMaxVideoSlideSeconds`
+  bounds how long one video may HOLD the slideshow, never the stored file, which
+  still plays in full everywhere else. A `setTimeout` would keep counting while
+  the video is paused or rebuffering, so it is driven by the player's own
+  `timeUpdate` position instead (`tv/src/lib/partySlideshow.ts`). One latch per
+  video decides whether it may advance, because a cap crossing and `playToEnd`
+  on the same frame would otherwise advance twice and silently skip an item.

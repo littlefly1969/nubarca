@@ -12,7 +12,7 @@ type ProgressCb = (e: { lengthComputable: boolean; loaded: number; total: number
 class MockXHR {
   static last: MockXHR | null = null;
   static status = 200;
-  static body = '{"accepted":2,"rejected":1}';
+  static body = '{"accepted":1,"rejected":0,"acceptedPhotos":1,"acceptedVideos":0,"quotaRejectedPhotos":0,"quotaRejectedVideos":0,"remainingPhotos":null,"remainingVideos":null}';
   method = '';
   url = '';
   withCredentials = false;
@@ -24,16 +24,33 @@ class MockXHR {
   onabort: (() => void) | null = null;
   open(method: string, url: string) { this.method = method; this.url = url; }
   addEventListener() {}
-  send() { MockXHR.last = this; }
+  static autoFinish = false;
+  send() {
+    MockXHR.last = this;
+    MockXHR.sent.push(this);
+    // The upload queue awaits each request before starting the next, so a mock
+    // that never completes would stall the run. Tests that want to observe
+    // progress mid-flight keep autoFinish off and drive finish() themselves.
+    if (MockXHR.autoFinish) queueMicrotask(() => this.finish());
+  }
+  static sent: MockXHR[] = [];
   abort() { this.onabort?.(); }
   progress(loaded: number, total: number) { this.upload.onprogress?.({ lengthComputable: true, loaded, total }); }
-  finish() { this.status = MockXHR.status; this.responseText = MockXHR.body; this.onload?.(); }
+  static bodies: string[] = [];
+  finish() {
+    this.status = MockXHR.status;
+    this.responseText = MockXHR.bodies.length > 0 ? MockXHR.bodies.shift()! : MockXHR.body;
+    this.onload?.();
+  }
 }
 
 beforeEach(() => {
   MockXHR.last = null;
+  MockXHR.sent = [];
+  MockXHR.bodies = [];
+  MockXHR.autoFinish = false;
   MockXHR.status = 200;
-  MockXHR.body = '{"accepted":2,"rejected":1}';
+  MockXHR.body = '{"accepted":1,"rejected":0,"acceptedPhotos":1,"acceptedVideos":0,"quotaRejectedPhotos":0,"quotaRejectedVideos":0,"remainingPhotos":null,"remainingVideos":null}';
   vi.stubGlobal('XMLHttpRequest', MockXHR as unknown as typeof XMLHttpRequest);
 });
 
@@ -81,6 +98,17 @@ function jpeg(name = 'photo.jpg') {
   return new File([new Uint8Array([0xff, 0xd8, 0xff])], name, { type: 'image/jpeg' });
 }
 
+function mp4(name = 'clip.mp4') {
+  return new File([new Uint8Array([0, 0, 0, 24])], name, { type: 'video/mp4' });
+}
+
+function session(over: Record<string, unknown> = {}) {
+  return {
+    maxPhotos: null, maxVideos: null, usedPhotos: 0, usedVideos: 0,
+    remainingPhotos: null, remainingVideos: null, ...over,
+  };
+}
+
 describe('PartyUploadPage (public anonymous upload)', () => {
   it('shows progress + a do-not-close warning while uploading, then the result', async () => {
     installFetchMock({
@@ -89,7 +117,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     });
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg('a.jpg'), jpeg('b.jpg')]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
 
@@ -98,16 +126,20 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     expect(progress).toBeInTheDocument();
     expect(screen.getByText(/Non chiudere questa schermata/i)).toBeInTheDocument();
 
-    // A progress event moves the bar / label.
+    // Two files are two REQUESTS to the same endpoint, sent one at a time, so
+    // progress is aggregated across the whole run: half of the first file is a
+    // quarter of the batch.
     act(() => { MockXHR.last!.progress(50, 100); });
-    expect(screen.getByText(/Caricamento 50%/i)).toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+    expect(screen.getByText(/Caricamento 25%/i)).toBeInTheDocument();
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25');
 
-    // Completing the request clears the progress and shows the counts.
-    act(() => { MockXHR.last!.finish(); });
+    // Finishing the first request starts the second.
+    await act(async () => { MockXHR.last!.finish(); });
+    await waitFor(() => expect(MockXHR.sent).toHaveLength(2));
+    await act(async () => { MockXHR.last!.finish(); });
+
     const result = await screen.findByTestId('upload-result');
-    expect(result).toHaveTextContent(/Caricate 2 foto/i);
-    expect(result).toHaveTextContent(/1 è stata rifiutata/i);
+    expect(result).toHaveTextContent(/Caricati 2 foto e 0 video/i);
     expect(screen.queryByTestId('upload-progress')).not.toBeInTheDocument();
 
     // No login or album-browsing surface on the upload page.
@@ -119,7 +151,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     const wake = installWakeLock();
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
 
@@ -142,7 +174,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     const wake = installWakeLock();
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
     await waitFor(() => expect(wake.request).toHaveBeenCalledTimes(1));
@@ -182,7 +214,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     });
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
     expect(request).toHaveBeenCalledTimes(1);
@@ -207,12 +239,12 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     });
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
     await waitFor(() => expect(request).toHaveBeenCalledOnce());
     act(() => { MockXHR.last!.finish(); });
-    expect(await screen.findByTestId('upload-result')).toHaveTextContent(/Caricate 2 foto/i);
+    expect(await screen.findByTestId('upload-result')).toHaveTextContent(/Caricati 1 foto e 0 video/i);
   });
 
   it('shows an unavailable message when the upload link is revoked (404 on POST)', async () => {
@@ -221,7 +253,7 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     MockXHR.body = '';
 
     render(wrapper());
-    const input = await screen.findByLabelText(/Scegli le foto da caricare/i);
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
     await userEvent.setup().upload(input as HTMLInputElement, [jpeg()]);
     await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
     act(() => { MockXHR.last!.finish(); });
@@ -235,8 +267,136 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     });
 
     render(wrapper());
-    await screen.findByLabelText(/Scegli le foto da caricare/i);
+    await screen.findByLabelText(/Scegli foto e video da caricare/i);
     const button = screen.getByRole('button', { name: /Carica/i });
     expect(button).toBeDisabled();
   });
+
+  it('accepts images AND the supported video types', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session()),
+    });
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    const accept = (input as HTMLInputElement).accept;
+    expect(accept).toContain('image/*');
+    expect(accept).toContain('video/mp4');
+    expect(accept).toContain('video/webm');
+    expect(accept).toContain('video/quicktime');
+  });
+
+  it('shows the remaining photo and video quota, and unlimited when there is none', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(
+        session({ maxPhotos: 20, remainingPhotos: 7, usedPhotos: 13 })),
+    });
+    render(wrapper());
+    const quota = await screen.findByTestId('upload-quota');
+    expect(quota).toHaveTextContent(/Foto: 7 di 20 disponibili/i);
+    // Videos are unconstrained here and must not read as "0 left".
+    expect(quota).toHaveTextContent(/Video: illimitati/i);
+  });
+
+  it('warns when the selection exceeds the remaining quota for a kind', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(
+        session({ maxPhotos: 5, remainingPhotos: 1, maxVideos: 5, remainingVideos: 2 })),
+    });
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg('a.jpg'), jpeg('b.jpg')]);
+
+    expect(await screen.findByText(/più foto di quante puoi ancora caricare/i)).toBeInTheDocument();
+    // The video selection is within quota, so no video warning appears.
+    expect(screen.queryByText(/più video di quanti puoi ancora caricare/i)).not.toBeInTheDocument();
+  });
+
+  it('stops sending a kind the server reports as full, and keeps sending the other', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session()),
+    });
+    // The FIRST response says photos are now full. The queue must not send the
+    // second photo, but must still send the video — the quotas are independent.
+    MockXHR.body = JSON.stringify({
+      accepted: 1, rejected: 0, acceptedPhotos: 1, acceptedVideos: 0,
+      quotaRejectedPhotos: 0, quotaRejectedVideos: 0,
+      remainingPhotos: 0, remainingVideos: null,
+    });
+    MockXHR.autoFinish = true;
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    await userEvent.setup().upload(
+      input as HTMLInputElement, [jpeg('a.jpg'), jpeg('b.jpg'), mp4('c.mp4')]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+
+    await screen.findByTestId('upload-result');
+    // Three files selected, but only two requests: the second photo was never
+    // sent because the server had already said there was no room for it.
+    expect(MockXHR.sent).toHaveLength(2);
+    expect(screen.getByTestId('upload-result')).toHaveTextContent(/limite di foto/i);
+  });
+
+  it('reports a server-side quota rejection that the client could not predict', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      // The page believes there is room…
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(
+        session({ maxPhotos: 5, remainingPhotos: 5 })),
+    });
+    // …but another tab (or a lowered quota) got there first.
+    MockXHR.body = JSON.stringify({
+      accepted: 0, rejected: 1, acceptedPhotos: 0, acceptedVideos: 0,
+      quotaRejectedPhotos: 1, quotaRejectedVideos: 0,
+      remainingPhotos: 0, remainingVideos: null,
+    });
+    MockXHR.autoFinish = true;
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg('a.jpg')]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+
+    const result = await screen.findByTestId('upload-result');
+    expect(result).toHaveTextContent(/limite di foto/i);
+  });
+
+  it('reports a mixed batch as photos AND videos', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session()),
+    });
+    MockXHR.autoFinish = true;
+    MockXHR.bodies = [
+      JSON.stringify({ accepted: 1, rejected: 0, acceptedPhotos: 1, acceptedVideos: 0, remainingPhotos: null, remainingVideos: null }),
+      JSON.stringify({ accepted: 1, rejected: 0, acceptedPhotos: 0, acceptedVideos: 1, remainingPhotos: null, remainingVideos: null }),
+    ];
+
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg('a.jpg'), mp4('c.mp4')]);
+    await userEvent.setup().click(screen.getByRole('button', { name: /Carica/i }));
+
+    const result = await screen.findByTestId('upload-result');
+    expect(result).toHaveTextContent(/Caricati 1 foto e 1 video/i);
+  });
+
+  it('still lets the guest upload when the session probe fails', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      // The upload endpoint resolves the session itself, so a failed probe must
+      // not block uploading — it only removes the quota header.
+      'POST /api/party/uptok-1/upload-session': () => errorResponse(500),
+    });
+    render(wrapper());
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    expect(screen.queryByTestId('upload-quota')).not.toBeInTheDocument();
+    await userEvent.setup().upload(input as HTMLInputElement, [jpeg('a.jpg')]);
+    expect(screen.getByRole('button', { name: /Carica/i })).toBeEnabled();
+  });
+
 });

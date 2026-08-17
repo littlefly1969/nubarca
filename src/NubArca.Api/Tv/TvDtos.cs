@@ -92,7 +92,17 @@ public sealed record TvAlbumItemsDto(
     IReadOnlyList<TvAlbumItemDto> Items,
     bool PartyEnabled = false,
     string? PartyUrl = null,
-    string? PartyUploadUrl = null);
+    string? PartyUploadUrl = null,
+    // Slideshow timing for THIS album's active party link, or null when party
+    // mode is off. Nested rather than four loose scalars so the TV reads one
+    // typed object whose absence is the "not a party" case, and so adding a
+    // future timing value does not widen this record again. The TV never calls
+    // an owner API — this is how the configured timing reaches it.
+    TvPartySlideshowDto? PartySlideshow = null);
+
+// Party slideshow timing as the TV consumes it: seconds, matching the owner
+// contract, converted to milliseconds by the client at the point of use.
+public sealed record TvPartySlideshowDto(int PhotoSeconds, int MaxVideoSeconds);
 
 // --- TV active face-search (party face filter) ---
 // A guest's face search reaches the TV only after an EXPLICIT "show on TV"

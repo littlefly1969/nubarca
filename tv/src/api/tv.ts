@@ -53,6 +53,14 @@ export interface TvAlbumItem {
   videoUrl: string | null;
 }
 
+// Party slideshow timing for THIS album's active party link, or null when party
+// mode is off. Arrives with the album items so the TV never calls an owner API
+// to learn how the owner configured the wall.
+export interface TvPartySlideshow {
+  photoSeconds: number;
+  maxVideoSeconds: number;
+}
+
 export interface TvAlbumItems {
   id: string;
   name: string;
@@ -60,6 +68,7 @@ export interface TvAlbumItems {
   partyEnabled: boolean;
   partyUrl: string | null;
   partyUploadUrl: string | null;
+  partySlideshow: TvPartySlideshow | null;
 }
 
 export function startTvPairing(signal?: AbortSignal): Promise<TvPairingStarted> {

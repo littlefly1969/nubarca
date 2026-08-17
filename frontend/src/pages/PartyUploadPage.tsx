@@ -2,8 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router';
 import {
   ApiError,
+  classifyPartyFile,
   getPartyAlbum,
+  PARTY_VIDEO_TYPES,
+  startPartyUploadSession,
   uploadToPartyWithProgress,
+  type PartyUploadSession,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -18,6 +22,29 @@ type Phase =
   | { kind: 'ready'; albumName: string }
   | { kind: 'unavailable' }
   | { kind: 'error' };
+
+// Aggregate outcome of one upload RUN (which is many requests — see the queue
+// below), so the guest reads one sentence rather than a line per file.
+interface RunResult {
+  acceptedPhotos: number;
+  acceptedVideos: number;
+  rejected: number;
+  quotaRejectedPhotos: number;
+  quotaRejectedVideos: number;
+}
+
+const EMPTY_RUN: RunResult = {
+  acceptedPhotos: 0, acceptedVideos: 0, rejected: 0,
+  quotaRejectedPhotos: 0, quotaRejectedVideos: 0,
+};
+
+// Videos are large. One multipart request carrying every selected clip would
+// mean a single failure loses the whole batch, a progress bar that says nothing
+// useful, and a request big enough for a proxy to refuse outright. The queue
+// sends ONE media per request to the SAME endpoint — no new upload protocol,
+// no chunking — so each file settles independently and the quota reported by
+// each response steers the rest of the run.
+const QUEUE_CONCURRENCY = 1;
 
 // Best-effort Screen Wake Lock for one foreground upload. The initial request
 // is made directly from the upload click (important on WebKit), then reacquired
@@ -103,10 +130,23 @@ export function PartyUploadPage() {
   // Fraction (0..1) of bytes sent for the current upload; reaches 1 while the
   // server still processes, so we show a "processing" state after that.
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<{ accepted: number; rejected: number } | null>(null);
+  const [result, setResult] = useState<RunResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [session, setSession] = useState<PartyUploadSession | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadWakeLock = useUploadWakeLock();
+
+  // Resolve (or create) this guest's upload session so the quota can be shown
+  // before anything is picked. Failure is NOT fatal: the upload endpoint
+  // resolves the session itself, so a guest can still upload without this.
+  useEffect(() => {
+    if (!token) return;
+    const ctrl = new AbortController();
+    startPartyUploadSession(token, ctrl.signal)
+      .then(setSession)
+      .catch(() => { /* quota display is best-effort; the server stays authoritative */ });
+    return () => ctrl.abort();
+  }, [token]);
 
   // While an upload is in flight, warn the guest before they close/reload the
   // tab — a single request, so leaving aborts the whole upload and loses it.
@@ -158,27 +198,80 @@ export function PartyUploadPage() {
   const handleUpload = async () => {
     if (!token || files.length === 0) return;
     // Keep this call before the first await: the click's user activation gives
-    // WebKit the best chance to grant the initial lock.
+    // WebKit the best chance to grant the initial lock. It is held for the WHOLE
+    // queue, not per request, so the screen cannot sleep between two videos.
     uploadWakeLock.start();
     setBusy(true);
     setUploadError(null);
     setResult(null);
     setProgress(0);
+
+    const run: RunResult = { ...EMPTY_RUN };
+    // Once the SERVER says a kind is full, stop sending more of that kind — but
+    // keep sending the other, because the two quotas are independent. This is
+    // the race the client cannot pre-empt: another of the guest's own tabs, or
+    // a lowered quota, can exhaust a kind mid-run.
+    let photosFull = false;
+    let videosFull = false;
+    let failed = false;
+
     try {
-      const r = await uploadToPartyWithProgress(token, files, setProgress);
-      setResult(r);
-      setFiles([]);
-      if (inputRef.current) inputRef.current.value = '';
+      for (let i = 0; i < files.length; i += QUEUE_CONCURRENCY) {
+        const file = files[i];
+        const kind = classifyPartyFile(file);
+        if ((kind === 'photo' && photosFull) || (kind === 'video' && videosFull)) {
+          // Not sent at all: the server already told us there is no room.
+          if (kind === 'photo') run.quotaRejectedPhotos += 1;
+          else run.quotaRejectedVideos += 1;
+          run.rejected += 1;
+          setProgress((i + 1) / files.length);
+          continue;
+        }
+
+        const response = await uploadToPartyWithProgress(
+          token, [file],
+          // Whole-run progress: this file's own fraction, scaled into its slot.
+          (fraction) => setProgress((i + fraction) / files.length),
+        );
+
+        run.acceptedPhotos += response.acceptedPhotos ?? 0;
+        run.acceptedVideos += response.acceptedVideos ?? 0;
+        run.quotaRejectedPhotos += response.quotaRejectedPhotos ?? 0;
+        run.quotaRejectedVideos += response.quotaRejectedVideos ?? 0;
+        run.rejected += response.rejected ?? 0;
+        if (response.remainingPhotos === 0) photosFull = true;
+        if (response.remainingVideos === 0) videosFull = true;
+        // Every response carries the fresh quota, so the header stays truthful
+        // during a long run without a second round-trip.
+        setSession((current) => (current === null ? current : {
+          ...current,
+          usedPhotos: current.usedPhotos + (response.acceptedPhotos ?? 0),
+          usedVideos: current.usedVideos + (response.acceptedVideos ?? 0),
+          remainingPhotos: response.remainingPhotos ?? current.remainingPhotos,
+          remainingVideos: response.remainingVideos ?? current.remainingVideos,
+        }));
+        setProgress((i + 1) / files.length);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setPhase({ kind: 'unavailable' });
+        uploadWakeLock.stop();
+        setBusy(false);
+        setProgress(0);
         return;
       }
+      failed = true;
       setUploadError(t('partyUpload.failed'));
     } finally {
       uploadWakeLock.stop();
       setBusy(false);
       setProgress(0);
+    }
+
+    setResult(run);
+    if (!failed) {
+      setFiles([]);
+      if (inputRef.current) inputRef.current.value = '';
     }
   };
 
@@ -210,8 +303,26 @@ export function PartyUploadPage() {
   const uploadLabel = busy
     ? t('partyUpload.uploading')
     : files.length === 0
-      ? t('partyUpload.uploadPhotos')
+      ? t('partyUpload.uploadMedia')
       : tn(files.length, 'partyUpload.uploadCount');
+
+  // Client-side selection check. UX ONLY — the backend decides. It exists so a
+  // guest is told before a long video upload that there is no room for it,
+  // rather than after.
+  const selectedPhotos = files.filter((f) => classifyPartyFile(f) === 'photo').length;
+  const selectedVideos = files.filter((f) => classifyPartyFile(f) === 'video').length;
+  const unsupported = files.filter((f) => classifyPartyFile(f) === 'unsupported').length;
+  const overPhotoQuota = session?.remainingPhotos != null && selectedPhotos > session.remainingPhotos;
+  const overVideoQuota = session?.remainingVideos != null && selectedVideos > session.remainingVideos;
+
+  const quotaLine = (
+    remaining: number | null,
+    max: number | null,
+    unlimitedKey: 'partyUpload.photosUnlimited' | 'partyUpload.videosUnlimited',
+    countKey: 'partyUpload.photosRemaining' | 'partyUpload.videosRemaining',
+  ) => (remaining == null || max == null
+    ? t(unlimitedKey)
+    : t(countKey, { remaining: String(remaining), max: String(max) }));
 
   return (
     <main className="party-upload-page">
@@ -226,15 +337,38 @@ export function PartyUploadPage() {
         </div>
         <p className="muted">{t('partyUpload.intro')}</p>
 
+        {session && (
+          <ul className="party-upload-quota" data-testid="upload-quota">
+            <li>{quotaLine(
+              session.remainingPhotos, session.maxPhotos,
+              'partyUpload.photosUnlimited', 'partyUpload.photosRemaining')}
+            </li>
+            <li>{quotaLine(
+              session.remainingVideos, session.maxVideos,
+              'partyUpload.videosUnlimited', 'partyUpload.videosRemaining')}
+            </li>
+          </ul>
+        )}
+
         <input
           ref={inputRef}
           type="file"
-          accept="image/*"
+          // Photos AND the video containers the party pipeline accepts. The
+          // server re-checks every byte; this only shapes the picker.
+          accept={['image/*', ...PARTY_VIDEO_TYPES].join(',')}
           multiple
-          aria-label={t('partyUpload.choosePhotos')}
+          aria-label={t('partyUpload.chooseMedia')}
           onChange={(e) => onSelect(e.target.files)}
           disabled={busy}
         />
+
+        {!busy && (overPhotoQuota || overVideoQuota || unsupported > 0) && (
+          <div className="party-upload-selection-warning" role="status">
+            {overPhotoQuota && <p>{t('partyUpload.overPhotoQuota')}</p>}
+            {overVideoQuota && <p>{t('partyUpload.overVideoQuota')}</p>}
+            {unsupported > 0 && <p>{t('partyUpload.unsupportedSelected')}</p>}
+          </div>
+        )}
 
         <div className="party-upload-actions">
           <button
@@ -274,12 +408,23 @@ export function PartyUploadPage() {
 
         <div className="party-upload-status" aria-live="polite">
           {result && (
-            <p data-testid="upload-result">
-              {result.accepted > 0
-                ? tn(result.accepted, 'partyUpload.resultUploaded')
-                : t('partyUpload.resultNone')}
-              {result.rejected > 0 && tn(result.rejected, 'partyUpload.rejectedSuffix')}
-            </p>
+            <div data-testid="upload-result">
+              <p>
+                {result.acceptedPhotos + result.acceptedVideos > 0
+                  ? t('partyUpload.resultMixed', {
+                    photos: String(result.acceptedPhotos),
+                    videos: String(result.acceptedVideos),
+                  })
+                  : t('partyUpload.resultNone')}
+                {result.rejected > 0 && tn(result.rejected, 'partyUpload.rejectedSuffix')}
+              </p>
+              {result.quotaRejectedPhotos > 0 && (
+                <p className="muted">{t('partyUpload.photoQuotaReached')}</p>
+              )}
+              {result.quotaRejectedVideos > 0 && (
+                <p className="muted">{t('partyUpload.videoQuotaReached')}</p>
+              )}
+            </div>
           )}
           {uploadError && <p role="alert" className="inline-error">{uploadError}</p>}
         </div>

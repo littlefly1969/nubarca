@@ -41,6 +41,27 @@ public class PartyAlbumLink
     // party behavior. Never rotates the view/upload tokens when toggled.
     public bool RequireUploadApproval { get; set; }
 
+    // --- Slideshow timing (owner-configurable, TV-facing) ---
+    // How long a PHOTO holds the party slideshow, in seconds. The TV reads these
+    // through its album-items context; changing either takes effect on the TV's
+    // next poll WITHOUT rotating a token or restarting the slideshow.
+    public int PhotoSlideSeconds { get; set; } = PartySlideshowDefaults.PhotoSeconds;
+
+    // The MOST a single video may monopolise the party slideshow, in seconds.
+    // This bounds the SLIDESHOW, never the file: the stored video is untouched
+    // and plays in full anywhere else. A video shorter than the cap advances on
+    // its natural end.
+    public int MaxVideoSlideSeconds { get; set; } = PartySlideshowDefaults.MaxVideoSeconds;
+
+    // --- Per-participant upload quotas ---
+    // Maximum media of each kind ONE participant may contribute through this
+    // link. 0 means unlimited, which is the default and the historical
+    // behaviour. Photo and video quotas are independent: exhausting one never
+    // blocks the other. Lowering a quota below what a participant has already
+    // used deletes nothing — it simply leaves them no remaining slots.
+    public int MaxPhotoUploadsPerParticipant { get; set; }
+    public int MaxVideoUploadsPerParticipant { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -53,4 +74,31 @@ public class PartyAlbumLink
 
     // Who enabled it (owner or, in future, a delegated user). Owner-scoped.
     public Guid? CreatedByUserId { get; set; }
+}
+
+// Defaults and validated ranges for the owner-configurable party slideshow and
+// quota settings. Kept beside the entity so the API validator, the owner UI
+// contract and the TV timing all quote ONE set of numbers.
+public static class PartySlideshowDefaults
+{
+    public const int PhotoSeconds = 9;
+    public const int MinPhotoSeconds = 3;
+    public const int MaxPhotoSeconds = 60;
+
+    public const int MaxVideoSeconds = 60;
+    public const int MinMaxVideoSeconds = 5;
+    public const int MaxMaxVideoSeconds = 600;
+
+    // 0 = unlimited on both quotas; the upper bound only stops absurd input.
+    public const int MinQuota = 0;
+    public const int MaxQuota = 10_000;
+
+    public static bool IsValidPhotoSeconds(int value)
+        => value >= MinPhotoSeconds && value <= MaxPhotoSeconds;
+
+    public static bool IsValidMaxVideoSeconds(int value)
+        => value >= MinMaxVideoSeconds && value <= MaxMaxVideoSeconds;
+
+    public static bool IsValidQuota(int value)
+        => value >= MinQuota && value <= MaxQuota;
 }

@@ -43,5 +43,12 @@ public class PartyUploadItemConfiguration : IEntityTypeConfiguration<PartyUpload
             .WithMany()
             .HasForeignKey(p => p.OwnerUserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Provenance, not ownership: Restrict so removing a participant row can
+        // never take the moderation history of their uploads with it.
+        builder.HasOne<PartyParticipant>()
+            .WithMany()
+            .HasForeignKey(p => p.PartyParticipantId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

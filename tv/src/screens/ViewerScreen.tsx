@@ -19,18 +19,22 @@ import {
 } from '../api/tv';
 import { ApiError, loadTvMedia } from '../api/client';
 import { SlideImage } from '../components/SlideImage';
-import { TvVideoPlayer, TV_VIDEO_SEEK_SECONDS, type TvVideoControls } from '../components/TvVideoPlayer';
+import {
+  TvVideoPlayer, TV_VIDEO_SEEK_SECONDS,
+  type TvVideoControls, type TvVideoReadyState,
+} from '../components/TvVideoPlayer';
 import { mapViewerRemoteEvent } from '../video/remoteMap';
 import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
 import { remapIndexById, sameItemIds } from '../lib/liveItems';
+import {
+  photoSlideMs, shouldArmPreparingGrace, videoCapSeconds,
+  VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
+} from '../lib/partySlideshow';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
-
-// Slideshow auto-advance interval.
-const SLIDE_MS = 9000;
 
 // Live-refresh interval for a PartyMode album's items (10-20s band).
 const PARTY_ITEMS_POLL_MS = 15_000;
@@ -51,6 +55,9 @@ interface Props {
   partyEnabled?: boolean;
   partyUrl?: string | null;
   partyUploadUrl?: string | null;
+  // Owner-configured party slideshow timing, refreshed by the same poll that
+  // brings new guest uploads. null for a non-party album (historical timing).
+  partySlideshow?: PartySlideshowTiming | null;
   onSessionInvalid?: () => void;
 }
 
@@ -73,7 +80,8 @@ interface Props {
 // playback is not reset.
 export function ViewerScreen({
   items: initialItems, startIndex, autoPlay = false, onClose,
-  albumId, albumName, partyEnabled = false, partyUrl = null, partyUploadUrl = null, onSessionInvalid,
+  albumId, albumName, partyEnabled = false, partyUrl = null, partyUploadUrl = null,
+  partySlideshow = null, onSessionInvalid,
 }: Props) {
   const { t } = useI18n();
   const { width, height } = useWindowDimensions();
@@ -93,6 +101,12 @@ export function ViewerScreen({
   // navigate ONLY the matching subset; the search id is needed to delete the
   // search on BACK. Starting the slideshow from a filtered grid lands here too
   // (the immediate poll re-adopts the same active filter).
+  // Timing is STATE, not just a prop: the party poll below refreshes it, so an
+  // owner changing the duration mid-party takes effect on the next poll without
+  // the viewer closing, reopening or losing its place.
+  const [timing, setTiming] = useState<PartySlideshowTiming | null>(partySlideshow);
+  // Typed readiness of the CURRENT video, for the preparing-grace policy.
+  const [videoReady, setVideoReady] = useState<TvVideoReadyState>('probing');
   const [faceFilter, setFaceFilter] = useState<{
     searchId: string;
     faceThumbnailUrl: string | null;
@@ -245,14 +259,36 @@ export function ViewerScreen({
   // exempt from the timer: it advances when playback ENDS (TvVideoPlayer's
   // onEnded → goNext), never mid-play.
   const currentIsVideo = item?.mediaType === 'video';
+  const photoMs = photoSlideMs(partyEnabled ? timing : null);
   useEffect(() => {
     if (!playing || displayItems.length === 0 || currentIsVideo) return;
     const timer = setTimeout(() => {
       const len = displayItemsRef.current.length;
       setIndex((i) => (len === 0 ? 0 : (i + 1) % len));
-    }, SLIDE_MS);
+    }, photoMs);
     return () => clearTimeout(timer);
-  }, [playing, index, displayItems.length, currentIsVideo]);
+    // `photoMs` is a dependency, so a timing change re-arms the CURRENT photo's
+    // timer in place rather than moving to another item.
+  }, [playing, index, displayItems.length, currentIsVideo, photoMs]);
+
+  // A video that cannot become playable must not freeze an autoplaying party
+  // wall. The grace window is armed only while the slideshow is actually
+  // rotating; paused or manual viewing keeps whatever the user is looking at,
+  // and the item is retried normally the next time round.
+  const armPreparingGrace = shouldArmPreparingGrace({
+    partyEnabled,
+    playing,
+    isVideo: currentIsVideo,
+    videoReady: videoReady === 'ready',
+  });
+  useEffect(() => {
+    if (!armPreparingGrace) return;
+    const timer = setTimeout(() => goNext(), VIDEO_PREPARING_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [armPreparingGrace, index, goNext]);
+
+  // A new item is a new readiness question.
+  useEffect(() => { setVideoReady('probing'); }, [item?.id]);
 
   // Warm ONLY the next and previous previews (low priority, so the current image
   // always wins the download pool). Never prefetches the whole album.
@@ -277,6 +313,16 @@ export function ViewerScreen({
       listTvAlbumItems(albumId)
         .then((detail) => {
           if (detail.items.length === 0) { onClose(); return; }
+          // Adopt refreshed timing regardless of whether the item list moved —
+          // a settings change is not an item change.
+          setTiming((current) => {
+            const next = detail.partySlideshow;
+            if (current === next) return current;
+            if (current && next
+              && current.photoSeconds === next.photoSeconds
+              && current.maxVideoSeconds === next.maxVideoSeconds) return current;
+            return next;
+          });
           const prev = itemsRef.current;
           if (sameItemIds(prev, detail.items)) return;
           if (faceFilterRef.current) {
@@ -349,6 +395,14 @@ export function ViewerScreen({
           videoPath={item.videoUrl}
           posterPath={item.posterUrl ?? null}
           onEnded={goNext}
+          onCapReached={goNext}
+          // Party caps how long ONE video may hold the wall; the stored file is
+          // untouched and still plays in full everywhere else.
+          maxPlaybackSeconds={partyEnabled ? videoCapSeconds(timing) : null}
+          // In a rotating slideshow the viewer's play state governs the player,
+          // so PAUSE stops the video as well as the photo countdown.
+          playing={partyEnabled ? playing : undefined}
+          onReadyStateChange={setVideoReady}
           controlsRef={videoControlsRef}
         />
       ) : (
