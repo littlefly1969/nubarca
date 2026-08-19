@@ -195,13 +195,15 @@ test('the TV app stays a leanback app that does not require a touchscreen', () =
 
 const withFireTvBanner = require(resolve(tvRoot, 'plugins/withFireTvBanner.js'));
 
-async function applyFireTvManifest() {
-  const manifest = {
+/** The template manifest prebuild writes, before this plugin touches it. */
+function templateManifest() {
+  return {
     manifest: {
       application: [{
         $: { 'android:name': '.MainApplication' },
         activity: [{
-          $: { 'android:name': '.MainActivity' },
+          $: { 'android:name': '.MainActivity', 'android:screenOrientation': 'landscape',
+               'android:exported': 'true' },
           'intent-filter': [{
             action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
             category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }],
@@ -210,19 +212,85 @@ async function applyFireTvManifest() {
       }],
     },
   };
+}
+
+async function applyFireTvManifest(manifest = templateManifest()) {
   const { mods } = withFireTvBanner({});
   const applied = await mods.android.manifest({ modResults: manifest });
   return applied.modResults.manifest.application[0];
 }
 
-test('the Fire TV activity exposes the rectangular banner through Leanback only', async () => {
+const names = (entries) => (entries ?? []).map((e) => e.$['android:name']);
+const countOf = (entries, name) => names(entries).filter((n) => n === name).length;
+
+test('the Fire TV activity exposes the rectangular banner', async () => {
   const application = await applyFireTvManifest();
   const activity = application.activity[0];
-  const categories = activity['intent-filter'][0].category
-    .map((category) => category.$['android:name']);
   assert.equal(application.$['android:banner'], '@drawable/tv_banner');
   assert.equal(activity.$['android:banner'], '@drawable/tv_banner');
-  assert.deepEqual(categories, ['android.intent.category.LEANBACK_LAUNCHER']);
+});
+
+// REGISTRATION. This plugin used to STRIP android.intent.category.LAUNCHER,
+// guessing it was what made Fire OS draw a square icon instead of the banner.
+// Physical 1.0.6 acceptance disproved it twice over: the square stayed square,
+// and the app no longer appeared in the Fire TV Applications library after an
+// ordinary in-place update until "Move application" forced a launcher refresh.
+// Amazon's own samples declare both categories, so both are declared here.
+test('the launcher activity declares BOTH launcher categories exactly once', async () => {
+  const activity = (await applyFireTvManifest()).activity[0];
+  const filters = activity['intent-filter'];
+  assert.equal(filters.length, 1, 'no second MAIN intent-filter may be introduced');
+  const [filter] = filters;
+  assert.equal(countOf(filter.action, 'android.intent.action.MAIN'), 1);
+  assert.equal(countOf(filter.category, 'android.intent.category.LAUNCHER'), 1);
+  assert.equal(countOf(filter.category, 'android.intent.category.LEANBACK_LAUNCHER'), 1);
+  assert.deepEqual(new Set(names(filter.category)), new Set([
+    'android.intent.category.LAUNCHER',
+    'android.intent.category.LEANBACK_LAUNCHER',
+  ]));
+});
+
+test('repeated application never duplicates a launcher category', async () => {
+  // prebuild re-applies every plugin from scratch, but a config can also be
+  // evaluated more than once in one run; accumulating a second LAUNCHER would
+  // be an invalid manifest.
+  let manifest = templateManifest();
+  for (let pass = 0; pass < 3; pass += 1) {
+    const { mods } = withFireTvBanner({});
+    manifest = (await mods.android.manifest({ modResults: manifest })).modResults;
+  }
+  const filter = manifest.manifest.application[0].activity[0]['intent-filter'][0];
+  assert.equal(countOf(filter.category, 'android.intent.category.LAUNCHER'), 1);
+  assert.equal(countOf(filter.category, 'android.intent.category.LEANBACK_LAUNCHER'), 1);
+  assert.equal(countOf(filter.action, 'android.intent.action.MAIN'), 1);
+});
+
+test('a manifest that already carries both categories is left alone', async () => {
+  const manifest = templateManifest();
+  manifest.manifest.application[0].activity[0]['intent-filter'][0].category.push(
+    { $: { 'android:name': 'android.intent.category.LEANBACK_LAUNCHER' } });
+  const activity = (await applyFireTvManifest(manifest)).activity[0];
+  assert.deepEqual(names(activity['intent-filter'][0].category), [
+    'android.intent.category.LAUNCHER',
+    'android.intent.category.LEANBACK_LAUNCHER',
+  ]);
+});
+
+test('the plugin preserves activity attributes it did not set', async () => {
+  // Deliberately NOT phrased as "the build is landscape": these attributes come
+  // from the fixture, so all this can honestly prove is that rebuilding the
+  // category list does not drop the attributes around it. The generated
+  // manifest is the authority for what the build actually declares.
+  const activity = (await applyFireTvManifest()).activity[0];
+  assert.equal(activity.$['android:screenOrientation'], 'landscape');
+  assert.equal(activity.$['android:exported'], 'true');
+  assert.equal(activity.$['android:name'], '.MainActivity');
+});
+
+test('the plugin refuses a MainActivity with no MAIN intent', async () => {
+  const manifest = templateManifest();
+  manifest.manifest.application[0].activity[0]['intent-filter'] = [];
+  await assert.rejects(() => applyFireTvManifest(manifest), /no MAIN intent/);
 });
 
 // --- native generation -------------------------------------------------------

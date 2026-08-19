@@ -1,9 +1,9 @@
 {
   "applicationName": "NubArca TV",
   "package": "it.littlefly.nubarca.tv",
-  "version": "1.0.6",
-  "versionCode": 8,
-  "runtimeVersion": "nubarca-tv-native-7",
+  "version": "1.0.7",
+  "versionCode": 9,
+  "runtimeVersion": "nubarca-tv-native-8",
   "channel": "production",
   "updatePath": "/api/tv-app/updates",
   "apkSignerSha256": "d79cc09c3df0df09a279633c728d6d753e3290d74f309ced7bf73344d2ab3547"

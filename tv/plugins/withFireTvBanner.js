@@ -3,7 +3,8 @@
 //
 // WHAT WAS ACTUALLY WRONG
 // -----------------------
-// Diagnosed from a clean prebuild, not guessed. Two independent defects:
+// Diagnosed from a clean prebuild and from physical Fire Stick acceptance, not
+// guessed. Three independent defects, the third found only on hardware:
 //
 //  1. WRONG DENSITY. `@react-native-tvos/config-tv` takes the single
 //     `androidTVBanner` file and copies it, unscaled, into EVERY density
@@ -20,6 +21,14 @@
 //     Amazon's own launcher, and several of its surfaces read the banner from
 //     the LEANBACK_LAUNCHER activity and fall back to `android:icon` — the
 //     square — when the activity does not declare one.
+//
+//  3. LOST REGISTRATION. An earlier version of this plugin REMOVED
+//     `android.intent.category.LAUNCHER`, guessing that it was what made Fire
+//     OS pick the square icon over the banner. On 1.0.6 hardware that guess
+//     failed twice over: the square was still square, and the app stopped
+//     appearing in the Fire TV Applications library after an ordinary in-place
+//     update until "Move application" forced a launcher refresh. Both
+//     categories are declared again — see withActivityBanner below.
 //
 // WHAT THIS DOES
 // --------------
@@ -113,9 +122,23 @@ const withActivityBanner = (config) =>
     application.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
     activity.$['android:banner'] = `@drawable/${BANNER_RESOURCE}`;
 
-    // This binary is TV-only. If the ordinary launcher category remains beside
-    // LEANBACK_LAUNCHER, Fire OS may register the square phone icon instead of
-    // the TV banner. Keep MAIN, but expose it only through Leanback.
+    // BOTH launcher categories. This previously stripped LAUNCHER and kept only
+    // LEANBACK_LAUNCHER, on the theory that an ordinary launcher category would
+    // make Fire OS register the square phone icon instead of the TV banner.
+    //
+    // Physical acceptance of 1.0.6 on a Fire Stick disproved that theory in
+    // both directions at once: with LAUNCHER already removed, the tile in the
+    // sideloaded-apps surface was STILL square, AND the app did not appear in
+    // the Fire TV Applications library at all after an ordinary in-place
+    // update — it showed up only after Fire OS "Move application" forced a
+    // launcher refresh. Removing LAUNCHER bought nothing and cost the app its
+    // registration.
+    //
+    // So this is a return to the ordinary, documented contract: Amazon's own
+    // Fire TV samples declare MAIN with LAUNCHER and LEANBACK_LAUNCHER
+    // together. The banner declarations above are what select TV artwork; the
+    // categories are what make the app VISIBLE, and the two are independent.
+    // Exactly one of each, so repeated prebuilds cannot accumulate duplicates.
     let hasMainIntent = false;
     for (const filter of activity['intent-filter'] ?? []) {
       const isMain = (filter.action ?? []).some(
@@ -123,16 +146,20 @@ const withActivityBanner = (config) =>
       );
       if (!isMain) continue;
       hasMainIntent = true;
-      const categories = filter.category ?? [];
-      const hasLeanbackLauncher = categories.some(
-        (category) => category.$?.['android:name'] === LEANBACK_LAUNCHER,
-      );
-      filter.category = categories.filter(
-        (category) => category.$?.['android:name'] !== LAUNCHER,
-      );
-      if (!hasLeanbackLauncher) {
-        filter.category.push({ $: { 'android:name': LEANBACK_LAUNCHER } });
+      const categories = [];
+      const seen = new Set();
+      for (const category of filter.category ?? []) {
+        const name = category.$?.['android:name'];
+        if (seen.has(name)) continue; // never duplicate what is already there
+        seen.add(name);
+        categories.push(category);
       }
+      for (const required of [LAUNCHER, LEANBACK_LAUNCHER]) {
+        if (seen.has(required)) continue;
+        seen.add(required);
+        categories.push({ $: { 'android:name': required } });
+      }
+      filter.category = categories;
     }
     if (!hasMainIntent) {
       throw new Error('withFireTvBanner: MainActivity has no MAIN intent');

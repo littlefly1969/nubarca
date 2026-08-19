@@ -7,12 +7,22 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.6,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 8, runtime
-`nubarca-tv-native-7`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.7,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 9, runtime
+`nubarca-tv-native-8`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.6 corrects the two ANDROID LAUNCHER icon slots. Both previously pointed at
+1.0.7 restores `android.intent.category.LAUNCHER` beside `LEANBACK_LAUNCHER` on
+the MAIN activity. An earlier plugin version removed it, guessing it was what
+made Fire OS draw a square icon instead of the banner. Physical 1.0.6
+acceptance disproved that twice over: the tile stayed square, AND the app
+stopped appearing in the Fire TV Applications library after an ordinary
+in-place update until "Move application" forced a launcher refresh. Amazon's
+own Fire TV samples declare both categories. Banner declarations select TV
+artwork; categories decide VISIBILITY, and the two are independent. Manifest
+change, therefore a native release. No artwork and no updater change.
+
+1.0.6 corrected the two ANDROID LAUNCHER icon slots. Both previously pointed at
 opaque full-bleed squares that each contained a picture of a rounded app icon,
 so the Fire TV home row drew a dark rectangle with a small logo in it, and the
 adaptive foreground masked that same square instead of the mark. The legacy icon
@@ -30,7 +40,7 @@ release reaches the device through **Mode Select → Aggiornamenti / Updates**
 with no ADB, PC or file manager — 1.0.6 is the first release to actually
 exercise that path end to end.
 
-Runtime `nubarca-tv-native-7` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-8` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.
