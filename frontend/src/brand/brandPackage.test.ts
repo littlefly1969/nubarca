@@ -80,10 +80,10 @@ describe('canonical package identity', () => {
 describe('manifest counts', () => {
   it('matches the catalogued records', () => {
     const c = manifest.counts;
-    expect(manifest.assets).toHaveLength(54);
-    expect(c.totalAssets).toBe(54);
+    expect(manifest.assets).toHaveLength(56);
+    expect(c.totalAssets).toBe(56);
     expect(c.sourceMasters).toBe(8);
-    expect(c.runtimeReadyAssets).toBe(39);
+    expect(c.runtimeReadyAssets).toBe(41);
     expect(c.referenceOnlyAssets).toBe(7);
     expect(c.conditionallyReadyAssets).toBe(0);
     expect(c.missingAssets).toBe(0);

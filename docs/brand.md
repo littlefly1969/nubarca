@@ -146,7 +146,9 @@ ones, so any consumer path traces back to the package by name.
 | `frontend/public/brand/nubarca-pwa-*`, `nubarca-apple-touch-icon-180.png` | `runtime/pwa/` | PWA install + Apple touch |
 | `frontend/public/brand/nubarca-mark-flat-on-{dark,light}-{16..256}.png` | `runtime/web/` | shell, navigation, drawer |
 | `frontend/public/brand/nubarca-wordmark-on-dark-{480,960,1440}w.png`, `nubarca-wordmark-on-light.png` | `runtime/web/` | login and prominent placements |
-| `tv/assets/brand/nubarca-expo-app-icon-1024.png` | `runtime/pwa/` | Expo launcher + adaptive icon |
+| `tv/assets/brand/nubarca-expo-app-icon-1024.png` | `runtime/pwa/` | Expo top-level (iOS) icon |
+| `tv/assets/brand/nubarca-android-launcher-icon-512.png` | `runtime/tv/` | Android legacy launcher icon (transparent corners) |
+| `tv/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground (transparent) |
 | `tv/assets/brand/nubarca-android-tv-banner-320x180.png` | `runtime/tv/` | Android TV banner slot |
 | `tv/assets/brand/nubarca-fire-tv-{icon-512,banner-1280x720}.png` | `runtime/tv/` | Fire TV icon and banner |
 | `tv/assets/brand/nubarca-tv-lockup-transparent-{640,1280,1800}w.png` | `runtime/tv/` | in-app TV branding |

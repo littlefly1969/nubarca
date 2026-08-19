@@ -36,9 +36,9 @@
     }
   },
   "counts": {
-    "totalAssets": 54,
+    "totalAssets": 56,
     "sourceMasters": 8,
-    "runtimeReadyAssets": 39,
+    "runtimeReadyAssets": 41,
     "conditionallyReadyAssets": 0,
     "referenceOnlyAssets": 7,
     "missingAssets": 0
@@ -423,6 +423,46 @@
       "safeArea": "central 66% artwork; mask safe",
       "glow": false,
       "sha256": "bebbd781db91727ce5d67ca69954a905ea6d2237956a2c507444e602b150a1e3"
+    },
+    {
+      "path": "runtime/tv/nubarca-android-adaptive-foreground-432.png",
+      "role": "Android adaptive icon foreground",
+      "source": "derived from source/nubarca-mark-flat-on-dark-master.png: approved artwork cropped to its alpha bounds and centered, alone, on a fully transparent 108dp-at-xxxhdpi canvas (scripts/generate-android-launcher-icons.py)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Launcher derivative: an adaptive FOREGROUND must be transparent and carry only the mark, because the system supplies adaptiveIcon.backgroundColor and applies its own mask. Geometry and colours are the approved ones; only composition changed.",
+      "width": 432,
+      "height": 432,
+      "aspectRatio": "432:432",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "mark within the central 66/108 dp square Android guarantees visible under every launcher mask",
+      "glow": false,
+      "sha256": "c67a1775f5e5d1da6c9618c4d28fe2d07474d97efaa15013f39a9ea0d9cb66de"
+    },
+    {
+      "path": "runtime/tv/nubarca-android-launcher-icon-512.png",
+      "role": "Android/Fire TV legacy launcher icon",
+      "source": "derived from source/nubarca-mark-flat-on-dark-master.png: approved artwork cropped to its alpha bounds and centered on a Midnight Navy rounded tile with transparent outer corners (scripts/generate-android-launcher-icons.py)",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Launcher derivative: replaces the opaque full-bleed square that made the home-row icon read as a dark rectangle containing a small drawing of an icon. Geometry and colours are the approved ones; only composition changed.",
+      "width": 512,
+      "height": 512,
+      "aspectRatio": "512:512",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 0,
+      "safeArea": "Midnight Navy tile inset 2.5% with 22.5% corner radius; mark 64% of canvas width, centered",
+      "glow": false,
+      "sha256": "77dd59572356fff12bf8fc3519c5a9ab8ba12bdc2dcaf582b74fd086d4914612"
     },
     {
       "path": "runtime/tv/nubarca-android-tv-banner-320x180.png",

@@ -62,6 +62,12 @@ COPIES: list[tuple[str, Path]] = [
     # --- TV ------------------------------------------------------------------
     ("pwa/nubarca-expo-app-icon-1024.png", TV_ASSETS),
     *[(f"tv/{n}", TV_ASSETS) for n in (
+        # The two ANDROID LAUNCHER slots. They are separate assets from the
+        # square/promotional Fire TV icon because they are separate KINDS of
+        # artwork: a legacy icon needs transparent outer corners, and an
+        # adaptive foreground must be transparent and carry only the mark.
+        "nubarca-android-adaptive-foreground-432.png",
+        "nubarca-android-launcher-icon-512.png",
         "nubarca-android-tv-banner-320x180.png",
         "nubarca-fire-tv-banner-1280x720.png",
         "nubarca-fire-tv-icon-512.png",

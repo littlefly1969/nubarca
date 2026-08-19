@@ -164,9 +164,19 @@ module.exports = () => ({
       package: release.package,
       versionCode: release.versionCode,
       usesCleartextTraffic,
-      icon: './assets/brand/nubarca-fire-tv-icon-512.png',
+      // The two ANDROID LAUNCHER slots. Both used to point at full-bleed
+      // OPAQUE squares that each contained a picture of a rounded app icon,
+      // frame and halo included. Android drew exactly that: a dark rectangle
+      // with a small logo in it, and — worse — masked the same opaque square as
+      // the adaptive FOREGROUND, so the square always won over
+      // backgroundColor. These two assets are the shapes the slots require:
+      // a tile with transparent outer corners, and a transparent
+      // foreground carrying only the mark inside Android's 66/108dp safe
+      // square. Both are derived from the approved flat-mark master by
+      // scripts/generate-android-launcher-icons.py.
+      icon: './assets/brand/nubarca-android-launcher-icon-512.png',
       adaptiveIcon: {
-        foregroundImage: './assets/brand/nubarca-expo-app-icon-1024.png',
+        foregroundImage: './assets/brand/nubarca-android-adaptive-foreground-432.png',
         backgroundColor: '#0a0f1a',
       },
     },

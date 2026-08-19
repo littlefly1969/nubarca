@@ -7,19 +7,30 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.5,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 7, runtime
-`nubarca-tv-native-6`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.6,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 8, runtime
+`nubarca-tv-native-7`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.5 is a NATIVE release, and specifically the **in-app updater bootstrap**: it
-adds the `REQUEST_INSTALL_PACKAGES` permission and a PackageInstaller path to the
-existing `NubArcaTvPlatform` bridge. Neither can arrive by OTA, so 1.0.5 is the
-one APK that must still be installed the old way. Once it is installed, both
-update kinds are reachable from **Mode Select → Aggiornamenti / Updates** with no
-ADB, PC or file manager.
+1.0.6 corrects the two ANDROID LAUNCHER icon slots. Both previously pointed at
+opaque full-bleed squares that each contained a picture of a rounded app icon,
+so the Fire TV home row drew a dark rectangle with a small logo in it, and the
+adaptive foreground masked that same square instead of the mark. The legacy icon
+is now a tile with transparent outer corners and the adaptive foreground is
+transparent artwork inside Android's 66/108dp safe square, both derived from the
+approved flat-mark master. Launcher icons are build-time resources baked into
+the APK, so this cannot ship as an OTA — hence a native release. The Leanback
+banner is deliberately untouched.
 
-Runtime `nubarca-tv-native-6` starts with NO OTA publication, and that is
+1.0.5 was the **in-app updater bootstrap**: it added the
+`REQUEST_INSTALL_PACKAGES` permission and a PackageInstaller path to the
+existing `NubArcaTvPlatform` bridge. Neither could arrive by OTA, so 1.0.5 was
+the last APK that had to be installed the old way. From 1.0.6 onwards a native
+release reaches the device through **Mode Select → Aggiornamenti / Updates**
+with no ADB, PC or file manager — 1.0.6 is the first release to actually
+exercise that path end to end.
+
+Runtime `nubarca-tv-native-7` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.
