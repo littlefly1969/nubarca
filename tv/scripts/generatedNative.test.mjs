@@ -142,6 +142,38 @@ when('the TV activity does not pin an orientation', () => {
   assert.doesNotMatch(mainActivity(), /android:screenOrientation/);
 });
 
+when('the output observer watches only the ACTIVE route and the display path', () => {
+  const observer = readFileSync(resolve(ANDROID,
+    'app/src/main/java/it/littlefly/nubarca/tv/platform/NubArcaTvOutputObserver.kt'), 'utf8');
+  const kotlin = observer
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+
+  // HDMI is the television's display path: losing it genuinely means playback
+  // has nowhere to go.
+  assert.match(kotlin, /TYPE_HDMI\b/);
+  assert.match(kotlin, /TYPE_HDMI_ARC/);
+  // eARC exists only from API 31, so it must be version-guarded rather than
+  // referenced unconditionally.
+  assert.match(kotlin, /TYPE_HDMI_EARC/);
+  assert.match(kotlin, /Build\.VERSION_CODES\.S[\s\S]{0,80}TYPE_HDMI_EARC/);
+
+  // onAudioDevicesRemoved reports EVERY output that vanishes, not the one in
+  // use. Classifying an unrelated Bluetooth speaker or headset as "our route is
+  // gone" pauses playback for a device that was never carrying it — the user
+  // sees the video stop for no reason. Those cases belong to BECOMING_NOISY,
+  // which is Android's statement about the ACTIVE route.
+  const callback = kotlin.slice(kotlin.indexOf('isDisplayPathOutput'));
+  for (const overreach of [/TYPE_BLUETOOTH_A2DP/, /TYPE_WIRED_HEADSET/,
+    /TYPE_WIRED_HEADPHONES/, /TYPE_USB_/, /TYPE_LINE_/, /TYPE_AUX_LINE/]) {
+    assert.doesNotMatch(callback, overreach,
+      `the device callback must not treat ${overreach} as the active route`);
+  }
+  // …and the active-route signal is still registered, so Bluetooth loss is
+  // covered.
+  assert.match(kotlin, /ACTION_AUDIO_BECOMING_NOISY/);
+});
+
 when('the output observer reached the generated project', () => {
   const observer = resolve(ANDROID, 'app/src/main/java/it/littlefly/nubarca/tv/platform/NubArcaTvOutputObserver.kt');
   assert.ok(existsSync(observer), 'the output-route observer must be generated');

@@ -60,6 +60,21 @@ Repeat the media operations using MENU, Play/Pause, RW and FF.
 
 ## G. HOME lifecycle
 
+The two media kinds behave differently on purpose, and both must be checked.
+
+**Photo slideshow → HOME → return**
+
+- [ ] rotation stops immediately (nothing advances behind the launcher)
+- [ ] the wake lock is released — ambient/screensaver is allowed
+- [ ] on return: the SAME photograph, and the slideshow is **paused**
+- [ ] it does not restart by itself after a few seconds
+- [ ] SELECT resumes it, once
+
+**Party/personal VIDEO → HOME → return**
+
+The video is not merely paused: the player is RELEASED, so the decoder, the
+MediaSession and the audio-focus registration all go with it.
+
 Play a video, note the position, press HOME.
 
 - [ ] no audio continues
@@ -71,8 +86,9 @@ Return.
 
 - [ ] same item, approximately the same position
 - [ ] **paused** — no sound starts by itself
-- [ ] SELECT resumes
+- [ ] SELECT resumes — and **one press is enough**
 - [ ] exactly one player
+- [ ] no audio starts between returning and pressing SELECT
 
 ## H. Voice / system overlay
 
@@ -84,7 +100,12 @@ Return.
 During playback, where the hardware allows:
 
 - [ ] HDMI disconnect / receiver input change → playback pauses
+      (the display path, caught by the device callback)
 - [ ] Bluetooth speaker disconnect → playback pauses
+      (the active route, caught by ACTION_AUDIO_BECOMING_NOISY)
+- [ ] disconnecting a Bluetooth device that is **not** carrying the audio —
+      a phone, a controller, a second speaker — does **not** pause anything.
+      This is the false positive the device callback was narrowed to avoid
 - [ ] restoring the output does **not** auto-resume
 - [ ] SELECT resumes from the same position
 

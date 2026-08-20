@@ -629,8 +629,11 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
  * Two standard sources, because they catch different things:
  *   * ACTION_AUDIO_BECOMING_NOISY — the classic "output is about to go away"
  *     broadcast, which fires for a headset/Bluetooth disconnect;
- *   * AudioDeviceCallback.onAudioDevicesRemoved — the API 23+ route-level
- *     signal, which is what reports an HDMI/USB/dock output disappearing.
+ *   * AudioDeviceCallback.onAudioDevicesRemoved — narrowed to the TV DISPLAY
+ *     PATH (HDMI / ARC / eARC). It reports every output that vanishes, not the
+ *     one we are using, so a wider net pauses playback because some unrelated
+ *     speaker left the room. Bluetooth and headset route loss stays with
+ *     BECOMING_NOISY, which is Android's statement about the ACTIVE route.
  */
 internal class NubArcaTvOutputObserver(
     private val reactContext: ReactApplicationContext,
@@ -652,7 +655,7 @@ internal class NubArcaTvOutputObserver(
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) {
             if (removed == null) return
             for (device in removed) {
-                if (isPlaybackOutput(device.type)) {
+                if (isDisplayPathOutput(device.type)) {
                     emit()
                     return
                 }
@@ -660,19 +663,29 @@ internal class NubArcaTvOutputObserver(
         }
     }
 
-    /** Output types whose removal means NubArca's sound has nowhere to go. */
-    private fun isPlaybackOutput(type: Int): Boolean = when (type) {
-        AudioDeviceInfo.TYPE_HDMI,
-        AudioDeviceInfo.TYPE_HDMI_ARC,
-        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
-        AudioDeviceInfo.TYPE_WIRED_HEADSET,
-        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
-        AudioDeviceInfo.TYPE_USB_DEVICE,
-        AudioDeviceInfo.TYPE_USB_HEADSET,
-        AudioDeviceInfo.TYPE_AUX_LINE,
-        AudioDeviceInfo.TYPE_LINE_ANALOG,
-        AudioDeviceInfo.TYPE_LINE_DIGITAL -> true
-        else -> false
+    /**
+     * The TV DISPLAY PATH only.
+     *
+     * onAudioDevicesRemoved reports every output that disappears, not the one
+     * NubArca is using. Treating any removed Bluetooth speaker, headset or USB
+     * dongle as "our route is gone" pauses playback for a device that was never
+     * carrying it — a false positive the user experiences as the video stopping
+     * for no reason.
+     *
+     * HDMI is different: on a television it IS the path the picture and sound
+     * travel, so losing it genuinely means playback has nowhere to go.
+     * Everything else is left to ACTION_AUDIO_BECOMING_NOISY, which is
+     * Android's own statement that the ACTIVE route is becoming unusable —
+     * exactly the question this callback cannot answer.
+     */
+    private fun isDisplayPathOutput(type: Int): Boolean {
+        if (type == AudioDeviceInfo.TYPE_HDMI || type == AudioDeviceInfo.TYPE_HDMI_ARC) {
+            return true
+        }
+        // eARC exists only from API 31; referencing the constant unguarded
+        // would not compile against older platforms.
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            type == AudioDeviceInfo.TYPE_HDMI_EARC
     }
 
     fun start() {

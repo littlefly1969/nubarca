@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from './wakePolicy.ts';
 import {
-  pausesOnOutputLoss, releasesPlayer, restorablePosition, resumesFromBackground,
-  resumesOnOutputRestored, shouldAutoResume, shouldMountPlayer,
+  hostStateFromAppState, pausesOnOutputLoss, releasesPlayer, restorablePosition,
+  resumesFromBackground, resumesOnOutputRestored, shouldAutoResume, shouldMountPlayer,
 } from './playerLifecycle.ts';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -184,4 +184,127 @@ test('background playback is not enabled', () => {
 
 test('exactly one AppState authority owns the player lifecycle', () => {
   assert.equal([...player.matchAll(/AppState\.addEventListener/g)].length, 1);
+});
+
+// ------------------------------------------------- WIRING, not just policy
+
+// The tranche-3 suite proved shouldRotateSlideshow and shouldKeepPhotoSlideshowAwake
+// agree, and that was not enough: ViewerScreen's timer still called
+// photoRotationActive({ slideshowMode, playing }), which knows nothing about the
+// foreground. The pure functions were right and unused. These tests check the
+// call sites.
+
+test('both viewers drive the rotation timer from the shared policy', () => {
+  for (const [name, source] of Object.entries({ partyViewer, personalViewer })) {
+    assert.match(source, /shouldRotateSlideshow\(wakeInputs\)/,
+      `${name}: the timer must derive from the shared policy`);
+    assert.match(source, /useScreenAwake\(shouldKeepPhotoSlideshowAwake\(wakeInputs\)\)/,
+      `${name}: the wake lock must consume the SAME inputs value`);
+  }
+});
+
+test('the party timer no longer has a host-blind lifecycle authority', () => {
+  // photoRotationActive keeps its domain home in lib/partySlideshow.ts; what it
+  // must not be is a SECOND answer to "is the slideshow running", because it
+  // cannot see the foreground.
+  assert.doesNotMatch(partyViewer, /const rotating = photoRotationActive/);
+  assert.doesNotMatch(partyViewer, /photoRotationActive\(/,
+    'ViewerScreen must not reintroduce a host-blind rotation predicate');
+});
+
+test('a genuine background changes playback INTENT in both viewers', () => {
+  // Gating only the timer would restart the slideshow on return — and for a
+  // party VIDEO the recreated player would read `playing === true` and start
+  // audio by itself, walking past shouldAutoResume().
+  assert.match(partyViewer,
+    /if \(hostState === 'background'\) setPlaying\(false\);/);
+  assert.match(personalViewer,
+    /if \(hostState === 'background'\) setSlideshow\(false\);/);
+});
+
+test('a transient inactive blip does not change what the user asked for', () => {
+  // Stopping a timer for a momentary overlay is free; silently turning the
+  // user's slideshow off is not.
+  for (const [name, source] of Object.entries({ partyViewer, personalViewer })) {
+    assert.doesNotMatch(source, /hostState !== 'active'\) set(Playing|Slideshow)\(false\)/, name);
+    assert.match(source, /hostState === 'background'/, name);
+  }
+});
+
+test('there is one host-state hook, not an AppState listener per screen', () => {
+  for (const [name, source] of Object.entries({ partyViewer, personalViewer })) {
+    assert.doesNotMatch(source, /AppState\.addEventListener/,
+      `${name} must consume the shared hook rather than add a listener`);
+    assert.match(source, /useHostState\(\)/, name);
+  }
+});
+
+// --------------------------------------------------------- initial host state
+
+test('a player created while already backgrounded does not mount', () => {
+  assert.equal(hostStateFromAppState('background'), 'background');
+  assert.equal(shouldMountPlayer(hostStateFromAppState('background')), false);
+  assert.equal(shouldMountPlayer(hostStateFromAppState('active')), true);
+  // Anything unrecognised is treated as a non-active interruption rather than
+  // assumed foreground.
+  for (const unknown of ['inactive', 'unknown', null, undefined]) {
+    assert.equal(hostStateFromAppState(unknown as string), 'inactive');
+  }
+});
+
+test('the player derives its first host state instead of assuming active', () => {
+  assert.match(player, /useState<HostState>\(\s*\(\) => hostStateFromAppState\(AppState\.currentState\)\)/);
+  assert.doesNotMatch(player, /useState<HostState>\('active'\)/);
+});
+
+// ------------------------------------------------ the full lifecycle scenario
+
+test('photo: playing → background → foreground → SELECT', () => {
+  // The scenario the review asked for, as state rather than prose.
+  let playing = true;
+  let host: 'active' | 'background' = 'active';
+  const inputs = () => ({ kind: 'photo' as const, slideshowPlaying: playing, hostActive: host === 'active' });
+
+  assert.equal(shouldRotateSlideshow(inputs()), true, 'rotating in the foreground');
+
+  host = 'background';
+  playing = false;                       // the viewers' effect does exactly this
+  assert.equal(shouldRotateSlideshow(inputs()), false, 'stopped in the background');
+
+  host = 'active';
+  assert.equal(shouldRotateSlideshow(inputs()), false, 'STILL paused after returning');
+  assert.equal(shouldKeepPhotoSlideshowAwake(inputs()), false);
+
+  playing = true;                        // SELECT
+  assert.equal(shouldRotateSlideshow(inputs()), true, 'the user resumed it');
+});
+
+test('party video: playing at 42s → background → foreground → SELECT', () => {
+  const source = '/api/tv/media/x/video';
+  let playing = true;
+  let host: 'active' | 'background' = 'active';
+
+  // Background: snapshot, intent becomes paused, player unmounts.
+  host = 'background';
+  const snapshot = { source, positionSeconds: 42, wasPlaying: playing };
+  playing = false;
+  assert.equal(releasesPlayer('active', host), true);
+  assert.equal(shouldMountPlayer(host), false, 'no player while backgrounded');
+
+  // Foreground: exactly one player, the same position, and NOT playing.
+  host = 'active';
+  assert.equal(shouldMountPlayer(host), true);
+  assert.equal(restorablePosition(snapshot, source), 42);
+  assert.equal(playing, false,
+    'the parent intent is what keeps the recreated player paused');
+  assert.equal(shouldAutoResume(), false);
+
+  // SELECT: one play action.
+  playing = true;
+  assert.equal(playing, true);
+});
+
+test('a changed item discards the stale position', () => {
+  const snapshot = { source: '/api/tv/media/x/video', positionSeconds: 42, wasPlaying: true };
+  assert.equal(restorablePosition(snapshot, '/api/tv/media/y/video'), null);
 });

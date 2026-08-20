@@ -17,7 +17,7 @@ import {
 } from '../../components/TvVideoPlayer';
 import { mapViewerRemoteEvent } from '../../video/remoteMap';
 import { useScreenAwake } from '../../lib/useScreenAwake';
-import { useHostActive } from '../../lib/useHostActive';
+import { useHostState } from '../../lib/useHostActive';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../../video/wakePolicy';
 import { actionableEventType } from '../../lib/remoteEvent';
 import { useI18n } from '../../i18n';
@@ -105,7 +105,8 @@ export function PersonalMediaViewer({
   // a television lit because a photograph was open. Video is deliberately not
   // here: expo-video's keepScreenOnWhilePlaying already tracks real playback,
   // and a second lock would be a second authority to get stuck.
-  const hostActive = useHostActive();
+  const hostState = useHostState();
+  const hostActive = hostState === 'active';
   const wakeInputs = {
     kind: (isVideo ? 'video' : 'photo') as 'video' | 'photo',
     slideshowPlaying: slideshow,
@@ -154,6 +155,13 @@ export function PersonalMediaViewer({
   // Same inputs as the wake lock, by construction: a slideshow that keeps
   // advancing photographs behind HOME is doing work nobody can see, and it
   // would drag the wake lock along with it.
+  // Background changes INTENT, not just the timer: returning must find the
+  // slideshow paused on the same item, waiting for SELECT — never restarting by
+  // itself. 'inactive' does not, so a momentary overlay is not a decision.
+  useEffect(() => {
+    if (hostState === 'background') setSlideshow(false);
+  }, [hostState]);
+
   const rotating = shouldRotateSlideshow(wakeInputs);
   useEffect(() => {
     if (!rotating) return;

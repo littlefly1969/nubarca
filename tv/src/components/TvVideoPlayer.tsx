@@ -15,6 +15,7 @@ import {
   resumesFromBackground,
   shouldAutoResume,
   shouldMountPlayer,
+  hostStateFromAppState,
   type HostState,
   type PlaybackSnapshot,
 } from '../video/playerLifecycle';
@@ -149,7 +150,11 @@ export function TvVideoPlayer({
   // 'inactive' is deliberately NOT a release. React Native reports it for brief
   // interruptions that are not an Activity stop, and tearing ExoPlayer down for
   // those would churn the decoder on incidental focus changes.
-  const [host, setHost] = useState<HostState>('active');
+  // DERIVED, not assumed. A player created while Android is already backgrounded
+  // used to start at 'active' and could mount — and autoplay — for the interval
+  // before the first AppState event arrived.
+  const [host, setHost] = useState<HostState>(
+    () => hostStateFromAppState(AppState.currentState));
   const snapshotRef = useRef<PlaybackSnapshot | null>(null);
   const controlsForSnapshot = controlsRef;
   const [mode, setMode] = useState<TvVideoMode | 'probing'>('probing');
@@ -191,10 +196,9 @@ export function TvVideoPlayer({
   // Snapshot before the unmount, restore after the remount. The parent holds
   // both because the child is the thing being released.
   useEffect(() => {
-    let previous: HostState = AppState.currentState === 'active' ? 'active' : 'inactive';
+    let previous: HostState = hostStateFromAppState(AppState.currentState);
     const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
-      const state: HostState = next === 'active' ? 'active'
-        : next === 'background' ? 'background' : 'inactive';
+      const state = hostStateFromAppState(next);
       if (releasesPlayer(previous, state)) {
         // Pull position and intent out of the live player FIRST; a moment later
         // it will not exist.

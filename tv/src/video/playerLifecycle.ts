@@ -36,6 +36,20 @@ export interface PlaybackSnapshot {
  * Should the player component be MOUNTED (and therefore its native player
  * alive) for this host state?
  */
+/**
+ * Map React Native's AppState string onto the host state.
+ *
+ * Used for the INITIAL value as well as for changes. A component created while
+ * Android is already backgrounded previously started at 'active' and could
+ * mount a player — and autoplay it — for the interval before the first AppState
+ * event arrived. Deriving the first value removes that window entirely.
+ */
+export function hostStateFromAppState(status: string | null | undefined): HostState {
+  if (status === 'active') return 'active';
+  if (status === 'background') return 'background';
+  return 'inactive';
+}
+
 export function shouldMountPlayer(host: HostState): boolean {
   return host !== 'background';
 }

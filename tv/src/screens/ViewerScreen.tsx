@@ -29,11 +29,11 @@ import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
-import { shouldKeepPhotoSlideshowAwake } from '../video/wakePolicy';
-import { useHostActive } from '../lib/useHostActive';
+import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../video/wakePolicy';
+import { useHostState } from '../lib/useHostActive';
 import { remapIndexById, sameItemIds } from '../lib/liveItems';
 import {
-  photoRotationActive, photoSlideMs, resolvePlayPause, shouldArmPreparingGrace,
+  photoSlideMs, resolvePlayPause, shouldArmPreparingGrace,
   videoPlaybackProps, VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
 } from '../lib/partySlideshow';
 import { useI18n } from '../i18n';
@@ -117,9 +117,11 @@ export function ViewerScreen({
   // inferred from `playing` happening to become true.
   const [slideshowMode, setSlideshowMode] = useState(autoPlay);
 
-  // The one keep-awake decision (video/wakePolicy.ts). True only while a photo
-  // slideshow is actually rotating in the foreground.
-  const hostActive = useHostActive();
+  // ONE host signal for this screen. 'inactive' is not active (timers and wake
+  // locks stop for a blip, which is free); only a genuine 'background' changes
+  // what the USER asked for.
+  const hostState = useHostState();
+  const hostActive = hostState === 'active';
   // Face-filter mode (polled below): while active, LEFT/RIGHT/auto-advance
   // navigate ONLY the matching subset; the search id is needed to delete the
   // search on BACK. Starting the slideshow from a filtered grid lands here too
@@ -148,13 +150,30 @@ export function ViewerScreen({
   const displayItems = faceFilter?.items ?? items;
   const item = displayItems[Math.min(index, Math.max(0, displayItems.length - 1))];
 
-  // Applied here, where the current item's kind is finally known. Video is
-  // absent by design — expo-video's keepScreenOnWhilePlaying owns that case.
-  useScreenAwake(shouldKeepPhotoSlideshowAwake({
-    kind: item?.mediaType === 'video' ? 'video' : 'photo',
+  // ONE WakeInputs value, consumed by BOTH the wake lock and the rotation
+  // timer, so the two cannot answer differently. Video is absent by design:
+  // expo-video's keepScreenOnWhilePlaying owns that case.
+  const wakeInputs = {
+    kind: (item?.mediaType === 'video' ? 'video' : 'photo') as 'video' | 'photo',
     slideshowPlaying: slideshowMode && playing,
     hostActive,
-  }));
+  };
+  useScreenAwake(shouldKeepPhotoSlideshowAwake(wakeInputs));
+
+  // BACKGROUND CHANGES INTENT, not merely timers.
+  //
+  // Gating the timer on host state alone would restart the slideshow the moment
+  // the user came back — and for a party VIDEO it would do worse: the recreated
+  // player would see `playing === true` from this state and start audio by
+  // itself, walking straight past shouldAutoResume(). The parent slideshow
+  // state is the authority for "is playback wanted", so THAT is what a genuine
+  // background transition changes.
+  //
+  // 'inactive' deliberately does not: a momentary overlay must not silently
+  // turn the user's slideshow off.
+  useEffect(() => {
+    if (hostState === 'background') setPlaying(false);
+  }, [hostState]);
 
   // Refs so the (stable) TV-event / poll callbacks read the latest values.
   const itemsRef = useRef(items);
@@ -309,7 +328,11 @@ export function ViewerScreen({
   // onEnded → goNext), never mid-play.
   const currentIsVideo = item?.mediaType === 'video';
   const photoMs = photoSlideMs(partyEnabled ? timing : null);
-  const rotating = photoRotationActive({ slideshowMode, playing });
+  // The SAME inputs as the wake lock — including host state. This previously
+  // called photoRotationActive({ slideshowMode, playing }), which knows nothing
+  // about the foreground, so photographs kept advancing behind HOME while the
+  // wake lock (correctly) let go. Two lifecycle authorities for one behaviour.
+  const rotating = shouldRotateSlideshow(wakeInputs) && !currentIsVideo;
   useEffect(() => {
     if (!rotating || displayItems.length === 0 || currentIsVideo) return;
     const timer = setTimeout(() => {
