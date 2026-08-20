@@ -17,6 +17,35 @@ command remains the release/CI contract. External tests may still report
 `Skipped` when their documented dependency or opt-in environment variable is
 unavailable.
 
+## GitHub Actions
+
+The public repository uses standard GitHub-hosted Ubuntu runners only, so the
+automated verification does not require paid runner capacity or repository
+secrets.
+
+`.github/workflows/ci.yml` runs on every pull request, every push to `main`, and
+manual dispatch. Its independent jobs run in parallel and verify:
+
+- the NubArca product identity contract;
+- a Release build and the deterministic backend lane;
+- frontend typechecking, tests, and production build;
+- TV typechecking and tests;
+- mobile typechecking.
+
+Superseded CI runs on the same branch are cancelled so an obsolete backend run
+does not consume capacity while a newer commit is waiting.
+
+`.github/workflows/backend-full.yml` runs every night at 02:17 UTC and can also
+be started manually. It executes `scripts/test-backend-full.sh`, including the
+external lane backed by the Docker, PostgreSQL/Testcontainers and FFmpeg
+capabilities available on the standard Ubuntu runner. Test result artifacts are
+uploaded even when a test command fails; fast results are retained for 7 days
+and full-suite results for 14 days.
+
+Neither workflow deploys, publishes a release, writes to the repository, or
+receives production secrets. Production deployment remains a separate,
+operator-controlled operation governed by `deploy/FAST_DEPLOY.md`.
+
 Additional arguments are passed through to `dotnet test`, for example:
 
 ```bash

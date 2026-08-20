@@ -12,6 +12,8 @@ is built is described by `ARCHITECTURE.md`.
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
+- CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
+  requests and `main`; the external backend lane runs nightly or on demand
 - Storage: local content-addressed blobs with database-owned logical paths
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
