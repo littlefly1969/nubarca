@@ -34,6 +34,7 @@ import { FocusableButton } from '../components/FocusableButton';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { MediaTilePreview } from '../components/MediaTilePreview';
 import { MenuCommandRail } from '../components/MenuCommandRail';
+import { TvContextActionsLauncher } from '../components/TvContextActionsLauncher';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
@@ -145,6 +146,12 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
 
   const refreshGrid = useCallback(() => { void load(null, false); }, [load]);
 
+  // THE single entry to the command surface. Beauty Lab's actions — Add
+  // images above all — were MENU-only, and its empty state literally told the
+  // user to press a key many Android TV remotes do not have. On those devices
+  // the whole feature was unreachable.
+  const openActions = useCallback(() => { overlay.show(); }, [overlay]);
+
   // MENU toggles the action overlay (only from the grid root). Fire TV dispatches
   // key-up AND key-down; ignore key-down (eventKeyAction === 0) so one press is
   // one toggle — matching the album grid's handler.
@@ -153,8 +160,12 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
     if (eventType === null) return;
     // Not a media context — transport keys stay with the platform (§11).
     if (isMediaTransportEvent(eventType)) return;
-    if (eventType === 'menu' && viewRef.current === 'grid') overlay.toggle();
-  }, [overlay]);
+    // MENU is a SHORTCUT to the same surface the on-screen launcher opens.
+    if (eventType === 'menu' && viewRef.current === 'grid') {
+      if (overlay.visibleRef.current) overlay.hide();
+      else openActions();
+    }
+  }, [overlay, openActions]);
   useTVEventHandler(onTVEvent);
 
   // Layered BACK: overlay → open panel → selection → lock at the root.
@@ -336,6 +347,11 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
       </View>
       {notice && <Text style={styles.notice}>{notice}</Text>}
       {error && <Text style={styles.error}>{error}</Text>}
+
+      {/* Shown in BOTH states on purpose. An empty lab is exactly when "Add
+          images" matters most, so this is the one screen where removing the
+          launcher from the empty state would remove the only way in. */}
+      <TvContextActionsLauncher onOpen={openActions} focusable={gridFocusable} />
 
       {items.length === 0 && !loading ? (
         <Text style={styles.empty}>{t('beautyLab.empty')}</Text>

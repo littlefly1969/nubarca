@@ -21,6 +21,7 @@ import {
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { FocusableButton } from '../components/FocusableButton';
 import { MenuCommandRail } from '../components/MenuCommandRail';
+import { TvContextActionsLauncher } from '../components/TvContextActionsLauncher';
 import { MediaTilePreview } from '../components/MediaTilePreview';
 import { LibraryFilterPanel } from './library/LibraryFilterPanel';
 import { PersonalMediaViewer } from './library/PersonalMediaViewer';
@@ -193,7 +194,6 @@ export function PersonalLibraryScreen({
     visible: overlayVisible,
     visibleRef: overlayVisibleRef,
     show: showOverlay,
-    toggle: toggleOverlay,
     hide: hideOverlay,
     bump: bumpOverlay,
   } = useMenuOverlay();
@@ -327,6 +327,16 @@ export function PersonalLibraryScreen({
   // viewer own their own MENU behaviour). This is the ONLY global key listener
   // on this screen and it never touches a direction — the native focus engine
   // owns those, with no competitor.
+  // THE single entry to the command surface. MENU is wired to it and so is the
+  // on-screen launcher, so there is one state transition with two entrances
+  // rather than two command systems that can disagree.
+  const openActions = useCallback(() => {
+    // A fresh entry always lands on the active tab — never on a landing spot
+    // left over from a filter panel the user backed out of some time ago.
+    setRailFocus('kind');
+    showOverlay();
+  }, [showOverlay]);
+
   const onTVEvent = useCallback((evt: HWEvent) => {
     const eventType = actionableEventType(evt);
     if (eventType === null) return;
@@ -337,13 +347,12 @@ export function PersonalLibraryScreen({
     // user did not ask for.
     if (isMediaTransportEvent(eventType)) return;
     if (eventType === 'menu') {
-      // A MENU press is a fresh entry into the rail, so it always lands on the
-      // active tab — never on a landing spot left over from a filter panel the
-      // user backed out of some time ago.
-      setRailFocus('kind');
-      toggleOverlay();
+      // MENU is a SHORTCUT to the same surface the launcher opens. While it is
+      // already up, MENU closes it — the existing toggle behaviour.
+      if (overlayVisibleRef.current) hideOverlay();
+      else openActions();
     } else bumpOverlay();
-  }, [toggleOverlay, bumpOverlay]);
+  }, [openActions, hideOverlay, bumpOverlay, overlayVisibleRef]);
   useTVEventHandler(onTVEvent);
 
   // BACK precedence at the library root (panels/viewer register their own
@@ -499,20 +508,27 @@ export function PersonalLibraryScreen({
           />
         </View>
       ) : (
-        <FlatList
-          data={rows}
-          renderItem={renderRow}
-          keyExtractor={(row) => row.key}
-          contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
-          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
-          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
-          removeClippedSubviews={false}
-          snapToAlignment="item"
-          scrollAnimationEnabled={false}
-          onEndReachedThreshold={2}
-          onEndReached={loadMore}
-        />
+        <>
+          {/* FIVE-WAY entry to the command surface. In the normal layout flow,
+              above the grid, so the native focus engine finds it with UP from
+              the first media row — no focus graph, no key handler, no timer.
+              Inert while the rail owns focus so no direction can escape to it. */}
+          <TvContextActionsLauncher onOpen={openActions} focusable={gridFocusable} />
+          <FlatList
+            data={rows}
+            renderItem={renderRow}
+            keyExtractor={(row) => row.key}
+            contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
+            initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+            maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+            windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
+            removeClippedSubviews={false}
+            snapToAlignment="item"
+            scrollAnimationEnabled={false}
+            onEndReachedThreshold={2}
+            onEndReached={loadMore}
+          />
+        </>
       )}
 
       {load.phase === 'loadingMore' && items.length > 0 && (

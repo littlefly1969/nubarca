@@ -46,7 +46,7 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'beautyLab.title': 'Beauty Lab',
   'beautyLab.loading': 'Loading…',
   'beautyLab.loadError': 'Could not load the lab.',
-  'beautyLab.empty': 'No images yet. Press MENU and choose “Add images”.',
+  'beautyLab.empty': 'No images yet. Open “Actions” and choose “Add images”.',
   'beautyLab.loadMore': 'Load more',
   'beautyLab.menu': 'Actions',
   'beautyLab.addImages': 'Add images',
@@ -134,6 +134,7 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'gallery.selectedCount_one': '{count} photo selected',
   'gallery.selectedCount_other': '{count} photos selected',
 
+  'actions.open': 'Actions',
   'gallery.filters': 'Filters',
   'gallery.sort': 'Sort',
   'gallery.search': 'Search',

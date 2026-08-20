@@ -26,6 +26,7 @@ import { ApiError } from '../api/client';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
 import { FocusableButton } from '../components/FocusableButton';
 import { MenuCommandRail } from '../components/MenuCommandRail';
+import { TvContextActionsLauncher } from '../components/TvContextActionsLauncher';
 import { MediaTilePreview } from '../components/MediaTilePreview';
 import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
@@ -184,10 +185,15 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   const {
     visible: overlayVisible,
     visibleRef: overlayVisibleRef,
-    toggle: toggleOverlay,
+    show: showOverlay,
     hide: hideOverlay,
     bump: bumpOverlay,
   } = useMenuOverlay();
+
+  // THE single entry to the command surface: MENU and the on-screen Actions
+  // launcher both call this, so Slideshow and "show all photos" are reachable
+  // on a remote that has no MENU key at all.
+  const openActions = useCallback(() => { showOverlay(); }, [showOverlay]);
 
   // MENU is the ONLY command that shows/hides the overlay (KEYCODE_MENU → the
   // 'menu' eventType). All other remote activity (D-pad focus moves, SELECT on
@@ -200,9 +206,12 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
     tvDebug('remote', eventType, 'grid-overlay', overlayVisibleRef.current);
     // Not a media context — transport keys stay with the platform (§11).
     if (isMediaTransportEvent(eventType)) return;
-    if (eventType === 'menu') toggleOverlay();
-    else bumpOverlay();
-  }, [toggleOverlay, bumpOverlay, overlayVisibleRef]);
+    // MENU is a SHORTCUT to the same surface the on-screen launcher opens.
+    if (eventType === 'menu') {
+      if (overlayVisibleRef.current) hideOverlay();
+      else openActions();
+    } else bumpOverlay();
+  }, [openActions, hideOverlay, bumpOverlay, overlayVisibleRef]);
   useTVEventHandler(onTVEvent);
 
   // BACK / "show all photos" while face-filter mode is active: delete THIS
@@ -447,20 +456,25 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
           <FocusableButton label={t('items.backToAlbums')} onPress={onBack} hasTVPreferredFocus />
         </View>
       ) : (
-        <FlatList
-          data={rows}
-          renderItem={renderRow}
-          keyExtractor={(row) => row.key}
-          contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
-          // Geometry is known before thumbnails decode. Native TV focus owns
-          // navigation, while the bounded window keeps the next rows mounted.
-          initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
-          maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
-          windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
-          removeClippedSubviews={false}
-          snapToAlignment="item"
-          scrollAnimationEnabled={false}
-        />
+        <>
+          {/* Same FIVE-WAY affordance as the Personal Library: in normal flow
+              above the grid, so UP from the first row reaches it natively. */}
+          <TvContextActionsLauncher onOpen={openActions} focusable={gridFocusable} />
+          <FlatList
+            data={rows}
+            renderItem={renderRow}
+            keyExtractor={(row) => row.key}
+            contentContainerStyle={[styles.grid, { paddingBottom: inset.y }]}
+            // Geometry is known before thumbnails decode. Native TV focus owns
+            // navigation, while the bounded window keeps the next rows mounted.
+            initialNumToRender={TV_MEDIA_GRID_INITIAL_ROWS}
+            maxToRenderPerBatch={TV_MEDIA_GRID_BATCH_ROWS}
+            windowSize={TV_MEDIA_GRID_WINDOW_SIZE}
+            removeClippedSubviews={false}
+            snapToAlignment="item"
+            scrollAnimationEnabled={false}
+          />
+        </>
       )}
 
       {/* MENU overlay: QR corners + centered album title and command bar on top.

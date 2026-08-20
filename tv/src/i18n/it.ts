@@ -83,7 +83,7 @@ const it = {
   'beautyLab.title': 'Laboratorio bellezza',
   'beautyLab.loading': 'Caricamento…',
   'beautyLab.loadError': 'Impossibile caricare il laboratorio.',
-  'beautyLab.empty': 'Ancora nessuna immagine. Premi MENU e scegli “Aggiungi immagini”.',
+  'beautyLab.empty': 'Ancora nessuna immagine. Apri “Azioni” e scegli “Aggiungi immagini”.',
   'beautyLab.loadMore': 'Carica altre',
   'beautyLab.menu': 'Azioni',
   'beautyLab.addImages': 'Aggiungi immagini',
@@ -171,6 +171,7 @@ const it = {
   'gallery.selectedCount_one': '{count} foto selezionata',
   'gallery.selectedCount_other': '{count} foto selezionate',
 
+  'actions.open': 'Azioni',
   'gallery.filters': 'Filtri',
   'gallery.sort': 'Ordina',
   'gallery.search': 'Cerca',
