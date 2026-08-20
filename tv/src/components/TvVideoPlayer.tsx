@@ -8,6 +8,16 @@ import { VIDEO_SEEK_SECONDS } from '../video/remoteMap';
 import { SlideImage } from './SlideImage';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
+import { subscribeOutputLost } from '../lib/tvPlatform';
+import {
+  releasesPlayer,
+  restorablePosition,
+  resumesFromBackground,
+  shouldAutoResume,
+  shouldMountPlayer,
+  type HostState,
+  type PlaybackSnapshot,
+} from '../video/playerLifecycle';
 
 // Full-screen video playback for the TV viewer.
 //
@@ -38,8 +48,19 @@ import { tvDebug } from '../debug';
 //  2. BOUNDED BUFFER. Android's default is an unlimited BYTE budget; on a
 //     high-bitrate source that is a memory climb with no ceiling. The explicit
 //     `bufferOptions` below replaces it with a duration AND byte bound.
-//  3. LIFECYCLE. Backgrounding pauses and releases; returning does NOT
-//     auto-resume. See the AppState effect.
+//  3. LIFECYCLE. A genuine BACKGROUND transition snapshots the position and
+//     then UNMOUNTS the player component, which is what releases the native
+//     ExoPlayer, its decoder, the Media3 MediaSession and the audio-focus
+//     registration — none of which NubArca owns. A transient 'inactive' blip
+//     only PAUSES: an incidental focus change is not an Activity stop, and
+//     re-preparing ExoPlayer for one would churn the decoder for nothing.
+//     Returning recreates exactly one player, restores the position when it
+//     belongs to the same source, and does NOT auto-resume. See
+//     video/playerLifecycle.ts for the rules and the AppState effect below for
+//     the wiring.
+//
+//     This comment used to say "pauses and releases" while the code only
+//     paused. It now describes what executes.
 //
 // A decoder/network error is reported through `statusChange` and turns into the
 // poster + a generic message. It never propagates, and nothing here can
@@ -51,6 +72,10 @@ export interface TvVideoControls {
   // Stop and release before the app closes or the screen goes away, so nothing
   // keeps playing behind the launcher.
   stop(): void;
+  // Position + intent, read by the PARENT immediately before it unmounts this
+  // player for a background transition. It has to be pulled from outside
+  // because the component that owns the position is the one being torn down.
+  snapshot(): PlaybackSnapshot | null;
 }
 
 const PREPARING_POLL_MS = 5000;
@@ -114,6 +139,19 @@ export function TvVideoPlayer({
   maxPlaybackSeconds = null, onCapReached, playing, onReadyStateChange,
 }: Props) {
   const { t } = useI18n();
+  // BACKGROUND RELEASE. The player component is UNMOUNTED when the app is
+  // genuinely backgrounded, and expo-video's documented contract is that
+  // useVideoPlayer releases its native player on unmount. That single move
+  // releases the ExoPlayer, its decoder, the Media3 MediaSession and the
+  // audio-focus registration — none of which NubArca owns, and none of which it
+  // therefore has to release by hand.
+  //
+  // 'inactive' is deliberately NOT a release. React Native reports it for brief
+  // interruptions that are not an Activity stop, and tearing ExoPlayer down for
+  // those would churn the decoder on incidental focus changes.
+  const [host, setHost] = useState<HostState>('active');
+  const snapshotRef = useRef<PlaybackSnapshot | null>(null);
+  const controlsForSnapshot = controlsRef;
   const [mode, setMode] = useState<TvVideoMode | 'probing'>('probing');
 
   // Report readiness upward so the viewer can run its grace window. 'hls' and
@@ -150,7 +188,28 @@ export function TvVideoPlayer({
     };
   }, [videoPath, personal]);
 
-  if (mode === 'hls' || mode === 'direct') {
+  // Snapshot before the unmount, restore after the remount. The parent holds
+  // both because the child is the thing being released.
+  useEffect(() => {
+    let previous: HostState = AppState.currentState === 'active' ? 'active' : 'inactive';
+    const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
+      const state: HostState = next === 'active' ? 'active'
+        : next === 'background' ? 'background' : 'inactive';
+      if (releasesPlayer(previous, state)) {
+        // Pull position and intent out of the live player FIRST; a moment later
+        // it will not exist.
+        snapshotRef.current = controlsForSnapshot.current?.snapshot() ?? null;
+        tvDebug('video', 'lifecycle', 'releasing-on-background');
+      } else if (resumesFromBackground(previous, state)) {
+        tvDebug('video', 'lifecycle', 'foregrounded');
+      }
+      previous = state;
+      setHost(state);
+    });
+    return () => subscription.remove();
+  }, [controlsForSnapshot]);
+
+  if ((mode === 'hls' || mode === 'direct') && shouldMountPlayer(host)) {
     return (
       <ReadyPlayer
         // KEY: a new video path is a NEW component instance, so the previous
@@ -169,6 +228,8 @@ export function TvVideoPlayer({
         onCapReached={onCapReached}
         playing={playing}
         onFatalError={() => setMode('error')}
+        restoreSnapshot={snapshotRef.current}
+        host={host}
       />
     );
   }
@@ -191,13 +252,19 @@ export function TvVideoPlayer({
 // is never more than one live native player.
 function ReadyPlayer({
   videoPath, mode, onEnded, controlsRef, onFatalError, personal,
-  maxPlaybackSeconds, onCapReached, playing,
+  maxPlaybackSeconds, onCapReached, playing, restoreSnapshot = null, host,
 }: {
   videoPath: string;
   mode: 'hls' | 'direct';
   onEnded: () => void;
   controlsRef: MutableRefObject<TvVideoControls | null>;
   onFatalError: () => void;
+  // Position captured before a background release, restored on the recreated
+  // player when — and only when — it belongs to THIS source.
+  restoreSnapshot?: PlaybackSnapshot | null;
+  // Only ever 'active' or 'inactive' here: a 'background' host means this
+  // component is not rendered at all.
+  host: HostState;
   personal: boolean;
   maxPlaybackSeconds: number | null;
   onCapReached?: () => void;
@@ -217,9 +284,22 @@ function ReadyPlayer({
     p.timeUpdateEventInterval = capSeconds === null ? 0 : 0.5;
     // Replace Android's unlimited byte budget before playback starts.
     p.bufferOptions = BUFFER_OPTIONS;
-    // `playing === false` means the slideshow is paused: starting playback here
-    // would put audio in the room under a PAUSED pill.
-    if (playing !== false) p.play();
+    // Make the product invariant VISIBLE and regression-testable rather than
+    // relying on an upstream default: expo-video owns the video keep-awake, and
+    // NubArca adds no second lock on top of it.
+    p.keepScreenOnWhilePlaying = true;
+
+    // Restore a position captured before a background release. `restorablePosition`
+    // refuses a snapshot from a DIFFERENT source, so changing item while
+    // backgrounded can never seek the new video to the old one's timestamp.
+    const resumeAt = restorablePosition(restoreSnapshot, videoPath);
+    if (resumeAt !== null) p.currentTime = resumeAt;
+
+    // After a real background interruption playback stays PAUSED: returning to a
+    // room and having audio start by itself is the behaviour this product
+    // deliberately avoids, and shouldAutoResume() says so in one place.
+    const interrupted = resumeAt !== null;
+    if (playing !== false && (!interrupted || shouldAutoResume())) p.play();
   });
 
   // Whether the user has playback going. Consulted when returning from the
@@ -250,42 +330,57 @@ function ReadyPlayer({
         }
         wasPlayingRef.current = false;
       },
+      snapshot: () => {
+        try {
+          return {
+            source: videoPath,
+            positionSeconds: player.currentTime,
+            wasPlaying: player.playing,
+          };
+        } catch {
+          // Released already: there is nothing to restore, and guessing a
+          // position would be worse than starting from the beginning.
+          return null;
+        }
+      },
     };
     return () => { controlsRef.current = null; };
-  }, [player, controlsRef]);
+  }, [player, controlsRef, videoPath]);
 
-  // Explicit lifecycle. Fire TV backgrounds this app for Home, the Alexa/voice
-  // overlay, an app switch and screen sleep, and audio focus is lost with it.
+  // OUTPUT ROUTE. HDMI unplugged, a receiver switched away, a Bluetooth speaker
+  // gone: pause and keep the position. Never navigate, never close the viewer,
+  // never reset — the user has not asked to stop watching, only the sound has
+  // nowhere to go. Coming back does NOT auto-resume, for the same reason
+  // returning from background does not.
   //
-  // Going away: PAUSE. The playback position stays on the player, so the user
-  // returns where they left off. Deliberately not a release: expo-video/Media3
-  // already stops decoding while paused and in the background, and tearing the
-  // player down here would lose the position and force a full re-prepare on
-  // every incidental interruption.
-  //
-  // Coming back: do NOT auto-resume. Returning to a room and having audio start
-  // by itself is the behaviour to avoid; the user presses play. The one
-  // exception is a brief 'inactive' blip that never became a real background —
-  // there was no interruption to recover from.
+  // Subscribed only while a player exists, so outside a playback context
+  // nothing is registered natively.
+  useEffect(() => subscribeOutputLost(() => {
+    try {
+      wasPlayingRef.current = player.playing;
+      player.pause();
+    } catch {
+      // Already released; nothing to pause.
+    }
+    tvDebug('video', 'lifecycle', 'paused-on-output-lost');
+  }), [player]);
+
+  // The PARENT owns background/foreground: it snapshots the position and then
+  // unmounts this component, which is what releases the native player. All this
+  // effect does is honour a transient 'inactive' blip by PAUSING — never by
+  // releasing, because an incidental focus change is not an Activity stop and
+  // re-preparing ExoPlayer for one would churn the decoder for nothing.
   useEffect(() => {
-    let previous: AppStateStatus = AppState.currentState;
-    const subscription = AppState.addEventListener('change', (next) => {
-      const leaving = next === 'background' || next === 'inactive';
-      if (leaving && previous === 'active') {
-        wasPlayingRef.current = player.playing;
-        try {
-          player.pause();
-        } catch {
-          // The player may already be gone if the screen is unmounting.
-        }
-        tvDebug('video', 'lifecycle', 'paused-on-background');
-      } else if (next === 'active' && previous === 'background') {
-        tvDebug('video', 'lifecycle', 'foregrounded', wasPlayingRef.current ? 'was-playing' : 'was-paused');
-      }
-      previous = next;
-    });
-    return () => subscription.remove();
-  }, [player]);
+    if (host === 'active') return;
+    try {
+      wasPlayingRef.current = player.playing;
+      player.pause();
+    } catch {
+      // Already released; nothing to pause.
+    }
+    tvDebug('video', 'lifecycle', 'paused-on-inactive');
+  }, [host, player]);
+
 
   const reportError = useCallback((message: string | undefined) => {
     // Sanitized: the CATEGORY reaches the debug log, the user sees a plain

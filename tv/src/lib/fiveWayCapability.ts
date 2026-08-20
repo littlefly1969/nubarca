@@ -40,10 +40,16 @@ export interface TvCapability {
   readonly accelerators: readonly string[];
 }
 
-// One entry per product FUNCTION. Presentation that carries no command — the
-// Party QR corners, the face-filter indicator, the title pill — is deliberately
-// absent: it is information, not a function, and demanding a route to it would
-// dilute the rule until it stopped catching anything.
+// One entry per product FUNCTION. Presentation that carries no command is
+// deliberately absent: the Party QR corners, the face-filter indicator, the
+// title pill, and the viewer's ambient chrome (item name, position counter,
+// slideshow pill) are INFORMATION, not commands.
+//
+// The chrome was briefly listed here with a five-way "route", and that was a
+// category error worth naming: it made the matrix report a pass for something
+// that is not a function, and the only way to keep it honest would have been to
+// invent a D-pad command for decoration. MENU may still redisplay it — an
+// accelerator to information is not a function gate.
 export const TV_CAPABILITIES: readonly TvCapability[] = [
   // --- Personal Library ----------------------------------------------------
   { screen: 'PersonalLibrary', action: 'browse media',
@@ -107,8 +113,6 @@ export const TV_CAPABILITIES: readonly TvCapability[] = [
     fiveWayRoute: 'SELECT', accelerators: ['PLAY_PAUSE'] },
   { screen: 'Viewer', action: 'seek a video',
     fiveWayRoute: 'LEFT / RIGHT', accelerators: ['REWIND', 'FAST_FORWARD'] },
-  { screen: 'Viewer', action: 'show the ambient chrome',
-    fiveWayRoute: 'shown on entry; any activity re-arms it', accelerators: ['MENU'] },
   { screen: 'Viewer', action: 'return to the grid',
     fiveWayRoute: 'BACK', accelerators: [] },
 

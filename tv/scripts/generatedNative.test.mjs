@@ -111,6 +111,69 @@ when('the install permission contract is unchanged', () => {
   assert.equal(manifest().includes('UPDATE_PACKAGES_WITHOUT_USER_ACTION'), false);
 });
 
+// --- generic TV device contract ---------------------------------------------
+
+when('the TV device contract is declared, and nothing NubArca does not need', () => {
+  const source = manifest();
+  // A television has no touchscreen. Declaring it REQUIRED would exclude every
+  // TV from a store listing.
+  assert.match(source, /android\.hardware\.touchscreen[\s\S]{0,120}android:required="false"/);
+  assert.match(source, /android\.software\.leanback/);
+  // Hardware NubArca genuinely does not use must not be a requirement.
+  for (const feature of [
+    'android.hardware.camera', 'android.hardware.telephony',
+    'android.hardware.location', 'android.hardware.microphone',
+  ]) {
+    const required = new RegExp(`${feature.replace(/\./g, '\\.')}"[^>]*android:required="true"`);
+    assert.doesNotMatch(source, required, `${feature} must not be required`);
+  }
+});
+
+when('the launcher activity is exported', () => {
+  assert.match(mainActivity(), /android:exported="true"/);
+});
+
+// ORIENTATION. `android:screenOrientation` is deliberately ABSENT: the TV
+// toolchain's `removePortraitOrientation` deletes it for leanback builds, and a
+// TV is landscape by construction. This test pins the ABSENCE so a future
+// "hardening" pass does not reintroduce a plugin that fights the toolchain —
+// which is exactly what happened once and was reverted.
+when('the TV activity does not pin an orientation', () => {
+  assert.doesNotMatch(mainActivity(), /android:screenOrientation/);
+});
+
+when('the output observer reached the generated project', () => {
+  const observer = resolve(ANDROID, 'app/src/main/java/it/littlefly/nubarca/tv/platform/NubArcaTvOutputObserver.kt');
+  assert.ok(existsSync(observer), 'the output-route observer must be generated');
+  const source = readFileSync(observer, 'utf8');
+  assert.match(source, /ACTION_AUDIO_BECOMING_NOISY/);
+  assert.match(source, /onAudioDevicesRemoved/);
+  // Stripped of comments before the NEGATIVE assertions: the observer's own
+  // documentation explains that it must not build a MediaSession, and prose
+  // saying so must not be mistaken for code doing so.
+  const kotlin = source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+  for (const forbidden of [
+    /MediaSession/, /requestAudioFocus/, /abandonAudioFocus/,
+    /OnAudioFocusChangeListener/, /ExoPlayer/,
+  ]) {
+    assert.doesNotMatch(kotlin, forbidden,
+      `the observer must not own playback concerns: ${forbidden}`);
+  }
+});
+
+when('no second native module was introduced', () => {
+  const packageFile = resolve(ANDROID,
+    'app/src/main/java/it/littlefly/nubarca/tv/platform/NubArcaTvPlatformPackage.kt');
+  const source = readFileSync(packageFile, 'utf8');
+  // Exactly one module in the package's list — the output observer is a
+  // collaborator of the EXISTING module, not a second registration.
+  const registered = [...source.matchAll(/(\w+)\(reactContext\)/g)].map((m) => m[1]);
+  assert.deepEqual(registered, ['NubArcaTvPlatformModule'],
+    'the output observer belongs to the EXISTING bridge, not a new module');
+});
+
 when('the generated project still builds the accepted release identity', () => {
   const gradle = readFileSync(resolve(ANDROID, 'app/build.gradle'), 'utf8');
   assert.match(gradle, new RegExp(`versionCode ${release.versionCode}\\b`));

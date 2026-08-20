@@ -78,6 +78,18 @@ module.exports = () => ({
     scheme: 'nubarca-tv',
     version: release.version,
     runtimeVersion,
+    // Deliberately does NOT reach the generated manifest, and that is correct.
+    // `@react-native-tvos/config-tv` runs `removePortraitOrientation`, which
+    // DELETES `android:screenOrientation` from the TV launcher activity: a
+    // leanback device is landscape by construction, and pinning the attribute
+    // is upstream's explicit non-goal for TV builds.
+    //
+    // A generic-TV hardening pass added a plugin to put it back, then removed
+    // it again on discovering this. Fighting the TV toolchain to restate
+    // something it removes on purpose is not hardening — it is a workaround
+    // against the platform, and the next clean prebuild would have silently
+    // won anyway. The key is kept here because it still describes the app's
+    // intent for the non-TV (iOS dev smoke) target.
     orientation: 'landscape',
     platforms: ['android', 'ios'],
     // Approved square launcher artwork (1024x1024), copied byte-for-byte from

@@ -203,7 +203,52 @@ export function validateTvApk(apkPath) {
     problems.push('apksigner not found — the signer CANNOT be proven');
   }
 
-  // --- TV manifest contract -------------------------------------------------
+  // --- TV manifest contract, from the PACKAGED manifest ---------------------
+  // aapt2 badging summarises; the launcher/banner/orientation contract needs
+  // the decoded manifest itself. Fail closed if it cannot be read: an
+  // uninspectable manifest is not a passing one.
+  const apkanalyzer = sdkTool('cmdline-tools/*/bin/apkanalyzer');
+  if (apkanalyzer) {
+    let decoded;
+    try {
+      decoded = run(apkanalyzer, ['manifest', 'print', apk]);
+    } catch {
+      decoded = null;
+    }
+    if (decoded === null) {
+      problems.push('the packaged manifest could not be decoded — the TV contract is unproven');
+    } else {
+      const activity = /<activity[^>]*MainActivity[\s\S]*?<\/activity>/.exec(decoded)?.[0] ?? '';
+      const mainFilters = [...activity.matchAll(/<intent-filter>[\s\S]*?<\/intent-filter>/g)]
+        .map((m) => m[0]).filter((f) => f.includes('android.intent.action.MAIN'));
+      const count = (haystack, name) => haystack.split(`"${name}"`).length - 1;
+      report.launcher = {
+        mainFilters: mainFilters.length,
+        main: mainFilters[0] ? count(mainFilters[0], 'android.intent.action.MAIN') : 0,
+        launcher: mainFilters[0] ? count(mainFilters[0], 'android.intent.category.LAUNCHER') : 0,
+        leanback: mainFilters[0]
+          ? count(mainFilters[0], 'android.intent.category.LEANBACK_LAUNCHER') : 0,
+        exported: /android:exported="true"/.test(activity),
+        activityBanner: /android:banner=/.test(activity),
+        applicationBanner: (decoded.match(/android:banner=/g) ?? []).length >= 2,
+        // Deliberately absent for a leanback build — the TV toolchain removes
+        // it on purpose, so its PRESENCE would be the surprise.
+        pinnedOrientation: /android:screenOrientation/.test(activity),
+      };
+      const l = report.launcher;
+      if (l.mainFilters !== 1) problems.push(`expected exactly one MAIN intent-filter, found ${l.mainFilters}`);
+      if (l.main !== 1) problems.push(`ACTION_MAIN appears ${l.main} times`);
+      if (l.launcher !== 1) problems.push(`CATEGORY_LAUNCHER appears ${l.launcher} times`);
+      if (l.leanback !== 1) problems.push(`CATEGORY_LEANBACK_LAUNCHER appears ${l.leanback} times`);
+      if (!l.exported) problems.push('the launcher activity is not exported');
+      if (!l.activityBanner) problems.push('the launcher activity declares no banner');
+      if (!l.applicationBanner) problems.push('the application declares no banner');
+    }
+  } else {
+    problems.push('apkanalyzer not found — the packaged TV manifest CANNOT be inspected');
+  }
+
+  // --- TV feature contract (badging) ----------------------------------------
   if (!badging.leanbackLaunchable) problems.push('no LEANBACK_LAUNCHER activity');
   if (!badging.launchable) problems.push('no ordinary LAUNCHER activity (accepted 1.0.7 registration)');
   if (!badging.notRequiredFeatures.includes('android.hardware.touchscreen')) {
@@ -281,6 +326,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     line('touchscreen', report.notRequiredFeatures.includes('android.hardware.touchscreen')
       ? 'not required (correct)' : 'REQUIRED');
     line('APK bytes', report.sizeBytes);
+    if (report.launcher) {
+      const l = report.launcher;
+      line('MAIN / LAUNCHER / LEANBACK', `${l.main} / ${l.launcher} / ${l.leanback}`);
+      line('activity exported', l.exported);
+      line('banners', l.applicationBanner && l.activityBanner ? 'application + activity' : 'INCOMPLETE');
+      line('pinned orientation', l.pinnedOrientation
+        ? 'declared' : 'absent (correct for leanback)');
+    }
     const gatedLibs = report.nativeLibraries.filter((l) => l.gated);
     const worst = gatedLibs.reduce(
       (low, l) => (low === null || l.alignment < low.alignment ? l : low), null);

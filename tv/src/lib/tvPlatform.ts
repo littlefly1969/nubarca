@@ -1,4 +1,4 @@
-import { BackHandler, NativeModules, Platform } from 'react-native';
+import { BackHandler, NativeEventEmitter, NativeModules, Platform } from 'react-native';
 import { tvDebug } from '../debug.ts';
 
 // JavaScript side of the NubArcaTvPlatform native bridge (see
@@ -25,6 +25,8 @@ import { tvDebug } from '../debug.ts';
 // Native exception text, stack traces and filesystem paths never reach the UI.
 
 interface NubArcaTvPlatformNative {
+  startOutputObserver(): Promise<boolean>;
+  stopOutputObserver(): Promise<boolean>;
   // Resolves true when an Activity was found and finished, false when there was
   // none to finish (so the caller can fall back rather than hang).
   exitAndRemoveTask(): Promise<boolean>;
@@ -149,4 +151,37 @@ export async function exitTvApp(): Promise<void> {
     tvDebug('app', 'exit', 'native-absent');
   }
   BackHandler.exitApp();
+}
+
+// --- audio output route ------------------------------------------------------
+
+// The event the native observer emits when the playback output disappears —
+// HDMI unplugged, a receiver switched away, a Bluetooth speaker gone.
+const OUTPUT_LOST_EVENT = 'NubArcaTvOutputLost';
+
+/**
+ * Subscribe to output-route loss while a playback context exists.
+ *
+ * The native side is deliberately dumb: it reports, it never acts. Deciding
+ * what loss MEANS — pause, keep the position, do not auto-resume — belongs to
+ * the JavaScript playback authority, because expo-video already owns the
+ * player, the audio focus and the MediaSession and a second owner of any of
+ * those is the defect this whole audit set out to avoid.
+ *
+ * Registration is scoped to the subscription: outside a playback context there
+ * is nothing to react to, so nothing is registered and NubArca is not sitting
+ * on a broadcast receiver for the life of the process.
+ */
+export function subscribeOutputLost(onLost: () => void): () => void {
+  if (!native?.startOutputObserver) return () => {};
+  const emitter = new NativeEventEmitter(native as never);
+  const subscription = emitter.addListener(OUTPUT_LOST_EVENT, () => {
+    tvDebug('audio', 'output-lost');
+    onLost();
+  });
+  void native.startOutputObserver().catch(() => {});
+  return () => {
+    subscription.remove();
+    void native.stopOutputObserver?.().catch(() => {});
+  };
 }

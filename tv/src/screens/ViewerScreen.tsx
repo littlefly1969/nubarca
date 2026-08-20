@@ -29,6 +29,8 @@ import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
+import { shouldKeepPhotoSlideshowAwake } from '../video/wakePolicy';
+import { useHostActive } from '../lib/useHostActive';
 import { remapIndexById, sameItemIds } from '../lib/liveItems';
 import {
   photoRotationActive, photoSlideMs, resolvePlayPause, shouldArmPreparingGrace,
@@ -66,8 +68,12 @@ interface Props {
 //
 // Interaction model (consistent with the album grid):
 //  - Overlay HIDDEN (default): ONLY the photo. LEFT = previous, RIGHT = next,
-//    MENU = show the overlay, BACK = exit to the grid, play/pause media key =
-//    toggle auto-advance. SELECT is deliberately RESERVED (no-op).
+//    SELECT = start / pause / resume the slideshow, MENU = show the overlay,
+//    BACK = exit to the grid. The play/pause media key and REWIND /
+//    FAST_FORWARD are ACCELERATORS for exactly those actions, never additional
+//    features: a remote with only the five-way keys must lose nothing, and
+//    SELECT used to be a no-op here, which meant a slideshow could not be
+//    started at all on a remote without a transport key.
 //  - Overlay VISIBLE: purely INFORMATIONAL — party QR cards bottom-left/right
 //    and a small centered playback-state + "current / total" pill at the top
 //    (no buttons or filenames, nothing that can clip).
@@ -88,10 +94,15 @@ export function ViewerScreen({
   const { width, height } = useWindowDimensions();
   const inset = overscan(width, height);
   const qrSize = overlayQrSize(height);
-  // Keep the TV screen awake for the whole time the slideshow is on screen
-  // (this component is only mounted while the Party viewer is active); released
-  // automatically on exit / grid return / session teardown via unmount.
-  useScreenAwake(true);
+  // KEEP-AWAKE, exactly once and only when something is actually moving.
+  //
+  // This used to be `useScreenAwake(true)` for the viewer's whole lifetime,
+  // which kept a television lit because a picture was on screen. The platform's
+  // own ambient/screensaver behaviour exists precisely to stop that.
+  //
+  // Video is NOT here on purpose: expo-video's keepScreenOnWhilePlaying already
+  // tracks real playback, so adding a second lock would create two authorities
+  // and the redundant one is always the one that gets stuck holding it.
   // The FULL album list (live-refreshed for a party album). When opened from a
   // face-filtered grid this starts as the filtered snapshot and is corrected by
   // the immediate party refresh below.
@@ -105,6 +116,10 @@ export function ViewerScreen({
   // behaved, but that is now an explicit transition rather than something
   // inferred from `playing` happening to become true.
   const [slideshowMode, setSlideshowMode] = useState(autoPlay);
+
+  // The one keep-awake decision (video/wakePolicy.ts). True only while a photo
+  // slideshow is actually rotating in the foreground.
+  const hostActive = useHostActive();
   // Face-filter mode (polled below): while active, LEFT/RIGHT/auto-advance
   // navigate ONLY the matching subset; the search id is needed to delete the
   // search on BACK. Starting the slideshow from a filtered grid lands here too
@@ -132,6 +147,14 @@ export function ViewerScreen({
   // mode, the full album otherwise. `index` is relative to THIS list.
   const displayItems = faceFilter?.items ?? items;
   const item = displayItems[Math.min(index, Math.max(0, displayItems.length - 1))];
+
+  // Applied here, where the current item's kind is finally known. Video is
+  // absent by design — expo-video's keepScreenOnWhilePlaying owns that case.
+  useScreenAwake(shouldKeepPhotoSlideshowAwake({
+    kind: item?.mediaType === 'video' ? 'video' : 'photo',
+    slideshowPlaying: slideshowMode && playing,
+    hostActive,
+  }));
 
   // Refs so the (stable) TV-event / poll callbacks read the latest values.
   const itemsRef = useRef(items);
@@ -198,11 +221,12 @@ export function ViewerScreen({
   // KEY_EVENTS_ACTIONS map). The overlay has NO focusable controls, so
   // LEFT/RIGHT always drive the slideshow — visible overlay included (the
   // counter updates live); any activity just re-arms its auto-hide window.
-  // SELECT stays free/reserved.
-  // Video-hls slice 4: the event→action mapping is the pure, unit-tested
-  // src/video/remoteMap.ts. Photos keep the historical semantics verbatim;
-  // while a VIDEO is current, SELECT/playPause toggle the player, LEFT/RIGHT
-  // seek ±10 s and UP/DOWN take over prev/next.
+  // SELECT starts / pauses / resumes the slideshow — the five-way route.
+  // The event→action mapping is the pure, unit-tested src/video/remoteMap.ts:
+  //   PHOTO — LEFT/RIGHT prev/next, SELECT (and playPause) start/pause/resume
+  //           the slideshow, REWIND/FAST_FORWARD are prev/next accelerators.
+  //   VIDEO — SELECT/playPause toggle playback, LEFT/RIGHT seek ±10 s,
+  //           REWIND/FAST_FORWARD seek, UP/DOWN change item.
   const onTVEvent = useCallback((evt: HWEvent) => {
     const eventType = actionableEventType(evt);
     if (eventType === null) return; // one action per physical press
@@ -437,9 +461,9 @@ export function ViewerScreen({
 
       {/* Transparent full-screen focus anchor — ALWAYS mounted (the overlay has
           no focusable controls), so the screen reliably owns the D-pad on
-          Android TV. For photos SELECT stays a reserved no-op; for videos the
-          global TVEventHandler above maps it to play/pause before focus
-          handling matters. MENU owns the overlay. */}
+          Android TV. SELECT is handled by the global TVEventHandler above for
+          BOTH kinds — slideshow play/pause on a photo, playback play/pause on a
+          video — before focus handling matters. MENU owns the overlay. */}
       <Pressable
         focusable
         hasTVPreferredFocus

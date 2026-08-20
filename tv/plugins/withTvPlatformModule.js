@@ -1,13 +1,23 @@
 // Expo config plugin: the NubArca TV native platform bridge.
 //
-// It carries exactly two capabilities, both of which exist because there is no
-// JavaScript binding for them:
+// It carries exactly three capabilities, each of which exists because there is
+// no JavaScript binding for it:
 //
 //   1. finishAndRemoveTask() — the final BACK at the navigation root must really
 //      CLOSE the app (see below).
 //   2. A user-approved package install — NubArca TV must be able to install its
 //      OWN next official APK from inside the app, so a native upgrade no longer
 //      needs ADB, a PC or a file manager.
+//   3. An AUDIO OUTPUT-ROUTE observer. HDMI unplugged, an AV receiver switched
+//      away, a Bluetooth speaker disconnecting: standard Android reports these
+//      and a media app is expected to stop rather than keep playing to nowhere.
+//      Auditing the installed expo-video found an AudioFocusManager but NO
+//      AudioDeviceCallback and no ACTION_AUDIO_BECOMING_NOISY handling, and
+//      Media3 leaves setHandleAudioBecomingNoisy off by default — so this gap
+//      is real rather than assumed. The observer is deliberately DUMB: it emits
+//      a semantic event and nothing else. It does not play, pause, request
+//      audio focus, build a MediaSession or change routing, because expo-video
+//      already owns every one of those and a second owner is the defect.
 //
 // WHY (1) EXISTS
 // --------------
@@ -127,6 +137,13 @@ class NubArcaTvPlatformModule(reactContext: ReactApplicationContext) :
 
     override fun getName(): String = "NubArcaTvPlatform"
 
+    private val outputObserver = NubArcaTvOutputObserver(reactContext)
+
+    override fun invalidate() {
+        outputObserver.stop()
+        super.invalidate()
+    }
+
     @ReactMethod
     fun exitAndRemoveTask(promise: Promise) {
         val activity: Activity? = reactApplicationContext.currentActivity
@@ -137,6 +154,23 @@ class NubArcaTvPlatformModule(reactContext: ReactApplicationContext) :
         activity.runOnUiThread {
             activity.finishAndRemoveTask()
         }
+        promise.resolve(true)
+    }
+
+    /**
+     * Begin/stop observing the audio output route. The JS media authority calls
+     * these around a playback context; outside one there is nothing to react to
+     * and nothing should be registered.
+     */
+    @ReactMethod
+    fun startOutputObserver(promise: Promise) {
+        outputObserver.start()
+        promise.resolve(true)
+    }
+
+    @ReactMethod
+    fun stopOutputObserver(promise: Promise) {
+        outputObserver.stop()
         promise.resolve(true)
     }
 
@@ -557,6 +591,126 @@ internal object NubArcaTvInstaller {
 }
 `;
 
+
+const OUTPUT_KT = `package ${PACKAGE_NAME}
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
+
+/**
+ * Observes the AUDIO OUTPUT ROUTE and reports its loss. Nothing else.
+ *
+ * WHAT IT IS FOR
+ * --------------
+ * A television's sound can go away without the app being backgrounded: HDMI
+ * unplugged, an AV receiver switched to another input, a Bluetooth speaker
+ * walking out of range. Android reports all three; a media application is
+ * expected to stop rather than keep playing to an output nobody can hear.
+ *
+ * WHAT IT DELIBERATELY DOES NOT DO
+ * --------------------------------
+ * It does not pause, play, seek, request or abandon audio focus, build a
+ * MediaSession, or change routing. expo-video/Media3 already owns playback,
+ * audio focus and the session, and the whole point of the preceding audit was
+ * that a SECOND owner of any of those is the defect, not the fix. This class
+ * emits one semantic event and lets the existing JavaScript playback authority
+ * decide what it means.
+ *
+ * Two standard sources, because they catch different things:
+ *   * ACTION_AUDIO_BECOMING_NOISY — the classic "output is about to go away"
+ *     broadcast, which fires for a headset/Bluetooth disconnect;
+ *   * AudioDeviceCallback.onAudioDevicesRemoved — the API 23+ route-level
+ *     signal, which is what reports an HDMI/USB/dock output disappearing.
+ */
+internal class NubArcaTvOutputObserver(
+    private val reactContext: ReactApplicationContext,
+) {
+    companion object {
+        const val EVENT_OUTPUT_LOST = "NubArcaTvOutputLost"
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private var registered = false
+
+    private val noisyReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) emit()
+        }
+    }
+
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>?) {
+            if (removed == null) return
+            for (device in removed) {
+                if (isPlaybackOutput(device.type)) {
+                    emit()
+                    return
+                }
+            }
+        }
+    }
+
+    /** Output types whose removal means NubArca's sound has nowhere to go. */
+    private fun isPlaybackOutput(type: Int): Boolean = when (type) {
+        AudioDeviceInfo.TYPE_HDMI,
+        AudioDeviceInfo.TYPE_HDMI_ARC,
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_WIRED_HEADSET,
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+        AudioDeviceInfo.TYPE_USB_DEVICE,
+        AudioDeviceInfo.TYPE_USB_HEADSET,
+        AudioDeviceInfo.TYPE_AUX_LINE,
+        AudioDeviceInfo.TYPE_LINE_ANALOG,
+        AudioDeviceInfo.TYPE_LINE_DIGITAL -> true
+        else -> false
+    }
+
+    fun start() {
+        if (registered) return
+        registered = true
+        val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            reactContext.registerReceiver(noisyReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            reactContext.registerReceiver(noisyReceiver, filter)
+        }
+        audioManager()?.registerAudioDeviceCallback(deviceCallback, handler)
+    }
+
+    fun stop() {
+        if (!registered) return
+        registered = false
+        try {
+            reactContext.unregisterReceiver(noisyReceiver)
+        } catch (error: Exception) {
+            // Already gone; nothing to undo.
+        }
+        audioManager()?.unregisterAudioDeviceCallback(deviceCallback)
+    }
+
+    private fun audioManager(): AudioManager? =
+        reactContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+
+    private fun emit() {
+        if (!reactContext.hasActiveReactInstance()) return
+        reactContext
+            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+            .emit(EVENT_OUTPUT_LOST, null)
+    }
+}
+`;
+
 const PACKAGE_KT = `package ${PACKAGE_NAME}
 
 import android.view.View
@@ -599,6 +753,7 @@ const withNativeSources = (config) =>
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, 'NubArcaTvPlatformModule.kt'), MODULE_KT, 'utf8');
       fs.writeFileSync(path.join(dir, 'NubArcaTvInstaller.kt'), INSTALLER_KT, 'utf8');
+      fs.writeFileSync(path.join(dir, 'NubArcaTvOutputObserver.kt'), OUTPUT_KT, 'utf8');
       fs.writeFileSync(path.join(dir, 'NubArcaTvPlatformPackage.kt'), PACKAGE_KT, 'utf8');
       return modConfig;
     },

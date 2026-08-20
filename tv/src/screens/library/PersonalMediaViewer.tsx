@@ -17,6 +17,8 @@ import {
 } from '../../components/TvVideoPlayer';
 import { mapViewerRemoteEvent } from '../../video/remoteMap';
 import { useScreenAwake } from '../../lib/useScreenAwake';
+import { useHostActive } from '../../lib/useHostActive';
+import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../../video/wakePolicy';
 import { actionableEventType } from '../../lib/remoteEvent';
 import { useI18n } from '../../i18n';
 import { useMenuOverlay } from '../../lib/useMenuOverlay';
@@ -97,9 +99,19 @@ export function PersonalMediaViewer({
   const item = items[clamped];
   const isVideo = item?.kind === 'video';
 
-  // Keep the panel awake while media is on screen. Unmounting the viewer (exit,
-  // lock, revocation, session loss) always releases through the hook's cleanup.
-  useScreenAwake(true);
+  // KEEP-AWAKE, exactly once and only while something is actually moving.
+  //
+  // This was `useScreenAwake(true)` for the viewer's whole lifetime, which kept
+  // a television lit because a photograph was open. Video is deliberately not
+  // here: expo-video's keepScreenOnWhilePlaying already tracks real playback,
+  // and a second lock would be a second authority to get stuck.
+  const hostActive = useHostActive();
+  const wakeInputs = {
+    kind: (isVideo ? 'video' : 'photo') as 'video' | 'photo',
+    slideshowPlaying: slideshow,
+    hostActive,
+  };
+  useScreenAwake(shouldKeepPhotoSlideshowAwake(wakeInputs));
 
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -139,11 +151,15 @@ export function PersonalMediaViewer({
 
   // Photo slideshow timer. A VIDEO is exempt: it advances when playback ends,
   // not on a clock, so a nine-second timer cannot cut a video short.
+  // Same inputs as the wake lock, by construction: a slideshow that keeps
+  // advancing photographs behind HOME is doing work nobody can see, and it
+  // would drag the wake lock along with it.
+  const rotating = shouldRotateSlideshow(wakeInputs);
   useEffect(() => {
-    if (!slideshow || isVideo) return;
+    if (!rotating) return;
     const timer = setTimeout(goNext, SLIDE_MS);
     return () => clearTimeout(timer);
-  }, [slideshow, isVideo, clamped, goNext]);
+  }, [rotating, clamped, goNext]);
 
   // The viewer owns the WHOLE remote while it is up.
   const onTVEvent = useCallback((evt: HWEvent) => {
