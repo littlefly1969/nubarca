@@ -46,6 +46,7 @@ import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import { remapFocusIndexById } from '../lib/focusRemap';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
+import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
 
 // Live-refresh interval for an open PartyMode album's items so guest uploads
 // appear on the TV without reopening the album (10-20s band).
@@ -194,9 +195,12 @@ export function AlbumItemsScreen({ album, onBack, onOpenItem, onSessionInvalid }
   // re-arms the auto-hide window. Fire TV dispatches on key-up only, so ignore
   // explicit key-downs (see ReactAndroidHWInputDeviceHelper).
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction === 0) return;
-    tvDebug('remote', evt.eventType, 'grid-overlay', overlayVisibleRef.current);
-    if (evt.eventType === 'menu') toggleOverlay();
+    const eventType = actionableEventType(evt);
+    if (eventType === null) return;
+    tvDebug('remote', eventType, 'grid-overlay', overlayVisibleRef.current);
+    // Not a media context — transport keys stay with the platform (§11).
+    if (isMediaTransportEvent(eventType)) return;
+    if (eventType === 'menu') toggleOverlay();
     else bumpOverlay();
   }, [toggleOverlay, bumpOverlay, overlayVisibleRef]);
   useTVEventHandler(onTVEvent);

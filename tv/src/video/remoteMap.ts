@@ -2,13 +2,22 @@
 // branched on whether the CURRENT item is a video. Extracted from
 // ViewerScreen so the (user-approved) video remote semantics are unit-tested:
 //
-//   photos (unchanged):  LEFT/RIGHT = prev/next photo · play/pause key =
-//     toggle slideshow · SELECT reserved (no-op) · MENU = overlay
-//   videos:              SELECT and the play/pause key = play/pause ·
-//     REWIND / FAST_FORWARD = seek −/+10 s (the Fire TV media convention) ·
-//     LEFT/RIGHT = seek −/+10 s as well · UP/DOWN = prev/next item · MENU =
-//     overlay · advancing to the next item on video end is the player's job,
-//     not a remote event.
+//   photos:  LEFT/RIGHT = prev/next photo · SELECT and the play/pause key =
+//     start / pause / resume the slideshow · REWIND / FAST_FORWARD = prev/next
+//     · MENU = overlay
+//
+//   videos:  SELECT and the play/pause key = play/pause · REWIND /
+//     FAST_FORWARD = seek −/+10 s (the TV media convention) · LEFT/RIGHT =
+//     seek −/+10 s as well · UP/DOWN = prev/next item · MENU = overlay ·
+//     advancing to the next item on video end is the player's job, not a
+//     remote event.
+//
+// SELECT used to be RESERVED (a no-op) on photos, and that was a five-way
+// accessibility defect rather than a design choice: on a remote with no
+// dedicated play/pause key — which is most generic Android TV remotes — there
+// was NO way to start a slideshow from inside the viewer. The rule is that
+// every product function must be reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK
+// alone, so SELECT now carries the same meaning the transport key does.
 //
 // D-pad LEFT/RIGHT may control seek ONLY because the viewer owns the ENTIRE
 // remote while it is up: it is a full-screen surface with no focusable grid
@@ -39,14 +48,23 @@ export function mapViewerRemoteEvent(eventType: string, isVideo: boolean): Viewe
     switch (eventType) {
       case 'left':
       case 'longLeft':
+      // A dedicated transport key means the same thing it means on a video
+      // player: go back one. It is an accelerator for LEFT, never a second
+      // feature.
+      case 'rewind':
         return 'prev';
       case 'right':
       case 'longRight':
+      case 'fastForward':
         return 'next';
+      // SELECT is the FIVE-WAY route to the slideshow; playPause is the
+      // accelerator for the remotes that have it. One semantic action, two
+      // keys — the viewer decides whether that means start, pause or resume.
+      case 'select':
       case 'playPause':
         return 'toggle-play';
       default:
-        return 'none'; // SELECT stays reserved for photos
+        return 'none';
     }
   }
 

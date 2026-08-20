@@ -42,6 +42,7 @@ import {
   VIDEO_FALLBACK_ASPECT_RATIO,
 } from '../lib/mediaAspectRatio';
 import { useI18n } from '../i18n';
+import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
 import { displayTotal, mergePagedTotal } from '../personal/pagingTotals';
 import {
   activeFilterCount,
@@ -327,9 +328,15 @@ export function PersonalLibraryScreen({
   // on this screen and it never touches a direction — the native focus engine
   // owns those, with no competitor.
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction === 0) return;
+    const eventType = actionableEventType(evt);
+    if (eventType === null) return;
     if (panelRef.current !== 'none' || viewerOpenRef.current) return;
-    if (evt.eventType === 'menu') {
+    // This is not a media context. Dedicated transport keys are left entirely
+    // to the platform, so NubArca never steals Play/Pause from whatever else
+    // the television is playing, and never gives a transport key a meaning the
+    // user did not ask for.
+    if (isMediaTransportEvent(eventType)) return;
+    if (eventType === 'menu') {
       // A MENU press is a fresh entry into the rail, so it always lands on the
       // active tab — never on a landing spot left over from a filter panel the
       // user backed out of some time ago.

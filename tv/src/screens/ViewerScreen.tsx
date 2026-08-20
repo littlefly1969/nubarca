@@ -23,6 +23,7 @@ import {
   TvVideoPlayer, TV_VIDEO_SEEK_SECONDS,
   type TvVideoControls, type TvVideoReadyState,
 } from '../components/TvVideoPlayer';
+import { actionableEventType } from '../lib/remoteEvent';
 import { mapViewerRemoteEvent } from '../video/remoteMap';
 import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
@@ -203,7 +204,8 @@ export function ViewerScreen({
   // while a VIDEO is current, SELECT/playPause toggle the player, LEFT/RIGHT
   // seek ±10 s and UP/DOWN take over prev/next.
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction === 0) return; // fire once, on key-up
+    const eventType = actionableEventType(evt);
+    if (eventType === null) return; // one action per physical press
     const type = evt.eventType;
     const isVideo = isVideoRef.current;
     tvDebug('remote', type, 'video', isVideo, 'overlay', overlayVisibleRef.current);

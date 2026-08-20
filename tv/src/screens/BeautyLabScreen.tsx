@@ -36,6 +36,7 @@ import { MediaTilePreview } from '../components/MediaTilePreview';
 import { MenuCommandRail } from '../components/MenuCommandRail';
 import { QrCode } from '../components/QrCode';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
+import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
 import { useTvGridFocusMemory } from '../lib/mediaMenuFocus';
 import {
   buildTvMediaGridRows,
@@ -148,8 +149,11 @@ export function BeautyLabScreen({ onLock, onSessionInvalid }: Props) {
   // key-up AND key-down; ignore key-down (eventKeyAction === 0) so one press is
   // one toggle — matching the album grid's handler.
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction === 0) return;
-    if (evt.eventType === 'menu' && viewRef.current === 'grid') overlay.toggle();
+    const eventType = actionableEventType(evt);
+    if (eventType === null) return;
+    // Not a media context — transport keys stay with the platform (§11).
+    if (isMediaTransportEvent(eventType)) return;
+    if (eventType === 'menu' && viewRef.current === 'grid') overlay.toggle();
   }, [overlay]);
   useTVEventHandler(onTVEvent);
 

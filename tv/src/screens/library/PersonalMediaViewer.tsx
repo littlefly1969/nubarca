@@ -17,6 +17,7 @@ import {
 } from '../../components/TvVideoPlayer';
 import { mapViewerRemoteEvent } from '../../video/remoteMap';
 import { useScreenAwake } from '../../lib/useScreenAwake';
+import { actionableEventType } from '../../lib/remoteEvent';
 import { useI18n } from '../../i18n';
 import { useMenuOverlay } from '../../lib/useMenuOverlay';
 import { formatPosition } from '../../personal/pagingTotals';
@@ -146,8 +147,11 @@ export function PersonalMediaViewer({
 
   // The viewer owns the WHOLE remote while it is up.
   const onTVEvent = useCallback((evt: HWEvent) => {
-    if (!evt || evt.eventKeyAction === 0) return;
-    switch (mapViewerRemoteEvent(evt.eventType, isVideo)) {
+    // ONE phase rule for the whole app (lib/remoteEvent.ts): key-down is
+    // dropped, key-up and unknown-phase runtimes each act exactly once.
+    const eventType = actionableEventType(evt);
+    if (eventType === null) return;
+    switch (mapViewerRemoteEvent(eventType, isVideo)) {
       case 'prev': goPrev(); break;
       case 'next': goNext(); break;
       case 'toggle-play':
