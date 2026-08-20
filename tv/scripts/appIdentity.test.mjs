@@ -72,6 +72,32 @@ test('APK validation and publication consume one release contract and one valida
   assert.doesNotMatch(publisher, /apksigner|apkanalyzer|aapt2/);
 });
 
+// A NubArca version bump must move the PROJECT version and nothing else. A
+// blanket text replace of the old version across package-lock.json rewrote four
+// DEPENDENCY version fields that happened to carry the same number, leaving
+// entries claiming a version their own resolved URL and integrity hash
+// contradict. Nothing else in the suite reads the lockfile, so it stayed green
+// until `npm ci` at the release build. Regenerate with npm; never sed.
+test('a release bump cannot silently rewrite dependency versions', () => {
+  const lock = JSON.parse(readFileSync(resolve(tvRoot, 'package-lock.json'), 'utf8'));
+  const packageJson = JSON.parse(readFileSync(resolve(tvRoot, 'package.json'), 'utf8'));
+
+  assert.equal(lock.version, release.version, 'lockfile root version must track the release contract');
+  assert.equal(lock.packages[''].version, release.version);
+  assert.equal(packageJson.version, release.version);
+
+  const wrong = [];
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (!name || !entry.resolved || !entry.version) continue;
+    // The registry tarball name ends with the exact version it contains.
+    const inUrl = /-(\d+\.\d+\.\d+[^/]*)\.tgz$/.exec(entry.resolved)?.[1];
+    if (inUrl && inUrl !== entry.version) {
+      wrong.push(`${name}: version ${entry.version} but tarball is ${inUrl}`);
+    }
+  }
+  assert.deepEqual(wrong, [], 'dependency versions disagree with their own tarballs');
+});
+
 test('the reserved mobile applicationId is not taken by the TV app', () => {
   // NubArca (mobile) and NubArca TV are separate applications sharing one
   // backend. it.littlefly.nubarca belongs to the future mobile binary.
@@ -291,6 +317,66 @@ test('the plugin refuses a MainActivity with no MAIN intent', async () => {
   const manifest = templateManifest();
   manifest.manifest.application[0].activity[0]['intent-filter'] = [];
   await assert.rejects(() => applyFireTvManifest(manifest), /no MAIN intent/);
+});
+
+// --- Fire TV banner density contract ----------------------------------------
+
+// THE RULE, and the specific wrong rule this must never drift back to.
+//
+// The Android TV banner spec is 320x180 px AT XHDPI, i.e. 160x90 dp. An earlier
+// version of the plugin read it as "320x180 dp" and was then self-consistent
+// with that wrong premise: 320x180 -> mdpi (1x) and the 1280x720 Fire TV
+// artwork -> xxxhdpi (4x), since 1280/4 = 320. Both are wrong by the same
+// factor of two, which is exactly why the arithmetic looked convincing — and on
+// a Fire TV (xhdpi) the device resolved to the 1280x720 entry, rescaled it by
+// 2/4, and drew the banner at twice its intended dp size.
+const bannerBuckets = () => {
+  const source = readFileSync(resolve(tvRoot, 'plugins/withFireTvBanner.js'), 'utf8');
+  const block = /const BANNER_BY_BUCKET = \{([\s\S]*?)\n\};/.exec(source)[1];
+  const buckets = {};
+  for (const [, bucket, asset] of block.matchAll(
+    /^\s*'?([A-Za-z-]+)'?:\s*(null|'([^']+)')/gm)) {
+    buckets[bucket] = asset === 'null' ? null : /'([^']+)'/.exec(asset)[1];
+  }
+  return buckets;
+};
+
+test('the 320x180 banner is the XHDPI resource, never mdpi', () => {
+  const buckets = bannerBuckets();
+  assert.equal(buckets['drawable-xhdpi'], 'nubarca-android-tv-banner-320x180.png',
+    '320x180 px is the 2x rendering of a 160x90 dp banner and belongs in xhdpi');
+  assert.equal(buckets['drawable-mdpi'], null,
+    'the retired "320x180 dp" reading put this file in mdpi — it must not come back');
+});
+
+test('the 1280x720 Amazon artwork is never a tv_banner density bucket', () => {
+  // A 160x90 dp banner would need an 8x bucket to be 1280x720, and Android's
+  // ladder stops at 4x. That asset is the Appstore/promotional artwork: it stays
+  // in the brand package and is not an Android manifest-banner resource.
+  const buckets = bannerBuckets();
+  for (const [bucket, asset] of Object.entries(buckets)) {
+    assert.notEqual(asset, 'nubarca-fire-tv-banner-1280x720.png',
+      `the 1280x720 promotional asset must not be copied into ${bucket}`);
+  }
+});
+
+test('exactly one bucket carries a banner and every other one is emptied', () => {
+  const buckets = bannerBuckets();
+  const carrying = Object.entries(buckets).filter(([, asset]) => asset !== null);
+  assert.deepEqual(carrying, [['drawable-xhdpi', 'nubarca-android-tv-banner-320x180.png']]);
+  // config-tv copies its banner into every bucket, so each of the others must be
+  // explicitly listed for deletion — an omitted bucket keeps a stale bitmap.
+  for (const bucket of ['drawable', 'drawable-mdpi', 'drawable-hdpi',
+    'drawable-xxhdpi', 'drawable-xxxhdpi']) {
+    assert.equal(buckets[bucket], null, `${bucket} must be explicitly emptied`);
+  }
+});
+
+test('the approved banner asset really is 320x180 pixels', () => {
+  // The bucket is only correct if the FILE is what its name claims.
+  const png = readFileSync(resolve(tvRoot, 'assets/brand/nubarca-android-tv-banner-320x180.png'));
+  assert.equal(png.readUInt32BE(16), 320);
+  assert.equal(png.readUInt32BE(20), 180);
 });
 
 // --- native generation -------------------------------------------------------

@@ -10,11 +10,8 @@
 //     `androidTVBanner` file and copies it, unscaled, into EVERY density
 //     bucket: drawable/, -mdpi, -hdpi, -xhdpi, -xxhdpi and -xxxhdpi all held
 //     the identical 320x180 bitmap. A drawable's density bucket declares the
-//     scale it was DESIGNED for, so the same 320x180 file means 320x180dp in
-//     -mdpi but only 80x45dp in -xxxhdpi. The Android TV banner spec is
-//     320x180dp, so on a 1080p Fire Stick (xhdpi) that bitmap claimed half the
-//     required size and the launcher drew a small image inside the full-size
-//     rectangular tile — precisely the reported symptom.
+//     scale it was DESIGNED for, so the same file means different dp sizes in
+//     different buckets.
 //
 //  2. NO ACTIVITY BANNER. `android:banner` was declared on <application> only.
 //     Stock Leanback falls back to the application banner, but Fire OS ships
@@ -30,22 +27,45 @@
 //     update until "Move application" forced a launcher refresh. Both
 //     categories are declared again — see withActivityBanner below.
 //
+// THE DENSITY RULE, STATED CORRECTLY
+// ----------------------------------
+// The Android TV banner spec is **320x180 px AT XHDPI**. xhdpi is 2x, so the
+// banner is 160x90 **dp**, and the correct pixel size per bucket is:
+//
+//     mdpi     1x    160x90
+//     hdpi     1.5x  240x135
+//     xhdpi    2x    320x180   <- the approved asset, and Fire TV's own density
+//     xxhdpi   3x    480x270
+//     xxxhdpi  4x    640x360
+//
+// An earlier version of this plugin read the spec as "320x180 **dp**" and was
+// then perfectly self-consistent with that wrong premise: 320x180 px went to
+// -mdpi (1x) and the 1280x720 Fire TV artwork went to -xxxhdpi (4x), because
+// 1280/4 = 320 and 720/4 = 180. Both placements are wrong by exactly the same
+// factor of two, which is why the arithmetic looked convincing.
+//
+// What it did on hardware: a Fire TV reports xhdpi, and the tree offered only
+// -mdpi and -xxxhdpi. Resource resolution takes the nearest LARGER bucket and
+// rescales, so the device picked the 1280x720 bitmap and scaled it by 2/4 to
+// 640x360 px — which at xhdpi is 320x180 dp, twice the 160x90 dp the banner
+// slot actually wants. The launcher drew an oversized banner.
+//
+// Note also that 1280x720 is not a density variant of a 160x90 dp banner at
+// all: it would need an 8x bucket, and Android's ladder stops at 4x. That asset
+// is the Amazon Appstore/promotional artwork, it stays in the brand package,
+// and it is deliberately NOT copied into any tv_banner bucket.
+//
 // WHAT THIS DOES
 // --------------
-// Places each APPROVED asset in the density bucket where its pixel size is
-// mathematically exactly 320x180dp, and declares the banner on the launcher
-// activity as well as the application:
+// Places the ONE approved asset in the ONE bucket where its pixel size is
+// exactly right, removes every other generated copy, and declares the banner on
+// the launcher activity as well as the application:
 //
-//     assets/brand/nubarca-android-tv-banner-320x180.png    → drawable-mdpi    (1x)
-//     assets/brand/nubarca-fire-tv-banner-1280x720.png      → drawable-xxxhdpi (4x)
+//     assets/brand/nubarca-android-tv-banner-320x180.png    → drawable-xhdpi (2x)
 //
-// 1280/4 = 320 and 720/4 = 180, so the approved Fire TV artwork IS the 4x
-// variant of the same banner. Nothing is redrawn, recoloured, resized or
-// recomposed — this is placement, which is what §9 asks for. The intermediate
-// buckets are removed so resource resolution picks the nearest LARGER asset and
-// downscales it (crisp) rather than matching a bucket holding a too-small
-// bitmap (blurry, undersized). Android TV keeps working: an mdpi/hdpi device
-// selects the 320x180 exactly as before.
+// Nothing is redrawn, recoloured, resized or recomposed — this is placement.
+// A device at another density resolves to the xhdpi entry and rescales it,
+// which is ordinary Android behaviour and correct.
 
 // ORDERING. The resource placement runs as a FINALIZED mod, not a dangerous
 // one. Expo's mod compiler gives `dangerous` precedence -2 (runs first) and
@@ -68,13 +88,17 @@ const LEANBACK_LAUNCHER = 'android.intent.category.LEANBACK_LAUNCHER';
 // Density buckets the config-tv plugin populates, and the approved asset that
 // genuinely belongs in each. `null` means "delete it and let Android downscale
 // from the next larger bucket" — never "leave a wrong-size bitmap there".
+// 320x180 px IS the xhdpi (2x) rendering of a 160x90 dp banner. Every other
+// bucket is emptied: `null` means "delete the copy config-tv left there", never
+// "leave a wrongly-scaled bitmap behind". The 1280x720 Fire TV artwork appears
+// nowhere here on purpose — see the density rule above.
 const BANNER_BY_BUCKET = {
-  'drawable-mdpi': 'nubarca-android-tv-banner-320x180.png',
-  'drawable-xxxhdpi': 'nubarca-fire-tv-banner-1280x720.png',
+  'drawable-xhdpi': 'nubarca-android-tv-banner-320x180.png',
   drawable: null,
+  'drawable-mdpi': null,
   'drawable-hdpi': null,
-  'drawable-xhdpi': null,
   'drawable-xxhdpi': null,
+  'drawable-xxxhdpi': null,
 };
 
 const withBannerResources = (config) =>

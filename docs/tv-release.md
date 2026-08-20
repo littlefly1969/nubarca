@@ -7,12 +7,25 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.7,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 9, runtime
-`nubarca-tv-native-8`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.8,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 10, runtime
+`nubarca-tv-native-9`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
 
-1.0.7 restores `android.intent.category.LAUNCHER` beside `LEANBACK_LAUNCHER` on
+1.0.8 corrects the Fire TV banner DENSITY contract. The Android TV banner spec
+is 320x180 px **at xhdpi** — that is 160x90 dp. The plugin had read it as
+"320x180 dp" and was then self-consistent with that wrong premise, placing the
+320x180 asset in `drawable-mdpi` and the 1280x720 Appstore artwork in
+`drawable-xxxhdpi` (1280/4 = 320). Both placements are wrong by the same factor
+of two, which is why the arithmetic looked convincing. On a Fire TV, which
+reports xhdpi, resource resolution took the nearest larger bucket, rescaled the
+1280x720 bitmap by 2/4, and drew the banner at twice its intended dp size. The
+generated tree now carries `drawable-xhdpi/tv_banner.png` and nothing else; the
+1280x720 asset stays in the brand package for Appstore/promotional use and is
+not an Android manifest-banner resource. Resource change, therefore native. No
+artwork change, no icon change, no launcher-registration change.
+
+1.0.7 restored `android.intent.category.LAUNCHER` beside `LEANBACK_LAUNCHER` on
 the MAIN activity. An earlier plugin version removed it, guessing it was what
 made Fire OS draw a square icon instead of the banner. Physical 1.0.6
 acceptance disproved that twice over: the tile stayed square, AND the app
@@ -40,7 +53,7 @@ release reaches the device through **Mode Select → Aggiornamenti / Updates**
 with no ADB, PC or file manager — 1.0.6 is the first release to actually
 exercise that path end to end.
 
-Runtime `nubarca-tv-native-8` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-9` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.
