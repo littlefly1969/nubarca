@@ -1,10 +1,11 @@
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 import { FocusableButton } from '../../components/FocusableButton';
 import { PanelShell } from './PanelShell';
 import { isValidDateInput } from '../../lib/dateInput';
 import { useI18n } from '../../i18n';
+import { fixedEditorLayout } from '../../lib/panelLayout';
 
 // Remote-friendly on-screen keyboard: a DPAD character grid (no dependency on
 // the flaky Fire TV system keyboard, no tiny text input). Two modes:
@@ -13,6 +14,12 @@ import { useI18n } from '../../i18n';
 //    OK enabled only for a valid calendar date or an EMPTY value = clear).
 // BACK deletes the last character first; with nothing left it cancels — the
 // spec's "BACK deletes input before closing".
+//
+// IT DOES NOT SCROLL. A key grid has a known number of rows, so it is SIZED to
+// fit the viewport (lib/panelLayout.ts) rather than made scrollable to hide
+// that it does not. Inside a scroll the bottom row simply left the screen: a
+// focusable the remote could reach and the viewer could not see. PanelShell is
+// therefore in 'fixed' body mode here.
 interface Props {
   title: string;
   mode: 'text' | 'date';
@@ -47,6 +54,7 @@ function formatDateDigits(digits: string): string {
 
 export function TvKeyboardPanel({ title, mode, initialValue, onSubmit, onCancel }: Props) {
   const { t } = useI18n();
+  const viewport = useWindowDimensions();
   // Internal value: raw text, or raw digits (date mode).
   const [value, setValue] = useState(
     mode === 'date' ? initialValue.replaceAll('-', '') : initialValue,
@@ -86,20 +94,28 @@ export function TvKeyboardPanel({ title, mode, initialValue, onSubmit, onCancel 
   }, [mode, value, onSubmit]);
 
   const rows = mode === 'date' ? DATE_ROWS : TEXT_ROWS;
+  // +1 row for the action row below the character grid; the value readout and
+  // the (conditional) error line are the header.
+  const layout = fixedEditorLayout(viewport, {
+    rows: rows.length + 1,
+    columns: Math.max(...rows.map((row) => row.length)),
+    headerLines: 2,
+    actionRows: 0,
+  });
 
   return (
-    <PanelShell title={title} onBack={onCancel} onBackOverride={onBackOverride}>
-      <View style={styles.valueBox}>
-        <Text style={styles.value} numberOfLines={1}>
+    <PanelShell title={title} onBack={onCancel} onBackOverride={onBackOverride} body="fixed">
+      <View style={[styles.valueBox, { minHeight: layout.headerHeight / 2 }]}>
+        <Text style={[styles.value, { fontSize: layout.fontSize + 6 }]} numberOfLines={1}>
           {display.length > 0 ? display : mode === 'date' ? t('gallery.dateHint') : ' '}
         </Text>
       </View>
       {mode === 'date' && dateComplete && !dateValid && (
         <Text style={styles.error}>{t('gallery.dateInvalid')}</Text>
       )}
-      <View style={styles.keys}>
+      <View style={[styles.keys, { gap: layout.gap }]}>
         {rows.map((row, rowIndex) => (
-          <View key={rowIndex} style={styles.keyRow}>
+          <View key={rowIndex} style={[styles.keyRow, { gap: layout.gap }]}>
             {row.map((ch, colIndex) => (
               <FocusableButton
                 key={ch}
@@ -110,7 +126,7 @@ export function TvKeyboardPanel({ title, mode, initialValue, onSubmit, onCancel 
             ))}
           </View>
         ))}
-        <View style={styles.keyRow}>
+        <View style={[styles.keyRow, { gap: layout.gap }]}>
           {mode === 'text' && (
             <FocusableButton label={t('gallery.kbSpace')} onPress={() => append(' ')} />
           )}

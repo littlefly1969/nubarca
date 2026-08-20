@@ -40,6 +40,21 @@ export type MediaWorkspaceSource =
 
 export interface CommonMediaFilters {
   metadataQuery: string; // '' = none → wire `q`
+  // Visual/semantic text search. It lives in COMMON here although the web keeps
+  // it under `photo`, and the difference is deliberate: the web's placement is
+  // historical (semantic started photo-only), while this file's own stated
+  // taxonomy is "Common = valid for every kind" — which is exactly what
+  // semantic text search is, All / Photos / Videos alike. Behaviour is NOT
+  // divergent: `isSemanticActive` below mirrors the web predicate exactly, and
+  // `queryToWire` never emits it, because semantic retrieval is a different
+  // endpoint with its own relevance cursor rather than a filter on the
+  // structural list.
+  //
+  // It is emphatically NOT `q`. `q` is metadata substring matching; this is
+  // embedding similarity. Overloading one onto the other would make two
+  // different retrievals indistinguishable in the UI and in the cursor.
+  visualQuery: string;
+  semanticTopK: number; // 0 when no visualQuery
   favorite: boolean | null;
   minRating: number | null;
   dateTakenFrom: string; // '' = none, else ISO-8601 UTC instant
@@ -85,8 +100,14 @@ export interface MediaWorkspaceIdentity {
   direction: MediaSortDirection;
 }
 
+// Candidate depth for semantic retrieval. The server clamps it; this is the
+// TV's request, matching the web default.
+export const DEFAULT_SEMANTIC_TOP_K = 200;
+
 export const EMPTY_COMMON_FILTERS: CommonMediaFilters = {
   metadataQuery: '',
+  visualQuery: '',
+  semanticTopK: 0,
   favorite: null,
   minRating: null,
   dateTakenFrom: '',
@@ -146,6 +167,53 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
   };
 }
 
+// ------------------------------------------------------------------- semantic
+
+/**
+ * True when the visual query is set AND actually applies to the current tab and
+ * source. This mirrors the web's `isSemanticActive` predicate exactly.
+ *
+ *   Photos              → always, and album-scoped inside an album
+ *   Tutti / Video       → library source only
+ *
+ * The unified semantic route for mixed media is library-scoped and takes no
+ * album parameter, so a visual query cannot apply to a non-photo tab inside an
+ * album. This predicate is the SINGLE place that knows it — so the filter panel
+ * does not offer it there, the chips do not claim it, the fingerprint does not
+ * key on it, and no request is ever made that the server would have to reject.
+ */
+// ONE gate for the whole feature. Semantic retrieval needs a TV-personal
+// adapter on the server; until that exists the filter must not be offered, must
+// not produce a chip, must not key the fingerprint and must not reach any wire.
+// Putting the flag anywhere else means those five answers can disagree — which
+// is precisely what the first attempt at this did, and what the catalog's
+// coupling tests caught.
+//
+// The open decision it waits on: the canonical PHOTO semantic path returns
+// ImageItem, which carries no favorite/rating/takenAt, so projecting it into
+// the unified TV media DTO would render semantic photo results visibly poorer
+// than ordinary results in the same grid.
+export const SEMANTIC_RETRIEVAL_AVAILABLE = false;
+
+export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
+  if (!SEMANTIC_RETRIEVAL_AVAILABLE) return false;
+  if (identity.filters.common.visualQuery.trim().length === 0) return false;
+  if (identity.mediaKind === 'image') return true;
+  return identity.source.kind === 'library';
+}
+
+/** Which canonical backend path a semantic request must take. */
+export type SemanticRoute = 'photo' | 'media';
+
+/**
+ * Photos go through the canonical photo/image semantic pipeline (which honours
+ * albumId); All and Videos go through the unified MediaSemanticSearchService.
+ * Same split as the web — the TV picks the route, it never implements one.
+ */
+export function semanticRoute(identity: MediaWorkspaceIdentity): SemanticRoute {
+  return identity.mediaKind === 'image' ? 'photo' : 'media';
+}
+
 // ---------------------------------------------------------------- wire mapping
 
 export type WireQuery = Record<string, string>;
@@ -196,6 +264,48 @@ export function queryToWire(
   return wire;
 }
 
+/**
+ * The query string for a SEMANTIC request. Separate from `queryToWire` because
+ * it is a different endpoint with a different contract, not a variant of the
+ * structural list:
+ *
+ *   * the text goes in `q` — on the semantic route `q` IS the semantic query;
+ *   * only the structural filters the canonical semantic services actually
+ *     support are sent (favorite, rating, date range, album membership). The
+ *     others are not silently dropped here — the panel does not offer them
+ *     alongside an active semantic query, and the route does not accept them,
+ *     so there is no parameter to ignore;
+ *   * the cursor is the semantic route's own relevance cursor.
+ *
+ * Like `queryToWire`, this refuses to emit where the filter does not apply —
+ * two barriers, not one. A caller is expected to check `isSemanticActive`, but
+ * a caller that forgets must not be able to send a semantic query for a tab
+ * and source combination the panel does not even offer. An inapplicable
+ * identity yields an EMPTY wire, which is not a request.
+ */
+export function semanticToWire(
+  identity: MediaWorkspaceIdentity,
+  cursor: string | null,
+  limit: number = DEFAULT_MEDIA_LIMIT,
+): WireQuery {
+  if (!isSemanticActive(identity)) return {};
+  const { common } = identity.filters;
+  const wire: WireQuery = {
+    q: common.visualQuery.trim(),
+    kind: identity.mediaKind,
+    limit: String(limit),
+  };
+  if (cursor !== null && cursor.length > 0) wire.cursor = cursor;
+  if (common.favorite !== null) wire.favorite = String(common.favorite);
+  if (common.minRating !== null) wire.minRating = String(common.minRating);
+  if (common.dateTakenFrom.length > 0) wire.dateTakenFrom = common.dateTakenFrom;
+  if (common.dateTakenTo.length > 0) wire.dateTakenTo = common.dateTakenTo;
+  if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
+    wire.albumMembership = common.albumMembership;
+  }
+  return wire;
+}
+
 // ----------------------------------------------------------------- fingerprint
 
 // Deterministic identity string, minus cursor and limit. Two identities share a
@@ -209,6 +319,11 @@ export function queryFingerprint(identity: MediaWorkspaceIdentity): string {
     identity.source.kind === 'album' ? `album:${identity.source.albumId}` : 'library',
     identity.mediaKind,
     common.metadataQuery,
+    // Semantic text changes the RESULT SET wherever it applies, so it must key
+    // the fingerprint there — and must not key it where it is inert, or a tab
+    // switch would restart a query that returns the same items.
+    isSemanticActive(identity) ? common.visualQuery.trim() : '',
+    isSemanticActive(identity) ? common.semanticTopK : 0,
     common.favorite,
     common.minRating,
     common.dateTakenFrom,
@@ -243,6 +358,7 @@ export function queryFingerprint(identity: MediaWorkspaceIdentity): string {
 
 export type FilterChipKind =
   | 'metadata'
+  | 'semantic'
   | 'people-include'
   | 'people-exclude'
   | 'date'
@@ -275,6 +391,11 @@ export function buildFilterChips(identity: MediaWorkspaceIdentity): FilterChip[]
 
   if (common.metadataQuery.length > 0) {
     chips.push({ kind: 'metadata', value: common.metadataQuery });
+  }
+  // Only where it really applies, so the summary can never claim a filter the
+  // visible results do not have.
+  if (isSemanticActive(identity)) {
+    chips.push({ kind: 'semantic', value: common.visualQuery.trim() });
   }
   if (common.favorite !== null) chips.push({ kind: 'favorite', value: common.favorite });
   if (common.minRating !== null) chips.push({ kind: 'min-rating', value: common.minRating });

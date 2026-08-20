@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, font, spacing } from '../../theme';
+import { PERSON_META_FLEX, PERSON_NAME_FLEX } from '../../personal/peoplePicker';
 
 // One filter in the TV panel: a single full-width focusable row carrying its
 // own label, its current value in words, whether it is doing something, and
@@ -35,13 +36,26 @@ interface Props {
   hasTVPreferredFocus?: boolean;
   onSelect: () => void;
   onFocus?: () => void;
+  // Column split. 'filter' (default) gives the VALUE the larger share, which is
+  // right for "Valutazione / Almeno 3 stelle": short noun, composed summary.
+  //
+  // 'person' inverts it, because a person row is not that shape. The NAME is
+  // the only thing identifying the row and the trailing text is a bounded
+  // state plus a face count — so the generic split squeezed
+  // "Maria Annunziata della Rovere" to make room for "Off". Worse, the name's
+  // share moved with the state text, so the SAME name truncated at a different
+  // character in each of Off / Include / Exclude and the row appeared to change
+  // identity as the user cycled it. The person share is fixed and independent
+  // of what the trailing text currently says.
+  variant?: 'filter' | 'person';
 }
 
 export function FilterRow({
   label, value, active, opensEditor, accessibilityLabel,
-  hasTVPreferredFocus = false, onSelect, onFocus,
+  hasTVPreferredFocus = false, onSelect, onFocus, variant = 'filter',
 }: Props) {
   const [focused, setFocused] = useState(false);
+  const person = variant === 'person';
   return (
     <Pressable
       accessibilityRole="button"
@@ -54,10 +68,25 @@ export function FilterRow({
       style={[styles.outer, focused && styles.outerFocused]}
     >
       <View style={[styles.inner, focused && styles.innerFocused]}>
-        <Text style={[styles.label, active && styles.labelActive]} numberOfLines={1}>
+        <Text
+          style={[
+            styles.label,
+            person && styles.labelPerson,
+            active && styles.labelActive,
+          ]}
+          numberOfLines={1}
+          ellipsizeMode="tail"
+        >
           {focused ? '▸ ' : ''}{active ? '● ' : ''}{label}
         </Text>
-        <Text style={[styles.value, active && styles.valueActive]} numberOfLines={1}>
+        <Text
+          style={[
+            styles.value,
+            person && styles.valuePerson,
+            active && styles.valueActive,
+          ]}
+          numberOfLines={1}
+        >
           {value}
         </Text>
         <Text style={styles.disclosure}>{opensEditor ? '›' : ''}</Text>
@@ -93,8 +122,13 @@ const styles = StyleSheet.create({
   // larger one: labels are short nouns, values carry composed summaries, and at
   // 720p the row has roughly 650dp of text width to divide between them.
   label: { flex: 3, color: colors.muted, fontSize: font.body },
+  // minWidth 0 is what actually lets a flex child SHRINK and ellipsize rather
+  // than push its sibling out of the row; without it the name would overflow
+  // instead of truncating.
+  labelPerson: { flex: PERSON_NAME_FLEX, minWidth: 0, flexGrow: 1, color: colors.text },
   labelActive: { color: colors.text, fontWeight: '800' },
   value: { flex: 6, color: colors.muted, fontSize: font.body, textAlign: 'right' },
+  valuePerson: { flex: PERSON_META_FLEX, flexGrow: 0, flexShrink: 0 },
   valueActive: { color: colors.text, fontWeight: '700' },
   disclosure: { width: 24, color: colors.muted, fontSize: font.body, textAlign: 'right' },
 });

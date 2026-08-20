@@ -21,6 +21,7 @@ import {
   type MediaSortField,
   type MediaWorkspaceFilters,
   type MediaWorkspaceIdentity,
+  DEFAULT_SEMANTIC_TOP_K,
 } from '../../personal/mediaWorkspaceQuery';
 import {
   resolveTvFilterFocus,
@@ -68,7 +69,7 @@ interface Props {
 
 type SubEditor =
   | { kind: 'none' }
-  | { kind: 'text'; target: 'metadataQuery' | 'codec' }
+  | { kind: 'text'; target: 'metadataQuery' | 'semanticQuery' | 'codec' }
   | { kind: 'period' }
   | { kind: 'people' };
 
@@ -124,15 +125,27 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
 
   if (editor.kind === 'text') {
     const isCodec = editor.target === 'codec';
+    const isSemantic = editor.target === 'semanticQuery';
     return (
       <TvKeyboardPanel
         title={isCodec ? t('filters.codec') : t('filters.search')}
         mode="text"
-        initialValue={isCodec ? filters.video.codec : filters.common.metadataQuery}
+        initialValue={isCodec ? filters.video.codec
+          : isSemantic ? filters.common.visualQuery
+            : filters.common.metadataQuery}
         onCancel={() => setEditor({ kind: 'none' })}
         onSubmit={(value) => {
           if (isCodec) patchVideo({ codec: value.trim() });
-          else patchCommon({ metadataQuery: value.trim() });
+          else if (isSemantic) {
+            // topK is only meaningful with a query, and pairing them here keeps
+            // "no semantic search" a single unambiguous state rather than an
+            // empty string with a stale depth beside it.
+            const visualQuery = value.trim();
+            patchCommon({
+              visualQuery,
+              semanticTopK: visualQuery.length > 0 ? DEFAULT_SEMANTIC_TOP_K : 0,
+            });
+          } else patchCommon({ metadataQuery: value.trim() });
           setEditor({ kind: 'none' });
         }}
       />
@@ -214,6 +227,11 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
       label: t('filters.search'),
       value: filters.common.metadataQuery.length > 0 ? filters.common.metadataQuery : anyLabel,
       onSelect: () => open({ kind: 'text', target: 'metadataQuery' }, 'metadataQuery'),
+    },
+    semanticQuery: {
+      label: t('filters.semantic'),
+      value: filters.common.visualQuery.length > 0 ? filters.common.visualQuery : anyLabel,
+      onSelect: () => open({ kind: 'text', target: 'semanticQuery' }, 'semanticQuery'),
     },
     favorite: {
       label: t('filters.favorite'),

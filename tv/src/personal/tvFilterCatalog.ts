@@ -33,6 +33,7 @@
 // than trusted to stay parallel.
 
 import {
+  SEMANTIC_RETRIEVAL_AVAILABLE,
   type CommonMediaFilters,
   type MediaWorkspaceFilters,
   type MediaWorkspaceIdentity,
@@ -45,6 +46,7 @@ import {
 // that is the point: the row is the unit the user operates, not the field.
 export type TvFilterId =
   | 'metadataQuery'
+  | 'semanticQuery'
   | 'favorite'
   | 'minRating'
   | 'period'
@@ -69,6 +71,14 @@ export type TvFilterSection = 'common' | 'photo' | 'video';
 //   people → SELECT opens the lazily loaded person picker.
 export type TvFilterEditor = 'cycle' | 'text' | 'period' | 'people';
 
+// How the row reaches the server. Almost every filter is a parameter on the
+// structural list endpoint; SEMANTIC retrieval is a different endpoint with its
+// own relevance cursor, so `queryToWire` deliberately never emits it. Making
+// that a declared property rather than an exception keeps the coupling test
+// meaningful: every row must still be provably sendable, just not all through
+// the same builder.
+export type TvFilterTransport = 'list' | 'semantic';
+
 // Every field of every filter group, as a type. The `satisfies` below is what
 // turns "a new domain filter appeared" into a build failure.
 type DomainFilterField =
@@ -79,6 +89,8 @@ type DomainFilterField =
 // Which TV row owns each domain field. Exhaustive by construction.
 export const TV_FILTER_OWNER = {
   metadataQuery: 'metadataQuery',
+  visualQuery: 'semanticQuery',
+  semanticTopK: 'semanticQuery',
   favorite: 'favorite',
   minRating: 'minRating',
   dateTakenFrom: 'period',
@@ -104,6 +116,12 @@ export interface TvFilterDescriptor {
   // and the album endpoint does not accept the parameter, so the row is
   // library-only rather than shown-and-ignored.
   readonly librarySourceOnly: boolean;
+  // Inside an ALBUM this row exists only on the Photos tab. The unified
+  // semantic route for mixed media is library-scoped and takes no album
+  // parameter, so offering it on Tutti/Video inside an album would be a control
+  // that silently searched the wrong scope. Mirrors `isSemanticActive`.
+  readonly albumPhotoTabOnly: boolean;
+  readonly transport: TvFilterTransport;
   // The query-string parameters this row can produce. Used to prove the panel's
   // applicability rule and queryToWire's emission rule are the same rule.
   readonly wireKeys: readonly string[];
@@ -112,19 +130,20 @@ export interface TvFilterDescriptor {
 // Display order for the panel, top to bottom. Also the canonical order the
 // deterministic focus fallback walks when a focused row disappears.
 export const TV_FILTER_DESCRIPTORS = [
-  { id: 'metadataQuery', section: 'common', editor: 'text', librarySourceOnly: false, wireKeys: ['q'] },
-  { id: 'favorite', section: 'common', editor: 'cycle', librarySourceOnly: false, wireKeys: ['favorite'] },
-  { id: 'minRating', section: 'common', editor: 'cycle', librarySourceOnly: false, wireKeys: ['minRating'] },
-  { id: 'period', section: 'common', editor: 'period', librarySourceOnly: false, wireKeys: ['dateTakenFrom', 'dateTakenTo'] },
-  { id: 'albumMembership', section: 'common', editor: 'cycle', librarySourceOnly: true, wireKeys: ['albumMembership'] },
-  { id: 'people', section: 'photo', editor: 'people', librarySourceOnly: false, wireKeys: ['includePeople', 'excludePeople', 'includePeopleMode'] },
-  { id: 'hasGps', section: 'photo', editor: 'cycle', librarySourceOnly: false, wireKeys: ['hasGps'] },
-  { id: 'collapseDuplicates', section: 'photo', editor: 'cycle', librarySourceOnly: false, wireKeys: ['collapseDuplicates'] },
-  { id: 'durationMin', section: 'video', editor: 'cycle', librarySourceOnly: false, wireKeys: ['durationMin'] },
-  { id: 'durationMax', section: 'video', editor: 'cycle', librarySourceOnly: false, wireKeys: ['durationMax'] },
-  { id: 'minHeight', section: 'video', editor: 'cycle', librarySourceOnly: false, wireKeys: ['minHeight'] },
-  { id: 'codec', section: 'video', editor: 'text', librarySourceOnly: false, wireKeys: ['codec'] },
-  { id: 'hasAudio', section: 'video', editor: 'cycle', librarySourceOnly: false, wireKeys: ['hasAudio'] },
+  { id: 'metadataQuery', section: 'common', editor: 'text', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['q'] },
+  { id: 'semanticQuery', section: 'common', editor: 'text', albumPhotoTabOnly: true, transport: 'semantic', librarySourceOnly: false, wireKeys: ['q'] },
+  { id: 'favorite', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['favorite'] },
+  { id: 'minRating', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minRating'] },
+  { id: 'period', section: 'common', editor: 'period', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['dateTakenFrom', 'dateTakenTo'] },
+  { id: 'albumMembership', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: true, wireKeys: ['albumMembership'] },
+  { id: 'people', section: 'photo', editor: 'people', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['includePeople', 'excludePeople', 'includePeopleMode'] },
+  { id: 'hasGps', section: 'photo', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasGps'] },
+  { id: 'collapseDuplicates', section: 'photo', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['collapseDuplicates'] },
+  { id: 'durationMin', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMin'] },
+  { id: 'durationMax', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMax'] },
+  { id: 'minHeight', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minHeight'] },
+  { id: 'codec', section: 'video', editor: 'text', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['codec'] },
+  { id: 'hasAudio', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasAudio'] },
 ] as const satisfies readonly TvFilterDescriptor[];
 
 type DescribedFilterId = (typeof TV_FILTER_DESCRIPTORS)[number]['id'];
@@ -151,7 +170,17 @@ export function tvFilterApplies(
   descriptor: TvFilterDescriptor,
   identity: MediaWorkspaceIdentity,
 ): boolean {
+  // The semantic row follows the SAME gate as the chips, the wire and the
+  // fingerprint — see SEMANTIC_RETRIEVAL_AVAILABLE. A row offered while its
+  // retrieval is unavailable is a control that changes nothing the user can
+  // see, which is the dead-filter defect this module exists to prevent.
+  if (descriptor.id === 'semanticQuery' && !SEMANTIC_RETRIEVAL_AVAILABLE) return false;
   if (descriptor.librarySourceOnly && identity.source.kind !== 'library') return false;
+  if (descriptor.albumPhotoTabOnly
+      && identity.source.kind === 'album'
+      && identity.mediaKind !== 'image') {
+    return false;
+  }
   if (descriptor.section === 'photo') return identity.mediaKind === 'image';
   if (descriptor.section === 'video') return identity.mediaKind === 'video';
   return true;
@@ -163,6 +192,7 @@ export function isTvFilterActive(id: TvFilterId, filters: MediaWorkspaceFilters)
   const { common, photo, video } = filters;
   switch (id) {
     case 'metadataQuery': return common.metadataQuery.length > 0;
+    case 'semanticQuery': return common.visualQuery.trim().length > 0;
     case 'favorite': return common.favorite !== null;
     case 'minRating': return common.minRating !== null;
     case 'period': return common.dateTakenFrom.length > 0 || common.dateTakenTo.length > 0;

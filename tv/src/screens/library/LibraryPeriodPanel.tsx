@@ -78,7 +78,7 @@ export function LibraryPeriodPanel({ from, to, onChange, onClose }: Props) {
   const inverted = fromInput.length > 0 && toInput.length > 0 && fromInput > toInput;
 
   return (
-    <PanelShell title={t('filters.periodTitle')} onBack={onClose}>
+    <PanelShell title={t('filters.periodTitle')} onBack={onClose} body="fixed">
       <FilterRow
         label={t('filters.periodFrom')}
         value={fromInput.length > 0 ? fromInput : none}

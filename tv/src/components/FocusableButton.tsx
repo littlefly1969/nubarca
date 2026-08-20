@@ -15,30 +15,50 @@ interface Props {
   onPress: () => void;
   disabled?: boolean;
   hasTVPreferredFocus?: boolean;
+  // SELECTED is not FOCUSED, and conflating them is a real TV defect: focus is
+  // where the remote happens to be right now, selection is the state the screen
+  // is actually in. The media-kind rail used to express the current kind ONLY
+  // as initial preferred focus, so the moment the user moved the remote —
+  // never mind closed and reopened the menu — nothing on screen said whether
+  // they were looking at All, Photos or Videos.
+  //
+  // Marked with a ✓ AND weight, never colour alone: a washed-out television and
+  // a viewer who cannot separate two blues both need this to survive.
+  selected?: boolean;
   // Called on focus/interaction — e.g. the slideshow overlay uses it to re-arm
   // its auto-hide timer.
   onFocusChange?: (focused: boolean) => void;
 }
 
 export function FocusableButton({
-  label, onPress, disabled = false, hasTVPreferredFocus = false, onFocusChange,
+  label, onPress, disabled = false, hasTVPreferredFocus = false, selected = false,
+  onFocusChange,
 }: Props) {
   const [focused, setFocused] = useState(false);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ selected }}
       focusable={!disabled}
       disabled={disabled}
       hasTVPreferredFocus={hasTVPreferredFocus}
       onFocus={() => { setFocused(true); onFocusChange?.(true); }}
       onBlur={() => { setFocused(false); onFocusChange?.(false); }}
       onPress={onPress}
-      style={[styles.outer, disabled && styles.disabled, focused && styles.outerFocused]}
+      style={[
+        styles.outer,
+        disabled && styles.disabled,
+        selected && styles.outerSelected,
+        focused && styles.outerFocused,
+      ]}
     >
       <View style={[styles.inner, focused && styles.innerFocused]}>
-        <Text style={[styles.label, focused && styles.labelFocused]} numberOfLines={1}>
-          {focused ? '▸ ' : ''}{label}
+        <Text
+          style={[styles.label, selected && styles.labelSelected, focused && styles.labelFocused]}
+          numberOfLines={1}
+        >
+          {focused ? '▸ ' : ''}{selected ? '✓ ' : ''}{label}
         </Text>
       </View>
     </Pressable>
@@ -68,6 +88,9 @@ const styles = StyleSheet.create({
   innerFocused: {
     borderColor: colors.accent,
   },
+  // Survives focus moving away — that is the whole point.
+  outerSelected: { backgroundColor: colors.panelFocused },
+  labelSelected: { color: colors.text, fontWeight: '800' },
   disabled: { opacity: 0.35 },
   // font.button (20) — overlay commands must read from couch distance.
   label: { color: colors.text, fontSize: font.button, fontWeight: '600' },

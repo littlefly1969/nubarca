@@ -276,6 +276,7 @@ const it = {
   'filters.sectionVideo': 'VIDEO',
   'filters.sectionOrder': 'ORDINE',
   'filters.search': 'Testo',
+  'filters.semantic': 'Ricerca semantica',
   'filters.favorite': 'Preferiti',
   'filters.favoriteYes': 'Solo preferiti',
   'filters.favoriteNo': 'Non preferiti',
@@ -332,6 +333,8 @@ const it = {
   'filters.peopleModeAllShort': 'tutte',
   'filters.peopleModeAnyShort': 'qualsiasi',
   'filters.peopleClear': 'Azzera selezione',
+  'filters.peopleSearch': 'Cerca persona',
+  'filters.peopleSearchEmpty': 'Nessuna persona corrisponde alla ricerca.',
 
   'filters.periodTitle': 'Periodo di scatto',
   'filters.periodFrom': 'Dal giorno',

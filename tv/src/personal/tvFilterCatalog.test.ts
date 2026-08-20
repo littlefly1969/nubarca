@@ -15,6 +15,7 @@ import {
   cloneMediaFilters,
   emptyIdentity,
   queryToWire,
+  semanticToWire,
   type MediaKindScope,
   type MediaWorkspaceFilters,
   type MediaWorkspaceIdentity,
@@ -47,6 +48,7 @@ function identityFor(source: MediaWorkspaceSource, kind: MediaKindScope): MediaW
 // TvFilterId has to be given a value here before this file compiles.
 const SET_VALUE: Record<TvFilterId, (f: MediaWorkspaceFilters) => void> = {
   metadataQuery: (f) => { f.common.metadataQuery = 'vacanze'; },
+  semanticQuery: (f) => { f.common.visualQuery = 'un cane sulla spiaggia'; f.common.semanticTopK = 200; },
   favorite: (f) => { f.common.favorite = true; },
   minRating: (f) => { f.common.minRating = 4; },
   period: (f) => {
@@ -130,6 +132,18 @@ test('applicability follows the tab and the source', () => {
   // shown and ignored — and the album endpoint does not accept the parameter.
   assert.ok(!shown(ALBUM, 'all').includes('albumMembership'));
   assert.ok(!shown(ALBUM, 'image').includes('albumMembership'));
+  // Semantic retrieval for mixed media is library-scoped, so inside an album it
+  // is offered on the Photos tab (album-scoped there) and nowhere else — rather
+  // than offered everywhere and silently searching the whole library.
+  // Modelled and tested, deliberately NOT OFFERED until the TV-personal
+  // semantic adapter exists: a filter the user can set that changes nothing
+  // they can see is the exact defect this module prevents.
+  for (const source of SOURCES) {
+    for (const kind of KINDS) {
+      assert.ok(!shown(source, kind).includes('semanticQuery'),
+        `semanticQuery must not be offered on ${source.kind}/${kind} without its backend`);
+    }
+  }
 });
 
 test('the people row is shown on Photos and is an editor, not a readout', () => {
@@ -154,7 +168,13 @@ test('an applicable row reaches the wire; a hidden one never does', () => {
         const identity: MediaWorkspaceIdentity = {
           ...identityFor(source, kind), filters: filtersWith(id),
         };
-        const wire = queryToWire(identity, null);
+        // Each transport is checked against ITS OWN builder. Semantic
+        // retrieval is a different endpoint with its own relevance cursor, so
+        // queryToWire deliberately never emits it — asserting otherwise would
+        // force the semantic query to be smuggled onto the structural list.
+        const wire = descriptor.transport === 'semantic'
+          ? semanticToWire(identity, null)
+          : queryToWire(identity, null);
         const emitted = descriptor.wireKeys.filter((key) => key in wire);
         const rows = tvFilterRows(identity, identity.filters);
         const visible = rows.some((row) => row.id === id);
@@ -177,6 +197,7 @@ test('row activity and the applied-filter chips never disagree', () => {
   // projections of one state and must not be able to tell different stories.
   const CHIP_ROW: Record<string, TvFilterId> = {
     metadata: 'metadataQuery',
+    semantic: 'semanticQuery',
     favorite: 'favorite',
     'min-rating': 'minRating',
     date: 'period',

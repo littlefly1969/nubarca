@@ -18,6 +18,8 @@ import {
 import { mapViewerRemoteEvent } from '../../video/remoteMap';
 import { useScreenAwake } from '../../lib/useScreenAwake';
 import { useI18n } from '../../i18n';
+import { useMenuOverlay } from '../../lib/useMenuOverlay';
+import { formatPosition } from '../../personal/pagingTotals';
 import type { TvPersonalMediaItem } from '../../api/personalMedia';
 
 // The ONE Personal Area viewer, for photos and videos alike.
@@ -35,8 +37,23 @@ import type { TvPersonalMediaItem } from '../../api/personalMedia';
 //           LEFT/RIGHT) seek, UP/DOWN change item.
 //   BACK  → always navigation: stop playback, return to the grid. It is never
 //           spent as a playback control.
+//   MENU  → toggles the ambient chrome (name, counter, slideshow pill).
 //   HOME  → never intercepted. It is a system action; the player's AppState
 //           handling is what stops audio when the launcher takes over.
+//
+// AMBIENT CHROME
+// --------------
+// The name, the position counter and the slideshow pill used to be permanent.
+// On a television that is furniture: a photo the viewer wants to look at,
+// permanently captioned. They are now shown briefly on entry and then hidden by
+// the SHARED useMenuOverlay idle window — the same controller the album/Party
+// viewer already uses, so there is one interaction model and one timer
+// implementation rather than two that drift.
+//
+// The timer is deliberately NOT re-armed on every slideshow advance. A 9-second
+// slide under a 10-second idle window would re-arm forever and the overlay
+// would simply never go away, which is the defect wearing a different hat.
+// Remote ACTIVITY re-arms it; the clock advancing on its own does not.
 //
 // Exactly one video is ever mounted, and TvVideoPlayer is keyed by source, so
 // moving between items releases the old native player before creating the new
@@ -66,6 +83,14 @@ export function PersonalMediaViewer({
   const inset = overscan(width, height);
   const [index, setIndex] = useState(startIndex);
   const [slideshow, setSlideshow] = useState(false);
+  // The shared overlay controller — same timer, same MENU semantics, same
+  // OVERLAY_IDLE_MS as the album viewer.
+  const chrome = useMenuOverlay();
+  const showChrome = chrome.show;
+
+  // Show it briefly on entry so the viewer knows where they are, then let the
+  // shared idle window take it away. Runs once per viewer, NOT per item.
+  useEffect(() => { showChrome(); }, [showChrome]);
 
   const clamped = Math.min(index, Math.max(0, items.length - 1));
   const item = items[clamped];
@@ -131,17 +156,24 @@ export function PersonalMediaViewer({
         break;
       case 'seek-back': controlsRef.current?.seekBy(-TV_VIDEO_SEEK_SECONDS); break;
       case 'seek-forward': controlsRef.current?.seekBy(TV_VIDEO_SEEK_SECONDS); break;
-      case 'toggle-overlay':
+      case 'toggle-overlay': chrome.toggle(); return;
       case 'none':
         break;
     }
-  }, [isVideo, goNext, goPrev]);
+    // Real remote activity re-arms the idle window while the chrome is up; a
+    // slideshow tick does not, which is what stops a 9s slide from pinning a
+    // 10s overlay open forever.
+    chrome.bump();
+  }, [isVideo, goNext, goPrev, chrome]);
   useTVEventHandler(onTVEvent);
 
   // BACK leaves playback. Stopping FIRST is the point: the grid must never be
   // drawn over a video that is still audible.
   useEffect(() => {
     const onBackPress = () => {
+      // BACK stays NAVIGATION here. Unlike the album viewer, this one has no
+      // focusable overlay controls to dismiss first, so swallowing a BACK to
+      // hide decoration would make leaving the viewer take two presses.
       controlsRef.current?.stop();
       onClose(indexRef.current);
       return true;
@@ -166,16 +198,23 @@ export function PersonalMediaViewer({
         <SlideImage path={item.viewerImageUrl} personal />
       )}
 
-      <View style={[styles.counter, { bottom: inset.y, right: inset.x }]} pointerEvents="none">
-        <Text style={styles.counterText}>{clamped + 1} / {totalCount}</Text>
-      </View>
-      <View style={[styles.name, { bottom: inset.y, left: inset.x }]} pointerEvents="none">
-        <Text style={styles.nameText} numberOfLines={1}>{item.displayName}</Text>
-      </View>
-      {!isVideo && slideshow && (
-        <View style={[styles.pill, { top: inset.y }]} pointerEvents="none">
-          <Text style={styles.pillText}>{t('viewer.slideshow')}</Text>
-        </View>
+      {/* Ambient chrome. The media underneath is never interrupted by it
+          appearing or disappearing — these are absolutely positioned,
+          pointer-transparent overlays, not a layout change. */}
+      {chrome.visible && (
+        <>
+          <View style={[styles.counter, { bottom: inset.y, right: inset.x }]} pointerEvents="none">
+            <Text style={styles.counterText}>{formatPosition(clamped, totalCount)}</Text>
+          </View>
+          <View style={[styles.name, { bottom: inset.y, left: inset.x }]} pointerEvents="none">
+            <Text style={styles.nameText} numberOfLines={1}>{item.displayName}</Text>
+          </View>
+          {!isVideo && slideshow && (
+            <View style={[styles.pill, { top: inset.y }]} pointerEvents="none">
+              <Text style={styles.pillText}>{t('viewer.slideshow')}</Text>
+            </View>
+          )}
+        </>
       )}
     </View>
   );

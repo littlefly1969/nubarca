@@ -42,6 +42,7 @@ import {
   VIDEO_FALLBACK_ASPECT_RATIO,
 } from '../lib/mediaAspectRatio';
 import { useI18n } from '../i18n';
+import { displayTotal, mergePagedTotal } from '../personal/pagingTotals';
 import {
   activeFilterCount,
   clearActiveFilters,
@@ -256,7 +257,10 @@ export function PersonalLibraryScreen({
         setLoad({
           items: page.items,
           nextCursor: page.nextCursor,
-          totalCount: page.totalCount,
+          // Folded through the same merge as every later page: the first page
+          // is where a real total arrives, but nothing outside pagingTotals is
+          // allowed to decide what a reported total MEANS.
+          totalCount: mergePagedTotal(null, page.totalCount),
           photoCount: page.photoCount,
           videoCount: page.videoCount,
           phase: page.hasMore ? 'ready' : 'end',
@@ -298,7 +302,13 @@ export function PersonalLibraryScreen({
             ...s,
             items: [...s.items, ...appended],
             nextCursor: page.nextCursor,
-            totalCount: page.totalCount,
+            // THE BUG THIS FIXES. Cursor pages after the first report
+            // TotalCount = -1, meaning "unchanged — keep the total you have",
+            // because recomputing it is a global COUNT on every page. Assigning
+            // it blindly overwrote a perfectly good 137 with -1 and the viewer
+            // rendered "7 / -1". No new COUNT is requested; the first page's
+            // exact total is simply retained.
+            totalCount: mergePagedTotal(s.totalCount, page.totalCount),
             phase: page.hasMore ? 'ready' : 'end',
           };
         });
@@ -350,7 +360,9 @@ export function PersonalLibraryScreen({
   const contentWidth = Math.max(1, width - 2 * inset.x);
 
   const items = load.items;
-  const total = load.totalCount ?? items.length;
+  // Never a sentinel, never negative: displayTotal falls back to what is
+  // actually loaded when no valid server total exists yet.
+  const total = displayTotal(load.totalCount, items.length);
   const rows = useMemo(
     () => buildTvMediaGridRows({
       items,
@@ -537,6 +549,11 @@ export function PersonalLibraryScreen({
                 label={tabLabel(kind, load, t)}
                 onPress={() => setKind(kind)}
                 onFocusChange={(f) => { if (f) bumpOverlay(); }}
+                // `identity.mediaKind` is the ONLY authority. There is
+                // deliberately no selectedKind/activeTab state beside it: a
+                // second copy is a second thing to keep in sync, and the one
+                // that drifts is always the one the user is looking at.
+                selected={kind === identity.mediaKind}
                 hasTVPreferredFocus={railFocus === 'kind' && kind === identity.mediaKind}
               />
             ))}
