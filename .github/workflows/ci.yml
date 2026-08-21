@@ -144,6 +144,15 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # Already covered: `npm test` is a strict superset of `test:ota` today.
+      # It is listed separately because that superset is a hand-maintained file
+      # list, so a future edit could drop an OTA file from it and lose the
+      # coverage silently. This is also the exact command docs/tv-release.md
+      # tells an operator to run before publishing, so CI runs what the release
+      # procedure runs.
+      - name: Run OTA release-tooling tests
+        run: npm run test:ota
+
   mobile:
     name: Mobile typecheck
     runs-on: ubuntu-24.04
