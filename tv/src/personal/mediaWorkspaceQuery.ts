@@ -284,10 +284,27 @@ export function queryToWire(
  *   * the cursor is the semantic route's own relevance cursor.
  *
  * Like `queryToWire`, this refuses to emit where the filter does not apply —
- * two barriers, not one. A caller is expected to check `isSemanticActive`, but
- * a caller that forgets must not be able to send a semantic query for a tab
- * and source combination the panel does not even offer. An inapplicable
- * identity yields an EMPTY wire, which is not a request.
+ * two barriers, not one. An inapplicable identity yields an EMPTY wire, which
+ * is not a request.
+ *
+ * WHICH FILTERS TRAVEL, AND WHY IT DIFFERS BY KIND
+ * -----------------------------------------------
+ * The two canonical routes honour different things, and this function tells the
+ * truth about that rather than sending everything and hoping:
+ *
+ *   PHOTOS  → the photo pipeline is physical-filter-FIRST, so the metadata
+ *             text, GPS, duplicate collapse, People AND the album all shrink
+ *             the candidate set before ranking. `albumId` is what makes an
+ *             in-album photo search actually album-scoped.
+ *   ALL/VIDEO → the unified media route documents that folder/album/people/
+ *             GPS/codec/duration are NOT semantic-aware. They are therefore not
+ *             emitted, and `tvFilterApplies` does not offer them either, so the
+ *             user is never shown a filter marked applied that changes nothing.
+ *
+ * An earlier version emitted only q/kind/limit for every kind. Photos lost
+ * People, GPS and duplicate collapse; videos lost resolution, codec and audio;
+ * and inside an album a photo search silently queried the whole library. Each
+ * of those rows still rendered as ACTIVE.
  */
 export function semanticToWire(
   identity: MediaWorkspaceIdentity,
@@ -295,18 +312,35 @@ export function semanticToWire(
   limit: number = DEFAULT_MEDIA_LIMIT,
 ): WireQuery {
   if (!isSemanticActive(identity)) return {};
-  const { common } = identity.filters;
+  const { common, photo } = identity.filters;
   const wire: WireQuery = {
     q: common.visualQuery.trim(),
     kind: identity.mediaKind,
     limit: String(limit),
+    semanticTopK: String(common.semanticTopK),
   };
   if (cursor !== null && cursor.length > 0) wire.cursor = cursor;
   if (common.favorite !== null) wire.favorite = String(common.favorite);
   if (common.minRating !== null) wire.minRating = String(common.minRating);
   if (common.dateTakenFrom.length > 0) wire.dateTakenFrom = common.dateTakenFrom;
   if (common.dateTakenTo.length > 0) wire.dateTakenTo = common.dateTakenTo;
-  if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
+
+  if (semanticRoute(identity) === 'photo') {
+    // The album is the SCOPE, not a filter: without it an in-album search is a
+    // library search wearing the album's title.
+    if (identity.source.kind === 'album') wire.albumId = identity.source.albumId;
+    // `metadataQuery` is deliberately its own parameter. `q` is the visual
+    // description that RANKS; this narrows. Sending one as the other would make
+    // two different retrievals indistinguishable.
+    if (common.metadataQuery.length > 0) wire.metadataQuery = common.metadataQuery;
+    if (photo.hasGps !== null) wire.hasGps = String(photo.hasGps);
+    if (photo.collapseDuplicates) wire.collapseDuplicates = 'true';
+    if (photo.includePeople.length > 0) {
+      wire.includePeople = photo.includePeople.join(',');
+      wire.includePeopleMode = photo.includePeopleMode;
+    }
+    if (photo.excludePeople.length > 0) wire.excludePeople = photo.excludePeople.join(',');
+  } else if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
     wire.albumMembership = common.albumMembership;
   }
   return wire;
@@ -395,7 +429,13 @@ export function buildFilterChips(identity: MediaWorkspaceIdentity): FilterChip[]
   const { common, photo, video } = identity.filters;
   const chips: FilterChip[] = [];
 
-  if (common.metadataQuery.length > 0) {
+  // A chip claims a filter is APPLIED to the visible results. While a semantic
+  // query is running, only what the active canonical route actually honours may
+  // claim that — the photo route takes the metadata text into its candidate
+  // set, the unified media route does not.
+  const semantic = isSemanticActive(identity);
+  const photoRoute = semantic && semanticRoute(identity) === 'photo';
+  if (common.metadataQuery.length > 0 && (!semantic || photoRoute)) {
     chips.push({ kind: 'metadata', value: common.metadataQuery });
   }
   // Only where it really applies, so the summary can never claim a filter the
@@ -421,7 +461,9 @@ export function buildFilterChips(identity: MediaWorkspaceIdentity): FilterChip[]
     }
     if (photo.hasGps !== null) chips.push({ kind: 'gps', value: photo.hasGps });
     if (photo.collapseDuplicates) chips.push({ kind: 'collapse' });
-  } else if (identity.mediaKind === 'video') {
+  } else if (identity.mediaKind === 'video' && !semantic) {
+    // The unified media semantic route is not video-metadata aware, so with a
+    // visual query running these filters are neither offered nor claimed.
     if (video.durationMinSeconds !== null || video.durationMaxSeconds !== null) {
       chips.push({
         kind: 'duration',

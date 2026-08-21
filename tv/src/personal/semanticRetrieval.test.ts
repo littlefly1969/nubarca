@@ -11,11 +11,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  emptyIdentity, isSemanticActive, queryFingerprint, queryToWire, semanticToWire,
+  emptyIdentity, isSemanticActive, queryFingerprint, semanticToWire,
   SEMANTIC_RETRIEVAL_AVAILABLE, activeFilterCount, clearActiveFilters,
   type MediaKindScope, type MediaWorkspaceIdentity,
 } from './mediaWorkspaceQuery.ts';
 import { tvFilterRows } from './tvFilterCatalog.ts';
+import { semanticRoute } from './mediaWorkspaceQuery.ts';
 
 const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
 const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '')
@@ -136,14 +137,65 @@ test('semantic composes with the filters the canonical route supports', () => {
   assert.equal(wire.q, 'montagna', 'and the semantic query survives composition');
 });
 
-test('semantic never cancels the other filters', () => {
+test('semantic never cancels the other filters — on the SEMANTIC wire', () => {
+  // This test used to assert against queryToWire, which is the STRUCTURAL
+  // builder and is not called at all while semantic is active. It therefore
+  // passed while People, GPS and duplicate-collapse were being dropped from
+  // every semantic request. The wire under test must be the one actually sent.
   const identity = withQuery('image', 'cane');
   identity.filters.photo.includePeople = ['p-1'];
+  identity.filters.photo.hasGps = true;
+  identity.filters.photo.collapseDuplicates = true;
   identity.filters.common.favorite = true;
-  // The structural query still carries everything it did before.
-  const structural = queryToWire({ ...identity, filters: identity.filters }, null);
-  assert.equal(structural.favorite, 'true');
-  assert.equal(structural.includePeople, 'p-1');
+  identity.filters.common.metadataQuery = 'estate';
+
+  const wire = semanticToWire(identity, null);
+  assert.equal(wire.q, 'cane', 'the visual query still ranks');
+  assert.equal(wire.favorite, 'true');
+  assert.equal(wire.includePeople, 'p-1');
+  assert.equal(wire.hasGps, 'true');
+  assert.equal(wire.collapseDuplicates, 'true');
+  assert.equal(wire.metadataQuery, 'estate', 'metadata text is its own parameter, not q');
+});
+
+test('every row shown as APPLIED actually reaches the semantic wire', () => {
+  // The general form of the defect: a filter the user can see marked active
+  // that the request never carries. Checked for all three kinds and both
+  // sources, so it cannot come back on a combination nobody thought about.
+  const WIRED: Record<string, string[]> = {
+    metadataQuery: ['metadataQuery'], semanticQuery: ['q'],
+    favorite: ['favorite'], minRating: ['minRating'],
+    period: ['dateTakenFrom', 'dateTakenTo'], albumMembership: ['albumMembership'],
+    people: ['includePeople', 'excludePeople'], hasGps: ['hasGps'],
+    collapseDuplicates: ['collapseDuplicates'],
+    durationMin: ['durationMin'], durationMax: ['durationMax'],
+    minHeight: ['minHeight'], codec: ['codec'], hasAudio: ['hasAudio'],
+  };
+  for (const source of [{ kind: 'library' } as const, { kind: 'album', albumId: 'a-1' } as const]) {
+    for (const kind of ['all', 'image', 'video'] as const) {
+      const identity = { ...emptyIdentity(source), mediaKind: kind };
+      const f = identity.filters;
+      f.common.visualQuery = 'cane';
+      f.common.semanticTopK = 200;
+      f.common.metadataQuery = 'estate';
+      f.common.favorite = true;
+      f.common.minRating = 3;
+      f.photo.includePeople = ['p-1'];
+      f.photo.hasGps = true;
+      f.photo.collapseDuplicates = true;
+      f.video.codec = 'h264';
+      f.video.hasAudio = true;
+      f.video.minHeight = 1080;
+      if (!isSemanticActive(identity)) continue;
+
+      const wire = semanticToWire(identity, null);
+      for (const row of tvFilterRows(identity, f).filter((r) => r.active)) {
+        const keys = WIRED[row.id] ?? [];
+        assert.ok(keys.some((key) => key in wire),
+          `${source.kind}/${kind}: row "${row.id}" is shown APPLIED but reaches no wire key`);
+      }
+    }
+  }
 });
 
 test('a semantic query changes the result identity', () => {
@@ -210,4 +262,67 @@ test('semantic results use the same grid, viewer and paging', () => {
   assert.match(service, /new TvPersonalMediaPageDto\(/);
   // And paging folds through the same total policy.
   assert.match(screen, /mergePagedTotal\(s\.totalCount, page\.totalCount\)/);
+});
+
+// ------------------------------- the corrective slice's three defects
+
+test('PHOTOS go to the canonical PHOTO pipeline, not the unified one', () => {
+  // The requirement, and the thing an earlier version got wrong while its own
+  // comments claimed otherwise: semanticRoute() said 'photo' for image and was
+  // never called, so every kind reached MediaSemanticSearchService.
+  assert.equal(semanticRoute(withQuery('image', 'cane')), 'photo');
+  assert.equal(semanticRoute(withQuery('all', 'cane')), 'media');
+  assert.equal(semanticRoute(withQuery('video', 'cane')), 'media');
+  // And it now GOVERNS: the wire differs by route, and the backend branches.
+  assert.match(code(read('./mediaWorkspaceQuery.ts')), /semanticRoute\(identity\) === 'photo'/);
+  assert.match(service, /kind == MediaKindScope\.Image\s*\?\s*await SearchPhotosAsync/);
+  assert.match(service, /_photoSemantic\.SearchAsync\(/);
+  assert.match(service, /_semantic\.SearchAsync\(/);
+});
+
+test('photo ranking is hydrated into MediaItem, preserving relevance order', () => {
+  // The reason the photo route was avoided — ImageItem carries no favorite,
+  // rating or takenAt — is solved rather than accepted: the RANKED IDS are
+  // re-hydrated through the unified projection.
+  assert.match(service, /page\.Items\.Select\(item => item\.Id\)/);
+  assert.match(service, /ListGalleryMediaByRankAsync\(\s*ownerUserId, rankedIds/);
+  assert.match(service, /page\.NextCursor, page\.HasMore, page\.TotalCount/,
+    'the canonical cursor and total are preserved');
+});
+
+test('a photo search inside an album is album-SCOPED', () => {
+  // Without albumId the search answers an in-album question with the owner's
+  // whole library — silently, because the unified route takes no album.
+  const inAlbum = { ...emptyIdentity({ kind: 'album', albumId: 'alb-7' }), mediaKind: 'image' as const };
+  inAlbum.filters.common.visualQuery = 'cane';
+  inAlbum.filters.common.semanticTopK = 200;
+  assert.equal(semanticToWire(inAlbum, null).albumId, 'alb-7');
+  // In the library there is no album to scope to.
+  assert.equal('albumId' in semanticToWire(withQuery('image', 'cane'), null), false);
+  // Backend: AlbumId enters the canonical ImageFilters, and the album is
+  // owner-validated BEFORE the search runs.
+  assert.match(service, /AlbumId = albumId,/);
+  assert.match(endpoints, /GetAlbumAsync\(ownerUserId, requestedAlbum, cancellationToken\) is null/);
+  assert.match(endpoints, /'albumId' is only supported with kind=image/);
+});
+
+test('filters no semantic route honours are not offered at all', () => {
+  // Video metadata filters have no semantic-aware path, so with a visual query
+  // running they must not be settable — not merely ignored.
+  const video = withQuery('video', 'cane');
+  video.filters.video.codec = 'h264';
+  const rows = tvFilterRows(video, video.filters).map((r) => r.id);
+  for (const unsupported of ['codec', 'hasAudio', 'minHeight', 'durationMin', 'durationMax'] as const) {
+    assert.ok(!rows.includes(unsupported), `${unsupported} must not be offered with semantic active`);
+  }
+  // Without semantic they are back.
+  const plain = { ...emptyIdentity(LIBRARY), mediaKind: 'video' as const };
+  assert.ok(tvFilterRows(plain, plain.filters).map((r) => r.id).includes('codec'));
+});
+
+test('the backend refuses photo-only parameters on the other kinds', () => {
+  // Accepting and ignoring them is what "applied but inert" looks like from
+  // the server side.
+  assert.match(endpoints, /semantic-aware with kind=image/);
+  assert.match(endpoints, /'hasGps', 'collapseDuplicates' and People filters are only/);
 });

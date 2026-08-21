@@ -33,6 +33,7 @@
 // than trusted to stay parallel.
 
 import {
+  isSemanticActive,
   SEMANTIC_RETRIEVAL_AVAILABLE,
   type CommonMediaFilters,
   type MediaWorkspaceFilters,
@@ -79,6 +80,22 @@ export type TvFilterEditor = 'cycle' | 'text' | 'period' | 'people';
 // the same builder.
 export type TvFilterTransport = 'list' | 'semantic';
 
+// Whether a row survives an ACTIVE semantic query, and where.
+//
+// This exists because the two canonical semantic routes honour different
+// filters, and a row that the active route cannot honour must not be OFFERED —
+// otherwise the user sets it, sees it marked applied, and the results ignore
+// it. That is the "applied but inert" defect this module was built to prevent,
+// and semantic reintroduced it once already.
+//
+//   'always'      the route honours it whatever the kind (favorite, rating,
+//                 period, and the semantic row itself)
+//   'photo-only'  only the photo pipeline honours it — it is physical-filter-
+//                 FIRST, so People/GPS/collapse/metadata text shrink the
+//                 candidate set before ranking
+//   'never'       no semantic route honours it (the video metadata filters)
+export type TvSemanticSupport = 'always' | 'photo-only' | 'never';
+
 // Every field of every filter group, as a type. The `satisfies` below is what
 // turns "a new domain filter appeared" into a build failure.
 type DomainFilterField =
@@ -122,6 +139,7 @@ export interface TvFilterDescriptor {
   // that silently searched the wrong scope. Mirrors `isSemanticActive`.
   readonly albumPhotoTabOnly: boolean;
   readonly transport: TvFilterTransport;
+  readonly semanticSupport: TvSemanticSupport;
   // The query-string parameters this row can produce. Used to prove the panel's
   // applicability rule and queryToWire's emission rule are the same rule.
   readonly wireKeys: readonly string[];
@@ -130,20 +148,20 @@ export interface TvFilterDescriptor {
 // Display order for the panel, top to bottom. Also the canonical order the
 // deterministic focus fallback walks when a focused row disappears.
 export const TV_FILTER_DESCRIPTORS = [
-  { id: 'metadataQuery', section: 'common', editor: 'text', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['q'] },
-  { id: 'semanticQuery', section: 'common', editor: 'text', albumPhotoTabOnly: true, transport: 'semantic', librarySourceOnly: false, wireKeys: ['q'] },
-  { id: 'favorite', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['favorite'] },
-  { id: 'minRating', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minRating'] },
-  { id: 'period', section: 'common', editor: 'period', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['dateTakenFrom', 'dateTakenTo'] },
-  { id: 'albumMembership', section: 'common', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: true, wireKeys: ['albumMembership'] },
-  { id: 'people', section: 'photo', editor: 'people', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['includePeople', 'excludePeople', 'includePeopleMode'] },
-  { id: 'hasGps', section: 'photo', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasGps'] },
-  { id: 'collapseDuplicates', section: 'photo', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['collapseDuplicates'] },
-  { id: 'durationMin', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMin'] },
-  { id: 'durationMax', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMax'] },
-  { id: 'minHeight', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minHeight'] },
-  { id: 'codec', section: 'video', editor: 'text', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['codec'] },
-  { id: 'hasAudio', section: 'video', editor: 'cycle', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasAudio'] },
+  { id: 'metadataQuery', section: 'common', editor: 'text', semanticSupport: 'photo-only', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['q'] },
+  { id: 'semanticQuery', section: 'common', editor: 'text', semanticSupport: 'always', albumPhotoTabOnly: true, transport: 'semantic', librarySourceOnly: false, wireKeys: ['q'] },
+  { id: 'favorite', section: 'common', editor: 'cycle', semanticSupport: 'always', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['favorite'] },
+  { id: 'minRating', section: 'common', editor: 'cycle', semanticSupport: 'always', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minRating'] },
+  { id: 'period', section: 'common', editor: 'period', semanticSupport: 'always', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['dateTakenFrom', 'dateTakenTo'] },
+  { id: 'albumMembership', section: 'common', editor: 'cycle', semanticSupport: 'always', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: true, wireKeys: ['albumMembership'] },
+  { id: 'people', section: 'photo', editor: 'people', semanticSupport: 'photo-only', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['includePeople', 'excludePeople', 'includePeopleMode'] },
+  { id: 'hasGps', section: 'photo', editor: 'cycle', semanticSupport: 'photo-only', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasGps'] },
+  { id: 'collapseDuplicates', section: 'photo', editor: 'cycle', semanticSupport: 'photo-only', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['collapseDuplicates'] },
+  { id: 'durationMin', section: 'video', editor: 'cycle', semanticSupport: 'never', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMin'] },
+  { id: 'durationMax', section: 'video', editor: 'cycle', semanticSupport: 'never', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['durationMax'] },
+  { id: 'minHeight', section: 'video', editor: 'cycle', semanticSupport: 'never', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['minHeight'] },
+  { id: 'codec', section: 'video', editor: 'text', semanticSupport: 'never', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['codec'] },
+  { id: 'hasAudio', section: 'video', editor: 'cycle', semanticSupport: 'never', albumPhotoTabOnly: false, transport: 'list', librarySourceOnly: false, wireKeys: ['hasAudio'] },
 ] as const satisfies readonly TvFilterDescriptor[];
 
 type DescribedFilterId = (typeof TV_FILTER_DESCRIPTORS)[number]['id'];
@@ -180,6 +198,14 @@ export function tvFilterApplies(
       && identity.source.kind === 'album'
       && identity.mediaKind !== 'image') {
     return false;
+  }
+  // A row the ACTIVE semantic route cannot honour is not offered while that
+  // query is running. Hiding it is the honest option: leaving it visible means
+  // the user can set a filter, see it marked applied, and watch the results
+  // ignore it.
+  if (isSemanticActive(identity) && descriptor.semanticSupport !== 'always') {
+    if (descriptor.semanticSupport === 'never') return false;
+    if (identity.mediaKind !== 'image') return false;
   }
   if (descriptor.section === 'photo') return identity.mediaKind === 'image';
   if (descriptor.section === 'video') return identity.mediaKind === 'video';

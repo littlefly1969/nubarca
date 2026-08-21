@@ -502,6 +502,23 @@ public static class TvEndpoints
             [FromQuery] bool? hasGps,
             [FromQuery] DateTime? dateTakenFrom,
             [FromQuery] DateTime? dateTakenTo,
+            // PHOTO-route filters. The photo semantic pipeline is
+            // physical-filter-FIRST, so these shrink the candidate set before
+            // ranking rather than being applied to an already-ranked page.
+            [FromQuery] bool? collapseDuplicates,
+            [FromQuery] string? includePeople,
+            [FromQuery] string? excludePeople,
+            [FromQuery] string? includePeopleMode,
+            // Ordinary metadata text, DISTINCT from `q`. On the photo route it
+            // narrows the candidate set before ranking; `q` is the visual
+            // description that does the ranking. Conflating the two would make
+            // two different retrievals indistinguishable.
+            [FromQuery] string? metadataQuery,
+            // The album the workspace is browsing. Only the photo route can
+            // honour it; supplying it on another kind is a client bug and is
+            // refused rather than silently searching the whole library.
+            [FromQuery] Guid? albumId,
+            [FromQuery] int? semanticTopK,
             HttpContext httpContext,
             [FromServices] ITvPersonalAreaService personal,
             [FromServices] ITvPersonalMediaService media,
@@ -551,24 +568,90 @@ public static class TvEndpoints
                 limit ?? NubArca.Api.Media.Semantic.MediaSemanticSearchService.DefaultPageSize,
                 1, NubArca.Api.Media.Semantic.MediaSemanticSearchService.MaxPageSize);
 
-            // The structural filters the canonical semantic route composes with.
-            // Anything else is not silently dropped — the TV panel does not offer
-            // it alongside an active semantic query, and this route does not
-            // accept it, so there is no parameter to ignore.
+            // ALBUM SCOPE. Only the photo pipeline is album-aware; the unified
+            // media semantic route is library-scoped by construction. Accepting
+            // an album on the other kinds would mean answering an in-album
+            // question with a library-wide search — silently.
+            if (albumId is Guid requestedAlbum)
+            {
+                if (kindScope != MediaKindScope.Image)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "'albumId' is only supported with kind=image.",
+                    });
+                }
+                // Owner-validated BEFORE the search: a foreign or missing album
+                // is a generic 404, never an existence leak and never a silently
+                // unscoped search.
+                if (await media.GetAlbumAsync(ownerUserId, requestedAlbum, cancellationToken) is null)
+                {
+                    return Results.NotFound();
+                }
+            }
+
+            // THE FILTERS EACH CANONICAL ROUTE REALLY HONOURS.
+            //
+            // The photo pipeline builds its candidate set from the full
+            // ImageFilters, so metadata text, GPS, duplicate collapse and People
+            // all apply before ranking. The unified media route documents that
+            // folder/album/people/GPS/codec/duration are NOT semantic-aware
+            // there — so those parameters are REFUSED for the other kinds rather
+            // than accepted and ignored, which is what "applied but inert" would
+            // look like to the user.
+            var photoOnly = kindScope == MediaKindScope.Image;
+            if (!photoOnly && (hasGps is not null || collapseDuplicates is true
+                || !string.IsNullOrWhiteSpace(includePeople)
+                || !string.IsNullOrWhiteSpace(excludePeople)))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "'hasGps', 'collapseDuplicates' and People filters are only "
+                        + "semantic-aware with kind=image.",
+                });
+            }
+
             var filters = new NubArca.Api.Files.ImageFilters
             {
                 Favorite = favorite,
                 MinRating = minRating,
-                HasGps = hasGps,
                 DateTakenFrom = dateTakenFrom,
                 DateTakenTo = dateTakenTo,
             };
+            if (photoOnly)
+            {
+                // The SAME owner-private parsing the web gallery uses. A foreign
+                // person id simply matches nothing (the join is owner-scoped),
+                // so there is no existence leak to guard against here.
+                if (!ImagePeopleFilter.TryParseIds(
+                        includePeople, GalleryQueryParser.MaxPeopleFilterIds, out var includeIds))
+                {
+                    return Results.BadRequest(new { error = "'includePeople' must be a comma-separated list of ids." });
+                }
+                if (!ImagePeopleFilter.TryParseIds(
+                        excludePeople, GalleryQueryParser.MaxPeopleFilterIds, out var excludeIds))
+                {
+                    return Results.BadRequest(new { error = "'excludePeople' must be a comma-separated list of ids." });
+                }
+                filters = filters with
+                {
+                    Query = string.IsNullOrWhiteSpace(metadataQuery) ? null : metadataQuery.Trim(),
+                    HasGps = hasGps,
+                    CollapseDuplicates = collapseDuplicates ?? false,
+                    IncludePersonIds = includeIds,
+                    ExcludePersonIds = excludeIds,
+                    IncludePeopleMode = string.Equals(includePeopleMode, "any", StringComparison.OrdinalIgnoreCase)
+                        ? PeopleFilterMode.Any
+                        : PeopleFilterMode.All,
+                };
+            }
 
             NubArca.Api.Tv.TvPersonalMediaSemanticResult result;
             try
             {
                 result = await media.SearchSemanticAsync(
-                    ownerUserId, query, kindScope, pageSize, cursor, filters, cancellationToken);
+                    ownerUserId, query, kindScope, pageSize, cursor, filters,
+                    albumId, Math.Clamp(semanticTopK ?? 200, 1, 1000), cancellationToken);
             }
             catch (NubArca.Api.Ai.Photos.SemanticSearchCursorException)
             {

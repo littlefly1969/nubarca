@@ -164,6 +164,98 @@ public sealed class TvPersonalSemanticTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task An_Album_Is_Only_Accepted_On_The_Photo_Route()
+    {
+        // The unified media semantic route is library-scoped and takes no album.
+        // Accepting one there would answer an in-album question with a
+        // library-wide search — silently, which is the defect this refuses.
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+        var album = Guid.NewGuid();
+
+        foreach (var kind in new[] { "all", "video" })
+        {
+            var response = await TvSendAsync(
+                cookie, $"{Route}?q=cane&kind={kind}&albumId={album}", grant);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Contains("kind=image", await response.Content.ReadAsStringAsync());
+        }
+    }
+
+    [Fact]
+    public async Task A_Foreign_Or_Missing_Album_Is_A_Generic_NotFound()
+    {
+        // Owner-validated BEFORE the search: never an existence leak, and never
+        // a search that quietly loses its scope.
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        var response = await TvSendAsync(
+            cookie, $"{Route}?q=cane&kind=image&albumId={Guid.NewGuid()}", grant);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Empty(await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Photo_Only_Filters_Are_Refused_On_The_Other_Kinds()
+    {
+        // Accepting and ignoring them is exactly what "applied but inert" looks
+        // like from the server side.
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        foreach (var parameter in new[]
+        {
+            "hasGps=true", "collapseDuplicates=true",
+            $"includePeople={Guid.NewGuid()}", $"excludePeople={Guid.NewGuid()}",
+        })
+        {
+            foreach (var kind in new[] { "all", "video" })
+            {
+                var response = await TvSendAsync(
+                    cookie, $"{Route}?q=cane&kind={kind}&{parameter}", grant);
+                Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task The_Photo_Route_Accepts_The_Filters_It_Really_Honours()
+    {
+        // The photo pipeline is physical-filter-FIRST, so these shrink the
+        // candidate set before ranking rather than being ignored.
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        var url = $"{Route}?q=cane&kind=image&hasGps=true&collapseDuplicates=true"
+            + $"&includePeople={Guid.NewGuid()}&includePeopleMode=any&metadataQuery=estate"
+            + "&favorite=true&minRating=3";
+        var response = await TvSendAsync(cookie, url, grant);
+
+        // Valid input. The outcome depends on permission and retrieval
+        // availability — both legitimate — but never on validation.
+        Assert.NotEqual(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Malformed_Person_Id_Is_Refused_Rather_Than_Ignored()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairAsync(owner);
+        var grant = await UnlockTokenAsync(cookie);
+
+        var response = await TvSendAsync(
+            cookie, $"{Route}?q=cane&kind=image&includePeople=not-a-guid", grant);
+        Assert.True(
+            response.StatusCode is HttpStatusCode.BadRequest or HttpStatusCode.Forbidden,
+            $"unexpected {response.StatusCode}");
+    }
+
     // ── helpers (same shape as TvPersonalMediaTests) ────────────────────────
 
     private async Task<string> PairAsync(HttpClient owner)

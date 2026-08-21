@@ -42,6 +42,12 @@ public interface ITvPersonalMediaService
         int limit,
         string? cursor,
         NubArca.Api.Files.ImageFilters filters,
+        // The album the workspace is browsing, ALREADY owner-validated by the
+        // endpoint. Only the photo route can honour it — the unified media
+        // semantic route is library-scoped — so the panel does not offer a
+        // visual query on the other tabs inside an album.
+        Guid? albumId,
+        int semanticTopK,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<TvPersonalAlbumCardDto>> ListAlbumsAsync(

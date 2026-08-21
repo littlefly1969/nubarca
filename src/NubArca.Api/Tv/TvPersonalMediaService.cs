@@ -1,6 +1,7 @@
 using NubArca.Api.Albums;
 using NubArca.Api.Files;
 using NubArca.Api.Media;
+using NubArca.Api.Ai.Photos;
 using NubArca.Api.Media.Semantic;
 
 namespace NubArca.Api.Tv;
@@ -26,15 +27,21 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
     private readonly IMediaCollectionQueryService _media;
     private readonly IAlbumService _albums;
     private readonly MediaSemanticSearchService _semantic;
+    private readonly GallerySemanticQueryService _photoSemantic;
+    private readonly IFileItemService _files;
 
     public TvPersonalMediaService(
         IMediaCollectionQueryService media,
         IAlbumService albums,
-        MediaSemanticSearchService semantic)
+        MediaSemanticSearchService semantic,
+        GallerySemanticQueryService photoSemantic,
+        IFileItemService files)
     {
         _media = media;
         _albums = albums;
         _semantic = semantic;
+        _photoSemantic = photoSemantic;
+        _files = files;
     }
 
     public async Task<TvPersonalMediaListResult> QueryAsync(
@@ -60,19 +67,30 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
             null);
     }
 
-    // SEMANTIC retrieval, delegated ENTIRELY to the canonical service.
+    // SEMANTIC retrieval, delegated ENTIRELY to the canonical services — and to
+    // the RIGHT one for each kind, which is the correction this method exists to
+    // carry.
     //
-    // MediaSemanticSearchService is the one that already serves /api/media/semantic
-    // on the web, and it takes MediaKindScope: kind=image gathers photo
-    // candidates, kind=video gathers video candidates, kind=all gathers both.
-    // So one canonical ranking answers all three TV tabs, and this class adds
-    // no embedding, no vector store, no threshold and no fusion of its own —
-    // it converts a page of MediaItem into the SAME TV DTO ordinary results use.
+    //   image        → GallerySemanticQueryService, the photo pipeline the web's
+    //                  photo tab uses. It is physical-filter-FIRST: the People,
+    //                  GPS, duplicate-collapse and ALBUM constraints build the
+    //                  candidate set before ranking, so a photo semantic search
+    //                  inside an album really is album-scoped.
+    //   all | video  → MediaSemanticSearchService, the unified cross-kind route.
     //
-    // That shared projection is the point. Routing photos through the separate
-    // photo-gallery semantic service would return ImageItem, which carries no
-    // favorite, rating or takenAt, so semantic photo cards would render visibly
-    // poorer than ordinary ones in the very same grid.
+    // An earlier version sent every kind to the unified service. That produced
+    // the right-looking results for the wrong reason: photos were ranked by the
+    // media pipeline rather than the photo one, and — worse — a photo search
+    // inside an album silently searched the owner's WHOLE library, because the
+    // unified route is library-scoped and takes no album.
+    //
+    // The reason the photo route was avoided is real and is solved here rather
+    // than accepted: it hydrates into ImageItem, which carries no favorite,
+    // rating or takenAt, so projecting it would have made semantic photo cards
+    // visibly poorer than ordinary ones in the same grid. The fix is to take the
+    // RANKED IDS and re-hydrate them through ListGalleryMediaByRankAsync, which
+    // returns MediaItem in the supplied relevance order. Canonical ranking,
+    // canonical cursor, unified DTO.
     public async Task<TvPersonalMediaSemanticResult> SearchSemanticAsync(
         Guid ownerUserId,
         string query,
@@ -80,7 +98,75 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
         int limit,
         string? cursor,
         ImageFilters filters,
+        Guid? albumId,
+        int semanticTopK,
         CancellationToken cancellationToken = default)
+    {
+        return kind == MediaKindScope.Image
+            ? await SearchPhotosAsync(
+                ownerUserId, query, limit, cursor, filters, albumId, semanticTopK, cancellationToken)
+            : await SearchMediaAsync(
+                ownerUserId, query, kind, limit, cursor, filters, cancellationToken);
+    }
+
+    private async Task<TvPersonalMediaSemanticResult> SearchPhotosAsync(
+        Guid ownerUserId,
+        string query,
+        int limit,
+        string? cursor,
+        ImageFilters filters,
+        Guid? albumId,
+        int semanticTopK,
+        CancellationToken cancellationToken)
+    {
+        // AlbumId is what makes an in-album photo search album-scoped: it is
+        // part of the physical candidate set AND of the cursor fingerprint, so a
+        // cursor issued inside an album can never replay library-wide.
+        var photoFilters = filters with
+        {
+            SemanticQuery = query,
+            SemanticTopK = semanticTopK,
+            AlbumId = albumId,
+        };
+
+        GallerySemanticPage page;
+        try
+        {
+            page = await _photoSemantic.SearchAsync(
+                ownerUserId, limit, cursor, photoFilters, cancellationToken);
+        }
+        catch (SemanticSearchCursorException)
+        {
+            throw;
+        }
+
+        if (!page.Available)
+        {
+            return new TvPersonalMediaSemanticResult(null, false, page.UnavailableReason, false);
+        }
+
+        // Re-hydrate the RANKED ids into unified MediaItem, preserving the
+        // relevance order the ranking produced. This is why a semantic photo
+        // card is indistinguishable from an ordinary one.
+        var rankedIds = page.Items.Select(item => item.Id).ToList();
+        var media = await _files.ListGalleryMediaByRankAsync(
+            ownerUserId, rankedIds, cancellationToken);
+
+        var items = media.Select(Project).ToList();
+        return new TvPersonalMediaSemanticResult(
+            new TvPersonalMediaPageDto(
+                items, page.NextCursor, page.HasMore, page.TotalCount, items.Count, 0),
+            true, null, false);
+    }
+
+    private async Task<TvPersonalMediaSemanticResult> SearchMediaAsync(
+        Guid ownerUserId,
+        string query,
+        MediaKindScope kind,
+        int limit,
+        string? cursor,
+        ImageFilters filters,
+        CancellationToken cancellationToken)
     {
         var page = await _semantic.SearchAsync(
             ownerUserId, query, kind, limit, cursor, filters, cancellationToken);
@@ -100,15 +186,8 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
         var photoCount = items.Count(item => item.Kind != "video");
         return new TvPersonalMediaSemanticResult(
             new TvPersonalMediaPageDto(
-                items,
-                page.NextCursor,
-                page.HasMore,
-                page.Total,
-                photoCount,
-                items.Count - photoCount),
-            true,
-            null,
-            page.StillIndexingManyItems);
+                items, page.NextCursor, page.HasMore, page.Total, photoCount, items.Count - photoCount),
+            true, null, page.StillIndexingManyItems);
     }
 
     public async Task<IReadOnlyList<TvPersonalAlbumCardDto>> ListAlbumsAsync(
