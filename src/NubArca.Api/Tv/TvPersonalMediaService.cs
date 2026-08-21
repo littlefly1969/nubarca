@@ -1,6 +1,7 @@
 using NubArca.Api.Albums;
 using NubArca.Api.Files;
 using NubArca.Api.Media;
+using NubArca.Api.Media.Semantic;
 
 namespace NubArca.Api.Tv;
 
@@ -24,11 +25,16 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
 {
     private readonly IMediaCollectionQueryService _media;
     private readonly IAlbumService _albums;
+    private readonly MediaSemanticSearchService _semantic;
 
-    public TvPersonalMediaService(IMediaCollectionQueryService media, IAlbumService albums)
+    public TvPersonalMediaService(
+        IMediaCollectionQueryService media,
+        IAlbumService albums,
+        MediaSemanticSearchService semantic)
     {
         _media = media;
         _albums = albums;
+        _semantic = semantic;
     }
 
     public async Task<TvPersonalMediaListResult> QueryAsync(
@@ -52,6 +58,57 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
                 page.VideoCount),
             MediaCollectionStatus.Ok,
             null);
+    }
+
+    // SEMANTIC retrieval, delegated ENTIRELY to the canonical service.
+    //
+    // MediaSemanticSearchService is the one that already serves /api/media/semantic
+    // on the web, and it takes MediaKindScope: kind=image gathers photo
+    // candidates, kind=video gathers video candidates, kind=all gathers both.
+    // So one canonical ranking answers all three TV tabs, and this class adds
+    // no embedding, no vector store, no threshold and no fusion of its own —
+    // it converts a page of MediaItem into the SAME TV DTO ordinary results use.
+    //
+    // That shared projection is the point. Routing photos through the separate
+    // photo-gallery semantic service would return ImageItem, which carries no
+    // favorite, rating or takenAt, so semantic photo cards would render visibly
+    // poorer than ordinary ones in the very same grid.
+    public async Task<TvPersonalMediaSemanticResult> SearchSemanticAsync(
+        Guid ownerUserId,
+        string query,
+        MediaKindScope kind,
+        int limit,
+        string? cursor,
+        ImageFilters filters,
+        CancellationToken cancellationToken = default)
+    {
+        var page = await _semantic.SearchAsync(
+            ownerUserId, query, kind, limit, cursor, filters, cancellationToken);
+
+        // Unavailable is NOT an empty page. Returning one would be
+        // indistinguishable from "nothing matched", which is exactly the
+        // silent degradation this contract forbids.
+        if (!page.Available)
+        {
+            return new TvPersonalMediaSemanticResult(null, false, page.UnavailableReason, false);
+        }
+
+        // Only the media survives the boundary. BestMatch/AdditionalMatches carry
+        // raw similarity scores and segment evidence, which are internal ranking
+        // detail and never cross into a TV DTO.
+        var items = page.Items.Select(result => Project(result.Media)).ToList();
+        var photoCount = items.Count(item => item.Kind != "video");
+        return new TvPersonalMediaSemanticResult(
+            new TvPersonalMediaPageDto(
+                items,
+                page.NextCursor,
+                page.HasMore,
+                page.Total,
+                photoCount,
+                items.Count - photoCount),
+            true,
+            null,
+            page.StillIndexingManyItems);
     }
 
     public async Task<IReadOnlyList<TvPersonalAlbumCardDto>> ListAlbumsAsync(

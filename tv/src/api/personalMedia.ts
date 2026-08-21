@@ -2,6 +2,7 @@ import { tvGet } from './client';
 import { personalHeaders } from './personal';
 import {
   queryToWire,
+  semanticToWire,
   type MediaWorkspaceIdentity,
 } from '../personal/mediaWorkspaceQuery';
 
@@ -78,4 +79,42 @@ export function listPersonalMedia(
 
 export function listPersonalAlbums(): Promise<TvPersonalAlbumCard[]> {
   return tvGet<TvPersonalAlbumCard[]>('/api/tv/personal/albums', personalHeaders());
+}
+
+/** Retrieval could not run. NOT an empty result — see searchPersonalMediaSemantic. */
+export class SemanticUnavailableError extends Error {
+  constructor(readonly reason: string | null) {
+    super('semantic_unavailable');
+    this.name = 'SemanticUnavailableError';
+  }
+}
+
+/**
+ * One page of SEMANTIC results for the current identity.
+ *
+ * A different canonical route from `listPersonalMedia` because it is a
+ * different service with its own relevance cursor — but the SAME page DTO, so
+ * the grid and the viewer cannot tell a semantic result from an ordinary one.
+ *
+ * There is deliberately no fallback here. If retrieval is unavailable this
+ * throws, and the screen shows an explicit state: quietly returning metadata
+ * matches would let the user believe they were seeing a semantic search when
+ * they were seeing substring search.
+ */
+export async function searchPersonalMediaSemantic(
+  identity: MediaWorkspaceIdentity,
+  cursor: string | null,
+  limit?: number,
+): Promise<TvPersonalMediaPage> {
+  const qs = toQueryString(semanticToWire(identity, cursor, limit));
+  try {
+    return await tvGet<TvPersonalMediaPage>(
+      `/api/tv/personal/media/semantic${qs}`, personalHeaders());
+  } catch (error) {
+    const body = (error as { body?: { error?: string; reason?: string } } | null)?.body;
+    if (body?.error === 'semantic_unavailable') {
+      throw new SemanticUnavailableError(body.reason ?? null);
+    }
+    throw error;
+  }
 }

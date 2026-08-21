@@ -479,6 +479,111 @@ public static class TvEndpoints
                 await media.QueryAsync(ownerUserId, query, cancellationToken));
         }).WithName("ListTvPersonalMedia");
 
+        // SEMANTIC retrieval for the TV Media Library.
+        //
+        // A THIN ADAPTER, and deliberately nothing more. The ranking, the
+        // candidate policy, the relevance cursor and the availability rules all
+        // belong to MediaSemanticSearchService — the same service that answers
+        // /api/media/semantic on the web. This route exists only because a
+        // LIMITED TV session cannot call an owner-web endpoint: it re-derives
+        // the owner from the session cookie plus the unlock grant, server-side,
+        // and never accepts an owner from the television.
+        //
+        // Unavailable is a 503 with a sanitized reason, never a 200 with an
+        // empty page: a semantic search that cannot run must say so rather than
+        // look like "no matches", and must never quietly become substring search.
+        app.MapGet("/api/tv/personal/media/semantic", async (
+            [FromQuery] string? q,
+            [FromQuery] string? kind,
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            [FromQuery] bool? favorite,
+            [FromQuery] int? minRating,
+            [FromQuery] bool? hasGps,
+            [FromQuery] DateTime? dateTakenFrom,
+            [FromQuery] DateTime? dateTakenTo,
+            HttpContext httpContext,
+            [FromServices] ITvPersonalAreaService personal,
+            [FromServices] ITvPersonalMediaService media,
+            [FromServices] NubArca.Api.Access.IUserPermissionService userPermissions,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var (failure, ownerUserId) = await ResolveTvPersonalAccessAsync(httpContext, personal, cancellationToken);
+            if (failure is not null) return failure;
+
+            // The permission belongs to the RESOLVED OWNER, not to the
+            // television. A TV paired to an account without semantic access
+            // must be refused exactly as the web would refuse that account.
+            var effective = await userPermissions.GetEffectiveAsync(ownerUserId, cancellationToken);
+            if (!effective.Has(NubArca.Api.Access.Permissions.SemanticSearchAccess))
+            {
+                return Results.Forbid();
+            }
+
+            var query = q?.Trim() ?? string.Empty;
+            if (query.Length == 0
+                || query.Length > NubArca.Api.Media.Semantic.MediaSemanticSearchService.MaxQueryLength)
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"'q' must contain 1-{NubArca.Api.Media.Semantic.MediaSemanticSearchService.MaxQueryLength} characters.",
+                });
+            }
+            if (!MediaKindScopeParser.TryParse(kind, out var kindScope))
+            {
+                return Results.BadRequest(new { error = "'kind' must be one of: all, image, video." });
+            }
+            if (minRating is int rating && (rating < 0 || rating > 5))
+            {
+                return Results.BadRequest(new { error = "'minRating' must be between 0 and 5." });
+            }
+            if (dateTakenFrom is DateTime from && dateTakenTo is DateTime to && from > to)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "'dateTakenFrom' must be earlier than or equal to 'dateTakenTo'.",
+                });
+            }
+
+            // Bounded server-side; the television's request is a suggestion.
+            var pageSize = Math.Clamp(
+                limit ?? NubArca.Api.Media.Semantic.MediaSemanticSearchService.DefaultPageSize,
+                1, NubArca.Api.Media.Semantic.MediaSemanticSearchService.MaxPageSize);
+
+            // The structural filters the canonical semantic route composes with.
+            // Anything else is not silently dropped — the TV panel does not offer
+            // it alongside an active semantic query, and this route does not
+            // accept it, so there is no parameter to ignore.
+            var filters = new NubArca.Api.Files.ImageFilters
+            {
+                Favorite = favorite,
+                MinRating = minRating,
+                HasGps = hasGps,
+                DateTakenFrom = dateTakenFrom,
+                DateTakenTo = dateTakenTo,
+            };
+
+            NubArca.Api.Tv.TvPersonalMediaSemanticResult result;
+            try
+            {
+                result = await media.SearchSemanticAsync(
+                    ownerUserId, query, kindScope, pageSize, cursor, filters, cancellationToken);
+            }
+            catch (NubArca.Api.Ai.Photos.SemanticSearchCursorException)
+            {
+                return Results.BadRequest(new { error = "Invalid or mismatched semantic-search cursor." });
+            }
+
+            if (!result.Available)
+            {
+                return Results.Json(
+                    new { error = "semantic_unavailable", reason = result.UnavailableReason },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            return Results.Ok(result.Page);
+        }).WithName("SearchTvPersonalMediaSemantic");
+
         app.MapGet("/api/tv/personal/albums", async (
             HttpContext httpContext,
             [FromServices] ITvPersonalAreaService personal,

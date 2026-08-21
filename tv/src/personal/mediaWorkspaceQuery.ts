@@ -182,18 +182,24 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
  * does not offer it there, the chips do not claim it, the fingerprint does not
  * key on it, and no request is ever made that the server would have to reject.
  */
-// ONE gate for the whole feature. Semantic retrieval needs a TV-personal
-// adapter on the server; until that exists the filter must not be offered, must
-// not produce a chip, must not key the fingerprint and must not reach any wire.
-// Putting the flag anywhere else means those five answers can disagree — which
-// is precisely what the first attempt at this did, and what the catalog's
-// coupling tests caught.
+// ONE gate for the whole feature: whether the filter is offered, whether it
+// produces a chip, whether it keys the fingerprint and whether it reaches a
+// wire are all this one answer. Putting the flag anywhere else lets those
+// disagree — which the first attempt did, and the catalog's coupling tests
+// caught three ways at once.
 //
-// The open decision it waits on: the canonical PHOTO semantic path returns
-// ImageItem, which carries no favorite/rating/takenAt, so projecting it into
-// the unified TV media DTO would render semantic photo results visibly poorer
-// than ordinary results in the same grid.
-export const SEMANTIC_RETRIEVAL_AVAILABLE = false;
+// It is TRUE now because the retrieval exists: GET /api/tv/personal/media/semantic
+// is a thin adapter over MediaSemanticSearchService, the same canonical service
+// behind the web's /api/media/semantic. That service takes a MediaKindScope, so
+// one ranking answers All, Photos and Videos, and it returns MediaItem — the
+// exact type the ordinary TV projection consumes, which is why a semantic card
+// is indistinguishable from an ordinary one in the same grid.
+//
+// The alternative considered and rejected: routing photos through the separate
+// photo-gallery semantic service. It returns ImageItem, which carries no
+// favorite, rating or takenAt, so semantic photo results would have rendered
+// visibly poorer than ordinary ones beside them.
+export const SEMANTIC_RETRIEVAL_AVAILABLE = true;
 
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
   if (!SEMANTIC_RETRIEVAL_AVAILABLE) return false;

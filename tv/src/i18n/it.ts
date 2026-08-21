@@ -278,6 +278,7 @@ const it = {
   'filters.sectionOrder': 'ORDINE',
   'filters.search': 'Testo',
   'filters.semantic': 'Ricerca semantica',
+  'filters.semanticUnavailable': 'La ricerca semantica non è disponibile in questo momento. Riprova più tardi o rimuovi il filtro.',
   'filters.favorite': 'Preferiti',
   'filters.favoriteYes': 'Solo preferiti',
   'filters.favoriteNo': 'Non preferiti',

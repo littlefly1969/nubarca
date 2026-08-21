@@ -20,28 +20,6 @@ is built is described by `ARCHITECTURE.md`.
   `NUBARCA_ENCRYPTED_BACKUP_TARGET`, validated by
   `scripts/lib/operator-config.sh`, which fails closed on a missing value.
 
-## Open decisions
-
-- **TV semantic search — which canonical path serves Photos.** The TV media
-  workspace now MODELS semantic text search (`visualQuery`/`semanticTopK`,
-  `isSemanticActive`, `semanticToWire`, a catalog row) and is fully tested, but
-  the filter is NOT offered: `SEMANTIC_RETRIEVAL_AVAILABLE` in
-  `tv/src/personal/mediaWorkspaceQuery.ts` gates row, chips, fingerprint and
-  wire together, so no dead control ships.
-
-  It waits on one decision, because the two canonical services return different
-  shapes. `MediaSemanticSearchService` (All/Videos) returns `MediaItem` — the
-  exact type `TvPersonalMediaService.Project` already turns into the unified TV
-  DTO. The canonical PHOTO path (`GallerySemanticQueryService`) returns
-  `ImageItem`, which carries no `Favorite`, `Rating` or `TakenAt`. Projecting it
-  into the same grid would render semantic photo results visibly poorer than
-  ordinary ones — no hearts, no dates — in the very same view.
-
-  So: preserve the web's photo/media split and hydrate the missing fields, or
-  use the unified service for all three kinds on TV and accept a documented
-  divergence in photo ranking. Removing the gate is a one-line change once that
-  is settled.
-
 ## Development rules
 
 - Read `CLAUDE.md`, `ARCHITECTURE.md` and this file before repository work.

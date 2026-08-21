@@ -241,6 +241,7 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'filters.sectionOrder': 'ORDER',
   'filters.search': 'Text',
   'filters.semantic': 'Semantic search',
+  'filters.semanticUnavailable': 'Semantic search is unavailable right now. Try again later or remove the filter.',
   'filters.favorite': 'Favorite',
   'filters.favoriteYes': 'Favorites only',
   'filters.favoriteNo': 'Not favorites',

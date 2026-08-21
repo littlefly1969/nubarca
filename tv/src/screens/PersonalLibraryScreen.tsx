@@ -16,6 +16,8 @@ import { colors, font, overscan, spacing } from '../theme';
 import { ApiError } from '../api/client';
 import {
   listPersonalMedia,
+  searchPersonalMediaSemantic,
+  SemanticUnavailableError,
   type TvPersonalMediaItem,
 } from '../api/personalMedia';
 import { FocusableMediaTile } from '../components/FocusableMediaTile';
@@ -45,6 +47,7 @@ import {
 import { useI18n } from '../i18n';
 import { actionableEventType, isMediaTransportEvent } from '../lib/remoteEvent';
 import { displayTotal, mergePagedTotal } from '../personal/pagingTotals';
+import { isSemanticActive } from '../personal/mediaWorkspaceQuery';
 import {
   activeFilterCount,
   clearActiveFilters,
@@ -87,7 +90,12 @@ import {
 const PAGE_SIZE = 50;
 const GRID_GAP = TV_MEDIA_GRID_GAP;
 
-type Phase = 'loadingInitial' | 'ready' | 'loadingMore' | 'errorInitial' | 'errorMore' | 'end';
+// 'semanticUnavailable' is a first-class phase, NOT an error and NOT an empty
+// grid. A semantic search that cannot run must say so: showing "no results", or
+// quietly falling back to metadata matching, would let the user believe they
+// had searched semantically when they had not.
+type Phase = 'loadingInitial' | 'ready' | 'loadingMore' | 'errorInitial' | 'errorMore'
+  | 'end' | 'semanticUnavailable';
 type Panel = 'none' | 'filters';
 
 interface LoadState {
@@ -243,6 +251,21 @@ export function PersonalLibraryScreen({
   // identity rebuilt with equal values must not restart the query.
   const fingerprint = queryFingerprint(identity);
 
+  // THE routing decision, in one place. `isSemanticActive` is the same
+  // predicate that decides whether the filter is offered, whether it produces a
+  // chip and whether it keys the fingerprint — so the request can never
+  // disagree with what the UI claims is applied.
+  //
+  // Semantic and structural retrieval are different canonical services with
+  // different cursors, which is why this picks a function rather than adding a
+  // parameter: paging must continue against whichever one produced page one.
+  const fetchPage = useCallback(
+    (target: MediaWorkspaceIdentity, cursor: string | null) => (
+      isSemanticActive(target)
+        ? searchPersonalMediaSemantic(target, cursor, PAGE_SIZE)
+        : listPersonalMedia(target, cursor, PAGE_SIZE)
+    ), []);
+
   useEffect(() => {
     generationRef.current += 1;
     requestedCursorRef.current = null;
@@ -252,7 +275,7 @@ export function PersonalLibraryScreen({
     setLoad({ ...INITIAL_LOAD, generation: gen });
 
     let cancelled = false;
-    listPersonalMedia(identityRef.current, null, PAGE_SIZE)
+    fetchPage(identityRef.current, null)
       .then((page) => {
         if (cancelled || generationRef.current !== gen) return;
         setLoad({
@@ -276,7 +299,11 @@ export function PersonalLibraryScreen({
       .catch((err: unknown) => {
         if (cancelled || generationRef.current !== gen) return;
         if (handleAuthError(err)) return;
-        setLoad((s) => ({ ...s, phase: 'errorInitial' }));
+        // Explicit, never a silent downgrade to substring search.
+        setLoad((s) => ({
+          ...s,
+          phase: err instanceof SemanticUnavailableError ? 'semanticUnavailable' : 'errorInitial',
+        }));
       });
     return () => { cancelled = true; };
   }, [fingerprint, handleAuthError, restoreTo, readGridFocus]);
@@ -289,7 +316,7 @@ export function PersonalLibraryScreen({
     requestedCursorRef.current = current.nextCursor;
     const gen = generationRef.current;
     setLoad((s) => ({ ...s, phase: 'loadingMore' }));
-    listPersonalMedia(identityRef.current, current.nextCursor, PAGE_SIZE)
+    fetchPage(identityRef.current, current.nextCursor)
       .then((page) => {
         setLoad((s) => {
           if (s.generation !== gen) return s;
@@ -316,7 +343,10 @@ export function PersonalLibraryScreen({
       })
       .catch((err: unknown) => {
         if (handleAuthError(err)) return;
-        setLoad((s) => (s.generation !== gen ? s : { ...s, phase: 'errorMore' }));
+        setLoad((s) => (s.generation !== gen ? s : {
+          ...s,
+          phase: err instanceof SemanticUnavailableError ? 'semanticUnavailable' : 'errorMore',
+        }));
       })
       .finally(() => {
         if (generationRef.current === gen) requestedCursorRef.current = null;
@@ -482,6 +512,25 @@ export function PersonalLibraryScreen({
           <FocusableButton
             label={t('common.tryAgain')}
             onPress={() => setIdentity((current) => ({ ...current }))}
+            hasTVPreferredFocus={gridInteractive}
+          />
+          <FocusableButton label={t('gallery.backToHome')} onPress={onBack} />
+        </View>
+      ) : load.phase === 'semanticUnavailable' ? (
+        <View style={styles.stateBox}>
+          {/* Explicit. The alternative — an empty grid, or metadata matches
+              presented as semantic ones — would misrepresent what the search
+              actually did. */}
+          <Text style={styles.body}>{t('filters.semanticUnavailable')}</Text>
+          <FocusableButton
+            label={t('gallery.clearFilters')}
+            onPress={() => setIdentity((current) => ({
+              ...current,
+              filters: {
+                ...current.filters,
+                common: { ...current.filters.common, visualQuery: '', semanticTopK: 0 },
+              },
+            }))}
             hasTVPreferredFocus={gridInteractive}
           />
           <FocusableButton label={t('gallery.backToHome')} onPress={onBack} />

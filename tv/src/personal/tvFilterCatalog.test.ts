@@ -119,13 +119,13 @@ test('applicability follows the tab and the source', () => {
     tvFilterRows(identityFor(source, kind), emptyIdentity(source).filters).map((r) => r.id);
 
   assert.deepEqual(shown(LIBRARY, 'all'),
-    ['metadataQuery', 'favorite', 'minRating', 'period', 'albumMembership']);
+    ['metadataQuery', 'semanticQuery', 'favorite', 'minRating', 'period', 'albumMembership']);
   assert.deepEqual(shown(LIBRARY, 'image'), [
-    'metadataQuery', 'favorite', 'minRating', 'period', 'albumMembership',
+    'metadataQuery', 'semanticQuery', 'favorite', 'minRating', 'period', 'albumMembership',
     'people', 'hasGps', 'collapseDuplicates',
   ]);
   assert.deepEqual(shown(LIBRARY, 'video'), [
-    'metadataQuery', 'favorite', 'minRating', 'period', 'albumMembership',
+    'metadataQuery', 'semanticQuery', 'favorite', 'minRating', 'period', 'albumMembership',
     'durationMin', 'durationMax', 'minHeight', 'codec', 'hasAudio',
   ]);
   // Inside an album every item is a member, so the row is absent rather than
@@ -135,15 +135,18 @@ test('applicability follows the tab and the source', () => {
   // Semantic retrieval for mixed media is library-scoped, so inside an album it
   // is offered on the Photos tab (album-scoped there) and nowhere else — rather
   // than offered everywhere and silently searching the whole library.
-  // Modelled and tested, deliberately NOT OFFERED until the TV-personal
-  // semantic adapter exists: a filter the user can set that changes nothing
-  // they can see is the exact defect this module prevents.
-  for (const source of SOURCES) {
-    for (const kind of KINDS) {
-      assert.ok(!shown(source, kind).includes('semanticQuery'),
-        `semanticQuery must not be offered on ${source.kind}/${kind} without its backend`);
-    }
+  // Now OFFERED on every kind, because the retrieval exists: the TV adapter
+  // over MediaSemanticSearchService serves All, Photos and Videos alike.
+  for (const kind of KINDS) {
+    assert.ok(shown(LIBRARY, kind).includes('semanticQuery'),
+      `semanticQuery must be offered on library/${kind}`);
   }
+  // Inside an ALBUM it stays photo-tab only: the unified semantic route is
+  // library-scoped and takes no album parameter, so offering it on Tutti/Video
+  // there would be a control that silently searched the wrong scope.
+  assert.ok(shown(ALBUM, 'image').includes('semanticQuery'));
+  assert.ok(!shown(ALBUM, 'all').includes('semanticQuery'));
+  assert.ok(!shown(ALBUM, 'video').includes('semanticQuery'));
 });
 
 test('the people row is shown on Photos and is an editor, not a readout', () => {

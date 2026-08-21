@@ -100,7 +100,10 @@ test('the library screen merges totals instead of assigning them', () => {
 });
 
 test('the fix introduces no additional count request', () => {
-  const requests = [...libraryScreen.matchAll(/listPersonalMedia\(/g)].length;
+  // Retrieval is chosen once by `fetchPage`, which the screen calls exactly
+  // twice: the first page and the next page. The count assertion is about
+  // there being no SEPARATE total query, and that is still what it checks.
+  const requests = [...libraryScreen.matchAll(/fetchPage\(identityRef\.current/g)].length;
   assert.equal(requests, 2, 'exactly the first-page and next-page requests, nothing new');
   assert.doesNotMatch(libraryScreen, /countOnly|totalOnly|fetchCount|\/count\b/i);
 });
