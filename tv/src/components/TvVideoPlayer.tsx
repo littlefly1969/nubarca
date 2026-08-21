@@ -130,7 +130,20 @@ interface Props {
   // Typed readiness for the viewer's preparing-grace policy. The POLICY lives
   // in the viewer; this only reports the state.
   onReadyStateChange?: (state: TvVideoReadyState) => void;
+  // A pause this component performed for an EXTERNAL, system-driven reason,
+  // reported so a controlled parent can bring its own playback intent back into
+  // agreement with reality.
+  //
+  // Fired ONLY for causes the user did not choose. Never for a SELECT pause,
+  // never for `playing=false` arriving from the parent, never for a natural end
+  // or a cap — those already have their own paths, and turning any of them into
+  // an external pause would switch a slideshow OFF when it should simply
+  // advance. The `reason` is closed and semantic on purpose: raw player state
+  // must not become a second authority.
+  onExternalPause?: (reason: TvVideoExternalPauseReason) => void;
 }
+
+export type TvVideoExternalPauseReason = 'output-lost';
 
 // What the viewer needs to know about playability, and nothing more.
 export type TvVideoReadyState = 'probing' | 'preparing' | 'ready' | 'error';
@@ -138,6 +151,7 @@ export type TvVideoReadyState = 'probing' | 'preparing' | 'ready' | 'error';
 export function TvVideoPlayer({
   videoPath, posterPath, onEnded, controlsRef, personal = false,
   maxPlaybackSeconds = null, onCapReached, playing, onReadyStateChange,
+  onExternalPause,
 }: Props) {
   const { t } = useI18n();
   // BACKGROUND RELEASE. The player component is UNMOUNTED when the app is
@@ -234,6 +248,7 @@ export function TvVideoPlayer({
         onFatalError={() => setMode('error')}
         restoreSnapshot={snapshotRef.current}
         host={host}
+        onExternalPause={onExternalPause}
       />
     );
   }
@@ -257,6 +272,7 @@ export function TvVideoPlayer({
 function ReadyPlayer({
   videoPath, mode, onEnded, controlsRef, onFatalError, personal,
   maxPlaybackSeconds, onCapReached, playing, restoreSnapshot = null, host,
+  onExternalPause,
 }: {
   videoPath: string;
   mode: 'hls' | 'direct';
@@ -269,6 +285,7 @@ function ReadyPlayer({
   // Only ever 'active' or 'inactive' here: a 'background' host means this
   // component is not rendered at all.
   host: HostState;
+  onExternalPause?: (reason: TvVideoExternalPauseReason) => void;
   personal: boolean;
   maxPlaybackSeconds: number | null;
   onCapReached?: () => void;
@@ -309,6 +326,10 @@ function ReadyPlayer({
   // Whether the user has playback going. Consulted when returning from the
   // background so a paused video is not un-paused behind their back.
   const wasPlayingRef = useRef(true);
+  // Held in a ref so the native output subscription is keyed only by the
+  // player, not re-registered whenever the parent re-renders.
+  const onExternalPauseRef = useRef(onExternalPause);
+  onExternalPauseRef.current = onExternalPause;
 
   // Imperative remote controls for the viewer. Cleared on unmount so a stale
   // ref can never reach a released player.
@@ -359,14 +380,26 @@ function ReadyPlayer({
   //
   // Subscribed only while a player exists, so outside a playback context
   // nothing is registered natively.
+  // The callback is reported AFTER the pause, and only when playback was
+  // actually running: pausing something already paused is not an event, and a
+  // controlled parent must not be told its intent is wrong when it is not.
+  //
+  // Telling the parent is the whole point. Pausing the real player while the
+  // slideshow still believed it was playing left the two disagreeing, and the
+  // next SELECT then spent itself flipping the parent's stale `true` to
+  // `false` — so the video did not resume until a SECOND press.
   useEffect(() => subscribeOutputLost(() => {
+    let wasPlaying = false;
     try {
-      wasPlayingRef.current = player.playing;
+      wasPlaying = player.playing;
+      wasPlayingRef.current = wasPlaying;
       player.pause();
     } catch {
-      // Already released; nothing to pause.
+      // Already released; nothing to pause and nothing to reconcile.
+      return;
     }
     tvDebug('video', 'lifecycle', 'paused-on-output-lost');
+    if (wasPlaying) onExternalPauseRef.current?.('output-lost');
   }), [player]);
 
   // The PARENT owns background/foreground: it snapshots the position and then

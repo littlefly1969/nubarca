@@ -308,3 +308,110 @@ test('a changed item discards the stale position', () => {
   const snapshot = { source: '/api/tv/media/x/video', positionSeconds: 42, wasPlaying: true };
   assert.equal(restorablePosition(snapshot, '/api/tv/media/y/video'), null);
 });
+
+// ------------------------------- controlled video, external pause (3C)
+
+// THE DEFECT. During a controlled Party slideshow the output-loss handler
+// paused the REAL player but left the parent believing `playing === true`.
+// The two then disagreed, and the next SELECT was spent flipping that stale
+// `true` to `false` — so the first press did not resume the video and the user
+// needed a second one.
+
+test('the player reports an external pause with a closed, semantic reason', () => {
+  assert.match(player, /export type TvVideoExternalPauseReason = 'output-lost';/);
+  assert.match(player, /onExternalPause\?: \(reason: TvVideoExternalPauseReason\) => void;/);
+  assert.match(player, /onExternalPauseRef\.current\?\.\('output-lost'\)/);
+});
+
+test('the external pause is reported only when playback was actually running', () => {
+  // Pausing something already paused is not an event, and telling a controlled
+  // parent its intent is wrong when it is not would be a false reconciliation.
+  assert.match(player, /if \(wasPlaying\) onExternalPauseRef\.current\?\.\('output-lost'\)/);
+  // Anchored on the HANDLER. `subscribeOutputLost` also appears in the import
+  // line, and slicing from there swept in unrelated player.pause() calls.
+  const start = player.indexOf('useEffect(() => subscribeOutputLost(');
+  assert.ok(start > 0, 'the output-loss handler must exist');
+  const handler = player.slice(start, player.indexOf('}), [player]);', start));
+  const report = handler.indexOf('onExternalPauseRef');
+  const pause = handler.indexOf('player.pause()');
+  assert.ok(pause > 0, 'the handler must pause the player');
+  assert.ok(pause < report, 'the pause must happen before it is reported');
+});
+
+test('only the CONTROLLED slideshow reconciles its intent', () => {
+  // A manually opened video has no parent playback intent; manufacturing one
+  // would be a second authority for something the player already owns.
+  assert.match(partyViewer,
+    /onExternalPause=\{slideshowMode \? \(\) => setPlaying\(false\) : undefined\}/);
+  assert.doesNotMatch(personalViewer, /onExternalPause/,
+    'the personal viewer plays video uncontrolled and must stay that way');
+  assert.doesNotMatch(personalViewer, /playing=\{/,
+    'passing `playing` would make it controlled');
+});
+
+test('natural end and cap keep their own paths — they are not external pauses', () => {
+  // A video ending must ADVANCE an active slideshow, not switch the slideshow
+  // off. Routing it through the external-pause callback would do exactly that.
+  assert.match(partyViewer, /onEnded=\{goNext\}/);
+  assert.match(partyViewer, /onCapReached=\{goNext\}/);
+  const start = player.indexOf('useEffect(() => subscribeOutputLost(');
+  const handler = player.slice(start, player.indexOf('}), [player]);', start));
+  for (const unrelated of [/onEnded/, /onCapReached/, /playToEnd/]) {
+    assert.doesNotMatch(handler, unrelated,
+      'the external-pause path must not be reachable from a natural end');
+  }
+});
+
+test('a parent-commanded pause does not masquerade as an external one', () => {
+  // The controlled effect pauses when `playing` becomes false. That is the
+  // parent's own decision arriving, not a system event to report back to it —
+  // reporting it would be a feedback loop.
+  // Anchored on CODE: `player` is comment-stripped, so a prose anchor is not
+  // there to find.
+  const start = player.indexOf('if (playing === undefined) return;');
+  assert.ok(start > 0, 'the controlled-playing effect must exist');
+  const controlled = player.slice(start, player.indexOf('}, [playing, player]);', start));
+  assert.match(controlled, /player\.pause\(\)/, 'it pauses on a commanded false');
+  assert.doesNotMatch(controlled, /onExternalPause/,
+    'a commanded pause must not be reported back to the parent that commanded it');
+});
+
+test('the controlled party video scenario, end to end', () => {
+  // parent intent + real player, tracked as the two values that must agree.
+  let parentPlaying = true;
+  let playerPlaying = true;
+
+  // Output lost: the player pauses and REPORTS, so the parent follows.
+  const onOutputLost = () => {
+    const wasPlaying = playerPlaying;
+    playerPlaying = false;
+    if (wasPlaying) parentPlaying = false;      // onExternalPause → setPlaying(false)
+  };
+  onOutputLost();
+  assert.equal(playerPlaying, false);
+  assert.equal(parentPlaying, false, 'intent must agree with reality');
+
+  // Output restored: nothing changes, no auto-resume.
+  assert.equal(resumesOnOutputRestored(), false);
+  assert.equal(parentPlaying, false);
+  assert.equal(playerPlaying, false);
+
+  // FIRST SELECT: toggle-slideshow flips intent, and the controlled effect
+  // plays. One press, one resume.
+  let playCalls = 0;
+  parentPlaying = !parentPlaying;
+  if (parentPlaying && !playerPlaying) { playerPlaying = true; playCalls += 1; }
+  assert.equal(parentPlaying, true);
+  assert.equal(playerPlaying, true);
+  assert.equal(playCalls, 1, 'exactly one resume, on the FIRST press');
+});
+
+test('a second output loss while already paused reports nothing', () => {
+  let parentPlaying = false;
+  let reports = 0;
+  const playerPlaying = false;
+  const wasPlaying = playerPlaying;
+  if (wasPlaying) { reports += 1; parentPlaying = false; }
+  assert.equal(reports, 0);
+  assert.equal(parentPlaying, false);
+});

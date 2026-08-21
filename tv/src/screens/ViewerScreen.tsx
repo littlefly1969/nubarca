@@ -476,6 +476,16 @@ export function ViewerScreen({
           // come from one tested policy rather than from `partyEnabled` alone.
           {...videoPlaybackProps({ slideshowMode, partyEnabled, playing, timing })}
           onReadyStateChange={setVideoReady}
+          // EXTERNAL pause reconciliation, for the CONTROLLED slideshow only.
+          // When the output route disappears the player pauses for real; without
+          // this the slideshow still believed it was playing, and the next
+          // SELECT was spent flipping that stale `true` to `false` instead of
+          // resuming — the video needed two presses.
+          //
+          // A manually opened video is deliberately excluded: it has no parent
+          // playback intent, so inventing one here would be a second authority
+          // for something the player already owns.
+          onExternalPause={slideshowMode ? () => setPlaying(false) : undefined}
           controlsRef={videoControlsRef}
         />
       ) : (
