@@ -46,6 +46,41 @@ Repeat the media operations using MENU, Play/Pause, RW and FF.
 - [ ] A = Select, B = Back
 - [ ] no prompt names a vendor-specific button
 
+## D2. Media Library surfaces
+
+These are the reconciliation slice's user-visible outcomes. They are cheap to
+check and easy to regress.
+
+- [ ] **Paging counters.** Scroll past the first page in the Personal library.
+      The grid badge and the viewer counter must never show `-1` — the viewer
+      reads `7 / 137`, and the total does not change as later pages arrive
+- [ ] **Selected kind.** Choose Video, close the menu, browse, reopen: the
+      current kind is still marked, not merely focused
+- [ ] **People picker with many people.** Open it on an owner with a large
+      People list: it scrolls smoothly, focus never disappears while scrolling,
+      and the highlighted row is always the one the remote is on
+- [ ] **Search people.** Narrow the list by name, clear it, confirm the
+      include/exclude selection is unchanged by searching
+- [ ] **Long person names.** A long name truncates with an ellipsis at the SAME
+      character in each of Off / Include / Exclude — the row must not appear to
+      change identity as it is cycled
+- [ ] **Filter editors.** The keyboard, the numeric pad and the date pad each
+      show title, current value, every key row and the actions at once, with no
+      page scroll and no clipped bottom row
+- [ ] **Semantic search.** Confirmed absent from the filter list — it is
+      modelled but deliberately not offered yet (see docs/current-work.md)
+
+## D3. Personal viewer chrome
+
+- [ ] Opening a photo shows the name, the position counter and (when running)
+      the slideshow pill briefly
+- [ ] After the idle window they all disappear together, and the photograph is
+      not interrupted by their going
+- [ ] MENU brings them back; MENU again hides them
+- [ ] During a running slideshow they do NOT stay permanently visible — a slide
+      advancing must not keep re-arming the overlay
+- [ ] BACK still leaves the viewer in one press
+
 ## E. Photo keep-awake
 
 - [ ] still photograph → screensaver/ambient is allowed to arrive
