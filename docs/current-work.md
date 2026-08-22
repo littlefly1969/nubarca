@@ -532,3 +532,21 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   in. Related to the repository's older rule about piping validation commands
   into `head`/`tail` without `pipefail`; this is the same hazard with the
   opposite sign.
+- **TV 1.0.9 is accepted on physical hardware, with one defect left open: the
+  launcher icon still does not appear.** The operator accepted the release and
+  explicitly did not block on the icon, so it is recorded rather than fixed. It
+  matters that this is the FOURTH release to touch that area, because the next
+  attempt should not re-try what has already been disproved on real hardware:
+  1.0.6 replaced both Android launcher icon slots (legacy tile with transparent
+  corners, adaptive foreground inside the 66/108dp safe square) and the tile
+  stayed square; 1.0.7 restored `android.intent.category.LAUNCHER` beside
+  `LEANBACK_LAUNCHER`, which fixed VISIBILITY in the Applications library but not
+  the artwork; 1.0.8 corrected the banner density (320×180 px at xhdpi = 160×90
+  dp, `drawable-xhdpi` only). So icon slots, launcher category and banner density
+  are each individually ruled out as the whole explanation.
+  Whoever picks this up should FIRST establish which artifact is actually missing
+  — the Leanback banner on the home row, or the launcher tile in the Applications
+  library — because the three fixes above touch different resources and the
+  reports so far do not distinguish them. `adb shell dumpsys package
+  it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
+  and cannot get it, so the evidence has to come from what the screen shows.
