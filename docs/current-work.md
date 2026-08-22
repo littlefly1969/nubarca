@@ -502,3 +502,32 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   wiring reached the containers rather than assuming it. Rollback became a pin
   change with no recompilation, in both directions. The frontend is still built
   on the server; that is the next slice.
+- **The production server compiles no application code at all.** The frontend
+  was the last local build; it is now built, verified and published by CI beside
+  the backend, as an INDEPENDENT parallel job — the two share only the source
+  SHA, so a frontend failure never withholds a good backend image. With its
+  `build:` removed, `docker-compose.prod.yml` carries no application build
+  recipe whatsoever, and `up --build` has nothing left to compile. The frontend
+  records provenance as `org.opencontainers.image.revision` rather than an
+  application variable: nginx has no use for one, and a label is where a build
+  says what it came from. Its verifier RUNS the container instead of listing
+  files, because a `dist/` that copied cleanly and an nginx that answers
+  correctly are different claims — it proves the SPA fallback returns 200 for a
+  client-side route while a MISSING `/assets` file still returns 404, which is
+  the half that matters: a stale client handed HTML where it expected JavaScript
+  fails later, somewhere else, as a parse error. `/tv.apk` and `/download/tv/*`
+  are deliberately NOT tested in CI — they come from an installation volume,
+  never from the image, the same separation as `/dev/dri` for the backend — and
+  are checked after the deploy instead, where replacing the container is exactly
+  when that boundary would break.
+- **Never `probe … | grep -q` in the image verifiers.** `grep -q` exits at the
+  first match and closes the pipe, `docker run` dies of SIGPIPE, and under
+  `set -o pipefail` the pipeline reports failure even though the match
+  succeeded. Whether it bites depends on whether docker finished writing first,
+  so it appears as an intermittent false FAILURE on whichever check is slowest
+  to produce output — it was found because `nginx -t` failed verification while
+  the same container served every request correctly. Both verifiers now capture
+  into a variable and match with `[[ ]]`, so there is no pipe to lose the race
+  in. Related to the repository's older rule about piping validation commands
+  into `head`/`tail` without `pipefail`; this is the same hazard with the
+  opposite sign.

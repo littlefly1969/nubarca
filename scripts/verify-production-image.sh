@@ -42,6 +42,20 @@ probe() {
   docker run --rm --entrypoint /bin/sh "$image" -c "$1" 2>/dev/null
 }
 
+# Capture, then match — never `probe ... | grep -q`.
+#
+# `grep -q` exits at the first match and closes the pipe; `docker run` then dies
+# of SIGPIPE, and under `set -o pipefail` the pipeline reports FAILURE even
+# though the match succeeded. Whether it bites depends on whether docker has
+# finished writing first, so it shows up as an intermittent false failure on
+# exactly the checks whose output takes longest to produce. Capturing into a
+# variable removes the pipe, and with it the race.
+contains() {  # contains <shell-command-inside-image> <needle>
+  local out
+  out="$(probe "$1")" || true
+  [[ "$out" == *"$2"* ]]
+}
+
 echo "Verifying $image"
 echo "  variant       : $variant"
 echo "  expected SHA  : $expected_sha"
@@ -60,13 +74,13 @@ fi
 # --- the image actually starts ---------------------------------------------
 # `dotnet --info` exercises the runtime the entrypoint depends on. A broken or
 # absent .NET runtime fails here rather than at first boot in production.
-if probe 'command -v dotnet >/dev/null && dotnet --list-runtimes' | grep -q 'Microsoft.AspNetCore.App'; then
+if contains 'command -v dotnet >/dev/null && dotnet --list-runtimes' 'Microsoft.AspNetCore.App'; then
   pass "ASP.NET Core runtime present and dotnet is startable"
 else
   fail "no startable ASP.NET Core runtime"
 fi
 
-if probe 'test -f /app/NubArca.Api.dll && echo yes' | grep -q yes; then
+if contains 'test -f /app/NubArca.Api.dll && echo yes' yes; then
   pass "/app/NubArca.Api.dll is present"
 else
   fail "/app/NubArca.Api.dll is missing"
@@ -74,7 +88,7 @@ fi
 
 # --- external media providers ----------------------------------------------
 for tool in ffmpeg ffprobe; do
-  if probe "command -v $tool" | grep -q "/$tool$"; then
+  if contains "command -v $tool" "/$tool"; then
     pass "$tool present"
   else
     fail "$tool missing"
@@ -91,14 +105,14 @@ if [ "$variant" = "openvino" ]; then
   else
     want="libonnxruntime.so.*"
   fi
-  if probe "ls /opt/nubarca/ort-openvino/$want" | grep -q libonnxruntime; then
+  if contains "ls /opt/nubarca/ort-openvino/$want" libonnxruntime; then
     pass "OpenVINO ONNX Runtime present ($want)"
   else
     fail "missing /opt/nubarca/ort-openvino/$want"
   fi
 
   for lib in libonnxruntime_providers_shared.so libonnxruntime_providers_openvino.so; do
-    if probe "test -f /opt/nubarca/ort-openvino/$lib && echo yes" | grep -q yes; then
+    if contains "test -f /opt/nubarca/ort-openvino/$lib && echo yes" yes; then
       pass "$lib present"
     else
       fail "$lib missing"
@@ -109,26 +123,26 @@ if [ "$variant" = "openvino" ]; then
   # /dev/dri mount would actually drive; its ABSENCE here would mean the GPU
   # deployment can never work, whatever the installation maps in.
   for lib in 'libopenvino.so*' 'libopenvino_intel_cpu_plugin.so' 'libopenvino_intel_gpu_plugin.so'; do
-    if probe "ls /opt/nubarca/ort-openvino/$lib" | grep -q libopenvino; then
+    if contains "ls /opt/nubarca/ort-openvino/$lib" libopenvino; then
       pass "${lib} present"
     else
       fail "${lib} missing"
     fi
   done
 
-  if probe 'printf %s "${Ai__Onnx__OpenVino__NativeDir:-}"' | grep -q '/opt/nubarca/ort-openvino'; then
+  if contains 'printf %s "${Ai__Onnx__OpenVino__NativeDir:-}"' '/opt/nubarca/ort-openvino'; then
     pass "Ai__Onnx__OpenVino__NativeDir points at the staged libraries"
   else
     fail "Ai__Onnx__OpenVino__NativeDir is not set to /opt/nubarca/ort-openvino"
   fi
 
   # Intel GPU userspace. Present in the image; the DEVICE is the installation's.
-  if probe 'ls /usr/lib/x86_64-linux-gnu/libOpenCL.so*' | grep -q libOpenCL; then
+  if contains 'ls /usr/lib/x86_64-linux-gnu/libOpenCL.so*' libOpenCL; then
     pass "OpenCL ICD loader present"
   else
     fail "OpenCL ICD loader (ocl-icd-libopencl1) missing"
   fi
-  if probe 'ls /etc/OpenCL/vendors/*.icd' | grep -q '\.icd'; then
+  if contains 'ls /etc/OpenCL/vendors/*.icd' '.icd'; then
     pass "Intel OpenCL ICD registered"
   else
     fail "no OpenCL ICD registered (intel-opencl-icd missing)"
@@ -136,13 +150,13 @@ if [ "$variant" = "openvino" ]; then
 else
   # The lean runtime carries the CPU execution provider from the NuGet package,
   # published beside the application rather than staged under /opt.
-  if probe 'find /app -name "libonnxruntime.so*" -print -quit' | grep -q libonnxruntime; then
+  if contains 'find /app -name "libonnxruntime.so*" -print -quit' libonnxruntime; then
     pass "CPU ONNX Runtime present under /app"
   else
     fail "no ONNX Runtime native library under /app"
   fi
   # And it must NOT pretend to be the GPU image.
-  if probe 'test -d /opt/nubarca/ort-openvino && echo yes' | grep -q yes; then
+  if contains 'test -d /opt/nubarca/ort-openvino && echo yes' yes; then
     fail "lean runtime unexpectedly carries the OpenVINO native directory"
   else
     pass "lean runtime correctly carries no OpenVINO layer"

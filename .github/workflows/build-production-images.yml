@@ -18,8 +18,12 @@ concurrency:
 env:
   REGISTRY: ghcr.io
 
+# Backend and frontend are INDEPENDENT jobs, deliberately parallel. They share
+# nothing but the source SHA, so serialising them would only make the slower one
+# the release's latency for no gate it does not already have — and a frontend
+# failure has no business holding a good backend image hostage, or vice versa.
 jobs:
-  images:
+  backend:
     name: Build and publish production API images
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -129,4 +133,86 @@ jobs:
             echo "GPU execution is NOT exercised here — \`/dev/dri\` belongs to an installation."
             echo
             echo "Production is unchanged by this workflow and still builds from source."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  frontend:
+    name: Build and publish production frontend image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Resolve image reference
+        id: refs
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          sha='${{ github.sha }}'
+          {
+            echo "owner=$owner"
+            echo "sha=$sha"
+            echo "frontend=${REGISTRY}/${owner}/nubarca-frontend:${sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The frontend records its provenance as an OCI label rather than an
+      # application variable: nginx has no use for one, and a label is the
+      # standard place a build says what it came from. `npm run build` already
+      # runs `tsc -b && vite build`, so the Dockerfile needs no change to move
+      # the compile here — which is the point of this migration.
+      - name: Build frontend image
+        run: >-
+          docker buildx build --load
+          --label org.opencontainers.image.revision=${{ steps.refs.outputs.sha }}
+          --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          -f frontend/Dockerfile
+          -t ${{ steps.refs.outputs.frontend }}
+          frontend
+
+      - name: Verify frontend image
+        run: >-
+          scripts/verify-production-frontend-image.sh
+          ${{ steps.refs.outputs.frontend }}
+          ${{ steps.refs.outputs.sha }}
+
+      - name: Push image
+        run: docker push '${{ steps.refs.outputs.frontend }}'
+
+      - name: Record digest
+        id: digest
+        run: |
+          set -euo pipefail
+          digest="$(docker buildx imagetools inspect '${{ steps.refs.outputs.frontend }}' \
+            --format '{{.Manifest.Digest}}')"
+          echo "frontend_digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        run: |
+          {
+            echo "## Production frontend image"
+            echo
+            echo "Source SHA: \`${{ steps.refs.outputs.sha }}\`"
+            echo
+            echo "| Variant | Image | Digest |"
+            echo "| --- | --- | --- |"
+            echo "| frontend | \`${{ steps.refs.outputs.frontend }}\` | \`${{ steps.digest.outputs.frontend_digest }}\` |"
+            echo
+            echo "Verified before publication by running the container: nginx config,"
+            echo "hashed Vite bundles, SPA fallback, and that a missing /assets file"
+            echo "still 404s instead of being answered with index.html."
+            echo
+            echo "\`/tv.apk\` and \`/download/tv/*\` are NOT tested here — they come from an"
+            echo "installation volume, never from this image."
           } >> "$GITHUB_STEP_SUMMARY"
