@@ -422,6 +422,40 @@ public static class PeopleEndpoints
             return Results.Ok(page);
         }).WithName("UnassignedFaces").RequirePermission(Permissions.PeopleAccess);
 
+        // Owner-private: the PHOTOS that still carry undecided faces, most-undecided
+        // first. Keyset paged. Each row carries its unassigned face ids so the
+        // reviewer can work one photo through without a request per face.
+        app.MapGet("/api/people/photos-with-unassigned-faces", async (
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.PeopleService people,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var page = await people.GetPhotosWithUnassignedFacesAsync(
+                ownerUserId, limit ?? 40, cursor, cancellationToken);
+            return Results.Ok(page);
+        }).WithName("PhotosWithUnassignedFaces").RequirePermission(Permissions.PeopleAccess);
+
+        // Owner-private: ignore every still-undecided face on ONE photo, in one
+        // call. Deliberately not N per-face requests from the browser: the decision
+        // is a single act, and a partial failure would leave the photo in the queue
+        // with a few faces left — the state the action exists to clear. Faces already
+        // on a person, other photos, people, clustering and embeddings are untouched.
+        // Generic 404 when the photo is not an owner-visible active file.
+        app.MapPost("/api/people/photos/{fileItemId:guid}/ignore-unassigned-faces", async (
+            Guid fileItemId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Ai.Faces.PeopleService people,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var ignored = await people.IgnoreUnassignedFacesOnPhotoAsync(
+                ownerUserId, fileItemId, cancellationToken);
+            return ignored is null ? Results.NotFound() : Results.Ok(new { ignored = ignored.Value });
+        }).WithName("IgnoreUnassignedFacesOnPhoto").RequirePermission(Permissions.PeopleAccess);
+
         // Owner-private: drop cached crops for a face so they regenerate. Idempotent.
         app.MapPost("/api/people/faces/{faceId:guid}/preview/regenerate", async (
             Guid faceId,

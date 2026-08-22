@@ -829,6 +829,163 @@ public sealed class PeopleService
         return new UnassignedFacesPage(items, nextCursor, true);
     }
 
+    // ---- photo-centric review of unassigned faces -------------------------
+
+    // "Which PHOTOS still have faces nobody has decided about."
+    //
+    // The face-at-a-time pool answers a different question, and answering it one
+    // face at a time makes the reviewer jump between photos: three faces from the
+    // same picture arrive separated by faces from everywhere else, and each jump
+    // costs the context that makes a face recognisable in the first place. Here
+    // the unit of work is the photo, and a photo leaves the queue when it has no
+    // undecided faces left.
+    //
+    // The membership predicate is IDENTICAL to the one the face pool uses, and
+    // deliberately shares this helper with the bulk-ignore below: an "unassigned"
+    // that meant something slightly different in the list and in the action would
+    // let a photo be emptied and still come back.
+    private IQueryable<FaceDetection> UnassignedFacesQuery(Guid ownerUserId, Guid profileId)
+        => from d in _db.FaceDetections.AsNoTracking()
+           where d.ProfileId == profileId
+               && !_db.PersonFaceAssignments.Any(a => a.OwnerUserId == ownerUserId && a.FaceDetectionId == d.Id)
+               && !_db.IgnoredFaces.Any(g => g.OwnerUserId == ownerUserId && g.FaceDetectionId == d.Id)
+               && _db.FileItems.Any(f => f.BlobObjectId == d.BlobObjectId && f.OwnerUserId == ownerUserId
+                   && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
+           select d;
+
+    public async Task<PhotosWithUnassignedFacesPage> GetPhotosWithUnassignedFacesAsync(
+        Guid ownerUserId, int limit, string? cursor, CancellationToken cancellationToken = default)
+    {
+        var pageSize = Math.Clamp(limit, 1, MaxPageSize);
+        var profile = await ResolveActiveProfileAsync(cancellationToken);
+        if (profile is null)
+        {
+            return new PhotosWithUnassignedFacesPage(Array.Empty<PhotoWithUnassignedFacesDto>(), null, false);
+        }
+
+        // Grouped by BLOB, because a face belongs to blob content rather than to
+        // one library path; the representative FileItem is the same deterministic
+        // lowest-id choice every other People surface makes.
+        var grouped = UnassignedFacesQuery(ownerUserId, profile.Id)
+            .GroupBy(d => d.BlobObjectId)
+            .Select(g => new { BlobObjectId = g.Key, Count = g.Count() });
+
+        // Most-undecided photos first: it is the order that empties the backlog
+        // fastest, and it is stable enough to page through with a keyset because
+        // the tie-break is the blob id.
+        var after = DecodeCursor2(cursor);
+        if (after is not null
+            && int.TryParse(after.Value.SortRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var afterCount))
+        {
+            grouped = grouped.Where(x => x.Count < afterCount
+                || (x.Count == afterCount && x.BlobObjectId.CompareTo(after.Value.FaceId) > 0));
+        }
+
+        var rows = await grouped
+            .OrderByDescending(x => x.Count).ThenBy(x => x.BlobObjectId)
+            .Take(pageSize + 1)
+            .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > pageSize;
+        var window = rows.Take(pageSize).ToList();
+        var blobIds = window.Select(w => w.BlobObjectId).ToList();
+
+        var files = await _db.FileItems.AsNoTracking()
+            .Where(f => blobIds.Contains(f.BlobObjectId) && f.OwnerUserId == ownerUserId
+                && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
+            .OrderBy(f => f.Id)
+            .Select(f => new { f.Id, f.Name, f.BlobObjectId })
+            .ToListAsync(cancellationToken);
+        var fileByBlob = files
+            .GroupBy(f => f.BlobObjectId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // The face ids travel WITH the photo so the reviewer can cycle through
+        // them without a second round trip per picture. A photo carries a handful
+        // of faces, so this is bounded by the page size in practice.
+        var faceRows = await UnassignedFacesQuery(ownerUserId, profile.Id)
+            .Where(d => blobIds.Contains(d.BlobObjectId))
+            .OrderBy(d => d.Id)
+            .Select(d => new { d.Id, d.BlobObjectId })
+            .ToListAsync(cancellationToken);
+        var facesByBlob = faceRows
+            .GroupBy(r => r.BlobObjectId)
+            .ToDictionary(g => g.Key, g => g.Select(r => r.Id).ToList());
+
+        var items = window
+            .Where(w => fileByBlob.ContainsKey(w.BlobObjectId))
+            .Select(w =>
+            {
+                var file = fileByBlob[w.BlobObjectId];
+                var faceIds = facesByBlob.GetValueOrDefault(w.BlobObjectId) ?? new List<Guid>();
+                return new PhotoWithUnassignedFacesDto(file.Id, file.Name, faceIds.Count, faceIds);
+            })
+            .ToList();
+
+        string? nextCursor = hasMore && window.Count > 0
+            ? EncodeCursor2(
+                window[^1].Count.ToString(CultureInfo.InvariantCulture),
+                window[^1].BlobObjectId)
+            : null;
+
+        return new PhotosWithUnassignedFacesPage(items, nextCursor, true);
+    }
+
+    // Ignore EVERY still-undecided face on one photo, in one call.
+    //
+    // One request rather than N from the browser: the reviewer's decision is
+    // "nothing here is worth deciding about", which is a single act, and N
+    // requests can half-succeed and leave the photo in the queue with a few
+    // faces left — the exact state the action was meant to clear.
+    //
+    // It touches only faces that are UNASSIGNED on THIS photo. Faces already on a
+    // person, faces on other photos, the people themselves, clustering, embeddings
+    // and the photo are all untouched. Returns null when the photo is not an
+    // owner-visible active file (→ 404); the count of faces newly ignored
+    // otherwise, which is 0 when there was nothing left to do.
+    public async Task<int?> IgnoreUnassignedFacesOnPhotoAsync(
+        Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken = default)
+    {
+        var file = await _db.FileItems.AsNoTracking()
+            .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId
+                && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
+            .Select(f => new { f.BlobObjectId })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (file is null)
+        {
+            return null;
+        }
+
+        var profile = await ResolveActiveProfileAsync(cancellationToken);
+        if (profile is null)
+        {
+            return 0;
+        }
+
+        var faceIds = await UnassignedFacesQuery(ownerUserId, profile.Id)
+            .Where(d => d.BlobObjectId == file.BlobObjectId)
+            .Select(d => d.Id)
+            .ToListAsync(cancellationToken);
+        if (faceIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var faceId in faceIds)
+        {
+            _db.IgnoredFaces.Add(new IgnoredFace
+            {
+                Id = Guid.NewGuid(),
+                OwnerUserId = ownerUserId,
+                FaceDetectionId = faceId,
+                CreatedAt = now,
+            });
+        }
+        await _db.SaveChangesAsync(cancellationToken);
+        return faceIds.Count;
+    }
+
     public async Task<IReadOnlyList<PersonPhotoDto>?> GetPersonPhotosAsync(
         Guid ownerUserId, Guid personId, CancellationToken cancellationToken = default)
     {
@@ -1043,17 +1200,52 @@ public sealed class PeopleService
             }
         }
 
-        // Order (score desc, faceId asc); apply keyset cursor + limit.
+        // Who ALREADY holds each candidate, resolved over the WHOLE candidate set
+        // rather than over the page.
+        //
+        // This used to run on the window, after paging — which was enough to
+        // label a row, and not enough to order by it. A face already on someone
+        // else is a lower-value suggestion than a free one, however well it
+        // scores: the free face is a decision waiting to be made, while the
+        // assigned one is at most a correction of a decision already taken. So
+        // unassigned candidates come first, and only then the assigned ones,
+        // each group by descending score.
+        //
+        // Doing this BEFORE the limit is the whole point. Ordering the page in
+        // the client would let high-scoring assigned faces occupy all N slots
+        // and hide unassigned candidates that pass the threshold — the priority
+        // would hold within a page and be false across the pool. The lookup is
+        // bounded exactly like the ignored-face filter above (references ×
+        // SimilarFetchCap deduped candidates), and for the same reason.
+        var assignedTo = await AssignedPeopleByFaceAsync(
+            ownerUserId, best.Keys.ToList(), cancellationToken);
+
+        // Group 0 = free, group 1 = already on somebody. Sorting on the group
+        // first makes it a genuine two-block list, not a tie-break.
+        static int Group(Dictionary<Guid, PersonRef> held, Guid faceId)
+            => held.ContainsKey(faceId) ? 1 : 0;
+
         var ordered = best.Values
-            .OrderByDescending(n => n.Score).ThenBy(n => n.FaceDetectionId)
+            .OrderBy(n => Group(assignedTo, n.FaceDetectionId))
+            .ThenByDescending(n => n.Score)
+            .ThenBy(n => n.FaceDetectionId)
             .ToList();
 
-        var after = DecodeCursor(cursor);
+        // The keyset cursor carries the GROUP too. Without it the second page
+        // would resume by score alone and re-cross the boundary between the two
+        // blocks — repeating assigned faces, or skipping unassigned ones.
+        var after = DecodeSimilarCursor(cursor);
         if (after is not null)
         {
             ordered = ordered
-                .Where(n => n.Score < after.Value.Score
-                    || (n.Score == after.Value.Score && n.FaceDetectionId.CompareTo(after.Value.FaceId) > 0))
+                .Where(n =>
+                {
+                    var group = Group(assignedTo, n.FaceDetectionId);
+                    if (group != after.Value.Group) return group > after.Value.Group;
+                    return n.Score < after.Value.Score
+                        || (n.Score == after.Value.Score
+                            && n.FaceDetectionId.CompareTo(after.Value.FaceId) > 0);
+                })
                 .ToList();
         }
 
@@ -1061,12 +1253,12 @@ public sealed class PeopleService
         var hasMore = pageRows.Count > pageSize;
         var window = pageRows.Take(pageSize).ToList();
 
-        // Resolve boxes/file refs for the window (owner-visible only), plus the
-        // person each candidate is ALREADY on, so the UI can offer an explicit
-        // move instead of an add that silently steals the face.
+        // Resolve boxes/file refs for the window (owner-visible only). The person
+        // each candidate is already on came from the whole-set lookup above, so
+        // the UI can still offer an explicit move instead of an add that silently
+        // steals the face.
         var windowIds = window.Select(w => w.FaceDetectionId).ToList();
         var refs = await ResolveFaceRefsAsync(ownerUserId, windowIds, cancellationToken);
-        var assignedTo = await AssignedPeopleByFaceAsync(ownerUserId, windowIds, cancellationToken);
         var items = window
             .Where(w => refs.ContainsKey(w.FaceDetectionId))
             .Select(w =>
@@ -1080,7 +1272,10 @@ public sealed class PeopleService
             .ToList();
 
         string? nextCursor = hasMore && window.Count > 0
-            ? EncodeCursor(window[^1].Score, window[^1].FaceDetectionId)
+            ? EncodeSimilarCursor(
+                Group(assignedTo, window[^1].FaceDetectionId),
+                window[^1].Score,
+                window[^1].FaceDetectionId)
             : null;
 
         return new SimilarFacesPage(true, threshold, items, nextCursor, hasMore, null);
@@ -1413,13 +1608,25 @@ public sealed class PeopleService
         return result;
     }
 
-    private static string EncodeCursor(double score, Guid faceId)
+    // The similar-faces cursor carries the ORDERING GROUP as well as the score.
+    //
+    // The list is two blocks — unassigned candidates, then already-assigned ones
+    // — so a cursor that remembered only (score, faceId) would resume the second
+    // page by score alone and walk back across the block boundary: assigned faces
+    // repeated, unassigned ones skipped. The group is the primary sort key, so it
+    // has to be the primary cursor key too.
+    //
+    // A cursor in the OLD two-part format no longer parses and is treated as
+    // absent, which restarts the list from the top. That is the right failure for
+    // a page token: a stale one shows the first page again rather than a window
+    // computed against an ordering that no longer exists.
+    private static string EncodeSimilarCursor(int group, double score, Guid faceId)
     {
-        var raw = $"{score.ToString("R", CultureInfo.InvariantCulture)}|{faceId:N}";
+        var raw = $"{group}|{score.ToString("R", CultureInfo.InvariantCulture)}|{faceId:N}";
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(raw));
     }
 
-    private static (double Score, Guid FaceId)? DecodeCursor(string? cursor)
+    private static (int Group, double Score, Guid FaceId)? DecodeSimilarCursor(string? cursor)
     {
         if (string.IsNullOrWhiteSpace(cursor))
         {
@@ -1428,24 +1635,22 @@ public sealed class PeopleService
         try
         {
             var raw = Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
-            var parts = raw.Split('|', 2);
-            if (parts.Length == 2
-                && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var score)
-                && Guid.TryParse(parts[1], out var faceId))
+            var parts = raw.Split('|', 3);
+            if (parts.Length == 3
+                && int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var group)
+                && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var score)
+                && Guid.TryParse(parts[2], out var faceId))
             {
-                return (score, faceId);
+                return (group, score, faceId);
             }
         }
-        catch
+        catch (FormatException)
         {
-            // fall through
+            // Not decodable → treated as no cursor.
         }
         return null;
     }
 
-    // Opaque keyset cursor for the unassigned-faces view: base64("<sortRaw>|<faceId>").
-    // sortRaw is the sort field's value (ticks for recent, R-format double for score
-    // sorts); it carries no storage internals.
     private static string EncodeCursor2(string sortRaw, Guid faceId)
         => Convert.ToBase64String(Encoding.UTF8.GetBytes($"{sortRaw}|{faceId:N}"));
 
@@ -1505,6 +1710,14 @@ public sealed record UnassignedFaceDto(
 
 public sealed record UnassignedFacesPage(
     IReadOnlyList<UnassignedFaceDto> Items, string? NextCursor, bool ProfileAvailable);
+
+// One PHOTO still carrying undecided faces. `FaceIds` travels with the row so the
+// reviewer can cycle through that photo without another request per picture.
+public sealed record PhotoWithUnassignedFacesDto(
+    Guid FileItemId, string Name, int UnassignedCount, IReadOnlyList<Guid> FaceIds);
+
+public sealed record PhotosWithUnassignedFacesPage(
+    IReadOnlyList<PhotoWithUnassignedFacesDto> Items, string? NextCursor, bool ProfileAvailable);
 
 public sealed record IgnoredFaceDto(Guid FaceId, Guid FileItemId, string Name, FaceBoxDto Box);
 

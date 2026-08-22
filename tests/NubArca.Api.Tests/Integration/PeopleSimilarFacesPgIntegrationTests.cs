@@ -363,6 +363,116 @@ public sealed class PeopleSimilarFacesPgIntegrationTests : IAsyncLifetime
 
     // 45° between OneHot(0) and OneHot(1): cosine sqrt(0.5) to each, so BOTH
     // reference searches return it above a 0.5 threshold.
+    [SkippableFact]
+    public async Task Unassigned_Candidates_Come_First_Even_When_Assigned_Ones_Score_Higher()
+    {
+        Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
+
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var profileKey = $"face-order-{suffix}";
+        var settings = new Dictionary<string, string?>
+        {
+            ["Ai:Enabled"] = "true",
+            ["Ai:FaceProfileKey"] = profileKey,
+        };
+        await using var factory = new PostgresWebApplicationFactory(_fixture.ConnectionString!, settings);
+
+        // The scores are deliberately the WRONG way round for the priority: the
+        // faces already on somebody else are identical to the template (score 1.0)
+        // and the free ones are only ~0.707. Ordering by score alone would put
+        // every assigned face first — and there are more of them than fit on a
+        // page, so the free candidates would not appear on the first page at all.
+        const int assignedCount = 5;
+        const int freeCount = 3;
+        const int pageSize = 4;
+
+        Guid owner, personId;
+        var freeIds = new List<Guid>();
+        var assignedElsewhereIds = new List<Guid>();
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var users = scope.ServiceProvider.GetRequiredService<IUserService>();
+            var ser = scope.ServiceProvider.GetRequiredService<IAiVectorSerializer>();
+            var vectors = scope.ServiceProvider.GetRequiredService<FaceVectorIndexService>();
+
+            owner = (await users.CreateAsync($"order-{suffix}@example.com", "O")).Id;
+            var model = AddModel(db, $"m-{suffix}");
+            var profileId = AddProfile(db, profileKey, model.Id).Id;
+
+            var query = (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId;
+            for (var i = 0; i < assignedCount; i++)
+            {
+                assignedElsewhereIds.Add(
+                    (await AddFaceAsync(db, ser, vectors, owner, profileId, OneHot(0), null)).FaceId);
+            }
+            for (var i = 0; i < freeCount; i++)
+            {
+                freeIds.Add((await AddFaceAsync(db, ser, vectors, owner, profileId, NearVec(), null)).FaceId);
+            }
+
+            var person = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Alice", CreatedAt = DateTime.UtcNow };
+            var other = new Person { Id = Guid.NewGuid(), OwnerUserId = owner, DisplayName = "Maria", CreatedAt = DateTime.UtcNow };
+            db.People.AddRange(person, other);
+            Assign(db, owner, person.Id, query);
+            foreach (var faceId in assignedElsewhereIds)
+            {
+                Assign(db, owner, other.Id, faceId);
+            }
+            personId = person.Id;
+            await db.SaveChangesAsync();
+        }
+
+        using (var scope = factory.Services.CreateScope())
+        {
+            var people = scope.ServiceProvider.GetRequiredService<PeopleService>();
+
+            // THE LIMIT MUST NOT DEFEAT THE PRIORITY. The first page is smaller
+            // than the number of higher-scoring assigned faces, so ordering by
+            // score would fill it entirely with them.
+            var first = await people.FindSimilarFacesAsync(owner, personId, 0.5, pageSize, null);
+            Assert.NotNull(first);
+            var firstIds = first!.Items.Select(i => i.FaceId).ToList();
+            Assert.All(freeIds, id => Assert.Contains(id, firstIds));
+
+            // Every free candidate precedes every assigned one, across the WHOLE
+            // list rather than within a page.
+            var all = await CollectAsync(people, owner, personId, 0.5);
+            var lastFree = all.FindLastIndex(id => freeIds.Contains(id));
+            var firstAssigned = all.FindIndex(id => assignedElsewhereIds.Contains(id));
+            Assert.True(lastFree >= 0 && firstAssigned >= 0, "both groups must be present");
+            Assert.True(
+                lastFree < firstAssigned,
+                $"an assigned candidate appeared at {firstAssigned}, before a free one at {lastFree}");
+
+            // …and the scores really were inverted, so this is not passing because
+            // the free faces happened to rank higher anyway.
+            var byId = new Dictionary<Guid, double>();
+            string? cursor = null;
+            for (var guard = 0; guard < 20; guard++)
+            {
+                var page = await people.FindSimilarFacesAsync(owner, personId, 0.5, pageSize, cursor);
+                Assert.NotNull(page);
+                foreach (var item in page!.Items) byId[item.FaceId] = item.Score;
+                if (!page.HasMore || page.NextCursor is null) break;
+                cursor = page.NextCursor;
+            }
+            Assert.True(
+                byId[assignedElsewhereIds[0]] > byId[freeIds[0]],
+                "the fixture must keep the assigned candidate scoring HIGHER");
+
+            // Paging across the boundary between the two blocks neither repeats
+            // nor drops a candidate — the cursor carries the group.
+            Assert.Equal(assignedCount + freeCount, all.Count);
+            Assert.Equal(all.Count, all.Distinct().Count());
+
+            // Within each block, still descending by score.
+            var freeOrder = all.Where(freeIds.Contains).Select(id => byId[id]).ToList();
+            Assert.Equal(freeOrder.OrderByDescending(x => x).ToList(), freeOrder);
+        }
+    }
+
     private static float[] Diagonal()
     {
         var v = new float[Dim];
@@ -448,6 +558,17 @@ public sealed class PeopleSimilarFacesPgIntegrationTests : IAsyncLifetime
         };
         db.AiProfiles.Add(profile);
         return profile;
+    }
+
+    // ~0.707 cosine to OneHot(0): [1, 1, 0, …] (normalized at insert time). Above
+    // a 0.5 threshold, and deliberately BELOW an identical match, so a test can
+    // make the free candidates score worse than the assigned ones.
+    private static float[] NearVec()
+    {
+        var v = new float[Dim];
+        v[0] = 1f;
+        v[1] = 1f;
+        return v;
     }
 
     private static float[] OneHot(int i)
