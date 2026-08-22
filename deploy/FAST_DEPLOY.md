@@ -126,15 +126,18 @@ git pull --ff-only origin main
 
 Use the first 12 characters of the full commit SHA as `<shortsha>`.
 
-## 2. Obtain the backend image (the server does not build it)
+## 2. Obtain the images (the server does not build them)
 
-**The API and worker images are not built here.** CI builds them, verifies them
-and publishes them to GHCR under the full source SHA (§2.1). The production
-Compose model carries no `build:` recipe for `api` or `worker` at all, so a
-build cannot happen from this stack even by accident — `docker compose build api`
-fails with "neither an image nor a build context", which is the intended answer.
+**No application image is built here.** CI builds api, worker and frontend,
+verifies each one and publishes them to GHCR under the full source SHA (§2.1).
+The production Compose model carries no `build:` recipe for ANY application
+service, so a build cannot happen from this stack even by accident — `docker
+compose build api` fails with "neither an image nor a build context", and
+`up --build` has nothing to compile. That is the intended answer, not a
+limitation to work around.
 
-Both services run the OpenVINO target, so both take the SAME image.
+The API and worker both run the OpenVINO target, so both take the SAME image.
+The frontend is its own image.
 
 ```bash
 IMAGE_DIGEST='ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>'
@@ -150,13 +153,9 @@ If the GHCR package is public no credential is needed. If it is private, log in
 with a **read-only** `read:packages` credential. A publishing token never
 belongs on the production host.
 
-Frontend changes are still built here, and that is the remaining local build:
-
 ```bash
-docker build --pull=false \
-  -f frontend/Dockerfile \
-  -t nubarca-frontend:release-<shortsha> \
-  frontend
+FRONTEND_DIGEST='ghcr.io/<owner>/nubarca-frontend@sha256:<digest>'
+docker pull "$FRONTEND_DIGEST"
 ```
 
 Documentation/test-only commits do not require a new image at all.
@@ -166,10 +165,13 @@ Documentation/test-only commits do not require a new image at all.
 The `Build production images` workflow builds the SAME two API targets on a
 GitHub runner and publishes them to GHCR. It is `workflow_dispatch` only.
 
-**This is the backend deploy path.** `docker-compose.prod.yml` carries no
-`build:` recipe for `api` or `worker`, so what CI publishes here is what
-production runs; §2 pulls it and §3 gates it. The frontend is not covered yet
-and is still built on the server.
+**This is the deploy path for every application image.** `docker-compose.prod.yml`
+carries no `build:` recipe at all, so what CI publishes here is what production
+runs; §2 pulls it and §3 gates it.
+
+Backend and frontend build as INDEPENDENT parallel jobs. They share only the
+source SHA, so a frontend failure never withholds a good backend image, and
+neither waits on the other.
 
 What one run records:
 
@@ -178,13 +180,14 @@ What one run records:
 | Source SHA | `github.sha` of the dispatched ref, stamped into both images |
 | Lean runtime | `ghcr.io/<owner>/nubarca-api:<full-git-sha>` |
 | OpenVINO runtime | `ghcr.io/<owner>/nubarca-api-openvino:<full-git-sha>` |
+| Frontend | `ghcr.io/<owner>/nubarca-frontend:<full-git-sha>` |
 | Digest | printed per image in the run summary |
 
 Only the immutable full-SHA tag is published. There is deliberately no `latest`:
 a deploy must be able to name the exact commit that produced the bytes it runs,
 and a moving tag cannot answer that.
 
-Both images are built into the runner's daemon and **verified before they are
+All application images are built into the runner's daemon and **verified before they are
 pushed**, by the same script available locally:
 
 ```bash
@@ -258,8 +261,31 @@ Confirm in that output:
 `--profile worker` is needed or `worker` does not appear in the output at all,
 and its absence reads like a missing service rather than a hidden one.
 
-For a frontend image, the Docker build must complete `tsc -b` and Vite
-successfully.
+For a frontend image, the equivalent of 3a is its own verifier, which runs the
+container rather than only listing files — a `dist/` that copied cleanly and an
+nginx that answers correctly are not the same statement:
+
+```bash
+scripts/verify-production-frontend-image.sh \
+  'ghcr.io/<owner>/nubarca-frontend@sha256:<digest>' \
+  <full-source-sha>
+```
+
+It must print `FRONTEND IMAGE VERIFIED`. It checks the OCI revision label, that
+`nginx -t` accepts the shipped configuration, content-hashed Vite bundles that
+`index.html` actually references, the absence of node/npm in the runtime layer,
+and the two halves of the nginx contract that matter: a client-side route falls
+back to `index.html` with 200, while a MISSING `/assets` file still answers 404.
+That second half is the one worth having — a stale client that receives HTML
+where it expected JavaScript fails later, somewhere else, as a parse error.
+
+It deliberately does not test `/tv.apk` or `/download/tv/*`. Those come from an
+installation volume, never from the image — the same separation as `/dev/dri`
+for the backend. §6 checks them after the deploy, where they exist.
+
+For 3b, `frontend.build` must be absent alongside `api.build` and
+`worker.build`, and the frontend must keep its published port, its APK volume
+and the internal network.
 
 If a gate fails, leave the current release pins and running containers
 untouched.
@@ -378,11 +404,14 @@ services:
   worker:
     image: "ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>"
   frontend:
-    image: "nubarca-frontend:release-<shortsha>"
+    image: "ghcr.io/<owner>/nubarca-frontend@sha256:<digest>"
 ```
 
 API and worker take the SAME digest, because both run the OpenVINO target. The
-frontend is still a locally built tag until its own slice.
+frontend is a separate image with its own digest, built by a parallel job.
+
+Pin only what the release actually changes. A frontend-only release leaves the
+backend pins exactly as they are, and the reverse.
 
 Then recreate only affected services with the complete Compose stack:
 
@@ -396,9 +425,9 @@ docker compose \
   up -d --no-build --no-deps <affected-services>
 ```
 
-`--no-build` is defence in depth. The backend has no build recipe to fall back
-on any more, but the flag also stops a frontend rebuild being triggered by a
-backend-only deploy, and it makes the intent unmistakable in the shell history.
+`--no-build` is defence in depth: the production model has no application build
+recipes, and the flag makes that invariant explicit in the deploy command and
+shell history.
 
 Rules:
 
@@ -448,6 +477,23 @@ docker exec nubarca-worker ls /dev/dri
 
 Check the API and worker logs for the OpenVINO provider initialising, and for
 any silent fall back to a CPU or synthetic path that was not asked for.
+
+When the FRONTEND image changed, confirm the served bundle is the new one and —
+more importantly — that the boundary between the image and the installation's
+own artifacts survived:
+
+```bash
+docker inspect nubarca-frontend --format '{{.Config.Image}}'
+docker inspect nubarca-frontend \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8081/
+curl -fsSI "$ORIGIN/download/tv/nubarca-tv.apk" | grep -i content-type
+```
+
+The APK check is the one that would catch a real regression: the bundle comes
+from the image, the APK comes from a read-only volume this installation mounts,
+and replacing the container is exactly when that distinction gets broken. It
+must still answer with the APK media type, not the SPA shell.
 
 When backend video processing changed, verify inside the running worker:
 

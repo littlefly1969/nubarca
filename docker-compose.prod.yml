@@ -552,10 +552,17 @@ services:
     networks:
       - nubarca-internal
 
+  # The LAST application build to leave this file. Like api and worker, the
+  # frontend image is built, verified and published by CI and pinned by digest
+  # in the release override — so `docker compose build frontend` now has nothing
+  # to build, and neither does `up --build`. With this removal the production
+  # Compose model carries no application build recipe at all.
+  #
+  # The APK volume below is the reason that boundary is worth stating: what this
+  # container SERVES is partly the image and partly an installation resource,
+  # and only the first half comes from CI. Removing the build changes where the
+  # bundle is made, and nothing about the mount.
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
     container_name: nubarca-frontend
     restart: unless-stopped
     ports:
