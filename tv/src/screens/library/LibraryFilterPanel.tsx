@@ -40,8 +40,9 @@ import {
 // hunt for and nothing that needs a pointer.
 //
 // The rows are no longer written out by hand. They come from
-// `tvFilterCatalog.tvFilterRows`, which decides applicability from the active
-// tab and source, and every row it can produce carries an EDITOR. That is the
+// `tvFilterCatalog.tvFilterRows`, which decides applicability from the tab, the
+// source and the DRAFT being edited, and every row it can produce carries an
+// EDITOR. That is the
 // structural fix: the panel used to be the list of filters, so when the people
 // row was written as a read-only summary — it could clear a selection but never
 // make one — nothing could notice the television had a filter it could not
@@ -184,7 +185,7 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
   // ------------------------------------------------------------------ rows
 
   const draftIdentity: MediaWorkspaceIdentity = { ...applied, filters, sort, direction };
-  const rows = tvFilterRows(applied, filters);
+  const rows = tvFilterRows(draftIdentity, filters);
   // Deterministic and total: the same row when it is still there, else the
   // nearest one, else the primary action. Never the bare container.
   const focusKey = resolveTvFilterFocus(focusRef.current, rows);

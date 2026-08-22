@@ -234,14 +234,30 @@ export function isTvFilterActive(id: TvFilterId, filters: MediaWorkspaceFilters)
   }
 }
 
-// The rows to render, in display order: applicability from the COMMITTED
-// identity (its tab and source), activity from the DRAFT being edited.
+// The rows to render, in display order.
+//
+// BOTH halves read the DRAFT. This once said "applicability from the COMMITTED
+// identity, activity from the draft", which was true while applicability
+// depended only on the tab and the source — neither of which can change while
+// the panel is open. `semanticSupport` broke that: applicability now depends on
+// whether a visual query is present, and the user types that INTO the draft.
+//
+// Reading applicability from the committed identity therefore left the panel
+// showing rows the request would not carry for the whole time between typing a
+// visual query and pressing Apply — the "applied but inert" defect again, and
+// visibly so, because activeFilterCount reads the draft and had already stopped
+// counting them.
+//
+// `identity` still supplies what the draft cannot change (tab, source), so the
+// caller cannot get this wrong by passing the committed identity: the draft's
+// filters always win here.
 export function tvFilterRows(
   identity: MediaWorkspaceIdentity,
   draft: MediaWorkspaceFilters,
 ): TvFilterRow[] {
+  const drafted: MediaWorkspaceIdentity = { ...identity, filters: draft };
   return TV_FILTER_DESCRIPTORS
-    .filter((descriptor) => tvFilterApplies(descriptor, identity))
+    .filter((descriptor) => tvFilterApplies(descriptor, drafted))
     .map((descriptor) => ({ ...descriptor, active: isTvFilterActive(descriptor.id, draft) }));
 }
 

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   emptyIdentity, isRelevanceOrdered, isSemanticActive, queryFingerprint, semanticToWire,
-  SEMANTIC_RETRIEVAL_AVAILABLE, activeFilterCount, clearActiveFilters,
+  SEMANTIC_RETRIEVAL_AVAILABLE, activeFilterCount, clearActiveFilters, cloneMediaFilters,
   type MediaKindScope, type MediaWorkspaceIdentity,
 } from './mediaWorkspaceQuery.ts';
 import { resolveTvFilterFocus, tvFilterRows } from './tvFilterCatalog.ts';
@@ -24,6 +24,7 @@ const src = (path: string) => read(import.meta.url, path);
 const screen = src('../screens/PersonalLibraryScreen.tsx');
 const api = src('../api/personalMedia.ts');
 const panel = src('../screens/library/LibraryFilterPanel.tsx');
+const catalog = src('./tvFilterCatalog.ts');
 const endpoints = src('../../../src/NubArca.Api/Endpoints/TvEndpoints.cs');
 const service = src('../../../src/NubArca.Api/Tv/TvPersonalMediaService.cs');
 
@@ -402,4 +403,67 @@ test('albumMembership reaches the wire on every kind, and the endpoint declares 
   assert.match(endpoints, /string\?\s+albumMembership/);
   assert.match(endpoints, /TryParseAlbumMembership\(/);
   assert.match(endpoints, /AlbumMembership = membership/);
+});
+
+test('typing a visual query hides the incompatible rows BEFORE Apply', () => {
+  // The panel's real shape: what is APPLIED is still a plain structural query,
+  // and the semantic one exists only in the draft the user is editing. If
+  // applicability is read from the applied identity, codec/resolution/audio and
+  // the duration rows stay on screen and editable for the whole time between
+  // typing the query and pressing Apply — and semanticToWire then drops them.
+  const applied = { ...emptyIdentity(LIBRARY), mediaKind: 'video' as const };
+  assert.equal(isSemanticActive(applied), false);
+
+  const draft = cloneMediaFilters(applied.filters);
+  draft.common.visualQuery = 'cane';
+  draft.video.codec = 'h264';
+  draft.video.hasAudio = true;
+  draft.video.minHeight = 1080;
+  draft.video.durationMinSeconds = 60;
+
+  // Passing the COMMITTED identity on purpose: that is what the panel did, and
+  // the catalog must answer from the draft anyway. Handing it a pre-drafted
+  // identity would test the test, not the guarantee.
+  const shown: string[] = tvFilterRows(applied, draft).map((row) => row.id);
+  for (const gone of ['codec', 'hasAudio', 'minHeight', 'durationMin', 'durationMax']) {
+    assert.ok(!shown.includes(gone),
+      `"${gone}" is still offered while the draft carries a visual query`);
+  }
+
+  // The panel's own two readings must agree: a row shown as APPLIED and a chip
+  // the counter counts are the same set. They diverged because the count read
+  // the draft while the rows read the committed identity.
+  const active: string[] = tvFilterRows(applied, draft)
+    .filter((row) => row.active).map((row) => row.id);
+  assert.equal(active.length, activeFilterCount({ ...applied, filters: draft }),
+    'a row is marked active that the filter counter does not count');
+});
+
+test('clearing the visual query brings the video rows back, also BEFORE Apply', () => {
+  // The symmetric direction, which a one-way check would miss: semantic is what
+  // is APPLIED, and the user empties the query in the draft. The rows the
+  // structural request can carry must return without waiting for Apply.
+  const applied = { ...emptyIdentity(LIBRARY), mediaKind: 'video' as const };
+  applied.filters.common.visualQuery = 'cane';
+  assert.ok(isSemanticActive(applied));
+  assert.ok(!tvFilterRows(applied, applied.filters).some((row) => row.id === 'codec'));
+
+  const draft = cloneMediaFilters(applied.filters);
+  draft.common.visualQuery = '';
+
+  const shown: string[] = tvFilterRows(applied, draft).map((row) => row.id);
+  for (const back of ['codec', 'hasAudio', 'minHeight', 'durationMin', 'durationMax']) {
+    assert.ok(shown.includes(back), `"${back}" did not come back when the query was cleared`);
+  }
+});
+
+test('the panel decides applicability from the draft, not from what is applied', () => {
+  // Read the PANEL, because the defect was a single call site passing the
+  // committed identity while every other line around it used the draft.
+  assert.match(panel, /const rows = tvFilterRows\(draftIdentity, filters\)/);
+  // …and the catalog makes that call site impossible to get wrong anyway.
+  const start = catalog.indexOf('export function tvFilterRows');
+  const body = catalog.slice(start, catalog.indexOf('export ', start + 1));
+  assert.match(body, /\{ \.\.\.identity, filters: draft \}/);
+  assert.match(body, /tvFilterApplies\(descriptor, drafted\)/);
 });

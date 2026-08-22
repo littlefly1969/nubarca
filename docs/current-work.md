@@ -448,3 +448,23 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   per occurrence of the bug, and one of them had silently drifted to miss `/* */`
   blocks. It is now `tv/src/testing/sourceText.ts`, and reading a source strips
   by default so the unsafe form cannot be reached by accident.
+- **Filter applicability is decided from the DRAFT, never from what is applied.**
+  `tvFilterRows(identity, draft)` once split its two halves — applicability from
+  the committed identity, activity from the draft — which was correct while
+  applicability depended only on the tab and the source, neither of which can
+  change while the panel is open. `semanticSupport` invalidated that without
+  changing the signature: applicability now also depends on the visual query,
+  and the user types that INTO the draft. The panel therefore kept offering
+  codec, resolution, audio and duration for the whole time between typing a
+  query and pressing Apply, while `activeFilterCount` — which does read the
+  draft — had already stopped counting them: one panel, two disagreeing answers
+  about the same row. The catalog now builds `{ ...identity, filters: draft }`
+  internally, so passing the committed identity cannot produce a wrong row and
+  the call site is no longer load-bearing. Regression tests deliberately pass
+  the COMMITTED identity in both directions (query typed, query cleared) — an
+  earlier attempt handed them a pre-drafted identity and consequently proved
+  nothing, which is the same flaw that let the original defect through.
+  Deferred, non-blocking: the fixed "Order: Relevance" row is still a
+  `FilterRow`, i.e. a Pressable with `accessibilityRole="button"` and a no-op
+  SELECT; it should become a true informational non-button row with its own
+  focus-fallback handling.
