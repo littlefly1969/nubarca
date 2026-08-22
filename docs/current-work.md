@@ -474,9 +474,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `Build production images` (`workflow_dispatch` only) produces the same two API
   targets the server builds today and publishes them to GHCR under the immutable
   full-SHA tag — no `latest`, because a deploy must be able to name the commit
-  that produced its bytes. Production is deliberately untouched: the Compose file
-  still carries `build: context: .`, so the server keeps building from source
-  until a later slice moves it. Both images are verified BEFORE they are pushed,
+  that produced its bytes. When this was established the server still built from
+  source and the workflow only proved GitHub could produce the images; the two
+  entries below moved production onto them, first the backend and then the
+  frontend. Both images are verified BEFORE they are pushed,
   by `scripts/verify-production-image.sh`, so an unverifiable image is never
   something anyone could deploy. The check that made this slice necessary at all:
   only `runtime-openvino` stamped `NUBARCA_GIT_SHA`, so the lean `runtime` target

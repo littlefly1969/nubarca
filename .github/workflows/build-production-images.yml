@@ -1,9 +1,9 @@
 name: Build production images
 
-# Manual only, deliberately. The point of this first slice is to prove that
-# GitHub can produce the images the server builds today — not to change how or
-# when production is built. Nothing here deploys, and production still builds
-# from source until a later slice says otherwise.
+# Manual only, deliberately.
+#
+# This workflow only builds, verifies and publishes immutable application
+# images. Deployment remains a separate explicit production step.
 on:
   workflow_dispatch:
 
@@ -132,7 +132,8 @@ jobs:
             echo "ffmpeg/ffprobe, and the ONNX Runtime layer each variant is supposed to carry."
             echo "GPU execution is NOT exercised here — \`/dev/dri\` belongs to an installation."
             echo
-            echo "Production is unchanged by this workflow and still builds from source."
+            echo "This workflow publishes artifacts only; deployment remains a separate,"
+            echo "explicit production step."
           } >> "$GITHUB_STEP_SUMMARY"
 
   frontend:

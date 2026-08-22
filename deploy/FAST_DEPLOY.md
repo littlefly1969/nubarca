@@ -187,7 +187,7 @@ Only the immutable full-SHA tag is published. There is deliberately no `latest`:
 a deploy must be able to name the exact commit that produced the bytes it runs,
 and a moving tag cannot answer that.
 
-Both images are built into the runner's daemon and **verified before they are
+All application images are built into the runner's daemon and **verified before they are
 pushed**, by the same script available locally:
 
 ```bash
@@ -425,9 +425,9 @@ docker compose \
   up -d --no-build --no-deps <affected-services>
 ```
 
-`--no-build` is defence in depth. The backend has no build recipe to fall back
-on any more, but the flag also stops a frontend rebuild being triggered by a
-backend-only deploy, and it makes the intent unmistakable in the shell history.
+`--no-build` is defence in depth: the production model has no application build
+recipes, and the flag makes that invariant explicit in the deploy command and
+shell history.
 
 Rules:
 
