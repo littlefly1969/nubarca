@@ -77,3 +77,9 @@ ENV LD_LIBRARY_PATH=/opt/nubarca/ort-openvino \
 
 # ---- default target: the lean runtime (LAST stage → default `docker build`) ----
 FROM runtime-base AS runtime
+# The SAME provenance stamp runtime-openvino carries. Without it this image
+# reports NUBARCA_GIT_SHA as empty, so a deploy could not tell which source
+# built it — and the two targets would disagree about their own identity for no
+# reason other than which stage happened to declare the ARG.
+ARG GIT_SHA=unknown
+ENV NUBARCA_GIT_SHA=$GIT_SHA

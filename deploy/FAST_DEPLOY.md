@@ -158,6 +158,56 @@ docker build --pull=false \
 Build only the services affected by the diff. Documentation/test-only commits
 do not require a container rebuild.
 
+## 2.1 Production image build (GitHub)
+
+The `Build production images` workflow builds the SAME two API targets on a
+GitHub runner and publishes them to GHCR. It is `workflow_dispatch` only.
+
+**It is not yet the deploy path.** `docker-compose.prod.yml` still carries
+`build: context: .`, so §2 above remains the procedure and production continues
+to build from source. This section exists so the images can be produced and
+inspected before anything depends on them.
+
+What one run records:
+
+| | |
+| --- | --- |
+| Source SHA | `github.sha` of the dispatched ref, stamped into both images |
+| Lean runtime | `ghcr.io/<owner>/nubarca-api:<full-git-sha>` |
+| OpenVINO runtime | `ghcr.io/<owner>/nubarca-api-openvino:<full-git-sha>` |
+| Digest | printed per image in the run summary |
+
+Only the immutable full-SHA tag is published. There is deliberately no `latest`:
+a deploy must be able to name the exact commit that produced the bytes it runs,
+and a moving tag cannot answer that.
+
+Both images are built into the runner's daemon and **verified before they are
+pushed**, by the same script available locally:
+
+```bash
+scripts/verify-production-image.sh <image-ref> <expected-git-sha> [runtime|openvino]
+```
+
+It checks provenance (`NUBARCA_GIT_SHA` equals the source SHA — the lean
+`runtime` target stamps this too, not only `runtime-openvino`), a startable
+ASP.NET Core runtime with the published application, `ffmpeg`/`ffprobe`, and the
+ONNX Runtime layer each variant is SUPPOSED to carry: the CPU provider beside
+the application for `runtime`, and for `runtime-openvino` the staged
+`libonnxruntime.so.<abi>` under its SONAME, the OpenVINO providers, the CPU and
+GPU plugins and the Intel OpenCL userspace. The expected ABI is read from
+`scripts/openvino-direct/onnxruntime-openvino.lock`, so it cannot drift into
+asserting a version nobody ships.
+
+The lean variant is also asserted NOT to carry the OpenVINO directory. Being
+lean is what that target is for; an image that quietly grew the GPU layer is a
+different image from the one §2 describes.
+
+**GPU execution is not tested here and must not be.** `/dev/dri`, the render
+group and the model mounts belong to an installation, never to a build host or
+a CI runner. What the workflow can prove is that the GPU variant CONTAINS the
+native layer and Intel userspace a GPU device would need; that the device works
+is established on the installation, unchanged, by §6.
+
 ## 3. Gate images before changing release pins
 
 Do not edit `docker-compose.release.local.yml` until every required build has
