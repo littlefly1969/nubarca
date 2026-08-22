@@ -14,6 +14,10 @@ export const FACES_TABS = [
   'suggested',
   'people',
   'unassigned',
+  // Photo-centric review, ALONGSIDE the face-at-a-time pool above rather than
+  // replacing it: the two answer different questions, and the pool is the right
+  // surface when the reviewer is looking for one particular face.
+  'photoReview',
   'review',
   'videoFaces',
   'ignored',

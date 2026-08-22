@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router';
 import { PERMISSIONS } from '@nubarca/api-client';
 import {
@@ -17,17 +17,19 @@ import { FaceCrop } from '../components/people/FaceCrop';
 import { FaceContextViewer } from '../components/people/FaceContextViewer';
 import { FaceAISettings } from '../components/people/FaceAISettings';
 import { UnassignedFacesTab } from '../components/people/UnassignedFacesTab';
+import { PhotoFaceReviewTab } from '../components/people/PhotoFaceReviewTab';
 import { IgnoredFacesTab } from '../components/people/IgnoredFacesTab';
 import { VideoFaceReviewTab } from '../components/people/VideoFaceReviewTab';
 import { ClusterAssignDialog } from '../components/people/ClusterAssignDialog';
 import { withoutFace, type FaceViewerSequence } from '../components/people/faceViewerSequence';
 import { useI18n } from '../i18n';
 import { type FacesTab, resolveFacesTab } from './facesTabs';
+import { filterPeopleByName } from './peopleFilter';
 
 type Tab = FacesTab;
 
 // Tabs that load their own data inside their component (not via `reload`).
-const SELF_LOADING_TABS: Tab[] = ['settings', 'unassigned', 'ignored', 'videoFaces'];
+const SELF_LOADING_TABS: Tab[] = ['settings', 'unassigned', 'photoReview', 'ignored', 'videoFaces'];
 
 // Owner-private Faces page (Volti). Suggested groups → name a person; People →
 // browse named clusters; Review → low-confidence groups; Settings → admin
@@ -134,6 +136,7 @@ export function PeoplePage() {
         <TabButton active={tab === 'suggested'} onClick={() => selectTab('suggested')}>{t('people.tabSuggested')}</TabButton>
         <TabButton active={tab === 'people'} onClick={() => selectTab('people')}>{t('people.tabPeople')}</TabButton>
         <TabButton active={tab === 'unassigned'} onClick={() => selectTab('unassigned')}>{t('people.tabUnassigned')}</TabButton>
+        <TabButton active={tab === 'photoReview'} onClick={() => selectTab('photoReview')}>{t('people.tabPhotoReview')}</TabButton>
         <TabButton active={tab === 'review'} onClick={() => selectTab('review')}>{t('people.tabReview')}</TabButton>
         <TabButton active={tab === 'videoFaces'} onClick={() => selectTab('videoFaces')}>{t('people.tabVideoFaces')}</TabButton>
         <TabButton active={tab === 'ignored'} onClick={() => selectTab('ignored')}>{t('people.tabIgnored')}</TabButton>
@@ -150,6 +153,8 @@ export function PeoplePage() {
           excludeFaceIds={dismissedFaceIds}
           invalidateAuth={invalidateAuth}
         />
+      ) : tab === 'photoReview' ? (
+        <PhotoFaceReviewTab />
       ) : tab === 'videoFaces' ? (
         <VideoFaceReviewTab invalidateAuth={invalidateAuth} />
       ) : tab === 'ignored' ? (
@@ -219,12 +224,32 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 // action lands on the tab that opened it, not on the default landing tab.
 function PeopleGrid({ people, returnTo }: { people: Person[]; returnTo: string }) {
   const { t, tn } = useI18n();
+  // The whole list is already in memory, so this filters what is DRAWN. No
+  // endpoint, no debounce, no request per keystroke — and nothing that can fall
+  // out of sync with the server while the user types.
+  const [query, setQuery] = useState('');
+  const shown = useMemo(() => filterPeopleByName(people, query), [people, query]);
+
   if (people.length === 0) {
     return <p className="muted">{t('people.noPeople')}</p>;
   }
   return (
+    <>
+      <div className="people-filter">
+        <label htmlFor="people-filter-input">{t('people.filterLabel')}</label>
+        <input
+          id="people-filter-input"
+          type="search"
+          value={query}
+          placeholder={t('people.filterPlaceholder')}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
+      {shown.length === 0 ? (
+        <p className="muted">{t('people.filterNoMatch', { query: query.trim() })}</p>
+      ) : (
     <ul className="people-grid">
-      {people.map((p) => (
+      {shown.map((p) => (
         <li key={p.personId} className="people-card">
           <Link
             to={`/people/${p.personId}`}
@@ -247,6 +272,8 @@ function PeopleGrid({ people, returnTo }: { people: Person[]; returnTo: string }
         </li>
       ))}
     </ul>
+      )}
+    </>
   );
 }
 

@@ -6049,6 +6049,34 @@ video.lightbox-image {
 .face-viewer-controls button { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 0.3rem 0.6rem; cursor: pointer; }
 .face-viewer-controls button:disabled { opacity: 0.4; cursor: default; }
 .face-viewer-zoom { min-width: 3.5em; text-align: center; }
+/* The face viewer's own ignore, beside "assign": the decision a reviewer makes
+   most often after naming somebody, previously reachable only inside the menu. */
+.face-viewer-ignore {
+  align-self: flex-start; background: rgba(255,255,255,0.12); color: #fff;
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 6px;
+  padding: 0.3rem 0.6rem; cursor: pointer;
+}
+.face-viewer-ignore:disabled { opacity: 0.4; cursor: default; }
+.face-viewer-progress { color: #cbd5e1; margin-right: 0.35rem; white-space: nowrap; }
+
+/* Photo-centric review of undecided faces (ux/photo-face-review). */
+.people-filter { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+.people-filter input { flex: 1 1 auto; max-width: 22rem; padding: 0.35rem 0.5rem; }
+
+.photo-face-review-list {
+  list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem;
+}
+.photo-face-review-item {
+  width: 100%; display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  padding: 0.5rem; border: 1px solid var(--border, #e5e7eb); border-radius: 8px;
+  background: none; color: inherit; cursor: pointer;
+}
+.photo-face-review-item img {
+  width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex: 0 0 auto;
+}
+.photo-face-review-name { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.photo-face-review-count { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.75; }
 
 /* Manual face assignment (feature/people-manual-assignment-ux) */
 .assign-menu { display: inline-block; width: 100%; }

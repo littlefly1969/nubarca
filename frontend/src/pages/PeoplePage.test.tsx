@@ -46,6 +46,50 @@ it('renders tabs and suggested groups', async () => {
   expect(screen.getByLabelText('Nome persona')).toBeTruthy();
 });
 
+it('filters the People tab by name without asking the server', async () => {
+  let listCalls = 0;
+  renderPeople(false, {
+    'GET /api/people': () => {
+      listCalls += 1;
+      return jsonResponse([
+        { personId: 'p-1', name: 'Marco', faceCount: 1, representative: null },
+        { personId: 'p-2', name: 'Maria', faceCount: 1, representative: null },
+        { personId: 'p-3', name: 'Gianmarco', faceCount: 1, representative: null },
+        { personId: 'p-4', name: 'Lucia', faceCount: 1, representative: null },
+      ]);
+    },
+  });
+  await screen.findByText('3 volti');
+  await userEvent.click(screen.getByRole('button', { name: 'Persone' }));
+  await screen.findByText('Marco');
+
+  const before = listCalls;
+  await userEvent.type(screen.getByLabelText('Cerca persona'), 'mar');
+
+  // Contains, not startsWith: Gianmarco has to survive.
+  await waitFor(() => expect(screen.queryByText('Lucia')).toBeNull());
+  expect(screen.getByText('Marco')).toBeTruthy();
+  expect(screen.getByText('Maria')).toBeTruthy();
+  expect(screen.getByText('Gianmarco')).toBeTruthy();
+
+  // The whole list was already loaded, so typing must cost no request.
+  expect(listCalls).toBe(before);
+});
+
+it('says so when a name filter matches nobody', async () => {
+  renderPeople(false, {
+    'GET /api/people': () => jsonResponse([
+      { personId: 'p-1', name: 'Marco', faceCount: 1, representative: null },
+    ]),
+  });
+  await screen.findByText('3 volti');
+  await userEvent.click(screen.getByRole('button', { name: 'Persone' }));
+  await screen.findByText('Marco');
+
+  await userEvent.type(screen.getByLabelText('Cerca persona'), 'zzz');
+  await waitFor(() => expect(screen.getByText('Nessuna persona corrisponde a «zzz».')).toBeTruthy());
+});
+
 it('hides the admin Settings tab from non-admins and shows it to admins', async () => {
   renderPeople(false);
   await screen.findByText('3 volti');

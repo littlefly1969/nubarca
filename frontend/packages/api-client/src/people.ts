@@ -237,6 +237,51 @@ export interface UnassignedFacesPage {
   profileAvailable: boolean;
 }
 
+// One PHOTO that still carries faces nobody has decided about.
+//
+// The face-at-a-time pool answers a different question. Working a photo at a
+// time keeps the reviewer inside one picture until it is finished, instead of
+// jumping between photos on every face — and `faceIds` travels with the row so
+// that cycling costs no extra request.
+export interface PhotoWithUnassignedFaces {
+  fileItemId: string;
+  name: string;
+  unassignedCount: number;
+  faceIds: string[];
+}
+
+export interface PhotosWithUnassignedFacesPage {
+  items: PhotoWithUnassignedFaces[];
+  nextCursor: string | null;
+  profileAvailable: boolean;
+}
+
+export function getPhotosWithUnassignedFaces(
+  opts: { limit?: number; cursor?: string | null } = {},
+  signal?: AbortSignal,
+): Promise<PhotosWithUnassignedFacesPage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.cursor) params.set('cursor', opts.cursor);
+  const qs = params.toString();
+  return api<PhotosWithUnassignedFacesPage>(
+    `/api/people/photos-with-unassigned-faces${qs ? `?${qs}` : ''}`, { signal });
+}
+
+/**
+ * Ignore every still-undecided face on ONE photo, in one request.
+ *
+ * Deliberately not a loop of per-face calls: the decision is a single act, and a
+ * half-finished loop leaves the photo in the queue with a few faces left — the
+ * state the action exists to clear. Returns how many faces were newly ignored,
+ * which is 0 when there was nothing left to do.
+ */
+export async function ignoreUnassignedFacesOnPhoto(fileItemId: string): Promise<number> {
+  const result = await api<{ ignored: number }>(
+    `/api/people/photos/${fileItemId}/ignore-unassigned-faces`, { method: 'POST' });
+  return result.ignored;
+}
+
 export interface IgnoredFace {
   faceId: string;
   fileItemId: string;

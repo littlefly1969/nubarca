@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, getFaceContext, listPeople, type FaceContext, type Person } from '@nubarca/api-client';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ApiError, getFaceContext, ignoreFace, listPeople, type FaceContext, type Person } from '@nubarca/api-client';
 import { mediumPreviewUrl } from '../files/types';
 import { useAuth } from '../../auth/useAuth';
 import { AssignToPersonMenu } from './AssignToPersonMenu';
@@ -27,6 +27,9 @@ export function FaceContextViewer({
   onClose,
   onFaceIgnored,
   onFaceRestored,
+  onFaceAssigned,
+  progressLabel,
+  extraActions,
 }: {
   faceIds: string[];
   index: number;
@@ -34,6 +37,19 @@ export function FaceContextViewer({
   onClose: () => void;
   onFaceIgnored?: (faceId: string) => void;
   onFaceRestored?: (faceId: string) => void;
+  // A face was given to a person. Reported separately from onChanged because for
+  // a queue that is the same event as an ignore — the face has been DECIDED and
+  // leaves the work — while for a plain viewer it is just a label change. Without
+  // it a review queue sits on a face it has already assigned.
+  onFaceAssigned?: (faceId: string) => void;
+  // What the caller is counting through, when it is counting something more
+  // specific than "face n of m" — the photo review says "undecided face 1 of 3".
+  progressLabel?: string;
+  // Actions that belong to the CALLER's workflow, not to looking at a face:
+  // "skip", "ignore every undecided face on this photo". They live here so the
+  // reviewer reaches them without leaving the photo, and stay out of this
+  // component so it does not learn about queues it does not own.
+  extraActions?: ReactNode;
 }) {
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
@@ -42,6 +58,7 @@ export function FaceContextViewer({
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [people, setPeople] = useState<Person[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [ignoring, setIgnoring] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -86,6 +103,29 @@ export function FaceContextViewer({
   }, [activeFaceId, invalidateAuth, refreshTick]);
 
   // People list for the assign menu (loaded once; refreshed after a change).
+  // Ignore the face currently highlighted in the photo — and only that one.
+  //
+  // The caller is told through onFaceIgnored, exactly as when the action came
+  // from inside the assign menu: this viewer does not own the sequence, so it
+  // cannot decide whether to advance or close. Reporting rather than refetching
+  // also avoids asking the server for a face we just removed from the pool.
+  const ignoreSelected = useCallback(async () => {
+    if (!ctx || ignoring) return;
+    const faceId = ctx.selectedFaceId;
+    setIgnoring(true);
+    try {
+      await ignoreFace(faceId);
+      if (onFaceIgnored) onFaceIgnored(faceId);
+      else setRefreshTick((n) => n + 1);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth();
+      // Any other failure leaves the face exactly where it was; the button
+      // re-enables and the reviewer can try again or move on.
+    } finally {
+      setIgnoring(false);
+    }
+  }, [ctx, ignoring, onFaceIgnored, invalidateAuth]);
+
   const loadPeople = useCallback(() => {
     void listPeople().then(setPeople).catch(() => { /* non-fatal for the viewer */ });
   }, []);
@@ -179,15 +219,43 @@ export function FaceContextViewer({
         <div className="face-viewer-title">
           {ctx?.personName ? <strong>{ctx.personName}</strong> : <span className="muted">{t('face.notAssigned')}</span>}
           <span className="muted">{ctx?.fileName}</span>
+          {ctx && !ctx.isIgnored && (
+            // Ignore is ALSO inside the assign menu, and that is where it was
+            // only reachable: a two-step action for the decision a reviewer
+            // makes most often after "this is X" — "this is nobody worth
+            // naming". One click, beside the other one.
+            <button
+              type="button"
+              className="face-viewer-ignore"
+              disabled={ignoring}
+              onClick={() => { void ignoreSelected(); }}
+            >
+              {t('face.ignoreFace')}
+            </button>
+          )}
           {ctx && (
             <AssignToPersonMenu
               faceId={ctx.selectedFaceId}
               people={people}
               currentPersonId={ctx.personId}
               currentPersonName={ctx.personName}
-              allowIgnore
+              // Ignore has MOVED OUT of the menu and into the button above:
+              // offering it in both places is the same action twice in one
+              // toolbar. The menu keeps it only for an already-ignored face,
+              // where what it offers is "Ripristina" and the explicit button
+              // does not apply.
+              allowIgnore={ctx.isIgnored}
               isIgnored={ctx.isIgnored}
-              onChanged={() => { setRefreshTick((t) => t + 1); loadPeople(); }}
+              onChanged={(personId) => {
+                // personId === null is a REMOVAL from a person, which puts the
+                // face back into the undecided pool rather than taking it out.
+                if (personId !== null && onFaceAssigned) {
+                  onFaceAssigned(ctx.selectedFaceId);
+                  return;
+                }
+                setRefreshTick((t) => t + 1);
+                loadPeople();
+              }}
               onIgnored={(id) => {
                 // No refetch of the face we just removed from the pool: the
                 // caller drops it from the sequence and this viewer either
@@ -204,6 +272,8 @@ export function FaceContextViewer({
           )}
         </div>
         <div className="face-viewer-controls">
+          {progressLabel && <span className="face-viewer-progress">{progressLabel}</span>}
+          {extraActions}
           <button type="button" onClick={fitImage}>{t('face.showWholePhoto')}</button>
           <button type="button" onClick={() => ctx && focusFace(ctx.selectedBox)}>{t('face.centerFace')}</button>
           <button type="button" aria-label={t('face.zoomOut')} onClick={() => zoomBy(1 / 1.25)}>−</button>
