@@ -288,15 +288,23 @@ runtime/channel and equality of the embedded/supplied OTA certificate.
 
 ## 12. APK publication
 
-When an authorized physical device is reachable from the build host, prefer to
-run `adb install -r` before replacing the public artifact and prove that
-application data and pairing survive.
+**Publication comes before installation, and that is the normal order.** From
+1.0.6 onwards the delivery path is the device's own update surface (§12.1), which
+reads the published descriptor — so on an installation with no ADB access the
+APK cannot reach the device until it has been published. Treating a sideload as
+the preferred step would make the ordinary release look like a degraded one.
 
-When no device is reachable and the public APK is the delivery path needed to
-install it, remote-first publication is allowed only after the relevant source
-tests, the release build and §11 validation have all passed. Record physical
-acceptance as **pending**, publish the validated bytes, and perform §13 as soon
-as the APK can be installed. Never report pending acceptance as passed.
+Publish once the relevant source tests, the release build and §11 validation have
+all passed. Physical acceptance (§13) necessarily happens afterwards: record it as
+**pending** until it is performed, and never report pending acceptance as passed.
+
+`adb install -r` is an OPTIONAL extra check, not a prerequisite, and it exists
+only where the operator has an authorized device reachable from the build host.
+Many installations have no ADB access at all and never will; that is not a
+missing capability to work around, and nothing in this runbook may depend on it.
+Where ADB is available, installing before replacing the public artifact does add
+one thing worth having: it proves application data and pairing survive an
+in-place update before any device is offered the release.
 
 From the repository root, set operator-provided
 `NUBARCA_PRODUCTION_SSH` and `NUBARCA_TV_APK_DIR` and run:
@@ -314,6 +322,15 @@ FAIL-CLOSED order:
 3. the canonical `nubarca-tv.apk` and `nubarca-tv.apk.sha256` — the manual
    sideload contract, unchanged;
 4. `nubarca-tv.release.json` **last**.
+
+When verifying a publication over HTTP, do not read the status code as proof of
+existence. The APK directory is served by the frontend, and a frontend that
+serves a single-page application answers an unknown path with **200 and the app
+shell**, not 404 — so `curl -I` on an APK that was never published looks
+successful, with a plausible `content-length` of a few kilobytes. The
+discriminator is the content type: a real artifact answers
+`application/octet-stream`, the shell answers `text/html`. Verify the SHA-256 of
+the bytes, not the response code.
 
 The release descriptor is the ACTIVATION POINTER: an installed TV reads it and
 offers to install the bytes it names, so it must never be visible before those
@@ -351,11 +368,23 @@ This changes nothing about how a release is BUILT, VALIDATED or PUBLISHED —
 
 ## 13. Native installation acceptance
 
-Confirm package, signer and version before installation. Use `adb install -r`
-when ADB is available; after a remote-first publication, install the public APK
-through the device instead. Launch and verify pairing/session persistence,
-media playback and OTA cold-launch behavior on a physical device. A changed
-applicationId cannot update in place and requires a fresh install/re-pair.
+Confirm package, signer and version before installation.
+
+The ordinary path is the device itself: **Mode Select → Aggiornamenti / Updates**
+offers the published release and installs it through Fire OS's own confirmation
+(§12.1). This requires no ADB, no PC and no file manager, and it is the path
+real users take — so exercising it IS the acceptance, not a substitute for one.
+`adb install -r` is available only where the operator has a reachable authorized
+device, and is an additional check rather than the expected route.
+
+Then launch and verify pairing/session persistence, media playback and OTA
+cold-launch behaviour on the physical device. A changed applicationId cannot
+update in place and requires a fresh install and re-pair.
+
+Acceptance is performed by whoever holds the device. When that is not the agent
+running §10-§12, the agent reports acceptance as **pending** and hands over the
+exact steps and the expected version — it must never infer acceptance from a
+successful publication.
 
 ## 14. OTA trust rotation — do not use for normal releases
 
