@@ -61,10 +61,21 @@ services:
     # No `ports:` block on purpose — PostgreSQL must only be reachable from
     # the api service on the internal network.
 
+  # NO `build:` — and that absence is the point.
+  #
+  # The production API image is built and verified by CI, published to GHCR
+  # under its full source SHA, and pinned BY DIGEST in the release override. A
+  # build recipe here would let a hurried `docker compose build api` on the
+  # server produce bytes nobody verified and nobody can trace back to a commit,
+  # which is exactly what this stack stopped doing. Telling operators not to
+  # pass --build is weaker than not offering the recipe at all.
+  #
+  # The effective image therefore comes from the overrides — the OpenVINO
+  # override supplies one, and the release override pins the exact digest. See
+  # deploy/FAST_DEPLOY.md §2. Consequence worth knowing: this base file no
+  # longer resolves api/worker on its own, which is honest, because the base
+  # stack was never a valid way to run them (it carries no GPU wiring either).
   api:
-    build:
-      context: .
-      dockerfile: src/NubArca.Api/Dockerfile
     container_name: nubarca-api
     restart: unless-stopped
     depends_on:
@@ -382,10 +393,10 @@ services:
   # in-process worker. Run AT MOST ONE worker for now (one job at a time;
   # MaxConcurrentJobs=1, no SKIP LOCKED yet). The lease/heartbeat means a
   # crashed worker's in-flight job is reclaimed ~Jobs__LeaseSeconds later.
+  # Same image as the API, by design: both run the OpenVINO target, so both are
+  # pinned to the SAME digest. See the note on `api` above for why there is no
+  # build recipe here.
   worker:
-    build:
-      context: .
-      dockerfile: src/NubArca.Api/Dockerfile
     container_name: nubarca-worker
     restart: unless-stopped
     profiles: ["worker"]

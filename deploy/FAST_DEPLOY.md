@@ -126,27 +126,31 @@ git pull --ff-only origin main
 
 Use the first 12 characters of the full commit SHA as `<shortsha>`.
 
-## 2. Build immutable images
+## 2. Obtain the backend image (the server does not build it)
 
-Backend changes always require both API and worker to use the same image bytes:
+**The API and worker images are not built here.** CI builds them, verifies them
+and publishes them to GHCR under the full source SHA (§2.1). The production
+Compose model carries no `build:` recipe for `api` or `worker` at all, so a
+build cannot happen from this stack even by accident — `docker compose build api`
+fails with "neither an image nor a build context", which is the intended answer.
+
+Both services run the OpenVINO target, so both take the SAME image.
 
 ```bash
-docker build --pull=false \
-  --target runtime-openvino \
-  --build-arg GIT_SHA=<fullsha> \
-  -f src/NubArca.Api/Dockerfile \
-  -t nubarca-api:release-<shortsha> .
-
-docker tag \
-  nubarca-api:release-<shortsha> \
-  nubarca-worker:release-<shortsha>
+IMAGE_DIGEST='ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>'
+docker pull "$IMAGE_DIGEST"
 ```
 
-The `--target runtime-openvino` and `GIT_SHA` build argument are mandatory.
-Plain `docker build` selects the final lean `runtime` stage and is not a valid
-production image for the current OpenVINO deployment.
+Pull by **digest**, not by tag. The `:<full-git-sha>` tag is the readable name
+and is what a human quotes; the digest is what fixes the bytes. A tag can be
+moved, a digest cannot, and the thing production runs should be the one that
+cannot change under it.
 
-Frontend changes:
+If the GHCR package is public no credential is needed. If it is private, log in
+with a **read-only** `read:packages` credential. A publishing token never
+belongs on the production host.
+
+Frontend changes are still built here, and that is the remaining local build:
 
 ```bash
 docker build --pull=false \
@@ -155,18 +159,17 @@ docker build --pull=false \
   frontend
 ```
 
-Build only the services affected by the diff. Documentation/test-only commits
-do not require a container rebuild.
+Documentation/test-only commits do not require a new image at all.
 
 ## 2.1 Production image build (GitHub)
 
 The `Build production images` workflow builds the SAME two API targets on a
 GitHub runner and publishes them to GHCR. It is `workflow_dispatch` only.
 
-**It is not yet the deploy path.** `docker-compose.prod.yml` still carries
-`build: context: .`, so §2 above remains the procedure and production continues
-to build from source. This section exists so the images can be produced and
-inspected before anything depends on them.
+**This is the backend deploy path.** `docker-compose.prod.yml` carries no
+`build:` recipe for `api` or `worker`, so what CI publishes here is what
+production runs; §2 pulls it and §3 gates it. The frontend is not covered yet
+and is still built on the server.
 
 What one run records:
 
@@ -210,18 +213,50 @@ is established on the installation, unchanged, by §6.
 
 ## 3. Gate images before changing release pins
 
-Do not edit `docker-compose.release.local.yml` until every required build has
-succeeded.
+Do not edit `docker-compose.release.local.yml` until the image has passed both
+gates below.
 
-For a backend image, verify:
+**3a. Verify the pulled image itself.** This is a SECOND, independent check —
+CI already verified the image before publishing it, and this one runs against
+the bytes that actually arrived on this host:
 
-- `NUBARCA_GIT_SHA` equals the full release SHA;
-- `ffmpeg` and `ffprobe` exist;
-- `/opt/nubarca/ort-openvino` contains the ONNX Runtime native library. It ships
-  under its SONAME, so match the versioned name (`ls
-  /opt/nubarca/ort-openvino/libonnxruntime.so*`) — a bare `libonnxruntime.so`
-  does not exist and checking for it fails a good image;
-- API and worker tags resolve to the same image ID.
+```bash
+scripts/verify-production-image.sh \
+  'ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>' \
+  <full-source-sha> \
+  openvino
+```
+
+It must print `IMAGE VERIFIED` and a `NUBARCA_GIT_SHA` equal to the source SHA.
+Anything else stops the deploy here.
+
+**3b. Verify the EFFECTIVE Compose model**, after pinning the digest and before
+recreating anything. What matters is not what the files say separately but what
+the four of them resolve to together:
+
+```bash
+docker compose \
+  -f docker-compose.prod.yml \
+  -f docker-compose.prod.local.yml \
+  -f docker-compose.facedirect-api.yml \
+  -f docker-compose.release.local.yml \
+  --env-file .env \
+  --profile worker \
+  config
+```
+
+Confirm in that output:
+
+- `api.image` and `worker.image` are both the pinned `@sha256:` digest — the
+  SAME one, because both run the OpenVINO target;
+- `api.build` and `worker.build` are **absent**;
+- the GPU wiring survives: `/dev/dri` on both, `group_add` carrying
+  `OPENVINO_RENDER_GID`, and the device placements unchanged (API: detector GPU,
+  recognizer CPU, photoText CPU; worker: detector GPU, recognizer GPU,
+  photoImage CPU).
+
+`--profile worker` is needed or `worker` does not appear in the output at all,
+and its absence reads like a missing service rather than a hidden one.
 
 For a frontend image, the Docker build must complete `tsc -b` and Vite
 successfully.
@@ -329,18 +364,25 @@ fails with "column does not exist" against a perfectly good schema.
 
 ## 5. Pin and deploy
 
-Update only the relevant image entries in
-`docker-compose.release.local.yml`:
+`docker-compose.release.local.yml` is the RELEASE PIN. It is server-local and
+not in the repository, and it names images that already exist — it is no longer
+where locally built images are referenced.
+
+Record the currently pinned backend image BEFORE editing: that recorded value is
+the whole of the rollback (§9), and it is only obtainable now.
 
 ```yaml
 services:
   api:
-    image: "nubarca-api:release-<shortsha>"
+    image: "ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>"
   worker:
-    image: "nubarca-worker:release-<shortsha>"
+    image: "ghcr.io/<owner>/nubarca-api-openvino@sha256:<digest>"
   frontend:
     image: "nubarca-frontend:release-<shortsha>"
 ```
+
+API and worker take the SAME digest, because both run the OpenVINO target. The
+frontend is still a locally built tag until its own slice.
 
 Then recreate only affected services with the complete Compose stack:
 
@@ -351,8 +393,12 @@ docker compose \
   -f docker-compose.facedirect-api.yml \
   -f docker-compose.release.local.yml \
   --env-file .env \
-  up -d --no-deps <affected-services>
+  up -d --no-build --no-deps <affected-services>
 ```
+
+`--no-build` is defence in depth. The backend has no build recipe to fall back
+on any more, but the flag also stops a frontend rebuild being triggered by a
+backend-only deploy, and it makes the intent unmistakable in the shell history.
 
 Rules:
 
@@ -375,6 +421,33 @@ curl -fsS http://127.0.0.1:8081/
 Wait until the API Docker health is `healthy`. Confirm the frontend HTML names
 the newly built JS/CSS assets. Check worker stability and recent logs without
 printing secrets, paths, payloads or raw metadata.
+
+When the backend image changed, also confirm the delivery itself did what it
+claims — the container is running the exact bytes that were gated:
+
+```bash
+docker inspect nubarca-api    --format '{{.Image}}'
+docker inspect nubarca-worker --format '{{.Image}}'
+docker exec nubarca-api sh -c 'printf %s "$NUBARCA_GIT_SHA"'
+```
+
+Both containers must resolve to the same image, and the running
+`NUBARCA_GIT_SHA` must equal the source SHA the digest was built from.
+
+`/health/ready` matters more than `/health` for this stack: readiness is what
+the direct-OpenVINO model reports through, so a container that answers `/health`
+but never becomes ready has loaded no inference runtime. Also confirm the GPU
+wiring actually reached the containers, since the image no longer comes from
+this host and a device mount is the one thing an image cannot carry:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health/ready
+docker exec nubarca-api    ls /dev/dri
+docker exec nubarca-worker ls /dev/dri
+```
+
+Check the API and worker logs for the OpenVINO provider initialising, and for
+any silent fall back to a CPU or synthetic path that was not asked for.
 
 When backend video processing changed, verify inside the running worker:
 
@@ -441,8 +514,16 @@ Verify that the worker claims the returned job ID. This command excludes
 
 ## 9. Rollback
 
-Keep the previous image tags until smoke checks pass. To roll back, restore the
-previous pins in `docker-compose.release.local.yml` and recreate only the
-affected services with the same four-file Compose stack. A release containing a
-database migration requires the migration-specific restore plan; never assume
-an image-only rollback is schema-safe.
+Keep the previous image references until smoke checks pass. To roll back,
+restore the previous pins in `docker-compose.release.local.yml` and recreate
+only the affected services with the same four-file Compose stack, again with
+`--no-build`.
+
+For the backend this is now a pin change and nothing else: **no recompilation**.
+The previous image is still in the local daemon, and the one being rolled back
+from remains addressable by its digest, so the rollback is reversible in both
+directions and neither leg depends on a build succeeding under pressure. That
+property is a large part of why the backend stopped being built here.
+
+A release containing a database migration requires the migration-specific
+restore plan; never assume an image-only rollback is schema-safe.

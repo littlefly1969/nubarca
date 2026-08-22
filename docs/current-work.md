@@ -485,3 +485,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   belong to an installation, so the workflow proves the GPU variant CONTAINS the
   OpenVINO native layer and Intel OpenCL userspace, and leaves the device itself
   to the installation's own smoke checks.
+- **The production server no longer compiles the backend.** `api` and `worker`
+  run the OpenVINO image CI built, pinned BY DIGEST in the server-local release
+  override — the same digest for both, because both run the same target. The
+  `:<full-git-sha>` tag stays the readable name a human quotes; the digest is
+  what fixes the bytes, because a tag can be moved and the thing production runs
+  should be the one that cannot change under it. The production Compose model
+  carries no `build:` recipe for either service, so a backend build from that
+  stack is not merely discouraged, it is unavailable: `docker compose build api`
+  answers "neither an image nor a build context". A measured consequence, kept
+  deliberately: the base stack (`prod.yml` + `prod.local.yml`) no longer resolves
+  api/worker on its own — which is honest, since it never carried the GPU wiring
+  and was never a valid way to run them. Everything hardware stays where it was,
+  in the OpenVINO override: `/dev/dri`, `OPENVINO_RENDER_GID`, and the device
+  placements. The image cannot carry a device mount, so §6 now proves the GPU
+  wiring reached the containers rather than assuming it. Rollback became a pin
+  change with no recompilation, in both directions. The frontend is still built
+  on the server; that is the next slice.
