@@ -27,10 +27,10 @@
 // created, and Android verifies the signature again after that.
 
 /** The one public path the release descriptor is published at. */
-export const RELEASE_DESCRIPTOR_PATH = '/download/tv/nubarca-tv.release.json';
+const RELEASE_DESCRIPTOR_PATH = '/download/tv/nubarca-tv.release.json';
 
 /** The directory the immutable APKs are published in, on the same origin. */
-export const RELEASE_DOWNLOAD_PREFIX = '/download/tv/';
+const RELEASE_DOWNLOAD_PREFIX = '/download/tv/';
 
 export interface NativeRelease {
   readonly schemaVersion: 1;

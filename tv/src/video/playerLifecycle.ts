@@ -99,24 +99,12 @@ export function shouldAutoResume(): boolean {
 }
 
 // --- output routes -----------------------------------------------------------
-
-/**
- * What losing the audio output route means for playback.
- *
- * HDMI unplugged, an AV receiver switched away, a Bluetooth speaker
- * disconnecting: pause and keep the position. Never navigate, never close the
- * viewer, never reset position — the user has not asked to stop watching, only
- * the sound has nowhere to go.
- */
-export function pausesOnOutputLoss(hasPlaybackContext: boolean): boolean {
-  return hasPlaybackContext;
-}
-
-/**
- * And when the route comes back: still NO auto-resume, for the same reason as
- * returning from background. Predictable beats clever on a device in a living
- * room.
- */
-export function resumesOnOutputRestored(): boolean {
-  return false;
-}
+//
+// There is deliberately NO policy function here for output loss: TvVideoPlayer's
+// subscription pauses directly, and nothing resumes. An exported predicate the
+// runtime never consults is not documentation — it is a second, silent answer
+// that can drift from the real one. The behaviour lives in the handler and the
+// tests read the handler.
+//
+// `shouldAutoResume` above IS shared, because both the background path and the
+// output path genuinely consult it.

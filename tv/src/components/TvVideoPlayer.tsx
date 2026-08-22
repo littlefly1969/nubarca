@@ -59,9 +59,7 @@ import {
 //     belongs to the same source, and does NOT auto-resume. See
 //     video/playerLifecycle.ts for the rules and the AppState effect below for
 //     the wiring.
-//
-//     This comment used to say "pauses and releases" while the code only
-//     paused. It now describes what executes.
+
 //
 // A decoder/network error is reported through `statusChange` and turns into the
 // poster + a generic message. It never propagates, and nothing here can

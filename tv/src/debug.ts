@@ -5,7 +5,7 @@
 // leak-free: it carries only the media VARIANT (thumbnail/preview/poster), an
 // OPAQUE cache key, timings, byte counts, queue depth, and failure class —
 // never cookies, tokens, ids, or URLs.
-export const TV_DEBUG_MEDIA = false;
+const TV_DEBUG_MEDIA = false;
 
 export function tvDebug(...parts: Array<string | number | boolean>): void {
   if (!TV_DEBUG_MEDIA) return;

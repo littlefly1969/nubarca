@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 import {
   createMediaSubscribers,
   handoffFirstLive,
@@ -9,7 +9,7 @@ import {
   type MediaWaiter,
 } from './mediaCachePolicy.ts';
 
-const source = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const source = (relativePath: string) => read(import.meta.url, relativePath);
 
 test('cache eviction skips live leases and its just-produced entry', () => {
   const order = ['live-oldest', 'free-oldest', 'fresh'];

@@ -11,27 +11,18 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { code, read } from '../testing/sourceText.ts';
 import { tvFlowReducer, isPersonalState, type TvFlowState } from '../personal/flow.ts';
 
 const require = createRequire(import.meta.url);
 const plugin = require(new URL('../../plugins/withTvPlatformModule.js', import.meta.url).pathname);
-const pluginSource = readFileSync(
-  new URL('../../plugins/withTvPlatformModule.js', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
-const modeSelect = readFileSync(
-  new URL('../screens/ModeSelectScreen.tsx', import.meta.url), 'utf8');
-const updateScreen = readFileSync(new URL('../screens/UpdateScreen.tsx', import.meta.url), 'utf8');
+const pluginSource = read(import.meta.url, '../../plugins/withTvPlatformModule.js');
+const app = read(import.meta.url, '../../App.tsx');
+const modeSelect = read(import.meta.url, '../screens/ModeSelectScreen.tsx');
+const updateScreen = read(import.meta.url, '../screens/UpdateScreen.tsx');
 const packageJson = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 
 const INSTALL_PERMISSION = 'android.permission.REQUEST_INSTALL_PACKAGES';
-
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n');
-}
 
 /** Run the plugin's manifest mods over a minimal generated-manifest fixture. */
 async function applyManifest(existingPermissions: string[] = []) {
@@ -237,7 +228,7 @@ test('the existing mode transitions are unchanged', () => {
 // --- the mode selector and the screen ----------------------------------------
 
 test('the mode selector has a fourth entry that does not steal the initial focus', () => {
-  const source = code(modeSelect);
+  const source = modeSelect;
   const buttons = [...source.matchAll(/<FocusableButton\s+label=\{t\('([^']+)'\)\}/g)]
     .map((match) => match[1]);
   assert.deepEqual(buttons, ['mode.party', 'mode.personal', 'mode.beautyLab', 'mode.updates']);
@@ -248,7 +239,7 @@ test('the mode selector has a fourth entry that does not steal the initial focus
 });
 
 test('App wires the update surface into the one flow reducer', () => {
-  const source = code(app);
+  const source = app;
   assert.match(source, /rawDispatch\(\{ type: 'CHOOSE_UPDATES' \}\)/);
   assert.match(source, /rawDispatch\(\{ type: 'UPDATES_BACK' \}\)/);
   assert.match(source, /flow\.name === 'updates' &&/);
@@ -259,7 +250,7 @@ test('App wires the update surface into the one flow reducer', () => {
 test('the update screen evaluates the native release before offering an OTA', () => {
   // Sliced past the imports: the order that matters is the order of the CALLS,
   // and an import block would otherwise decide this assertion.
-  const source = code(updateScreen).slice(code(updateScreen).indexOf('export function UpdateScreen'));
+  const source = updateScreen.slice(updateScreen.indexOf('export function UpdateScreen'));
   const descriptor = source.indexOf('fetchNativeRelease');
   const decision = source.indexOf('decideUpdatePath');
   const ota = source.indexOf('checkForOtaUpdateNow');
@@ -270,7 +261,7 @@ test('the update screen evaluates the native release before offering an OTA', ()
 });
 
 test('the update screen never shows a path, a hash or a native message', () => {
-  const source = code(updateScreen);
+  const source = updateScreen;
   assert.doesNotMatch(source, /apkSha256\}|apkFile\}|\.uri\}/);
   assert.doesNotMatch(source, /error\.message|String\(error\)/);
   // Every failure the screen can render comes from the sanitized code map.

@@ -1,19 +1,16 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 import {
   capabilitiesForScreen, FIVE_WAY_KEYS, menuOnlyCapabilities, TV_CAPABILITIES,
 } from './fiveWayCapability.ts';
 
-const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
-const code = (source: string) => source
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+const src = (path: string) => read(import.meta.url, path);
 
-const library = code(read('../screens/PersonalLibraryScreen.tsx'));
-const albumItems = code(read('../screens/AlbumItemsScreen.tsx'));
-const beautyLab = code(read('../screens/BeautyLabScreen.tsx'));
-const launcher = code(read('../components/TvContextActionsLauncher.tsx'));
+const library = src('../screens/PersonalLibraryScreen.tsx');
+const albumItems = src('../screens/AlbumItemsScreen.tsx');
+const beautyLab = src('../screens/BeautyLabScreen.tsx');
+const launcher = src('../components/TvContextActionsLauncher.tsx');
 
 const SCREENS = { library, albumItems, beautyLab };
 
@@ -161,8 +158,8 @@ test('MENU still works as an accelerator and still closes the surface', () => {
 });
 
 test('Beauty Lab no longer instructs the user to press a key it may not have', () => {
-  const it = read('../i18n/it.ts');
-  const en = read('../i18n/en.ts');
+  const it = src('../i18n/it.ts');
+  const en = src('../i18n/en.ts');
   // The empty state used to say "Press MENU" — on a remote without one, the
   // whole feature was unreachable and the copy was the only instruction.
   assert.doesNotMatch(it, /beautyLab\.empty':[^\n]*MENU/);

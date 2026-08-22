@@ -425,3 +425,26 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `timeUpdate` position instead (`tv/src/lib/partySlideshow.ts`). One latch per
   video decides whether it may advance, because a cap crossing and `playToEnd`
   on the same frame would otherwise advance twice and silently skip an item.
+- **"Applied but inert" is a defect class, not an incident.** A control the
+  television shows as active that the request cannot carry is invisible to
+  every status-code assertion: the parameter is accepted, parsed and dropped,
+  and the search silently answers a different question than the screen claims.
+  It has now appeared three times — a filter emitted on one route only, a
+  filter no endpoint declared, and ORDER controls under a relevance ranking
+  that never sends `sort` or `direction`. The structural answers are
+  `TvSemanticSupport` in the catalog (a row unsupported by the active route is
+  not offered at all), `isRelevanceOrdered` (the panel states the order instead
+  of pretending it is editable, and `queryFingerprint` stops keying on it so
+  two identical searches stay one request), and tests that assert on RESULTS
+  rather than on status codes — `TvPersonalSemanticFilterTests` runs a real
+  deterministic-backend search over two items that differ only by album
+  membership, so an ignored filter cannot survive it.
+- **Source-reading tests strip comments, in exactly one place.** Several
+  guarantees are structural and are asserted by checking a construct is absent,
+  which is where `assert.doesNotMatch` lies: the comment explaining why
+  something was retired keeps the assertion red, and a renamed construct keeps
+  it green because the old name survives in prose. Both have happened here. The
+  stripper had accreted into eight hand-rolled copies across six files — one
+  per occurrence of the bug, and one of them had silently drifted to miss `/* */`
+  blocks. It is now `tv/src/testing/sourceText.ts`, and reading a source strips
+  by default so the unsafe form cannot be reached by accident.

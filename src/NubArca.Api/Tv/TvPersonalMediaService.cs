@@ -68,8 +68,7 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
     }
 
     // SEMANTIC retrieval, delegated ENTIRELY to the canonical services — and to
-    // the RIGHT one for each kind, which is the correction this method exists to
-    // carry.
+    // the RIGHT one for each kind.
     //
     //   image        → GallerySemanticQueryService, the photo pipeline the web's
     //                  photo tab uses. It is physical-filter-FIRST: the People,
@@ -78,14 +77,14 @@ public sealed class TvPersonalMediaService : ITvPersonalMediaService
     //                  inside an album really is album-scoped.
     //   all | video  → MediaSemanticSearchService, the unified cross-kind route.
     //
-    // An earlier version sent every kind to the unified service. That produced
-    // the right-looking results for the wrong reason: photos were ranked by the
-    // media pipeline rather than the photo one, and — worse — a photo search
-    // inside an album silently searched the owner's WHOLE library, because the
-    // unified route is library-scoped and takes no album.
+    // Sending every kind to the unified service produces results that LOOK right
+    // for the wrong reason: photos get ranked by the media pipeline rather than
+    // the photo one, and — worse — a photo search inside an album silently
+    // searches the owner's WHOLE library, because the unified route is
+    // library-scoped and takes no album.
     //
-    // The reason the photo route was avoided is real and is solved here rather
-    // than accepted: it hydrates into ImageItem, which carries no favorite,
+    // The one real cost of the photo route is solved here rather than accepted:
+    // it hydrates into ImageItem, which carries no favorite,
     // rating or takenAt, so projecting it would have made semantic photo cards
     // visibly poorer than ordinary ones in the same grid. The fix is to take the
     // RANKED IDS and re-hydrate them through ListGalleryMediaByRankAsync, which

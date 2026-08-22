@@ -9,8 +9,8 @@
 // back-navigation test actually had.
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 import {
   displayTotal, formatPosition, formatTotal, isUnknownTotal,
   mergePagedTotal, TOTAL_UNCHANGED,
@@ -22,21 +22,14 @@ import {
 } from './peoplePicker.ts';
 import { fixedEditorLayout, TV_VIEWPORTS, usableHeight } from '../lib/panelLayout.ts';
 
-const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
-function code(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n');
-}
+const src = (path: string) => read(import.meta.url, path);
 
-const peoplePanel = code(read('../screens/library/LibraryPeoplePanel.tsx'));
-const panelShell = code(read('../screens/gallery/PanelShell.tsx'));
-const filterRow = code(read('../screens/library/FilterRow.tsx'));
-const viewer = code(read('../screens/library/PersonalMediaViewer.tsx'));
-const libraryScreen = code(read('../screens/PersonalLibraryScreen.tsx'));
-const keyboard = code(read('../screens/gallery/TvKeyboardPanel.tsx'));
+const peoplePanel = src('../screens/library/LibraryPeoplePanel.tsx');
+const panelShell = src('../screens/gallery/PanelShell.tsx');
+const filterRow = src('../screens/library/FilterRow.tsx');
+const viewer = src('../screens/library/PersonalMediaViewer.tsx');
+const libraryScreen = src('../screens/PersonalLibraryScreen.tsx');
+const keyboard = src('../screens/gallery/TvKeyboardPanel.tsx');
 
 // ---------------------------------------------------------------- paging
 
@@ -352,7 +345,7 @@ test('BACK still leaves the viewer in one press', () => {
 
 test('the selected media kind is visible when focus moves away', () => {
   assert.match(libraryScreen, /selected=\{kind === identity\.mediaKind\}/);
-  assert.match(code(read('../components/FocusableButton.tsx')),
+  assert.match(src('../components/FocusableButton.tsx'),
     /\{focused \? '▸ ' : ''\}\{selected \? '✓ ' : ''\}\{label\}/);
 });
 
@@ -363,7 +356,7 @@ test('identity.mediaKind stays the only authority', () => {
 });
 
 test('selection is marked by more than colour', () => {
-  const button = code(read('../components/FocusableButton.tsx'));
+  const button = src('../components/FocusableButton.tsx');
   assert.match(button, /labelSelected: \{ color: colors\.text, fontWeight: '800' \}/);
   assert.match(button, /accessibilityState=\{\{ selected \}\}/);
 });

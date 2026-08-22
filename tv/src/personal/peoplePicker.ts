@@ -83,7 +83,7 @@ export interface FocusViewport {
  * is "approaching the boundary" and the list is scrolled to bring it back
  * toward the middle.
  */
-export const FOCUS_SAFE_ROWS = 1;
+const FOCUS_SAFE_ROWS = 1;
 
 export interface ScrollRequest {
   index: number;

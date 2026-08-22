@@ -265,6 +265,7 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'filters.audioYes': 'With audio',
   'filters.audioNo': 'Without audio',
   'filters.sort': 'Sort by',
+  'filters.sort.relevance': 'Relevance',
   'filters.sort.created': 'Upload date',
   'filters.sort.datetaken': 'Date taken',
   'filters.sort.name': 'Name',

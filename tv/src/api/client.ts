@@ -57,20 +57,6 @@ export function getBaseUrl(): string {
   return _baseUrl;
 }
 
-export function hasSession(): boolean {
-  return sessionCookie.current !== null;
-}
-
-// Video-hls slice 4: request headers carrying the limited TV session cookie,
-// for consumers that stream /api/tv media through a NATIVE loader (the
-// expo-video player) instead of the fetch stack above. The native player does
-// not share RN fetch's cookie jar, so the manually-held cookie must ride along
-// explicitly. Only ever pass these to URLs vetted by resolveTvMediaUrl —
-// the same /api/tv-only boundary every other consumer obeys.
-export function getTvSessionHeaders(): Record<string, string> {
-  return sessionCookie.current ? { cookie: sessionCookie.current } : {};
-}
-
 // Headers for native media consumers. Personal video playback needs the same
 // short-lived unlock grant as JSON/poster requests; expo-video does not share
 // the fetch client, so both headers must be attached to master + HLS children.
@@ -180,10 +166,6 @@ export function tvPost<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   return request<T>(path, { method: 'POST', json, headers, signal });
-}
-
-export function tvPut<T>(path: string, json?: unknown, headers?: Record<string, string>): Promise<T> {
-  return request<T>(path, { method: 'PUT', json, headers });
 }
 
 export function tvDelete<T>(path: string, headers?: Record<string, string>): Promise<T> {
@@ -649,7 +631,7 @@ export function loadTvMediaLeased(
 
 // Purge all cached derived media (called when the TV session is cleared/revoked/
 // expired). Best-effort: drops in-flight tracking and deletes the cache dir.
-export function clearTvMediaCache(): void {
+function clearTvMediaCache(): void {
   _mediaEpoch += 1;
   _mediaInflight.clear();
   _mediaFailures.clear();

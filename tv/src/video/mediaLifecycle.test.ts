@@ -1,19 +1,17 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from './wakePolicy.ts';
 import {
-  hostStateFromAppState, pausesOnOutputLoss, releasesPlayer, restorablePosition,
-  resumesFromBackground, resumesOnOutputRestored, shouldAutoResume, shouldMountPlayer,
+  hostStateFromAppState, releasesPlayer, restorablePosition,
+  resumesFromBackground, shouldAutoResume, shouldMountPlayer,
 } from './playerLifecycle.ts';
 
-const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '')
-  .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+const src = (path: string) => read(import.meta.url, path);
 
-const player = code(read('../components/TvVideoPlayer.tsx'));
-const partyViewer = code(read('../screens/ViewerScreen.tsx'));
-const personalViewer = code(read('../screens/library/PersonalMediaViewer.tsx'));
+const player = src('../components/TvVideoPlayer.tsx');
+const partyViewer = src('../screens/ViewerScreen.tsx');
+const personalViewer = src('../screens/library/PersonalMediaViewer.tsx');
 
 // ------------------------------------------------------------------ wake
 
@@ -121,13 +119,22 @@ test('a nonsensical snapshot is discarded rather than applied', () => {
 test('playback never resumes by itself', () => {
   // Returning to a room and having audio start on its own is the behaviour this
   // product avoids — even when the user WAS playing before the interruption.
+  // One predicate, consulted by both the background and the output paths.
   assert.equal(shouldAutoResume(), false);
-  assert.equal(resumesOnOutputRestored(), false);
 });
 
-test('losing the audio output pauses, and only when something is playing', () => {
-  assert.equal(pausesOnOutputLoss(true), true);
-  assert.equal(pausesOnOutputLoss(false), false);
+test('losing the audio output pauses, and only when something was playing', () => {
+  // Read from the HANDLER rather than from a policy function, because the
+  // handler is what runs. A pause is performed unconditionally (pausing an
+  // already-paused player is harmless) and only a real interruption is
+  // REPORTED to the controlled parent.
+  const start = player.indexOf('useEffect(() => subscribeOutputLost(');
+  const handler = player.slice(start, player.indexOf('}), [player]);', start));
+  assert.match(handler, /wasPlaying = player\.playing;/);
+  assert.match(handler, /player\.pause\(\);/);
+  assert.match(handler, /if \(wasPlaying\) onExternalPauseRef/);
+  // And nothing in it resumes.
+  assert.doesNotMatch(handler, /player\.play\(\)/);
 });
 
 test('the player snapshots before it is unmounted', () => {
@@ -160,7 +167,7 @@ test('NubArca adds no MediaSession and no audio-focus owner', () => {
   // expo-video already owns both. A second one is the double-dispatch and the
   // duplicate registration the audit exists to prevent.
   const nativeSources = [
-    read('../../plugins/withTvPlatformModule.js'),
+    src('../../plugins/withTvPlatformModule.js'),
     player, partyViewer, personalViewer,
   ].join('\n');
   for (const forbidden of [
@@ -392,7 +399,7 @@ test('the controlled party video scenario, end to end', () => {
   assert.equal(parentPlaying, false, 'intent must agree with reality');
 
   // Output restored: nothing changes, no auto-resume.
-  assert.equal(resumesOnOutputRestored(), false);
+  assert.equal(shouldAutoResume(), false);
   assert.equal(parentPlaying, false);
   assert.equal(playerPlaying, false);
 

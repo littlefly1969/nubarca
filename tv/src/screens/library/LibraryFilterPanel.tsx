@@ -14,6 +14,7 @@ import {
   cloneMediaFilters,
   DURATION_PRESET_MINUTES,
   isoToDateInput,
+  isRelevanceOrdered,
   MIN_HEIGHT_PRESETS,
   minutesToSeconds,
   secondsToMinutes,
@@ -356,32 +357,61 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
       })}
 
       <Text style={styles.section}>{t('filters.sectionOrder')}</Text>
-      <FilterRow
-        label={t('filters.sort')}
-        value={t(`filters.sort.${sort}` as Parameters<typeof t>[0])}
-        active={sort !== 'created'}
-        opensEditor={false}
-        accessibilityLabel={t('filters.rowA11y', {
-          label: t('filters.sort'),
-          value: t(`filters.sort.${sort}` as Parameters<typeof t>[0]),
-        })}
-        hasTVPreferredFocus={focusKey === 'sort'}
-        onFocus={() => { focusRef.current = 'sort'; }}
-        onSelect={() => setSort(cycle(SORTS, sort))}
-      />
-      <FilterRow
-        label={t('filters.direction')}
-        value={direction === 'desc' ? t('filters.newest') : t('filters.oldest')}
-        active={direction !== 'desc'}
-        opensEditor={false}
-        accessibilityLabel={t('filters.rowA11y', {
-          label: t('filters.direction'),
-          value: direction === 'desc' ? t('filters.newest') : t('filters.oldest'),
-        })}
-        hasTVPreferredFocus={focusKey === 'direction'}
-        onFocus={() => { focusRef.current = 'direction'; }}
-        onSelect={() => setDirection(direction === 'desc' ? 'asc' : 'desc')}
-      />
+      {/* Under a semantic query the order IS the relevance ranking: both
+          canonical services sort by score and carry their own cursor, so `sort`
+          and `direction` are never sent. Offering them anyway would let the
+          user change the ordering, see it marked active, press Apply and get
+          byte-identical results — the same "applied but inert" defect as a
+          filter that reaches no wire. So the controls are replaced by a
+          statement of what the order actually is. */}
+      {isRelevanceOrdered(draftIdentity) ? (
+        <FilterRow
+          label={t('filters.sort')}
+          value={t('filters.sort.relevance')}
+          active={false}
+          opensEditor={false}
+          accessibilityLabel={t('filters.rowA11y', {
+            label: t('filters.sort'),
+            value: t('filters.sort.relevance'),
+          })}
+          // 'sort' and 'direction' are STATIC focus keys, so resolveTvFilterFocus
+          // keeps honouring them here even though neither row is rendered. This
+          // one row answers for both, or focus lands nowhere and the remote
+          // loses its ring — the state that resolver exists to prevent.
+          hasTVPreferredFocus={focusKey === 'sort' || focusKey === 'direction'}
+          onFocus={() => { focusRef.current = 'sort'; }}
+          onSelect={() => { /* relevance is not a choice while searching by meaning */ }}
+        />
+      ) : (
+        <>
+          <FilterRow
+            label={t('filters.sort')}
+            value={t(`filters.sort.${sort}` as Parameters<typeof t>[0])}
+            active={sort !== 'created'}
+            opensEditor={false}
+            accessibilityLabel={t('filters.rowA11y', {
+              label: t('filters.sort'),
+              value: t(`filters.sort.${sort}` as Parameters<typeof t>[0]),
+            })}
+            hasTVPreferredFocus={focusKey === 'sort'}
+            onFocus={() => { focusRef.current = 'sort'; }}
+            onSelect={() => setSort(cycle(SORTS, sort))}
+          />
+          <FilterRow
+            label={t('filters.direction')}
+            value={direction === 'desc' ? t('filters.newest') : t('filters.oldest')}
+            active={direction !== 'desc'}
+            opensEditor={false}
+            accessibilityLabel={t('filters.rowA11y', {
+              label: t('filters.direction'),
+              value: direction === 'desc' ? t('filters.newest') : t('filters.oldest'),
+            })}
+            hasTVPreferredFocus={focusKey === 'direction'}
+            onFocus={() => { focusRef.current = 'direction'; }}
+            onSelect={() => setDirection(direction === 'desc' ? 'asc' : 'desc')}
+          />
+        </>
+      )}
 
       <View style={styles.actions}>
         <FocusableButton

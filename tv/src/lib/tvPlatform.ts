@@ -42,19 +42,16 @@ interface NubArcaTvPlatformNative {
 const native = (NativeModules as { NubArcaTvPlatform?: NubArcaTvPlatformNative })
   .NubArcaTvPlatform;
 
-export function hasNativeTaskExit(): boolean {
-  return Platform.OS === 'android' && typeof native?.exitAndRemoveTask === 'function';
-}
-
 /** Whether this build can install its own updates at all (release Fire TV only). */
 export function hasNativeInstaller(): boolean {
   return Platform.OS === 'android' && typeof native?.requestPackageUpdate === 'function';
 }
 
-// The complete set of failures the update screen knows how to explain. Anything
-// the bridge cannot classify collapses to 'installer-unavailable' rather than
-// leaking a native message.
-export const PACKAGE_UPDATE_FAILURES = [
+// Every failure the NATIVE bridge can report. Anything it cannot classify
+// collapses to 'installer-unavailable' rather than leaking a native message.
+// The update screen explains one more — 'download-failed' — which happens
+// before the bridge is reached; see NativeUpdateFailure.
+const PACKAGE_UPDATE_FAILURES = [
   'permission-required',
   'invalid-file',
   'hash-mismatch',

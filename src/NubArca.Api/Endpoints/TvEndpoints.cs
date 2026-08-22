@@ -483,8 +483,9 @@ public static class TvEndpoints
         //
         // A THIN ADAPTER, and deliberately nothing more. The ranking, the
         // candidate policy, the relevance cursor and the availability rules all
-        // belong to MediaSemanticSearchService — the same service that answers
-        // /api/media/semantic on the web. This route exists only because a
+        // belong to the canonical semantic services — GallerySemanticQueryService
+        // for photos, MediaSemanticSearchService for the cross-kind route — which
+        // TvPersonalMediaService picks between. This route exists only because a
         // LIMITED TV session cannot call an owner-web endpoint: it re-derives
         // the owner from the session cookie plus the unlock grant, server-side,
         // and never accepts an owner from the television.
@@ -502,6 +503,11 @@ public static class TvEndpoints
             [FromQuery] bool? hasGps,
             [FromQuery] DateTime? dateTakenFrom,
             [FromQuery] DateTime? dateTakenTo,
+            // Album MEMBERSHIP ("in an album" / "in no album"), distinct from
+            // albumId ("in THIS album"). A physical filter both canonical
+            // semantic routes honour, because both build their candidate set
+            // through BuildGalleryQuery.
+            [FromQuery] string? albumMembership,
             // PHOTO-route filters. The photo semantic pipeline is
             // physical-filter-FIRST, so these shrink the candidate set before
             // ranking rather than being applied to an already-ranked page.
@@ -611,12 +617,19 @@ public static class TvEndpoints
                 });
             }
 
+            if (!GalleryQueryParser.TryParseAlbumMembership(
+                    albumMembership, out var membership, out var membershipError))
+            {
+                return Results.BadRequest(new { error = membershipError });
+            }
+
             var filters = new NubArca.Api.Files.ImageFilters
             {
                 Favorite = favorite,
                 MinRating = minRating,
                 DateTakenFrom = dateTakenFrom,
                 DateTakenTo = dateTakenTo,
+                AlbumMembership = membership,
             };
             if (photoOnly)
             {

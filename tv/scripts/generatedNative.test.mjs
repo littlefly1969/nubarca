@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
+import { code } from '../src/testing/sourceText.ts';
 import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -145,9 +146,7 @@ when('the TV activity does not pin an orientation', () => {
 when('the output observer watches only the ACTIVE route and the display path', () => {
   const observer = readFileSync(resolve(ANDROID,
     'app/src/main/java/it/littlefly/nubarca/tv/platform/NubArcaTvOutputObserver.kt'), 'utf8');
-  const kotlin = observer
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+  const kotlin = code(observer);
 
   // HDMI is the television's display path: losing it genuinely means playback
   // has nowhere to go.
@@ -183,9 +182,7 @@ when('the output observer reached the generated project', () => {
   // Stripped of comments before the NEGATIVE assertions: the observer's own
   // documentation explains that it must not build a MediaSession, and prose
   // saying so must not be mistaken for code doing so.
-  const kotlin = source
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n').filter((line) => !line.trimStart().startsWith('//')).join('\n');
+  const kotlin = code(source);
   for (const forbidden of [
     /MediaSession/, /requestAudioFocus/, /abandonAudioFocus/,
     /OnAudioFocusChangeListener/, /ExoPlayer/,

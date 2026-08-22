@@ -26,9 +26,6 @@ export const font = {
   code: 56,
 };
 
-// Focus ring width used across focusable tiles/buttons.
-export const focusRing = 4;
-
 // TV overscan safe-area insets (~3.5% per edge, floored). Overlay chrome (QR
 // corners, title, command bars) is positioned inside these so it is never
 // clipped on 1080p or 720p panels.

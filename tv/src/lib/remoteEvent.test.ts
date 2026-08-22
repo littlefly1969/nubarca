@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 import {
   actionableEventType, isMediaTransportEvent, MEDIA_TRANSPORT_EVENTS,
   REMOTE_ACTION_DOWN, shouldActOnRemoteEvent,
@@ -60,8 +61,7 @@ test('the transport vocabulary is closed and recognised', () => {
 });
 
 test('non-media screens leave transport keys to the platform', () => {
-  const code = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
-    .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+  const code = (path: string) => read(import.meta.url, path);
   // Repurposing Play/Pause to activate a focused button would steal transport
   // control from whatever else the television is playing.
   for (const screen of [

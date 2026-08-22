@@ -84,7 +84,7 @@ export function usableHeight(viewport: Viewport): number {
   return Math.max(0, viewport.height - 2 * overscan - 2 * c.padding - c.title);
 }
 
-export function usableWidth(viewport: Viewport): number {
+function usableWidth(viewport: Viewport): number {
   const overscan = Math.max(24, Math.round(viewport.width * OVERSCAN_RATIO));
   return Math.max(0, viewport.width - 2 * overscan);
 }

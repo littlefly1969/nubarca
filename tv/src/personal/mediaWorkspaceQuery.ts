@@ -30,7 +30,7 @@ export type MediaSortField = 'created' | 'name' | 'size' | 'datetaken';
 export type MediaSortDirection = 'asc' | 'desc';
 export type PeopleMode = 'all' | 'any';
 
-export const DEFAULT_MEDIA_LIMIT = 50;
+const DEFAULT_MEDIA_LIMIT = 50;
 
 // Which collection the workspace is browsing. `album` carries the album id; the
 // only thing that differs between the two is the endpoint's source predicate.
@@ -104,7 +104,7 @@ export interface MediaWorkspaceIdentity {
 // TV's request, matching the web default.
 export const DEFAULT_SEMANTIC_TOP_K = 200;
 
-export const EMPTY_COMMON_FILTERS: CommonMediaFilters = {
+const EMPTY_COMMON_FILTERS: CommonMediaFilters = {
   metadataQuery: '',
   visualQuery: '',
   semanticTopK: 0,
@@ -115,7 +115,7 @@ export const EMPTY_COMMON_FILTERS: CommonMediaFilters = {
   albumMembership: 'any',
 };
 
-export const EMPTY_PHOTO_FILTERS: PhotoMediaFilters = {
+const EMPTY_PHOTO_FILTERS: PhotoMediaFilters = {
   hasGps: null,
   collapseDuplicates: false,
   includePeople: [],
@@ -123,7 +123,7 @@ export const EMPTY_PHOTO_FILTERS: PhotoMediaFilters = {
   includePeopleMode: 'all',
 };
 
-export const EMPTY_VIDEO_FILTERS: VideoMediaFilters = {
+const EMPTY_VIDEO_FILTERS: VideoMediaFilters = {
   durationMinSeconds: null,
   durationMaxSeconds: null,
   minHeight: null,
@@ -131,7 +131,7 @@ export const EMPTY_VIDEO_FILTERS: VideoMediaFilters = {
   hasAudio: null,
 };
 
-export function emptyMediaFilters(): MediaWorkspaceFilters {
+function emptyMediaFilters(): MediaWorkspaceFilters {
   return {
     common: { ...EMPTY_COMMON_FILTERS },
     photo: { ...EMPTY_PHOTO_FILTERS, includePeople: [], excludePeople: [] },
@@ -185,20 +185,11 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
 // ONE gate for the whole feature: whether the filter is offered, whether it
 // produces a chip, whether it keys the fingerprint and whether it reaches a
 // wire are all this one answer. Putting the flag anywhere else lets those
-// disagree — which the first attempt did, and the catalog's coupling tests
-// caught three ways at once.
+// disagree — which an early attempt did, three ways at once.
 //
-// It is TRUE now because the retrieval exists: GET /api/tv/personal/media/semantic
-// is a thin adapter over MediaSemanticSearchService, the same canonical service
-// behind the web's /api/media/semantic. That service takes a MediaKindScope, so
-// one ranking answers All, Photos and Videos, and it returns MediaItem — the
-// exact type the ordinary TV projection consumes, which is why a semantic card
-// is indistinguishable from an ordinary one in the same grid.
-//
-// The alternative considered and rejected: routing photos through the separate
-// photo-gallery semantic service. It returns ImageItem, which carries no
-// favorite, rating or takenAt, so semantic photo results would have rendered
-// visibly poorer than ordinary ones beside them.
+// TRUE because the retrieval exists: GET /api/tv/personal/media/semantic is a
+// thin adapter that delegates to whichever canonical service the KIND calls for
+// (see `semanticRoute`). It never ranks anything itself.
 export const SEMANTIC_RETRIEVAL_AVAILABLE = true;
 
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
@@ -212,12 +203,35 @@ export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
 export type SemanticRoute = 'photo' | 'media';
 
 /**
- * Photos go through the canonical photo/image semantic pipeline (which honours
- * albumId); All and Videos go through the unified MediaSemanticSearchService.
- * Same split as the web — the TV picks the route, it never implements one.
+ * Which canonical service answers, and therefore which filters are honoured.
+ *
+ *   'photo'  GallerySemanticQueryService — the pipeline the web's photo tab
+ *            uses. Physical-filter-FIRST, so metadata text, People, GPS,
+ *            duplicate collapse, album membership AND the album itself shrink
+ *            the candidate set before ranking.
+ *   'media'  MediaSemanticSearchService — the unified cross-kind route. It is
+ *            library-scoped and honours only favorite, rating, date range and
+ *            album membership.
+ *
+ * The TV picks the route; it never implements one. This function is consumed by
+ * `semanticToWire` and `buildFilterChips`, so what is SENT and what is CLAIMED
+ * cannot drift apart from what is offered.
  */
 export function semanticRoute(identity: MediaWorkspaceIdentity): SemanticRoute {
   return identity.mediaKind === 'image' ? 'photo' : 'media';
+}
+
+/**
+ * Is the result order chosen by the user, or by relevance?
+ *
+ * Both canonical semantic services order by relevance and carry their own score
+ * cursor, so `sort` and `direction` are not sent and cannot take effect. The
+ * panel therefore must not offer them: an ordering control that the user can
+ * change, see marked active and apply — with identical results — is the same
+ * "applied but inert" defect as a filter that never reaches the wire.
+ */
+export function isRelevanceOrdered(identity: MediaWorkspaceIdentity): boolean {
+  return isSemanticActive(identity);
 }
 
 // ---------------------------------------------------------------- wire mapping
@@ -325,6 +339,13 @@ export function semanticToWire(
   if (common.dateTakenFrom.length > 0) wire.dateTakenFrom = common.dateTakenFrom;
   if (common.dateTakenTo.length > 0) wire.dateTakenTo = common.dateTakenTo;
 
+  // Album MEMBERSHIP is honoured by both routes (both build their candidate set
+  // through the same gallery query), so it is emitted for both. It is distinct
+  // from `albumId`, which is the album SCOPE and photo-only.
+  if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
+    wire.albumMembership = common.albumMembership;
+  }
+
   if (semanticRoute(identity) === 'photo') {
     // The album is the SCOPE, not a filter: without it an in-album search is a
     // library search wearing the album's title.
@@ -340,8 +361,6 @@ export function semanticToWire(
       wire.includePeopleMode = photo.includePeopleMode;
     }
     if (photo.excludePeople.length > 0) wire.excludePeople = photo.excludePeople.join(',');
-  } else if (identity.source.kind === 'library' && common.albumMembership !== 'any') {
-    wire.albumMembership = common.albumMembership;
   }
   return wire;
 }
@@ -369,8 +388,12 @@ export function queryFingerprint(identity: MediaWorkspaceIdentity): string {
     common.dateTakenFrom,
     common.dateTakenTo,
     identity.source.kind === 'library' ? common.albumMembership : 'n/a',
-    identity.sort,
-    identity.direction,
+    // Under relevance ordering these do not reach the wire, so keying on them
+    // would make two IDENTICAL semantic requests look like different queries —
+    // restarting the search, discarding the accumulator and losing the user's
+    // place for a change that cannot alter a single result.
+    isRelevanceOrdered(identity) ? 'relevance' : identity.sort,
+    isRelevanceOrdered(identity) ? 'relevance' : identity.direction,
   ];
   if (identity.mediaKind === 'image') {
     parts.push(

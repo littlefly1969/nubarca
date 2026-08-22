@@ -8,25 +8,24 @@
 // degrades into substring search.
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
-  emptyIdentity, isSemanticActive, queryFingerprint, semanticToWire,
+  emptyIdentity, isRelevanceOrdered, isSemanticActive, queryFingerprint, semanticToWire,
   SEMANTIC_RETRIEVAL_AVAILABLE, activeFilterCount, clearActiveFilters,
   type MediaKindScope, type MediaWorkspaceIdentity,
 } from './mediaWorkspaceQuery.ts';
-import { tvFilterRows } from './tvFilterCatalog.ts';
+import { resolveTvFilterFocus, tvFilterRows } from './tvFilterCatalog.ts';
 import { semanticRoute } from './mediaWorkspaceQuery.ts';
+import { read } from '../testing/sourceText.ts';
 
-const read = (p: string) => readFileSync(new URL(p, import.meta.url), 'utf8');
-const code = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '')
-  .split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+// C# strips through the same helper: `//` and `/* */` mean the same there.
+const src = (path: string) => read(import.meta.url, path);
 
-const screen = code(read('../screens/PersonalLibraryScreen.tsx'));
-const api = code(read('../api/personalMedia.ts'));
-const panel = code(read('../screens/library/LibraryFilterPanel.tsx'));
-const endpoints = read('../../../src/NubArca.Api/Endpoints/TvEndpoints.cs');
-const service = read('../../../src/NubArca.Api/Tv/TvPersonalMediaService.cs');
+const screen = src('../screens/PersonalLibraryScreen.tsx');
+const api = src('../api/personalMedia.ts');
+const panel = src('../screens/library/LibraryFilterPanel.tsx');
+const endpoints = src('../../../src/NubArca.Api/Endpoints/TvEndpoints.cs');
+const service = src('../../../src/NubArca.Api/Tv/TvPersonalMediaService.cs');
 
 const LIBRARY = { kind: 'library' } as const;
 function withQuery(kind: MediaKindScope, visualQuery: string): MediaWorkspaceIdentity {
@@ -53,7 +52,7 @@ test('the request reaches the canonical service, with no TV ranking', () => {
   assert.match(service, /_semantic\.SearchAsync\(\s*ownerUserId, query, kind, limit, cursor, filters/);
   // Comment-stripped: the service's own prose says it adds "no embedding, no
   // vector store", and prose saying so must not be read as code doing so.
-  const tvCode = [code(service), screen, api].join('\n');
+  const tvCode = [service, screen, api].join('\n');
   for (const forbidden of [/cosine/i, /embedding/i, /new Vector/i, /rank\(/i, /score\s*\*/]) {
     assert.doesNotMatch(tvCode, forbidden, `the TV must not implement retrieval: ${forbidden}`);
   }
@@ -180,6 +179,9 @@ test('every row shown as APPLIED actually reaches the semantic wire', () => {
       f.common.metadataQuery = 'estate';
       f.common.favorite = true;
       f.common.minRating = 3;
+      f.common.albumMembership = 'unassigned';
+      f.common.dateTakenFrom = '2024-01-01';
+      f.common.dateTakenTo = '2024-12-31';
       f.photo.includePeople = ['p-1'];
       f.photo.hasGps = true;
       f.photo.collapseDuplicates = true;
@@ -274,7 +276,7 @@ test('PHOTOS go to the canonical PHOTO pipeline, not the unified one', () => {
   assert.equal(semanticRoute(withQuery('all', 'cane')), 'media');
   assert.equal(semanticRoute(withQuery('video', 'cane')), 'media');
   // And it now GOVERNS: the wire differs by route, and the backend branches.
-  assert.match(code(read('./mediaWorkspaceQuery.ts')), /semanticRoute\(identity\) === 'photo'/);
+  assert.match(src('./mediaWorkspaceQuery.ts'), /semanticRoute\(identity\) === 'photo'/);
   assert.match(service, /kind == MediaKindScope\.Image\s*\?\s*await SearchPhotosAsync/);
   assert.match(service, /_photoSemantic\.SearchAsync\(/);
   assert.match(service, /_semantic\.SearchAsync\(/);
@@ -325,4 +327,79 @@ test('the backend refuses photo-only parameters on the other kinds', () => {
   // the server side.
   assert.match(endpoints, /semantic-aware with kind=image/);
   assert.match(endpoints, /'hasGps', 'collapseDuplicates' and People filters are only/);
+});
+
+test('relevance order is not a choice the user can edit', () => {
+  // The mirror of the filter defect, on the ORDER controls: semanticToWire
+  // correctly sends neither sort nor direction, so leaving them editable
+  // offers a setting the request cannot carry.
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const searching = { ...withQuery(kind, 'cane'), sort: 'created' as const };
+    assert.ok(isRelevanceOrdered(searching), `${kind}: semantic must be relevance-ordered`);
+
+    const wire = semanticToWire(searching, null);
+    assert.ok(!('sort' in wire), `${kind}: sort must not reach the semantic wire`);
+    assert.ok(!('direction' in wire), `${kind}: direction must not reach the semantic wire`);
+
+    // …and browsing again restores the user's own order.
+    assert.equal(isRelevanceOrdered(withQuery(kind, '')), false);
+  }
+});
+
+test('the ORDER section offers relevance instead of editable rows', () => {
+  // A row the panel renders as editable while the request ignores it is the
+  // same class of defect as an inert filter, so this reads the PANEL.
+  const order = panel.slice(panel.indexOf('isRelevanceOrdered(draftIdentity)'));
+  const branch = order.slice(0, order.indexOf('</>'));
+  assert.match(branch, /filters\.sort\.relevance/);
+  assert.match(branch, /opensEditor=\{false\}/);
+  // The editable Sort and Direction rows live in the OTHER branch.
+  assert.doesNotMatch(branch, /onSelect=\{\(\) => open/);
+
+  // 'sort' and 'direction' stay STATIC focus keys, so resolveTvFilterFocus can
+  // still answer either one while neither editable row exists. The relevance
+  // row must claim both, or restored focus lands on nothing.
+  assert.match(branch, /focusKey === 'sort' \|\| focusKey === 'direction'/);
+  assert.ok(resolveTvFilterFocus('direction', []) === 'direction',
+    'direction is still honoured as a static focus key');
+});
+
+test('an identical semantic request keeps one identity, whatever the sort was', () => {
+  // queryFingerprint drives request de-duplication. While relevance is in
+  // charge, a sort the wire never carries must not split one request in two —
+  // or the same search runs twice and the later answer wins by luck.
+  const byDate = { ...withQuery('all', 'cane'), sort: 'created' as const };
+  const byName = { ...withQuery('all', 'cane'), sort: 'name' as const };
+  assert.equal(queryFingerprint(byDate), queryFingerprint(byName));
+
+  const asc = { ...withQuery('all', 'cane'), direction: 'asc' as const };
+  const desc = { ...withQuery('all', 'cane'), direction: 'desc' as const };
+  assert.equal(queryFingerprint(asc), queryFingerprint(desc));
+
+  // Browsing without a query still distinguishes them — this narrows the
+  // fingerprint only while relevance is in charge.
+  const plainAsc = { ...withQuery('all', ''), direction: 'asc' as const };
+  const plainDesc = { ...withQuery('all', ''), direction: 'desc' as const };
+  assert.notEqual(queryFingerprint(plainAsc), queryFingerprint(plainDesc));
+});
+
+test('albumMembership reaches the wire on every kind, and the endpoint declares it', () => {
+  // The row was catalogued as always-supported and shown as a chip, but the
+  // photo branch did not emit it and the endpoint had no such parameter. Both
+  // halves are asserted, because either one alone leaves it inert.
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const identity = withQuery(kind, 'cane');
+    identity.filters.common.albumMembership = 'unassigned';
+    assert.equal(semanticToWire(identity, null).albumMembership, 'unassigned',
+      `${kind}: albumMembership must reach the semantic wire`);
+  }
+  // An album source scopes by albumId instead, so membership is not sent.
+  const inAlbum = { ...emptyIdentity({ kind: 'album', albumId: 'a-1' }), mediaKind: 'image' as const };
+  inAlbum.filters.common.visualQuery = 'cane';
+  inAlbum.filters.common.albumMembership = 'unassigned';
+  assert.ok(!('albumMembership' in semanticToWire(inAlbum, null)));
+
+  assert.match(endpoints, /string\?\s+albumMembership/);
+  assert.match(endpoints, /TryParseAlbumMembership\(/);
+  assert.match(endpoints, /AlbumMembership = membership/);
 });

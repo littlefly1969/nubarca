@@ -16,10 +16,6 @@ let _grant: string | null = null;
 // through this provider so a lock immediately stops authorizing new downloads.
 setPersonalMediaHeaderProvider(() => personalHeaders());
 
-export function hasPersonalGrant(): boolean {
-  return _grant !== null;
-}
-
 export function clearPersonalGrant(): void {
   _grant = null;
 }

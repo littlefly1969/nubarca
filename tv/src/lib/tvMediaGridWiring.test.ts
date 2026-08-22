@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { read } from '../testing/sourceText.ts';
 
-const source = (relativePath: string) => readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+const source = (relativePath: string) => read(import.meta.url, relativePath);
 
 const screens = [
   ['AlbumsScreen.tsx', source('../screens/AlbumsScreen.tsx')],

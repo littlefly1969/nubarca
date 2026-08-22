@@ -1,5 +1,5 @@
 export const TV_MEDIA_GRID_GAP = 4;
-export const TV_MEDIA_GRID_PACKING_GAP = 12;
+const TV_MEDIA_GRID_PACKING_GAP = 12;
 export const TV_MEDIA_GRID_FOCUS_BLEED = 4;
 // One shared virtualization budget for every TV media wall. Five initial rows
 // fill the screen plus the immediate destination; three viewports keep one

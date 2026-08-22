@@ -12,8 +12,10 @@ namespace NubArca.Api.Tests.Tv;
 // The adapter exists for one reason: a limited TV session cannot call an
 // owner-web endpoint. Everything that decides what a semantic result IS —
 // candidate policy, ranking, relevance cursor, availability — belongs to
-// MediaSemanticSearchService, the same service behind the web's
-// /api/media/semantic. So these tests deliberately do NOT re-test ranking.
+// the canonical semantic services the web itself uses. So these tests
+// deliberately do NOT re-test ranking. What they DO test is that each kind
+// reaches the RIGHT canonical service with the RIGHT filters, because picking
+// the wrong one is invisible in the response shape.
 // They test what is genuinely this route's own: the authorization boundary,
 // the owner derivation, the validation, and the promise that a semantic search
 // which cannot run says so instead of quietly becoming a substring search.

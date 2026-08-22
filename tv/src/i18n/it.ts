@@ -302,6 +302,7 @@ const it = {
   'filters.audioYes': 'Con audio',
   'filters.audioNo': 'Senza audio',
   'filters.sort': 'Ordina per',
+  'filters.sort.relevance': 'Rilevanza',
   'filters.sort.created': 'Data di caricamento',
   'filters.sort.datetaken': 'Data di scatto',
   'filters.sort.name': 'Nome',

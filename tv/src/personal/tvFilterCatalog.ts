@@ -261,7 +261,7 @@ const STATIC_FOCUS_KEYS: readonly TvFilterFocusKey[] = [
   'sort', 'direction', 'reset', 'apply', 'cancel',
 ];
 
-export function isStaticTvFilterFocus(
+function isStaticTvFilterFocus(
   key: TvFilterFocusKey,
 ): key is Exclude<TvFilterFocusKey, TvFilterId> {
   return (STATIC_FOCUS_KEYS as readonly string[]).includes(key);
