@@ -1,0 +1,132 @@
+name: Build production images
+
+# Manual only, deliberately. The point of this first slice is to prove that
+# GitHub can produce the images the server builds today — not to change how or
+# when production is built. Nothing here deploys, and production still builds
+# from source until a later slice says otherwise.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-production-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  images:
+    name: Build and publish production API images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # GHCR namespaces are lowercase; the owner is read from the repository
+      # rather than written down, so the workflow describes the PRODUCT and not
+      # one account.
+      - name: Resolve image references
+        id: refs
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          sha='${{ github.sha }}'
+          {
+            echo "owner=$owner"
+            echo "sha=$sha"
+            echo "runtime=${REGISTRY}/${owner}/nubarca-api:${sha}"
+            echo "openvino=${REGISTRY}/${owner}/nubarca-api-openvino:${sha}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both images are built into the local daemon FIRST and pushed only after
+      # they verify. An unverifiable image that is already published is a thing
+      # someone can deploy; one that never got pushed is not.
+      - name: Build lean runtime image
+        run: >-
+          docker buildx build --load
+          --target runtime
+          --build-arg GIT_SHA=${{ steps.refs.outputs.sha }}
+          -f src/NubArca.Api/Dockerfile
+          -t ${{ steps.refs.outputs.runtime }}
+          .
+
+      - name: Build OpenVINO runtime image
+        run: >-
+          docker buildx build --load
+          --target runtime-openvino
+          --build-arg GIT_SHA=${{ steps.refs.outputs.sha }}
+          -f src/NubArca.Api/Dockerfile
+          -t ${{ steps.refs.outputs.openvino }}
+          .
+
+      - name: Verify lean runtime image
+        run: >-
+          scripts/verify-production-image.sh
+          ${{ steps.refs.outputs.runtime }}
+          ${{ steps.refs.outputs.sha }}
+          runtime
+
+      - name: Verify OpenVINO runtime image
+        run: >-
+          scripts/verify-production-image.sh
+          ${{ steps.refs.outputs.openvino }}
+          ${{ steps.refs.outputs.sha }}
+          openvino
+
+      # Only the immutable SHA tag is pushed. There is no `latest`: a deploy
+      # must name the exact source it is running, and a moving tag cannot say
+      # which commit produced the bytes.
+      - name: Push images
+        run: |
+          set -euo pipefail
+          docker push '${{ steps.refs.outputs.runtime }}'
+          docker push '${{ steps.refs.outputs.openvino }}'
+
+      - name: Record digests
+        id: digests
+        run: |
+          set -euo pipefail
+          runtime_digest="$(docker buildx imagetools inspect '${{ steps.refs.outputs.runtime }}' \
+            --format '{{.Manifest.Digest}}')"
+          openvino_digest="$(docker buildx imagetools inspect '${{ steps.refs.outputs.openvino }}' \
+            --format '{{.Manifest.Digest}}')"
+          {
+            echo "runtime_digest=$runtime_digest"
+            echo "openvino_digest=$openvino_digest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Report
+        run: |
+          {
+            echo "## Production images"
+            echo
+            echo "Source SHA: \`${{ steps.refs.outputs.sha }}\`"
+            echo
+            echo "| Variant | Image | Digest |"
+            echo "| --- | --- | --- |"
+            echo "| runtime | \`${{ steps.refs.outputs.runtime }}\` | \`${{ steps.digests.outputs.runtime_digest }}\` |"
+            echo "| runtime-openvino | \`${{ steps.refs.outputs.openvino }}\` | \`${{ steps.digests.outputs.openvino_digest }}\` |"
+            echo
+            echo "Both images verified before publication: provenance stamp, ASP.NET runtime,"
+            echo "ffmpeg/ffprobe, and the ONNX Runtime layer each variant is supposed to carry."
+            echo "GPU execution is NOT exercised here — \`/dev/dri\` belongs to an installation."
+            echo
+            echo "Production is unchanged by this workflow and still builds from source."
+          } >> "$GITHUB_STEP_SUMMARY"

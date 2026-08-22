@@ -470,3 +470,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `FilterRow`, i.e. a Pressable with `accessibilityRole="button"` and a no-op
   SELECT; it should become a true informational non-button row with its own
   focus-fallback handling.
+- **Production images can be BUILT on GitHub before anything depends on them.**
+  `Build production images` (`workflow_dispatch` only) produces the same two API
+  targets the server builds today and publishes them to GHCR under the immutable
+  full-SHA tag — no `latest`, because a deploy must be able to name the commit
+  that produced its bytes. Production is deliberately untouched: the Compose file
+  still carries `build: context: .`, so the server keeps building from source
+  until a later slice moves it. Both images are verified BEFORE they are pushed,
+  by `scripts/verify-production-image.sh`, so an unverifiable image is never
+  something anyone could deploy. The check that made this slice necessary at all:
+  only `runtime-openvino` stamped `NUBARCA_GIT_SHA`, so the lean `runtime` target
+  could not say what built it; it now carries the same stamp. GPU execution is
+  not tested and must not be — `/dev/dri`, the render group and the model mounts
+  belong to an installation, so the workflow proves the GPU variant CONTAINS the
+  OpenVINO native layer and Intel OpenCL userspace, and leaves the device itself
+  to the installation's own smoke checks.
