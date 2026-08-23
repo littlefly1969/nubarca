@@ -475,6 +475,38 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `FilterRow`, i.e. a Pressable with `accessibilityRole="button"` and a no-op
   SELECT; it should become a true informational non-button row with its own
   focus-fallback handling.
+- **What the media selection dock OFFERS is one pure model, and it is half
+  capability, half permission.** `mediaSelectionCapabilities.ts` answers whether
+  an action makes sense for THIS selection (all photos? Excluded scope? inside
+  an album?); `mediaSelectionActions.ts` combines that with the caller's
+  effective permissions and is the only place a dock entry is created. The two
+  halves are separate on purpose: the capability question has nothing to do with
+  who is asking, and merging them would put permission logic back into the
+  surface that renders it. Three gates are easy to lose. **"Move to Personal" is
+  the private vault operation**, not a second name for the library, so it needs
+  `private-vault.access` exactly as the Private destination in the navigation
+  does. **Plates and Beauty carry the Laboratory's own composite** —
+  `laboratory.access` plus the section permission — so a user with Plates but not
+  Aesthetics is offered exactly one of them here, just as they get one tab there;
+  they were previously built with no permission check at all, which offered two
+  doors that answer 403. And **a photo-only destination is withdrawn entirely
+  from a mixed selection** rather than run over the photos in it: partially
+  applying a bulk action is worse than not offering it. Restore and
+  remove-from-album deliberately sit OUTSIDE the Move menu — restore is the
+  inverse of Excluded rather than a fourth destination, and removing an album
+  membership never touches the file, so listing it beside Trash would misdescribe
+  it.
+- **"Next photo" in face review is navigation, and resolves nothing.** The queue
+  advances by itself when a photo is FINISHED, and that advance removes the photo
+  from the list (`advancePhoto`). Next photo is the other thing entirely: parking
+  an unresolved photo and coming back to it. It opens the next LOADED photo and
+  leaves the current one's undecided faces, its count, its place in the queue and
+  the server untouched, and it never wraps — at the last loaded photo the control
+  is disabled rather than quietly returning to the top. Implementing it by
+  reusing `advancePhoto` is the obvious shortcut and is wrong in exactly the way
+  that matters: it would silently discard work the reviewer had not finished.
+  `Skip face` is a third, narrower level again — same photo, another undecided
+  face, no mutation either.
 - **Production images can be BUILT on GitHub before anything depends on them.**
   `Build production images` (`workflow_dispatch` only) produces the same two API
   targets the server builds today and publishes them to GHCR under the immutable

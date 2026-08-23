@@ -1,110 +1,106 @@
+import { Icon } from '../../components/icons/Icon';
 import { useI18n } from '../../i18n';
-import { DestinationMenu, type GalleryDestinationAction } from '../../gallery/workspace/DestinationMenu';
-import type { MediaSelectionCapabilities } from './mediaSelectionCapabilities';
+import { actionTestId, MediaSelectionMenu } from './MediaSelectionMenu';
+import type { MediaSelectionActionId, MediaSelectionActionModel } from './mediaSelectionActions';
 
-// Sticky selection bar for the unified workspace. Which actions appear is driven
-// entirely by the capability matrix, so a mixed or all-video selection never
-// shows photo-only destinations, and Active/Excluded/album context each offer
-// exactly the right actions. Renders nothing when the selection is empty.
+// The contextual command dock: what you can do with the media you just picked.
+//
+// Not a toolbar. It floats over the wall, states how much is selected, and
+// offers TWO grouped commands organised by what they mean —
+//
+//   Move to …  the media changes state or place (Personal, Excluded, Trash)
+//   Add to  …  the media stays put and gains an association (Album, Plates,
+//              Aesthetics)
+//
+// — plus whatever the current context makes a first-class action (Restore out of
+// Excluded, Remove from THIS album). Every entry comes from the pure action
+// model, so a mixed selection never sees a photo-only destination and a user
+// without private-vault.access never sees Personal.
+//
+// Renders nothing when the selection is empty.
 
 interface Props {
   count: number;
   busy: boolean;
-  capabilities: MediaSelectionCapabilities;
+  actions: MediaSelectionActionModel;
   restoreBusy?: boolean;
-  photoDestinations?: GalleryDestinationAction[];
-  onAddToAlbum(): void;
-  onRemoveFromAlbum(): void;
-  onMoveToPersonal(): void;
-  onMoveToExcluded(): void;
-  onRestore(): void;
-  onMoveToTrash(): void;
+  onAction(id: MediaSelectionActionId): void;
   onClear(): void;
 }
 
 export function MediaWorkspaceSelectionBar({
-  count,
-  busy,
-  capabilities: c,
-  restoreBusy = false,
-  photoDestinations = [],
-  onAddToAlbum,
-  onRemoveFromAlbum,
-  onMoveToPersonal,
-  onMoveToExcluded,
-  onRestore,
-  onMoveToTrash,
-  onClear,
+  count, busy, actions, restoreBusy = false, onAction, onClear,
 }: Props) {
   const { t, tn } = useI18n();
   if (count === 0) return null;
 
+  const label = tn(count, 'gallerySel.itemsSelected');
+
   return (
     <div
-      className="ws-selbar"
+      className="ws-dock"
       role="region"
-      aria-label={tn(count, 'gallerySel.itemsSelected')}
+      aria-label={label}
       data-testid="media-selection-bar"
     >
-      <span className="ws-selbar-count" data-testid="media-selection-count">
-        {tn(count, 'gallerySel.itemsSelected')}
+      <span className="ws-dock-count" data-testid="media-selection-count">
+        <Icon name="check" size={15} />
+        <span className="ws-dock-count-text">{label}</span>
       </span>
-      <div className="ws-selbar-actions">
-        {c.canRestore && (
-          <button
-            type="button"
-            className="row-action-primary"
-            data-testid="media-sel-restore"
-            disabled={busy || restoreBusy}
-            onClick={onRestore}
-          >
-            {restoreBusy ? t('moveToExcluded.restoring') : t('moveToExcluded.restore')}
-          </button>
-        )}
-        {c.canAddToAlbum && (
-          <button type="button" className="row-action" data-testid="media-sel-album" disabled={busy} onClick={onAddToAlbum}>
-            {t('gallerySel.addToAlbum')}
-          </button>
-        )}
-        {c.canRemoveFromCurrentAlbum && (
-          <button
-            type="button"
-            className="row-action"
-            data-testid="media-sel-remove-album"
-            disabled={busy}
-            onClick={onRemoveFromAlbum}
-          >
-            {t('mediaWs.removeFromAlbum')}
-          </button>
-        )}
-        {c.canMoveToPersonal && (
-          <button type="button" className="row-action" data-testid="media-sel-personal" disabled={busy} onClick={onMoveToPersonal}>
-            {t('gallery.ws.destPersonal')}
-          </button>
-        )}
-        {c.canMoveToExcluded && (
-          <button type="button" className="row-action" data-testid="media-sel-excluded" disabled={busy} onClick={onMoveToExcluded}>
-            {t('gallery.ws.destExcluded')}
-          </button>
-        )}
-        {c.canUsePhotoOnlyDestinations && photoDestinations.length > 0 && (
-          <DestinationMenu actions={photoDestinations} disabled={busy} menuTestId="media-photo-destinations" />
-        )}
-        {c.canTrash && (
-          <button
-            type="button"
-            className="row-action-destructive"
-            data-testid="media-sel-trash"
-            disabled={busy}
-            onClick={onMoveToTrash}
-          >
-            {t('gallerySel.moveToTrash')}
-          </button>
-        )}
-        <button type="button" className="row-action" data-testid="media-sel-clear" disabled={busy} onClick={onClear}>
-          {t('gallerySel.clear')}
-        </button>
+
+      <div className="ws-dock-commands">
+        {actions.contextual.map((a) => {
+          // Restore is the one contextual action with its own in-flight state:
+          // it runs straight from the dock rather than through a dialog.
+          const pending = a.id === 'restore' && restoreBusy;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              className="ws-dock-button is-contextual"
+              data-testid={actionTestId(a.id)}
+              disabled={busy || pending}
+              onClick={() => onAction(a.id)}
+            >
+              <Icon name={a.icon} size={16} />
+              <span className="ws-dock-label">
+                {pending ? t('moveToExcluded.restoring') : t(a.labelKey)}
+              </span>
+            </button>
+          );
+        })}
+
+        <MediaSelectionMenu
+          label={t('gallery.ws.moveTo')}
+          ariaLabel={t('gallery.ws.moveToAria')}
+          icon="move"
+          actions={actions.moveTo}
+          disabled={busy}
+          testId="media-sel-move-to"
+          onSelect={onAction}
+        />
+
+        <MediaSelectionMenu
+          label={t('gallery.ws.addTo')}
+          ariaLabel={t('gallery.ws.addToAria')}
+          icon="add"
+          actions={actions.addTo}
+          disabled={busy}
+          testId="media-sel-add-to"
+          onSelect={onAction}
+        />
       </div>
+
+      <button
+        type="button"
+        className="ws-dock-close"
+        data-testid="media-sel-clear"
+        aria-label={t('gallerySel.clear')}
+        disabled={busy}
+        onClick={onClear}
+      >
+        <Icon name="close" size={16} />
+      </button>
     </div>
   );
 }

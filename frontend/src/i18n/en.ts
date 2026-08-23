@@ -1435,7 +1435,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'people.photoReviewFaceCount': '{count} to decide',
   'people.photoReviewProgress': 'Face {current} of {total}',
   'people.photoReviewSkip': 'Skip face',
-  'people.photoReviewIgnoreAll': 'Ignore all unassigned faces',
+  'people.photoReviewNextPhoto': 'Next photo',
+  'people.photoReviewIgnoreAll': 'Ignore all unassigned faces in this photo',
   'people.photoReviewEmpty': 'No photo has faces left to decide.',
   'people.photoReviewError': 'Could not load the photos to review.',
   'people.photoReviewUnavailable': 'Face recognition is not enabled.',
@@ -1889,6 +1890,9 @@ const en: Partial<Record<MessageKey, string>> = {
   'face.removeHelp': 'Removes this face from the person. The face returns to the unassigned faces and can be reassigned or re-suggested by clustering.',
   'face.removeFromPerson': 'Remove from person',
   'face.ignoreFace': 'Ignore face',
+  'face.moreActions': 'More actions',
+  'face.viewToolsAria': 'View tools',
+  'face.decisionsAria': 'Decisions about the selected face',
 
   // --- Cluster assign dialog ---
   'cluster.title': 'Associate cluster with a person',
@@ -2328,6 +2332,9 @@ const en: Partial<Record<MessageKey, string>> = {
   'gallery.ws.moveToAria': 'Move the selection to another destination',
   'gallery.ws.destPersonal': 'Personal',
   'gallery.ws.destExcluded': 'Excluded',
+  'gallery.ws.destTrash': 'Trash',
+  'gallery.ws.destAlbum': 'Album',
+  'gallery.ws.destAesthetics': 'Beauty',
   // Trash confirmation
   'gallery.ws.trash.title_one': 'Move {count} photo to Trash?',
   'gallery.ws.trash.title_other': 'Move {count} photos to Trash?',
