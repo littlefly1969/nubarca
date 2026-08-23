@@ -6035,29 +6035,197 @@ video.lightbox-image {
 .face-crop-button { padding: 0; border: 0; cursor: pointer; background: #f1f5f9; }
 .face-crop-placeholder { width: 100%; height: 100%; display: block; background: repeating-linear-gradient(45deg,#e5e7eb,#e5e7eb 6px,#eef2f7 6px,#eef2f7 12px); }
 
-.face-viewer { position: fixed; inset: 0; z-index: 1100; background: rgba(0,0,0,0.92); display: flex; flex-direction: column; }
+/* ---- Face review viewer ---------------------------------------------------
+   A photo-first review surface. The image dominates; everything else is
+   translucent chrome laid over it, organised by PURPOSE rather than by the
+   order it happened to be added:
+
+     top     — where am I (close, identity, progress, next photo, overflow)
+     edges   — which face am I on
+     bottom  — how am I looking at it | what do I decide about it
+
+   The viewer paints its own dark ground in both themes: it is a lightbox, and
+   a photograph is judged against dark. Its chrome colours are therefore fixed
+   light-on-dark rather than token-driven, which is why the palette below does
+   not follow the surrounding theme.
+   -------------------------------------------------------------------------- */
+.face-viewer {
+  position: fixed; inset: 0; z-index: 1100;
+  background: rgb(6 9 16 / 94%);
+  display: flex; flex-direction: column;
+  --fv-chrome: rgb(255 255 255 / 10%);
+  --fv-chrome-hover: rgb(255 255 255 / 18%);
+  --fv-line: rgb(255 255 255 / 20%);
+  --fv-text: #f2f5fa;
+  --fv-text-dim: #b9c4d6;
+}
 .face-viewer-backdrop { position: absolute; inset: 0; border: 0; background: transparent; cursor: default; }
+
+/* ---- Top chrome ---- */
+.face-viewer-top {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--fv-text);
+  background: linear-gradient(to bottom, rgb(6 9 16 / 78%), transparent);
+}
+.face-viewer-identity { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1 1 auto; }
+.face-viewer-person { font-size: 0.95rem; line-height: 1.2; }
+.face-viewer-person.is-unassigned { color: var(--fv-text-dim); font-style: italic; }
+.face-viewer-file {
+  font-size: 0.78rem; color: var(--fv-text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.face-viewer-top-review { display: flex; align-items: center; gap: 0.4rem; flex: 0 0 auto; }
+.face-viewer-progress {
+  color: var(--fv-text-dim); font-size: 0.8rem; white-space: nowrap;
+  padding-right: 0.5rem; border-right: 1px solid var(--fv-line);
+}
+
+/* One icon-only chrome control (close, zoom steps, overflow). */
+.face-viewer-icon-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.1rem; height: 2.1rem; flex: 0 0 auto;
+  color: var(--fv-text); background: var(--fv-chrome);
+  border: 1px solid var(--fv-line); border-radius: 999px; cursor: pointer;
+}
+.face-viewer-icon-button:hover:not(:disabled) { background: var(--fv-chrome-hover); }
+.face-viewer-icon-button:disabled { opacity: 0.4; cursor: default; }
+
+/* A labelled chrome control (Next photo). */
+.face-viewer-chrome-button {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  height: 2.1rem; padding: 0 0.7rem;
+  font: inherit; font-size: 0.82rem; line-height: 1;
+  color: var(--fv-text); background: var(--fv-chrome);
+  border: 1px solid var(--fv-line); border-radius: var(--radius-button); cursor: pointer;
+  white-space: nowrap;
+}
+.face-viewer-chrome-button:hover:not(:disabled) { background: var(--fv-chrome-hover); }
+.face-viewer-chrome-button:disabled { opacity: 0.4; cursor: default; }
+
+.face-viewer-more { position: relative; }
+.face-viewer-more-list {
+  position: absolute; z-index: 5; top: calc(100% + 6px); right: 0;
+  min-width: 16rem; max-width: min(22rem, calc(100vw - 2rem));
+  list-style: none; margin: 0; padding: 0.3rem;
+  background: #101725; border: 1px solid var(--fv-line);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-lg);
+}
+.face-viewer-more-item {
+  display: flex; align-items: center; gap: 0.55rem;
+  width: 100%; padding: 0.5rem 0.55rem;
+  text-align: left; font: inherit; font-size: 0.85rem;
+  color: var(--fv-text); background: transparent;
+  border: none; border-radius: 8px; cursor: pointer;
+}
+.face-viewer-more-item .nc-icon { color: var(--fv-text-dim); flex: 0 0 auto; }
+.face-viewer-more-item:hover:not(:disabled) { background: var(--fv-chrome-hover); }
+.face-viewer-more-item:disabled { opacity: 0.4; cursor: default; }
+
+/* ---- Stage ---- */
 .face-viewer-stage { position: relative; flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; }
 .face-viewer-canvas { position: relative; max-width: 100%; max-height: 100%; transform-origin: center center; will-change: transform; }
-.face-viewer-image { display: block; max-width: 90vw; max-height: 82vh; user-select: none; }
-.face-viewer-box { position: absolute; border: 2px solid rgba(255,255,255,0.45); border-radius: 4px; background: transparent; padding: 0; cursor: pointer; box-shadow: 0 0 0 9999px rgba(0,0,0,0); }
-.face-viewer-box.is-selected { border-color: #22d3ee; border-width: 3px; box-shadow: 0 0 0 2px rgba(34,211,238,0.4); }
-.face-viewer-toolbar { position: relative; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.5rem 0.75rem; background: rgba(0,0,0,0.6); color: #fff; flex-wrap: wrap; }
-.face-viewer-title { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
-.face-viewer-title .muted { color: #cbd5e1; }
-.face-viewer-controls { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
-.face-viewer-controls button { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 0.3rem 0.6rem; cursor: pointer; }
-.face-viewer-controls button:disabled { opacity: 0.4; cursor: default; }
-.face-viewer-zoom { min-width: 3.5em; text-align: center; }
-/* The face viewer's own ignore, beside "assign": the decision a reviewer makes
-   most often after naming somebody, previously reachable only inside the menu. */
-.face-viewer-ignore {
-  align-self: flex-start; background: rgba(255,255,255,0.12); color: #fff;
-  border: 1px solid rgba(255,255,255,0.2); border-radius: 6px;
-  padding: 0.3rem 0.6rem; cursor: pointer;
+.face-viewer-image { display: block; max-width: 92vw; max-height: 100%; user-select: none; }
+.face-viewer-box { position: absolute; border: 2px solid rgb(255 255 255 / 45%); border-radius: 4px; background: transparent; padding: 0; cursor: pointer; }
+.face-viewer-box.is-selected { border-color: var(--brand-cyan-glow); border-width: 3px; box-shadow: 0 0 0 2px rgb(0 212 255 / 40%); }
+
+/* Face navigation belongs to the IMAGE, not to the row of action buttons: two
+   restrained edge controls, the pattern every photo viewer already taught. */
+.face-viewer-edge {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  width: 2.75rem; height: 2.75rem;
+  color: var(--fv-text); background: rgb(6 9 16 / 55%);
+  border: 1px solid var(--fv-line); border-radius: 999px; cursor: pointer;
 }
-.face-viewer-ignore:disabled { opacity: 0.4; cursor: default; }
-.face-viewer-progress { color: #cbd5e1; margin-right: 0.35rem; white-space: nowrap; }
+.face-viewer-edge.is-prev { left: 0.75rem; }
+.face-viewer-edge.is-next { right: 0.75rem; }
+.face-viewer-edge:hover:not(:disabled) { background: rgb(6 9 16 / 80%); }
+.face-viewer-edge:disabled { opacity: 0.25; cursor: default; }
+
+/* ---- Bottom chrome ---- */
+.face-viewer-bottom {
+  position: relative; z-index: 2;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+  padding: 0.6rem 0.75rem 0.75rem;
+  color: var(--fv-text);
+  background: linear-gradient(to top, rgb(6 9 16 / 82%), transparent);
+}
+/* Viewport tools: one compact cluster that must never read as a decision. */
+.face-viewer-tools { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.face-viewer-tool {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  height: 2.1rem; padding: 0 0.65rem;
+  font: inherit; font-size: 0.8rem; line-height: 1;
+  color: var(--fv-text-dim); background: var(--fv-chrome);
+  border: 1px solid transparent; border-radius: var(--radius-button); cursor: pointer;
+  white-space: nowrap;
+}
+.face-viewer-tool:hover { background: var(--fv-chrome-hover); color: var(--fv-text); }
+.face-viewer-zoom-group {
+  display: inline-flex; align-items: center; gap: 0.2rem;
+  padding-left: 0.35rem; margin-left: 0.15rem;
+  border-left: 1px solid var(--fv-line);
+}
+.face-viewer-zoom { min-width: 3.5em; text-align: center; font-size: 0.8rem; color: var(--fv-text-dim); }
+
+/* Decisions: what actually resolves or defers this face. Assign is the primary
+   and is the only filled control in the viewer; ignore is secondary and
+   deliberately NOT destructive-red — it sets a face aside, it deletes nothing;
+   skip is tertiary, because deciding nothing is the weakest of the three. */
+.face-viewer-decisions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.face-viewer-secondary,
+.face-viewer-tertiary {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  height: 2.4rem; padding: 0 0.8rem;
+  font: inherit; font-size: 0.85rem; line-height: 1;
+  border-radius: var(--radius-button); cursor: pointer;
+}
+.face-viewer-secondary {
+  color: var(--fv-text); background: var(--fv-chrome);
+  border: 1px solid var(--fv-line);
+}
+.face-viewer-secondary:hover:not(:disabled) { background: var(--fv-chrome-hover); }
+.face-viewer-tertiary {
+  color: var(--fv-text-dim); background: transparent; border: 1px solid transparent;
+}
+.face-viewer-tertiary:hover:not(:disabled) { background: var(--fv-chrome); color: var(--fv-text); }
+.face-viewer-secondary:disabled,
+.face-viewer-tertiary:disabled { opacity: 0.4; cursor: default; }
+
+.face-viewer-decisions .assign-menu { flex: 0 0 auto; }
+.face-viewer-decisions .assign-menu-trigger {
+  width: auto; height: 2.4rem; padding: 0 1rem;
+  font-size: 0.85rem; font-weight: 600; line-height: 1;
+  color: var(--accent-contrast); background: var(--accent-strong);
+  border: 1px solid transparent; border-radius: var(--radius-button); cursor: pointer;
+}
+.face-viewer-decisions .assign-menu-trigger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-strong) 85%, #fff);
+}
+
+.face-viewer button:focus-visible {
+  outline: 2px solid var(--brand-cyan-glow); outline-offset: 2px;
+}
+
+/* Narrow widths: the chrome recomposes instead of eating the photo. The two
+   bottom clusters stack, the tools shed their labels, and the edge controls
+   move in — the image stays the dominant element throughout. */
+@media (max-width: 720px) {
+  .face-viewer-top { flex-wrap: wrap; gap: 0.5rem; }
+  .face-viewer-top-review { width: 100%; justify-content: flex-end; }
+  .face-viewer-bottom { flex-direction: column; align-items: stretch; gap: 0.5rem; padding-top: 0.5rem; }
+  .face-viewer-tools { justify-content: center; }
+  .face-viewer-tool span { display: none; }
+  .face-viewer-tool { padding: 0 0.6rem; }
+  .face-viewer-decisions { justify-content: center; }
+  .face-viewer-edge { width: 2.4rem; height: 2.4rem; }
+  .face-viewer-edge.is-prev { left: 0.35rem; }
+  .face-viewer-edge.is-next { right: 0.35rem; }
+  .face-viewer-more-list { right: 0; }
+}
 
 /* Photo-centric review of undecided faces (ux/photo-face-review). */
 .people-filter { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
@@ -6798,25 +6966,109 @@ video.lightbox-image {
 .ws-menu-item:hover { background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .ws-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* ---- Selection bar -------------------------------------------------------- */
-.ws-selbar {
+/* ---- Contextual selection dock -------------------------------------------
+   A command dock, not a toolbar: one elevated neutral surface floating over the
+   wall, holding the count, two grouped commands and whatever the current
+   context makes a first-class action. Everything in it is the same height and
+   the same radius, and nothing carries a colour it has not earned — the only
+   tinted element in the whole dock is the Trash row, and only inside the menu.
+   -------------------------------------------------------------------------- */
+.ws-dock {
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: 0.9rem; z-index: 1100;
-  display: flex; align-items: center; gap: 1rem;
-  padding: 0.55rem 0.9rem;
-  background: var(--fg); color: var(--bg);
+  bottom: 1rem; z-index: 1100;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 0.5rem 0.4rem 0.85rem;
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 30%, transparent);
+  box-shadow: var(--shadow-lg);
   max-width: calc(100vw - 1.5rem);
 }
-.ws-selbar-count { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
-.ws-selbar-actions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-.ws-selbar .row-action, .ws-selbar .row-action-destructive {
-  background: color-mix(in srgb, var(--bg) 16%, transparent);
-  color: var(--bg); border-color: transparent;
+.ws-dock-count {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+  padding-right: 0.6rem;
+  border-right: 1px solid var(--border-default);
+  color: var(--text-primary);
 }
-.ws-selbar .row-action:hover { background: color-mix(in srgb, var(--bg) 26%, transparent); }
-.ws-selbar .row-action-destructive { color: color-mix(in srgb, var(--error) 60%, var(--bg)); }
+.ws-dock-count .nc-icon { color: var(--accent); flex: 0 0 auto; }
+.ws-dock-commands { display: flex; align-items: center; gap: 0.35rem; min-width: 0; }
+
+/* One button shape for every command in the dock. */
+.ws-dock-button {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  height: 2.25rem; padding: 0 0.7rem;
+  font: inherit; font-size: 0.85rem; line-height: 1;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-button);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ws-dock-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+.ws-dock-button[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--text-primary) 12%, transparent);
+  border-color: var(--border-strong);
+}
+.ws-dock-button:disabled { opacity: 0.45; cursor: default; }
+.ws-dock-button:focus-visible,
+.ws-dock-close:focus-visible {
+  outline: 2px solid var(--focus-ring); outline-offset: 2px;
+}
+/* Restore / Remove-from-album: available right now, so they read one step
+   stronger than a menu trigger without becoming a coloured pill. */
+.ws-dock-button.is-contextual { border-color: var(--border-strong); }
+.ws-dock-button .nc-icon { flex: 0 0 auto; }
+.ws-dock-label { overflow: hidden; text-overflow: ellipsis; }
+
+.ws-dock-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 2.25rem; height: 2.25rem; flex: 0 0 auto;
+  color: var(--text-secondary);
+  background: transparent; border: 1px solid transparent;
+  border-radius: 999px; cursor: pointer;
+}
+.ws-dock-close:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-primary) 10%, transparent);
+  color: var(--text-primary);
+}
+.ws-dock-close:disabled { opacity: 0.45; cursor: default; }
+
+/* ---- Dock menus ---- */
+.ws-dock-menu { position: relative; }
+.ws-dock-list {
+  position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0;
+  min-width: 13rem; max-width: min(20rem, calc(100vw - 2rem));
+  list-style: none; margin: 0; padding: 0.3rem;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lg);
+}
+.ws-dock-item {
+  display: flex; align-items: center; gap: 0.55rem;
+  width: 100%; min-height: 2.25rem;
+  padding: 0.45rem 0.55rem;
+  text-align: left; font: inherit; font-size: 0.85rem;
+  color: var(--text-primary);
+  background: transparent; border: none; border-radius: 8px;
+  cursor: pointer;
+}
+.ws-dock-item .nc-icon { color: var(--text-secondary); flex: 0 0 auto; }
+.ws-dock-item:hover { background: color-mix(in srgb, var(--text-primary) 10%, transparent); }
+.ws-dock-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+/* Trash is destructive and says so — as a tint on one row, never as a red pill
+   competing with every other command in the dock. */
+.ws-dock-item.is-destructive,
+.ws-dock-item.is-destructive .nc-icon { color: var(--danger); }
+.ws-dock-item.is-destructive:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
 .has-bulk-bar { padding-bottom: 4.5rem; }
 
 /* ---- Confirmation dialog -------------------------------------------------- */
@@ -6837,12 +7089,22 @@ video.lightbox-image {
 /* ---- Responsive: full-height sheet + full-width bar on narrow screens ----- */
 @media (max-width: 620px) {
   .ws-sheet { width: 100vw; border-left: none; }
-  .ws-selbar {
+  /* The dock becomes a full-width bar docked to the bottom edge. Labels on the
+     two menu triggers survive (they are what makes the grouping legible); the
+     contextual actions collapse to their icons so nothing overflows. */
+  .ws-dock {
     left: 0; right: 0; bottom: 0; transform: none;
-    border-radius: 12px 12px 0 0; max-width: none;
-    justify-content: space-between;
+    border-radius: var(--radius-card) var(--radius-card) 0 0;
+    border-left: none; border-right: none; border-bottom: none;
+    max-width: none; padding: 0.5rem 0.6rem;
+    justify-content: space-between; gap: 0.4rem;
   }
-  .ws-selbar-actions .row-action, .ws-selbar-actions .row-action-destructive { min-height: 2.5rem; }
+  .ws-dock-count { padding-right: 0.45rem; }
+  .ws-dock-count-text { display: none; }
+  .ws-dock-button.is-contextual { padding: 0 0.55rem; }
+  .ws-dock-button.is-contextual .ws-dock-label { display: none; }
+  .ws-dock-commands { flex: 1 1 auto; justify-content: flex-end; }
+  .ws-dock-list { left: auto; right: 0; }
   .ws-header-controls { align-items: stretch; }
   .ws-header-actions { justify-content: space-between; }
 }

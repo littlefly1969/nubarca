@@ -118,7 +118,10 @@ it('ignoring every undecided face finishes the photo and opens the next one', as
   });
   await openFirstPhoto();
 
-  await userEvent.click(screen.getByRole('button', { name: 'Ignora tutti i volti non assegnati' }));
+  // It lives behind the overflow now: it decides a whole photo at once and must
+  // not compete with the per-face decisions.
+  await userEvent.click(screen.getByTestId('face-viewer-more'));
+  await userEvent.click(screen.getByRole('menuitem', { name: 'Ignora tutti i volti non assegnati di questa foto' }));
 
   // One request, not one per face — and the queue moved to the next photo.
   // IMG_B's name appears twice once it is open (queue row + viewer), which is
@@ -141,4 +144,64 @@ it('deciding the last face of the last photo ends the review', async () => {
   await userEvent.click(screen.getByRole('button', { name: 'Ignora volto' }));
 
   await waitFor(() => expect(screen.queryByText('Volto 1 di 1')).toBeNull());
+});
+
+// ---------------------------------------------------------------------------
+// Next photo: MANUAL navigation, and nothing else.
+//
+// The distinction these tests exist to hold: the queue advances by itself when
+// a photo is FINISHED, and that advance removes the photo. Next photo is the
+// other thing — parking an unresolved photo and coming back to it — so it must
+// leave the queue, the counts and the server exactly as they were.
+// ---------------------------------------------------------------------------
+
+it('Next photo opens the next loaded photo without finishing this one', async () => {
+  const mock = renderTab();
+  await openFirstPhoto();
+
+  await userEvent.click(screen.getByTestId('face-viewer-next-photo'));
+
+  // IMG_B is open...
+  await waitFor(() => expect(screen.getByText('Volto 1 di 1')).toBeTruthy());
+  await waitFor(() => expect(screen.getAllByText('IMG_B.jpg').length).toBeGreaterThan(0));
+  // ...and IMG_A is STILL in the queue, with all three faces still to decide.
+  expect(screen.getByText('IMG_A.jpg')).toBeTruthy();
+  expect(screen.getByText('3 da decidere')).toBeTruthy();
+  // Nothing was assigned, ignored, or otherwise written.
+  expect(mock.calls.some((c) => c.method !== 'GET')).toBe(false);
+});
+
+it('Next photo is disabled on the last loaded photo and does not wrap', async () => {
+  renderTab();
+  await openFirstPhoto();
+
+  await userEvent.click(screen.getByTestId('face-viewer-next-photo'));
+  await waitFor(() => expect(screen.getByText('Volto 1 di 1')).toBeTruthy());
+
+  // IMG_B is the last loaded photo: there is nowhere further to go, and the
+  // control says so rather than quietly returning to the top of the queue.
+  const next = screen.getByTestId('face-viewer-next-photo');
+  expect(next).toBeDisabled();
+  await userEvent.click(next);
+  expect(screen.getByText('Volto 1 di 1')).toBeTruthy();
+});
+
+it('skipping stays on the same photo, and is offered only when there is another face', async () => {
+  const mock = renderTab();
+  await openFirstPhoto();
+
+  await userEvent.click(screen.getByTestId('face-viewer-skip'));
+
+  // Same photo, next undecided face, nothing decided and nothing sent.
+  await waitFor(() => expect(screen.getByText('Volto 2 di 3')).toBeTruthy());
+  expect(screen.getAllByText('IMG_A.jpg').length).toBeGreaterThan(0);
+  expect(mock.calls.some((c) => c.method === 'POST')).toBe(false);
+});
+
+it('offers no Skip on a photo with a single undecided face', async () => {
+  renderTab();
+  await waitFor(() => expect(screen.getByText('IMG_B.jpg')).toBeTruthy());
+  await userEvent.click(screen.getByText('IMG_B.jpg'));
+  await waitFor(() => expect(screen.getByText('Volto 1 di 1')).toBeTruthy());
+  expect(screen.getByTestId('face-viewer-skip')).toBeDisabled();
 });

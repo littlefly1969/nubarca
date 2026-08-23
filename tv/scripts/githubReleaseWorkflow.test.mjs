@@ -26,6 +26,15 @@ test('JDK setup does not require the generated Android tree to exist', () => {
   assert.doesNotMatch(setupJdk, /cache:\s*gradle/);
 });
 
+test('Android SDK setup resolves sdkmanager without relying on runner PATH', () => {
+  const setupSdk =
+    workflow.match(/- name: Install Android SDK packages[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? '';
+  assert.match(setupSdk, /ANDROID_SDK_ROOT/);
+  assert.match(setupSdk, /cmdline-tools\/latest\/bin\/sdkmanager/);
+  assert.match(setupSdk, /"\$sdkmanager_path"/);
+  assert.doesNotMatch(setupSdk, /^\s+sdkmanager\s/m);
+});
+
 test('native releases are gated to main and publishing confirms versionCode', () => {
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(workflow, /CONFIRMED_VERSION_CODE.*version_code/);

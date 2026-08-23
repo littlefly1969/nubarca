@@ -126,6 +126,29 @@ export function PhotoFaceReviewTab() {
     setPhotos(remaining);
   }, [advancePhoto]);
 
+  /**
+   * Open the next LOADED photo without finishing this one.
+   *
+   * Deliberately NOT advancePhoto: that removes a photo the reviewer is done
+   * with. This is plain navigation — the current photo keeps every undecided
+   * face, keeps its count, and keeps its place in the list, and no request is
+   * made. It is how somebody parks a difficult photo and comes back to it.
+   *
+   * It never wraps: at the last loaded photo there is no next one and the
+   * control is disabled rather than quietly returning to the top.
+   */
+  const openNextPhoto = useCallback(() => {
+    const current = openRef.current;
+    if (!current) return;
+    const list = photosRef.current;
+    const at = list.findIndex((p) => p.fileItemId === current.photo.fileItemId);
+    const next = at >= 0 ? list[at + 1] : undefined;
+    if (!next) return;
+    const opened = { photo: next, faceIds: next.faceIds, index: 0 };
+    openRef.current = opened;
+    setOpen(opened);
+  }, []);
+
   /** Leave the face undecided and move on — the third answer beside assign and ignore. */
   const skipFace = useCallback(() => {
     const current = openRef.current;
@@ -150,6 +173,11 @@ export function PhotoFaceReviewTab() {
       setBusy(false);
     }
   }, [open, busy, advancePhoto, invalidateAuth]);
+
+  // Is there a photo AFTER the open one in the loaded queue? Read from `photos`
+  // (not the ref) so the control re-renders when the queue changes.
+  const openAt = open ? photos.findIndex((p) => p.fileItemId === open.photo.fileItemId) : -1;
+  const hasNextPhoto = openAt >= 0 && openAt + 1 < photos.length;
 
   if (status === 'loading') return <p className="muted">{t('common.loading')}</p>;
   if (status === 'error') return <p className="error">{t('people.photoReviewError')}</p>;
@@ -193,18 +221,20 @@ export function PhotoFaceReviewTab() {
           onFaceIgnored={faceDecided}
           onFaceRestored={faceDecided}
           onFaceAssigned={faceDecided}
-          progressLabel={t('people.photoReviewProgress', {
-            current: open.index + 1,
-            total: open.faceIds.length,
-          })}
-          extraActions={(
-            <>
-              <button type="button" onClick={skipFace}>{t('people.photoReviewSkip')}</button>
-              <button type="button" disabled={busy} onClick={() => { void ignoreWholePhoto(); }}>
-                {t('people.photoReviewIgnoreAll')}
-              </button>
-            </>
-          )}
+          reviewControls={{
+            progressLabel: t('people.photoReviewProgress', {
+              current: open.index + 1,
+              total: open.faceIds.length,
+            }),
+            // Skipping is only an answer when there is somewhere else on this
+            // photo to go.
+            canSkipFace: open.faceIds.length > 1,
+            onSkipFace: skipFace,
+            canNextPhoto: hasNextPhoto,
+            onNextPhoto: openNextPhoto,
+            onIgnoreRemaining: () => { void ignoreWholePhoto(); },
+            ignoreRemainingBusy: busy,
+          }}
         />
       )}
     </section>

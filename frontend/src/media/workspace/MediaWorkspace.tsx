@@ -22,14 +22,17 @@ import { useMoveToExcluded } from '../actions/useMoveToExcluded';
 import { usePeopleIndex } from '../../gallery/workspace/usePeopleIndex';
 import { TrashConfirmation } from '../../gallery/workspace/TrashConfirmation';
 import { moveFilesToTrash } from '../../gallery/workspace/bulkTrash';
-import type { GalleryDestinationAction } from '../../gallery/workspace/DestinationMenu';
+import { usePermissions } from '../../auth/usePermissions';
 
 // A photo-only bulk destination (Beauty Lab, Plates, …). `run` receives the
 // selected ids; the shell binds the live selection so the page never has to
 // reach inside the workspace.
 export interface MediaPhotoDestination {
-  id: string;
-  label: string;
+  // Matches the action id in mediaSelectionActions.ts. The MODEL decides
+  // whether this destination may be offered at all (photos only, and the
+  // Laboratory permissions the server requires); the page supplies only what
+  // happens when it is chosen.
+  id: 'plates' | 'beauty-lab';
   // Returns an optional already-localized notice to surface on success.
   run(ids: string[]): Promise<string | void> | string | void;
 }
@@ -41,6 +44,7 @@ import { MediaFilterSheet } from './MediaFilterSheet';
 import { MediaGrid, type SemanticTileMatches } from './MediaGrid';
 import { MediaWorkspaceSelectionBar } from './MediaWorkspaceSelectionBar';
 import { getMediaSelectionCapabilities } from './mediaSelectionCapabilities';
+import { buildMediaSelectionActions, type MediaSelectionActionId } from './mediaSelectionActions';
 import {
   buildFilterChips,
   clearActiveFilters,
@@ -84,6 +88,7 @@ export function MediaWorkspace({
 }: Props) {
   const { t, tn } = useI18n();
   const { invalidateAuth } = useAuth();
+  const perms = usePermissions();
   const location = useLocation();
   const people = usePeopleIndex();
   const viewportRef = useAppScrollViewport();
@@ -366,39 +371,63 @@ export function MediaWorkspace({
     () => ws.items.filter((it) => selection.isSelected(it.id)),
     [ws.items, selection],
   );
-  // Bind the live selection to the page-supplied photo-only destinations so the
-  // page never reaches inside the workspace's selection.
-  const boundPhotoDestinations = useMemo<GalleryDestinationAction[]>(
-    () => photoDestinations.map((d) => ({
-      id: d.id,
-      label: d.label,
-      isAvailable: true,
-      run: () => {
-        const ids = [...selection.selected];
-        if (ids.length === 0) return;
-        void (async () => {
-          const msg = await d.run(ids);
-          if (typeof msg === 'string') {
-            setNotice(msg); announce(msg); selection.clear();
-            // "Solo da organizzare" shows media with NO album. Filing an item
-            // into one makes it no longer belong here, so invalidate through
-            // the existing refetch rather than keeping a second client-side
-            // notion of album membership. Only when the filter is on: an
-            // unfiltered library has no reason to re-page itself.
-            if (identity.filters.common.albumMembership === 'unassigned') {
-              ws.refresh();
-            }
-          }
-        })();
-      },
-    })),
-    [photoDestinations, selection, announce, identity.filters.common.albumMembership, ws],
-  );
   const capabilities = getMediaSelectionCapabilities({
     items: selectedItems,
     source: source.kind,
     scope: identity.libraryScope,
   });
+
+  // What the dock offers: the capability matrix combined with this user's
+  // effective permissions, then narrowed to the photo-only destinations this
+  // PAGE actually supplies a runner for (an album workspace supplies none).
+  // Nothing else in this component decides whether an action is available.
+  const actionModel = useMemo(() => {
+    const model = buildMediaSelectionActions({ capabilities, permissions: perms.all });
+    const supplied = new Set<string>(photoDestinations.map((d) => d.id));
+    return {
+      ...model,
+      addTo: model.addTo.filter((a) => a.id === 'album' || supplied.has(a.id)),
+    };
+  }, [capabilities, perms.all, photoDestinations]);
+
+  // Bind the live selection to the page-supplied photo-only destinations so the
+  // page never reaches inside the workspace's selection.
+  const runPhotoDestination = useCallback((id: MediaSelectionActionId) => {
+    const destination = photoDestinations.find((d) => d.id === id);
+    const ids = [...selection.selected];
+    if (!destination || ids.length === 0) return;
+    void (async () => {
+      const msg = await destination.run(ids);
+      if (typeof msg === 'string') {
+        setNotice(msg); announce(msg); selection.clear();
+        // "Solo da organizzare" shows media with NO album. Filing an item into
+        // one makes it no longer belong here, so invalidate through the existing
+        // refetch rather than keeping a second client-side notion of album
+        // membership. Only when the filter is on: an unfiltered library has no
+        // reason to re-page itself.
+        if (identity.filters.common.albumMembership === 'unassigned') ws.refresh();
+      }
+    })();
+  }, [photoDestinations, selection, announce, identity.filters.common.albumMembership, ws]);
+
+  // ONE dispatcher for the dock. Each branch keeps the flow it already had —
+  // the vault dialog, the excluded dialog, the trash confirmation, the album
+  // picker — so no action's semantics move with its presentation.
+  const runSelectionAction = useCallback((id: MediaSelectionActionId) => {
+    // The model is the authority on what may run, not the markup: an id that is
+    // not in it was never offered, so it is not executed either.
+    const offered = [...actionModel.contextual, ...actionModel.moveTo, ...actionModel.addTo];
+    if (!offered.some((a) => a.id === id)) return;
+    switch (id) {
+      case 'restore': void restoreSelected(); break;
+      case 'remove-from-album': void removeFromAlbum(); break;
+      case 'personal': moveToPersonal.open([...selection.selected]); break;
+      case 'excluded': moveToExcluded.open([...selection.selected]); break;
+      case 'trash': setTrashOpen(true); break;
+      case 'album': setPickerOpen(true); break;
+      default: runPhotoDestination(id);
+    }
+  }, [actionModel, restoreSelected, removeFromAlbum, moveToPersonal, moveToExcluded, selection, runPhotoDestination]);
 
   const semantic = isSemanticActive(identity);
   // Same source as the chips rendered below the command bar, so the badge on
@@ -553,15 +582,9 @@ export function MediaWorkspace({
       <MediaWorkspaceSelectionBar
         count={selection.count}
         busy={busy}
-        capabilities={capabilities}
+        actions={actionModel}
         restoreBusy={restoreBusy}
-        photoDestinations={boundPhotoDestinations}
-        onAddToAlbum={() => setPickerOpen(true)}
-        onRemoveFromAlbum={() => void removeFromAlbum()}
-        onMoveToPersonal={() => moveToPersonal.open([...selection.selected])}
-        onMoveToExcluded={() => moveToExcluded.open([...selection.selected])}
-        onRestore={() => void restoreSelected()}
-        onMoveToTrash={() => setTrashOpen(true)}
+        onAction={runSelectionAction}
         onClear={selection.clear}
       />
 

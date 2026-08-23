@@ -166,3 +166,43 @@ it('renders no storage internals', async () => {
     expect(html).not.toContain(needle);
   }
 });
+
+it('navigates faces with the arrow keys', async () => {
+  // The photo answers the arrows wherever focus is — the edge controls are the
+  // visible form of the same navigation, not a replacement for it.
+  installFetchMock({
+    'GET /api/people/faces/f-1/context': context('f-1'),
+    'GET /api/people/faces/f-2/context': context('f-2'),
+    'GET /api/people': () => jsonResponse([]),
+  });
+  const onIndexChange = vi.fn();
+  renderViewer(['f-1', 'f-2'], 0, onIndexChange);
+  await screen.findByText('crowd.jpg');
+
+  fireEvent.keyDown(window, { key: 'ArrowRight' });
+  expect(onIndexChange).toHaveBeenCalledWith(1);
+
+  onIndexChange.mockClear();
+  // At the first face there is no previous one, so ArrowLeft is a no-op.
+  fireEvent.keyDown(window, { key: 'ArrowLeft' });
+  expect(onIndexChange).not.toHaveBeenCalled();
+});
+
+it('shows no review chrome when no queue opened it', async () => {
+  // People and Person Detail open the viewer to LOOK at a face. Skip, Next
+  // photo and the bulk ignore belong to a review queue, and there is none here.
+  installFetchMock({
+    'GET /api/people/faces/f-1/context': context('f-1'),
+    'GET /api/people': () => jsonResponse([]),
+  });
+  renderViewer(['f-1', 'f-2'], 0);
+  await screen.findByText('crowd.jpg');
+
+  expect(screen.queryByTestId('face-viewer-skip')).toBeNull();
+  expect(screen.queryByTestId('face-viewer-next-photo')).toBeNull();
+  expect(screen.queryByTestId('face-viewer-more')).toBeNull();
+  expect(screen.queryByTestId('face-viewer-progress')).toBeNull();
+  // Looking at a face and deciding it are still both possible.
+  expect(screen.getByTestId('face-viewer-ignore')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Assegna a persona' })).toBeTruthy();
+});

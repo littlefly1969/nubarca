@@ -1446,7 +1446,8 @@ const it = {
   'people.photoReviewFaceCount': '{count} da decidere',
   'people.photoReviewProgress': 'Volto {current} di {total}',
   'people.photoReviewSkip': 'Salta volto',
-  'people.photoReviewIgnoreAll': 'Ignora tutti i volti non assegnati',
+  'people.photoReviewNextPhoto': 'Foto successiva',
+  'people.photoReviewIgnoreAll': 'Ignora tutti i volti non assegnati di questa foto',
   'people.photoReviewEmpty': 'Nessuna foto con volti da decidere.',
   'people.photoReviewError': 'Non è stato possibile caricare le foto da rivedere.',
   'people.photoReviewUnavailable': 'Il riconoscimento dei volti non è attivo.',
@@ -1902,6 +1903,9 @@ const it = {
   'face.removeHelp': 'Rimuove questo volto dalla persona. Il volto tornerà tra i non assegnati e potrà essere riassegnato o riproposto dal clustering.',
   'face.removeFromPerson': 'Rimuovi dalla persona',
   'face.ignoreFace': 'Ignora volto',
+  'face.moreActions': 'Altre azioni',
+  'face.viewToolsAria': 'Strumenti di visualizzazione',
+  'face.decisionsAria': 'Decisioni sul volto selezionato',
 
   // --- Cluster assign dialog ---
   'cluster.title': 'Associa cluster a persona',
@@ -2343,6 +2347,11 @@ const it = {
   'gallery.ws.moveToAria': 'Sposta la selezione in un’altra destinazione',
   'gallery.ws.destPersonal': 'Personal',
   'gallery.ws.destExcluded': 'Esclusi',
+  // Short forms for the dock menus: the menu heading already says "Sposta in" /
+  // "Aggiungi a", so the row must not repeat it.
+  'gallery.ws.destTrash': 'Cestino',
+  'gallery.ws.destAlbum': 'Album',
+  'gallery.ws.destAesthetics': 'Estetica',
   // Trash confirmation
   'gallery.ws.trash.title_one': 'Spostare {count} foto nel cestino?',
   'gallery.ws.trash.title_other': 'Spostare {count} foto nel cestino?',
