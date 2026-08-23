@@ -14,6 +14,7 @@ const it = {
   'help.ai.title': 'Chiedi a NubArca',
   'help.ai.externalBadge': 'IA esterna',
   'help.ai.privacy': 'La domanda che scrivi viene inviata al provider di IA esterno configurato ({provider}). NubArca non allega né recupera file, foto, persone, metadati, risultati di ricerca o altri dati privati della tua libreria.',
+  'help.ai.knowledgeUnavailable': 'L\u2019assistente non è pronto su questa installazione: mancano le informazioni di prodotto per la versione installata. Chi amministra l\u2019installazione può risolverlo.',
   'help.ai.disabled': 'L\u2019assistente IA non è configurato su questa installazione.',
   'help.ai.empty': 'Fai una domanda su come funziona NubArca.',
   'help.ai.you': 'Tu',

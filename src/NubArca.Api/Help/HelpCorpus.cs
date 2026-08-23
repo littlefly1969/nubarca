@@ -45,10 +45,14 @@ public static class HelpCorpusBuilder
         "docs",
     };
 
-    /// Even inside an allowed directory, some tracked files describe an
-    /// INSTALLATION or an operational procedure rather than the product. They
-    /// are excluded by name so a new document has to be considered, not
-    /// inherited.
+    /// Markdown under an allowed directory is included AUTOMATICALLY; this list
+    /// is the set of named exceptions taken back out.
+    ///
+    /// So a new `docs/**.md` becomes Help knowledge as soon as it is committed,
+    /// without anyone opting it in — which is the intended trade for keeping the
+    /// product documentation and the assistant's knowledge in step. Adding a
+    /// document that describes an INSTALLATION or an internal procedure rather
+    /// than the product means adding it here at the same time.
     private static readonly string[] ExcludedNames =
     {
         "current-work.md",   // internal working notes, not user-facing product docs

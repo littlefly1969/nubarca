@@ -218,6 +218,78 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         Assert.DoesNotContain("example.invalid", body, StringComparison.Ordinal);
     }
 
+    // ---- fail closed without approved product knowledge --------------------
+
+    [Theory]
+    // A corpus that is simply not there.
+    [InlineData("missing")]
+    // A corpus that exists but was built from a DIFFERENT revision. Both end in
+    // the same state — the retriever reports nothing available — and the point of
+    // covering both is that they are different WAYS to get there.
+    [InlineData("mismatched")]
+    public async Task No_Approved_Knowledge_Means_Zero_Outbound_Provider_Calls(string how)
+    {
+        var corpusPath = Path.Combine(Path.GetTempPath(), $"help-corpus-{Guid.NewGuid():N}.json");
+        if (how == "mismatched")
+        {
+            File.WriteAllText(corpusPath, JsonSerializer.Serialize(new HelpCorpus(
+                "a-revision-this-build-is-not",
+                new[] { new HelpCorpusDocument("README.md", "NubArca", "README.md", "Product text.") })));
+        }
+
+        var handler = new CapturingProviderHandler(_ => CapturingProviderHandler.Answer("unused"));
+        var previousSha = Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA");
+        Environment.SetEnvironmentVariable("NUBARCA_GIT_SHA", "the-running-revision");
+        try
+        {
+            using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
+            {
+                ["ExternalHelp:Enabled"] = "true",
+                ["ExternalHelp:BaseUrl"] = "https://provider.example",
+                ["ExternalHelp:ApiKey"] = Key,
+                ["ExternalHelp:Model"] = "test-model-1",
+                ["ExternalHelp:ProviderLabel"] = "Test Provider",
+                ["ExternalHelp:CorpusPath"] = corpusPath,
+            });
+            factory.ConfigureExtraServices = services =>
+                services.AddHttpClient<IExternalHelpChatClient, OpenAiCompatibleChatCompletionClient>()
+                    .ConfigurePrimaryHttpMessageHandler(() => handler);
+            factory.EnsureDatabaseCreated();
+
+            var (_, client) = await factory.CreateAuthenticatedClientAsync();
+            var response = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
+
+            // An optional feature that cannot work, not an application error.
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var body = await response.Content.ReadAsStringAsync();
+            Assert.Contains(HelpFailureReasons.KnowledgeUnavailable, body, StringComparison.Ordinal);
+
+            // THE ASSERTION THAT MATTERS. The provider is fully configured, so
+            // nothing but the guard stops the call — and the user's question must
+            // not leave NubArca to buy an answer improvised with no product
+            // documentation behind it.
+            Assert.Equal(0, handler.Calls);
+            Assert.Null(handler.Body);
+
+            // The status endpoint says the same thing, so the browser can decline
+            // to offer a chat rather than discovering it on the first question.
+            var status = await (await client.GetAsync("/api/help/ai/status")).Content.ReadAsStringAsync();
+            Assert.Contains("\"knowledgeAvailable\":false", status, StringComparison.Ordinal);
+            Assert.Contains("\"enabled\":true", status, StringComparison.Ordinal);
+            // …and still without naming a path, a revision or any configuration.
+            foreach (var leak in new[] { corpusPath, "a-revision-this-build-is-not", "the-running-revision", Key })
+            {
+                Assert.DoesNotContain(leak, status, StringComparison.Ordinal);
+                Assert.DoesNotContain(leak, body, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NUBARCA_GIT_SHA", previousSha);
+            try { File.Delete(corpusPath); } catch (IOException) { }
+        }
+    }
+
     // ---- C. the API key -----------------------------------------------------
 
     [Fact]

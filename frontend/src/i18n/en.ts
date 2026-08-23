@@ -10,6 +10,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'help.ai.title': 'Ask NubArca',
   'help.ai.externalBadge': 'External AI',
   'help.ai.privacy': 'The question you type is sent to the configured external AI provider ({provider}). NubArca does not attach or retrieve files, photos, people, metadata, search results, or other private library data.',
+  'help.ai.knowledgeUnavailable': 'The assistant is not ready on this installation: the product information for the installed version is missing. Whoever administers this installation can resolve it.',
   'help.ai.disabled': 'The AI assistant is not configured on this installation.',
   'help.ai.empty': 'Ask a question about how NubArca works.',
   'help.ai.you': 'You',

@@ -77,6 +77,19 @@ it('reads as not-configured rather than broken when disabled', async () => {
   expect(screen.queryByLabelText('La tua domanda')).toBeNull();
 });
 
+it('offers no chat when configured but without product knowledge', async () => {
+  // The server refuses to call the provider in this state, so a composer would
+  // invite a question guaranteed to fail.
+  renderHelp({
+    'GET /api/help/ai/status': () =>
+      jsonResponse({ enabled: true, providerLabel: 'Test Provider', knowledgeAvailable: false }),
+  });
+
+  expect(await screen.findByText(/non è pronto su questa installazione/i)).toBeTruthy();
+  expect(screen.queryByLabelText('La tua domanda')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Chiedi' })).toBeNull();
+});
+
 it('survives a provider failure without implying NubArca is down', async () => {
   renderHelp({
     'POST /api/help/ai/chat': () => jsonResponse({ ok: false, reason: 'provider_unavailable' }),

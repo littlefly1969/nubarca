@@ -111,6 +111,13 @@ export function HelpPage() {
         // configured a provider should read as "not set up", and the rest of the
         // product Help stays exactly as usable as before.
         <p className="muted">{t('help.ai.disabled')}</p>
+      ) : !status.knowledgeAvailable ? (
+        // Configured, but with no approved product knowledge for this release.
+        // The server refuses to call the provider in this state, so offering a
+        // composer would invite a question that is guaranteed to fail — and the
+        // message says what a person can act on without naming a corpus path, a
+        // revision or a configuration value.
+        <p className="muted">{t('help.ai.knowledgeUnavailable')}</p>
       ) : (
         <>
           <p className="help-ai-privacy">
@@ -170,6 +177,7 @@ function reasonKey(reason: string): Parameters<ReturnType<typeof useI18n>['t']>[
     case 'provider_unauthorized': return 'help.ai.errorProvider';
     case 'provider_rate_limited': return 'help.ai.errorBusy';
     case 'provider_timeout': return 'help.ai.errorTimeout';
+    case 'help_knowledge_unavailable': return 'help.ai.knowledgeUnavailable';
     case 'help_disabled':
     case 'help_not_configured': return 'help.ai.disabled';
     default: return 'help.ai.errorUnavailable';

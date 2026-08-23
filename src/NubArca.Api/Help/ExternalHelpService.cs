@@ -68,6 +68,25 @@ public sealed class ExternalHelpService
             trimmed = trimmed[.._options.EffectiveQuestionCharacters];
         }
 
+        // FAIL CLOSED without approved product knowledge.
+        //
+        // The retriever already refuses a corpus that is missing or built from a
+        // different revision. Calling the provider anyway would still be a
+        // request that LEAVES NubArca — carrying the user's question to a third
+        // party — in exchange for an answer improvised with no product
+        // documentation behind it, which is the answer most likely to be wrong
+        // about the version actually installed. Paying an outbound call and a
+        // privacy boundary crossing for that is the wrong trade.
+        //
+        // Still an optional-feature failure, never an application-health one.
+        if (!_knowledge.IsAvailable)
+        {
+            _log.LogInformation(
+                "external help: refused, no approved product knowledge for the running revision");
+            return new HelpAnswer(
+                false, null, HelpFailureReasons.KnowledgeUnavailable, Array.Empty<string>());
+        }
+
         var excerpts = _knowledge.Retrieve(
             trimmed, _options.EffectiveContextExcerpts, _options.EffectiveContextCharacters);
 
