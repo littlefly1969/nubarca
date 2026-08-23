@@ -278,9 +278,11 @@ to the debug signer.
 10–12. It is manual-only, runs inside the `tv-production` GitHub Environment,
 builds with Node 22/JDK 17/Android 36, verifies both signing identities before
 compilation, runs the TV tests, builds and validates the signed APK, and uploads
-the validated immutable artifact. With `publish=true` it then runs the canonical
-`deploy/publish-tv-apk.sh` and verifies the activated descriptor and APK bytes
-over HTTPS.
+the validated immutable artifact. With `publish=true` it packages those exact
+three publication files in a scratch OCI image, verifies the extracted image,
+and pushes it to GHCR under the immutable full-source-SHA tag. The workflow
+records the manifest digest but never connects to production; activation is a
+local pull from the server.
 
 Configure these Environment **secrets**; never repository files:
 
@@ -291,16 +293,12 @@ Configure these Environment **secrets**; never repository files:
 | `NUBARCA_TV_RELEASE_KEY_ALIAS` | Definitive key alias |
 | `NUBARCA_TV_RELEASE_KEY_PASSWORD` | Key password |
 | `NUBARCA_TV_OTA_CERTIFICATE_BASE64` | Established public OTA certificate PEM, base64 without line wrapping |
-| `NUBARCA_TV_DEPLOY_SSH_PRIVATE_KEY` | Unencrypted CI deploy key accepted only by the publication account |
 
 Configure these installation-specific Environment **variables**:
 
 | Variable | Value |
 | --- | --- |
 | `NUBARCA_PUBLIC_ORIGIN` | Production HTTPS origin |
-| `NUBARCA_PRODUCTION_SSH` | Publication `login@host` |
-| `NUBARCA_TV_APK_DIR` | Remote directory served at `/download/tv/` |
-| `NUBARCA_TV_DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts line(s); never obtain them with `ssh-keyscan` during a release |
 
 The OTA private key is intentionally absent: a native APK embeds only the public
 OTA verifier, and this workflow does not publish OTA bundles. Restrict the
@@ -312,7 +310,26 @@ Run the workflow with `publish=false` to build and retain a validated artifact
 from `main` without changing the installation. Publication is additionally
 fail-closed unless `confirm_version_code` exactly matches
 `tv/release-contract.json`.
-Successful remote publication still leaves physical Fire Stick acceptance
+
+The GHCR `nubarca-tv-apk` package must be readable by the production host. A
+public package needs no server credential; a private package requires a
+read-only `read:packages` credential. A publishing credential never belongs on
+production. On the server, after pulling the matching source checkout, activate
+the digest printed in the workflow summary:
+
+```bash
+./deploy/pull-publish-tv-apk-image.sh \
+  --env-file .env \
+  'ghcr.io/<owner>/nubarca-tv-apk@sha256:<digest>'
+```
+
+The server verifies the OCI provenance against its exact Git HEAD, extracts the
+bundle, revalidates contract/hash/size, installs the immutable and canonical APK
+files atomically, and replaces `nubarca-tv.release.json` last. The general
+`deploy/update-production.sh check|apply` pair performs the same operation when
+an APK bundle exists for the confirmed application release SHA.
+
+Successful server publication still leaves physical Fire Stick acceptance
 **pending**, as required by section 13.
 
 ## 11. APK validation
@@ -349,8 +366,11 @@ Where ADB is available, installing before replacing the public artifact does add
 one thing worth having: it proves application data and pairing survive an
 in-place update before any device is offered the release.
 
-From the repository root, set operator-provided
-`NUBARCA_PRODUCTION_SSH` and `NUBARCA_TV_APK_DIR` and run:
+The normal CI path is the server-side digest pull described in §10.1. It keeps
+production unreachable from GitHub and uses no deployment key. For an APK built
+and validated on an operator workstation instead, set operator-provided
+`NUBARCA_PRODUCTION_SSH` and `NUBARCA_TV_APK_DIR` and run the alternate SSH
+publisher from the repository root:
 
 ```bash
 ./deploy/publish-tv-apk.sh <validated-apk>

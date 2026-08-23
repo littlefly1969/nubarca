@@ -71,6 +71,34 @@ can truncate the semicolon-delimited PostgreSQL connection string.
 Do not use `--remove-orphans`. The HumanAesExpert and direct-import containers
 may legitimately be managed by separate Compose invocations.
 
+## Guided two-command path
+
+For an ordinary release with CI images and **no database migration**, the server
+provides a review/apply pair:
+
+```bash
+./deploy/update-production.sh check --env-file .env
+./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha>
+```
+
+`check` fetches `origin/main` and reports, without changing the checkout,
+release pins or containers, which backend/frontend/TV components changed and
+whether the corresponding immutable GHCR artifacts exist. It prints the exact
+`apply` command. Read that report before continuing.
+
+`apply` requires the same full SHA, refuses if `origin/main` moved, refuses a
+dirty/non-`main` checkout, applies the root-capacity gate, pulls images by
+digest, runs the image verifiers and the effective-Compose gate, then
+fast-forwards and recreates only affected application services with
+`--no-build`. It restores the previous pin if smoke checks fail. A TV bundle is
+activated locally only when CI published one for that exact source SHA.
+
+The simple path deliberately refuses every release containing an EF migration;
+perform sections 4–6 manually for those releases. It also never cleans Docker
+or storage. The first installation of this helper necessarily needs one manual
+`git pull --ff-only origin main`; subsequent runs fetch and fast-forward
+themselves.
+
 ## 1. Establish the exact release
 
 Before changing the server:
