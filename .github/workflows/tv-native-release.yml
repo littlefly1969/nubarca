@@ -193,7 +193,10 @@ jobs:
           NUBARCA_TV_RELEASE_STORE_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_STORE_PASSWORD }}
           NUBARCA_TV_RELEASE_KEY_ALIAS: ${{ secrets.NUBARCA_TV_RELEASE_KEY_ALIAS }}
           NUBARCA_TV_RELEASE_KEY_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_KEY_PASSWORD }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: >-
+          ./gradlew --no-daemon
+          -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=2g -Dfile.encoding=UTF-8"
+          assembleRelease
 
       - name: Validate release APK
         run: ./deploy/validate-tv-apk.sh tv/android/app/build/outputs/apk/release/app-release.apk
