@@ -66,10 +66,13 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
     setSearchParams(sp, { replace: true });
   }, [effectiveScope, navigate, setSearchParams]);
 
+  // WHAT each photo-only destination does when chosen. Whether it is OFFERED is
+  // not decided here: the workspace's action model gates both of these on an
+  // all-photo selection plus the Laboratory permissions the server requires, so
+  // this page cannot accidentally hand a user a door that answers 403.
   const photoDestinations = useMemo<MediaPhotoDestination[]>(() => [
     {
       id: 'beauty-lab',
-      label: t('gallerySel.addToAestheticsLab'),
       run: async (ids) => {
         const r = await addAestheticLabFromGallery(ids);
         return t('aesthetics.addedFromGallery', { added: r.added.length, skipped: r.skipped.length });
@@ -77,7 +80,6 @@ export function MediaLibraryPage({ scope = 'active' }: { scope?: MediaGallerySco
     },
     {
       id: 'plates',
-      label: t('gallery.ws.destPlates'),
       run: async (ids) => {
         const r = await addPlateImagesFromGallery(ids);
         return r.added.length === 1

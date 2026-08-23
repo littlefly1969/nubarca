@@ -254,15 +254,106 @@ describe('MediaWorkspace', () => {
     );
   });
 
-  it('selecting an item reveals the capability-gated selection bar', async () => {
+  it('selecting an item reveals the capability-gated command dock', async () => {
     renderWorkspace(page([imageItem, videoItem]));
     await screen.findByText('photo.jpg');
     const controls = screen.getAllByTestId('media-select-control');
     await userEvent.click(controls[0]);
     expect(await screen.findByTestId('media-selection-bar')).toBeInTheDocument();
-    // A single image selection offers photo-only destinations + move-to-excluded.
-    expect(screen.getByTestId('media-sel-excluded')).toBeInTheDocument();
+    // Two grouped commands, not a flat row: the destinations live inside them.
+    expect(screen.getByTestId('media-sel-move-to')).toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-add-to')).toBeInTheDocument();
+    // Restore is an Excluded-scope action and this is the active library.
     expect(screen.queryByTestId('media-sel-restore')).not.toBeInTheDocument();
+
+    // A single image selection: every destination, because this member holds
+    // the vault and both Laboratory sections.
+    await userEvent.click(screen.getByTestId('media-sel-move-to'));
+    expect(screen.getByTestId('media-sel-personal')).toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-excluded')).toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-trash')).toBeInTheDocument();
+  });
+
+  it('builds no destination the user is not permitted to use', async () => {
+    // The bug this closes: the Plates and Beauty destinations used to be built
+    // from the page with no permission check at all, so a user with no
+    // Laboratory access was offered two doors that answer 403.
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(page([imageItem])),
+      'GET /api/albums': () => jsonResponse([]),
+      'GET /api/shared-albums': () => jsonResponse([]),
+    });
+    render(
+      <MemoryRouter>
+        <AuthedWrapper permissions={[]}>
+          <MediaWorkspace
+            source={LIBRARY}
+            identity={emptyIdentity(LIBRARY)}
+            onIdentityChange={vi.fn()}
+            searchPlaceholder="Cerca"
+            photoDestinations={[
+              { id: 'plates', run: () => 'x' },
+              { id: 'beauty-lab', run: () => 'x' },
+            ]}
+          />
+        </AuthedWrapper>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('photo.jpg');
+    await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
+    await screen.findByTestId('media-selection-bar');
+
+    await userEvent.click(screen.getByTestId('media-sel-add-to'));
+    expect(screen.getByTestId('media-sel-album')).toBeInTheDocument();
+    expect(screen.queryByTestId('media-sel-plates')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('media-sel-beauty')).not.toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    await userEvent.click(screen.getByTestId('media-sel-move-to'));
+    expect(screen.queryByTestId('media-sel-personal')).not.toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-excluded')).toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-trash')).toBeInTheDocument();
+  });
+
+  it('offers the photo-only destinations only for an all-photo selection', async () => {
+    installFetchMock({
+      'GET /api/media': () => jsonResponse(page([imageItem, videoItem])),
+      'GET /api/albums': () => jsonResponse([]),
+      'GET /api/shared-albums': () => jsonResponse([]),
+    });
+    render(
+      <MemoryRouter>
+        <AuthedWrapper>
+          <MediaWorkspace
+            source={LIBRARY}
+            identity={emptyIdentity(LIBRARY)}
+            onIdentityChange={vi.fn()}
+            searchPlaceholder="Cerca"
+            photoDestinations={[
+              { id: 'plates', run: () => 'x' },
+              { id: 'beauty-lab', run: () => 'x' },
+            ]}
+          />
+        </AuthedWrapper>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('photo.jpg');
+    const controls = screen.getAllByTestId('media-select-control');
+    await userEvent.click(controls[0]);
+    await userEvent.click(await screen.findByTestId('media-sel-add-to'));
+    expect(screen.getByTestId('media-sel-plates')).toBeInTheDocument();
+    expect(screen.getByTestId('media-sel-beauty')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+
+    // Adding the video makes the selection mixed: a photo-only action must not
+    // run over part of it, so it is withdrawn entirely.
+    await userEvent.click(controls[1]);
+    await userEvent.click(screen.getByTestId('media-sel-add-to'));
+    expect(screen.getByTestId('media-sel-album')).toBeInTheDocument();
+    expect(screen.queryByTestId('media-sel-plates')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('media-sel-beauty')).not.toBeInTheDocument();
   });
 
   it('files the whole selection through the common picker, then clears it', async () => {
@@ -301,6 +392,7 @@ describe('MediaWorkspace', () => {
     const controls = screen.getAllByTestId('media-select-control');
     await userEvent.click(controls[0]);
     await userEvent.click(controls[1]);
+    await userEvent.click(await screen.findByTestId('media-sel-add-to'));
     await userEvent.click(await screen.findByTestId('media-sel-album'));
 
     await userEvent.click(await screen.findByTestId('album-picker-destination'));
@@ -344,6 +436,7 @@ describe('MediaWorkspace', () => {
 
     await screen.findByText('photo.jpg');
     await userEvent.click(screen.getAllByTestId('media-select-control')[0]);
+    await userEvent.click(await screen.findByTestId('media-sel-add-to'));
     await userEvent.click(await screen.findByTestId('media-sel-album'));
 
     const add = await screen.findByTestId('album-picker-add');

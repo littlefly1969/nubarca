@@ -45,7 +45,21 @@ export type IconName =
   | 'similar'
   | 'explore'
   | 'info'
-  | 'roles';
+  | 'roles'
+  // Added for the contextual selection dock and the face-review viewer: the
+  // commands those two surfaces expose had no glyph in the set yet.
+  | 'check'
+  | 'chevron-down'
+  | 'restore'
+  | 'album-remove'
+  | 'more'
+  | 'fit'
+  | 'focus'
+  | 'plus'
+  | 'minus'
+  | 'eye-off'
+  | 'skip'
+  | 'next-photo';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -88,6 +102,25 @@ const PATHS: Record<IconName, string> = {
   info: 'M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18zM12 11v6M12 8h.01',
   // A key: a role is what opens which doors.
   roles: 'M14.5 9.5a3.5 3.5 0 1 1-4.9 3.2L4 18.3V21h3v-2h2v-2h2l.7-.7a3.5 3.5 0 0 0 2.8-6.8zM15.5 8.5h.01',
+  check: 'M5 12.5l4.5 4.5L19 7',
+  'chevron-down': 'M6 10l6 6 6-6',
+  // An arrow curving back into the library: what "restore" undoes.
+  restore: 'M4 10h6V4M4.5 10.5a8 8 0 1 1 .6 6',
+  // An album with a minus: membership removed, the media itself untouched.
+  'album-remove': 'M4 6h9a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zM14.5 9h7',
+  more: 'M6 12h.01M12 12h.01M18 12h.01',
+  // Four corners opening outward: show the whole photo.
+  fit: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',
+  // A reticle over the thing being centred.
+  focus: 'M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM12 2v3M12 19v3M2 12h3M19 12h3',
+  plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  // An eye with a stroke through it: seen, and set aside.
+  'eye-off': 'M4 4l16 16M10.6 10.6a2 2 0 0 0 2.8 2.8M6.3 6.4A11 11 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 4.5-1.1M9.9 5.2A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3 4',
+  // Jump the playhead forward past this one, deciding nothing.
+  skip: 'M6 5l9 7-9 7zM19 5v14',
+  // A photo with an arrow out of it: the NEXT picture, not the next face.
+  'next-photo': 'M3 6h11v10H3zM3 13.5l3.5-3.5 2.5 2.5M17 8l4 4-4 4M21 12h-6',
 };
 
 export interface IconProps {
