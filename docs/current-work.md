@@ -15,8 +15,10 @@ is built is described by `ARCHITECTURE.md`.
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
-  definitively signed APK and optionally publishes it through the canonical
-  production activation path
+  definitively signed APK and optionally publishes an immutable GHCR bundle.
+  Production pulls verified application/APK artifacts by digest; the guided
+  `deploy/update-production.sh check|apply` path refuses migrations and never
+  builds on the server
 - Storage: local content-addressed blobs with database-owned logical paths
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
