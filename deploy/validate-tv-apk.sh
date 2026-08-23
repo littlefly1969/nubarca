@@ -53,19 +53,21 @@ fi
 [[ -n "$apkanalyzer" ]] || { echo "apkanalyzer not found." >&2; exit 1; }
 
 signer_report="$("$apksigner" verify --verbose --print-certs "$apk_path")"
-if grep -q 'CN=Android Debug' <<<"$signer_report"; then
+jar_signer_report="$(keytool \
+  -J-Duser.language=en \
+  -J-Duser.country=US \
+  -printcert -jarfile "$apk_path")"
+if grep -q 'CN=Android Debug' <<<"$jar_signer_report"; then
   echo "APK is signed with the Android debug key." >&2
   exit 1
 fi
-signer_sha256="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print tolower($2); exit}' <<<"$signer_report" | tr -d ':')"
+signer_count="$(grep -Ec '^Signer #[0-9]+:$' <<<"$jar_signer_report" || true)"
+[[ "$signer_count" == "1" ]] || { echo "APK must have exactly one signer; found $signer_count." >&2; exit 1; }
+signer_sha256="$(awk -F': ' '/^[[:space:]]*SHA256:/ {print tolower($2); exit}' <<<"$jar_signer_report" | tr -d ':')"
 if [[ "$signer_sha256" != "$expected_signer_sha256" ]]; then
   echo "APK signer is not the definitive NubArca TV signer." >&2
   echo "Expected signer SHA-256: $expected_signer_sha256" >&2
   echo "Actual signer SHA-256:   ${signer_sha256:-missing}" >&2
-  exit 1
-fi
-if grep -q '^Signer #2 certificate' <<<"$signer_report"; then
-  echo "APK must have exactly one signer." >&2
   exit 1
 fi
 if ! grep -qE '^Verified using v2 scheme \(APK Signature Scheme v2\): true' <<<"$signer_report" ||
