@@ -13,7 +13,10 @@
 .dockerignore
 **/Dockerfile
 docker-compose*.yml
-README.md
+# README.md is NOT excluded: it is the best single description of what NubArca
+# is, and the external Help knowledge corpus is built from it inside the image.
+# It sits after `dotnet publish` in the Dockerfile, so editing documentation
+# rebuilds the corpus layer without invalidating restore or compilation.
 PROJECT_PLAN.md
 CLAUDE.md
 .editorconfig

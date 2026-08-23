@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
   getPhotosWithUnassignedFaces,
@@ -22,6 +22,12 @@ import { FaceContextViewer } from './FaceContextViewer';
 // face of the SAME photo, and only when the photo has none left does the queue
 // advance. That is also why "ignore everything still undecided here" exists: it
 // is the fastest true statement about a photo full of strangers.
+interface OpenPhoto {
+  photo: PhotoWithUnassignedFaces;
+  faceIds: string[];
+  index: number;
+}
+
 export function PhotoFaceReviewTab() {
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
@@ -33,7 +39,7 @@ export function PhotoFaceReviewTab() {
 
   // The open photo, as a QUEUE the caller owns: FaceContextViewer is controlled,
   // so the face list and position live here and nowhere else.
-  const [open, setOpen] = useState<{ photo: PhotoWithUnassignedFaces; faceIds: string[]; index: number } | null>(null);
+  const [open, setOpen] = useState<OpenPhoto | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -66,17 +72,27 @@ export function PhotoFaceReviewTab() {
     }
   }, [cursor, loadingMore, invalidateAuth]);
 
+  // The queue, readable synchronously.
+  //
+  // Both updates below have to be decided TOGETHER — which photo leaves the list
+  // and which one opens — and a state updater is the wrong place to decide
+  // anything: React may call it more than once or defer it, so a `setOpen` inside
+  // one fires an unpredictable number of times at an unpredictable moment. That
+  // was a real intermittent failure, not a flaky test.
+  const photosRef = useRef<PhotoWithUnassignedFaces[]>([]);
+  photosRef.current = photos;
+
   /** Open the next photo in the queue after `fileItemId`, or close the review. */
   const advancePhoto = useCallback((finishedFileItemId: string) => {
-    setPhotos((prev) => {
-      const remaining = prev.filter((p) => p.fileItemId !== finishedFileItemId);
-      const at = prev.findIndex((p) => p.fileItemId === finishedFileItemId);
-      // The photo that took this one's place — which is the next one in the
-      // queue, or nothing if it was the last.
-      const next = at >= 0 && at < remaining.length ? remaining[at] : null;
-      setOpen(next ? { photo: next, faceIds: next.faceIds, index: 0 } : null);
-      return remaining;
-    });
+    const prev = photosRef.current;
+    const at = prev.findIndex((p) => p.fileItemId === finishedFileItemId);
+    const remaining = prev.filter((p) => p.fileItemId !== finishedFileItemId);
+    // The photo that took this one's place — the next in the queue, or nothing
+    // if it was the last.
+    const next = at >= 0 && at < remaining.length ? remaining[at] : null;
+    photosRef.current = remaining;
+    setPhotos(remaining);
+    setOpen(next ? { photo: next, faceIds: next.faceIds, index: 0 } : null);
   }, []);
 
   /**
@@ -85,30 +101,40 @@ export function PhotoFaceReviewTab() {
    * Stay on the same POSITION, which is now the next face; when the photo runs
    * out, the whole photo is done and the queue moves on.
    */
+  const openRef = useRef<OpenPhoto | null>(null);
+  openRef.current = open;
+
   const faceDecided = useCallback((faceId: string) => {
-    setOpen((current) => {
-      if (!current) return null;
-      const faceIds = current.faceIds.filter((id) => id !== faceId);
-      if (faceIds.length === 0) {
-        // Deferred so this state updater stays pure — advancePhoto sets state too.
-        queueMicrotask(() => advancePhoto(current.photo.fileItemId));
-        return current;
-      }
-      return { ...current, faceIds, index: Math.min(current.index, faceIds.length - 1) };
-    });
-    setPhotos((prev) => prev.map((p) => (p.faceIds.includes(faceId)
+    const current = openRef.current;
+    if (!current) return;
+
+    const faceIds = current.faceIds.filter((id) => id !== faceId);
+    if (faceIds.length === 0) {
+      // The photo is finished: dropping it from the queue and opening the next
+      // one is one decision, taken here rather than split across two updaters.
+      advancePhoto(current.photo.fileItemId);
+      return;
+    }
+
+    const next = { ...current, faceIds, index: Math.min(current.index, faceIds.length - 1) };
+    openRef.current = next;
+    setOpen(next);
+    const remaining = photosRef.current.map((p) => (p.faceIds.includes(faceId)
       ? { ...p, faceIds: p.faceIds.filter((id) => id !== faceId), unassignedCount: p.unassignedCount - 1 }
-      : p)));
+      : p));
+    photosRef.current = remaining;
+    setPhotos(remaining);
   }, [advancePhoto]);
 
   /** Leave the face undecided and move on — the third answer beside assign and ignore. */
   const skipFace = useCallback(() => {
-    setOpen((current) => {
-      if (!current || current.faceIds.length === 0) return current;
-      // Wraps, so skipping the last face returns to the first still-undecided
-      // one instead of dead-ending on a photo that still has work in it.
-      return { ...current, index: (current.index + 1) % current.faceIds.length };
-    });
+    const current = openRef.current;
+    if (!current || current.faceIds.length === 0) return;
+    // Wraps, so skipping the last face returns to the first still-undecided one
+    // instead of dead-ending on a photo that still has work in it.
+    const next = { ...current, index: (current.index + 1) % current.faceIds.length };
+    openRef.current = next;
+    setOpen(next);
   }, []);
 
   const ignoreWholePhoto = useCallback(async () => {

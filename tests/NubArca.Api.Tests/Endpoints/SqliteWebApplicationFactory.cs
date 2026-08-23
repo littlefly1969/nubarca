@@ -78,6 +78,15 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
     // test class having to duplicate the whole service registration list.
     // `clockOverride` (slice 83) swaps the singleton TimeProvider so a test can
     // drive wall-clock budgets deterministically.
+    /// Extra service registrations, applied AFTER everything else so a test can
+    /// replace a production registration.
+    ///
+    /// `WithWebHostBuilder` cannot be used for this: it builds a second host with
+    /// its own in-memory SQLite connection, so the schema this factory created is
+    /// not visible to it and every query fails with "no such table". The hook has
+    /// to live on the factory that owns the connection.
+    public Action<IServiceCollection>? ConfigureExtraServices { get; set; }
+
     public SqliteWebApplicationFactory(
         IReadOnlyDictionary<string, string?>? extraSettings,
         TimeProvider? clockOverride = null,
@@ -337,6 +346,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // Intentionally NOT registered as IHostedService: tests drive the
             // janitor / sweeper via RunOnceAsync to avoid timing races with
             // the host's background loop.
+
+            ConfigureExtraServices?.Invoke(services);
         });
     }
 
