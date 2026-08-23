@@ -220,73 +220,62 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
 
     // ---- fail closed without approved product knowledge --------------------
 
-    [Theory]
-    // A corpus that is simply not there.
-    [InlineData("missing")]
-    // A corpus that exists but was built from a DIFFERENT revision. Both end in
-    // the same state — the retriever reports nothing available — and the point of
-    // covering both is that they are different WAYS to get there.
-    [InlineData("mismatched")]
-    public async Task No_Approved_Knowledge_Means_Zero_Outbound_Provider_Calls(string how)
+    [Fact]
+    public async Task No_Approved_Knowledge_Means_Zero_Outbound_Provider_Calls()
     {
-        var corpusPath = Path.Combine(Path.GetTempPath(), $"help-corpus-{Guid.NewGuid():N}.json");
-        if (how == "mismatched")
-        {
-            File.WriteAllText(corpusPath, JsonSerializer.Serialize(new HelpCorpus(
-                "a-revision-this-build-is-not",
-                new[] { new HelpCorpusDocument("README.md", "NubArca", "README.md", "Product text.") })));
-        }
-
+        // A corpus that is simply not there. The OTHER way into this state — a
+        // corpus built from a different revision — is proven by
+        // HelpKnowledgeBoundaryTests.A_Corpus_From_A_Different_Revision_Is_Refused,
+        // at the retriever, where the revision logic lives.
+        //
+        // It is deliberately NOT re-proven here. Doing so would mean setting
+        // NUBARCA_GIT_SHA, which is process-wide, while xUnit runs test classes in
+        // parallel and that other class sets the same variable — a race between
+        // classes, which is exactly the intermittent failure this suite keeps
+        // trying to eliminate. Both tests reach the same service boundary
+        // (IsAvailable == false); only one of them needs to own the global.
+        var corpusPath = Path.Combine(Path.GetTempPath(), $"help-corpus-missing-{Guid.NewGuid():N}.json");
         var handler = new CapturingProviderHandler(_ => CapturingProviderHandler.Answer("unused"));
-        var previousSha = Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA");
-        Environment.SetEnvironmentVariable("NUBARCA_GIT_SHA", "the-running-revision");
-        try
+
+        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
         {
-            using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
-            {
-                ["ExternalHelp:Enabled"] = "true",
-                ["ExternalHelp:BaseUrl"] = "https://provider.example",
-                ["ExternalHelp:ApiKey"] = Key,
-                ["ExternalHelp:Model"] = "test-model-1",
-                ["ExternalHelp:ProviderLabel"] = "Test Provider",
-                ["ExternalHelp:CorpusPath"] = corpusPath,
-            });
-            factory.ConfigureExtraServices = services =>
-                services.AddHttpClient<IExternalHelpChatClient, OpenAiCompatibleChatCompletionClient>()
-                    .ConfigurePrimaryHttpMessageHandler(() => handler);
-            factory.EnsureDatabaseCreated();
+            ["ExternalHelp:Enabled"] = "true",
+            ["ExternalHelp:BaseUrl"] = "https://provider.example",
+            ["ExternalHelp:ApiKey"] = Key,
+            ["ExternalHelp:Model"] = "test-model-1",
+            ["ExternalHelp:ProviderLabel"] = "Test Provider",
+            ["ExternalHelp:CorpusPath"] = corpusPath,
+        });
+        factory.ConfigureExtraServices = services =>
+            services.AddHttpClient<IExternalHelpChatClient, OpenAiCompatibleChatCompletionClient>()
+                .ConfigurePrimaryHttpMessageHandler(() => handler);
+        factory.EnsureDatabaseCreated();
 
-            var (_, client) = await factory.CreateAuthenticatedClientAsync();
-            var response = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+        var response = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
 
-            // An optional feature that cannot work, not an application error.
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var body = await response.Content.ReadAsStringAsync();
-            Assert.Contains(HelpFailureReasons.KnowledgeUnavailable, body, StringComparison.Ordinal);
+        // An optional feature that cannot work, not an application error.
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains(HelpFailureReasons.KnowledgeUnavailable, body, StringComparison.Ordinal);
 
-            // THE ASSERTION THAT MATTERS. The provider is fully configured, so
-            // nothing but the guard stops the call — and the user's question must
-            // not leave NubArca to buy an answer improvised with no product
-            // documentation behind it.
-            Assert.Equal(0, handler.Calls);
-            Assert.Null(handler.Body);
+        // THE ASSERTION THAT MATTERS. The provider is fully configured, so nothing
+        // but the guard stops the call — and the user's question must not leave
+        // NubArca to buy an answer improvised with no product documentation
+        // behind it.
+        Assert.Equal(0, handler.Calls);
+        Assert.Null(handler.Body);
 
-            // The status endpoint says the same thing, so the browser can decline
-            // to offer a chat rather than discovering it on the first question.
-            var status = await (await client.GetAsync("/api/help/ai/status")).Content.ReadAsStringAsync();
-            Assert.Contains("\"knowledgeAvailable\":false", status, StringComparison.Ordinal);
-            Assert.Contains("\"enabled\":true", status, StringComparison.Ordinal);
-            // …and still without naming a path, a revision or any configuration.
-            foreach (var leak in new[] { corpusPath, "a-revision-this-build-is-not", "the-running-revision", Key })
-            {
-                Assert.DoesNotContain(leak, status, StringComparison.Ordinal);
-                Assert.DoesNotContain(leak, body, StringComparison.Ordinal);
-            }
-        }
-        finally
+        // The status endpoint says the same thing, so the browser can decline to
+        // offer a chat rather than discovering it on the first question…
+        var status = await (await client.GetAsync("/api/help/ai/status")).Content.ReadAsStringAsync();
+        Assert.Contains("\"knowledgeAvailable\":false", status, StringComparison.Ordinal);
+        Assert.Contains("\"enabled\":true", status, StringComparison.Ordinal);
+        // …and still without naming a path or any configuration value.
+        foreach (var leak in new[] { corpusPath, Key })
         {
-            Environment.SetEnvironmentVariable("NUBARCA_GIT_SHA", previousSha);
-            try { File.Delete(corpusPath); } catch (IOException) { }
+            Assert.DoesNotContain(leak, status, StringComparison.Ordinal);
+            Assert.DoesNotContain(leak, body, StringComparison.Ordinal);
         }
     }
 
