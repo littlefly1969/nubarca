@@ -272,6 +272,49 @@ The Gradle plugin fails `assembleRelease`, `bundleRelease` and `packageRelease`
 closed if the release keystore or credentials are missing; it never falls back
 to the debug signer.
 
+### 10.1 GitHub Actions build and publication
+
+`.github/workflows/tv-native-release.yml` is the remote equivalent of sections
+10–12. It is manual-only, runs inside the `tv-production` GitHub Environment,
+builds with Node 22/JDK 17/Android 36, verifies both signing identities before
+compilation, runs the TV tests, builds and validates the signed APK, and uploads
+the validated immutable artifact. With `publish=true` it then runs the canonical
+`deploy/publish-tv-apk.sh` and verifies the activated descriptor and APK bytes
+over HTTPS.
+
+Configure these Environment **secrets**; never repository files:
+
+| Secret | Value |
+| --- | --- |
+| `NUBARCA_TV_RELEASE_KEYSTORE_BASE64` | Definitive release JKS, base64 without line wrapping |
+| `NUBARCA_TV_RELEASE_STORE_PASSWORD` | JKS store password |
+| `NUBARCA_TV_RELEASE_KEY_ALIAS` | Definitive key alias |
+| `NUBARCA_TV_RELEASE_KEY_PASSWORD` | Key password |
+| `NUBARCA_TV_OTA_CERTIFICATE_BASE64` | Established public OTA certificate PEM, base64 without line wrapping |
+| `NUBARCA_TV_DEPLOY_SSH_PRIVATE_KEY` | Unencrypted CI deploy key accepted only by the publication account |
+
+Configure these installation-specific Environment **variables**:
+
+| Variable | Value |
+| --- | --- |
+| `NUBARCA_PUBLIC_ORIGIN` | Production HTTPS origin |
+| `NUBARCA_PRODUCTION_SSH` | Publication `login@host` |
+| `NUBARCA_TV_APK_DIR` | Remote directory served at `/download/tv/` |
+| `NUBARCA_TV_DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts line(s); never obtain them with `ssh-keyscan` during a release |
+
+The OTA private key is intentionally absent: a native APK embeds only the public
+OTA verifier, and this workflow does not publish OTA bundles. Restrict the
+Environment deployment branches to `main`, and protect it with required reviewers
+where the GitHub plan supports them. The workflow also gates on `main` before it
+materializes any signing input.
+
+Run the workflow with `publish=false` to build and retain a validated artifact
+from `main` without changing the installation. Publication is additionally
+fail-closed unless `confirm_version_code` exactly matches
+`tv/release-contract.json`.
+Successful remote publication still leaves physical Fire Stick acceptance
+**pending**, as required by section 13.
+
 ## 11. APK validation
 
 Validate an already-built/current APK locally, without remote configuration:
