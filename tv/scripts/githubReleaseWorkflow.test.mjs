@@ -16,6 +16,11 @@ test('native release workflow is manual and production-environment scoped', () =
   assert.match(workflow, /cancel-in-progress: false/);
 });
 
+test('JDK setup does not require the generated Android tree to exist', () => {
+  const setupJdk = workflow.match(/- name: Set up JDK[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? '';
+  assert.doesNotMatch(setupJdk, /cache:\s*gradle/);
+});
+
 test('native releases are gated to main and publishing confirms versionCode', () => {
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(workflow, /CONFIRMED_VERSION_CODE.*version_code/);
