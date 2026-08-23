@@ -101,6 +101,9 @@ export function UserMenu({ displayName, email, onUserUpdated, onSignOut }: UserM
           </div>
 
           <div className="user-menu__section">
+            <NavLink to="/help" className="user-menu__item" onClick={() => setOpen(false)}>
+              {t('help.ai.menu')}
+            </NavLink>
             <NavLink to="/account" className="user-menu__item" onClick={() => setOpen(false)}>
               <Icon name="account" />
               <span>{t('nav.account')}</span>

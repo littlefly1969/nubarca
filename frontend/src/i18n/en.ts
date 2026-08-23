@@ -6,6 +6,22 @@ import type { MessageKey } from './it';
 // key is never shown). Translations are natural English, not word-for-word.
 const en: Partial<Record<MessageKey, string>> = {
   // --- Common / shared UI states ---
+  'help.ai.menu': 'Ask NubArca',
+  'help.ai.title': 'Ask NubArca',
+  'help.ai.externalBadge': 'External AI',
+  'help.ai.privacy': 'The question you type is sent to the configured external AI provider ({provider}). NubArca does not attach or retrieve files, photos, people, metadata, search results, or other private library data.',
+  'help.ai.disabled': 'The AI assistant is not configured on this installation.',
+  'help.ai.empty': 'Ask a question about how NubArca works.',
+  'help.ai.you': 'You',
+  'help.ai.sources': 'Sources: {sources}',
+  'help.ai.questionLabel': 'Your question',
+  'help.ai.placeholder': 'How do albums work?',
+  'help.ai.ask': 'Ask',
+  'help.ai.asking': 'Asking…',
+  'help.ai.errorUnavailable': 'The assistant is unreachable right now. NubArca itself is unaffected.',
+  'help.ai.errorProvider': 'The external AI provider rejected the request. Contact whoever administers this installation.',
+  'help.ai.errorBusy': 'The external AI provider is busy. Try again shortly.',
+  'help.ai.errorTimeout': 'The external AI provider did not answer in time.',
   'common.loading': 'Loading…',
   'common.error': 'Something went wrong',
   'common.errorGeneric': 'Something went wrong',

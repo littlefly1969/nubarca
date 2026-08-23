@@ -385,6 +385,21 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // Optional external Help: a per-USER budget, not per-IP. Every request costs
+    // an outbound call to a paid third party, and the callers here are
+    // authenticated, so the account is the meaningful subject.
+    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.ExternalHelpRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User?.Identity?.Name
+                ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
     options.AddPolicy(VaultUnlockRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -872,6 +887,18 @@ builder.Services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
 builder.Services.Configure<AiOptions>(
     builder.Configuration.GetSection(AiOptions.SectionName));
 
+// Optional external Smart Help. Disabled by default; the registration is
+// unconditional so the status endpoint can answer "not enabled" without the
+// container failing to build a service. Nothing registered here can read library
+// content — see ExternalHelpService's constructor.
+builder.Services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
+builder.Services.AddHttpClient<NubArca.Api.Help.IExternalHelpChatClient,
+    NubArca.Api.Help.OpenAiCompatibleChatCompletionClient>();
+builder.Services.AddSingleton<NubArca.Api.Help.IHelpKnowledgeRetriever,
+    NubArca.Api.Help.FileHelpKnowledgeRetriever>();
+builder.Services.AddScoped<NubArca.Api.Help.ExternalHelpService>();
+
 // VSEM-01: canonical video temporal substrate (scene segments + sample
 // timestamps). Bound alongside AiOptions; disabled by default. The CLI/worker
 // host binds the same section (parity — see CliEntryPoint).
@@ -1125,6 +1152,7 @@ app.MapAdminAiEndpoints();
 // owner-private/Vault-exclusion behavior; see that file for the
 // implementation.
 app.MapPeopleEndpoints();
+app.MapHelpEndpoints();
 
 // Media Library (gallery membership rules + per-file exclusion) and Photo
 // Organizer (owner-scoped date-taken reorganization) endpoints live in

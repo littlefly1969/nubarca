@@ -10,6 +10,22 @@
 // {count} is injected automatically.
 const it = {
   // --- Common / shared UI states ---
+  'help.ai.menu': 'Chiedi a NubArca',
+  'help.ai.title': 'Chiedi a NubArca',
+  'help.ai.externalBadge': 'IA esterna',
+  'help.ai.privacy': 'La domanda che scrivi viene inviata al provider di IA esterno configurato ({provider}). NubArca non allega né recupera file, foto, persone, metadati, risultati di ricerca o altri dati privati della tua libreria.',
+  'help.ai.disabled': 'L\u2019assistente IA non è configurato su questa installazione.',
+  'help.ai.empty': 'Fai una domanda su come funziona NubArca.',
+  'help.ai.you': 'Tu',
+  'help.ai.sources': 'Fonti: {sources}',
+  'help.ai.questionLabel': 'La tua domanda',
+  'help.ai.placeholder': 'Come funzionano gli album?',
+  'help.ai.ask': 'Chiedi',
+  'help.ai.asking': 'Sto chiedendo…',
+  'help.ai.errorUnavailable': 'L\u2019assistente non è raggiungibile in questo momento. NubArca continua a funzionare normalmente.',
+  'help.ai.errorProvider': 'Il provider di IA esterno ha rifiutato la richiesta. Contatta chi amministra l\u2019installazione.',
+  'help.ai.errorBusy': 'Il provider di IA esterno è momentaneamente sovraccarico. Riprova fra poco.',
+  'help.ai.errorTimeout': 'Il provider di IA esterno non ha risposto in tempo.',
   'common.loading': 'Caricamento…',
   'common.error': 'Si è verificato un errore',
   'common.errorGeneric': 'Qualcosa è andato storto',

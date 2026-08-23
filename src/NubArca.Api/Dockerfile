@@ -8,6 +8,26 @@ RUN dotnet restore src/NubArca.Api/NubArca.Api.csproj
 COPY src/NubArca.Api/ src/NubArca.Api/
 RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
+# ---- public Help knowledge, built from THIS source revision -------------------
+#
+# The optional external Help assistant is shown a bounded set of PUBLIC product
+# documentation and nothing else. Building the corpus here, rather than fetching
+# anything at runtime, is what makes that set finite and reviewable: no GitHub
+# token, no network dependency, no rate limit, and documentation that matches the
+# exact revision the operator is running.
+#
+# The corpus is stamped with GIT_SHA and the running application refuses one whose
+# revision disagrees with its own build, so Help cannot describe a feature the
+# installed release does not have.
+#
+# Only the allowlisted public documents are copied in — the builder would ignore
+# anything else, and not copying it means it was never in the layer either.
+ARG GIT_SHA=unknown
+COPY README.md ARCHITECTURE.md ./
+COPY docs/ docs/
+RUN dotnet /app/publish/NubArca.Api.dll help-knowledge build \
+        --source /src --out /app/publish/help-corpus.json --revision "$GIT_SHA"
+
 # ---- Gate 3A native layer: OpenVINO-enabled ORT core, fetched + verified, pinned.
 # Only the runtime-openvino target consumes this; the default runtime stays lean.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS onnx-native

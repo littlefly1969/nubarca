@@ -8177,3 +8177,30 @@ video.lightbox-image {
 /* The volume trim sits next to the scrubber but never competes with it for
    width: the position is what a person actually drags. */
 .cast-mini__volume { flex: 0 0 5rem; width: 5rem; }
+
+/* Ask NubArca — the optional external Help assistant (feat/external-smart-help). */
+.help-ai { max-width: 52rem; }
+.help-ai-header { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.help-ai-badge {
+  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem; border-radius: 999px;
+  border: 1px solid var(--warning-border, #f59e0b); color: var(--warning-border, #f59e0b);
+}
+/* The disclosure is body text, not fine print: it is the thing a person needs
+   to read before typing, so it is not styled to be skipped. */
+.help-ai-privacy {
+  margin: 0.5rem 0 1rem; padding: 0.6rem 0.75rem; border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb); background: var(--surface-muted, rgba(0,0,0,0.03));
+}
+.help-ai-thread { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
+.help-ai-turn {
+  padding: 0.6rem 0.75rem; border-radius: 8px;
+  border: 1px solid var(--border, #e5e7eb);
+}
+.help-ai-turn--user { background: var(--surface-muted, rgba(0,0,0,0.03)); }
+.help-ai-turn p { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.help-ai-role { font-size: 0.8rem; font-weight: 600; opacity: 0.75; }
+.help-ai-sources { font-size: 0.8rem; opacity: 0.7; }
+.help-ai-composer { display: flex; flex-direction: column; gap: 0.4rem; }
+.help-ai-composer textarea { width: 100%; padding: 0.5rem; resize: vertical; }
+.help-ai-composer button { align-self: flex-start; }

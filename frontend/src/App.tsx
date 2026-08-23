@@ -13,6 +13,7 @@ import { AdminRolesPage } from './pages/AdminRolesPage';
 import { AdminStatsPage } from './pages/AdminStatsPage';
 import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
+import { HelpPage } from './pages/HelpPage';
 import { AlbumsPage } from './pages/AlbumsPage';
 import { CloudFunctionsPage } from './pages/CloudFunctionsPage';
 import { MediaLibraryPage } from './pages/MediaLibraryPage';
@@ -77,6 +78,7 @@ export function App() {
             }
           >
             <Route path="/" element={<HomePage />} />
+            <Route path="/help" element={<HelpPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/albums/:albumId/party-uploads" element={<PartyUploadsPage />} />

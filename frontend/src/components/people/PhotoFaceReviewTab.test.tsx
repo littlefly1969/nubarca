@@ -121,8 +121,14 @@ it('ignoring every undecided face finishes the photo and opens the next one', as
   await userEvent.click(screen.getByRole('button', { name: 'Ignora tutti i volti non assegnati' }));
 
   // One request, not one per face — and the queue moved to the next photo.
+  // IMG_B's name appears twice once it is open (queue row + viewer), which is
+  // itself the evidence, so this counts rather than expecting exactly one.
   await waitFor(() => expect(screen.getByText('Volto 1 di 1')).toBeTruthy());
-  expect(screen.getByText('IMG_B.jpg')).toBeTruthy();
+  expect(screen.getAllByText('IMG_B.jpg').length).toBeGreaterThan(0);
+  // IMG_A leaving is an EVENTUAL state, not an immediate one: the progress label
+  // updates synchronously from the queue, while the viewer's file name arrives
+  // from a fetch. Asserting it without waiting was the flake.
+  await waitFor(() => expect(screen.queryByText('IMG_A.jpg')).toBeNull());
   expect(mock.calls.filter((c) => c.method === 'POST').length).toBe(1);
 });
 

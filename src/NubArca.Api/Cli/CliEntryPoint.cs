@@ -68,6 +68,7 @@ public static class CliEntryPoint
             "jobs",
             "ai",
             "plates",
+            "help-knowledge",
             "--help", "-h", "help",
         };
 
@@ -97,6 +98,14 @@ public static class CliEntryPoint
 
         switch ((verb, sub))
         {
+            // Builds the PUBLIC Help knowledge corpus from a source checkout.
+            // Runs at image-build time, where the checkout and the release SHA
+            // are both present; the running application then refuses a corpus
+            // whose revision disagrees with its own build. Needs no services and
+            // no database, so it is dispatched directly.
+            case ("help-knowledge", "build"):
+                return await BuildHelpKnowledge(rest, stdout, stderr);
+
             case ("users", "ensure"):
                 return await DispatchAsync(
                     serviceProviderFactory,
@@ -4984,4 +4993,57 @@ public static class CliEntryPoint
         stdout.WriteLine("  64 usage error (missing/invalid arguments)");
         stdout.WriteLine("  78 configuration error (ConnectionStrings:Postgres not set)");
     }
+    // help-knowledge build --source <dir> --out <file> --revision <sha>
+    //
+    // The corpus is an ALLOWLIST of public product documentation (see
+    // HelpCorpusBuilder). Nothing operator-specific, nothing secret and nothing
+    // untracked can enter it, because entry requires being named.
+    private static Task<int> BuildHelpKnowledge(string[] args, TextWriter stdout, TextWriter stderr)
+    {
+        var source = ArgValue(args, "--source") ?? ".";
+        var output = ArgValue(args, "--out") ?? "help-corpus.json";
+        var revision = ArgValue(args, "--revision")
+            ?? Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA")
+            ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(revision))
+        {
+            stderr.WriteLine("help-knowledge build: --revision (or NUBARCA_GIT_SHA) is required.");
+            stderr.WriteLine("A corpus with no revision cannot be checked against the running build.");
+            return Task.FromResult(2);
+        }
+        if (!Directory.Exists(source))
+        {
+            stderr.WriteLine("help-knowledge build: source directory not found.");
+            return Task.FromResult(2);
+        }
+
+        var corpus = NubArca.Api.Help.HelpCorpusBuilder.Build(source, revision);
+        if (corpus.Documents.Count == 0)
+        {
+            stderr.WriteLine("help-knowledge build: no eligible public documents were found.");
+            return Task.FromResult(1);
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(corpus);
+        var directory = Path.GetDirectoryName(Path.GetFullPath(output));
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+        File.WriteAllText(output, json);
+
+        stdout.WriteLine($"revision={revision}");
+        stdout.WriteLine($"documents={corpus.Documents.Count}");
+        stdout.WriteLine($"sources={corpus.Documents.Select(d => d.Path).Distinct().Count()}");
+        stdout.WriteLine($"out={output}");
+        return Task.FromResult(0);
+    }
+
+    private static string? ArgValue(string[] args, string name)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (string.Equals(args[i], name, StringComparison.Ordinal)) return args[i + 1];
+        }
+        return null;
+    }
+
 }
