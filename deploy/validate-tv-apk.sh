@@ -58,7 +58,12 @@ if grep -q 'CN=Android Debug' <<<"$signer_report"; then
   exit 1
 fi
 signer_sha256="$(awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print tolower($2); exit}' <<<"$signer_report" | tr -d ':')"
-[[ "$signer_sha256" == "$expected_signer_sha256" ]] || { echo "APK signer is not the definitive NubArca TV signer." >&2; exit 1; }
+if [[ "$signer_sha256" != "$expected_signer_sha256" ]]; then
+  echo "APK signer is not the definitive NubArca TV signer." >&2
+  echo "Expected signer SHA-256: $expected_signer_sha256" >&2
+  echo "Actual signer SHA-256:   ${signer_sha256:-missing}" >&2
+  exit 1
+fi
 if grep -q '^Signer #2 certificate' <<<"$signer_report"; then
   echo "APK must have exactly one signer." >&2
   exit 1
