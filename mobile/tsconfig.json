@@ -2,6 +2,9 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // Runtime modules are imported by node --test with explicit .ts
+    // extensions (Node strip-only mode), so allow them here too — same as tv/.
+    "allowImportingTsExtensions": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },

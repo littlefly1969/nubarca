@@ -28,6 +28,74 @@ const it = {
   'gallery.whatFolder': 'questa cartella',
   'gallery.loadErrorHttp': 'Impossibile caricare {what} (errore {status}).',
   'gallery.loadErrorNetwork': 'Impossibile caricare {what}. Controlla la connessione.',
+
+  // Tabs
+  'tabs.photos': 'Foto',
+  'tabs.videos': 'Video',
+  'tabs.albums': 'Album',
+  'tabs.files': 'File',
+
+  // Photos / Videos grids
+  'grid.emptyPhotos': 'Nessuna foto.',
+  'grid.emptyVideos': 'Nessun video.',
+  'grid.emptyHint': 'Carica i media dal web per vederli qui.',
+  'grid.errorTitle': 'Impossibile caricare la libreria',
+  'grid.duplicateBadge': '{count}×',
+  'grid.videoNoPoster': 'Video senza anteprima',
+  'grid.syntheticPoster': 'Anteprima non disponibile',
+
+  // Viewer
+  'viewer.back': 'Torna indietro',
+  'viewer.toggleChrome': 'Mostra o nascondi i controlli',
+
+  // Video player
+  'player.retry': 'Riprova la riproduzione',
+  'player.playbackError': 'Riproduzione impossibile.',
+  'player.loading': 'Preparazione del video…',
+  'player.back': 'Chiudi il video',
+
+  // Albums
+  'albums.empty': 'Nessun album.',
+  'albums.emptyHint': 'Crea il tuo primo album.',
+  'albums.create': 'Nuovo album',
+  'albums.createTitle': 'Nuovo album',
+  'albums.nameLabel': 'Nome',
+  'albums.descriptionLabel': 'Descrizione (opzionale)',
+  'albums.save': 'Salva',
+  'albums.cancel': 'Annulla',
+  'albums.rename': 'Rinomina',
+  'albums.edit': 'Modifica',
+  'albums.delete': 'Elimina album',
+  'albums.deleteConfirmTitle': 'Eliminare l\'album?',
+  'albums.deleteConfirmBody':
+    'L\'album "{name}" verrà eliminato. Le foto e i video al suo interno NON vengono cancellati dalla libreria.',
+  'albums.photoCount': '{count} foto',
+  'albums.videoCount': '{count} video',
+  'albums.itemCounts': '{photos}, {videos}',
+  'albums.open': 'Apri l\'album {name}',
+  'albumDetail.empty': 'Album vuoto.',
+  'albumDetail.emptyHint': 'Aggiungi media dalla libreria.',
+  'albumDetail.addMedia': 'Aggiungi media',
+  'albumDetail.removeSelected': 'Rimuovi dall\'album ({count})',
+  'albumDetail.removedNotice': '{count} elementi rimossi dall\'album. I file restano nella tua libreria.',
+  'albumDetail.select': 'Seleziona',
+  'albumDetail.cancelSelection': 'Annulla selezione',
+  'albumDetail.deletedMedia': 'Elemento non più disponibile',
+
+  // Selection / add-to-album
+  'selection.addToAlbum': 'Aggiungi all\'album',
+  'selection.select': 'Seleziona',
+  'selection.selectedCount': '{count} selezionati',
+  'selection.chooseAlbum': 'Scegli un album',
+  'selection.createNew': 'Crea nuovo album…',
+  'selection.addedNotice': '{succeeded} aggiunti, {skipped} già presenti o ignorati.',
+  'selection.addedAll': '{count} elementi aggiunti all\'album.',
+
+  // Files
+  'files.breadcrumbHome': 'Home',
+
+  // Login extras
+  'login.serverHint': 'Es. http://10.0.0.5:5177 in rete locale',
 } as const;
 
 export type MobileMessageKey = keyof typeof it;
