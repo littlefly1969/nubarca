@@ -1,0 +1,286 @@
+name: TV native release
+
+# A native TV release is deliberately manual. The workflow builds and validates
+# a signed APK, then optionally publishes an immutable pull-by-digest bundle to
+# GHCR. Production activation remains a local server operation.
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the validated APK bundle to GHCR for server-side pull
+        required: true
+        default: false
+        type: boolean
+      confirm_version_code:
+        description: Exact release-contract versionCode (required when publishing)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: tv-native-release-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, validate, and optionally publish Fire TV APK bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: tv-production
+    env:
+      CI: true
+      NODE_ENV: production
+      REGISTRY: ghcr.io
+      NUBARCA_PUBLIC_ORIGIN: ${{ vars.NUBARCA_PUBLIC_ORIGIN }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tv/package-lock.json
+
+      - name: Enforce native-release policy
+        id: release
+        env:
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+          CONFIRMED_VERSION_CODE: ${{ inputs.confirm_version_code }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./tv/release-contract.json').version")"
+          version_code="$(node -p "require('./tv/release-contract.json').versionCode")"
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Native release builds are allowed only from main; got $GITHUB_REF" >&2
+            exit 1
+          }
+          if [[ "$REQUESTED_PUBLISH" == "true" ]]; then
+            [[ "$CONFIRMED_VERSION_CODE" == "$version_code" ]] || {
+              echo "confirm_version_code must exactly equal $version_code" >&2
+              exit 1
+            }
+          fi
+          {
+            echo "version=$version"
+            echo "version_code=$version_code"
+            echo "artifact_name=nubarca-tv-${version}-vc${version_code}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check required signing configuration
+        env:
+          TV_RELEASE_KEYSTORE_BASE64: ${{ secrets.NUBARCA_TV_RELEASE_KEYSTORE_BASE64 }}
+          NUBARCA_TV_RELEASE_STORE_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_STORE_PASSWORD }}
+          NUBARCA_TV_RELEASE_KEY_ALIAS: ${{ secrets.NUBARCA_TV_RELEASE_KEY_ALIAS }}
+          NUBARCA_TV_RELEASE_KEY_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_KEY_PASSWORD }}
+          TV_OTA_CERTIFICATE_BASE64: ${{ secrets.NUBARCA_TV_OTA_CERTIFICATE_BASE64 }}
+        run: |
+          set -euo pipefail
+          required=(
+            NUBARCA_PUBLIC_ORIGIN
+            TV_RELEASE_KEYSTORE_BASE64
+            NUBARCA_TV_RELEASE_STORE_PASSWORD
+            NUBARCA_TV_RELEASE_KEY_ALIAS
+            NUBARCA_TV_RELEASE_KEY_PASSWORD
+            TV_OTA_CERTIFICATE_BASE64
+          )
+          for name in "${required[@]}"; do
+            [[ -n "${!name:-}" ]] || { echo "Missing tv-production value: $name" >&2; exit 1; }
+          done
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
+
+      - name: Install TV dependencies
+        working-directory: tv
+        run: npm ci --include=dev
+
+      - name: Typecheck TV application
+        working-directory: tv
+        run: npm run lint
+
+      - name: Run TV tests
+        working-directory: tv
+        run: npm test
+
+      # Private signing bytes do not exist on the runner while repository tests
+      # execute. They are decoded only after source verification has passed.
+      - name: Materialize signing inputs
+        env:
+          TV_RELEASE_KEYSTORE_BASE64: ${{ secrets.NUBARCA_TV_RELEASE_KEYSTORE_BASE64 }}
+          TV_OTA_CERTIFICATE_BASE64: ${{ secrets.NUBARCA_TV_OTA_CERTIFICATE_BASE64 }}
+        run: |
+          set -euo pipefail
+          secrets_dir="$RUNNER_TEMP/nubarca-tv-signing"
+          install -d -m 0700 "$secrets_dir"
+          printf '%s' "$TV_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$secrets_dir/release.jks"
+          printf '%s' "$TV_OTA_CERTIFICATE_BASE64" | base64 --decode > "$secrets_dir/ota-certificate.pem"
+          chmod 0600 "$secrets_dir/release.jks" "$secrets_dir/ota-certificate.pem"
+          {
+            echo "NUBARCA_TV_RELEASE_STORE_FILE=$secrets_dir/release.jks"
+            echo "NUBARCA_TV_OTA_CERTIFICATE=$secrets_dir/ota-certificate.pem"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify signing identities
+        env:
+          NUBARCA_TV_RELEASE_STORE_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_STORE_PASSWORD }}
+          NUBARCA_TV_RELEASE_KEY_ALIAS: ${{ secrets.NUBARCA_TV_RELEASE_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          expected_signer="$(node -p "require('./tv/release-contract.json').apkSignerSha256")"
+          actual_signer="$(keytool -list -v \
+            -keystore "$NUBARCA_TV_RELEASE_STORE_FILE" \
+            -storepass "$NUBARCA_TV_RELEASE_STORE_PASSWORD" \
+            -alias "$NUBARCA_TV_RELEASE_KEY_ALIAS" 2>/dev/null \
+            | awk -F': ' '/SHA256:/{gsub(":", "", $2); print tolower($2); exit}')"
+          [[ "$actual_signer" == "$expected_signer" ]] || {
+            echo "The configured JKS is not the definitive NubArca TV signer." >&2
+            exit 1
+          }
+          node -e '
+            const { validateCodeSigningCertificate } = require("./tv/scripts/code-signing-certificate.cjs");
+            validateCodeSigningCertificate(process.env.NUBARCA_TV_OTA_CERTIFICATE);
+          '
+
+      - name: Generate native Android project
+        working-directory: tv
+        run: npm run tv:prebuild
+
+      - name: Build signed release APK
+        working-directory: tv/android
+        env:
+          NUBARCA_TV_RELEASE_STORE_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_STORE_PASSWORD }}
+          NUBARCA_TV_RELEASE_KEY_ALIAS: ${{ secrets.NUBARCA_TV_RELEASE_KEY_ALIAS }}
+          NUBARCA_TV_RELEASE_KEY_PASSWORD: ${{ secrets.NUBARCA_TV_RELEASE_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Validate release APK
+        run: ./deploy/validate-tv-apk.sh tv/android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Prepare immutable release artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          apk="tv/android/app/build/outputs/apk/release/app-release.apk"
+          dist="$RUNNER_TEMP/${{ steps.release.outputs.artifact_name }}"
+          install -d -m 0755 "$dist"
+          immutable_name="nubarca-tv-v${{ steps.release.outputs.version_code }}.apk"
+          install -m 0644 "$apk" "$dist/$immutable_name"
+          node tv/scripts/release-descriptor.cjs "$apk" "$dist/nubarca-tv.release.json" >/dev/null
+          (cd "$dist" && sha256sum "$immutable_name" > "$immutable_name.sha256")
+          python3 deploy/validate-tv-apk-bundle.py "$dist" tv/release-contract.json
+          {
+            echo "apk=$apk"
+            echo "dist=$dist"
+            echo "immutable_name=$immutable_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload validated APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.artifact_name }}
+          path: ${{ steps.artifact.outputs.dist }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Resolve immutable APK bundle image
+        if: ${{ inputs.publish }}
+        id: image
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          image="${REGISTRY}/${owner}/nubarca-tv-apk:${GITHUB_SHA}"
+          {
+            echo "image=$image"
+            echo "owner=$owner"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        if: ${{ inputs.publish }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: ${{ inputs.publish }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to replace an existing immutable APK image
+        if: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect '${{ steps.image.outputs.image }}' >/dev/null 2>&1; then
+            echo "Immutable APK image tag already exists: ${{ steps.image.outputs.image }}" >&2
+            exit 1
+          fi
+
+      - name: Build APK bundle image
+        if: ${{ inputs.publish }}
+        run: |
+          docker buildx build --load \
+            --build-arg GIT_SHA="$GITHUB_SHA" \
+            --build-arg RELEASE_VERSION='${{ steps.release.outputs.version }}' \
+            --build-arg RELEASE_VERSION_CODE='${{ steps.release.outputs.version_code }}' \
+            --label org.opencontainers.image.source="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            -f deploy/Dockerfile.tv-apk-bundle \
+            -t '${{ steps.image.outputs.image }}' \
+            '${{ steps.artifact.outputs.dist }}'
+
+      - name: Verify APK bundle image before publication
+        if: ${{ inputs.publish }}
+        run: |
+          set -euo pipefail
+          extracted="$RUNNER_TEMP/verified-tv-apk-image"
+          install -d -m 0755 "$extracted"
+          container="$(docker create '${{ steps.image.outputs.image }}' /bin/true)"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          docker cp "$container:/release/." "$extracted"
+          diff -qr '${{ steps.artifact.outputs.dist }}' "$extracted"
+          python3 deploy/validate-tv-apk-bundle.py "$extracted" tv/release-contract.json
+
+      - name: Publish immutable APK bundle image
+        if: ${{ inputs.publish }}
+        run: docker push '${{ steps.image.outputs.image }}'
+
+      - name: Record APK bundle digest
+        if: ${{ inputs.publish }}
+        id: digest
+        run: |
+          digest="$(docker buildx imagetools inspect '${{ steps.image.outputs.image }}' \
+            --format '{{.Manifest.Digest}}')"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Release summary
+        if: always()
+        env:
+          REQUESTED_PUBLISH: ${{ inputs.publish }}
+        run: |
+          {
+            echo "## NubArca TV native release"
+            echo
+            echo "- Source: \`$GITHUB_SHA\`"
+            echo "- Version: \`${{ steps.release.outputs.version }}\`"
+            echo "- Version code: \`${{ steps.release.outputs.version_code }}\`"
+            echo "- GHCR publication requested: \`$REQUESTED_PUBLISH\`"
+            if [[ "$REQUESTED_PUBLISH" == "true" ]]; then
+              echo "- Server pull: \`${{ steps.image.outputs.image }}@${{ steps.digest.outputs.digest }}\`"
+            fi
+            echo "- Production activation: **pending server-side pull**"
+            echo "- Physical Fire Stick acceptance: **pending**"
+          } >> "$GITHUB_STEP_SUMMARY"

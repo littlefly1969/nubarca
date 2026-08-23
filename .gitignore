@@ -47,6 +47,7 @@ appsettings.Production.json
 # (which includes the password-hash column) and the entire blob tree; do
 # not commit. Operators should ship these off-host (scp / rclone / restic).
 /backups/
+/deploy-history/
 *.sql.gz
 *.tar.gz
 

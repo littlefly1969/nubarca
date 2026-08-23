@@ -364,6 +364,24 @@ services:
       # changing it silently invalidates existing tombstones. Blank = built-in
       # dev fallback (fine for a fresh deploy; set a real secret in .env).
       DeletedContent__Pepper: ${DeletedContent__Pepper:-}
+      # ---- optional external Smart Help -------------------------------------
+      #
+      # An assistant that explains NubArca as a PRODUCT through an external
+      # provider. OFF unless an operator sets all four of Enabled/BaseUrl/
+      # ApiKey/Model; an unset key or model leaves it disabled rather than half
+      # configured. See docs/external-smart-help.md.
+      #
+      # API ONLY, deliberately. The worker runs no Help endpoint and has no
+      # reason to hold a third-party credential: a key that exists in two
+      # containers is a key with two ways to leak, and the worker's logs and
+      # crash dumps are a second surface for nothing gained.
+      ExternalHelp__Enabled: ${ExternalHelp__Enabled:-false}
+      ExternalHelp__BaseUrl: ${ExternalHelp__BaseUrl:-}
+      ExternalHelp__ApiKey: ${ExternalHelp__ApiKey:-}
+      ExternalHelp__Model: ${ExternalHelp__Model:-}
+      ExternalHelp__ProviderLabel: ${ExternalHelp__ProviderLabel:-External AI}
+      ExternalHelp__TimeoutSeconds: ${ExternalHelp__TimeoutSeconds:-30}
+      ExternalHelp__MaxOutputTokens: ${ExternalHelp__MaxOutputTokens:-800}
     volumes:
       - storage-data:/var/lib/nubarca/storage
       - dataprotection-keys:/var/lib/nubarca/dataprotection-keys

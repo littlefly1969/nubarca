@@ -1,0 +1,12 @@
+FROM scratch
+
+ARG GIT_SHA
+ARG RELEASE_VERSION
+ARG RELEASE_VERSION_CODE
+
+LABEL io.nubarca.artifact="tv-apk" \
+      org.opencontainers.image.revision="$GIT_SHA" \
+      org.opencontainers.image.version="$RELEASE_VERSION" \
+      io.nubarca.tv.version-code="$RELEASE_VERSION_CODE"
+
+COPY . /release/
