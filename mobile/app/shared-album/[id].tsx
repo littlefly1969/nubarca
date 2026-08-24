@@ -42,6 +42,7 @@ import {
   type SharedAlbumDetail,
   type SharedAlbumItem,
 } from '../../src/api/sharedAlbums.ts';
+import { buildDownloadName, pickHeader } from '../../src/media/downloadName';
 import { colors, radii, spacing, touch } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -163,21 +164,32 @@ export default function SharedAlbum(): React.JSX.Element {
     if (!src) return;
     setBusyItem(item.albumItemId);
     try {
-      const res = await fetch(src.uri, { headers: src.headers });
-      if (!res.ok) throw new Error(String(res.status));
-      const buf = await res.arrayBuffer();
-      let binary = '';
-      const view = new Uint8Array(buf);
-      for (let i = 0; i < view.length; i += 0x8000) {
-        binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
-      }
-      const ext = item.kind === 'video' ? 'mp4' : 'jpg';
-      const fileUri = `${FileSystem.cacheDirectory}nubarca-${item.fileItemId.slice(0, 12)}.${ext}`;
-      await FileSystem.writeAsStringAsync(fileUri, btoa(binary), {
-        encoding: FileSystem.EncodingType.Base64,
+      // FILE-NATIVE download (acceptance blocker): the ORIGINAL bytes go
+      // straight to disk via expo's downloader with the session cookie —
+      // they NEVER pass through the JS heap or a base64 expansion, so even a
+      // multi-hundred-MB original cannot OOM the app.
+      const tempUri = `${FileSystem.cacheDirectory}.nubarca-download-${Date.now()}`;
+      const res = await FileSystem.downloadAsync(src.uri, tempUri, {
+        headers: src.headers,
       });
-      await Sharing.shareAsync(fileUri, {
-        mimeType: item.kind === 'video' ? 'video/mp4' : 'image/jpeg',
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(`download failed with status ${res.status}`);
+      }
+      const headers = res.headers as Record<string, string | string[] | undefined>;
+      const disposition = pickHeader(headers, 'content-disposition');
+      const mimeType = pickHeader(headers, 'content-type');
+      // Name and extension come from what the SERVER declared about its own
+      // original (Content-Disposition / Content-Type) — never guessed from
+      // the media kind.
+      const fileName = buildDownloadName({
+        disposition,
+        mimeType,
+        kindFallbackExtension: item.kind === 'video' ? 'mp4' : 'jpg',
+      });
+      const finalUri = `${FileSystem.cacheDirectory}${encodeURIComponent(fileName)}`;
+      await FileSystem.moveAsync({ from: res.uri, to: finalUri });
+      await Sharing.shareAsync(finalUri, {
+        mimeType: mimeType ?? undefined,
         dialogTitle: t('shared.download'),
       });
     } catch {

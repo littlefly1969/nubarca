@@ -40,6 +40,16 @@ export default function MediaRoute(): React.JSX.Element {
   const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
   const { width } = useWindowDimensions();
 
+  // ONE exit path for both the hardware back and the chrome button: release
+  // the sequence, then leave — with a SAFE fallback when this route was
+  // entered without usable history (deep link / state restore), where a bare
+  // router.back() would swallow the Android back key forever.
+  const closeAndLeave = useCallback(() => {
+    closeViewer();
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/photos');
+  }, [closeViewer]);
+
   // Slides arrive pre-built through the viewer context. A files-mode entry
   // (no sequence) degrades to ONE OWNED slide built from route params —
   // folder browsing is owner-only in this slice, so owner paths are correct
@@ -97,17 +107,14 @@ export default function MediaRoute(): React.JSX.Element {
     [index, slides.length, width, setViewerIndex],
   );
 
-  // Hardware back pops the viewer AND releases its sequence immediately.
+  // Hardware back uses the SAME safe exit path as the chrome button.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (router.canGoBack()) {
-        closeViewer();
-        router.back();
-      }
+      closeAndLeave();
       return true;
     });
     return () => sub.remove();
-  }, [closeViewer]);
+  }, [closeAndLeave]);
 
   if (session.status !== 'authed') {
     return <Redirect href="/login" />;
@@ -149,10 +156,7 @@ export default function MediaRoute(): React.JSX.Element {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('viewer.back')}
-            onPress={() => {
-              closeViewer();
-              router.back();
-            }}
+            onPress={closeAndLeave}
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
             hitSlop={8}
           >

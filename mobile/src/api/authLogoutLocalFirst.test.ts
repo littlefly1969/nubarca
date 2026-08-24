@@ -29,7 +29,7 @@ test('local teardown runs first; the captured cookie rides the best-effort call'
   });
 
   try {
-    const pending = signOutLocalFirst(() => {
+    const handle = signOutLocalFirst(() => {
       // EXACTLY what the real provider's callback does: wipe the local state.
       tornDown = true;
       setSessionCookieSource({ current: null, capture: () => {} });
@@ -43,11 +43,11 @@ test('local teardown runs first; the captured cookie rides the best-effort call'
     // …and the notification carries the CAPTURED pre-teardown cookie.
     assert.deepEqual(seenCookies, ['NubArca.Auth=OLD-SESSION']);
 
-    // Restore a resolving fetch so the pending best-effort POST can settle
-    // and this test can end cleanly.
+    // Restore a resolving fetch so the tracked notification can settle and
+    // this test can end cleanly.
     globalThis.fetch = (() =>
       Promise.resolve({ ok: true, status: 200 } as Response)) as typeof fetch;
-    await Promise.race([pending, new Promise((r) => setImmediate(r))]);
+    await Promise.race([handle.serverNotification, new Promise((r) => setImmediate(r))]);
     assert.equal(tornDown, true);
   } finally {
     globalThis.fetch = originalFetch;
@@ -114,11 +114,11 @@ test('a FAILING server notification cannot fail the logout', async () => {
 
   try {
     let tornDown = false;
-    await assert.doesNotReject(
-      signOutLocalFirst(() => {
-        tornDown = true;
-      }),
-    );
+    const { serverNotification } = signOutLocalFirst(() => {
+      tornDown = true;
+    });
+    // The notification swallows its own failure; awaiting it stays safe.
+    await assert.doesNotReject(serverNotification);
     assert.equal(tornDown, true);
   } finally {
     globalThis.fetch = originalFetch;

@@ -49,7 +49,15 @@ export function sharedSlides(items: SharedAlbumItem[]): ViewerSlide[] {
       kind: item.kind,
       displayName: '', // shared items carry NO display name by contract
       imagePath: item.previewUrl,
-      videoSource: src ? { uri: src.uri, headers: src.headers } : null,
+      videoSource: src
+        ? {
+            uri: src.uri,
+            headers: src.headers,
+            // The shared /video route is HLS-ONLY (404 without the provider)
+            // and has no .m3u8 extension — declare the container explicitly.
+            contentType: 'hls',
+          }
+        : null,
       posterUrl: item.posterUrl,
     };
   });

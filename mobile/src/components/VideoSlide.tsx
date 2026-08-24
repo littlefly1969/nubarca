@@ -17,9 +17,17 @@ import {
   type VideoPlayer,
 } from 'expo-video';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
+import { AuthedImage } from './AuthedImage';
 import { ErrorState, LoadingState } from '../ui/states';
 import { useI18n } from '../i18n';
 import type { ViewerSlide } from '../media/viewerSequence';
+
+// Probe tuning: how long the slide waits for the HLS ladder to prepare
+// before declaring the video unavailable.
+const PROBE_RETRY_MS = 3000;
+const PROBE_MAX_ATTEMPTS = 10; // ≈30 s of "Preparing" window
+
+type ProbeState = 'probing' | 'ready' | 'preparing' | 'unavailable';
 
 export function VideoSlide({
   slide,
@@ -37,7 +45,54 @@ export function VideoSlide({
   // The source arrives FULLY BUILT on the slide (uri + cookie snapshot), so a
   // re-render can never hand useVideoPlayer a new object identity.
   const source = slide.videoSource;
-  const player: VideoPlayer = useVideoPlayer(source ?? null, (p) => {
+
+  // PREFLIGHT (acceptance): the shared /video route answers 202 while the HLS
+  // ladder prepares, 404 when HLS is off or the item is gone, and 200 only
+  // when real playback can start. The player mounts exclusively on a
+  // confirmed 200 — expo-video never sees the intermediate states. The same
+  // probe also covers the owned endpoint's 202-with-HLS behaviour.
+  const [probe, setProbe] = useState<ProbeState>(
+    slide.videoSource ? 'probing' : 'unavailable',
+  );
+
+  useEffect(() => {
+    if (!source) return;
+    let cancelled = false;
+    let attempt = 0;
+    void (async () => {
+      while (!cancelled && attempt < PROBE_MAX_ATTEMPTS) {
+        attempt += 1;
+        try {
+          const res = await fetch(source.uri, { headers: source.headers });
+          if (cancelled) return;
+          if (res.ok) {
+            setProbe('ready');
+            return;
+          }
+          if (res.status === 202) {
+            setProbe('preparing');
+            await new Promise((r) => setTimeout(r, PROBE_RETRY_MS));
+            continue;
+          }
+          // 404 etc: HLS provider off, revoked membership, deleted item —
+          // all deliberate non-availability, never worth retrying.
+          setProbe('unavailable');
+          return;
+        } catch {
+          // A network hiccup mid-probe behaves like "still preparing".
+          setProbe('preparing');
+          await new Promise((r) => setTimeout(r, PROBE_RETRY_MS));
+        }
+      }
+      if (!cancelled) setProbe('unavailable'); // gave up waiting for the ladder
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  const playerReady = source !== null && probe === 'ready';
+  const player: VideoPlayer = useVideoPlayer(playerReady ? source : null, (p) => {
     // Mount ≠ autoplay. Playback is owned exclusively by the `active` effect:
     // an unfocused neighbor must never start making noise.
     p.loop = false;
@@ -88,14 +143,18 @@ export function VideoSlide({
       }
       return;
     }
-    if (ready && error === null) {
+    if (playerReady && ready && error === null) {
       void player.play();
     }
-  }, [active, ready, error, player]);
+  }, [active, playerReady, ready, error, player]);
 
-  if (source === null) {
+  if (source === null || probe === 'unavailable') {
+    // HLS off / item gone / no playable source: poster + explicit message.
     return (
       <View style={styles.centerDark}>
+        {slide.posterUrl ? (
+          <AuthedImage path={slide.posterUrl} style={styles.poster} accessibilityLabel="" />
+        ) : null}
         <Text style={styles.errorText}>{t('grid.videoNoPoster')}</Text>
       </View>
     );
@@ -111,10 +170,12 @@ export function VideoSlide({
 
   return (
     <View style={[styles.full, styles.dark]}>
-      {!ready && (
+      {(!ready || probe === 'preparing' || probe === 'probing') && (
         <View style={styles.loadingOverlay}>
           <LoadingState />
-          <Text style={styles.loadingText}>{t('player.loading')}</Text>
+          <Text style={styles.loadingText}>
+            {probe === 'preparing' ? t('player.preparing') : t('player.loading')}
+          </Text>
         </View>
       )}
       <VideoView
@@ -144,5 +205,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0F1A',
   },
   loadingText: { color: '#F5F7FB', marginTop: 12, fontSize: 14 },
+  poster: { width: '86%', height: '52%', borderRadius: 12, marginBottom: 16 },
   errorText: { color: '#F5F7FB', padding: 24, textAlign: 'center' },
 });

@@ -127,17 +127,18 @@ export class OwnerSessionCookieStore {
     }
   }
 
-  // Sign-out / invalidation. Clears memory immediately and best-effort on
-  // disk; the generation bump makes any in-flight restore or persist stale.
-  clear(): void {
+  // Sign-out / invalidation. Clears memory IMMEDIATELY and synchronously,
+  // then starts the durable removal and RETURNS its promise so a caller can
+  // track completion without ever blocking the UI on it (local-first logout,
+  // acceptance BLOCKER 8): the generation bump makes any in-flight restore or
+  // persist stale regardless of when the removal lands.
+  clear(): Promise<void> {
     this.generation += 1;
     this.currentCookie = null;
     this.durableGeneration = 0;
-    void this.enqueue(() => this.storage.removeItem(SESSION_STORAGE_KEY)).catch(
-      () => {
-        /* server validation still gates access; next login rewrites */
-      },
-    );
+    return this.enqueue(() => this.storage.removeItem(SESSION_STORAGE_KEY)).catch(() => {
+      /* server validation still gates access; next login rewrites */
+    });
   }
 
   // Ensure the CURRENT cookie is durably stored (used right after login).

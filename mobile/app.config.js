@@ -64,6 +64,9 @@ module.exports = {
       // deliberately does NOT use this applicationId.
       package: 'it.littlefly.nubarca',
       usesCleartextTraffic,
+      // Privacy-explicit (release-gate review): an owner's media library and
+      // account session must never ride unencrypted device backups.
+      allowBackup: false,
     },
     ios: {
       bundleIdentifier: 'it.littlefly.nubarca',

@@ -26,7 +26,7 @@ import {
   fetchCurrentUser,
   type CurrentUser,
 } from '../api/auth';
-import { signOutLocalFirst } from '../api/signOut';
+import { notifyServerLogout } from '../api/signOut';
 import { clearImageCache } from '../media/imageLoader';
 import { useI18n } from '../i18n';
 import { toLanguage } from '../i18n';
@@ -76,17 +76,24 @@ export function SessionProvider({
     [setLanguage],
   );
 
-  // LOCAL-FIRST teardown (acceptance BLOCKER): memory jar, SecureStore and
-  // the UI die inside one synchronous callback; only AFTER that fires the
-  // best-effort server notification, riding the captured pre-teardown cookie.
-  // A hanging or failing /api/auth/logout can never keep the app signed in.
-  // (Viewer/private state is wiped by ViewerProvider's own identity watch.)
+  // LOCAL-FIRST + DURABLE-TRACKED teardown (acceptance BLOCKER):
+  //   1. capture the pre-teardown cookie (last chance);
+  //   2. START the SecureStore removal — its promise is TRACKED, not awaited
+  //      here, so a slow disk can never hold the UI hostage;
+  //   3. wipe the image cache and flip the UI to unauthed synchronously (the
+  //      viewer wipes itself through its identity watch);
+  //   4. afterwards, settle the durable removal and fire ONE best-effort
+  //      server notification riding the captured cookie. A hanging/failing
+  //      network can neither resurrect the session nor block anything.
   const teardownToUnauthed = useCallback((expired: boolean) => {
-    signOutLocalFirst(() => {
-      ownerSession.clear();
-      clearImageCache();
-      setState({ phase: 'unauthed', expired });
-    });
+    const cookie = ownerSession.current ?? undefined;
+    const durableClear = ownerSession.clear();
+    clearImageCache();
+    setState({ phase: 'unauthed', expired });
+    void (async () => {
+      await durableClear.catch(() => undefined);
+      if (cookie !== undefined) await notifyServerLogout(cookie);
+    })();
   }, []);
 
   const handleUnauthorized = useCallback(() => {
