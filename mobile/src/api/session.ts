@@ -10,10 +10,15 @@ import {
 } from './sessionCookie.ts';
 
 // SecureStore adapter. Values are small (one cookie pair); SecureStore's
-// per-key size limit comfortably covers it.
+// per-key size limit comfortably covers it. The iOS keychain item is pinned
+// to this-device-unlocked so a session never migrates to a fresh device via
+// an unencrypted backup, and is unreachable while the device is locked.
 const secureStorage: SessionCookieStorage = {
   getItem: (key) => SecureStore.getItemAsync(key),
-  setItem: (key, value) => SecureStore.setItemAsync(key, value),
+  setItem: (key, value) =>
+    SecureStore.setItemAsync(key, value, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    }),
   removeItem: (key) => SecureStore.deleteItemAsync(key),
 };
 

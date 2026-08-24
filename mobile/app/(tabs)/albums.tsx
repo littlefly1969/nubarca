@@ -26,14 +26,18 @@ export default function Albums(): React.JSX.Element {
   const [albums, setAlbums] = useState<AlbumSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     if (session.status !== 'authed') return;
     setFailed(false);
+    setRefreshing(true);
     try {
       setAlbums(await listAlbums());
     } catch {
       setFailed(true);
+    } finally {
+      setRefreshing(false);
     }
   }, [session.status]);
 
@@ -126,7 +130,7 @@ export default function Albums(): React.JSX.Element {
           onRefresh={() => {
             void load();
           }}
-          refreshing={false}
+          refreshing={refreshing}
         />
       )}
 

@@ -22,6 +22,12 @@ export interface MediaGridProps {
   selectedIds?: ReadonlySet<string>;
   onPressItem: (item: MediaItem) => void;
   onToggleSelect?: (id: string) => void;
+  /**
+   * Long-press outside selection mode: the screen decides how selection
+   * begins (enter mode + select the pressed item) — the grid never mutates
+   * selection state implicitly.
+   */
+  onLongPressItem?: (item: MediaItem) => void;
   ListHeaderComponent?: React.ComponentType<unknown> | React.ReactElement | null;
 }
 
@@ -36,6 +42,7 @@ export function MediaGrid({
   selectedIds,
   onPressItem,
   onToggleSelect,
+  onLongPressItem,
   ListHeaderComponent,
 }: MediaGridProps): React.JSX.Element {
   const { t } = useI18n();
@@ -58,13 +65,13 @@ export function MediaGrid({
           else onPressItem(item);
         }}
         onLongPress={
-          !selecting && onToggleSelect !== undefined
-            ? () => onToggleSelect(item.id)
+          !selecting && onLongPressItem !== undefined
+            ? () => onLongPressItem(item)
             : undefined
         }
       />
     ),
-    [tileSize, selecting, selectedIds, onPressItem, onToggleSelect],
+    [tileSize, selecting, selectedIds, onPressItem, onToggleSelect, onLongPressItem],
   );
 
   // Selection state changes must not reshuffle the whole grid.

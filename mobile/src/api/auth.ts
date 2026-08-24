@@ -10,7 +10,7 @@
 //      so a reported login survives an immediate app kill;
 //   4. persist the base URL for prefill.
 
-import { apiGet, apiPost, configureBaseUrl, ApiError } from './client.ts';
+import { apiGet, apiPost, configureBaseUrl } from './client.ts';
 import { clearPersistedSession, ownerSession, persistBaseUrl } from './session.ts';
 
 export interface CurrentUser {
@@ -41,7 +41,7 @@ export async function login(
   } catch (err) {
     // A failed login leaves no usable session behind.
     await clearPersistedSession();
-    throw err instanceof ApiError ? err : err;
+    throw err;
   }
 }
 

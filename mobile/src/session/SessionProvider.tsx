@@ -20,6 +20,7 @@ import React, {
 import { ownerSession, getStoredBaseUrl } from '../api/session';
 import { setSessionCookieSource } from '../api/sessionAccess';
 import { configureBaseUrl, setUnauthorizedHandler } from '../api/client';
+import { shouldDropPersistedSession } from './sessionRecovery';
 import {
   login as apiLogin,
   fetchCurrentUser,
@@ -119,7 +120,10 @@ export function SessionProvider({
           setState({ phase: 'authed', user });
         }
       } catch (err) {
-        await ownerSession.clear();
+        // A dead cookie (401/403 from the server) drops the persisted session;
+        // an unreachable server must NOT — an airplane-mode cold start would
+        // otherwise sign the user out permanently.
+        if (shouldDropPersistedSession(err)) await ownerSession.clear();
         clearImageCache();
         const expired = (err as { status?: number }).status === 401;
         if (!cancelled) setState({ phase: 'unauthed', expired });

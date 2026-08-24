@@ -6,6 +6,7 @@ const it = {
   'common.loading': 'Caricamento…',
   'common.retry': 'Riprova',
   'common.signOut': 'Esci',
+  'common.signOutConfirmBody': 'Vuoi uscire dal tuo account?',
   'common.back': '‹ Indietro',
 
   'app.restoring': 'Ripristino della sessione…',
@@ -15,6 +16,8 @@ const it = {
   'login.email': 'Email',
   'login.password': 'Password',
   'login.signIn': 'Accedi',
+  'login.errorCredentials': 'Email o password non valide.',
+  'login.errorNetwork': 'Impossibile raggiungere il server. Controlla URL e connessione.',
 
   'gallery.home': 'Home',
   'gallery.photos': 'Foto',
@@ -25,6 +28,7 @@ const it = {
   'gallery.folderEmpty': 'Questa cartella è vuota.',
   'gallery.pullToRefresh': 'Trascina verso il basso per aggiornare.',
   'gallery.whatPhotos': 'le foto',
+  'gallery.whatVideos': 'i video',
   'gallery.whatFolder': 'questa cartella',
   'gallery.loadErrorHttp': 'Impossibile caricare {what} (errore {status}).',
   'gallery.loadErrorNetwork': 'Impossibile caricare {what}. Controlla la connessione.',
@@ -62,6 +66,7 @@ const it = {
   'albums.nameLabel': 'Nome',
   'albums.descriptionLabel': 'Descrizione (opzionale)',
   'albums.save': 'Salva',
+  'albums.saveError': 'Salvataggio non riuscito. Riprova.',
   'albums.cancel': 'Annulla',
   'albums.rename': 'Rinomina',
   'albums.edit': 'Modifica',

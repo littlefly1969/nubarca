@@ -64,17 +64,23 @@ export class PagedList<TItem> {
   }
 
   // Pull-to-refresh / initial load / query change.
+  //
+  // Non-destructive: when content is already on screen, a refresh keeps the
+  // previous page visible under the 'refreshing' phase and replaces it
+  // ATOMICALLY on success — a pull-to-refresh (or a focus re-entry) must not
+  // blank the grid and throw the user back to the top of a long library.
   async refresh(fetcher: FetchPage<TItem>): Promise<void> {
     const hadContent = this.items.length > 0;
     const myToken = ++this.token;
     this.abortInflight();
-    // The reset is atomic with the token bump above: from this instant, any
-    // older result is stale AND the visible state already reflects the new
-    // query's emptiness.
-    this.items = [];
-    this.cursor = null;
     this.loadMoreInFlight = false;
     this.setPhase(hadContent ? 'refreshing' : 'loading');
+    if (!hadContent) {
+      // First load has nothing to protect: start empty immediately so no
+      // stale query result can ever flash.
+      this.items = [];
+      this.cursor = null;
+    }
     this.abort = new AbortController();
     try {
       const page = await fetcher(null, this.abort.signal);
@@ -85,13 +91,16 @@ export class PagedList<TItem> {
       this.setPhase('ready');
     } catch (err) {
       if (myToken !== this.token) return;
-      // A cancelled refresh belongs to a superseded operation, not a failure.
-      if (!isAbortError(err)) this.setPhase('error');
-      else this.setPhase('ready');
-    } finally {
-      if (this.abort?.signal.aborted || myToken === this.token) {
-        if (myToken === this.token) this.abort = null;
+      if (!isAbortError(err)) {
+        // With prior content we KEEP it: the failure surfaces through the
+        // footer retry affordance, not by wiping the grid.
+        this.setPhase('error');
+        if (hadContent) this.cursor = null; // next loadMore restarts from safety
+      } else {
+        this.setPhase(hadContent ? 'ready' : 'error');
       }
+    } finally {
+      if (myToken === this.token) this.abort = null;
     }
   }
 

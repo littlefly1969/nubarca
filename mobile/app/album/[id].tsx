@@ -107,9 +107,16 @@ export default function AlbumDetail(): React.JSX.Element {
         onPress: () => {
           void (async () => {
             // Deletes the ALBUM ONLY — membership rows. Files stay.
-            await deleteAlbum(albumId);
-            router.back();
-          })().catch(() => undefined);
+            try {
+              await deleteAlbum(albumId);
+              router.back();
+            } catch {
+              Alert.alert(
+                name,
+                t('gallery.loadErrorNetwork', { what: t('albums.delete') }),
+              );
+            }
+          })();
         },
       },
     ]);
@@ -173,6 +180,10 @@ export default function AlbumDetail(): React.JSX.Element {
             router.push(`/media/${item.id}`);
           }}
           onToggleSelect={selectionState.toggle}
+          onLongPressItem={(item) => {
+            selectionState.begin();
+            selectionState.toggle(item.id);
+          }}
           refreshing={snapshot.phase === 'refreshing'}
           onRefresh={() => {
             void refresh();

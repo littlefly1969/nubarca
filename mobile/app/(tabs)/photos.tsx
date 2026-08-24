@@ -1,7 +1,7 @@
 // Photos tab: the whole owner photo library, newest first, cursor-paginated.
 // Opens the shared viewer; long-press starts multi-select for bulk add-to-album.
 import React, { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
@@ -95,7 +95,18 @@ export default function Photos(): React.JSX.Element {
                 accessibilityRole="button"
                 accessibilityLabel={t('common.signOut')}
                 onPress={() => {
-                  void session.logout();
+                  Alert.alert(
+                    t('common.signOut'),
+                    t('common.signOutConfirmBody'),
+                    [
+                      { text: t('albums.cancel'), style: 'cancel' },
+                      {
+                        text: t('common.signOut'),
+                        style: 'destructive',
+                        onPress: () => void session.logout(),
+                      },
+                    ],
+                  );
                 }}
                 style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                 hitSlop={4}
@@ -127,6 +138,10 @@ export default function Photos(): React.JSX.Element {
             selectedIds={selectionState.ids}
             onPressItem={openViewer}
             onToggleSelect={selectionState.toggle}
+            onLongPressItem={(item) => {
+              selectionState.begin();
+              selectionState.toggle(item.id);
+            }}
             refreshing={snapshot.phase === 'refreshing'}
             onRefresh={() => {
               void refresh();

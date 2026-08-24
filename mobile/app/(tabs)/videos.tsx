@@ -63,7 +63,7 @@ export default function Videos(): React.JSX.Element {
       ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
         <ErrorState
           title={t('grid.errorTitle')}
-          message={t('gallery.loadErrorNetwork', { what: t('gallery.whatFolder') })}
+          message={t('gallery.loadErrorNetwork', { what: t('gallery.whatVideos') })}
           onRetry={() => {
             void refresh();
           }}

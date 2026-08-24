@@ -41,12 +41,14 @@ export function NamePromptModal({
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? '');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) {
       setName(initialName);
       setDescription(initialDescription ?? '');
       setBusy(false);
+      setError(null);
     }
   }, [visible, initialName, initialDescription]);
 
@@ -57,8 +59,13 @@ export function NamePromptModal({
   async function submit(): Promise<void> {
     if (!nameValid || !descriptionValid || busy) return;
     setBusy(true);
+    setError(null);
     try {
       await onSubmit(name.trim(), withDescription ? description.trim() || null : null);
+    } catch {
+      // The modal owns failure feedback: the submit promise is awaited here,
+      // so an unhandled rejection can never escape to the screen.
+      setError(t('albums.saveError'));
     } finally {
       setBusy(false);
     }
@@ -129,6 +136,8 @@ export function NamePromptModal({
               <Text style={styles.saveText}>{t('albums.save')}</Text>
             </Pressable>
           </View>
+
+          {error !== null && <Text style={styles.errorText}>{error}</Text>}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -175,6 +184,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: spacing.s,
+    marginTop: spacing.s,
+  },
+  errorText: {
+    color: colors.danger,
+    fontSize: 12,
     marginTop: spacing.s,
   },
   btn: {

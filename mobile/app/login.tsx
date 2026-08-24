@@ -60,9 +60,9 @@ export default function Login(): React.JSX.Element {
       // Navigation happens via the authed redirect in this screen.
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setError('Email o password non valide.');
+        setError(t('login.errorCredentials'));
       } else {
-        setError('Impossibile raggiungere il server. Controlla URL e connessione.');
+        setError(t('login.errorNetwork'));
       }
     } finally {
       setBusy(false);

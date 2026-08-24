@@ -6,6 +6,7 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'common.loading': 'Loading…',
   'common.retry': 'Retry',
   'common.signOut': 'Sign out',
+  'common.signOutConfirmBody': 'Sign out of your account?',
   'common.back': '‹ Back',
 
   'app.restoring': 'Restoring session…',
@@ -15,6 +16,8 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'login.email': 'Email',
   'login.password': 'Password',
   'login.signIn': 'Sign In',
+  'login.errorCredentials': 'Invalid email or password.',
+  'login.errorNetwork': "Couldn't reach the server. Check the URL and your connection.",
 
   'tabs.photos': 'Photos',
   'tabs.videos': 'Videos',
@@ -44,6 +47,7 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'albums.nameLabel': 'Name',
   'albums.descriptionLabel': 'Description (optional)',
   'albums.save': 'Save',
+  'albums.saveError': 'Could not save. Please try again.',
   'albums.cancel': 'Cancel',
   'albums.rename': 'Rename',
   'albums.edit': 'Edit',
@@ -86,6 +90,7 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'gallery.folderEmpty': 'This folder is empty.',
   'gallery.pullToRefresh': 'Pull down to refresh.',
   'gallery.whatPhotos': 'photos',
+  'gallery.whatVideos': 'videos',
   'gallery.whatFolder': 'this folder',
   'gallery.loadErrorHttp': "Couldn't load {what} (error {status}).",
   'gallery.loadErrorNetwork': "Couldn't load {what}. Check your connection.",
