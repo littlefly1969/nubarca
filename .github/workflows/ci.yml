@@ -180,7 +180,8 @@ jobs:
         run: npm run lint
 
       # The mobile automated suite: session-cookie hardening, pagination
-      # races, selection, authenticated media sources, API contracts.
+      # races, selection, authenticated media sources, API contracts,
+      # unified-album cards/capabilities, viewer privacy, logout order.
       - name: Run tests
         run: npm test
 
@@ -188,3 +189,9 @@ jobs:
       # proves app.config.js evaluates cleanly with plugins applied.
       - name: Validate Expo config
         run: npm run config
+
+      # VERIFIED, not declared: the production fail-closed rules are exercised
+      # under all four environment combinations (no origin / http / https /
+      # development), asserting Android cleartext and iOS ATS stay off.
+      - name: Production config gate
+        run: node scripts/verify-production-config.mjs
