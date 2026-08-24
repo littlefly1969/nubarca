@@ -63,6 +63,22 @@ export function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// One page of a shared album, as the recipient's item endpoint answers it.
+// Fixtures state the ITEMS; the envelope (cursor + the album's per-kind counts)
+// is derived here so no test has to restate a contract it is not about.
+export function sharedItemsPage(
+  items: readonly { kind: 'image' | 'video' }[],
+  overrides: { nextCursor?: string | null; total?: number } = {},
+): unknown {
+  return {
+    items,
+    nextCursor: overrides.nextCursor ?? null,
+    total: overrides.total ?? items.length,
+    photoCount: items.filter((i) => i.kind === 'image').length,
+    videoCount: items.filter((i) => i.kind === 'video').length,
+  };
+}
+
 export function emptyResponse(status = 204): Response {
   return new Response(null, { status });
 }

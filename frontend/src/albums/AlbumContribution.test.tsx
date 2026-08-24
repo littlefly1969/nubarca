@@ -12,6 +12,7 @@ import {
   errorResponse,
   installFetchMock,
   jsonResponse,
+  sharedItemsPage,
 } from '../test-utils';
 
 // SHARE-ALBUM-02 frontend: roles, contribution, withdrawal, provenance.
@@ -307,7 +308,7 @@ function sharedItem(over: Partial<Record<string, unknown>> = {}) {
   return {
     albumItemId: 'ai-1',
     fileItemId: 'f1',
-    kind: 'image',
+    kind: 'image' as const,
     thumbnailUrl: '/api/shared-albums/alb-1/media/f1/thumbnail',
     previewUrl: '/api/shared-albums/alb-1/media/f1/preview',
     posterUrl: null,
@@ -370,7 +371,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('offers "Add from library" to a Contributor', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([sharedItem()])),
     });
     renderShared();
 
@@ -381,7 +382,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('offers it to an Editor too', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'editor', canEdit: true })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([sharedItem()])),
     });
     renderShared();
 
@@ -392,7 +393,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('does NOT offer it to a Viewer', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'viewer' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([sharedItem()])),
     });
     renderShared();
 
@@ -403,7 +404,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('goes to the ordinary Library carrying the album as transient context', async () => {
     const spy = installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([sharedItem()])),
     });
     renderShared();
 
@@ -423,7 +424,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('has no shared-album-specific media picker left at all', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([sharedItem()]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([sharedItem()])),
     });
     renderShared();
 
@@ -437,10 +438,10 @@ describe('SharedAlbumDetailPage — contribution', () => {
   it('marks only the caller’s own contributions and offers withdrawal for them', async () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([
         sharedItem({ fileItemId: 'theirs', canWithdraw: false }),
         sharedItem({ fileItemId: 'mine', canWithdraw: true }),
-      ]),
+      ])),
     });
     renderShared();
 
@@ -449,7 +450,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
 
     // Somebody else's item: no withdraw action.
     await userEvent.click(tiles[0]);
-    expect(await screen.findByTestId('shared-lightbox')).toBeInTheDocument();
+    expect(await screen.findByTestId('media-viewer')).toBeInTheDocument();
     expect(screen.queryByTestId('shared-withdraw')).not.toBeInTheDocument();
     await userEvent.keyboard('{Escape}');
 
@@ -464,9 +465,9 @@ describe('SharedAlbumDetailPage — contribution', () => {
     // Demoted, but the contribution and the right to take it back both survive.
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'viewer' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([
         sharedItem({ fileItemId: 'mine', canWithdraw: true }),
-      ]),
+      ])),
     });
     renderShared();
 
@@ -483,8 +484,8 @@ describe('SharedAlbumDetailPage — contribution', () => {
     let withdrawn = false;
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse(
-        withdrawn ? [] : [sharedItem({ fileItemId: 'mine', canWithdraw: true })]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage(
+        withdrawn ? [] : [sharedItem({ fileItemId: 'mine', canWithdraw: true })])),
       'DELETE /api/shared-albums/alb-1/contributions/mine': () => {
         withdrawn = true;
         return emptyResponse();
@@ -504,8 +505,8 @@ describe('SharedAlbumDetailPage — contribution', () => {
     let gone = false;
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(album({ role: 'contributor' })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse(
-        gone ? [] : [sharedItem({ fileItemId: 'mine', canWithdraw: true })]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage(
+        gone ? [] : [sharedItem({ fileItemId: 'mine', canWithdraw: true })])),
       'DELETE /api/shared-albums/alb-1/contributions/mine': () => {
         gone = true;
         return errorResponse(404);
@@ -518,7 +519,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
 
     // A notice, the lightbox closed, and the list refreshed — no error loop.
     expect(await screen.findByTestId('shared-album-notice')).toBeInTheDocument();
-    expect(screen.queryByTestId('shared-lightbox')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument();
     expect(await screen.findByTestId('shared-album-empty')).toBeInTheDocument();
   });
 
@@ -529,7 +530,7 @@ describe('SharedAlbumDetailPage — contribution', () => {
       'GET /api/shared-albums/alb-1': () => (revoked ? errorResponse(404)
         : jsonResponse(album({ role: 'contributor' }))),
       'GET /api/shared-albums/alb-1/items': () => (revoked ? errorResponse(404)
-        : jsonResponse([sharedItem({ fileItemId: 'mine', canWithdraw: true })])),
+        : jsonResponse(sharedItemsPage([sharedItem({ fileItemId: 'mine', canWithdraw: true })]))),
       'DELETE /api/shared-albums/alb-1/contributions/mine': () => {
         revoked = true;
         return emptyResponse();
@@ -547,14 +548,14 @@ describe('SharedAlbumDetailPage — contribution', () => {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(
         album({ role: 'contributor', allowOriginalDownload: false })),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([
         sharedItem({ fileItemId: 'mine', canWithdraw: true, downloadUrl: null }),
-      ]),
+      ])),
     });
     renderShared();
 
     await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
-    await screen.findByTestId('shared-lightbox');
+    await screen.findByTestId('media-viewer');
 
     expect(screen.queryByTestId('shared-download')).not.toBeInTheDocument();
     // No stray link to the original through any other affordance.

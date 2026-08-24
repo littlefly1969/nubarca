@@ -7,10 +7,16 @@ must never be committed.
 ## 1. Current release contract
 
 [`tv/release-contract.json`](../tv/release-contract.json) is the single tracked,
-non-secret native release contract. The current release is NubArca TV 1.0.9,
-package `it.littlefly.nubarca.tv`, Android `versionCode` 11, runtime
-`nubarca-tv-native-10`, channel `production`. Its Android signer SHA-256 is stored
+non-secret native release contract. The current release is NubArca TV 1.0.10,
+package `it.littlefly.nubarca.tv`, Android `versionCode` 12, runtime
+`nubarca-tv-native-11`, channel `production`. Its Android signer SHA-256 is stored
 in that contract and must not change for an in-place update.
+
+1.0.10 is the first release published through the immutable CI-built APK path.
+The installation already retained the previously accepted, locally built
+`versionCode` 11 artifact, so the CI build could not and must not replace those
+different immutable bytes. This release advances the Android identity and OTA
+runtime while retaining the definitive APK signer and OTA trust root.
 
 1.0.8 corrects the Fire TV banner DENSITY contract. The Android TV banner spec
 is 320x180 px **at xhdpi** — that is 160x90 dp. The plugin had read it as
@@ -53,7 +59,7 @@ release reaches the device through **Mode Select → Aggiornamenti / Updates**
 with no ADB, PC or file manager — 1.0.6 is the first release to actually
 exercise that path end to end.
 
-Runtime `nubarca-tv-native-10` starts with NO OTA publication, and that is
+Runtime `nubarca-tv-native-11` starts with NO OTA publication, and that is
 correct: the embedded bundle runs, and `/api/tv-app/updates` answers 204 for it
 until a later deliberate OTA exists. Do not publish one merely to exercise the
 endpoint.

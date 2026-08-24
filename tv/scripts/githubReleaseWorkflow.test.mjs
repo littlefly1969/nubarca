@@ -35,6 +35,31 @@ test('Android SDK setup resolves sdkmanager without relying on runner PATH', () 
   assert.doesNotMatch(setupSdk, /^\s+sdkmanager\s/m);
 });
 
+test('signed release build overrides the generated Gradle metaspace ceiling', () => {
+  const build =
+    workflow.match(/- name: Build signed release APK[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? '';
+  assert.match(build, /-Dorg\.gradle\.jvmargs=/);
+  assert.match(build, /-Xmx4g/);
+  assert.match(build, /-XX:MaxMetaspaceSize=2g/);
+  assert.match(build, /assembleRelease/);
+});
+
+test('signed release build passes every signing input explicitly to Gradle', () => {
+  const build =
+    workflow.match(/- name: Build signed release APK[\s\S]*?(?=\n\s+- name:)/)?.[0] ?? '';
+  for (const property of [
+    'NUBARCA_TV_RELEASE_STORE_FILE',
+    'NUBARCA_TV_RELEASE_STORE_PASSWORD',
+    'NUBARCA_TV_RELEASE_KEY_ALIAS',
+    'NUBARCA_TV_RELEASE_KEY_PASSWORD',
+  ]) {
+    assert.ok(
+      build.includes(`"-P${property}=$${property}"`),
+      `${property} must be an explicit Gradle project property`,
+    );
+  }
+});
+
 test('native releases are gated to main and publishing confirms versionCode', () => {
   assert.match(workflow, /GITHUB_REF.*refs\/heads\/main/);
   assert.match(workflow, /CONFIRMED_VERSION_CODE.*version_code/);
@@ -61,7 +86,7 @@ test('only APK signing inputs come from environment secrets', () => {
 });
 
 test('validated bytes are published to GHCR before server-side activation', () => {
-  const build = workflow.indexOf('./gradlew --no-daemon assembleRelease');
+  const build = workflow.indexOf('- name: Build signed release APK');
   const validate = workflow.indexOf('./deploy/validate-tv-apk.sh');
   const bundleValidate = workflow.indexOf('deploy/validate-tv-apk-bundle.py');
   const upload = workflow.indexOf('actions/upload-artifact@v4');

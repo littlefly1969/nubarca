@@ -918,17 +918,74 @@ public sealed class AlbumSharingService : IAlbumSharingService
             grant.IsOwner || AlbumRoles.CanEdit(grant.Role));
     }
 
-    public async Task<IReadOnlyList<SharedAlbumItem>> ListSharedItemsAsync(
-        AlbumAccessGrant grant, CancellationToken cancellationToken = default)
+    // One page of a shared album, in its curated order.
+    //
+    // Three things are deliberate. The counts describe the whole album, not the
+    // filtered slice, so a tab's label does not change meaning with the tab that
+    // is open. The page is a KEYSET over `(SortOrder, FileItemId)` — the very
+    // order the album is served in — so an item added or removed while the
+    // recipient is scrolling shifts nothing already read. And the kind filter is
+    // applied to the SAME query the counts come from, so "Videos" can never
+    // include something "All" would not.
+    //
+    // Returns null for a cursor that does not parse or was issued for another
+    // kind; the endpoint turns that into one 400.
+    public async Task<SharedAlbumItemsPage?> ListSharedItemsAsync(
+        AlbumAccessGrant grant,
+        SharedAlbumItemQuery query,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(grant);
+        ArgumentNullException.ThrowIfNull(query);
 
-        var rows = await DisplayableMembers()
-            .Where(x => x.AlbumId == grant.AlbumId)
-            // The album's CURATED order. FileItemId remains the final tie-break
-            // so the sequence is stable even if two rows share a SortOrder.
+        SharedAlbumItemCursor? cursor = null;
+        if (!string.IsNullOrWhiteSpace(query.Cursor))
+        {
+            if (!SharedAlbumItemCursor.TryParse(query.Cursor, out var parsed)
+                || !parsed.MatchesKind(query.Kind))
+            {
+                return null;
+            }
+
+            cursor = parsed;
+        }
+
+        var members = DisplayableMembers().Where(x => x.AlbumId == grant.AlbumId);
+
+        // Counts first, over the unfiltered, unseeked set: one round trip that
+        // answers every tab.
+        var byCategory = await members
+            .GroupBy(x => x.MediaCategory)
+            .Select(g => new { Category = g.Key, Count = g.Count() })
+            .ToListAsync(cancellationToken);
+        var photoCount = byCategory
+            .Where(x => x.Category == MediaCategories.Image).Sum(x => x.Count);
+        var videoCount = byCategory
+            .Where(x => x.Category == MediaCategories.Video).Sum(x => x.Count);
+
+        var page = query.Kind switch
+        {
+            SharedAlbumItemKinds.Image => members.Where(x => x.MediaCategory == MediaCategories.Image),
+            SharedAlbumItemKinds.Video => members.Where(x => x.MediaCategory == MediaCategories.Video),
+            _ => members,
+        };
+
+        if (cursor is not null)
+        {
+            var boundaryOrder = cursor.SortOrder;
+            var boundaryId = cursor.FileItemId;
+            page = page.Where(x => x.SortOrder > boundaryOrder
+                || (x.SortOrder == boundaryOrder && x.FileItemId.CompareTo(boundaryId) > 0));
+        }
+
+        // The album's CURATED order. FileItemId remains the final tie-break
+        // so the sequence is stable even if two rows share a SortOrder.
+        var rows = await page
             .OrderBy(x => x.SortOrder)
             .ThenBy(x => x.FileItemId)
+            // One more than asked for: whether a further page exists is a fact
+            // about the data, never a guess from a full page.
+            .Take(query.Limit + 1)
             .Select(x => new
             {
                 x.AlbumItemId,
@@ -939,12 +996,19 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 x.Width,
                 x.Height,
                 x.Orientation,
+                x.SortOrder,
                 x.AddedByUserId,
                 x.FileOwnerUserId,
             })
             .ToListAsync(cancellationToken);
 
-        return rows.Select(x =>
+        var hasMore = rows.Count > query.Limit;
+        if (hasMore)
+        {
+            rows.RemoveAt(rows.Count - 1);
+        }
+
+        var items = rows.Select(x =>
         {
             var isVideo = x.MediaCategory == MediaCategories.Video;
             var (width, height) = ImageDisplayDimensions.Resolve(x.Width, x.Height, x.Orientation);
@@ -973,6 +1037,14 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 // pair WithdrawContributionAsync checks server-side.
                 x.AddedByUserId == grant.ActorUserId && x.FileOwnerUserId == grant.ActorUserId);
         }).ToList();
+
+        var last = rows.Count > 0 ? rows[^1] : null;
+        var nextCursor = hasMore && last is not null
+            ? new SharedAlbumItemCursor(query.Kind, last.SortOrder, last.FileItemId).Encode()
+            : null;
+
+        return new SharedAlbumItemsPage(
+            items, nextCursor, photoCount + videoCount, photoCount, videoCount);
     }
 
     // SHARE-ALBUM-03: a chosen cover is a preference, not a relation — but a

@@ -7449,6 +7449,38 @@ video.lightbox-image {
 .album-badge-tv { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 .album-card-delete { align-self: flex-start; margin: 0 0.75rem 0.75rem; font-size: 0.78rem; padding: 0.3rem 0.6rem; }
 
+/* Whose album this is. One quiet line under the title — ownership has to be
+   unmistakable without competing with the media above it, which is why there is
+   no coloured banner here. */
+.album-card-owner { margin: 0; font-size: 0.74rem; color: var(--muted); }
+.album-card[data-owner="shared"] .album-card-owner { color: var(--accent); }
+
+/* Which album collection: All | Mine | Shared, as navigation rather than a
+   hidden filter. */
+.albums-scope-tabs { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0 0 1rem; }
+.albums-scope-tab {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  min-height: 2.25rem; padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-subtle); color: var(--fg);
+  font-size: 0.85rem; cursor: pointer;
+}
+.albums-scope-tab.is-active { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent); color: var(--accent); }
+.albums-scope-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.albums-scope-count { font-size: 0.75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.albums-scope-tab.is-active .albums-scope-count { color: inherit; }
+.albums-invitations { margin: 0 0 0.5rem; }
+.albums-invitations h3 { display: flex; align-items: baseline; gap: 0.4rem; }
+
+/* The kind tabs share their row with album Play, which is a viewer operation
+   and sits beside the tabs rather than among the owner's mutations. */
+.ws-kind-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
+.ws-kind-row .media-kind-tabs { flex: 1 1 auto; min-width: 0; }
+.album-play-button { flex: 0 0 auto; white-space: nowrap; }
+
+/* A download offered from the viewer chrome, next to the other icon actions. */
+.media-viewer-download-action { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+
 /* ── SHARE-ALBUM-01: live album sharing ─────────────────────────────────── */
 
 /* Album detail gained a second header action ("Share"), so the pair needs to
@@ -7490,30 +7522,13 @@ video.lightbox-image {
 .shared-media-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .shared-media-video-badge { position: absolute; right: 0.4rem; bottom: 0.4rem; font-size: 0.8rem; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
 
-/* A full-screen viewer, NOT a side sheet. It deliberately does not reuse
-   .ws-sheet-backdrop: that one dims to 32% and pins its child to the right
-   edge, which left the app shell readable behind the photo and the viewer
-   chrome colliding with the top bar. Matches .face-viewer / .party-lightbox,
-   the codebase's existing full-screen media overlays. */
-.shared-lightbox-backdrop {
-  position: fixed; inset: 0; z-index: 1250;
-  background: rgba(0, 0, 0, 0.92);
-  display: flex; align-items: center; justify-content: center;
-}
-.shared-lightbox { display: flex; flex-direction: column; width: 100%; height: 100%; max-width: 100vw; max-height: 100dvh; }
-.shared-lightbox:focus { outline: none; }
-.shared-lightbox-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.6rem 1rem; }
-.shared-lightbox-actions { display: flex; align-items: center; gap: 0.5rem; }
-.shared-lightbox-stage { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; gap: 0.5rem; padding: 0 0.5rem 1rem; }
-.shared-lightbox-image, .shared-lightbox-video { max-width: 100%; max-height: 100%; object-fit: contain; }
-.shared-lightbox-nav { flex: 0 0 auto; font-size: 1.8rem; line-height: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in srgb, var(--fg) 8%, transparent); color: var(--fg); cursor: pointer; }
-.shared-lightbox-nav:disabled { opacity: 0.35; cursor: default; }
+/* The recipient's viewer is the COMMON MediaViewer now, pointed at the
+   album-scoped URLs the server supplied. The bespoke .shared-lightbox stack
+   that used to live here is gone: it was a second full-screen media overlay
+   with its own chrome, its own keyboard handling and its own idea of what a
+   photo looks like, and keeping it in agreement with the real viewer was work
+   that bought nothing. */
 
-/* Coarse pointers get bigger hit targets; the arrows move under the stage so a
-   thumb is not reaching across the image. */
-@media (max-width: 40rem) {
-  .shared-lightbox-nav { padding: 0.65rem 1rem; min-width: 3rem; }
-}
 /* The masked account hint next to a member's display name. Display names are
    not unique, so this is what makes two identically-named members tellable
    apart; it is deliberately quiet, since it is a disambiguator, not an identity. */

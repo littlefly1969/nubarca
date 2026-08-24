@@ -2,7 +2,6 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
   type RefObject,
@@ -16,7 +15,8 @@ import { SemanticMarkerStrip, toMarkers } from './SemanticMarkerStrip';
 import { VideoPreview } from '../../video/VideoPreview';
 import { getMediaAspectRatio } from './mediaAspectRatio';
 import { computeJustifiedRows, type JustifiedLayoutItem } from '../layout/computeJustifiedRows';
-import { MEDIA_WALL_GAP_PX, mediaWallRowParams } from '../layout/mediaWallGeometry';
+import { MEDIA_WALL_GAP_PX } from '../layout/mediaWallGeometry';
+import { useJustifiedWall } from '../layout/useJustifiedWall';
 import type { MediaSelection } from '../../gallery/useMediaSelection';
 
 // The full-width justified media wall. Photos and videos flow into justified
@@ -91,41 +91,19 @@ interface WallVirtualizer {
 type WallRows = ReturnType<typeof computeJustifiedRows>;
 
 /**
- * The justified layout, independent of who scrolls.
+ * The justified layout for a wall of MediaItems.
  *
- * Rows are not laid out against an invented fallback width, so tiles never render
- * at one size and then reflow once the true width arrives.
+ * The measuring and the row maths live in useJustifiedWall, which the shared
+ * album wall uses too — the two walls must produce the same geometry, and one
+ * copy of it is how that stays true. What is left here is the one thing that is
+ * specific to this wall: how a MediaItem's aspect ratio is read.
  */
 function useWallLayout(items: MediaItem[]): {
+  ref: (node: HTMLDivElement | null) => void;
   containerRef: RefObject<HTMLDivElement | null>;
   measured: boolean;
   rows: WallRows;
 } {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState<number | null>(null);
-
-  useLayoutEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const measure = () => {
-      const next = Math.round(node.getBoundingClientRect().width);
-      // Only react to real (>= 1px) width changes; a sub-pixel jitter must not
-      // recompute the layout.
-      if (next > 0) {
-        setContainerWidth((prev) => (prev != null && Math.abs(prev - next) < 1 ? prev : next));
-      }
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, []);
-
-  const measured = containerWidth != null;
-  const width = containerWidth ?? 0;
-  const params = mediaWallRowParams(width || 1);
-
   const layoutItems = useMemo<JustifiedLayoutItem[]>(
     () => items.map((item, index) => ({
       id: item.id,
@@ -135,22 +113,8 @@ function useWallLayout(items: MediaItem[]): {
     [items],
   );
 
-  // No rows until a real width is measured — the wall shows a stable skeleton
-  // meanwhile, and item identity / selection are untouched by a later resize.
-  const rows = useMemo(
-    () => (measured
-      ? computeJustifiedRows(layoutItems, {
-        containerWidth: width,
-        gap: MEDIA_WALL_GAP_PX,
-        targetRowHeight: params.targetRowHeight,
-        minRowHeight: params.minRowHeight,
-        maxRowHeight: params.maxRowHeight,
-      })
-      : []),
-    [measured, layoutItems, width, params.targetRowHeight, params.minRowHeight, params.maxRowHeight],
-  );
-
-  return { containerRef, measured, rows };
+  const { ref, containerRef, measured, rows } = useJustifiedWall(layoutItems);
+  return { ref, containerRef, measured, rows };
 }
 
 /**
@@ -212,7 +176,7 @@ export function MediaGrid(props: GridProps) {
 function ViewportScrolledWall({
   viewportRef, ...props
 }: GridProps & { viewportRef: RefObject<HTMLElement | null> }) {
-  const { containerRef, measured, rows } = useWallLayout(props.items);
+  const { ref, containerRef, measured, rows } = useWallLayout(props.items);
   const scrollMargin = useWallScrollMargin(containerRef, viewportRef);
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
@@ -224,7 +188,7 @@ function ViewportScrolledWall({
   return (
     <Wall
       {...props}
-      containerRef={containerRef}
+      wallRef={ref}
       measured={measured}
       rows={rows}
       virtualizer={rowVirtualizer}
@@ -234,7 +198,7 @@ function ViewportScrolledWall({
 
 /** The wall with no shell around it (public surfaces, unit tests). */
 function DocumentScrolledWall(props: GridProps) {
-  const { containerRef, measured, rows } = useWallLayout(props.items);
+  const { ref, containerRef, measured, rows } = useWallLayout(props.items);
   const rowVirtualizer = useWindowVirtualizer({
     count: rows.length,
     estimateSize: rowSizer(rows),
@@ -244,7 +208,7 @@ function DocumentScrolledWall(props: GridProps) {
   return (
     <Wall
       {...props}
-      containerRef={containerRef}
+      wallRef={ref}
       measured={measured}
       rows={rows}
       virtualizer={rowVirtualizer}
@@ -254,9 +218,9 @@ function DocumentScrolledWall(props: GridProps) {
 
 function Wall({
   items, orderedIds, selection, onOpen, semanticTimestamps, semanticMatches, badges,
-  containerRef, measured, rows, virtualizer,
+  wallRef, measured, rows, virtualizer,
 }: GridProps & {
-  containerRef: RefObject<HTMLDivElement | null>;
+  wallRef: (node: HTMLDivElement | null) => void;
   measured: boolean;
   rows: WallRows;
   virtualizer: WallVirtualizer;
@@ -271,7 +235,7 @@ function Wall({
 
   return (
     <div
-      ref={containerRef}
+      ref={wallRef}
       aria-label={t('mediaWs.gridAria')}
       role="list"
       data-testid="media-grid"

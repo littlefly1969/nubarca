@@ -46,11 +46,13 @@ export interface NavGroup {
 const MAIN: NavItem[] = [
   { to: '/', labelKey: 'nav.files', icon: 'files', end: true },
   { to: '/media', labelKey: 'mediaLib.title', icon: 'library' },
+  // ONE album destination. Albums the user owns and albums other people have
+  // shared with them are the same kind of thing to the person looking at them,
+  // and /albums holds both with the collection stated on every card. A second
+  // primary entry for "shared" made somebody else's album read as a different
+  // product; /shared-albums still resolves, as a redirect into the shared
+  // collection.
   { to: '/albums', labelKey: 'nav.albums', icon: 'albums' },
-  // SHARE-ALBUM-01: albums other people own and have shared with this user. A
-  // primary destination rather than a tab inside /albums, so somebody else's
-  // content is never mixed into the list of the user's own albums.
-  { to: '/shared-albums', labelKey: 'nav.sharedAlbums', icon: 'shared-albums' },
   { to: '/people', labelKey: 'nav.people', icon: 'people', permission: PERMISSIONS.peopleAccess },
 ];
 

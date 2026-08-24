@@ -8,7 +8,7 @@ is built is described by `ARCHITECTURE.md`.
 ## Baseline
 
 - Release: `0.3.0` (server and web)
-- NubArca TV: `1.0.9`, `versionCode` 11, OTA runtime `nubarca-tv-native-10`
+- NubArca TV: `1.0.10`, `versionCode` 12, OTA runtime `nubarca-tv-native-11`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
@@ -152,6 +152,51 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **Album membership is a physical filter, applied before ranking.** It lives in
   the query fingerprint, so a ranking built with the filter off can never be
   served with it on.
+- **There is ONE album destination, and ownership is a property of a card.**
+  `/albums` renders the caller's own albums and the accepted shares together;
+  `All / Mine / Shared` lives in the URL (`?scope=shared`), `/shared-albums`
+  redirects there, and `/shared-albums/{id}` is untouched — owner and recipient
+  must never resolve to one route. The two API shapes stay two shapes and are
+  normalised only at the presentation boundary (`albums/albumCardModel.ts`),
+  which is what keeps "whose album is this" explicit while the grid is uniform.
+  Two things are easy to undo by accident. `ownerKind` is STATED by whichever
+  constructor built the card, never inferred from a field being absent, so a
+  shared album cannot drift into looking owned; and a shared summary carries no
+  per-kind split, so the card renders no photo/video counts for it rather than
+  rendering zeroes the server never said. Pending invitations and received
+  copies stay in their own sections: an invitation is a decision, and a copy is
+  an album nobody can revoke — neither is a thing you can open.
+- **The recipient's album is the SAME browser, over a different authority.**
+  `SharedAlbumBrowser` reuses `MediaKindTabs`, `useJustifiedWall`,
+  `useWallSentinel` and the common `MediaViewer`; the bespoke shared lightbox is
+  gone. What separates it from the owner's workspace is not components but
+  `albums/albumCapabilities.ts`, a pure model whose owner-only entries are false
+  for every membership role — actions a caller may not perform are ABSENT from
+  the tree, never disabled. `MediaViewer` therefore takes its media SOURCES
+  explicitly (`ownerFile` | `albumScoped`), with no fallback from the second to
+  the first: a shared item with a missing URL renders as unavailable rather than
+  quietly becoming `/api/files/{id}/...`, which the recipient holds no grant on.
+  Curation follows the server's `canEdit`, never the role string.
+- **Album Play plays what is on screen.** One `useSequencePlayback` drives both
+  the owner's workspace and the recipient's browser over the CURRENT result —
+  tab, search and filters included — so "Videos, then Play" plays the videos and
+  nothing else. Photos hold for a bounded moment; a video advances when it ENDS,
+  never on a clock, because a timer would cut off anything longer than the
+  interval and linger on anything shorter. Running out of a loaded page is a
+  `wait`, not a `finish`: Play must not end early because pagination has not
+  caught up. It mutates nothing, which is what makes it safe for a shared
+  Viewer — and it is not Party and not Show-on-TV, which stay owner publication
+  settings in Settings.
+- **`GET /api/shared-albums/{id}/items` is a PAGE, and `kind` is its only
+  filter.** The envelope carries `items`, `nextCursor` and the album's per-kind
+  counts, so a tab label needs no second request and does not change meaning
+  with the tab that is open. `kind` is safe precisely because it is nothing new:
+  it is answered from the media category the shared item shape already carried.
+  A filter that needed owner-private metadata to answer would BE that metadata.
+  The cursor is `(SortOrder, FileItemId)` bound to the kind it was issued for,
+  and it is not a capability: membership is resolved BEFORE it is read, so a
+  stranger's malformed cursor is a 404 rather than the 400 that would confirm
+  the album exists.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

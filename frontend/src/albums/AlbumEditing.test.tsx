@@ -11,6 +11,7 @@ import {
   errorResponse,
   installFetchMock,
   jsonResponse,
+  sharedItemsPage,
 } from '../test-utils';
 
 // SHARE-ALBUM-03 frontend: the Editor role, curation, accessible reorder, and
@@ -416,7 +417,11 @@ describe('SharedAlbumDetailPage — role-gated curation', () => {
   function renderPage(detail: Record<string, unknown>) {
     installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(detail),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([]),
+      // The item endpoint answers a PAGE, not a bare array. A fixture that
+      // returns `[]` leaves `items` undefined and the wall throws — which is
+      // exactly what it did, silently, because the throw lands in a render this
+      // test never asserts on.
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([])),
     });
     return render(
       <AuthedWrapper>

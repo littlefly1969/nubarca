@@ -67,6 +67,11 @@ test('APK validation and publication consume one release contract and one valida
   const publisher = readFileSync(resolve(tvRoot, '../deploy/publish-tv-apk.sh'), 'utf8');
   assert.match(validator, /release-contract\.cjs/);
   assert.match(validator, /expected_signer_sha256="\$\{release_values\[7\]\}"/);
+  assert.match(validator, /Actual signer SHA-256/);
+  assert.match(validator, /keytool[\s\S]*-printcert -jarfile/);
+  assert.match(validator, /signer_count/);
+  assert.match(validator, /Verified using v2 scheme/);
+  assert.match(validator, /Verified using v3 scheme/);
   assert.doesNotMatch(validator, new RegExp(release.apkSignerSha256));
   assert.match(publisher, /deploy\/validate-tv-apk\.sh/);
   assert.doesNotMatch(publisher, /apksigner|apkanalyzer|aapt2/);
