@@ -79,6 +79,25 @@ describe('AlbumDetailPage', () => {
     expect(screen.getByTestId('media-scope-tabs')).toBeInTheDocument();
   });
 
+  // Album Play: the SAME control a recipient gets on a shared album, because it
+  // is a viewer operation and mutates nothing. Deliberately not Party and not
+  // Show-on-TV — those are publication decisions and stay in Settings.
+  it('offers Play, and playing opens the common viewer on the first item', async () => {
+    installFetchMock(baseHandlers());
+    render(wrapper());
+
+    await screen.findByText('photo.jpg');
+    await userEvent.click(screen.getByTestId('album-play'));
+
+    expect(await screen.findByTestId('media-viewer')).toBeInTheDocument();
+    expect(screen.getByTestId('media-viewer-image'))
+      .toHaveAttribute('src', '/api/files/file-1/preview');
+    // A run in progress can be stopped from inside the viewer, and Play never
+    // starts a Party or a TV publication.
+    expect(screen.getByTestId('viewer-play-stop')).toBeInTheDocument();
+    expect(screen.queryByTestId('album-party-panel')).not.toBeInTheDocument();
+  });
+
   it('opens the album settings panel with TV / delete controls', async () => {
     installFetchMock(baseHandlers());
     render(wrapper());

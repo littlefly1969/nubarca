@@ -167,6 +167,50 @@ depended on which page they had started from.
 - **Videos work** — media now comes from the library selection rather than a
   photo-only list.
 
+An album is an album. "Shared with me" used to be a second primary destination,
+which made somebody else's album read as a different product: a different list,
+a different card, a bespoke wall and a bespoke lightbox. Ownership and role
+decide WHAT a person may do with an album — never whether it looks and behaves
+like a different thing.
+
+- **One Albums destination** — `/albums` holds the user's own albums and the
+  ones other people have shared with them, in one grid with one search and one
+  sort, filtered by *All / Mine / Shared*. The collection lives in the URL, so
+  `/albums?scope=shared` is a real address; the old `/shared-albums` list
+  redirects to it and `/shared-albums/{id}` is untouched, because that is the
+  RECIPIENT's album and owner and recipient must never resolve to one route.
+- **Ownership stays unmistakable** — every card says whose album it is and, for
+  a shared one, what the membership may do. A shared card carries no Delete at
+  all: an action this caller may not perform is absent rather than disabled. The
+  two collections remain two API shapes and are normalised only at the
+  presentation boundary.
+- **A pending invitation is not an album** — invitations keep their own compact
+  section above the grid, and a received *copy* keeps its own, because accepting
+  an invitation gives you a view of somebody else's album while accepting a copy
+  gives you an album of your own that nobody can revoke.
+- **The recipient gets the real browser** — All / Photos / Videos with the
+  album's own counts, the same justified wall geometry as the library, and the
+  same full-screen viewer. The bespoke shared lightbox is gone. The viewer now
+  takes its media SOURCES explicitly: an album-scoped item uses only URLs the
+  server built, and there is no branch that falls back to `/api/files/{id}`.
+- **`GET /api/shared-albums/{id}/items` pages and filters** — `kind`, `cursor`
+  and `limit`, in an envelope that also carries the album's per-kind counts. It
+  used to serve a whole album on every open. `kind` is the only filter a shared
+  album gets, and it is safe because it is nothing new: it is answered from the
+  media category the item shape already carried. Filename, People, capture date,
+  GPS, favourites and ratings stay absent — a filter that needed owner-private
+  metadata to answer would BE that metadata, leaked one question at a time.
+- **Album Play** — an explicit ▶ Play on owned and shared albums alike. It walks
+  the current sequence (the active tab, search and filters), holds a photo for a
+  bounded moment, waits for a video to end, pages as it goes and stops on the
+  last item with an offer to run it again. It mutates nothing, which is why a
+  shared Viewer gets the identical control. It is not Party and not
+  Show-on-TV: those remain the owner's publication settings.
+- **Nothing else moved** — download stays independently permission-gated per
+  item, withdrawal stays the caller's own contribution only, curation stays the
+  server's `canEdit` rather than the role label, and revocation still takes
+  effect on the very next request, cursor in hand or not.
+
 ## 0.3.0
 
 NubArca `0.3.0` is the consolidated product baseline: one coherent identity

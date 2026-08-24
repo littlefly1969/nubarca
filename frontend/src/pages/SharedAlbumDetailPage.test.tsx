@@ -269,6 +269,13 @@ describe('SharedAlbumDetailPage viewer', () => {
     await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
     await screen.findByTestId('media-viewer');
 
+    // Every byte the viewer shows comes from a URL the SERVER built. An
+    // <img src> never reaches the fetch spy, so the element itself is asserted:
+    // synthesizing `/api/files/{id}/preview` from the file id would address the
+    // owner's library, which this caller holds no grant on.
+    expect(screen.getByTestId('media-viewer-image').getAttribute('src'))
+      .toMatch(/^\/api\/shared-albums\/alb-1\/media\//);
+
     // The owner's metadata endpoint is not reachable from a share, and the
     // recipient's viewer does not even try: no request, and no details drawer.
     for (const call of spy.calls) {
