@@ -111,3 +111,34 @@ test('refresh over existing content reports refreshing phase during flight', asy
   assert.equal(observedDuringFlight, 'refreshing');
   assert.deepEqual(list.snapshot().items.map((r) => r.id), ['b']);
 });
+
+test('refreshing over content PRESERVES the visible items until the new page lands', async () => {
+  const list = new PagedList<Row>(key);
+  await list.refresh(() => Promise.resolve(pageOf(['a', 'b'], true, 'c1')));
+  let observedItemsDuringFlight: string[] | null = null;
+  await list.refresh(async () => {
+    // The grid must keep rendering the OLD page while the refresh flies —
+    // blanking it would throw the user back to the top of the library.
+    observedItemsDuringFlight = list.snapshot().items.map((r) => r.id);
+    return pageOf(['c'], false, null);
+  });
+  assert.deepEqual(observedItemsDuringFlight, ['a', 'b']);
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['c']);
+  assert.equal(list.snapshot().phase, 'ready');
+});
+
+test('a FAILED refresh keeps prior content, surfaces error, and disarms loadMore', async () => {
+  const list = new PagedList<Row>(key);
+  await list.refresh(() => Promise.resolve(pageOf(['a'], true, 'c1')));
+  await list.refresh(() => Promise.reject(new Error('network down')));
+  assert.equal(list.snapshot().phase, 'error');
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['a']);
+  // Cursor was dropped with the failed page: loadMore must not silently
+  // append onto an unknown baseline.
+  await list.loadMore(() => Promise.resolve(pageOf(['X'], false, null)));
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['a']);
+  // The next successful refresh recovers cleanly.
+  await list.refresh(() => Promise.resolve(pageOf(['fresh'], false, null)));
+  assert.equal(list.snapshot().phase, 'ready');
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['fresh']);
+});
