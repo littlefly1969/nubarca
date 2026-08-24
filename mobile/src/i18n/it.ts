@@ -96,6 +96,30 @@ const it = {
   'selection.addedNotice': '{succeeded} aggiunti, {skipped} già presenti o ignorati.',
   'selection.addedAll': '{count} elementi aggiunti all\'album.',
 
+  // Unified albums / shared
+  'albums.filterAll': 'Tutti',
+  'albums.filterMine': 'Miei',
+  'albums.filterShared': 'Condivisi',
+  'shared.pendingInvitations': 'Inviti in attesa',
+  'shared.inviteAccept': 'Accetta',
+  'shared.inviteDecline': 'Rifiuta',
+  'shared.inviteAction': "la risposta all'invito",
+  'shared.badgeShared': 'Condiviso da',
+  'shared.sharedBy': 'di {name}',
+  'shared.roleViewer': 'Visualizzatore',
+  'shared.roleContributor': 'Contributore',
+  'shared.roleEditor': 'Editor',
+  'shared.itemsCount': '{count} elementi',
+  'shared.contribute': 'Aggiungi media',
+  'shared.itemActions': 'Azioni elemento',
+  'shared.withdrawTitle': 'Rimuovere il tuo contributo?',
+  'shared.withdrawConfirmBody': 'Il file NON viene cancellato: resta nella tua libreria.',
+  'shared.withdrawAction': 'Rimuovi contributo',
+  'shared.withdrawDone': 'Contributo rimosso dall album.',
+  'shared.withdrawFailed': 'Rimozione non riuscita. Riprova.',
+  'shared.download': 'Scarica',
+  'shared.downloadFailed': 'Download non riuscito.',
+
   // Files
   'files.breadcrumbHome': 'Home',
 

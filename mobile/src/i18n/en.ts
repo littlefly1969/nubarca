@@ -79,6 +79,30 @@ const en: Partial<Record<MobileMessageKey, string>> = {
 
   'files.breadcrumbHome': 'Home',
 
+  // Unified albums / shared
+  'albums.filterAll': 'All',
+  'albums.filterMine': 'Mine',
+  'albums.filterShared': 'Shared',
+  'shared.pendingInvitations': 'Pending invitations',
+  'shared.inviteAccept': 'Accept',
+  'shared.inviteDecline': 'Decline',
+  'shared.inviteAction': 'the invitation response',
+  'shared.badgeShared': 'Shared by',
+  'shared.sharedBy': 'by {name}',
+  'shared.roleViewer': 'Viewer',
+  'shared.roleContributor': 'Contributor',
+  'shared.roleEditor': 'Editor',
+  'shared.itemsCount': '{count} items',
+  'shared.contribute': 'Add media',
+  'shared.itemActions': 'Item actions',
+  'shared.withdrawTitle': 'Remove your contribution?',
+  'shared.withdrawConfirmBody': 'The file is NOT deleted — it stays in your library.',
+  'shared.withdrawAction': 'Withdraw contribution',
+  'shared.withdrawDone': 'Contribution removed from the album.',
+  'shared.withdrawFailed': 'Could not withdraw. Please try again.',
+  'shared.download': 'Download',
+  'shared.downloadFailed': 'Download failed.',
+
   'login.serverHint': 'e.g. http://10.0.0.5:5177 on a local network',
 
   'gallery.home': 'Home',
