@@ -260,9 +260,6 @@ export function MediaViewer({
 
   if (!item) return null;
 
-  // Size comes from the loaded item when available (no request); the effective
-  // Date Taken needs the metadata document, and is suppressed entirely when it
-  // would only be the upload-time fallback.
   // The bytes for THIS item, resolved once. An album-scoped item uses only what
   // the server handed over: there is no branch here that turns a missing shared
   // URL back into `/api/files/...`.
@@ -279,6 +276,10 @@ export function MediaViewer({
     ? (scoped ? scoped.downloadUrl : originalDownloadUrl(item.id))
     : null;
 
+  // Size comes from the loaded item when available (no request); the effective
+  // Date Taken needs the metadata document, and is suppressed entirely when it
+  // would only be the upload-time fallback. A recipient has neither, so the
+  // summary line is simply empty for them.
   const summary = resolveViewerSummary({ itemSizeBytes: item.sizeBytes, metadata });
   const summaryParts = [
     summary.sizeBytes !== null ? formatSize(summary.sizeBytes) : null,
