@@ -26,6 +26,9 @@ export interface PagedSnapshot<TItem> {
   items: TItem[];
   phase: PagedListPhase;
   hasMore: boolean;
+  // Which operation failed LAST and is awaiting its retry: the UI's retry
+  // affordance must repeat THIS operation, never degrade into a no-op.
+  retryTarget: 'refresh' | 'loadMore' | null;
 }
 
 export type FetchPage<TItem> = (
@@ -43,6 +46,9 @@ export class PagedList<TItem> {
   private token = 0;
   private loadMoreInFlight = false;
   private abort: AbortController | null = null;
+  // The failed operation awaiting retry. Cleared by its own success; a newer
+  // successful op of the other kind also clears it (the UI state moved on).
+  private lastFailure: 'refresh' | 'loadMore' | null = null;
 
   private readonly keyOf: (item: TItem) => string;
 
@@ -51,7 +57,12 @@ export class PagedList<TItem> {
   }
 
   snapshot(): PagedSnapshot<TItem> {
-    return { items: this.items, phase: this.phase, hasMore: this.hasMore };
+    return {
+      items: this.items,
+      phase: this.phase,
+      hasMore: this.hasMore,
+      retryTarget: this.lastFailure,
+    };
   }
 
   private setPhase(phase: PagedListPhase): void {
@@ -88,6 +99,7 @@ export class PagedList<TItem> {
       this.items = page.items;
       this.cursor = page.nextCursor;
       this.hasMore = page.hasMore;
+      this.lastFailure = null;
       this.setPhase('ready');
     } catch (err) {
       if (myToken !== this.token) return;
@@ -95,6 +107,7 @@ export class PagedList<TItem> {
         // With prior content we KEEP it: the failure surfaces through the
         // footer retry affordance, not by wiping the grid.
         this.setPhase('error');
+        this.lastFailure = 'refresh'; // the retry MUST re-run this refresh
         if (hadContent) this.cursor = null; // next loadMore restarts from safety
       } else {
         this.setPhase(hadContent ? 'ready' : 'error');
@@ -129,11 +142,17 @@ export class PagedList<TItem> {
       }
       this.cursor = page.nextCursor;
       this.hasMore = page.hasMore;
+      this.lastFailure = null;
       this.setPhase('ready');
     } catch (err) {
       if (myToken !== this.token) return;
-      if (!isAbortError(err)) this.setPhase('error');
-      else this.setPhase('ready');
+      if (!isAbortError(err)) {
+        this.setPhase('error');
+        // The SAME cursor stays armed: retrying re-fetches exactly this page.
+        this.lastFailure = 'loadMore';
+      } else {
+        this.setPhase('ready');
+      }
     } finally {
       this.loadMoreInFlight = false;
       if (myToken === this.token) this.abort = null;

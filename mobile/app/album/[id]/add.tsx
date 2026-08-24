@@ -39,7 +39,7 @@ export default function AlbumAdd(): React.JSX.Element {
     [],
   );
 
-  const { snapshot, refresh, loadMore } = usePagedList<MediaItem>((i) => i.id, fetcher);
+  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
 
   useFocusEffect(
     useCallback(() => {
@@ -123,7 +123,7 @@ export default function AlbumAdd(): React.JSX.Element {
                     : null
               }
               onLoadMoreRetry={() => {
-                void loadMore();
+                void retryFailed();
               }}
             />
           </View>

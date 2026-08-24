@@ -112,6 +112,66 @@ test('refresh over existing content reports refreshing phase during flight', asy
   assert.deepEqual(list.snapshot().items.map((r) => r.id), ['b']);
 });
 
+test('the phase flips IMMEDIATELY when an operation starts (UI fix)', () => {
+  const list = new PagedList<Row>(key);
+  let release!: (p: Page<Row>) => void;
+  const gate = new Promise<Page<Row>>((res) => {
+    release = res;
+  });
+  const op = list.refresh(() => gate);
+  // BEFORE the fetch settles the UI must already see the loading phase.
+  assert.equal(list.snapshot().phase, 'loading');
+  release(pageOf(['a'], false, null));
+  return op;
+});
+
+test('loadMore reports loadingMore immediately; a failed page retried re-uses the SAME cursor', async () => {
+  const list = new PagedList<Row>(key);
+  await list.refresh(() => Promise.resolve(pageOf(['a'], true, 'c1')));
+  const cursorsSeen: Array<string | null> = [];
+  const failingGate = new Promise<Page<Row>>((_, reject) =>
+    setTimeout(() => reject(new Error('page down')), 5),
+  );
+  const first = list.loadMore((cursor) => {
+    cursorsSeen.push(cursor);
+    return failingGate;
+  });
+  // IMMEDIATE phase, before the failure lands.
+  assert.equal(list.snapshot().phase, 'loadingMore');
+  await first;
+  assert.equal(list.snapshot().retryTarget, 'loadMore');
+
+  // Retry repeats the FAILED operation against the SAME cursor.
+  const second = list.loadMore((cursor) => {
+    cursorsSeen.push(cursor);
+    return Promise.resolve(pageOf(['b'], false, null));
+  });
+  await second;
+  assert.deepEqual(cursorsSeen, ['c1', 'c1']);
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['a', 'b']);
+  assert.equal(list.snapshot().retryTarget, null);
+});
+
+test('a failed refresh-with-content retries as REFRESH, never degrades to loadMore', async () => {
+  const list = new PagedList<Row>(key);
+  await list.refresh(() => Promise.resolve(pageOf(['old'], true, 'c-old')));
+  let refreshCalls = 0;
+  await list.refresh(() => {
+    refreshCalls += 1;
+    return Promise.reject(new Error('down'));
+  });
+  assert.equal(list.snapshot().retryTarget, 'refresh');
+  assert.equal(list.snapshot().items.length, 1); // content preserved
+
+  // The retry affordance re-runs the REFRESH (the hook maps retryTarget).
+  await list.refresh(() => {
+    refreshCalls += 1;
+    return Promise.resolve(pageOf(['new'], false, null));
+  });
+  assert.equal(refreshCalls, 2);
+  assert.deepEqual(list.snapshot().items.map((r) => r.id), ['new']);
+});
+
 test('refreshing over content PRESERVES the visible items until the new page lands', async () => {
   const list = new PagedList<Row>(key);
   await list.refresh(() => Promise.resolve(pageOf(['a', 'b'], true, 'c1')));

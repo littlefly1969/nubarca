@@ -56,6 +56,10 @@ export interface RequestOptions {
   // True for endpoints whose 401 means "rejected credentials" rather than
   // "the session died" (login). Never set it on ordinary authenticated calls.
   allow401?: boolean;
+  // Explicit Cookie header for the ONE case where the seam must NOT be read:
+  // the best-effort logout notification, sent AFTER the local teardown has
+  // already wiped the jar with a snapshot of the pre-teardown cookie.
+  cookieOverride?: string;
 }
 
 // Combine the caller's signal and the timeout into one controller so either
@@ -90,13 +94,13 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { json, signal, allow401 = false } = options;
+  const { json, signal, allow401 = false, cookieOverride } = options;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const linked = linkSignals(signal, timeoutMs);
 
   const headers: Record<string, string> = {};
   if (json !== undefined) headers['content-type'] = 'application/json';
-  const cookie = sessionCookieSource().current;
+  const cookie = cookieOverride ?? sessionCookieSource().current;
   if (cookie) headers['cookie'] = cookie;
 
   try {

@@ -24,9 +24,9 @@ import { shouldDropPersistedSession } from './sessionRecovery';
 import {
   login as apiLogin,
   fetchCurrentUser,
-  signOut as apiSignOut,
   type CurrentUser,
 } from '../api/auth';
+import { signOutLocalFirst } from '../api/signOut';
 import { clearImageCache } from '../media/imageLoader';
 import { useI18n } from '../i18n';
 import { toLanguage } from '../i18n';
@@ -53,7 +53,7 @@ interface SessionContextValue {
   expired: boolean;
   user: CurrentUser | null;
   login: (baseUrl: string, email: string, password: string) => Promise<void>;
-  logout: () => Promise<void>;
+  logout: () => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -76,19 +76,23 @@ export function SessionProvider({
     [setLanguage],
   );
 
-  const teardownToUnauthed = useCallback(
-    async (expired: boolean) => {
+  // LOCAL-FIRST teardown (acceptance BLOCKER): memory jar, SecureStore and
+  // the UI die inside one synchronous callback; only AFTER that fires the
+  // best-effort server notification, riding the captured pre-teardown cookie.
+  // A hanging or failing /api/auth/logout can never keep the app signed in.
+  // (Viewer/private state is wiped by ViewerProvider's own identity watch.)
+  const teardownToUnauthed = useCallback((expired: boolean) => {
+    signOutLocalFirst(() => {
+      ownerSession.clear();
       clearImageCache();
-      await apiSignOut();
       setState({ phase: 'unauthed', expired });
-    },
-    [],
-  );
+    });
+  }, []);
 
   const handleUnauthorized = useCallback(() => {
     // Fires when an AUTHENTICATED request comes back 401: the session died.
     if (stateRef.current.phase !== 'authed') return;
-    void teardownToUnauthed(true);
+    teardownToUnauthed(true);
   }, [teardownToUnauthed]);
 
   useEffect(() => {
@@ -143,8 +147,8 @@ export function SessionProvider({
     [adoptLanguage],
   );
 
-  const logout = useCallback(async () => {
-    await teardownToUnauthed(false);
+  const logout = useCallback(() => {
+    teardownToUnauthed(false);
   }, [teardownToUnauthed]);
 
   const value = useMemo<SessionContextValue>(

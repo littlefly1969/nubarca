@@ -5,6 +5,7 @@ import { Redirect, useFocusEffect } from 'expo-router';
 import { Screen, AppHeader } from '../../src/ui/components';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
+import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { usePagedList } from '../../src/lib/usePagedList';
@@ -36,7 +37,7 @@ export default function Videos(): React.JSX.Element {
     [],
   );
 
-  const { snapshot, refresh, loadMore } = usePagedList<MediaItem>((i) => i.id, fetcher);
+  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
 
   useFocusEffect(
     useCallback(() => {
@@ -50,7 +51,7 @@ export default function Videos(): React.JSX.Element {
   }
 
   const openPlayer = (item: MediaItem): void => {
-    viewer.open(snapshot.items, item.id);
+    viewer.open(ownedSlides(snapshot.items), item.id);
     router.push(`/media/${item.id}`);
   };
 
@@ -93,7 +94,7 @@ export default function Videos(): React.JSX.Element {
                 : null
           }
           onLoadMoreRetry={() => {
-            void loadMore();
+            void retryFailed();
           }}
         />
       )}

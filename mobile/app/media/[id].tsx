@@ -1,11 +1,12 @@
-// /media/[id]: full-screen media viewer.
+// /media/[id]: full-screen media viewer over PRE-BUILT viewer slides.
 //
-// Images: dark surface, swipe through the loaded sequence (virtualized,
-// bounded neighbor window), pinch/double-tap zoom with pan, single tap toggles
-// chrome. Medium previews only — never originals.
+// The opening screen hands the whole sequence to the viewer context with every
+// media URL already resolved (owned builders or server-provided shared URLs).
+// This route never rebuilds a path and never learns whether the album was
+// owned or shared.
 //
-// Videos: expo-video over the authenticated Range endpoint (videoSource builds
-// the Cookie header). Resources release on unmount.
+// Videos play only when their slide is the focused one (active flag).
+
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   BackHandler,
@@ -15,19 +16,20 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageSlide } from '../../src/components/ImageSlide';
 import { VideoSlide } from '../../src/components/VideoSlide';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
-import type { MediaItem, VideoMediaItem, ImageMediaItem } from '../../src/api/media.ts';
+import type { ViewerSlide } from '../../src/media/viewerSequence';
 import {
   filePosterPath,
   filePreviewPath,
-  fileThumbnailPath,
+  fileVideoPath,
 } from '../../src/api/filePaths';
+import { authenticatedSource } from '../../src/media/imageSource';
 import { colors, spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -35,55 +37,45 @@ export default function MediaRoute(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string; kind?: string; name?: string }>();
-  const { sequence } = useViewer();
+  const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
   const { width } = useWindowDimensions();
 
-  // Sequence comes from the grid context. A files-mode entry (no context)
-  // degrades to a single-item sequence built from route params.
-  const items: MediaItem[] = useMemo(() => {
-    if (sequence !== null && sequence.items.some((i) => i.id === params.id)) {
-      return sequence.items;
+  // Slides arrive pre-built through the viewer context. A files-mode entry
+  // (no sequence) degrades to ONE OWNED slide built from route params —
+  // folder browsing is owner-only in this slice, so owner paths are correct
+  // here by construction.
+  const slides: ViewerSlide[] = useMemo(() => {
+    if (sequence !== null && sequence.slides.some((s) => s.key === params.id)) {
+      return sequence.slides;
     }
-    const isVideo = params.kind === 'video';
-    const base = {
-      id: params.id,
-      name: params.name ?? '',
-      title: null,
-      displayName: params.name ?? '',
-      mimeType: isVideo ? 'video/mp4' : 'image/*',
-      sizeBytes: 0,
-      width: null,
-      height: null,
-      createdAt: '',
-      updatedAt: null,
-      takenAt: null,
-      thumbnailUrl:
-        params.kind === 'video'
-          ? filePosterPath(params.id)
-          : fileThumbnailPath(params.id),
-      occurrenceCount: 1,
-      hasDuplicates: false,
-    };
-    const fallback: MediaItem = isVideo
-      ? ({
-          ...base,
+    if (params.kind === 'video') {
+      const src = authenticatedSource(fileVideoPath(params.id));
+      return [
+        {
+          key: params.id,
           kind: 'video',
-          posterUrl: base.thumbnailUrl,
-          durationSeconds: null,
-          videoCodec: null,
-          audioCodec: null,
-          hasAudio: null,
-          frameRate: null,
-          posterSource: null,
-          previewStripUrl: null,
-        } satisfies VideoMediaItem)
-      : ({ ...base, kind: 'image' } satisfies ImageMediaItem);
-    return [fallback];
+          displayName: params.name ?? '',
+          imagePath: '',
+          videoSource: src ? { uri: src.uri, headers: src.headers } : null,
+          posterUrl: filePosterPath(params.id),
+        },
+      ];
+    }
+    return [
+      {
+        key: params.id,
+        kind: 'image',
+        displayName: params.name ?? '',
+        imagePath: filePreviewPath(params.id),
+        videoSource: null,
+        posterUrl: null,
+      },
+    ];
   }, [sequence, params.id, params.kind, params.name]);
 
   const startIndex = Math.max(
     0,
-    items.findIndex((i) => i.id === params.id),
+    slides.findIndex((s) => s.key === params.id),
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
@@ -92,31 +84,30 @@ export default function MediaRoute(): React.JSX.Element {
     setIndex(startIndex);
   }, [startIndex]);
 
-  const current = items[index];
+  const current = slides[index];
 
   const onMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
       const next = Math.round(e.nativeEvent.contentOffset.x / width);
-      if (next !== index && next >= 0 && next < items.length) setIndex(next);
+      if (next !== index && next >= 0 && next < slides.length) {
+        setIndex(next);
+        setViewerIndex(next);
+      }
     },
-    [index, items.length, width],
+    [index, slides.length, width, setViewerIndex],
   );
 
-  // Hardware back pops the viewer; the zoom gesture never traps it because
-  // the responder never captures a single unzoomed touch.
+  // Hardware back pops the viewer AND releases its sequence immediately.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (router.canGoBack()) router.back();
+      if (router.canGoBack()) {
+        closeViewer();
+        router.back();
+      }
       return true;
     });
     return () => sub.remove();
-  }, []);
-
-  // Leaving the screen (back/gesture) is enough — VideoSlide cleanup pauses
-  // playback and releases the player on unmount.
-  useFocusEffect(
-    useCallback(() => undefined, []),
-  );
+  }, [closeViewer]);
 
   if (session.status !== 'authed') {
     return <Redirect href="/login" />;
@@ -125,10 +116,10 @@ export default function MediaRoute(): React.JSX.Element {
   return (
     <View style={styles.root}>
       <FlatList
-        data={items}
+        data={slides}
         horizontal
         pagingEnabled
-        keyExtractor={(i) => i.id}
+        keyExtractor={(s) => s.key}
         initialScrollIndex={startIndex}
         getItemLayout={(_data, i) => ({
           length: width,
@@ -139,15 +130,15 @@ export default function MediaRoute(): React.JSX.Element {
         maxToRenderPerBatch={2}
         windowSize={3}
         onMomentumScrollEnd={onMomentumEnd}
-        renderItem={({ item }) =>
+        renderItem={({ item, index: i }) =>
           item.kind === 'image' ? (
             <ImageSlide
-              path={filePreviewPath(item.id)}
+              path={item.imagePath}
               name={item.displayName}
               onToggle={() => setChromeVisible((v) => !v)}
             />
           ) : (
-            <VideoSlide item={item} />
+            <VideoSlide slide={item} active={i === index} />
           )
         }
         style={{ width }}
@@ -158,7 +149,10 @@ export default function MediaRoute(): React.JSX.Element {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('viewer.back')}
-            onPress={() => router.back()}
+            onPress={() => {
+              closeViewer();
+              router.back();
+            }}
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
             hitSlop={8}
           >
@@ -167,7 +161,7 @@ export default function MediaRoute(): React.JSX.Element {
           <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
             {current.displayName}
           </Text>
-          <Text style={styles.counter}>{`${index + 1} / ${items.length}`}</Text>
+          <Text style={styles.counter}>{`${index + 1} / ${slides.length}`}</Text>
         </View>
       )}
     </View>

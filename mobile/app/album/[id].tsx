@@ -14,6 +14,7 @@ import { MediaGrid } from '../../src/components/MediaGrid';
 import { NamePromptModal } from '../../src/components/NamePromptModal';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { ownedSlides } from '../../src/media/viewerEntries';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { useSelectionState } from '../../src/lib/useSelectionState';
 import {
@@ -51,7 +52,7 @@ export default function AlbumDetail(): React.JSX.Element {
     [albumId],
   );
 
-  const { snapshot, refresh, loadMore } = usePagedList<MediaItem>((i) => i.id, fetcher);
+  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
 
   useFocusEffect(
     useCallback(() => {
@@ -176,7 +177,7 @@ export default function AlbumDetail(): React.JSX.Element {
           selecting={selectionState.selecting}
           selectedIds={selectionState.ids}
           onPressItem={(item) => {
-            viewer.open(snapshot.items, item.id);
+            viewer.open(ownedSlides(snapshot.items), item.id);
             router.push(`/media/${item.id}`);
           }}
           onToggleSelect={selectionState.toggle}
@@ -203,7 +204,7 @@ export default function AlbumDetail(): React.JSX.Element {
                 : null
           }
           onLoadMoreRetry={() => {
-            void loadMore();
+            void retryFailed();
           }}
         />
       )}

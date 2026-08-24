@@ -13,6 +13,7 @@ import {
 } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
 import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
+import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { usePagedList } from '../../src/lib/usePagedList';
@@ -47,7 +48,7 @@ export default function Photos(): React.JSX.Element {
     [],
   );
 
-  const { snapshot, refresh, loadMore } = usePagedList<MediaItem>((i) => i.id, fetcher);
+  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
 
   // Refresh on each focus so changes made elsewhere are reflected; the
   // PagedList token makes this race-safe against in-flight loads.
@@ -63,7 +64,7 @@ export default function Photos(): React.JSX.Element {
   }
 
   const openViewer = (item: MediaItem): void => {
-    viewer.open(snapshot.items, item.id);
+    viewer.open(ownedSlides(snapshot.items), item.id);
     router.push(`/media/${item.id}`);
   };
 
@@ -161,7 +162,7 @@ export default function Photos(): React.JSX.Element {
                   : null
             }
             onLoadMoreRetry={() => {
-              void loadMore();
+              void retryFailed();
             }}
           />
           {selectionState.selecting && (

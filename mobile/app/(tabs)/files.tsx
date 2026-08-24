@@ -1,6 +1,6 @@
 // Files tab: secondary read-only folder browser with breadcrumbs and paging.
 // Images open the viewer; videos (MIME-detected) open the player.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -41,6 +41,10 @@ export default function Files(): React.JSX.Element {
   const [failed, setFailed] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // RACE GUARD (acceptance): every request is bound to the generation of the
+  // directory it was opened for. Navigating A → B bumps the generation and
+  // aborts the in-flight request; a late page from A can never land under B.
+  const dirGenerationRef = useRef(0);
 
   const current = stack[stack.length - 1];
 
@@ -50,36 +54,43 @@ export default function Files(): React.JSX.Element {
     useCallback(() => {
       if (session.status !== 'authed') return;
       let cancelled = false;
+      const generation = ++dirGenerationRef.current;
+      const controller = new AbortController();
+      setLoading(true);
+      setFailed(false);
       void (async () => {
-        setLoading(true);
-        setFailed(false);
         try {
-          const res = await getDirectoryChildren(current.id, { limit: PAGE_SIZE });
-          if (cancelled) return;
+          const res = await getDirectoryChildren(current.id, { limit: PAGE_SIZE }, controller.signal);
+          if (cancelled || generation !== dirGenerationRef.current) return;
           setFolders(res.folders);
           setFiles(res.files);
           setCursor(res.nextCursor ?? null);
           setHasMore(res.hasMore ?? false);
         } catch {
-          if (!cancelled) setFailed(true);
+          // Aborts belong to the superseding navigation, not to the user.
+          if (!cancelled && !controller.signal.aborted) setFailed(true);
         } finally {
-          if (!cancelled) setLoading(false);
+          if (!cancelled && generation === dirGenerationRef.current) setLoading(false);
         }
       })();
       return () => {
         cancelled = true;
+        controller.abort();
       };
     }, [current.id, session.status, reloadToken]),
   );
 
   async function loadMore(): Promise<void> {
     if (!hasMore || loadingMore || cursor === null) return;
+    const generation = dirGenerationRef.current;
+    const dirId = current.id;
+    const requestedCursor = cursor;
+    const controller = new AbortController();
     setLoadingMore(true);
     try {
-      const res = await getDirectoryChildren(current.id, {
-        limit: PAGE_SIZE,
-        cursor,
-      });
+      const res = await getDirectoryChildren(dirId, { limit: PAGE_SIZE, cursor: requestedCursor }, controller.signal);
+      // The response is only valid if the user never left this directory.
+      if (generation !== dirGenerationRef.current) return;
       setFiles((prev) => {
         const known = new Set(prev.map((f) => f.id));
         return [...prev, ...res.files.filter((f) => !known.has(f.id))];
@@ -87,9 +98,9 @@ export default function Files(): React.JSX.Element {
       setCursor(res.nextCursor ?? null);
       setHasMore(res.hasMore ?? false);
     } catch {
-      setFailed(true);
+      if (generation === dirGenerationRef.current) setFailed(true);
     } finally {
-      setLoadingMore(false);
+      if (generation === dirGenerationRef.current) setLoadingMore(false);
     }
   }
 

@@ -4,6 +4,7 @@
 // GET /api/files/{id}/video (Range-enabled) via media/videoSource.
 
 import { apiGet } from './client.ts';
+import { filePosterPath, filePreviewPath, fileThumbnailPath } from './filePaths.ts';
 import type { ImageSortDirection, ImageSortField } from './images';
 
 export interface VideoItem {
@@ -62,15 +63,15 @@ export function listVideos(
 
 // Small still for grid tiles (never the original).
 export function smallThumbnailPath(fileId: string): string {
-  return `/api/files/${fileId}/thumbnail?size=small`;
+  return fileThumbnailPath(fileId);
 }
 
 // Medium preview for the photo viewer (never the original full-res).
 export function mediumPreviewPath(fileId: string): string {
-  return `/api/files/${fileId}/preview`;
+  return filePreviewPath(fileId);
 }
 
 // Poster path for a video tile/player cover.
 export function posterPath(fileId: string): string {
-  return `/api/files/${fileId}/poster`;
+  return filePosterPath(fileId);
 }

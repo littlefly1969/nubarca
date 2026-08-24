@@ -1,8 +1,15 @@
-// VideoSlide: native expo-video playback over the authenticated Range endpoint.
-// One player per slide instance (the pager only materializes the focused
-// neighbor), released on unmount — audio never outlives the viewer.
+// VideoSlide: one video in the viewer pager, driven by an explicit `active`
+// flag from the parent.
+//
+// LIFECYCLE CONTRACT (acceptance BLOCKER):
+//   * mounting does NOT autoplay — the pager keeps neighbor slides mounted;
+//   * active=true starts playback, active=false pauses it;
+//   * unmount always stops the audio and releases the player;
+//   * keep-awake is held only by the ACTIVE playing video.
+// Two audios can therefore never play at once: only the focused slide is ever
+// allowed to reach the playing state.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   useVideoPlayer,
@@ -10,25 +17,30 @@ import {
   type VideoPlayer,
 } from 'expo-video';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { buildVideoSource } from '../media/videoSource.ts';
 import { ErrorState, LoadingState } from '../ui/states';
 import { useI18n } from '../i18n';
-import type { VideoMediaItem, MediaItem } from '../api/media';
+import type { ViewerSlide } from '../media/viewerSequence';
 
-export function VideoSlide({ item }: { item: MediaItem }): React.JSX.Element {
+export function VideoSlide({
+  slide,
+  active,
+}: {
+  slide: ViewerSlide;
+  active: boolean;
+}): React.JSX.Element {
   const { t } = useI18n();
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const playingRef = useRef(false);
-  // The pager only mounts video slides for kind:'video' items. The source is
-  // memoized on the item id so a re-render (ready/error state changes) can
-  // NEVER hand useVideoPlayer a fresh object identity — expo-video would
-  // otherwise recreate the player and restart playback mid-stream.
-  const source = useMemo(() => buildVideoSource(item as VideoMediaItem), [item]);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
-  const player: VideoPlayer = useVideoPlayer(source?.source ?? null, (p) => {
+  // The source arrives FULLY BUILT on the slide (uri + cookie snapshot), so a
+  // re-render can never hand useVideoPlayer a new object identity.
+  const source = slide.videoSource;
+  const player: VideoPlayer = useVideoPlayer(source ?? null, (p) => {
+    // Mount ≠ autoplay. Playback is owned exclusively by the `active` effect:
+    // an unfocused neighbor must never start making noise.
     p.loop = false;
-    if (source !== null) void p.play();
   });
 
   useEffect(() => {
@@ -42,20 +54,21 @@ export function VideoSlide({ item }: { item: MediaItem }): React.JSX.Element {
         );
       }
     });
+
     const playingSub = player.addListener('playingChange', ({ isPlaying }) => {
-      playingRef.current = isPlaying;
-      if (isPlaying) {
+      // Keep-awake belongs to the ACTIVE playing video only.
+      if (isPlaying && activeRef.current) {
         void activateKeepAwakeAsync();
       } else {
         deactivateKeepAwake();
       }
     });
+
     return () => {
       statusSub.remove();
       playingSub.remove();
       deactivateKeepAwake();
-      // Releasing happens with the player on unmount; pause first so audio
-      // stops even during the teardown window.
+      // Unmount always stops the audio, even during the teardown window.
       try {
         player.pause();
       } catch {
@@ -63,6 +76,22 @@ export function VideoSlide({ item }: { item: MediaItem }): React.JSX.Element {
       }
     };
   }, [player]);
+
+  // Focus drives playback. Pausing on !active is what makes simultaneous
+  // playback impossible while the pager keeps neighbors mounted.
+  useEffect(() => {
+    if (!active) {
+      try {
+        player.pause();
+      } catch {
+        /* released */
+      }
+      return;
+    }
+    if (ready && error === null) {
+      void player.play();
+    }
+  }, [active, ready, error, player]);
 
   if (source === null) {
     return (
@@ -93,7 +122,6 @@ export function VideoSlide({ item }: { item: MediaItem }): React.JSX.Element {
         contentFit="contain"
         allowsFullscreen
         allowsPictureInPicture={false}
-        requiresLinearPlayback={false}
         style={styles.full}
       />
     </View>

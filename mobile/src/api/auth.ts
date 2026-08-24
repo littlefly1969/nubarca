@@ -49,13 +49,7 @@ export function fetchCurrentUser(): Promise<CurrentUser> {
   return apiGet<CurrentUser>('/api/auth/me');
 }
 
-// Best-effort server logout, then unconditional local teardown. Even when the
-// network call fails, the local session must die.
-export async function signOut(): Promise<void> {
-  try {
-    await apiPost<void>('/api/auth/logout', undefined, { allow401: true });
-  } catch {
-    /* the server-side session expires on its own; local state goes now */
-  }
-  await clearPersistedSession();
-}
+// The LOCAL-FIRST logout lives in ../signOut.ts (kept free of SecureStore so
+// node --test can exercise the ordering). The provider wires it with its own
+// teardown callback.
+

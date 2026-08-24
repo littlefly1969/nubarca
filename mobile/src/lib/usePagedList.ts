@@ -16,6 +16,7 @@ export function usePagedList<TItem>(
   snapshot: PagedSnapshot<TItem>;
   refresh: () => Promise<void>;
   loadMore: () => Promise<void>;
+  retryFailed: () => Promise<void>;
   patchItem: (key: string, patch: (item: TItem) => TItem) => void;
   removeItems: (keys: ReadonlySet<string>) => void;
   /** Version counter that increments whenever items change (list re-render). */
@@ -37,15 +38,32 @@ export function usePagedList<TItem>(
     setVersion((v) => v + 1);
   }, [list]);
 
+  // IMMEDIATE PHASES (acceptance fix): the state machine flips its phase
+  // SYNCHRONOUSLY before the first await — syncing right after starting the
+  // promise is what lets the UI show loading/refreshing/loadingMore NOW,
+  // instead of discovering them only when the operation settles.
   const refresh = useCallback(async () => {
-    await list.refresh(fetcher);
+    const pending = list.refresh(fetcher);
+    sync();
+    await pending;
     sync();
   }, [list, fetcher, sync]);
 
   const loadMore = useCallback(async () => {
-    await list.loadMore(fetcher);
+    const pending = list.loadMore(fetcher);
+    sync();
+    await pending;
     sync();
   }, [list, fetcher, sync]);
+
+  // The footer's retry must repeat the operation that ACTUALLY failed:
+  // a failed refresh re-runs refresh (a bare loadMore would be a no-op with
+  // its dropped cursor); a failed loadMore re-fetches the same page.
+  const retryFailed = useCallback(async () => {
+    const target = list.snapshot().retryTarget;
+    if (target === 'loadMore') await loadMore();
+    else await refresh();
+  }, [list, loadMore, refresh]);
 
   const patchItem = useCallback(
     (key: string, patch: (item: TItem) => TItem) => {
@@ -63,7 +81,7 @@ export function usePagedList<TItem>(
     [list, sync],
   );
 
-  return { snapshot, refresh, loadMore, patchItem, removeItems, version };
+  return { snapshot, refresh, loadMore, retryFailed, patchItem, removeItems, version };
 }
 
 export type { FetchPage, Page };
