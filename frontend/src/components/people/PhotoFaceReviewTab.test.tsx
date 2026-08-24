@@ -95,7 +95,7 @@ it('assigning a face also advances within the same photo', async () => {
   });
   await openFirstPhoto();
 
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   await userEvent.click(screen.getByRole('button', { name: 'Alice' }));
 
   await waitFor(() => expect(screen.getByText('Volto 1 di 2')).toBeTruthy());
@@ -118,10 +118,11 @@ it('ignoring every undecided face finishes the photo and opens the next one', as
   });
   await openFirstPhoto();
 
-  // It lives behind the overflow now: it decides a whole photo at once and must
-  // not compete with the per-face decisions.
-  await userEvent.click(screen.getByTestId('face-viewer-more'));
-  await userEvent.click(screen.getByRole('menuitem', { name: 'Ignora tutti i volti non assegnati di questa foto' }));
+  // It sits beside the single ignore — same kind of answer, larger scale — and
+  // it is the one action here that asks first, because it decides several faces
+  // at once.
+  await userEvent.click(screen.getByTestId('face-viewer-ignore-all'));
+  await userEvent.click(await screen.findByTestId('face-viewer-ignore-all-accept'));
 
   // One request, not one per face — and the queue moved to the next photo.
   // IMG_B's name appears twice once it is open (queue row + viewer), which is

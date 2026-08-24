@@ -19,7 +19,7 @@ const people = [
 it('opens the assign menu from a face and searches existing people', async () => {
   installFetchMock({});
   render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={() => {}} /></I18nProvider>);
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   expect(screen.getByRole('dialog', { name: 'Assegna a persona' })).toBeTruthy();
 
   // Search narrows the list.
@@ -35,7 +35,7 @@ it('assigns to an existing person', async () => {
       jsonResponse({ personId: 'p-1', name: 'Alice', faceCount: 4, representative: null }),
   });
   render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={onChanged} /></I18nProvider>);
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   await userEvent.click(screen.getByRole('button', { name: 'Alice' }));
 
   await waitFor(() => {
@@ -53,7 +53,7 @@ it('creates a new person and assigns the face', async () => {
       jsonResponse({ personId: 'p-new', name: 'Carol', faceCount: 1, representative: null }),
   });
   render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={onChanged} /></I18nProvider>);
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   await userEvent.type(screen.getByLabelText('Crea nuova persona'), 'Carol');
   await userEvent.click(screen.getByRole('button', { name: 'Crea e assegna' }));
 
@@ -80,8 +80,9 @@ it('moves and removes an already-assigned face', async () => {
       onChanged={onChanged}
     /></I18nProvider>,
   );
-  // Trigger reflects the assigned state.
-  await userEvent.click(screen.getByRole('button', { name: 'Sposta o rimuovi' }));
+  // The trigger names what it will do, and for a face that already belongs to
+  // somebody that is editing, not assigning.
+  await userEvent.click(screen.getByRole('button', { name: 'Modifica persona' }));
   expect(screen.getByText('Già assegnato a:')).toBeTruthy();
   expect(screen.getByText('Alice')).toBeTruthy();
 
@@ -95,7 +96,7 @@ it('moves and removes an already-assigned face', async () => {
   expect(onChanged).toHaveBeenCalledWith('p-2');
 
   // Reopen → remove from person.
-  await userEvent.click(screen.getByRole('button', { name: 'Sposta o rimuovi' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Modifica persona' }));
   await userEvent.click(screen.getByRole('button', { name: 'Rimuovi dalla persona' }));
   await waitFor(() =>
     expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/faces/face-9/assignment'))).toBe(true),
@@ -105,7 +106,7 @@ it('moves and removes an already-assigned face', async () => {
 it('opens as a portal dialog and closes on Escape', async () => {
   installFetchMock({});
   render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={() => {}} /></I18nProvider>);
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   const dialog = screen.getByRole('dialog', { name: 'Assegna a persona' });
   // Rendered through a portal onto document.body (not confined to a parent container).
   expect(dialog.closest('.assign-modal-backdrop')).toBeTruthy();
@@ -118,9 +119,52 @@ it('opens as a portal dialog and closes on Escape', async () => {
 it('renders no storage internals', async () => {
   installFetchMock({});
   const { container } = render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={() => {}} /></I18nProvider>);
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
   const html = container.innerHTML;
   for (const needle of ['blobObjectId', 'storageKey', 'sha256', '/storage/objects/', 'embeddingBytes']) {
     expect(html).not.toContain(needle);
   }
+});
+
+// Controlled mode. The face viewer opens this dialog from a double-click on the
+// face box, which is not a click on the trigger — and synthesising one would
+// work until the trigger is disabled, moved, or not rendered at all, then fail
+// silently in a way nothing can assert on.
+it('opens and closes from the outside when the caller owns `open`', async () => {
+  const onOpenChange = vi.fn();
+  installFetchMock({});
+  const { rerender } = render(
+    <I18nProvider><AssignToPersonMenu
+      faceId="face-9"
+      people={people}
+      open={false}
+      onOpenChange={onOpenChange}
+      onChanged={vi.fn()}
+    /></I18nProvider>,
+  );
+  expect(screen.queryByRole('dialog', { name: 'Assegna a persona' })).toBeNull();
+
+  rerender(
+    <I18nProvider><AssignToPersonMenu
+      faceId="face-9"
+      people={people}
+      open
+      onOpenChange={onOpenChange}
+      onChanged={vi.fn()}
+    /></I18nProvider>,
+  );
+  expect(screen.getByRole('dialog', { name: 'Assegna a persona' })).toBeTruthy();
+
+  // Closing REPORTS rather than deciding: the caller owns the state, so the
+  // dialog cannot close itself behind the caller's back.
+  await userEvent.click(screen.getByRole('button', { name: 'Annulla' }));
+  expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it('still opens from its own trigger when nobody controls it', async () => {
+  installFetchMock({});
+  render(<I18nProvider><AssignToPersonMenu faceId="face-9" people={people} onChanged={vi.fn()} /></I18nProvider>);
+
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
+  expect(screen.getByRole('dialog', { name: 'Assegna a persona' })).toBeTruthy();
 });
