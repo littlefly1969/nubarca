@@ -8,7 +8,7 @@ is built is described by `ARCHITECTURE.md`.
 ## Baseline
 
 - Release: `0.3.0` (server and web)
-- NubArca TV: `1.0.9`, `versionCode` 11, OTA runtime `nubarca-tv-native-10`
+- NubArca TV: `1.0.10`, `versionCode` 12, OTA runtime `nubarca-tv-native-11`
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
