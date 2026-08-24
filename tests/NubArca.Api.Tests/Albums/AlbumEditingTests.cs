@@ -736,11 +736,13 @@ public sealed class AlbumEditingTests : IDisposable
         return detail.GetProperty("version").GetInt32();
     }
 
+    // The recipient's item endpoint answers a PAGE (`items` + `nextCursor` +
+    // counts); the curation assertions here are all about the items.
     private static async Task<List<JsonElement>> SharedItemsAsync(HttpClient client, Guid albumId)
     {
-        var items = await client.GetFromJsonAsync<JsonElement>(
+        var page = await client.GetFromJsonAsync<JsonElement>(
             $"/api/shared-albums/{albumId}/items");
-        return items.EnumerateArray().ToList();
+        return page.GetProperty("items").EnumerateArray().ToList();
     }
 
     private static async Task<List<Guid>> SharedItemIdsAsync(HttpClient client, Guid albumId) =>

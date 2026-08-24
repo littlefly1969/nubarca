@@ -135,8 +135,14 @@ public interface IAlbumSharingService
     Task<SharedAlbumDetail> GetSharedAlbumAsync(
         AlbumAccessGrant grant, CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<SharedAlbumItem>> ListSharedItemsAsync(
-        AlbumAccessGrant grant, CancellationToken cancellationToken = default);
+    // One page of the album's items in its curated order, plus the whole
+    // album's per-kind counts. Null means the request carried a cursor that does
+    // not parse or was issued for a different kind — the endpoint answers 400;
+    // an empty album is an empty page, not null.
+    Task<SharedAlbumItemsPage?> ListSharedItemsAsync(
+        AlbumAccessGrant grant,
+        SharedAlbumItemQuery query,
+        CancellationToken cancellationToken = default);
 }
 
 // What a bulk contribution actually did. `Counts` is the only part a client

@@ -238,6 +238,60 @@ public sealed record SharedAlbumItem(
     // belongs to the album owner's moderation surface alone.
     bool CanWithdraw);
 
+// The media kinds a recipient may slice a shared album by.
+//
+// This is the ONLY dimension a shared album can be filtered on, and it is safe
+// precisely because it is nothing new: `Kind` is already on every
+// SharedAlbumItem, derived from the server-detected MediaCategory. Filename
+// search, People, capture date, GPS, favourites, ratings, library folders and
+// every other owner-library filter are deliberately absent — a filter that
+// needed owner-private metadata to answer would be that metadata, leaked one
+// question at a time.
+public static class SharedAlbumItemKinds
+{
+    public const string All = "all";
+    public const string Image = "image";
+    public const string Video = "video";
+
+    public static bool IsKnown(string? value) =>
+        value is All or Image or Video;
+
+    // Absent/empty means "all", which is what a client that has never heard of
+    // the parameter sends. Anything else unknown is a refusal, not a default:
+    // silently widening a misspelled filter would show media the caller did not
+    // ask for.
+    public static bool TryNormalize(string? value, out string kind)
+    {
+        kind = string.IsNullOrWhiteSpace(value) ? All : value.Trim().ToLowerInvariant();
+        return IsKnown(kind);
+    }
+}
+
+// One request for a page of a shared album's items. `Limit` is already clamped
+// by the endpoint — the service does not re-interpret it.
+public sealed record SharedAlbumItemQuery(string Kind, string? Cursor, int Limit)
+{
+    public const int DefaultLimit = 120;
+    public const int MaxLimit = 500;
+
+    public static SharedAlbumItemQuery All() => new(SharedAlbumItemKinds.All, null, DefaultLimit);
+}
+
+// One page of a shared album, in its curated order.
+//
+// The three counts describe the WHOLE album regardless of the active kind, so
+// the recipient's tabs can be labelled without a second request and without
+// each tab meaning a different total. They count exactly what
+// ListSharedItemsAsync would serve — a member's own unavailable media, a
+// withdrawn contribution and a vaulted original are outside all three.
+public sealed record SharedAlbumItemsPage(
+    IReadOnlyList<SharedAlbumItem> Items,
+    // Null means "this was the last page", never "ask again".
+    string? NextCursor,
+    int Total,
+    int PhotoCount,
+    int VideoCount);
+
 // An invitation the caller has been sent and has not answered. Shows enough to
 // decide (who, what album, how many items, what it permits) and nothing more —
 // no media URLs, because a pending invitation grants no access to the content.
