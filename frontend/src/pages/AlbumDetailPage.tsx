@@ -185,6 +185,12 @@ export function AlbumDetailPage() {
         identity={identity}
         onIdentityChange={onIdentityChange}
         searchPlaceholder={t('mediaWs.searchAlbum')}
+        // Album Play, the same control a recipient gets on a shared album. It
+        // plays the CURRENT result — tab, search and filters included — and
+        // mutates nothing, which is what makes it safe to offer on both sides.
+        // It is not Party and it is not Show-on-TV: those stay in Settings,
+        // where publishing decisions belong.
+        showPlay
       />
 
       {shareOpen && (

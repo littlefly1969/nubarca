@@ -230,11 +230,45 @@ export async function getSharedAlbum(
   return api<SharedAlbumDetail>(`/api/shared-albums/${albumId}`, { signal });
 }
 
+// The only dimension a shared album can be sliced on. It is answered from the
+// media kind the item shape already carries — a filter that needed owner-private
+// metadata would BE that metadata, leaked one question at a time.
+export type SharedAlbumItemKind = 'all' | 'image' | 'video';
+
+export interface SharedAlbumItemsPage {
+  items: SharedAlbumItem[];
+  // Null means "that was the last page", never "ask again".
+  nextCursor: string | null;
+  // The WHOLE album, whatever kind is being browsed, so a tab label does not
+  // change meaning with the tab that is open.
+  total: number;
+  photoCount: number;
+  videoCount: number;
+}
+
+export interface SharedAlbumItemsQuery {
+  kind?: SharedAlbumItemKind;
+  cursor?: string | null;
+  limit?: number;
+}
+
+// One page of a shared album in its curated order. The cursor is opaque and is
+// bound server-side to the kind it was issued for: pass back exactly what the
+// previous page returned, never a hand-built one.
 export async function listSharedAlbumItems(
   albumId: string,
+  query: SharedAlbumItemsQuery = {},
   signal?: AbortSignal,
-): Promise<SharedAlbumItem[]> {
-  return api<SharedAlbumItem[]>(`/api/shared-albums/${albumId}/items`, { signal });
+): Promise<SharedAlbumItemsPage> {
+  const params = new URLSearchParams();
+  if (query.kind && query.kind !== 'all') params.set('kind', query.kind);
+  if (query.cursor) params.set('cursor', query.cursor);
+  if (query.limit !== undefined) params.set('limit', String(query.limit));
+  const suffix = params.toString();
+  return api<SharedAlbumItemsPage>(
+    `/api/shared-albums/${albumId}/items${suffix ? `?${suffix}` : ''}`,
+    { signal },
+  );
 }
 
 export async function listAlbumInvitations(signal?: AbortSignal): Promise<AlbumInvitation[]> {

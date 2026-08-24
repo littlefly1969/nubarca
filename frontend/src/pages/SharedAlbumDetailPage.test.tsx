@@ -3,12 +3,19 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { SharedAlbumDetailPage } from './SharedAlbumDetailPage';
-import { AuthedWrapper, errorResponse, installFetchMock, jsonResponse } from '../test-utils';
+import {
+  AuthedWrapper, errorResponse, installFetchMock, jsonResponse, sharedItemsPage,
+} from '../test-utils';
 
-// The shared wall lays out with the same justified geometry as the library
-// wall, which needs a measured container width. jsdom reports 0 for every rect,
-// so stub a width and a no-op ResizeObserver — the same convention
-// MediaWorkspace.test.tsx uses — otherwise the wall stays pre-measurement.
+// The recipient's album, browsed with the SAME language as the owner's — kind
+// tabs, one justified wall, one full-screen viewer, one Play — over a completely
+// different authority. Every test here is about one of those two halves: the
+// experience being the same, or the authority not being.
+
+// The wall lays out with the justified geometry the library wall uses, which
+// needs a measured container width. jsdom reports 0 for every rect, so stub a
+// width and a no-op ResizeObserver — the same convention MediaWorkspace.test.tsx
+// uses — otherwise the wall stays pre-measurement.
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
     () => ({
@@ -33,22 +40,53 @@ const ALBUM = {
   role: 'viewer' as const,
   allowOriginalDownload: false,
   itemCount: 2,
+  version: 1,
+  canEdit: false,
 };
 
-function item(over: Partial<Record<string, unknown>> = {}) {
+interface Item {
+  fileItemId: string;
+  kind: 'image' | 'video';
+  thumbnailUrl: string;
+  previewUrl: string;
+  posterUrl: string | null;
+  videoUrl: string | null;
+  downloadUrl: string | null;
+  albumItemId: string;
+  width: number | null;
+  height: number | null;
+  addedAt: string;
+  canWithdraw: boolean;
+}
+
+function item(over: Partial<Item> = {}): Item {
+  const id = over.fileItemId ?? 'f1';
   return {
-    fileItemId: 'f1',
+    fileItemId: id,
     kind: 'image',
-    thumbnailUrl: '/api/shared-albums/alb-1/media/f1/thumbnail',
-    previewUrl: '/api/shared-albums/alb-1/media/f1/preview',
+    thumbnailUrl: `/api/shared-albums/alb-1/media/${id}/thumbnail`,
+    previewUrl: `/api/shared-albums/alb-1/media/${id}/preview`,
     posterUrl: null,
     videoUrl: null,
     downloadUrl: null,
+    albumItemId: `ai-${id}`,
     width: 4000,
     height: 3000,
     addedAt: '2026-07-01T00:00:00Z',
+    canWithdraw: false,
     ...over,
   };
+}
+
+function video(over: Partial<Item> = {}): Item {
+  const id = over.fileItemId ?? 'v1';
+  return item({
+    fileItemId: id,
+    kind: 'video',
+    posterUrl: `/api/shared-albums/alb-1/media/${id}/poster`,
+    videoUrl: `/api/shared-albums/alb-1/media/${id}/video`,
+    ...over,
+  });
 }
 
 function renderPage(albumId = 'alb-1') {
@@ -63,14 +101,22 @@ function renderPage(albumId = 'alb-1') {
   );
 }
 
-function mockAlbum(items: unknown[], album: Record<string, unknown> = ALBUM) {
-  installFetchMock({
+// The kind tab drives a server request, so the mock answers per kind exactly as
+// the endpoint does.
+function mockAlbum(items: Item[], album: Record<string, unknown> = ALBUM) {
+  return installFetchMock({
     'GET /api/shared-albums/alb-1': () => jsonResponse(album),
-    'GET /api/shared-albums/alb-1/items': () => jsonResponse(items),
+    'GET /api/shared-albums/alb-1/items': (req) => {
+      const kind = new URL(req.url, 'http://x').searchParams.get('kind');
+      const slice = kind === null ? items : items.filter((i) => i.kind === kind);
+      return jsonResponse({ ...(sharedItemsPage(slice) as object), total: items.length,
+        photoCount: items.filter((i) => i.kind === 'image').length,
+        videoCount: items.filter((i) => i.kind === 'video').length });
+    },
   });
 }
 
-describe('SharedAlbumDetailPage', () => {
+describe('SharedAlbumDetailPage identity', () => {
   it('states that the album is live and owned by somebody else', async () => {
     mockAlbum([item()]);
     renderPage();
@@ -79,6 +125,46 @@ describe('SharedAlbumDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Vacanze' })).toBeInTheDocument();
   });
 
+  it('shows a revoked/removed share as unavailable, not as an error', async () => {
+    installFetchMock({
+      'GET /api/shared-albums/alb-1': () => errorResponse(404),
+      'GET /api/shared-albums/alb-1/items': () => errorResponse(404),
+    });
+    renderPage();
+
+    expect(await screen.findByTestId('shared-album-unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /condivisi con me/i })).toBeInTheDocument();
+  });
+
+  it('sends the way back to the shared collection of the one Albums page', async () => {
+    mockAlbum([item()]);
+    renderPage();
+
+    const back = await screen.findByRole('link', { name: /condivisi con me/i });
+    expect(back).toHaveAttribute('href', '/albums?scope=shared');
+  });
+
+  it('offers a retry on a server error', async () => {
+    installFetchMock({
+      'GET /api/shared-albums/alb-1': () => errorResponse(500),
+      'GET /api/shared-albums/alb-1/items': () => errorResponse(500),
+    });
+    renderPage();
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /riprova/i })).toBeInTheDocument();
+  });
+
+  it('shows an empty album without breaking', async () => {
+    mockAlbum([]);
+    renderPage();
+
+    expect(await screen.findByTestId('shared-album-empty')).toBeInTheDocument();
+  });
+});
+
+describe('SharedAlbumDetailPage wall', () => {
   it('lays the wall out justified from each item’s real display ratio', async () => {
     mockAlbum([item(), item({ fileItemId: 'f2', width: 3000, height: 4000 })]);
     renderPage();
@@ -89,7 +175,7 @@ describe('SharedAlbumDetailPage', () => {
     // Justified: both tiles share a row height, and the landscape 4:3 tile is
     // wider than the portrait 3:4 one — the layout honours the real ratio
     // (EXIF quarter-turns already applied server-side) rather than cropping to
-    // a uniform cell.
+    // a uniform cell. The SAME geometry the owner's wall uses.
     const box = (el: HTMLElement) => ({
       w: parseFloat(el.style.width), h: parseFloat(el.style.height),
     });
@@ -112,27 +198,84 @@ describe('SharedAlbumDetailPage', () => {
     }
   });
 
+  it('carries no file name into the wall or the viewer', async () => {
+    // The item shape has no name at all; this asserts that nothing here invents
+    // one from an id or a URL segment.
+    mockAlbum([item()]);
+    renderPage();
+
+    await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
+    const title = await screen.findByTestId('media-viewer-title');
+    expect(title.textContent).toMatch(/^Elemento 1 di 1$/);
+  });
+});
+
+describe('SharedAlbumDetailPage kind filter', () => {
+  it('offers All / Photos / Videos with the album’s own counts', async () => {
+    mockAlbum([item(), video()]);
+    renderPage();
+
+    // Wait for the first page: the tabs render before it lands, with the count
+    // slot reserved and empty, so asserting too early reads the placeholder.
+    expect(await screen.findAllByTestId('shared-media-tile')).toHaveLength(2);
+    expect(screen.getByTestId('media-kind-count-all')).toHaveTextContent('2');
+    expect(screen.getByTestId('media-kind-count-image')).toHaveTextContent('1');
+    expect(screen.getByTestId('media-kind-count-video')).toHaveTextContent('1');
+  });
+
+  it('asks the server for the chosen kind rather than filtering locally', async () => {
+    const spy = mockAlbum([item(), video()]);
+    renderPage();
+
+    await userEvent.click(await screen.findByTestId('media-kind-tab-video'));
+
+    await vi.waitFor(() => {
+      expect(spy.calls.some((c) => c.url.includes('kind=video'))).toBe(true);
+    });
+    const tiles = await screen.findAllByTestId('shared-media-tile');
+    expect(tiles).toHaveLength(1);
+    expect(tiles[0].querySelector('img'))
+      .toHaveAttribute('src', '/api/shared-albums/alb-1/media/v1/poster');
+  });
+});
+
+describe('SharedAlbumDetailPage viewer', () => {
   it('opens the viewer and walks it with the arrow keys', async () => {
-    mockAlbum([item(), item({ fileItemId: 'f2', previewUrl: '/api/shared-albums/alb-1/media/f2/preview' })]);
+    mockAlbum([item(), item({ fileItemId: 'f2' })]);
     renderPage();
 
     await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
 
-    const lightbox = await screen.findByTestId('shared-lightbox');
-    expect(lightbox).toHaveTextContent('1 / 2');
-    expect(screen.getByTestId('shared-lightbox-image'))
+    await screen.findByTestId('media-viewer');
+    expect(screen.getByTestId('media-viewer-image'))
       .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f1/preview');
 
     await userEvent.keyboard('{ArrowRight}');
-    expect(screen.getByTestId('shared-lightbox-image'))
+    expect(screen.getByTestId('media-viewer-image'))
       .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f2/preview');
 
     await userEvent.keyboard('{ArrowLeft}');
-    expect(screen.getByTestId('shared-lightbox-image'))
+    expect(screen.getByTestId('media-viewer-image'))
       .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f1/preview');
 
     await userEvent.keyboard('{Escape}');
-    expect(screen.queryByTestId('shared-lightbox')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('media-viewer')).not.toBeInTheDocument();
+  });
+
+  it('uses the URLs the server supplied and asks for no metadata document', async () => {
+    const spy = mockAlbum([item()]);
+    renderPage();
+
+    await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
+    await screen.findByTestId('media-viewer');
+
+    // The owner's metadata endpoint is not reachable from a share, and the
+    // recipient's viewer does not even try: no request, and no details drawer.
+    for (const call of spy.calls) {
+      expect(call.url).not.toContain('/api/files/');
+      expect(call.url).not.toContain('/metadata');
+    }
+    expect(screen.queryByTestId('viewer-details-toggle')).not.toBeInTheDocument();
   });
 
   it('offers no download when the membership does not permit originals', async () => {
@@ -141,7 +284,7 @@ describe('SharedAlbumDetailPage', () => {
 
     await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
 
-    expect(await screen.findByTestId('shared-lightbox')).toBeInTheDocument();
+    expect(await screen.findByTestId('media-viewer')).toBeInTheDocument();
     expect(screen.queryByTestId('shared-download')).not.toBeInTheDocument();
   });
 
@@ -164,12 +307,7 @@ describe('SharedAlbumDetailPage', () => {
     const VIDEO = '/api/shared-albums/alb-1/media/v1/video';
     const spy = installFetchMock({
       'GET /api/shared-albums/alb-1': () => jsonResponse(ALBUM),
-      'GET /api/shared-albums/alb-1/items': () => jsonResponse([item({
-        fileItemId: 'v1',
-        kind: 'video',
-        posterUrl: '/api/shared-albums/alb-1/media/v1/poster',
-        videoUrl: VIDEO,
-      })]),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([video()])),
       // The shared /video route speaks the SAME adaptive contract as the
       // owner's: a master playlist when the ladder is published.
       [`GET ${VIDEO}`]: () => new Response('#EXTM3U', {
@@ -197,40 +335,71 @@ describe('SharedAlbumDetailPage', () => {
       expect(call.url).not.toContain('/api/files/');
     }
   });
+});
 
-  it('shows a revoked/removed share as unavailable, not as an error', async () => {
-    installFetchMock({
-      'GET /api/shared-albums/alb-1': () => errorResponse(404),
-      'GET /api/shared-albums/alb-1/items': () => errorResponse(404),
+describe('SharedAlbumDetailPage Play', () => {
+  it('starts the album from the first item', async () => {
+    mockAlbum([item(), item({ fileItemId: 'f2' })]);
+    renderPage();
+
+    await userEvent.click(await screen.findByTestId('album-play'));
+
+    expect(await screen.findByTestId('media-viewer-image'))
+      .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f1/preview');
+    // A run in progress can be stopped from inside the viewer.
+    expect(screen.getByTestId('viewer-play-stop')).toBeInTheDocument();
+  });
+
+  it('advances a photo on its own and stops at the last item', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      mockAlbum([item(), item({ fileItemId: 'f2' })]);
+      renderPage();
+
+      const play = await screen.findByTestId('album-play');
+      await userEvent.click(play);
+      await screen.findByTestId('media-viewer-image');
+
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(screen.getByTestId('media-viewer-image'))
+        .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f2/preview');
+
+      // The end: the run stops on the last item rather than closing the viewer
+      // out from under the person watching, and offers to run it again.
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(await screen.findByTestId('viewer-play-replay')).toBeInTheDocument();
+      expect(screen.getByTestId('media-viewer-image'))
+        .toHaveAttribute('src', '/api/shared-albums/alb-1/media/f2/preview');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('plays the FILTERED sequence, never the hidden rest of the album', async () => {
+    mockAlbum([item(), item({ fileItemId: 'f2' }), video()]);
+    renderPage();
+
+    // Videos only, then Play: the first thing shown must be the video, not the
+    // album's first photo.
+    await userEvent.click(await screen.findByTestId('media-kind-tab-video'));
+    await vi.waitFor(async () => {
+      expect(await screen.findAllByTestId('shared-media-tile')).toHaveLength(1);
     });
-    renderPage();
+    await userEvent.click(screen.getByTestId('album-play'));
 
-    expect(await screen.findByTestId('shared-album-unavailable')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /condivisi con me/i })).toBeInTheDocument();
+    await screen.findByTestId('media-viewer');
+    // The sequence is the ONE video, not the album's three items: no photo is
+    // on screen, and the viewer's own position line says how long the sequence
+    // it is playing actually is.
+    expect(screen.queryByTestId('media-viewer-image')).not.toBeInTheDocument();
+    expect(screen.getByTestId('media-viewer-title')).toHaveTextContent('Elemento 1 di 1');
   });
+});
 
-  it('offers a retry on a server error', async () => {
-    installFetchMock({
-      'GET /api/shared-albums/alb-1': () => errorResponse(500),
-      'GET /api/shared-albums/alb-1/items': () => errorResponse(500),
-    });
-    renderPage();
-
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /riprova/i })).toBeInTheDocument();
-  });
-
-  it('shows an empty album without breaking', async () => {
-    mockAlbum([]);
-    renderPage();
-
-    expect(await screen.findByTestId('shared-album-empty')).toBeInTheDocument();
-  });
-
-  // SHARE-COPY-01: giving an album away is an OWNER-only act. An Editor may
-  // curate the album, but curation is not redistribution — no role reaches this
-  // affordance, and it must not exist even as a disabled control.
+describe('SharedAlbumDetailPage authority', () => {
+  // Giving an album away is an OWNER-only act. An Editor may curate the album,
+  // but curation is not redistribution — no role reaches this affordance, and it
+  // must not exist even as a disabled control.
   it.each(['viewer', 'contributor', 'editor'])(
     'never offers "send a copy" to a %s',
     async (role) => {
@@ -255,5 +424,37 @@ describe('SharedAlbumDetailPage', () => {
     for (const forbidden of ['/api/files/', '/people', '/media?', 'Simili', 'Persone']) {
       expect(html).not.toContain(forbidden);
     }
+  });
+
+  it('offers a Viewer no owner mutation of any kind', async () => {
+    mockAlbum([item()]);
+    renderPage();
+
+    await userEvent.click((await screen.findAllByTestId('shared-media-tile'))[0]);
+    await screen.findByTestId('media-viewer');
+
+    for (const forbidden of [
+      'media-select-control', 'ws-selection-bar', 'album-open-settings', 'album-open-share',
+      'shared-album-edit', 'shared-album-curate', 'shared-album-add', 'album-delete-btn',
+      'viewer-details-toggle', 'shared-withdraw',
+    ]) {
+      expect(screen.queryByTestId(forbidden)).not.toBeInTheDocument();
+    }
+  });
+
+  it('offers curation only when the SERVER says this caller may edit', async () => {
+    mockAlbum([item()], { ...ALBUM, role: 'editor', canEdit: false });
+    renderPage();
+
+    await screen.findByTestId('shared-album-page');
+    // The label says Editor; the server said no. The server wins.
+    expect(screen.queryByTestId('shared-album-edit')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shared-album-curate')).not.toBeInTheDocument();
+
+    cleanup();
+    mockAlbum([item()], { ...ALBUM, role: 'editor', canEdit: true });
+    renderPage();
+    expect(await screen.findByTestId('shared-album-edit')).toBeInTheDocument();
+    expect(screen.getByTestId('shared-album-curate')).toBeInTheDocument();
   });
 });

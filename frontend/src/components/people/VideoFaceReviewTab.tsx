@@ -10,7 +10,7 @@ import {
   type VideoFaceTrackReview,
   type VideoFaceTrackSuggestion,
 } from '@nubarca/api-client';
-import { MediaViewer, type MediaViewerItem } from '../MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from '../MediaViewer';
 import { videoPosterUrl } from '../files/types';
 import { useI18n } from '../../i18n';
 import { formatTrackInterval } from './videoTrackTime';
@@ -77,6 +77,7 @@ export function VideoFaceReviewTab({ invalidateAuth }: { invalidateAuth: () => v
     setViewer({
       items: [{
         id: track.fileItemId,
+        sources: OWNER_FILE_SOURCES,
         name: track.name,
         displayName: track.name,
         kind: 'video',

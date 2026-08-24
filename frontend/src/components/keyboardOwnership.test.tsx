@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse, type MockHandler } from '../test-utils';
 import { FaceContextViewer } from './people/FaceContextViewer';
 import { ClusterAssignDialog } from './people/ClusterAssignDialog';
-import { MediaViewer, type MediaViewerItem } from './MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from './MediaViewer';
 import { AlbumPickerModal } from '../gallery/AlbumPickerModal';
 import { isEditableKeyboardTarget, isModalOwnedKey, ownsKeyboardEvent } from './keyboardOwnership';
 
@@ -119,7 +119,8 @@ describe('face viewer under an assign modal', () => {
 
 describe('media viewer under the album picker', () => {
   const photo: MediaViewerItem = {
-    id: 'f1', name: 'IMG_1248.JPG', displayName: 'IMG_1248.JPG', kind: 'image', sizeBytes: 1000,
+    id: 'f1', sources: OWNER_FILE_SOURCES, name: 'IMG_1248.JPG',
+    displayName: 'IMG_1248.JPG', kind: 'image', sizeBytes: 1000,
   };
 
   function metadataDoc() {

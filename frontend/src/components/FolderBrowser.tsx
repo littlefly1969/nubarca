@@ -15,7 +15,7 @@ import { useAppScrollViewport } from './appScroll';
 import { formatSize } from './format';
 import { CreateFolderForm } from './CreateFolderForm';
 import { UploadPanel } from './UploadPanel';
-import { MediaViewer, type MediaViewerItem } from './MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from './MediaViewer';
 import { FilesToolbar } from './files/FilesToolbar';
 import { FileItemCard } from './files/FileItemCard';
 import { FileItemRow } from './files/FileItemRow';
@@ -118,7 +118,15 @@ export function FolderBrowser() {
           // The file browser is a FILE surface, not a media gallery: it shows
           // the logical file name, never a gallery title. Passing the name as
           // the display name keeps that deliberate.
-          return kind ? { id: file.id, name: file.name, displayName: file.name, kind } : null;
+          return kind
+            ? {
+              id: file.id,
+              sources: OWNER_FILE_SOURCES,
+              name: file.name,
+              displayName: file.name,
+              kind,
+            }
+            : null;
         })
         .filter((m): m is MediaViewerItem => m !== null),
     [listing.files],

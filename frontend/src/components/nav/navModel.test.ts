@@ -15,23 +15,25 @@ describe('primary navigation model', () => {
   // before roles existed.
   it('keeps every normal-user destination for a Member', () => {
     expect(allRoutes(MEMBER_PERMISSIONS)).toEqual([
-      '/', '/media', '/albums', '/shared-albums', '/people',
+      '/', '/media', '/albums', '/people',
       '/lab', '/shares', '/cloud-functions', '/private', '/trash',
     ]);
   });
 
-  // SHARE-ALBUM-01: albums other people own are their OWN destination, next to
-  // — never merged into — the user's own /albums. Mixing them would make "whose
-  // album is this" a matter of reading a badge.
-  it('keeps albums shared with the user separate from their own albums', () => {
+  // An album is an album. Albums the user owns and albums other people have
+  // shared with them are ONE destination, because putting somebody else's album
+  // in a different part of the product made it read as a different feature. The
+  // collection is stated on every card and addressed by /albums?scope=shared —
+  // never by a second primary entry.
+  it('offers ONE albums destination, not a second one for shared albums', () => {
     const routes = allRoutes(MEMBER_PERMISSIONS);
     expect(routes).toContain('/albums');
-    expect(routes).toContain('/shared-albums');
-    const shared = buildNavGroups({ permissions: MEMBER_PERMISSIONS })
-      .flatMap((g) => g.items).find((i) => i.to === '/shared-albums')!;
-    expect(shared.labelKey).toBe('nav.sharedAlbums');
-    // No `end`: /shared-albums/:albumId keeps the entry active.
-    expect(shared.end).toBeUndefined();
+    expect(routes).not.toContain('/shared-albums');
+    const albums = buildNavGroups({ permissions: MEMBER_PERMISSIONS })
+      .flatMap((g) => g.items).find((i) => i.to === '/albums')!;
+    expect(albums.labelKey).toBe('nav.albums');
+    // No `end`: /albums/:albumId keeps the entry active.
+    expect(albums.end).toBeUndefined();
   });
 
   // UX-02: Plates and Aesthetics are sections of one Laboratory workspace,
@@ -94,10 +96,10 @@ describe('primary navigation model', () => {
   // ---------------------------------------------------------- permissions
 
   it('leaves the core personal cloud untouched for a Restricted user', () => {
-    // Files, media, albums, shared albums, shares and trash are not gated at
-    // all — which is why Restricted needs no permission to keep them.
+    // Files, media, albums, shares and trash are not gated at all — which is
+    // why Restricted needs no permission to keep them.
     expect(allRoutes(RESTRICTED)).toEqual([
-      '/', '/media', '/albums', '/shared-albums', '/shares', '/trash',
+      '/', '/media', '/albums', '/shares', '/trash',
     ]);
   });
 
