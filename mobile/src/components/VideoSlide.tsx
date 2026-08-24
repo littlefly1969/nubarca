@@ -2,7 +2,7 @@
 // One player per slide instance (the pager only materializes the focused
 // neighbor), released on unmount — audio never outlives the viewer.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   useVideoPlayer,
@@ -20,8 +20,11 @@ export function VideoSlide({ item }: { item: MediaItem }): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const playingRef = useRef(false);
-  // The pager only mounts video slides for kind:'video' items.
-  const source = buildVideoSource(item as VideoMediaItem);
+  // The pager only mounts video slides for kind:'video' items. The source is
+  // memoized on the item id so a re-render (ready/error state changes) can
+  // NEVER hand useVideoPlayer a fresh object identity — expo-video would
+  // otherwise recreate the player and restart playback mid-stream.
+  const source = useMemo(() => buildVideoSource(item as VideoMediaItem), [item]);
 
   const player: VideoPlayer = useVideoPlayer(source?.source ?? null, (p) => {
     p.loop = false;

@@ -7,6 +7,7 @@
 // later without touching any screen.
 
 import { authenticatedSource, type AuthenticatedSource } from './imageSource.ts';
+import { fileVideoPath } from '../api/filePaths.ts';
 import type { VideoMediaItem } from '../api/media.ts';
 
 export interface VideoPlaybackSource {
@@ -19,7 +20,7 @@ export interface VideoPlaybackSource {
 }
 
 export function videoFileVideoPath(fileId: string): string {
-  return `/api/files/${fileId}/video`;
+  return fileVideoPath(fileId);
 }
 
 // Build the expo-video source for one video item, or null when there is no

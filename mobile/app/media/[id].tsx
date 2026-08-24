@@ -23,6 +23,11 @@ import { VideoSlide } from '../../src/components/VideoSlide';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import type { MediaItem, VideoMediaItem, ImageMediaItem } from '../../src/api/media.ts';
+import {
+  filePosterPath,
+  filePreviewPath,
+  fileThumbnailPath,
+} from '../../src/api/filePaths';
 import { colors, spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -54,8 +59,8 @@ export default function MediaRoute(): React.JSX.Element {
       takenAt: null,
       thumbnailUrl:
         params.kind === 'video'
-          ? `/api/files/${params.id}/poster`
-          : `/api/files/${params.id}/thumbnail?size=small`,
+          ? filePosterPath(params.id)
+          : fileThumbnailPath(params.id),
       occurrenceCount: 1,
       hasDuplicates: false,
     };
@@ -137,7 +142,7 @@ export default function MediaRoute(): React.JSX.Element {
         renderItem={({ item }) =>
           item.kind === 'image' ? (
             <ImageSlide
-              path={`/api/files/${item.id}/preview`}
+              path={filePreviewPath(item.id)}
               name={item.displayName}
               onToggle={() => setChromeVisible((v) => !v)}
             />
