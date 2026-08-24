@@ -356,11 +356,23 @@ describe('double-clicking a face box', () => {
   });
 
   it('double-clicking ANOTHER face waits for that face before opening', async () => {
-    // The dialog must describe the face that was clicked. Opening it against
-    // the previous context would offer "Già assegnato a Alice" for a stranger.
+    // The race this defends. The dialog must describe the face that was
+    // CLICKED; opening it while the previous face is still the loaded context
+    // offers "Già assegnato a Alice" for a stranger, and the reviewer files
+    // somebody else's face under Alice.
+    //
+    // The second context is deliberately held open, because a mock that
+    // resolves immediately hides the bug entirely: React batches the selection
+    // and the open, the fetch settles before anything is asserted, and a viewer
+    // that opens the dialog straight away looks identical to one that waits.
+    let releaseFaceTwo: () => void = () => {};
+    const faceTwoArrives = new Promise<void>((resolve) => { releaseFaceTwo = resolve; });
     installFetchMock({
       'GET /api/people/faces/f-1/context': context('f-1', 'Alice'),
-      'GET /api/people/faces/f-2/context': context('f-2'), // unassigned
+      'GET /api/people/faces/f-2/context': async (req) => {
+        await faceTwoArrives;
+        return context('f-2')(req); // unassigned
+      },
       'GET /api/people': () => jsonResponse([]),
     });
     renderViewer(['f-1', 'f-2'], 0);
@@ -368,11 +380,19 @@ describe('double-clicking a face box', () => {
 
     fireEvent.doubleClick(screen.getByRole('button', { name: 'Altri volti nella foto' }));
 
-    // f-2 is unassigned, so the dialog that opens is the ASSIGN one — and it
-    // carries no trace of the person f-1 belonged to.
+    // While f-2 is still in flight NO dialog exists. A dialog here would be
+    // f-1's, describing a face the reviewer did not click.
+    await waitFor(() => expect(screen.queryByTestId('face-viewer-file-name')).toBeTruthy());
+    expect(screen.queryByRole('dialog', { name: 'Assegna a persona' })).toBeNull();
+
+    releaseFaceTwo();
+
+    // Now it opens, for f-2 — and carries no trace of the person f-1 belonged to.
     const dialog = await screen.findByRole('dialog', { name: 'Assegna a persona' });
     expect(within(dialog).queryByText(/Alice/)).toBeNull();
-    expect(screen.getByRole('button', { name: 'Volto selezionato' }).dataset.faceId).toBe('f-2');
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Volto selezionato' }).dataset.faceId,
+    ).toBe('f-2'));
   });
 
   it('offers move and remove when the double-clicked face already has a person', async () => {
