@@ -13,7 +13,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { smallThumbnailUrl } from '../components/files/types';
 import { useI18n, type MessageKey } from '../i18n';
-import { MediaViewer, type MediaViewerItem } from '../components/MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from '../components/MediaViewer';
 import { MediaGrid } from '../media/workspace/MediaGrid';
 import { MediaMetadataPanel } from '../media/metadata/MediaMetadataPanel';
 import { useMediaSimilarityActions } from '../media/viewer/mediaViewerActions';
@@ -147,7 +147,11 @@ export function SimilarPhotosExplorerPage() {
   const mediaItems = useMemo(() => items.map(toMediaItem), [items]);
   const viewerItems = useMemo<MediaViewerItem[]>(
     () => mediaItems.map((it) => ({
-      id: it.id, name: it.name, displayName: it.displayName, kind: 'image',
+      id: it.id,
+      sources: OWNER_FILE_SOURCES,
+      name: it.name,
+      displayName: it.displayName,
+      kind: 'image' as const,
     })),
     [mediaItems],
   );

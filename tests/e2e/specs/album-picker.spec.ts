@@ -56,6 +56,12 @@ async function openPicker(page: import('@playwright/test').Page) {
   await page.getByTestId('media-select-control').first().click();
   await expect(page.getByTestId('media-selection-bar')).toBeVisible();
 
+  // "Add to album" is one entry of the dock's Add-to MENU — it stopped being a
+  // button of its own when the command dock became contextual. Clicking the
+  // destination without opening the menu waited for an element that is not
+  // rendered until it is open, which is a stale test rather than a defect: the
+  // four assertions below are still exactly the geometry the spec exists for.
+  await page.getByTestId('media-sel-add-to').click();
   await page.getByTestId('media-sel-album').click();
   await expect(page.getByTestId('album-picker')).toBeVisible();
   // The full destination set has loaded: the filler albums are all there.

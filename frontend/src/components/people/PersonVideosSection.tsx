@@ -5,7 +5,7 @@ import {
   type PersonVideo,
   type PersonVideoMatch,
 } from '@nubarca/api-client';
-import { MediaViewer, type MediaViewerItem } from '../MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from '../MediaViewer';
 import { videoPosterUrl } from '../files/types';
 import { useI18n } from '../../i18n';
 import { formatTrackInterval } from './videoTrackTime';
@@ -57,6 +57,7 @@ export function PersonVideosSection({
   function open(video: PersonVideo, match: PersonVideoMatch) {
     const items: MediaViewerItem[] = videos.map((v) => ({
       id: v.fileItemId,
+      sources: OWNER_FILE_SOURCES,
       name: v.name,
       displayName: v.name,
       kind: 'video',

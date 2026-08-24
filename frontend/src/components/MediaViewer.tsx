@@ -23,8 +23,77 @@ import { isEditableKeyboardTarget, ownsKeyboardEvent } from './keyboardOwnership
 // loaded document is handed to `renderDetails`, so opening the drawer costs no
 // second request and shows no second loading state.
 
+// Where the viewer gets the bytes for ONE item.
+//
+// `ownerFile` derives them from the file id on the owner's own routes — the
+// behaviour every owner surface has always had. `albumScoped` uses URLs the
+// SERVER built and handed over, which is the only safe form for a shared album:
+// a recipient's authority is a membership on one album, and a URL assembled here
+// out of a file id would address the OWNER's library instead, which the
+// recipient has no grant on at all.
+//
+// There is deliberately no fallback from the second form to the first. A shared
+// item whose URL is missing renders as unavailable; it never quietly becomes an
+// owner route.
+export type MediaViewerSources =
+  | { kind: 'ownerFile' }
+  | {
+    kind: 'albumScoped';
+    previewUrl: string;
+    posterUrl: string | null;
+    videoUrl: string | null;
+    downloadUrl: string | null;
+  };
+
+// The owner's own media. A shared constant so the owner call sites state it
+// once and a new one cannot forget to state it at all.
+export const OWNER_FILE_SOURCES: MediaViewerSources = { kind: 'ownerFile' };
+
+// What this viewer is allowed to do, beyond showing the media.
+//
+// Absent, not disabled: a capability that is false removes the control from the
+// DOM. The server refuses every one of these independently — this only decides
+// whether the affordance exists.
+export interface MediaViewerCapabilities {
+  // Load and show the owner's metadata document. False for a recipient: the
+  // metadata endpoint is owner-only, so asking would be one 404 per opened item
+  // AND would be asking for exactly the private layer a share does not include.
+  metadata: boolean;
+  // Send a video to a Cast receiver. Owner-only: a Cast grant is minted against
+  // the caller's own file.
+  cast: boolean;
+  // Offer the immutable original. For a shared album this is additionally
+  // per-item — the item's own `downloadUrl` is the real gate.
+  download: boolean;
+}
+
+// Everything: the owner looking at their own library, which is what every
+// existing call site means.
+export const OWNER_VIEWER_CAPABILITIES: MediaViewerCapabilities = {
+  metadata: true, cast: true, download: true,
+};
+
+// Album Play driven through this viewer.
+//
+// The viewer does NOT own the schedule — the caller does, because the caller is
+// the one that knows the sequence, the filter it came from and where it ends.
+// The viewer only reports that a video finished, keeps auto-fullscreen out of
+// the way of an unattended run, and offers a way to stop.
+export interface MediaViewerPlaybackBinding {
+  active: boolean;
+  // The sequence reached its last item and stopped there. The viewer stays open
+  // on that item — ending an album must not yank the last photo off the screen —
+  // and offers to run it again.
+  finished: boolean;
+  onVideoEnded(): void;
+  onStop(): void;
+  onReplay(): void;
+}
+
 export interface MediaViewerItem {
   id: string;
+  // Where this item's bytes come from. See MediaViewerSources.
+  sources: MediaViewerSources;
   // Original file name — kept for the download link and diagnostics.
   name: string;
   // What the chrome shows: the owner's title when set, else the file name.
@@ -66,11 +135,21 @@ interface MediaViewerProps {
   // actions. The drawer shell (header, close, dialog placement) stays owned by
   // the viewer so the chrome is consistent.
   renderDetails?: (context: MediaViewerDetailsContext) => ReactNode;
+  // Defaults to the owner's full set, so every existing call site is unchanged.
+  capabilities?: MediaViewerCapabilities;
+  // Extra chrome actions for the current item — the shared album's "Withdraw"
+  // and its album-scoped Download. Rendered before the details/close buttons.
+  renderActions?: (item: MediaViewerItem) => ReactNode;
+  // Present only while a caller is driving album Play through this viewer.
+  playback?: MediaViewerPlaybackBinding;
 }
 
 const IDLE_HIDE_MS = 2600;
 
-export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, renderDetails }: MediaViewerProps) {
+export function MediaViewer({
+  items, index, onClose, onIndexChange, onNearEnd, renderDetails,
+  capabilities = OWNER_VIEWER_CAPABILITIES, renderActions, playback,
+}: MediaViewerProps) {
   const { t, formatDate } = useI18n();
   const item = items[index];
   const hasPrev = index > 0;
@@ -95,8 +174,11 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   // One metadata request per opened item. Aborted on navigation so a fast
   // arrow-key run through the viewer does not leave stale responses landing.
   const itemId = item?.id;
+  const canReadMetadata = capabilities.metadata;
   useEffect(() => {
-    if (itemId === undefined) return;
+    // A recipient never asks: the metadata document is the owner's private
+    // layer, and there is no album-scoped form of it by design.
+    if (itemId === undefined || !canReadMetadata) return;
     const controller = new AbortController();
     setMetadata(null);
     setMetadataError(false);
@@ -107,7 +189,7 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
         setMetadataError(true);
       });
     return () => controller.abort();
-  }, [itemId]);
+  }, [itemId, canReadMetadata]);
 
   const adoptMetadata = useCallback((next: FileMetadata) => {
     setMetadata(next);
@@ -166,20 +248,38 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   // somebody was watching the TV.
   const consumeHandoff = cast?.consumeHandoff;
   const currentItemId = item?.id;
-  const castingThis = cast?.remote?.fileId === currentItemId && currentItemId !== undefined;
+  const castingThis = capabilities.cast
+    && cast?.remote?.fileId === currentItemId && currentItemId !== undefined;
   useEffect(() => {
-    if (consumeHandoff === undefined || currentItemId === undefined || castingThis) return;
+    if (!capabilities.cast || consumeHandoff === undefined || currentItemId === undefined || castingThis) return;
     const resumeAt = consumeHandoff(currentItemId);
     if (resumeAt === null) return;
     playerRef.current?.pause();
     playerRef.current?.seek(resumeAt);
-  }, [consumeHandoff, currentItemId, castingThis]);
+  }, [capabilities.cast, consumeHandoff, currentItemId, castingThis]);
 
   if (!item) return null;
 
+  // The bytes for THIS item, resolved once. An album-scoped item uses only what
+  // the server handed over: there is no branch here that turns a missing shared
+  // URL back into `/api/files/...`.
+  const scoped = item.sources.kind === 'albumScoped' ? item.sources : null;
+  const imageUrl = scoped ? scoped.previewUrl : `/api/files/${item.id}/preview`;
+  const scopedVideoUrl = scoped ? scoped.videoUrl : null;
+  const scopedPosterUrl = scoped ? scoped.posterUrl : null;
+  // A shared video the server would not serve (an untrusted detected type) is
+  // stated as unavailable rather than played from somewhere else.
+  const videoUnavailable = item.kind === 'video' && scoped !== null && scoped.videoUrl === null;
+  // The original. Owner-derived for their own library; for a shared album it is
+  // the album-scoped URL, present only when the membership permits originals.
+  const downloadUrl = capabilities.download
+    ? (scoped ? scoped.downloadUrl : originalDownloadUrl(item.id))
+    : null;
+
   // Size comes from the loaded item when available (no request); the effective
   // Date Taken needs the metadata document, and is suppressed entirely when it
-  // would only be the upload-time fallback.
+  // would only be the upload-time fallback. A recipient has neither, so the
+  // summary line is simply empty for them.
   const summary = resolveViewerSummary({ itemSizeBytes: item.sizeBytes, metadata });
   const summaryParts = [
     summary.sizeBytes !== null ? formatSize(summary.sizeBytes) : null,
@@ -189,6 +289,7 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
   return (
     <div
       className="media-viewer"
+      data-testid="media-viewer"
       role="dialog"
       aria-modal="true"
       aria-label={t('mediaViewer.viewerAria', { name: item.displayName })}
@@ -208,19 +309,24 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
 
       <div className="media-viewer-stage">
         {item.kind === 'image' ? (
-          imageFailed ? (
+          imageFailed || imageUrl === null ? (
             <div className="media-viewer-error" role="alert">
               {t('mediaViewer.imageError')}
             </div>
           ) : (
             <img
               className="media-viewer-media"
-              src={`/api/files/${item.id}/preview`}
+              data-testid="media-viewer-image"
+              src={imageUrl}
               alt={item.displayName}
               draggable={false}
               onError={() => setImageFailed(true)}
             />
           )
+        ) : videoUnavailable ? (
+          <div className="media-viewer-error" role="alert">
+            {t('mediaViewer.videoError')}
+          </div>
         ) : (
           // Video-hls slice 3: the player probes the /video contract (adaptive
           // HLS master / 202-preparing / legacy byte stream) and renders the
@@ -230,10 +336,19 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
           <HlsVideoPlayer
             key={item.id}
             fileId={item.id}
+            // Album-scoped playback hands the player the routes the SERVER
+            // built; the owner form leaves both undefined and the player keeps
+            // deriving them from the file id exactly as before.
+            videoUrl={scopedVideoUrl ?? undefined}
+            posterUrl={scopedPosterUrl ?? undefined}
             className="media-viewer-media"
             initialPositionMilliseconds={item.initialPositionMilliseconds ?? null}
             playerRef={playerRef}
             suppressLocalPlayback={castingThis}
+            // Play runs unattended through a whole album: each video must not
+            // throw the browser into fullscreen and back on its way past.
+            autoFullscreen={!playback?.active}
+            onEnded={playback?.active ? playback.onVideoEnded : undefined}
           />
         )}
       </div>
@@ -253,8 +368,30 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
             )}
           </div>
           <div className="media-viewer-actions">
+            {/* Album Play is running: the way out is a control, not a guess. */}
+            {playback?.active && (
+              <button
+                type="button"
+                aria-label={t('albumPlay.stop')}
+                data-testid="viewer-play-stop"
+                onClick={playback.onStop}
+              >
+                {t('albumPlay.stopShort')}
+              </button>
+            )}
+            {playback?.finished && (
+              <button
+                type="button"
+                aria-label={t('albumPlay.replay')}
+                data-testid="viewer-play-replay"
+                onClick={playback.onReplay}
+              >
+                {t('albumPlay.replayShort')}
+              </button>
+            )}
+            {renderActions?.(item)}
             {/* Video only in this phase: images are not cast. */}
-            {item.kind === 'video' && (
+            {capabilities.cast && item.kind === 'video' && (
               <CastVideoControl
                 fileId={item.id}
                 title={item.displayName}
@@ -263,9 +400,14 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
                 onHandoff={() => playerRef.current?.pause()}
               />
             )}
-            <button type="button" aria-label={t('mediaViewer.details')} aria-pressed={detailsOpen}
-              data-testid="viewer-details-toggle"
-              onClick={() => setDetailsOpen((v) => !v)}>ⓘ</button>
+            {/* No drawer at all when there is nothing a caller may put in it:
+                a recipient has no metadata document and no owner actions, so an
+                empty ⓘ would advertise a surface that does not exist. */}
+            {(capabilities.metadata || renderDetails !== undefined) && (
+              <button type="button" aria-label={t('mediaViewer.details')} aria-pressed={detailsOpen}
+                data-testid="viewer-details-toggle"
+                onClick={() => setDetailsOpen((v) => !v)}>ⓘ</button>
+            )}
             <button type="button" aria-label={t('common.close')} onClick={onClose}>✕</button>
           </div>
         </div>
@@ -283,7 +425,13 @@ export function MediaViewer({ items, index, onClose, onIndexChange, onNearEnd, r
           </div>
           {renderDetails
             ? renderDetails({ item, metadata, metadataError, adoptMetadata })
-            : <DefaultMediaDetails item={item} metadata={metadata} metadataError={metadataError} />}
+            : (
+              <DefaultMediaDetails
+                metadata={metadata}
+                metadataError={metadataError}
+                downloadUrl={downloadUrl}
+              />
+            )}
         </aside>
       )}
     </div>
@@ -307,13 +455,15 @@ function formatDuration(totalSeconds: number): string {
 }
 
 function DefaultMediaDetails({
-  item,
   metadata: meta,
   metadataError,
+  downloadUrl,
 }: {
-  item: MediaViewerItem;
   metadata: FileMetadata | null;
   metadataError: boolean;
+  // Already resolved by the viewer: the owner's original, the album-scoped one,
+  // or null when this caller may not have it at all.
+  downloadUrl: string | null;
 }) {
   const { t, tn, formatDate } = useI18n();
 
@@ -375,8 +525,11 @@ function DefaultMediaDetails({
           )}
         </dl>
       )}
-      {/* The immutable original, never a derivative. */}
-      <a className="media-viewer-download" href={originalDownloadUrl(item.id)}>{t('common.download')}</a>
+      {/* The immutable original, never a derivative — and only when this
+          caller is entitled to it. */}
+      {downloadUrl !== null && (
+        <a className="media-viewer-download" href={downloadUrl}>{t('common.download')}</a>
+      )}
     </>
   );
 }

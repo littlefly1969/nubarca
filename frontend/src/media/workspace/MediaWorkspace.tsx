@@ -11,7 +11,8 @@ import {
 import { useAuth } from '../../auth/useAuth';
 import { useI18n } from '../../i18n';
 import { scrollViewportToTop, useAppScrollViewport } from '../../components/appScroll';
-import { MediaViewer, type MediaViewerItem } from '../../components/MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from '../../components/MediaViewer';
+import { useSequencePlayback } from '../playback/useSequencePlayback';
 import { MediaMetadataPanel } from '../metadata/MediaMetadataPanel';
 import { useMediaSimilarityActions } from '../viewer/mediaViewerActions';
 import { AlbumPickerModal } from '../../gallery/AlbumPickerModal';
@@ -37,6 +38,7 @@ export interface MediaPhotoDestination {
   run(ids: string[]): Promise<string | void> | string | void;
 }
 import { useMediaWorkspace } from './useMediaWorkspace';
+import { useWallSentinel } from './useWallSentinel';
 import { MediaKindTabs } from './MediaKindTabs';
 import { MediaCommandBar } from './MediaCommandBar';
 import { MediaFilterChips } from './MediaFilterChips';
@@ -70,6 +72,12 @@ interface Props {
   // Album-context callback so the page can refresh its header counts/cover after
   // a membership change. Ignored for the library source.
   onAlbumMembershipChanged?(): void;
+  // Offer album Play: open the CURRENT sequence and walk it, photos for a
+  // bounded moment and videos until they end. A pure viewer operation — it
+  // mutates nothing, which is why the shared album offers the identical control.
+  // Off for the library, where "play my whole library" is not a thing anybody
+  // asked for.
+  showPlay?: boolean;
   // An album the destination picker should open already pointing at — set when
   // the user arrived here from a shared album's "Add from library". It only
   // preselects: the Library stays the ordinary Library, and every other
@@ -84,6 +92,7 @@ export function MediaWorkspace({
   searchPlaceholder,
   photoDestinations = [],
   onAlbumMembershipChanged,
+  showPlay = false,
   preselectedAlbumId,
 }: Props) {
   const { t, tn } = useI18n();
@@ -254,55 +263,32 @@ export function MediaWorkspace({
   }, [anyOverlayOpen, selection, ws.orderedIds]);
 
   // ---- infinite scroll sentinel --------------------------------------------
-  // Latest intersection state of the sentinel. An IntersectionObserver only
-  // fires on a TRANSITION, so when a load leaves the sentinel still inside the
-  // (large) preload margin no further callback comes — this ref lets the effect
-  // below keep loading until the sentinel is finally pushed out of the margin.
-  const sentinelVisibleRef = useRef(false);
+  // Rooted in the application scroll viewport and self-chaining while the
+  // sentinel stays inside the preload margin — see useWallSentinel, which the
+  // shared album wall uses too so both walls page identically.
   const loadMoreRef = useRef(ws.loadMore);
   loadMoreRef.current = ws.loadMore;
-  // The sentinel node as state, not a callback ref: the observer is then created
-  // from an effect, which runs after every ref in the commit is attached, so the
-  // application scroll viewport below is never read too early.
-  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
+  const setSentinelNode = useWallSentinel({
+    ready: ws.phase.kind === 'ready',
+    hasMore: ws.hasMore,
+    loadMore: ws.loadMore,
+  });
 
-  // The observer's root is the APPLICATION scroll viewport, not the browser
-  // viewport. `.app-main` owns the scrolling and clips what overflows it, and a
-  // root's margin inflates only the root — an intermediate clip is applied
-  // unexpanded. Left document-rooted, the 1400px preload margin would therefore
-  // be swallowed by that clip and the next page would not start loading until the
-  // sentinel was already on screen, which is the stall the margin exists to
-  // prevent. Outside the shell there is no viewport and `null` keeps the previous
-  // document-rooted behaviour.
-  useEffect(() => {
-    if (!sentinelNode || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        sentinelVisibleRef.current = entries.some((e) => e.isIntersecting);
-        if (sentinelVisibleRef.current) loadMoreRef.current();
-      },
-      { root: viewportRef?.current ?? null, rootMargin: '1400px 0px' },
-    );
-    observer.observe(sentinelNode);
-    return () => {
-      observer.disconnect();
-      // The sentinel is gone (a new query, or the end of the set): its last known
-      // visibility must not seed the chaining effect below for a different result.
-      sentinelVisibleRef.current = false;
-    };
-  }, [sentinelNode, viewportRef]);
-
-  // After each page settles, if the sentinel is STILL inside the preload margin
-  // and there is more to load, fetch the next page. Without this the chain
-  // stalls at the bottom (the observer gives no fresh callback while the
-  // sentinel stays continuously intersecting) until the user scrolls up and back
-  // down. The observer updates sentinelVisibleRef to false once enough rows
-  // (or a scroll-up) push the sentinel out, which ends the chain.
-  useEffect(() => {
-    if (ws.phase.kind === 'ready' && ws.hasMore && sentinelVisibleRef.current) {
-      loadMoreRef.current();
-    }
-  }, [ws.phase, ws.hasMore]);
+  // ---- album Play -----------------------------------------------------------
+  // Driven over `ws.items`, which is the CURRENT result: whatever tab, search
+  // and filters are active. Play therefore plays what the user is looking at,
+  // and pagination extends the sequence as it goes rather than ending it early.
+  const openViewerAt = useCallback((i: number) => viewer.open(i), [viewer]);
+  const kindAtIndex = useCallback((i: number) => ws.items[i]?.kind, [ws.items]);
+  const play = useSequencePlayback({
+    count: ws.items.length,
+    index: viewer.index,
+    kindAt: kindAtIndex,
+    onOpen: openViewerAt,
+    onIndexChange: viewer.setIndex,
+    hasMore: ws.hasMore,
+    onNeedMore: () => loadMoreRef.current(),
+  });
 
   // ---- a new result identity starts at the top ------------------------------
   // Changing WHAT is on screen — tab, scope, search, filters, sort, "solo da
@@ -325,6 +311,9 @@ export function MediaWorkspace({
   const viewerItems = useMemo<MediaViewerItem[]>(
     () => ws.items.map((it) => ({
       id: it.id,
+      // The owner's own library: the viewer derives the media URLs from the
+      // file id, exactly as it always has.
+      sources: OWNER_FILE_SOURCES,
       name: it.name,
       displayName: it.displayName,
       kind: it.kind,
@@ -453,12 +442,25 @@ export function MediaWorkspace({
           gallery can still switch tab, search, filter, sort or drop a chip without
           scrolling back. The media itself is never in here. */}
       <div className="ws-sticky-chrome" data-testid="ws-sticky-chrome">
-        <MediaKindTabs
-          value={identity.mediaKind}
-          onChange={changeKind}
-          panelId={PANEL_ID}
-          counts={ws.total !== null ? { all: ws.total, image: ws.photoCount ?? 0, video: ws.videoCount ?? 0 } : null}
-        />
+        <div className="ws-kind-row">
+          <MediaKindTabs
+            value={identity.mediaKind}
+            onChange={changeKind}
+            panelId={PANEL_ID}
+            counts={ws.total !== null ? { all: ws.total, image: ws.photoCount ?? 0, video: ws.videoCount ?? 0 } : null}
+          />
+          {showPlay && (
+            <button
+              type="button"
+              className="row-action album-play-button"
+              data-testid="album-play"
+              disabled={ws.items.length === 0}
+              onClick={() => play.start(0)}
+            >
+              {t('albumPlay.start')}
+            </button>
+          )}
+        </div>
 
         <MediaCommandBar
           searchPlaceholder={searchPlaceholder}
@@ -553,6 +555,15 @@ export function MediaWorkspace({
           onClose={viewer.close}
           onIndexChange={viewer.setIndex}
           onNearEnd={() => loadMoreRef.current()}
+          playback={play.active || play.finished
+            ? {
+              active: play.active,
+              finished: play.finished,
+              onVideoEnded: play.onVideoEnded,
+              onStop: play.stop,
+              onReplay: play.replay,
+            }
+            : undefined}
           renderDetails={({ item: vi, metadata, metadataError, adoptMetadata }) => {
             const current = ws.items.find((it) => it.id === vi.id);
             if (!current) return null;

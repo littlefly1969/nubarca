@@ -317,8 +317,15 @@ test.describe('roles and permissions', () => {
 
     await modal.getByTestId('admin-user-role').selectOption('Member');
     await expect(vault).toHaveAttribute('data-included', 'yes');
-    // Every non-administrative permission in the catalogue — nine of them.
-    await expect(modal.getByTestId('role-permission-count')).toHaveText('9 permessi');
+    // Every non-administrative permission in the catalogue. The number is READ
+    // from the role rather than written down here: a literal drifts the moment a
+    // permission is added (which is exactly what `people.cluster.rebuild` did to
+    // the "nine" this line used to assert), and what the test is actually about
+    // is that the preview shows what the ROLE carries.
+    const member = (await listRoles(page)).find((r) => r.name === 'Member');
+    expect(member, 'the built-in Member role').toBeTruthy();
+    await expect(modal.getByTestId('role-permission-count'))
+      .toHaveText(`${member!.permissions.length} permessi`);
 
     // Escape closes it; the list underneath was never replaced.
     await page.keyboard.press('Escape');

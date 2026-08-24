@@ -661,8 +661,20 @@ public static class AlbumSharingEndpoints
             return Results.Ok(detail);
         }).WithName("GetSharedAlbum").RequireAuthorization();
 
+        // One page of the album, in its curated order.
+        //
+        // `kind` is the only filter a recipient gets, and it is answered from
+        // the media category the shared item shape already carries. `cursor` and
+        // `limit` exist because a shared album is somebody's real album and can
+        // hold thousands of items: serving all of them on open was a full copy
+        // of the collection per visit. The membership is resolved BEFORE any of
+        // the three is looked at, so a malformed cursor from a non-member is
+        // still a 404 and never a 400 that would confirm the album exists.
         app.MapGet("/api/shared-albums/{albumId:guid}/items", async (
             Guid albumId,
+            [FromQuery] string? kind,
+            [FromQuery] string? cursor,
+            [FromQuery] int? limit,
             HttpContext httpContext,
             [FromServices] IAlbumAccessResolver access,
             [FromServices] IAlbumSharingService sharing,
@@ -675,9 +687,25 @@ public static class AlbumSharingEndpoints
                 return Results.NotFound();
             }
 
-            var items = await sharing.ListSharedItemsAsync(grant, cancellationToken);
+            if (!SharedAlbumItemKinds.TryNormalize(kind, out var normalizedKind))
+            {
+                return Results.BadRequest(new { error = "'kind' must be all, image or video." });
+            }
+
+            var effectiveLimit = Math.Clamp(
+                limit ?? SharedAlbumItemQuery.DefaultLimit, 1, SharedAlbumItemQuery.MaxLimit);
+
+            var page = await sharing.ListSharedItemsAsync(
+                grant,
+                new SharedAlbumItemQuery(normalizedKind, cursor, effectiveLimit),
+                cancellationToken);
+            if (page is null)
+            {
+                return Results.BadRequest(new { error = "'cursor' is malformed or was issued for a different kind." });
+            }
+
             SetNoStore(httpContext);
-            return Results.Ok(items);
+            return Results.Ok(page);
         }).WithName("ListSharedAlbumItems").RequireAuthorization();
     }
 

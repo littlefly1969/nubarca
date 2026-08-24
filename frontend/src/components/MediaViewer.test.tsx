@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
-import { MediaViewer, type MediaViewerItem } from './MediaViewer';
+import { MediaViewer, OWNER_FILE_SOURCES, type MediaViewerItem } from './MediaViewer';
 
 afterEach(() => {
   cleanup();
@@ -38,6 +38,7 @@ function metadataDoc(overrides: Record<string, unknown> = {}) {
 
 const photo: MediaViewerItem = {
   id: 'f1',
+  sources: OWNER_FILE_SOURCES,
   name: 'IMG_1248.JPG',
   displayName: 'IMG_1248.JPG',
   kind: 'image',

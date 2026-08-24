@@ -134,12 +134,21 @@ interface HlsVideoPlayerProps {
   // is the most jarring way to get casting wrong, and the remote device is
   // authoritative while a cast is live.
   suppressLocalPlayback?: boolean;
+  // Album Play: the sequence advances when this video finishes, so the caller
+  // has to be told. Absent for ordinary playback, where an ended video simply
+  // stops.
+  onEnded?: () => void;
+  // Playback start normally requests fullscreen on the user's own gesture.
+  // Album Play runs unattended through many items, and entering and leaving
+  // fullscreen at every video would make the sequence unwatchable — so the
+  // caller can turn it off. Defaults to the existing behaviour.
+  autoFullscreen?: boolean;
 }
 
 export function HlsVideoPlayer({
   fileId, className, initialPositionMilliseconds = null,
   videoUrl: videoUrlProp, posterUrl: posterUrlProp, playerRef,
-  suppressLocalPlayback = false,
+  suppressLocalPlayback = false, onEnded, autoFullscreen = true,
 }: HlsVideoPlayerProps) {
   const { t } = useI18n();
   const [mode, setMode] = useState<VideoPlaybackMode | 'probing'>('probing');
@@ -387,7 +396,7 @@ export function HlsVideoPlayer({
       videoRef.current?.pause();
       return;
     }
-    if (document.fullscreenElement) return;
+    if (!autoFullscreen || document.fullscreenElement) return;
     wrapRef.current?.requestFullscreen?.().catch(() => { /* stay windowed */ });
   };
 
@@ -410,6 +419,7 @@ export function HlsVideoPlayer({
         onResize={onVideoDimensionsChange}
         onLoadedData={() => setHasFrame(true)}
         onPlay={onPlay}
+        onEnded={onEnded}
       />
       {/* A restrained spinner over the poster until a frame can be painted. It
           sits ABOVE the picture area and is removed the moment there is one,

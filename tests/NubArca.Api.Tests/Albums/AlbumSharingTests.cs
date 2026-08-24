@@ -586,7 +586,7 @@ public sealed class AlbumSharingTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Preview(albumId, drop))).StatusCode);
         (await viewer.GetAsync(Thumb(albumId, keep))).EnsureSuccessStatusCode();
 
-        var items = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items");
+        var items = await SharedItemsAsync(viewer, albumId);
         Assert.Equal(1, items.GetArrayLength());
         Assert.Equal(keep, items[0].GetProperty("fileItemId").GetGuid());
 
@@ -609,7 +609,7 @@ public sealed class AlbumSharingTests : IDisposable
 
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Thumb(albumId, deleted))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Thumb(albumId, excluded))).StatusCode);
-        Assert.Empty((await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items")).EnumerateArray());
+        Assert.Empty((await SharedItemsAsync(viewer, albumId)).EnumerateArray());
     }
 
     [Fact]
@@ -632,7 +632,7 @@ public sealed class AlbumSharingTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Thumb(albumId, fileId))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Preview(albumId, fileId))).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Content(albumId, fileId))).StatusCode);
-        Assert.Empty((await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items")).EnumerateArray());
+        Assert.Empty((await SharedItemsAsync(viewer, albumId)).EnumerateArray());
     }
 
     [Fact]
@@ -685,7 +685,7 @@ public sealed class AlbumSharingTests : IDisposable
         (await viewer.GetAsync(Thumb(albumId, video))).EnsureSuccessStatusCode();
         (await viewer.GetAsync(Preview(albumId, video))).EnsureSuccessStatusCode();
 
-        var items = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items");
+        var items = await SharedItemsAsync(viewer, albumId);
         var videoItem = items.EnumerateArray().Single(i => i.GetProperty("fileItemId").GetGuid() == video);
         Assert.Equal("video", videoItem.GetProperty("kind").GetString());
         Assert.False(string.IsNullOrEmpty(videoItem.GetProperty("posterUrl").GetString()));
@@ -728,14 +728,14 @@ public sealed class AlbumSharingTests : IDisposable
         (await viewer.GetAsync(Preview(albumId, fileId))).EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.NotFound, (await viewer.GetAsync(Content(albumId, fileId))).StatusCode);
 
-        var itemsBefore = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items");
+        var itemsBefore = await SharedItemsAsync(viewer, albumId);
         Assert.Equal(JsonValueKind.Null, itemsBefore[0].GetProperty("downloadUrl").ValueKind);
 
         (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/members/{membershipId}",
             new { allowOriginalDownload = true })).EnsureSuccessStatusCode();
 
         (await viewer.GetAsync(Content(albumId, fileId))).EnsureSuccessStatusCode();
-        var itemsAfter = await viewer.GetFromJsonAsync<JsonElement>($"/api/shared-albums/{albumId}/items");
+        var itemsAfter = await SharedItemsAsync(viewer, albumId);
         Assert.False(string.IsNullOrEmpty(itemsAfter[0].GetProperty("downloadUrl").GetString()));
 
         // Turning it back off is immediate too.
@@ -1093,6 +1093,19 @@ public sealed class AlbumSharingTests : IDisposable
             Assert.DoesNotContain(viewerId.ToString(), payload, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("a.png", payload, StringComparison.OrdinalIgnoreCase);
         }
+    }
+
+    // SHARE-ALBUM-04: the recipient's item endpoint answers a PAGE
+    // (`items` + `nextCursor` + counts) rather than a bare array. Every
+    // assertion below is about the items themselves, so they are read through
+    // one helper instead of being rewritten one by one.
+    private static async Task<JsonElement> SharedItemsAsync(
+        HttpClient client, Guid albumId, string query = "")
+    {
+        var response = await client.GetAsync($"/api/shared-albums/{albumId}/items{query}");
+        response.EnsureSuccessStatusCode();
+        var page = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return page.GetProperty("items");
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
