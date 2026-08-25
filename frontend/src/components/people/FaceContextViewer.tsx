@@ -388,13 +388,30 @@ export function FaceContextViewer({
           )}
         </div>
 
-        {/* Where the reviewer is in the queue. A label, never a control: it
-            reports, it cannot be pressed, and it takes no operating space. */}
-        {reviewControls && (
-          <span className="face-viewer-progress" data-testid="face-viewer-progress">
-            {reviewControls.progressLabel}
+        {/* WHOSE face is highlighted, and where the reviewer is in the queue.
+            Both report; neither can be pressed. The person belongs here rather
+            than only inside the assign dialog: a reviewer looking at a face has
+            to be able to see who it is already filed under without opening
+            anything, and this viewer is the one component every face-photo
+            surface uses, so stating it here states it everywhere. */}
+        <div className="face-viewer-top-right">
+          <span className="face-viewer-person" data-testid="face-viewer-person">
+            {ctx?.personName
+              ? (
+                <>
+                  <span className="face-viewer-person-label">{t('face.faceOfLabel')}</span>
+                  {' '}
+                  <strong className="face-viewer-person-name">{ctx.personName}</strong>
+                </>
+              )
+              : <span className="is-unassigned">{t('face.notAssigned')}</span>}
           </span>
-        )}
+          {reviewControls && (
+            <span className="face-viewer-progress" data-testid="face-viewer-progress">
+              {reviewControls.progressLabel}
+            </span>
+          )}
+        </div>
       </header>
 
       <div
@@ -507,25 +524,40 @@ export function FaceContextViewer({
               type="button"
               className="face-viewer-tool"
               data-testid="face-viewer-next-photo"
+              // The label is hidden below a width where the row would otherwise
+              // wrap, so the NAME has to be stated on the button rather than
+              // read off the text — an icon-only control with no aria-label is
+              // an unnamed button to anything that is not looking at it.
+              aria-label={t('people.photoReviewNextPhoto')}
+              title={t('people.photoReviewNextPhoto')}
               disabled={!reviewControls.canNextPhoto}
               onClick={reviewControls.onNextPhoto}
             >
               <Icon name="next-photo" size={16} />
-              <span>{t('people.photoReviewNextPhoto')}</span>
+              <span className="face-viewer-tool-label">{t('people.photoReviewNextPhoto')}</span>
             </button>
           )}
-          <button type="button" className="face-viewer-tool" data-testid="face-viewer-fit" onClick={fitImage}>
+          <button
+            type="button"
+            className="face-viewer-tool"
+            data-testid="face-viewer-fit"
+            aria-label={t('face.showWholePhoto')}
+            title={t('face.showWholePhoto')}
+            onClick={fitImage}
+          >
             <Icon name="fit" size={16} />
-            <span>{t('face.showWholePhoto')}</span>
+            <span className="face-viewer-tool-label">{t('face.showWholePhoto')}</span>
           </button>
           <button
             type="button"
             className="face-viewer-tool"
             data-testid="face-viewer-focus"
+            aria-label={t('face.centerFace')}
+            title={t('face.centerFace')}
             onClick={focusFace}
           >
             <Icon name="focus" size={16} />
-            <span>{t('face.centerFace')}</span>
+            <span className="face-viewer-tool-label">{t('face.centerFace')}</span>
           </button>
           <span className="face-viewer-zoom-group">
             <button
@@ -585,6 +617,7 @@ export function FaceContextViewer({
                 ref={ignoreAllRef}
                 className="face-viewer-secondary"
                 data-testid="face-viewer-ignore-all"
+                title={t('people.photoReviewIgnoreAllHelp')}
                 disabled={reviewControls.ignoreRemainingBusy}
                 onClick={() => setConfirmIgnoreAll(true)}
               >
