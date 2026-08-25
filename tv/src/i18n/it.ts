@@ -340,6 +340,9 @@ const it = {
   'filters.peopleClear': 'Azzera selezione',
   'filters.peopleSearch': 'Cerca persona',
   'filters.peopleSearchEmpty': 'Nessuna persona corrisponde alla ricerca.',
+  'filters.peoplePrevious': 'Pagina precedente',
+  'filters.peopleNext': 'Pagina successiva',
+  'filters.peoplePage': 'Pagina {page} di {total}',
 
   'filters.periodTitle': 'Periodo di scatto',
   'filters.periodFrom': 'Dal giorno',

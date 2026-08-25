@@ -2,7 +2,7 @@ import { useCallback, type ReactNode } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 
-// EXACTLY ONE COMPONENT MAY OWN VERTICAL SCROLLING.
+// A FULL-SCREEN BODY DECLARES WHETHER IT SCROLLS.
 //
 // This shell used to wrap its children in a ScrollView unconditionally, which
 // made that impossible to honour. Two things went wrong, both on real
@@ -14,16 +14,14 @@ import { colors, font, spacing } from '../../theme';
 //     focusable the remote can reach and the viewer cannot see. A scroll is the
 //     wrong answer to "this does not fit"; sizing it to fit is (see
 //     lib/panelLayout.ts).
-//   * A VIRTUALIZED list cannot live inside a ScrollView. A FlatList given
-//     unbounded height renders every row, which defeats the virtualization
-//     entirely, and the two scroll containers then fight over the same gesture
-//     and the same focus.
+//   * A focusable TV chooser must not hide controls outside its declared body
+//     geometry. The People chooser is explicitly paged, so all of its mounted
+//     rows fit and no list viewport is needed.
 //
 // So the body mode is now declared:
 //   'scroll' — the shell scrolls. For genuinely variable row collections.
 //   'fixed'  — no scrolling at all. For bounded editors that must fit.
-//   'custom' — the CHILD owns scrolling (a FlatList). The shell must not.
-export type PanelBodyMode = 'scroll' | 'fixed' | 'custom';
+export type PanelBodyMode = 'scroll' | 'fixed';
 
 // Full-screen panel container for the Personal Gallery MENU actions (filters /
 // sort / search / people / albums / details).
@@ -47,7 +45,7 @@ interface Props {
   // true when handled; false falls through to onBack.
   onBackOverride?: () => boolean;
   // Defaults to 'scroll' so existing filter-row panels are unchanged; the
-  // editors and the People picker opt out explicitly.
+  // bounded editors and the explicitly paged People picker opt out.
   body?: PanelBodyMode;
 }
 
@@ -82,9 +80,8 @@ export function PanelShell({
             {children}
           </ScrollView>
         ) : (
-          // 'fixed' and 'custom' differ in INTENT, not in what this shell does:
-          // in both cases the shell must not scroll. 'fixed' promises the content
-          // fits; 'custom' promises the child scrolls itself.
+          // A fixed body promises that every mounted control fits. If a large
+          // data set is needed, the child must page it into a bounded set.
           <View style={[styles.scroll, styles.content]}>{children}</View>
         )}
       </View>
