@@ -636,3 +636,12 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reports so far do not distinguish them. `adb shell dumpsys package
   it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
   and cannot get it, so the evidence has to come from what the screen shows.
+- **TV full-screen editors are native windows, not elevated React siblings.**
+  A physical Fire Stick disproved the earlier `zIndex`/`elevation` fix: the
+  People picker received DPAD focus and scrolled, but remained painted behind
+  the media cover. `PanelShell` now uses React Native `Modal`, whose separate
+  native window makes both paint order and focus containment structural. The
+  surface remains opaque, the parent still makes the media grid non-focusable,
+  and Android BACK is handled through `Modal.onRequestClose`; `BackHandler`
+  does not receive events while a modal is open. The FlatList, local person-name
+  search, fixed Done action and include/exclude query contract are unchanged.
