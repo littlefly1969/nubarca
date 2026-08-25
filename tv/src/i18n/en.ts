@@ -266,6 +266,8 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'filters.audioNo': 'Without audio',
   'filters.sort': 'Sort by',
   'filters.sort.relevance': 'Relevance',
+  'filters.relevanceLocked': 'Semantic search determines this order and it cannot be changed.',
+  'filters.relevanceA11y': 'Relevance order, determined by semantic search and not editable',
   'filters.sort.created': 'Upload date',
   'filters.sort.datetaken': 'Date taken',
   'filters.sort.name': 'Name',

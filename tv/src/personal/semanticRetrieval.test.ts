@@ -350,19 +350,19 @@ test('relevance order is not a choice the user can edit', () => {
 test('the ORDER section offers relevance instead of editable rows', () => {
   // A row the panel renders as editable while the request ignores it is the
   // same class of defect as an inert filter, so this reads the PANEL.
-  const order = panel.slice(panel.indexOf('isRelevanceOrdered(draftIdentity)'));
-  const branch = order.slice(0, order.indexOf('</>'));
+  const order = panel.slice(panel.indexOf('{relevanceOrdered ? ('));
+  const branch = order.slice(0, order.indexOf(') : ('));
   assert.match(branch, /filters\.sort\.relevance/);
-  assert.match(branch, /opensEditor=\{false\}/);
-  // The editable Sort and Direction rows live in the OTHER branch.
-  assert.doesNotMatch(branch, /onSelect=\{\(\) => open/);
+  assert.match(branch, /<FilterInfoRow/);
+  assert.match(branch, /filters\.relevanceLocked/);
+  assert.doesNotMatch(branch, /<FilterRow/,
+    'relevance is information, never a button that consumes SELECT');
+  assert.doesNotMatch(branch, /onSelect=/);
 
-  // 'sort' and 'direction' stay STATIC focus keys, so resolveTvFilterFocus can
-  // still answer either one while neither editable row exists. The relevance
-  // row must claim both, or restored focus lands on nothing.
-  assert.match(branch, /focusKey === 'sort' \|\| focusKey === 'direction'/);
-  assert.ok(resolveTvFilterFocus('direction', []) === 'direction',
-    'direction is still honoured as a static focus key');
+  // The informational row cannot receive focus. A remembered ordering control
+  // therefore hands preferred focus to the primary action.
+  assert.equal(resolveTvFilterFocus('sort', [], true), 'apply');
+  assert.equal(resolveTvFilterFocus('direction', [], true), 'apply');
 });
 
 test('an identical semantic request keeps one identity, whatever the sort was', () => {

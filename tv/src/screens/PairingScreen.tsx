@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { colors, font, spacing } from '../theme';
 import { ApiError, ensureSessionPersisted } from '../api/client';
 import {
@@ -12,6 +19,7 @@ import {
 import { QrCode } from '../components/QrCode';
 import { FocusableButton } from '../components/FocusableButton';
 import { useI18n } from '../i18n';
+import { pairingLayout } from '../lib/pairingLayout';
 
 type State =
   | { kind: 'starting' }
@@ -38,10 +46,13 @@ interface Props {
 }
 
 // Landing/pairing screen: starts a pairing request and polls until the phone
-// approves it. QR rendering is a documented follow-up — for the spike we show
-// the short code + the approval URL the phone opens.
+// approves it. On TV the QR and the explanation form one horizontal row: the
+// former vertical stack was taller than Fire OS's common 960x540dp viewport,
+// which pushed most of the lockup above the visible area.
 export function PairingScreen({ onPaired, notice = null }: Props) {
   const { t } = useI18n();
+  const viewport = useWindowDimensions();
+  const layout = pairingLayout(viewport);
   const [state, setState] = useState<State>({ kind: 'starting' });
   const startController = useRef<AbortController | null>(null);
 
@@ -144,48 +155,75 @@ export function PairingScreen({ onPaired, notice = null }: Props) {
   }, [state, onPaired]);
 
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      { paddingHorizontal: layout.insetX, paddingVertical: layout.insetY },
+    ]}>
       {/* The approved transparent NubArca TV lockup. Transparent, so it sits
           on the screen's own Midnight Navy with no card edge or seam. The
           product name travels as the accessibility label rather than a
           second visible copy. */}
       <Image
         source={require('../../assets/brand/nubarca-tv-lockup-transparent-1280w.png')}
-        style={styles.lockup}
+        style={{ width: layout.lockupWidth, height: layout.lockupHeight }}
         resizeMode="contain"
         accessible
         accessibilityRole="image"
         accessibilityLabel={t('pairing.title')}
       />
-      {notice !== null && <Text style={styles.notice}>{notice}</Text>}
-
       {state.kind === 'starting' && (
-        <>
+        <View style={[
+          styles.status,
+          { minHeight: layout.qrSize, marginTop: layout.contentGap },
+        ]}>
+          {notice !== null && <Text style={styles.notice}>{notice}</Text>}
           <ActivityIndicator size="large" color={colors.accent} />
           <Text style={styles.body}>{t('pairing.preparing')}</Text>
-        </>
+        </View>
       )}
 
       {state.kind === 'pairing' && (
-        <>
-          <Text style={styles.body}>{t('pairing.scan')}</Text>
-          <QrCode value={state.pairing.approvalUrl} size={320} style={styles.qr} />
-          <Text style={styles.url}>{state.pairing.approvalUrl.split('#')[0]}</Text>
-          <Text style={styles.codeLabel}>{t('pairing.code')}</Text>
-          <Text style={styles.code}>{state.pairing.publicCode}</Text>
-          <Text style={styles.muted}>{t('pairing.expiresWaiting')}</Text>
-        </>
+        <View style={[
+          styles.pairingRow,
+          { minHeight: layout.qrSize, gap: layout.contentGap, marginTop: layout.contentGap },
+        ]}>
+          <QrCode value={state.pairing.approvalUrl} size={layout.qrSize} />
+          <View style={styles.details}>
+            {notice !== null && (
+              <Text style={[styles.notice, layout.dense && styles.noticeDense]}>{notice}</Text>
+            )}
+            <Text style={[styles.body, layout.dense && styles.textDense]}>
+              {t('pairing.scan')}
+            </Text>
+            {!layout.dense && (
+              <Text style={styles.url}>{state.pairing.approvalUrl.split('#')[0]}</Text>
+            )}
+            <Text style={[styles.codeLabel, layout.dense && styles.codeLabelDense]}>
+              {t('pairing.code')}
+            </Text>
+            <Text style={[styles.code, layout.dense && styles.codeDense]}>
+              {state.pairing.publicCode}
+            </Text>
+            <Text style={[styles.muted, layout.dense && styles.mutedDense]}>
+              {t('pairing.expiresWaiting')}
+            </Text>
+          </View>
+        </View>
       )}
 
       {(state.kind === 'expired' || state.kind === 'error') && (
-        <>
+        <View style={[
+          styles.status,
+          { minHeight: layout.qrSize, marginTop: layout.contentGap },
+        ]}>
+          {notice !== null && <Text style={styles.notice}>{notice}</Text>}
           <Text style={styles.body}>
             {state.kind === 'expired' ? t('pairing.expired') : t('pairing.unavailable')}
           </Text>
           <View style={styles.retry}>
             <FocusableButton label={t('common.tryAgain')} onPress={begin} hasTVPreferredFocus />
           </View>
-        </>
+        </View>
       )}
     </View>
   );
@@ -197,10 +235,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.bg,
-    padding: spacing.xl,
   },
-  // 640x148 keeps the approved 4.31:1 lockup proportions exactly; never stretched.
-  lockup: { width: 640, height: 148, marginBottom: spacing.lg },
+  pairingRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  details: { flex: 1, maxWidth: 620, alignItems: 'center' },
+  status: { alignItems: 'center', justifyContent: 'center' },
   notice: {
     color: colors.danger,
     fontSize: font.body,
@@ -208,11 +251,15 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     maxWidth: 640,
   },
-  body: { color: colors.text, fontSize: font.body, marginTop: spacing.md, textAlign: 'center' },
-  qr: { marginTop: spacing.md, borderRadius: 12 },
+  noticeDense: { fontSize: font.caption, marginBottom: spacing.xs },
+  body: { color: colors.text, fontSize: font.body, textAlign: 'center' },
+  textDense: { fontSize: font.caption },
   url: { color: colors.accent, fontSize: font.caption, marginTop: spacing.sm },
   codeLabel: { color: colors.muted, fontSize: font.caption, marginTop: spacing.lg },
+  codeLabelDense: { marginTop: spacing.xs },
   code: { color: colors.text, fontSize: font.code, fontWeight: '700', letterSpacing: 8 },
+  codeDense: { fontSize: font.title, letterSpacing: 6 },
   muted: { color: colors.muted, fontSize: font.caption, marginTop: spacing.md },
+  mutedDense: { marginTop: spacing.xs },
   retry: { marginTop: spacing.lg },
 });

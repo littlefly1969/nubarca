@@ -516,10 +516,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the COMMITTED identity in both directions (query typed, query cleared) — an
   earlier attempt handed them a pre-drafted identity and consequently proved
   nothing, which is the same flaw that let the original defect through.
-  Deferred, non-blocking: the fixed "Order: Relevance" row is still a
-  `FilterRow`, i.e. a Pressable with `accessibilityRole="button"` and a no-op
-  SELECT; it should become a true informational non-button row with its own
-  focus-fallback handling.
+  The fixed "Order: Relevance" statement is a non-focusable `FilterInfoRow`,
+  not a disabled/no-op button. It explains that semantic ranking determines the
+  order and cannot be edited; remembered Sort/Direction focus migrates to Apply
+  when those real controls disappear.
 - **What the media selection dock OFFERS is one pure model, and it is half
   capability, half permission.** `mediaSelectionCapabilities.ts` answers whether
   an action makes sense for THIS selection (all photos? Excluded scope? inside

@@ -5,6 +5,7 @@ import { FocusableButton } from '../../components/FocusableButton';
 import { PanelShell } from '../gallery/PanelShell';
 import { TvKeyboardPanel } from '../gallery/TvKeyboardPanel';
 import { FilterRow } from './FilterRow';
+import { FilterInfoRow } from './FilterInfoRow';
 import { LibraryPeoplePanel } from './LibraryPeoplePanel';
 import { LibraryPeriodPanel } from './LibraryPeriodPanel';
 import { useI18n } from '../../i18n';
@@ -188,7 +189,8 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
   const rows = tvFilterRows(draftIdentity, filters);
   // Deterministic and total: the same row when it is still there, else the
   // nearest one, else the primary action. Never the bare container.
-  const focusKey = resolveTvFilterFocus(focusRef.current, rows);
+  const relevanceOrdered = isRelevanceOrdered(draftIdentity);
+  const focusKey = resolveTvFilterFocus(focusRef.current, rows, relevanceOrdered);
   focusRef.current = focusKey;
 
   const peopleValue = (): string => {
@@ -365,23 +367,12 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
           byte-identical results — the same "applied but inert" defect as a
           filter that reaches no wire. So the controls are replaced by a
           statement of what the order actually is. */}
-      {isRelevanceOrdered(draftIdentity) ? (
-        <FilterRow
+      {relevanceOrdered ? (
+        <FilterInfoRow
           label={t('filters.sort')}
           value={t('filters.sort.relevance')}
-          active={false}
-          opensEditor={false}
-          accessibilityLabel={t('filters.rowA11y', {
-            label: t('filters.sort'),
-            value: t('filters.sort.relevance'),
-          })}
-          // 'sort' and 'direction' are STATIC focus keys, so resolveTvFilterFocus
-          // keeps honouring them here even though neither row is rendered. This
-          // one row answers for both, or focus lands nowhere and the remote
-          // loses its ring — the state that resolver exists to prevent.
-          hasTVPreferredFocus={focusKey === 'sort' || focusKey === 'direction'}
-          onFocus={() => { focusRef.current = 'sort'; }}
-          onSelect={() => { /* relevance is not a choice while searching by meaning */ }}
+          description={t('filters.relevanceLocked')}
+          accessibilityLabel={t('filters.relevanceA11y')}
         />
       ) : (
         <>
