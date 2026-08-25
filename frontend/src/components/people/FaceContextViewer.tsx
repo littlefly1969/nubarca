@@ -107,10 +107,19 @@ export function FaceContextViewer({
   // The stage's measured box and the bitmap's own size. The canvas is derived
   // from the two and from nothing else — see faceViewerGeometry.
   const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
-  const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
+  // The bitmap's size CARRIES THE FILE IT CAME FROM. Storing the dimensions
+  // alone and clearing them in an effect leaves one painted frame in which the
+  // new photo's boxes are laid out against the previous photo's aspect ratio —
+  // an effect runs after paint, so the mismatch is visible before it is undone.
+  // Pairing them makes the check a render-time one, and the window disappears.
+  const [naturalSize, setNaturalSize] = useState<
+    { fileItemId: string; width: number; height: number } | null
+  >(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const ignoreAllRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   // A double-click can land on a face that is NOT the one currently loaded. The
   // dialog must describe the face that was clicked, so the request to open it
@@ -168,24 +177,33 @@ export function FaceContextViewer({
     return () => ro.disconnect();
   }, [status]);
 
-  const canvas = useMemo(() => (stageSize && naturalSize
+  // Only a measurement belonging to THE PHOTO ON SCREEN counts. Anything else
+  // is the previous picture's, and a canvas built from it would be the wrong
+  // rectangle — which is the one thing the boxes cannot survive.
+  const natural = naturalSize !== null && naturalSize.fileItemId === ctx?.fileItemId
+    ? naturalSize
+    : null;
+
+  const canvas = useMemo(() => (stageSize && natural
     ? computeContainCanvas({
       availableWidth: stageSize.width,
       availableHeight: stageSize.height,
-      naturalWidth: naturalSize.width,
-      naturalHeight: naturalSize.height,
+      naturalWidth: natural.width,
+      naturalHeight: natural.height,
     })
-    : null), [stageSize, naturalSize]);
+    : null), [stageSize, natural]);
 
   // A NEW PHOTO always opens whole. Moving between two faces of the SAME photo
   // deliberately keeps the viewport: the reviewer zoomed in for a reason, and
   // resetting it on every face would undo that work several times per picture.
+  // The viewport itself is reset in an effect, which is safe: while the new
+  // photo's measurement has not arrived no box is drawn at all, so a frame at
+  // the previous zoom states nothing false about where a face is.
   const fileItemId = ctx?.fileItemId;
   useEffect(() => {
     if (fileItemId === undefined) return;
     setZoom(FIT_TRANSFORM.zoom);
     setPan(FIT_TRANSFORM.pan);
-    setNaturalSize(null);
   }, [fileItemId]);
 
   const fitImage = useCallback(() => {
@@ -259,6 +277,13 @@ export function FaceContextViewer({
 
   // The bulk confirmation owns Escape while it is up, so dismissing the question
   // does not also close the viewer behind it.
+  //
+  // It also has to own FOCUS. `aria-modal` is a promise to assistive technology,
+  // not a mechanism: without moving focus in, the keyboard stays on the controls
+  // underneath and the very next Tab walks a dialog the user cannot see they
+  // have left. `isModalOwnedKey` deliberately does NOT include Tab — that is
+  // what leaves focus traps possible — so the trap below is this dialog's own,
+  // exactly as AssignToPersonMenu implements its own.
   useEffect(() => {
     if (!confirmIgnoreAll) return;
     function onKey(e: KeyboardEvent) {
@@ -270,8 +295,32 @@ export function FaceContextViewer({
       }
     }
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    // Cancel, not the destructive answer: a question about several faces at
+    // once should not have "yes" one Enter away from an unaware keyboard.
+    const id = window.setTimeout(() => confirmCancelRef.current?.focus(), 0);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.clearTimeout(id);
+    };
   }, [confirmIgnoreAll]);
+
+  /** Keep Tab inside the confirmation while it is open. */
+  function onConfirmKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'Tab' || !confirmRef.current) return;
+    const focusable = confirmRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   function onPointerDown(e: React.PointerEvent) {
     drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
@@ -371,13 +420,21 @@ export function FaceContextViewer({
               : undefined}
           >
             <img
+              // Keyed by the file: a new photo mounts a new element, so it
+              // cannot show the previous picture's decoded frame and its load
+              // event cannot be skipped for an already-decoded one.
+              key={ctx.fileItemId}
               className="face-viewer-image"
               src={mediumPreviewUrl(ctx.fileItemId)}
               alt={ctx.fileName}
               draggable={false}
               onLoad={(e) => {
                 const img = e.currentTarget;
-                setNaturalSize({ width: img.naturalWidth, height: img.naturalHeight });
+                setNaturalSize({
+                  fileItemId: ctx.fileItemId,
+                  width: img.naturalWidth,
+                  height: img.naturalHeight,
+                });
               }}
             />
             {/* Boxes are percentages OF THE CANVAS, so they are only correct
@@ -586,12 +643,15 @@ export function FaceContextViewer({
             aria-modal="true"
             aria-label={t('face.ignoreAllTitle')}
             data-testid="face-viewer-ignore-all-confirm"
+            ref={confirmRef}
+            onKeyDown={onConfirmKeyDown}
           >
             <h3 className="face-viewer-confirm-title">{t('face.ignoreAllTitle')}</h3>
             <p className="face-viewer-confirm-body">{t('face.ignoreAllQuestion')}</p>
             <div className="face-viewer-confirm-actions">
               <button
                 type="button"
+                ref={confirmCancelRef}
                 className="face-viewer-tertiary"
                 data-testid="face-viewer-ignore-all-cancel"
                 onClick={() => {

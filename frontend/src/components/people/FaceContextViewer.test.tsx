@@ -10,9 +10,16 @@ import { AuthedWrapper, installFetchMock, jsonResponse, type MockHandler } from 
 // here exactly as the media-wall suites stub their container width. Without
 // them the viewer is correct to draw no boxes at all — see faceViewerGeometry.
 const STAGE = { width: 1000, height: 800 };
-const NATURAL = { width: 4000, height: 3000 };
+const LANDSCAPE = { width: 4000, height: 3000 };
+const PORTRAIT = { width: 3000, height: 4000 };
+
+// What the next <img> will report as its natural size. Mutable, because a
+// second photo with a DIFFERENT aspect ratio is the only way to prove that a
+// measurement never crosses from one picture to the next.
+let currentNatural = LANDSCAPE;
 
 beforeEach(() => {
+  currentNatural = LANDSCAPE;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
     () => ({
       width: STAGE.width, height: STAGE.height, top: 0, left: 0,
@@ -25,10 +32,10 @@ beforeEach(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver;
   Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
-    configurable: true, get: () => NATURAL.width,
+    configurable: true, get: () => currentNatural.width,
   });
   Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', {
-    configurable: true, get: () => NATURAL.height,
+    configurable: true, get: () => currentNatural.height,
   });
 });
 
@@ -303,6 +310,69 @@ describe('ignoring', () => {
     expect(screen.queryByTestId('face-viewer-ignore-all-confirm')).toBeNull();
   });
 
+  it('takes the keyboard when it opens, and starts on Annulla', async () => {
+    // `aria-modal` is a promise, not a mechanism: without moving focus in, the
+    // keyboard stays on the controls underneath and the next Tab walks a dialog
+    // the user cannot see they have left. Cancel first, because a question
+    // about several faces should not have "yes" one Enter away.
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0, vi.fn(), vi.fn(), reviewControls());
+    await screen.findByTestId('face-viewer-file-name');
+
+    await userEvent.click(screen.getByTestId('face-viewer-ignore-all'));
+
+    await waitFor(() => expect(document.activeElement)
+      .toBe(screen.getByTestId('face-viewer-ignore-all-cancel')));
+  });
+
+  it('traps Tab inside the confirmation, in both directions', async () => {
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0, vi.fn(), vi.fn(), reviewControls());
+    await screen.findByTestId('face-viewer-file-name');
+
+    await userEvent.click(screen.getByTestId('face-viewer-ignore-all'));
+    const cancel = screen.getByTestId('face-viewer-ignore-all-cancel');
+    const accept = screen.getByTestId('face-viewer-ignore-all-accept');
+    await waitFor(() => expect(document.activeElement).toBe(cancel));
+
+    // Forward from the last control wraps to the first, never out to the
+    // viewer's own buttons behind the dialog.
+    await userEvent.tab();
+    expect(document.activeElement).toBe(accept);
+    await userEvent.tab();
+    expect(document.activeElement).toBe(cancel);
+
+    // And backwards.
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(accept);
+  });
+
+  it('gives focus back to the control that opened it', async () => {
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0, vi.fn(), vi.fn(), reviewControls());
+    await screen.findByTestId('face-viewer-file-name');
+    const trigger = screen.getByTestId('face-viewer-ignore-all');
+
+    await userEvent.click(trigger);
+    await userEvent.click(screen.getByTestId('face-viewer-ignore-all-cancel'));
+    expect(document.activeElement).toBe(trigger);
+
+    // Escape leaves the reviewer in the same place a cancel does.
+    await userEvent.click(trigger);
+    await screen.findByTestId('face-viewer-ignore-all-confirm');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it('Escape dismisses the confirmation without closing the viewer', async () => {
     const onClose = vi.fn();
     installFetchMock({
@@ -555,27 +625,59 @@ describe('the viewport', () => {
     expect(screen.getByLabelText('Zoom').textContent).toBe('125%');
   });
 
-  it('opens a DIFFERENT photo at fit', async () => {
-    let file = 'file-1';
+  it('opens a DIFFERENT photo at fit, and no box survives the change', async () => {
+    // The review gate. A second context with a DIFFERENT aspect ratio has to
+    // actually arrive: the previous version of this test used a single-face
+    // list, sent ArrowRight while `hasNext` was false and then pressed Fit, so
+    // no fetch and no new fileItemId ever happened and the path it claimed to
+    // cover was never entered.
     installFetchMock({
       'GET /api/people/faces/f-1/context': () => jsonResponse({
-        fileItemId: file, fileName: 'crowd.jpg', selectedFaceId: 'f-1', selectedBox: b(0.2),
-        faces: [{ faceId: 'f-1', box: b(0.2) }], personId: null, personName: null,
-        isIgnored: false,
+        fileItemId: 'file-1', fileName: 'crowd.jpg', selectedFaceId: 'f-1', selectedBox: b(0.2),
+        faces: [{ faceId: 'f-1', box: b(0.2) }, { faceId: 'f-2', box: b(0.6) }],
+        personId: null, personName: null, isIgnored: false,
         effectiveDateTaken: '2019-07-14T10:30:00Z', effectiveDateTakenSource: 'embedded',
+      }),
+      'GET /api/people/faces/f-2/context': () => jsonResponse({
+        // Another PHOTO entirely, and a portrait one.
+        fileItemId: 'file-2', fileName: 'portrait.jpg', selectedFaceId: 'f-2', selectedBox: b(0.3),
+        faces: [{ faceId: 'f-2', box: b(0.3) }],
+        personId: null, personName: null, isIgnored: false,
+        effectiveDateTaken: '2020-01-02T09:00:00Z', effectiveDateTakenSource: 'embedded',
       }),
       'GET /api/people': () => jsonResponse([]),
     });
-    renderViewer(['f-1'], 0);
+    const { rerender } = renderViewer(['f-1', 'f-2'], 0);
     await settled();
+    expect(screen.getByTestId('face-viewer-canvas').style.width).toBe('1000px');
     await userEvent.click(screen.getByRole('button', { name: 'Zoom avanti' }));
     expect(screen.getByLabelText('Zoom').textContent).toBe('125%');
 
-    // The same face id resolving to another photo is exactly what "next photo"
-    // does to this component: a new picture must arrive whole.
-    file = 'file-2';
-    fireEvent.keyDown(window, { key: 'ArrowRight' });
-    await userEvent.click(screen.getByTestId('face-viewer-fit'));
+    currentNatural = PORTRAIT;
+    rerender(
+      <AuthedWrapper>
+        <MemoryRouter>
+          <FaceContextViewer faceIds={['f-1', 'f-2']} index={1} onIndexChange={vi.fn()} onClose={vi.fn()} />
+        </MemoryRouter>
+      </AuthedWrapper>,
+    );
+
+    // The new photo is on screen. Before ITS bitmap has reported a size there
+    // is no definitive canvas and NOT ONE BOX — the old photo's measurement
+    // must never lay out the new photo's faces.
+    await screen.findByText('portrait.jpg');
+    expect(screen.getByTestId('face-viewer-canvas').className).toContain('is-measuring');
+    expect(screen.getByTestId('face-viewer-canvas').style.width).toBe('');
+    expect(screen.queryAllByTestId('face-viewer-box')).toHaveLength(0);
+
+    // Once it does, the canvas is the PORTRAIT contain-fit: 3000x4000 into
+    // 1000x800 is limited by height → 600x800, not the landscape 1000x750.
+    fireEvent.load(await screen.findByRole('img'));
+    await waitFor(() => expect(screen.getByTestId('face-viewer-canvas').style.width).toBe('600px'));
+    expect(screen.getByTestId('face-viewer-canvas').style.height).toBe('800px');
+    expect(screen.getAllByTestId('face-viewer-box')).toHaveLength(1);
+
+    // And a new picture arrives whole.
     expect(screen.getByLabelText('Zoom').textContent).toBe('100%');
   });
 });
