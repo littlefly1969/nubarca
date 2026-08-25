@@ -102,8 +102,10 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
   rollback. Do not deploy from remembered chat commands.
 - **TV releases:** [`docs/tv-release.md`](docs/tv-release.md) is the only
   authorized APK/OTA runbook. Ordinary OTA publication is not a container
-  deploy and never rebuilds the APK; if it needs a compatible backend change,
-  deploy and verify the backend first.
+  deploy and never rebuilds the APK. It is Git-first: GitHub is the only ordinary
+  OTA signer, while production only pulls and activates an immutable bundle by
+  digest. Never build, export or sign an OTA on the server. If it needs a
+  compatible backend change, deploy and verify the backend first.
 - **Before deploying to an existing installation, obtain the production checkout
   location and connection settings from the operator. Never infer or hardcode a
   host path.** A host, login, directory and public origin belong to one
@@ -113,6 +115,8 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`, and where relevant
   `NUBARCA_PUBLIC_ORIGIN`, `NUBARCA_STORAGE_ROOT`, `NUBARCA_SERVICE_ROOT`,
   `NUBARCA_IMPORT_ROOT`, `NUBARCA_TV_APK_DIR`,
+  `NUBARCA_TV_OTA_STORAGE_ROOT`, `NUBARCA_TV_OTA_CERTIFICATE`,
+  `NUBARCA_TV_NODE`,
   `NUBARCA_ENCRYPTED_BACKUP_TARGET`. Missing values fail closed.
 - Use them generically:
 

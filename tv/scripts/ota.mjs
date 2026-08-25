@@ -21,6 +21,8 @@ const SAFE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const GIT_SHA = /^[0-9a-f]{40}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SIGNATURE = /^sig="([A-Za-z0-9+/]+={0,2})", keyid="main", alg="rsa-v1_5-sha256"$/;
+const BUNDLE_SCHEMA_VERSION = 1;
+const BUNDLE_ARTIFACT = 'nubarca-tv-ota';
 
 export function safeSegment(value, name) {
   if (!SAFE.test(value ?? '')) throw new Error(`${name} contains unsupported characters`);
@@ -198,6 +200,47 @@ export function validatePublication(directory, options) {
   return { metadata, manifest, manifestText };
 }
 
+export function validateBundle(directory, config, expectedGitSha = null) {
+  const root = resolve(directory);
+  assertNoSymlinkPath(root, dirname(root));
+  const metadataFile = join(root, 'bundle.json');
+  const publication = join(root, 'publication');
+  if (!existsSync(metadataFile) || !existsSync(publication)) throw new Error('OTA bundle is incomplete');
+  assertNoSymlinkPath(metadataFile, root);
+  assertNoSymlinkPath(publication, root);
+  if (!statSync(metadataFile).isFile() || !statSync(publication).isDirectory()) {
+    throw new Error('OTA bundle entries have invalid types');
+  }
+  const metadata = JSON.parse(readFileSync(metadataFile, 'utf8'));
+  const keys = Object.keys(metadata).sort();
+  const expectedKeys = [
+    'artifact', 'certificateSha256', 'channel', 'createdAt', 'gitSha', 'publicKeySha256',
+    'runtimeVersion', 'schemaVersion', 'updateId',
+  ].sort();
+  if (JSON.stringify(keys) !== JSON.stringify(expectedKeys)) throw new Error('OTA bundle metadata schema is invalid');
+  if (metadata.schemaVersion !== BUNDLE_SCHEMA_VERSION || metadata.artifact !== BUNDLE_ARTIFACT
+      || !GIT_SHA.test(metadata.gitSha ?? '') || !UUID.test(metadata.updateId ?? '')
+      || metadata.runtimeVersion !== config.runtimeVersion || metadata.channel !== config.channel
+      || typeof metadata.createdAt !== 'string'
+      || !/^[0-9a-f]{64}$/.test(metadata.certificateSha256 ?? '')
+      || !/^[0-9a-f]{64}$/.test(metadata.publicKeySha256 ?? '')) {
+    throw new Error('OTA bundle identity is invalid');
+  }
+  if (expectedGitSha && metadata.gitSha !== expectedGitSha) {
+    throw new Error('OTA bundle Git SHA is not the verified checkout HEAD');
+  }
+  const identity = certificateIdentity(config.certificatePath);
+  if (metadata.certificateSha256 !== identity.certificateSha256
+      || metadata.publicKeySha256 !== identity.publicKeySha256) {
+    throw new Error('OTA bundle signing identity does not match the authoritative certificate');
+  }
+  const validated = validatePublication(publication, { ...config, gitSha: metadata.gitSha });
+  if (validated.metadata.id !== metadata.updateId || validated.metadata.createdAt !== metadata.createdAt) {
+    throw new Error('OTA bundle metadata does not match its publication');
+  }
+  return { ...validated, bundleMetadata: metadata, publication };
+}
+
 export function activate(publicationId, config = paths()) {
   safeSegment(publicationId, 'update id');
   assertSafeStorageContext(config);
@@ -350,27 +393,87 @@ export function validate(env = process.env, dependencies = {}) {
   }
 }
 
-export function publish(env = process.env, dependencies = {}) {
-  const prepared = prepareRelease(env, { ...dependencies, requireStorage: true });
-  const config = prepared.context;
+export function bundle(outputDirectory, env = process.env, dependencies = {}) {
+  if (!outputDirectory) throw new Error('bundle output directory is required');
+  const output = resolve(outputDirectory);
+  if (existsSync(output)) throw new Error(`bundle output already exists: ${output}`);
+  const prepared = prepareRelease(env, { ...dependencies, requireStorage: false });
+  const temporary = mkdtempSync(join(dirname(output), '.nubarca-tv-ota-bundle-'));
+  try {
+    const candidate = createCandidate(prepared.context, prepared.gitSha, temporary, env, dependencies);
+    printCandidateSummary(prepared, candidate);
+    const assembled = join(temporary, 'bundle');
+    mkdirSync(assembled);
+    renameSync(candidate.publication, join(assembled, 'publication'));
+    writeFileSync(join(assembled, 'bundle.json'), `${JSON.stringify({
+      schemaVersion: BUNDLE_SCHEMA_VERSION,
+      artifact: BUNDLE_ARTIFACT,
+      gitSha: prepared.gitSha,
+      runtimeVersion: prepared.context.runtimeVersion,
+      channel: prepared.context.channel,
+      updateId: candidate.id,
+      createdAt: candidate.metadata.createdAt,
+      certificateSha256: prepared.signing.certificateSha256,
+      publicKeySha256: prepared.signing.publicKeySha256,
+    }, null, 2)}\n`, { flag: 'wx', mode: 0o644 });
+    validateBundle(assembled, prepared.context, prepared.gitSha);
+    renameSync(assembled, output);
+    console.log(`Validated OTA bundle: ${output}`);
+    return { ...prepared, id: candidate.id, output };
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+}
+
+function directoryDigest(directory) {
+  const hash = createHash('sha256');
+  const walk = (current, relative = '') => {
+    for (const entry of readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isSymbolicLink()) throw new Error('unsafe symlink in OTA bundle');
+      const childRelative = relative ? `${relative}/${entry.name}` : entry.name;
+      const child = join(current, entry.name);
+      hash.update(`${entry.isDirectory() ? 'd' : 'f'}\0${childRelative}\0`);
+      if (entry.isDirectory()) walk(child, childRelative);
+      else if (entry.isFile()) hash.update(readFileSync(child));
+      else throw new Error('unsupported file type in OTA bundle');
+    }
+  };
+  walk(directory);
+  return hash.digest('hex');
+}
+
+export function importBundle(bundleDirectory, expectedGitSha, env = process.env, dependencies = {}) {
+  assertNodeVersion(dependencies.nodeVersion ?? process.versions.node);
+  if (!GIT_SHA.test(expectedGitSha ?? '')) throw new Error('expected Git SHA must be 40 lowercase hexadecimal characters');
+  const config = resolveReleaseContext(env, { requireStorage: true, requirePrivateKey: false });
   mkdirSync(config.storage, { recursive: true });
   assertSafeStorageContext(config);
+  const validated = validateBundle(bundleDirectory, config, expectedGitSha);
   mkdirSync(config.publications, { recursive: true });
-  assertNoSymlinkPath(config.publications, config.storage);
   const stagingRoot = join(config.storage, '.staging');
   mkdirSync(stagingRoot, { recursive: true });
   assertNoSymlinkPath(stagingRoot, config.storage);
   const staging = join(stagingRoot, `${process.pid}-${randomUUID()}`);
-  mkdirSync(staging, { recursive: true });
+  const stagedPublication = join(staging, 'publication');
+  mkdirSync(staging);
   try {
-    const candidate = createCandidate(config, prepared.gitSha, staging, env, dependencies);
-    printCandidateSummary(prepared, candidate);
-    const destination = join(config.publications, candidate.id);
-    if (existsSync(destination)) throw new Error(`publication already exists: ${candidate.id}`);
-    renameSync(candidate.publication, destination);
-    activate(candidate.id, config);
-    console.log(`Published and activated ${candidate.id} for android/${config.runtimeVersion}/${config.channel}`);
-    return candidate.id;
+    cpSync(validated.publication, stagedPublication, { recursive: true, errorOnExist: true, force: false });
+    validatePublication(stagedPublication, { ...config, gitSha: expectedGitSha });
+    const destination = join(config.publications, validated.bundleMetadata.updateId);
+    if (existsSync(destination)) {
+      validatePublication(destination, { ...config, gitSha: expectedGitSha });
+      if (directoryDigest(destination) !== directoryDigest(stagedPublication)) {
+        throw new Error(`immutable OTA publication exists with different bytes: ${validated.bundleMetadata.updateId}`);
+      }
+    } else {
+      renameSync(stagedPublication, destination);
+    }
+    activate(validated.bundleMetadata.updateId, config);
+    const marker = join(config.storage, '.nubarca-tv-ota.source');
+    writeFileSync(`${marker}.${process.pid}.tmp`, `${expectedGitSha}\n`, { flag: 'wx', mode: 0o644 });
+    renameSync(`${marker}.${process.pid}.tmp`, marker);
+    console.log(`Imported and activated ${validated.bundleMetadata.updateId} for android/${config.runtimeVersion}/${config.channel}`);
+    return validated.bundleMetadata.updateId;
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }
@@ -519,12 +622,13 @@ const command = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(im
 if (command) {
   try {
     if (command === 'validate') validate();
-    else if (command === 'publish') publish();
+    else if (command === 'bundle') bundle(process.argv[3]);
+    else if (command === 'import-bundle') importBundle(process.argv[3], process.argv[4]);
     else if (command === 'status') status();
     else if (command === 'rollback-pointer') rollbackPointer(process.argv[3]);
     else if (command === 'cleanup') cleanup(process.argv.slice(3));
     else if (command === 'verify') await verifyRemote();
-    else throw new Error('usage: ota.mjs <validate|publish|status|verify|rollback-pointer|cleanup>');
+    else throw new Error('usage: ota.mjs <validate|bundle|import-bundle|status|verify|rollback-pointer|cleanup>');
   } catch (error) {
     console.error(`OTA ${command} failed: ${error instanceof Error ? error.message : error}`);
     process.exitCode = 1;

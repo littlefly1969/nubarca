@@ -55,15 +55,13 @@ on a new backward-compatible backend API, deploy and verify that backend first,
 then use the TV runbook. A native TV release also uses that runbook; do not add a
 second APK/OTA command sequence here.
 
-An OTA needs its own four operator-supplied values, none of which appear in this
-runbook or in the production `.env`: `TV_OTA_STORAGE_ROOT`,
-`NUBARCA_TV_OTA_CERTIFICATE`, `TV_OTA_PRIVATE_KEY_PATH` and
-`NUBARCA_PUBLIC_ORIGIN`. Obtain them from the operator. The signing key in
-particular is NOT necessarily beside the publication storage, more than one
-keypair may exist on a host with the retired one looking perfectly valid, and
-publishing with the wrong one produces a signature every device rejects — see
-[`../docs/tv-release.md`](../docs/tv-release.md) §4.1 for where to look and the
-SPKI check that settles it before publishing.
+An OTA is Git-first. GitHub Environment `tv-production` is the only ordinary
+signer and publishes an immutable GHCR bundle; GitHub never connects to
+production. The server only verifies and imports that bundle by digest. Its
+production `.env` must carry `NUBARCA_TV_OTA_STORAGE_ROOT`,
+`NUBARCA_TV_OTA_CERTIFICATE` and `NUBARCA_TV_NODE`, all non-secret local paths.
+The OTA private key must not be present on the server or in `.env`. See
+[`../docs/tv-release.md`](../docs/tv-release.md) §§3–6.
 
 Never source `.env`. Let Compose read it through `--env-file .env`; sourcing it
 can truncate the semicolon-delimited PostgreSQL connection string.
@@ -83,7 +81,9 @@ provides a review/apply pair:
 
 `check` fetches `origin/main` and reports, without changing the checkout,
 release pins or containers, which backend/frontend/TV components changed and
-whether the corresponding immutable GHCR artifacts exist. It prints the exact
+whether the corresponding immutable GHCR artifacts exist. A TV change requires
+either a native APK bundle or a signed OTA bundle for the exact SHA; an absent
+TV artifact is never silently skipped. It prints the exact
 `apply` command. Read that report before continuing.
 
 `apply` requires the same full SHA, refuses if `origin/main` moved, refuses a

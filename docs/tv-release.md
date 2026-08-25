@@ -98,7 +98,7 @@ APK and OTA signing are separate:
 | Boundary | Private material | Public verifier |
 | --- | --- | --- |
 | Android APK | release JKS and Gradle credentials, APK build host only | Android signer fingerprint in the release contract |
-| Expo OTA | `TV_OTA_PRIVATE_KEY_PATH`, publisher only | `NUBARCA_TV_OTA_CERTIFICATE`, embedded in the APK and mounted into the API |
+| Expo OTA | `NUBARCA_TV_OTA_PRIVATE_KEY_BASE64`, GitHub Environment `tv-production` only | `NUBARCA_TV_OTA_CERTIFICATE`, embedded in the APK and mounted into the API |
 
 For ordinary OTA publication the APK-embedded certificate, publisher
 certificate, API certificate and publisher-private-key SPKI must identify the
@@ -106,30 +106,34 @@ same established trust root. Compare full SHA-256 fingerprints over DER/SPKI,
 never CN labels. Missing or different material means **stop**: do not generate a
 replacement and do not rotate anything.
 
-The OTA private key and Android keystore must never enter the API container.
-Read-only is not confidentiality.
+The OTA private key and Android keystore must never enter the production server,
+API container or repository. Read-only is not confidentiality. The GitHub
+Environment is the sole ordinary OTA signing boundary.
 
 ## 4. Host and container paths
 
-These are four different concepts:
+These are distinct concepts:
 
 | Context | Setting | Requirement |
 | --- | --- | --- |
-| Publisher host | `TV_OTA_STORAGE_ROOT=<host-ota-storage>` | writable publication filesystem |
-| Publisher host | `NUBARCA_TV_OTA_CERTIFICATE=<host-ota-certificate.pem>` | readable public certificate |
-| Publisher host | `TV_OTA_PRIVATE_KEY_PATH=<host-ota-private-key.pem>` | private, readable only by publisher |
+| GitHub Environment secret | `NUBARCA_TV_OTA_PRIVATE_KEY_BASE64` | established private key, only on the ephemeral release runner |
+| GitHub Environment secret | `NUBARCA_TV_OTA_CERTIFICATE_BASE64` | matching established public certificate |
+| Production `.env` | `NUBARCA_TV_OTA_STORAGE_ROOT=<host-ota-storage>` | writable publication filesystem |
+| Production `.env` | `NUBARCA_TV_OTA_CERTIFICATE=<host-ota-certificate.pem>` | authoritative readable public certificate |
+| Production `.env` | `NUBARCA_TV_NODE=<absolute-node-22-binary>` | executable used only to verify/import the bundle |
 | API container | `TvUpdates__RootPath=/var/lib/nubarca/tv-updates` | read-only publication mount |
 | API container | `TvUpdates__CodeSigningCertificatePath=/var/lib/nubarca/tv-ota-trust/certificate.pem` | read-only public-certificate file mount |
 
-The publisher writes directly to `TV_OTA_STORAGE_ROOT`; it does not upload over
-SSH. Run it on the host owning that storage, or one with the same filesystem
-safely mounted read/write.
+GitHub builds, signs, validates and pushes an immutable scratch OCI bundle to
+GHCR. GitHub never connects to production. The production server pulls that
+bundle by digest, verifies it using the public certificate, copies the immutable
+publication and changes the channel pointer last. It never exports the app,
+builds, signs or receives the private key.
 
-### 4.1 Locating the signing material on an installation
+### 4.1 Establishing the GitHub signing secret
 
-All four publisher values are operator configuration and are never committed, so
-ask the operator for them. When you have to locate them on a host you have
-access to, two things make the search misleading:
+This is a one-time environment setup, not a release step. When migrating an
+existing installation's established key into GitHub, locate it carefully:
 
 - **The private key is not necessarily beside the storage root or the trust
   certificate.** It is commonly kept next to the deployment checkout under a
@@ -160,72 +164,64 @@ openssl x509 -in <host-ota-certificate.pem> -noout -pubkey \
 openssl pkey -in <candidate-private-key.pem> -pubout -outform DER | sha256sum
 ```
 
-`npm run status:ota` prints both the certificate SHA-256 and the OTA public-key
-SPKI SHA-256 for the configured values, so it is the quickest confirmation once
-the four variables are exported. A mismatch is §3's stop condition: do not
-generate a replacement, and do not rotate.
+After the SPKI match, stream the existing key directly to the
+`NUBARCA_TV_OTA_PRIVATE_KEY_BASE64` Environment secret without writing it into a
+repository file or terminal output. Configure
+`NUBARCA_TV_OTA_CERTIFICATE_BASE64` from the same authoritative certificate.
+The workflow repeats the certificate/key match before producing a bundle. A
+mismatch is §3's stop condition: do not generate a replacement and do not rotate.
 
 The API loads the certificate once into its singleton update store. Ordinary
 OTA publication needs no container rebuild or API restart. The first certificate
 mount or a changed certificate path needs one API recreate/restart. Certificate
 rotation is a native transition and also needs a new APK/runtime.
 
-## 5. OTA preflight
+## 5. OTA build and publication in GitHub
 
-Prepare the publication checkout without overwriting local work:
+Merge the reviewed change to protected `main`, wait for required CI, then run
+the manual `TV OTA release` workflow from `main`. Use `publish=true` and enter
+the exact full `main` SHA in `confirm_git_sha`.
 
-```bash
-cd <nubarca-checkout>
-git fetch origin main
-git switch main
-git pull --ff-only origin main
-test -z "$(git status --porcelain)"
+`.github/workflows/tv-ota-release.yml` is the **only ordinary command that may
+sign an OTA**. It installs with Node 22, typechecks and tests before materializing
+secrets, validates the key/certificate pair, exports the Android bundle, signs
+and verifies the publication, uploads the audit artifact, packages the exact
+bytes as `ghcr.io/<owner>/nubarca-tv-ota:<full-sha>`, refuses an existing tag,
+pushes it and records its digest. It has no production SSH credential or step.
 
-cd tv
-export NUBARCA_PUBLIC_ORIGIN='https://<installation-origin>'
-export NUBARCA_TV_OTA_CERTIFICATE='<host-ota-certificate.pem>'
-export TV_OTA_PRIVATE_KEY_PATH='<host-ota-private-key.pem>'
-export TV_OTA_STORAGE_ROOT='<host-ota-storage>'
-npm ci
-```
+There is deliberately no `npm run publish:ota`. Do not recreate one, do not run
+`ota.mjs bundle` on an operator workstation as the normal path, and do not copy
+an unsigned/exported directory to production.
 
-Node 22.x is required. Do not source the production `.env`; set these four
-values explicitly. Runtime, channel, update path and Git SHA are derived and
-must not be exported.
+## 6. Server pull and activation
 
-Start with:
+The production `.env` carries the three non-secret local paths from §4. After
+the workflow succeeds, the ordinary two-command deploy path discovers the OTA
+artifact for the exact candidate SHA:
 
 ```bash
-npm run status:ota
-npm run test:ota
-npm run validate:ota
+./deploy/update-production.sh check --env-file .env
+./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha>
 ```
 
-`validate:ota` refreshes `origin/main`, requires clean `main` with
-`HEAD == origin/main`, validates certificate/key, performs the production Expo
-config and Android export, creates/signs/verifies a candidate entirely in a
-temporary directory and removes it on success or failure. It never reads or
-writes `TV_OTA_STORAGE_ROOT`, changes a pointer or exposes an update.
-
-## 6. OTA publish
-
-Only after preflight passes:
+For an OTA-only recovery where the checkout is already at that exact `main`, the
+equivalent explicit command is:
 
 ```bash
-npm run publish:ota
-npm run status:ota
-npm run verify:ota
+./deploy/pull-publish-tv-ota-image.sh \
+  --env-file .env \
+  'ghcr.io/<owner>/nubarca-tv-ota@sha256:<digest>'
 ```
 
-`publish:ota` reuses the exact preflight pipeline, then commits the immutable
-publication and atomically activates its pointer. Record Git SHA, update UUID,
-createdAt, runtime/channel and OTA certificate/SPKI fingerprints in the
-installation release ledger. This operation does not change application or
-container artifacts and does not restart services.
+Only a digest is accepted. The importer requires clean `main == origin/main`,
+matches the OCI revision and runtime to that checkout, verifies bundle metadata,
+certificate identity, signature and every asset hash, installs an immutable UUID
+directory, then atomically activates the pointer. Retrying identical bytes is
+safe; a UUID with different bytes is refused. No container restart is needed.
 
 ## 7. OTA HTTP verification
 
-`npm run verify:ota` sends the protocol-v1 Android/runtime/channel headers,
+After activation, `npm run verify:ota` sends the protocol-v1 Android/runtime/channel headers,
 accepts an intentional `204 No Content`, or for HTTP 200 verifies content type,
 manifest identity, `Expo-Signature`, same-origin immutable asset URLs and every
 asset SHA-256 hash.

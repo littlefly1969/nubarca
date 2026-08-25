@@ -15,15 +15,19 @@ is built is described by `ARCHITECTURE.md`.
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
-  definitively signed APK and optionally publishes an immutable GHCR bundle.
-  Production pulls verified application/APK artifacts by digest; the guided
+  definitively signed APK and optionally publishes an immutable GHCR bundle. A
+  separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and
+  publishes a signed immutable GHCR bundle without contacting production.
+  Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path refuses migrations and never
   builds on the server
 - Storage: local content-addressed blobs with database-owned logical paths
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
   `NUBARCA_PUBLIC_ORIGIN`, `NUBARCA_STORAGE_ROOT`, `NUBARCA_SERVICE_ROOT`,
-  `NUBARCA_IMPORT_ROOT`, `NUBARCA_TV_APK_DIR` and
+  `NUBARCA_IMPORT_ROOT`, `NUBARCA_TV_APK_DIR`,
+  `NUBARCA_TV_OTA_STORAGE_ROOT`, `NUBARCA_TV_OTA_CERTIFICATE`,
+  `NUBARCA_TV_NODE` and
   `NUBARCA_ENCRYPTED_BACKUP_TARGET`, validated by
   `scripts/lib/operator-config.sh`, which fails closed on a missing value.
 

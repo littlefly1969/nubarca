@@ -8,9 +8,9 @@ import { tmpdir } from 'node:os';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import {
-  activate, assertNodeVersion, cleanup, parseCleanupArguments, publish, readPointer,
+  activate, assertNodeVersion, bundle, cleanup, importBundle, parseCleanupArguments, readPointer,
   refreshAndValidateGitState, resolveReleaseContext, rollbackPointer, status, validate,
-  validatePublication, verifyRemote,
+  validateBundle, validatePublication, verifyRemote,
 } from './ota.mjs';
 
 const gitSha = '1234567890abcdef1234567890abcdef12345678';
@@ -155,13 +155,48 @@ test('validate uses the real candidate pipeline without storage or APK keystore 
   assert.equal(existsSync(join(root, 'publications')), false, 'validation must not touch publication storage');
 });
 
-test('publish reuses candidate validation and records the freshly verified HEAD', () => {
-  const id = publish(env, dependencies());
+test('GitHub bundle and server import keep signing separate from activation', () => {
+  const output = join(root, 'ci-bundle');
+  const built = bundle(output, env, dependencies());
+  assert.equal(built.gitSha, gitSha);
+  const context = resolveReleaseContext(env);
+  const packaged = validateBundle(output, context, gitSha);
+  assert.equal(packaged.bundleMetadata.updateId, built.id);
+  assert.equal(existsSync(join(root, 'publications')), false, 'CI bundle must not touch publication storage');
+
+  const importEnv = { ...env };
+  delete importEnv.TV_OTA_PRIVATE_KEY_PATH;
+  const id = importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' });
   const config = resolveReleaseContext(env);
   const pointer = readPointer(config.pointer);
   assert.equal(pointer.current, id);
   const item = validatePublication(join(config.publications, id), config);
   assert.equal(item.metadata.gitSha, gitSha);
+  assert.equal(readFileSync(join(root, '.nubarca-tv-ota.source'), 'utf8'), `${gitSha}\n`);
+
+  assert.equal(importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' }), id,
+    'retrying the exact immutable bundle is idempotent');
+  assert.throws(() => importBundle(output, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', importEnv,
+    { nodeVersion: '22.22.0' }), /verified checkout HEAD/i);
+});
+
+test('bundle import rejects metadata tampering and immutable byte replacement', () => {
+  const output = join(root, 'ci-bundle');
+  bundle(output, env, dependencies());
+  const importEnv = { ...env };
+  delete importEnv.TV_OTA_PRIVATE_KEY_PATH;
+  const id = importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' });
+
+  const metadataFile = join(output, 'bundle.json');
+  const metadata = JSON.parse(readFileSync(metadataFile, 'utf8'));
+  metadata.channel = 'other';
+  writeFileSync(metadataFile, JSON.stringify(metadata));
+  assert.throws(() => importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' }), /identity/i);
+
+  metadata.channel = 'production';
+  writeFileSync(metadataFile, JSON.stringify(metadata));
+  writeFileSync(join(root, 'publications', 'android', 'nubarca-tv-native-11', id, 'unexpected.txt'), 'different');
+  assert.throws(() => importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' }), /different bytes/i);
 });
 
 test('wrong private key and invalid certificate usage fail before export', () => {
