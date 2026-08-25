@@ -152,6 +152,48 @@ describe('the header says which photo this is', () => {
     expect(await screen.findByTestId('face-viewer-date')).toHaveTextContent(/^Scattata il /);
   });
 
+  it('says WHOSE face is highlighted, in the top right', async () => {
+    // The reviewer has to be able to read who this face is already filed under
+    // without opening the assign dialog.
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1', 'Alice'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0);
+
+    const person = await screen.findByTestId('face-viewer-person');
+    expect(person).toHaveTextContent('Alice');
+    // In the header, opposite the photo's own identity.
+    expect(document.querySelector('.face-viewer-top')!.contains(person)).toBe(true);
+  });
+
+  it('says so plainly when nobody owns the face yet', async () => {
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1'), // unassigned
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0);
+
+    expect(await screen.findByTestId('face-viewer-person')).toHaveTextContent('Non assegnato');
+  });
+
+  it('follows the selection to another face’s person', async () => {
+    // Clicking a second box changes whose face is on screen, so the header has
+    // to change with it rather than describing the face that was there before.
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1', 'Alice'),
+      'GET /api/people/faces/f-2/context': context('f-2', 'Bruno'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1', 'f-2'], 0);
+    await settled();
+    expect(screen.getByTestId('face-viewer-person')).toHaveTextContent('Alice');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Altri volti nella foto' }));
+
+    await waitFor(() => expect(screen.getByTestId('face-viewer-person')).toHaveTextContent('Bruno'));
+  });
+
   it('carries no face action at all', async () => {
     installFetchMock({
       'GET /api/people/faces/f-1/context': context('f-1'),
@@ -202,6 +244,37 @@ describe('the bottom bar groups by consequence', () => {
     expect(within(decisions).getByTestId('face-viewer-ignore')).toBeTruthy();
     expect(within(decisions).getByTestId('face-viewer-ignore-all')).toBeTruthy();
     expect(within(decisions).getByRole('button', { name: 'Assegna persona' })).toBeTruthy();
+  });
+
+  it('gives every control a name and a label that cannot wrap', async () => {
+    // The bar collapses the viewport tools to icons when the width runs out, so
+    // each of them must carry its own name; and no label in the bar may break
+    // across two lines, because a taller bar takes the space from the photo.
+    installFetchMock({
+      'GET /api/people/faces/f-1/context': context('f-1'),
+      'GET /api/people': () => jsonResponse([]),
+    });
+    renderViewer(['f-1'], 0, vi.fn(), vi.fn(), reviewControls());
+    await screen.findByTestId('face-viewer-file-name');
+
+    for (const [testId, name] of [
+      ['face-viewer-next-photo', 'Foto successiva'],
+      ['face-viewer-fit', 'Mostra foto intera'],
+      ['face-viewer-focus', 'Centra volto'],
+    ] as const) {
+      const button = screen.getByTestId(testId);
+      // The name survives the label being hidden.
+      expect(button).toHaveAttribute('aria-label', name);
+      expect(button).toHaveAttribute('title', name);
+      expect(button.querySelector('.face-viewer-tool-label')).not.toBeNull();
+    }
+
+    // The bulk action is named for what it does; the sentence explaining its
+    // scope is the tooltip and the confirmation, not 45 characters of button.
+    const ignoreAll = screen.getByTestId('face-viewer-ignore-all');
+    expect(ignoreAll).toHaveTextContent('Ignora tutti i volti');
+    expect(ignoreAll.textContent!.length).toBeLessThan(25);
+    expect(ignoreAll).toHaveAttribute('title', expect.stringContaining('non assegnati'));
   });
 
   it('keeps no overflow menu behind', async () => {

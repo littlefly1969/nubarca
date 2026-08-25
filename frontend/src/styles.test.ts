@@ -363,3 +363,32 @@ describe('styles.css parses', () => {
     expect(decls.get('max-width')).toBe('100%');
   });
 });
+
+describe('the face viewer bar stays on one line', () => {
+  // The reported defect: the decision buttons wrapped, the bar grew a second
+  // row and the photograph lost the space. These are the three rules that
+  // together keep it to one row at a desktop width.
+  const rule = (selector: string): string => {
+    const at = CSS.indexOf(`${selector} {`);
+    expect(at, `${selector} is declared`).toBeGreaterThan(-1);
+    return CSS.slice(at, CSS.indexOf('}', at));
+  };
+
+  it('never wraps either group', () => {
+    expect(rule('.face-viewer-tools')).toContain('flex-wrap: nowrap');
+    expect(rule('.face-viewer-decisions')).toContain('flex-wrap: nowrap');
+  });
+
+  it('never breaks a button label across two lines', () => {
+    expect(rule('.face-viewer-tool')).toContain('white-space: nowrap');
+    expect(CSS).toContain('.face-viewer-secondary,\n.face-viewer-tertiary {\n  white-space: nowrap;');
+    expect(rule('.face-viewer-decisions .assign-menu-trigger')).toContain('white-space: nowrap');
+  });
+
+  it('sheds the viewport labels before the row can overflow', () => {
+    // Text goes before the row does, and the LEFT half's text goes first.
+    expect(CSS).toContain('@media (max-width: 75rem)');
+    const collapsed = CSS.slice(CSS.indexOf('@media (max-width: 75rem)'));
+    expect(collapsed.slice(0, 200)).toContain('.face-viewer-tool-label { display: none; }');
+  });
+});
