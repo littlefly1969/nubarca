@@ -42,12 +42,35 @@ import {
   type SharedAlbumDetail,
   type SharedAlbumItem,
 } from '../../src/api/sharedAlbums.ts';
-import { buildDownloadName, pickHeader } from '../../src/media/downloadName';
+import {
+  makeSharedDownloadOperationId,
+  runSharedAlbumOriginalDownload,
+  type SharedDownloadIo,
+} from '../../src/media/sharedDownload.ts';
 import { colors, radii, spacing, touch } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
 const PAGE_SIZE = 60;
 type Kind = 'all' | 'image' | 'video';
+
+// The real expo binding of the shared-download seam: the SAME legacy
+// filesystem API and session-cookie headers the route used before, now
+// handed to runSharedAlbumOriginalDownload so its lifecycle stays testable.
+const sharedDownloadIo: SharedDownloadIo = {
+  cacheDirectory: FileSystem.cacheDirectory ?? '',
+  makeOperationId: makeSharedDownloadOperationId,
+  makeDirectoryAsync: (path, options) => FileSystem.makeDirectoryAsync(path, options),
+  downloadAsync: async (uri, targetUri, options) => {
+    const res = await FileSystem.downloadAsync(uri, targetUri, options);
+    return {
+      status: res.status,
+      headers: res.headers as Record<string, string | string[] | undefined>,
+    };
+  },
+  moveAsync: ({ from, to }) => FileSystem.moveAsync({ from, to }),
+  deleteAsync: (path, options) => FileSystem.deleteAsync(path, options),
+  shareAsync: (uri, options) => Sharing.shareAsync(uri, options),
+};
 
 export default function SharedAlbum(): React.JSX.Element {
   const session = useSession();
@@ -168,28 +191,14 @@ export default function SharedAlbum(): React.JSX.Element {
       // straight to disk via expo's downloader with the session cookie —
       // they NEVER pass through the JS heap or a base64 expansion, so even a
       // multi-hundred-MB original cannot OOM the app.
-      const tempUri = `${FileSystem.cacheDirectory}.nubarca-download-${Date.now()}`;
-      const res = await FileSystem.downloadAsync(src.uri, tempUri, {
-        headers: src.headers,
-      });
-      if (res.status < 200 || res.status >= 300) {
-        throw new Error(`download failed with status ${res.status}`);
-      }
-      const headers = res.headers as Record<string, string | string[] | undefined>;
-      const disposition = pickHeader(headers, 'content-disposition');
-      const mimeType = pickHeader(headers, 'content-type');
-      // Name and extension come from what the SERVER declared about its own
-      // original (Content-Disposition / Content-Type) — never guessed from
-      // the media kind.
-      const fileName = buildDownloadName({
-        disposition,
-        mimeType,
+      //
+      // The orchestrator owns the whole lifecycle inside ONE unique
+      // per-operation cache directory and deletes it on EVERY exit path
+      // (share done/dismissed, share failure, download/move failure), so a
+      // private original never outlives the operation on this device.
+      await runSharedAlbumOriginalDownload(sharedDownloadIo, {
+        source: src,
         kindFallbackExtension: item.kind === 'video' ? 'mp4' : 'jpg',
-      });
-      const finalUri = `${FileSystem.cacheDirectory}${encodeURIComponent(fileName)}`;
-      await FileSystem.moveAsync({ from: res.uri, to: finalUri });
-      await Sharing.shareAsync(finalUri, {
-        mimeType: mimeType ?? undefined,
         dialogTitle: t('shared.download'),
       });
     } catch {
