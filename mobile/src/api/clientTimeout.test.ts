@@ -4,9 +4,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { apiRequest } from './client.ts';
-import { setSessionCookieSource } from './sessionAccess.ts';
+import {
+  setSessionCookieSource,
+  staticSessionCookieSource,
+} from './sessionAccess.ts';
 
-setSessionCookieSource({ current: null, capture: () => {} });
+setSessionCookieSource(staticSessionCookieSource(null));
 
 test('a hanging request is aborted after timeoutMs', async () => {
   const original = globalThis.fetch;

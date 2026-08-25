@@ -8,6 +8,9 @@
 // Request correctness rules:
 //   * every request accepts an AbortSignal and enforces a timeout — no
 //     operation can hang forever;
+//   * a response may refresh the session cookie ONLY while its request's
+//     session generation is still current — a stale response from a
+//     logged-out or switched account can never mutate the live cookie;
 //   * 401 on an authenticated request is normalized globally: the registered
 //     unauthorized handler runs exactly once per invalid session (the login
 //     request itself opts out — a wrong password is not a dead session);
@@ -100,7 +103,10 @@ async function request<T>(
 
   const headers: Record<string, string> = {};
   if (json !== undefined) headers['content-type'] = 'application/json';
-  const cookie = cookieOverride ?? sessionCookieSource().current;
+  // Snapshot ONCE at request start: this request belongs to THIS session
+  // generation even if a logout or account switch happens while it flies.
+  const session = sessionCookieSource().snapshot();
+  const cookie = cookieOverride ?? session.cookie;
   if (cookie) headers['cookie'] = cookie;
 
   try {
@@ -113,8 +119,17 @@ async function request<T>(
       credentials: 'include',
     });
 
-    // Capture a refreshed/rotated session cookie if the response carried one.
-    void sessionCookieSource().capture(res.headers.get('set-cookie'));
+    // Accept a refreshed/rotated session cookie ONLY while this response
+    // still belongs to the session its request started under (generation
+    // unchanged). The cookieOverride case is the best-effort logout
+    // notification riding a deliberately DEAD session: its response feeds
+    // nothing, ever.
+    if (cookieOverride === undefined) {
+      void sessionCookieSource().captureIfCurrent(
+        res.headers.get('set-cookie'),
+        session.generation,
+      );
+    }
 
     if (res.status === 204) return undefined as T;
 

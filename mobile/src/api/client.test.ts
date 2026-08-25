@@ -17,7 +17,7 @@ import {
 } from './client.ts';
 import {
   setSessionCookieSource,
-  type SessionCookieSource,
+  staticSessionCookieSource,
 } from './sessionAccess.ts';
 import { bulkAddAlbumItems, bulkRemoveAlbumItems, deleteAlbum } from './albums.ts';
 import { listAlbumMedia } from './media.ts';
@@ -79,7 +79,10 @@ function installFetch(): void {
 }
 
 const COOKIE = `NubArca.Auth=${'k'.repeat(30)}`;
-const session: SessionCookieSource = { current: COOKIE, capture: () => {} };
+// Fixed cookie, jar that never accepts response cookies — these tests own the
+// cookie themselves; response capture is exercised by the dedicated
+// stale-response suite.
+const session = staticSessionCookieSource(COOKIE);
 
 test.before(() => {
   installFetch();

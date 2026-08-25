@@ -8,7 +8,7 @@ import test from 'node:test';
 import { configureBaseUrl } from '../api/client.ts';
 import {
   setSessionCookieSource,
-  type SessionCookieSource,
+  staticSessionCookieSource,
 } from '../api/sessionAccess.ts';
 import {
   buildAuthenticatedSource,
@@ -19,8 +19,8 @@ import type { VideoMediaItem } from '../api/media.ts';
 
 const COOKIE = `NubArca.Auth=${'v'.repeat(36)}`;
 
-function fakeSession(cookie: string | null): SessionCookieSource {
-  return { current: cookie, capture: () => {} };
+function fakeSession(cookie: string | null) {
+  return staticSessionCookieSource(cookie);
 }
 
 function videoItem(overrides: Partial<VideoMediaItem> = {}): VideoMediaItem {

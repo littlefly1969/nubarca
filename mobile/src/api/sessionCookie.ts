@@ -27,6 +27,12 @@ export interface SessionCookieStorage {
   removeItem(key: string): Promise<void>;
 }
 
+/** Point-in-time identity of the live session, taken when a request starts. */
+export interface SessionSnapshot {
+  cookie: string | null;
+  generation: number;
+}
+
 // Extract exactly `NubArca.Auth=<value>` from raw Set-Cookie header content,
 // or null when no owner session cookie is present. Malformed input fails
 // safely: this never throws and never returns attribute fragments.
@@ -79,6 +85,13 @@ export class OwnerSessionCookieStore {
     return this.currentCookie;
   }
 
+  // Point-in-time identity of the live session, taken when an authenticated
+  // request STARTS. The GENERATION — never the cookie VALUE — later decides
+  // whether a response may feed its Set-Cookie back into this session.
+  snapshot(): SessionSnapshot {
+    return { cookie: this.currentCookie, generation: this.generation };
+  }
+
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     return this.tail.enqueue(operation);
   }
@@ -110,13 +123,8 @@ export class OwnerSessionCookieStore {
     }
   }
 
-  // Capture the session cookie out of a Set-Cookie response header. A response
-  // without the owner cookie is ignored (unrelated cookies never enter the
-  // jar). A clear() racing a capture wins: the generation bump makes persist's
-  // completion check discard the captured write.
-  async capture(setCookie: string | null): Promise<void> {
-    const cookie = normalizeOwnerSessionCookie(setCookie);
-    if (!cookie) return;
+  private async absorb(cookie: string | null): Promise<boolean> {
+    if (!cookie) return false;
     const generation = ++this.generation;
     this.currentCookie = cookie;
     try {
@@ -125,6 +133,30 @@ export class OwnerSessionCookieStore {
       // Durable write failed; the in-memory cookie still authenticates this
       // session and a later capture/ensure retries the write.
     }
+    return true;
+  }
+
+  // Capture the session cookie out of a Set-Cookie response header. A response
+  // without the owner cookie is ignored (unrelated cookies never enter the
+  // jar). A clear() racing a capture wins: the generation bump makes persist's
+  // completion check discard the captured write.
+  async capture(setCookie: string | null): Promise<void> {
+    await this.absorb(normalizeOwnerSessionCookie(setCookie));
+  }
+
+  // STALE-RESPONSE GUARD (MOBILE-SESSION-LIFECYCLE-01): accept a response's
+  // Set-Cookie ONLY while `generation` — the one snapshotted when its request
+  // started — is STILL the active session generation. A logout or account
+  // switch that landed mid-flight bumped the generation, so renewed-A can
+  // neither resurrect a signed-out state nor overwrite account B. Ownership
+  // is decided by the generation alone; equal cookie VALUES prove nothing.
+  // Resolves true exactly when the cookie was accepted into the jar.
+  async captureIfCurrent(
+    setCookie: string | null,
+    generation: number,
+  ): Promise<boolean> {
+    if (this.generation !== generation) return false;
+    return this.absorb(normalizeOwnerSessionCookie(setCookie));
   }
 
   // Sign-out / invalidation. Clears memory IMMEDIATELY and synchronously,

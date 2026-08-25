@@ -6,7 +6,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { signOutLocalFirst } from './signOut.ts';
-import { sessionCookieSource, setSessionCookieSource } from './sessionAccess.ts';
+import {
+  sessionCookieSource,
+  setSessionCookieSource,
+  staticSessionCookieSource,
+} from './sessionAccess.ts';
 
 interface RecordedRequest {
   url: string;
@@ -23,16 +27,13 @@ test('local teardown runs first; the captured cookie rides the best-effort call'
     return new Promise(() => undefined);
   }) as typeof fetch;
 
-  setSessionCookieSource({
-    current: 'NubArca.Auth=OLD-SESSION',
-    capture: () => {},
-  });
+  setSessionCookieSource(staticSessionCookieSource('NubArca.Auth=OLD-SESSION'));
 
   try {
     const handle = signOutLocalFirst(() => {
       // EXACTLY what the real provider's callback does: wipe the local state.
       tornDown = true;
-      setSessionCookieSource({ current: null, capture: () => {} });
+      setSessionCookieSource(staticSessionCookieSource(null));
     });
 
     await new Promise((r) => setImmediate(r));
@@ -56,10 +57,7 @@ test('local teardown runs first; the captured cookie rides the best-effort call'
 
 test('the notification carries the PRE-teardown cookie via override', async () => {
   const recorded: RecordedRequest[] = [];
-  setSessionCookieSource({
-    current: 'NubArca.Auth=LIVE-COOKIE',
-    capture: () => {},
-  });
+  setSessionCookieSource(staticSessionCookieSource('NubArca.Auth=LIVE-COOKIE'));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((url: string | URL, init?: { headers?: Record<string, string> }) => {
     recorded.push({
@@ -85,7 +83,7 @@ test('the notification carries the PRE-teardown cookie via override', async () =
 
 test('signed-out logout still tears down locally and calls NOTHING', async () => {
   const recorded: RecordedRequest[] = [];
-  setSessionCookieSource({ current: null, capture: () => {} });
+  setSessionCookieSource(staticSessionCookieSource(null));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = ((url: string | URL) => {
     recorded.push({ url: String(url), cookie: null });
@@ -105,10 +103,7 @@ test('signed-out logout still tears down locally and calls NOTHING', async () =>
 });
 
 test('a FAILING server notification cannot fail the logout', async () => {
-  setSessionCookieSource({
-    current: 'NubArca.Auth=X',
-    capture: () => {},
-  });
+  setSessionCookieSource(staticSessionCookieSource('NubArca.Auth=X'));
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (() => Promise.reject(new TypeError('Network request failed'))) as typeof fetch;
 

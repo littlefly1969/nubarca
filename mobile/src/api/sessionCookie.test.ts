@@ -129,6 +129,51 @@ test('capture persists exactly the extracted pair', async () => {
   assert.equal(memory.value, exact);
 });
 
+test('snapshot exposes the live pair and its generation', async () => {
+  const store = new OwnerSessionCookieStore(memoryStorage().storage);
+  assert.deepEqual(store.snapshot(), { cookie: null, generation: 0 });
+  await store.capture(exact);
+  assert.deepEqual(store.snapshot(), { cookie: exact, generation: 1 });
+});
+
+test('captureIfCurrent rejects a superseded generation WITHOUT touching memory or disk', async () => {
+  const memory = memoryStorage();
+  const store = new OwnerSessionCookieStore(memory.storage);
+  await store.capture(exact);
+  const { generation } = store.snapshot();
+
+  await store.clear(); // logout bumps the generation past the snapshot
+  const renewed = `NubArca.Auth=${'n'.repeat(40)}`;
+  assert.equal(
+    await store.captureIfCurrent(`${renewed}; httponly`, generation),
+    false,
+  );
+  assert.equal(store.current, null); // not restored in memory…
+  // …and nothing NEW was written: only the original capture's 'set' plus the
+  // logout's own 'remove'.
+  assert.deepEqual(memory.operations, ['set', 'remove']);
+});
+
+test('captureIfCurrent accepts while the generation still holds', async () => {
+  const memory = memoryStorage();
+  const store = new OwnerSessionCookieStore(memory.storage);
+  await store.capture(exact);
+  const { generation } = store.snapshot();
+  const renewed = `NubArca.Auth=${'n'.repeat(40)}`;
+  assert.equal(await store.captureIfCurrent(renewed, generation), true);
+  assert.equal(store.current, renewed);
+  await store.ensure();
+  assert.equal(memory.value, renewed);
+});
+
+test('captureIfCurrent ignores responses without the owner cookie', async () => {
+  const store = new OwnerSessionCookieStore(memoryStorage().storage);
+  await store.capture(exact);
+  const { generation } = store.snapshot();
+  assert.equal(await store.captureIfCurrent('Other=x', generation), false);
+  assert.equal(store.current, exact);
+});
+
 test('clear wins over an in-flight restore', async () => {
   const memory = memoryStorage(exact);
   const gate = deferred<void>();

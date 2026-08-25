@@ -16,10 +16,13 @@ import {
   withdrawSharedAlbumContribution,
 } from './sharedAlbums.ts';
 import { configureBaseUrl } from './client.ts';
-import { setSessionCookieSource } from './sessionAccess.ts';
+import {
+  setSessionCookieSource,
+  staticSessionCookieSource,
+} from './sessionAccess.ts';
 
 configureBaseUrl('https://unit.test');
-setSessionCookieSource({ current: 'NubArca.Auth=t', capture: () => {} });
+setSessionCookieSource(staticSessionCookieSource('NubArca.Auth=t'));
 
 interface Recorded {
   method: string;

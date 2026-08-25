@@ -13,7 +13,10 @@ import {
   __testConfigureLimits,
 } from './imageLoader.ts';
 
-import { setSessionCookieSource } from '../api/sessionAccess.ts';
+import {
+  setSessionCookieSource,
+  staticSessionCookieSource,
+} from '../api/sessionAccess.ts';
 import { configureBaseUrl } from '../api/client.ts';
 
 interface FakeBlob {
@@ -61,10 +64,7 @@ beforeEach(() => {
     totalBytes: 48 * 1024 * 1024,
     timeoutMs: 30_000,
   });
-  setSessionCookieSource({
-    current: 'NubArca.Auth=tok',
-    capture: () => {},
-  });
+  setSessionCookieSource(staticSessionCookieSource('NubArca.Auth=tok'));
   configureBaseUrl('https://unit.test');
 });
 
@@ -78,7 +78,7 @@ test('signed-out loads fail closed with 401 and never hit fetch', async () => {
     fetched += 1;
     return okResponse(10);
   });
-  setSessionCookieSource({ current: null, capture: () => {} });
+  setSessionCookieSource(staticSessionCookieSource(null));
   await assert.rejects(loadImage('/p/1'), (err: { status?: number }) => err.status === 401);
   assert.equal(fetched, 0);
   assert.equal(hasSession(), false);

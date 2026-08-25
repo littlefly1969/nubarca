@@ -38,8 +38,11 @@ setSessionCookieSource({
   get current() {
     return ownerSession.current;
   },
-  capture(setCookie) {
-    void ownerSession.capture(setCookie);
+  snapshot() {
+    return ownerSession.snapshot();
+  },
+  captureIfCurrent(setCookie, generation) {
+    return ownerSession.captureIfCurrent(setCookie, generation);
   },
 });
 
