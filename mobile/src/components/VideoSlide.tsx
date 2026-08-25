@@ -69,6 +69,13 @@ export function VideoSlide({
       const outcome = await probeVideoSource(source, {
         retryMs: VIDEO_PROBE_RETRY_MS,
         maxAttempts: VIDEO_PROBE_MAX_ATTEMPTS,
+        // The promise settles only on the TERMINAL verdict; without this the
+        // transient 202 never reaches the UI and the slide reads
+        // "Caricamento..." for the whole ladder-preparation wait instead of
+        // switching to its dedicated "preparing" branch.
+        onPhase: (phase) => {
+          if (!cancelled && phase === 'preparing') setProbeState('preparing');
+        },
         fetchImpl: ((
           uri: string,
           init: { headers: Record<string, string>; signal: AbortSignal },

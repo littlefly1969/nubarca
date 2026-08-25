@@ -10,6 +10,7 @@ import {
   resolveExpoVideoSource,
   type VideoProbeFetch,
   type VideoProbeOutcome,
+  type VideoProbePhase,
 } from './videoProbe.ts';
 
 const SRC = {
@@ -92,6 +93,54 @@ test('202 keeps the loop alive within the bounded budget', async () => {
   const outcome = await probeVideoSource(SRC, { fetchImpl: fetch, retryMs: 1 });
   assert.equal(calls, 3);
   assert.deepEqual(outcome, { phase: 'ready', container: 'hls' });
+});
+
+test('200 + HLS MIME WITH parameters (charset=utf-8) still classifies as HLS', async () => {
+  // Merge-blocker regression: ASP.NET Core serves the master through
+  // Results.Text, which may materialize the declared type with an explicit
+  // charset. An exact-match comparison turned that READY answer into
+  // "unavailable" on a real server.
+  const { fetch } = makeRecorder([
+    { status: 200, contentType: 'application/vnd.apple.mpegurl; charset=utf-8' },
+  ]);
+  const outcome = await probeVideoSource(SRC, { fetchImpl: fetch });
+  assert.deepEqual(outcome, { phase: 'ready', container: 'hls' });
+  // Parameter-stripping keeps case-insensitivity of the bare type.
+  assert.deepEqual(
+    classifyVideoProbe(200, 'APPLICATION/VND.APPLE.MPEGURL; CHARSET=UTF-8'),
+    { phase: 'ready', container: 'hls' },
+  );
+});
+
+test('every retried 202 surfaces preparing through onPhase BEFORE the final verdict', async () => {
+  const seen: VideoProbePhase[] = [];
+  const { fetch } = makeRecorder([
+    { status: 202 },
+    { status: 202 },
+    { status: 200, contentType: 'application/vnd.apple.mpegurl' },
+  ]);
+  const outcome = await probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    retryMs: 1,
+    onPhase: (phase) => seen.push(phase),
+  });
+  assert.deepEqual(seen, ['preparing', 'preparing']);
+  assert.deepEqual(outcome, { phase: 'ready', container: 'hls' });
+});
+
+test('the budget-exhausting 202 and terminal outcomes never pass through onPhase', async () => {
+  const seen: VideoProbePhase[] = [];
+  const { fetch } = makeRecorder([{ status: 202 }]);
+  const outcome = await probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    maxAttempts: 3,
+    retryMs: 1,
+    onPhase: (phase) => seen.push(phase),
+  });
+  // The two RETRIED 202s were notified; the LAST one resolves straight to
+  // unavailable without a pointless preparing flash right before the end.
+  assert.deepEqual(seen, ['preparing', 'preparing']);
+  assert.equal(outcome.phase, 'unavailable');
 });
 
 test('404 is deliberate unavailability: ONE call, no retries', async () => {

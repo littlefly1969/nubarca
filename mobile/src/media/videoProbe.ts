@@ -12,13 +12,15 @@
 //     body is never buffered either way;
 //   * uses a FRESH AbortController per attempt and never touches res.body;
 //   * retries only the "ladder still preparing" verdict (202), under a bounded
-//     attempt/retry budget.
+//     attempt/retry budget, reporting each such verdict through onPhase so the
+//     caller can surface "preparing" while the loop is still running;
 //
 // Classification follows NubArca's real contracts, not URL shapes:
 //   202                                   → preparing (retry)
 //   404 / other deliberate status         → unavailable
 //   206 + Content-Type video/*            → ready PROGRESSIVE (native original)
-//   200 + application/vnd.apple.mpegurl   → ready HLS
+//   200 + application/vnd.apple.mpegurl   → ready HLS (parameters after ';'
+//                                           are ignored — see below)
 //
 // The caller resolves the expo-video source FROM THE OUTCOME: shared media
 // keeps its server-provided album-scoped URL unchanged; owned media gains
@@ -67,6 +69,15 @@ export interface VideoProbeDeps {
   fetchImpl?: VideoProbeFetch;
   retryMs?: number;
   maxAttempts?: number;
+  /**
+   * Observes the transient "still preparing" verdict AS IT HAPPENS. The
+   * promise settles only on the terminal outcome, so without this callback a
+   * 202 stays invisible behind the internal retry loop and the caller cannot
+   * show its preparing state at all. Fired at most once per retried 202 (the
+   * budget-exhausting one resolves straight to unavailable); terminal phases
+   * are delivered through the promise instead.
+   */
+  onPhase?: (phase: VideoProbePhase) => void;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -105,8 +116,16 @@ export function classifyVideoProbe(
   }
 
   if (status === 200) {
-    const ct = (contentType ?? '').trim().toLowerCase();
-    if (ct === NUBARCA_HLS_MIME) return { phase: 'ready', container: 'hls' };
+    // Compare ONLY the bare MIME type: ASP.NET Core materializes Results.Text
+    // responses as UTF-8 text, so the declared master type can arrive as
+    // "application/vnd.apple.mpegurl; charset=utf-8". RFC 9110 media types
+    // carry parameters after ';', and an exact match would downgrade a READY
+    // ladder to unavailable on a real server.
+    const mime = (contentType ?? '')
+      .split(';', 1)[0]
+      .trim()
+      .toLowerCase();
+    if (mime === NUBARCA_HLS_MIME) return { phase: 'ready', container: 'hls' };
     const ctRaw = (contentType ?? '').trim();
     if (/^video\//i.test(ctRaw)) {
       // A 200 that ignored our single-byte range but IS native video: usable
@@ -147,6 +166,9 @@ export async function probeVideoSource(
       const outcome = classifyVideoProbe(res.status, readHeader(res, 'content-type'));
       if (outcome.phase !== 'preparing') return outcome;
       if (attempt >= maxAttempts) return { phase: 'unavailable' };
+      // There IS going to be a wait: tell the caller now instead of hiding
+      // the preparing state until the loop finally settles.
+      deps.onPhase?.(outcome.phase);
       await sleep(retryMs);
     } catch {
       // Transport-level failure mid-probe behaves like "still preparing" and
