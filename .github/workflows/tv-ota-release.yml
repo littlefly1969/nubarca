@@ -132,7 +132,11 @@ jobs:
         id: image
         run: |
           owner="$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          echo "image=${REGISTRY}/${owner}/nubarca-tv-ota:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          repository="${REGISTRY}/${owner}/nubarca-tv-ota"
+          {
+            echo "repository=$repository"
+            echo "image=$repository:${GITHUB_SHA}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         if: ${{ inputs.publish }}
@@ -201,7 +205,7 @@ jobs:
             echo "- Update: \`${{ steps.bundle.outputs.update_id }}\`"
             echo "- GHCR publication requested: \`$REQUESTED_PUBLISH\`"
             if [[ "$REQUESTED_PUBLISH" == "true" ]]; then
-              echo "- Server pull: \`${{ steps.image.outputs.image }}@${{ steps.digest.outputs.digest }}\`"
+              echo "- Server pull: \`${{ steps.image.outputs.repository }}@${{ steps.digest.outputs.digest }}\`"
             fi
             echo "- Production activation: **pending server-side pull**"
             echo "- Physical Fire Stick acceptance: **pending**"
