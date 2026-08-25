@@ -84,7 +84,7 @@ export function SessionProvider({
   //   2. START the SecureStore removal — its promise is TRACKED, not awaited
   //      here, so a slow disk can never hold the UI hostage;
   //   3. wipe the image cache and flip the UI to unauthed synchronously (the
-  //      viewer wipes itself through its identity watch);
+  //      VIEWER remounts empty through its identity key — see app/_layout.tsx);
   //   4. afterwards, settle the durable removal and fire ONE best-effort
   //      server notification riding the captured cookie. A hanging/failing
   //      network can neither resurrect the session nor block anything.

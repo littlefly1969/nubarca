@@ -14,7 +14,24 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
+import { viewerIdentityKey } from '../src/media/viewerIdentity';
 import { colors } from '../src/ui/tokens';
+
+function IdentityKeyedViewerProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.JSX.Element {
+  const session = useSession();
+  // PRIVACY: the whole viewer subtree is REMOUNTED whenever the authenticated
+  // identity changes — account switch or sign-out. Keying (instead of wiping
+  // in an after-render effect) guarantees the FIRST render under the new
+  // identity already observes an empty sequence; nothing belonging to the
+  // previous account is ever committed under the new one.
+  return (
+    <ViewerProvider key={viewerIdentityKey(session)}>{children}</ViewerProvider>
+  );
+}
 
 function RootGate(): React.JSX.Element {
   const session = useSession();
@@ -60,10 +77,10 @@ export default function RootLayout(): React.JSX.Element {
     <SafeAreaProvider>
       <I18nProvider>
         <SessionProvider>
-          <ViewerProvider>
+          <IdentityKeyedViewerProvider>
             <StatusBar style="dark" />
             <RootGate />
-          </ViewerProvider>
+          </IdentityKeyedViewerProvider>
         </SessionProvider>
       </I18nProvider>
     </SafeAreaProvider>
