@@ -166,7 +166,17 @@ export interface FaceContext {
   // "Ignorati" tab too, so it offers Restore rather than an Ignore that would
   // mean nothing.
   isIgnored: boolean;
+  // When the photo was taken, and WHICH fact that is. They travel together on
+  // purpose: with source 'uploaded' the value is an upload time, and captioning
+  // it "Scattata il" would state something false about the photograph.
+  effectiveDateTaken: string;
+  effectiveDateTakenSource: EffectiveDateTakenSource;
 }
+
+// user     — the owner typed this date
+// embedded — it came out of the file's own metadata
+// uploaded — nobody ever said; this is when it arrived
+export type EffectiveDateTakenSource = 'user' | 'embedded' | 'uploaded';
 
 export function getFaceContext(faceId: string, signal?: AbortSignal): Promise<FaceContext> {
   return api<FaceContext>(`/api/people/faces/${encodeURIComponent(faceId)}/context`, { signal });

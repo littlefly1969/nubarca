@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
+using NubArca.Api.Metadata;
 
 namespace NubArca.Api.Ai.Faces;
 
@@ -1303,7 +1304,12 @@ public sealed class PeopleService
         var file = await _db.FileItems.AsNoTracking()
             .Where(f => f.BlobObjectId == face.BlobObjectId && f.OwnerUserId == ownerUserId && f.DeletedAt == null && f.MediaLibraryState == MediaLibraryState.Active)
             .OrderBy(f => f.Id)
-            .Select(f => new { f.Id, f.Name })
+            // The capture date travels with the photo the face is on. It comes from
+            // the DENORMALIZED column, which already applies the one precedence
+            // the product has — user override → embedded date → upload time — so
+            // the viewer states the same date the gallery orders by, with no
+            // second query and no metadata fetch from the client.
+            .Select(f => new { f.Id, f.Name, f.EffectiveDateTaken, f.EffectiveDateTakenSource })
             .FirstOrDefaultAsync(cancellationToken);
         if (file is null)
         {
@@ -1344,7 +1350,12 @@ public sealed class PeopleService
 
         return new FaceContextDto(
             file.Id, file.Name, faceId, selected.Box, faces,
-            person?.Id, person?.DisplayName, ignored);
+            person?.Id, person?.DisplayName, ignored,
+            file.EffectiveDateTaken,
+            // Null only for a row written before the column existed. The client
+            // reads an unknown source the same way it reads "uploaded" — as a
+            // date it must not present as a capture date.
+            file.EffectiveDateTakenSource ?? EffectiveDateTakenSources.Uploaded);
     }
 
     // ---- internals -------------------------------------------------------
@@ -1751,4 +1762,13 @@ public sealed record FaceContextDto(
     IReadOnlyList<FaceBoxRef> Faces,
     Guid? PersonId,
     string? PersonName,
-    bool IsIgnored);
+    bool IsIgnored,
+    // When the photo was taken, and WHICH fact that is. The pair travels
+    // together on purpose: a date whose source is "uploaded" is an upload time,
+    // and presenting it as a capture date would state something false about the
+    // photograph. One of EffectiveDateTakenSources.{User, Embedded, Uploaded}.
+    //
+    // No GPS, no camera body, no embedded payload: the viewer needs a date to
+    // caption the photo, not the owner's metadata document.
+    DateTime EffectiveDateTaken,
+    string EffectiveDateTakenSource);

@@ -42,7 +42,7 @@ it('loads and lists unassigned faces', async () => {
   renderTab();
   await waitFor(() => expect(screen.getAllByLabelText('Volto non assegnato').length).toBe(2));
   // Each face offers an assign action.
-  expect(screen.getAllByRole('button', { name: 'Assegna a persona' }).length).toBe(2);
+  expect(screen.getAllByRole('button', { name: 'Assegna persona' }).length).toBe(2);
 });
 
 it('assigns an unassigned face and removes it from the pool', async () => {
@@ -53,7 +53,7 @@ it('assigns an unassigned face and removes it from the pool', async () => {
   await waitFor(() => expect(screen.getAllByLabelText('Volto non assegnato').length).toBe(2));
 
   // Open the first face's assign menu and pick Alice.
-  await userEvent.click(screen.getAllByRole('button', { name: 'Assegna a persona' })[0]);
+  await userEvent.click(screen.getAllByRole('button', { name: 'Assegna persona' })[0]);
   await userEvent.click(screen.getByRole('button', { name: 'Alice' }));
 
   await waitFor(() =>

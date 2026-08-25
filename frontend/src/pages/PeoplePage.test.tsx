@@ -278,7 +278,7 @@ it('drops an ignored face from the grid and moves the viewer to the next one', a
   expect(await screen.findByText('first.jpg')).toBeTruthy();
   // Scoped to the viewer: every unassigned card carries the same trigger.
   const viewer = screen.getByRole('dialog', { name: 'Visualizzatore volto' });
-  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna persona' }));
   await userEvent.click(await screen.findByRole('button', { name: 'Ignora volto' }));
 
   await waitFor(() =>
@@ -328,7 +328,7 @@ it('closes the viewer when the ignored face was the only one left', async () => 
   await userEvent.click(await screen.findByLabelText('Volto non assegnato'));
   await screen.findByText('only.jpg');
   const viewer = screen.getByRole('dialog', { name: 'Visualizzatore volto' });
-  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(within(viewer).getByRole('button', { name: 'Assegna persona' }));
   await userEvent.click(await screen.findByRole('button', { name: 'Ignora volto' }));
 
   await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Visualizzatore volto' })).toBeNull());
@@ -363,7 +363,7 @@ it('offers Restore, not Ignore, on a face opened from the Ignorati tab', async (
   await userEvent.click(screen.getByRole('button', { name: 'Ignorati' }));
   await userEvent.click(await screen.findByLabelText('Volto ignorato'));
   await screen.findByText('dismissed.jpg');
-  await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+  await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
 
   // An "Ignora volto" here would be an action that does nothing.
   const dialog = await screen.findByRole('dialog', { name: 'Assegna a persona' });

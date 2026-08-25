@@ -70,7 +70,7 @@ describe('face viewer under an assign modal', () => {
       </AuthedWrapper>,
     );
     await screen.findByText('crowd.jpg');
-    await userEvent.click(screen.getByRole('button', { name: 'Assegna a persona' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Assegna persona' }));
     const search = await screen.findByLabelText('Cerca persona');
     return { onIndexChange, onClose, search: search as HTMLInputElement };
   }
