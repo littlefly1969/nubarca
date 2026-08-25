@@ -319,6 +319,16 @@ test('focus never resolves to nothing', () => {
   assert.equal(resolveTvFilterFocus('people', []), 'apply');
 });
 
+test('relevance information never becomes a no-op focus target', () => {
+  const identity = identityFor(LIBRARY, 'image');
+  identity.filters.common.visualQuery = 'tramonto';
+  identity.filters.common.semanticTopK = 200;
+  const rows = tvFilterRows(identity, identity.filters);
+  assert.equal(resolveTvFilterFocus('sort', rows, true), 'apply');
+  assert.equal(resolveTvFilterFocus('direction', rows, true), 'apply');
+  assert.equal(resolveTvFilterFocus('reset', rows, true), 'reset');
+});
+
 // ------------------------------------------------------------- integration
 
 // The named regression: a person filter that did not exist, chosen with the

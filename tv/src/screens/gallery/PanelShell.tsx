@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from 'react';
-import { BackHandler, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, type ReactNode } from 'react';
+import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 
 // EXACTLY ONE COMPONENT MAY OWN VERTICAL SCROLLING.
@@ -26,11 +26,19 @@ import { colors, font, spacing } from '../../theme';
 export type PanelBodyMode = 'scroll' | 'fixed' | 'custom';
 
 // Full-screen panel container for the Personal Gallery MENU actions (filters /
-// sort / search / people / albums / details). Opaque, so the grid behind it is
-// fully covered; the grid's tiles are made non-focusable by the parent while a
-// panel is open, so DPAD focus cannot escape underneath. Registers its OWN
-// hardware-Back handler on mount — handlers are LIFO, so the deepest open panel
-// always wins BACK, closing itself first (spec: BACK closes the deepest panel).
+// sort / search / people / albums / details).
+//
+// This is a real native Modal rather than an absolutely-positioned sibling of
+// the media grid. Android may promote focused/elevated descendants from a
+// virtualized grid above an ordinary React sibling even when that sibling has a
+// larger zIndex/elevation. That failure was reproduced on a physical Fire Stick:
+// DPAD focus moved through the People picker, but the user kept seeing the cover
+// underneath it. A Modal owns a separate native window, so its opaque surface
+// and its focus tree are unconditionally above the library.
+//
+// While an Android Modal is open, BACK is delivered through onRequestClose (not
+// BackHandler). The deepest panel is still the one mounted in the modal and
+// therefore closes first.
 interface Props {
   title: string;
   onBack: () => void;
@@ -46,46 +54,47 @@ interface Props {
 export function PanelShell({
   title, onBack, children, onBackOverride, body = 'scroll',
 }: Props) {
-  useEffect(() => {
-    const onBackPress = () => {
-      if (onBackOverride?.()) return true;
-      onBack();
-      return true;
-    };
-    const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
-    return () => sub.remove();
+  const requestClose = useCallback(() => {
+    if (onBackOverride?.()) return;
+    onBack();
   }, [onBack, onBackOverride]);
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{title}</Text>
-      {body === 'scroll' ? (
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.content}
-          // The DPAD moves between focusables; the ScrollView follows the focused
-          // child automatically on TV. No nested horizontal scrolling.
-          showsVerticalScrollIndicator={false}
-        >
-          {children}
-        </ScrollView>
-      ) : (
-        // 'fixed' and 'custom' differ in INTENT, not in what this shell does:
-        // in both cases the shell must not scroll. 'fixed' promises the content
-        // fits; 'custom' promises the child scrolls itself.
-        <View style={[styles.scroll, styles.content]}>{children}</View>
-      )}
-    </View>
+    <Modal
+      animationType="none"
+      hardwareAccelerated
+      navigationBarTranslucent
+      onRequestClose={requestClose}
+      presentationStyle="fullScreen"
+      statusBarTranslucent
+      visible
+    >
+      <View style={styles.container} accessibilityViewIsModal>
+        <Text style={styles.title}>{title}</Text>
+        {body === 'scroll' ? (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.content}
+            // The DPAD moves between focusables; the ScrollView follows the focused
+            // child automatically on TV. No nested horizontal scrolling.
+            showsVerticalScrollIndicator={false}
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          // 'fixed' and 'custom' differ in INTENT, not in what this shell does:
+          // in both cases the shell must not scroll. 'fixed' promises the content
+          // fits; 'custom' promises the child scrolls itself.
+          <View style={[styles.scroll, styles.content]}>{children}</View>
+        )}
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: colors.bg,
     paddingVertical: spacing.xl,
     paddingHorizontal: spacing.xl * 2,

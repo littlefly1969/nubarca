@@ -22,6 +22,14 @@ test('production update consumes only immutable CI images and never builds or pr
   assert.doesNotMatch(script, /docker (?:compose )?build\b/);
   assert.doesNotMatch(script, /\bprune\b/);
   assert.match(script, /up -d --no-build --no-deps/);
+  assert.match(script, /TV_OTA_REPO="ghcr\.io\/\$GHCR_OWNER\/nubarca-tv-ota"/);
+  assert.match(script, /pull-publish-tv-ota-image\.sh.*TV_OTA_REPO@\$TV_OTA_DIGEST/);
+});
+
+test('TV changes require a CI-built native or OTA artifact', () => {
+  assert.match(script, /TV_CHANGED.*TV_DIGEST.*TV_OTA_DIGEST/s);
+  assert.match(script, /no CI-built TV native or OTA artifact exists/);
+  assert.match(script, /\.nubarca-tv-ota\.source/);
 });
 
 test('gates images and Compose before replacing release pins', () => {

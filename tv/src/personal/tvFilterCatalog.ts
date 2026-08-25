@@ -296,9 +296,15 @@ function isStaticTvFilterFocus(
 export function resolveTvFilterFocus(
   preferred: TvFilterFocusKey | null,
   rows: readonly TvFilterRow[],
+  relevanceOrdered = false,
 ): TvFilterFocusKey {
   if (preferred === null) return rows.length === 0 ? 'apply' : rows[0].id;
-  // The static controls are on every tab, so a request for one is always
+  // Relevance is an informational, non-focusable statement. If a semantic
+  // query takes over while the remote remembers either editable order row,
+  // move to the primary action instead of leaving preferred focus on a control
+  // that no longer exists.
+  if (relevanceOrdered && (preferred === 'sort' || preferred === 'direction')) return 'apply';
+  // The other static controls are always present, so a request for one is
   // honourable and the chain below is only ever walked for rows.
   if (isStaticTvFilterFocus(preferred)) return preferred;
   if (rows.length === 0) return 'apply';

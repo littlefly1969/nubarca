@@ -32,6 +32,9 @@
 #   NUBARCA_SERVICE_ROOT             service data / model root
 #   NUBARCA_IMPORT_ROOT              bulk import source root
 #   NUBARCA_TV_APK_DIR               directory the TV APK is published into
+#   NUBARCA_TV_OTA_STORAGE_ROOT      OTA publication storage root
+#   NUBARCA_TV_OTA_CERTIFICATE       authoritative OTA public certificate
+#   NUBARCA_TV_NODE                  absolute Node 22 executable
 #   NUBARCA_ENCRYPTED_BACKUP_TARGET  directory encrypted backups are written to
 set -uo pipefail
 
@@ -153,6 +156,12 @@ require_import_root() {
 
 require_tv_apk_dir() {
   require_absolute_path_var NUBARCA_TV_APK_DIR "directory the signed TV APK is published into on the installation host"
+}
+
+require_tv_ota_paths() {
+  require_absolute_path_var NUBARCA_TV_OTA_STORAGE_ROOT "OTA publication storage root on the installation host"
+  require_absolute_path_var NUBARCA_TV_OTA_CERTIFICATE "authoritative OTA public certificate on the installation host"
+  require_absolute_path_var NUBARCA_TV_NODE "Node 22 executable used to verify and import OTA bundles"
 }
 
 require_encrypted_backup_target() {

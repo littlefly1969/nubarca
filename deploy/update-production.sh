@@ -111,7 +111,7 @@ changed_between "$CURRENT_FRONTEND_SHA" \
     frontend scripts/verify-production-frontend-image.sh && FRONTEND_CHANGED=true
 
 TV_SOURCE_FILE=""
-TV_CURRENT_SHA=""
+TV_APK_CURRENT_SHA=""
 if [[ -n "${NUBARCA_TV_APK_DIR:-}" ]]; then
     TV_SOURCE_FILE="${NUBARCA_TV_APK_DIR%/}/.nubarca-tv.source"
 elif grep -qE '^[[:space:]]*(export[[:space:]]+)?NUBARCA_TV_APK_DIR=' "$ENV_FILE"; then
@@ -122,13 +122,41 @@ elif grep -qE '^[[:space:]]*(export[[:space:]]+)?NUBARCA_TV_APK_DIR=' "$ENV_FILE
     TV_SOURCE_FILE="${TV_APK_DIR_LINE%/}/.nubarca-tv.source"
 fi
 if [[ -n "$TV_SOURCE_FILE" && -f "$TV_SOURCE_FILE" ]]; then
-    TV_CURRENT_SHA="$(tr -d '\r\n' < "$TV_SOURCE_FILE")"
+    TV_APK_CURRENT_SHA="$(tr -d '\r\n' < "$TV_SOURCE_FILE")"
 fi
-if [[ "$TV_CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-    git cat-file -e "$TV_CURRENT_SHA^{commit}" 2>/dev/null || TV_CURRENT_SHA=""
+if [[ "$TV_APK_CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    git cat-file -e "$TV_APK_CURRENT_SHA^{commit}" 2>/dev/null || TV_APK_CURRENT_SHA=""
 fi
+
+TV_OTA_STORAGE_ROOT=""
+if grep -qE '^[[:space:]]*(export[[:space:]]+)?NUBARCA_TV_OTA_STORAGE_ROOT=' "$ENV_FILE"; then
+    TV_OTA_STORAGE_ROOT="$(sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?NUBARCA_TV_OTA_STORAGE_ROOT=//p' "$ENV_FILE" | tail -n 1)"
+    TV_OTA_STORAGE_ROOT="${TV_OTA_STORAGE_ROOT%\"}"; TV_OTA_STORAGE_ROOT="${TV_OTA_STORAGE_ROOT#\"}"
+    TV_OTA_STORAGE_ROOT="${TV_OTA_STORAGE_ROOT%\'}"; TV_OTA_STORAGE_ROOT="${TV_OTA_STORAGE_ROOT#\'}"
+    [[ "$TV_OTA_STORAGE_ROOT" == /* && "$TV_OTA_STORAGE_ROOT" != "/" ]] || fail "invalid NUBARCA_TV_OTA_STORAGE_ROOT"
+fi
+TV_OTA_CURRENT_SHA=""
+if [[ -n "$TV_OTA_STORAGE_ROOT" && -f "$TV_OTA_STORAGE_ROOT/.nubarca-tv-ota.source" ]]; then
+    TV_OTA_CURRENT_SHA="$(tr -d '\r\n' < "$TV_OTA_STORAGE_ROOT/.nubarca-tv-ota.source")"
+fi
+if [[ "$TV_OTA_CURRENT_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+    git cat-file -e "$TV_OTA_CURRENT_SHA^{commit}" 2>/dev/null || TV_OTA_CURRENT_SHA=""
+fi
+
+TV_CURRENT_SHA=""
+TV_DISTANCE=""
+for published_sha in "$TV_APK_CURRENT_SHA" "$TV_OTA_CURRENT_SHA"; do
+    [[ "$published_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+    git merge-base --is-ancestor "$published_sha" "$CANDIDATE_SHA" || continue
+    distance="$(git rev-list --count "$published_sha..$CANDIDATE_SHA")"
+    if [[ -z "$TV_DISTANCE" || "$distance" -lt "$TV_DISTANCE" ]]; then
+        TV_CURRENT_SHA="$published_sha"
+        TV_DISTANCE="$distance"
+    fi
+done
 if [[ -n "$TV_CURRENT_SHA" ]]; then
-    changed_between "$TV_CURRENT_SHA" tv deploy/validate-tv-apk.sh && TV_CHANGED=true
+    changed_between "$TV_CURRENT_SHA" tv deploy/validate-tv-apk.sh deploy/pull-publish-tv-ota-image.sh \
+        .github/workflows/tv-native-release.yml .github/workflows/tv-ota-release.yml && TV_CHANGED=true
 else
     # A legacy publication has no source marker. Offer TV only when CI has
     # published a bundle for this exact candidate; never guess an older build.
@@ -151,7 +179,8 @@ print(digest)' <<< "$manifest"
 API_REPO="ghcr.io/$GHCR_OWNER/nubarca-api-openvino"
 FRONTEND_REPO="ghcr.io/$GHCR_OWNER/nubarca-frontend"
 TV_REPO="ghcr.io/$GHCR_OWNER/nubarca-tv-apk"
-API_DIGEST=""; FRONTEND_DIGEST=""; TV_DIGEST=""
+TV_OTA_REPO="ghcr.io/$GHCR_OWNER/nubarca-tv-ota"
+API_DIGEST=""; FRONTEND_DIGEST=""; TV_DIGEST=""; TV_OTA_DIGEST=""
 if [[ "$BACKEND_CHANGED" == true ]]; then
     API_DIGEST="$(manifest_digest "$API_REPO:$CANDIDATE_SHA" || true)"
 fi
@@ -160,6 +189,7 @@ if [[ "$FRONTEND_CHANGED" == true ]]; then
 fi
 if [[ "$TV_CHANGED" == true ]]; then
     TV_DIGEST="$(manifest_digest "$TV_REPO:$CANDIDATE_SHA" || true)"
+    TV_OTA_DIGEST="$(manifest_digest "$TV_OTA_REPO:$CANDIDATE_SHA" || true)"
 fi
 
 log "checkout:  $HEAD_SHA"
@@ -167,12 +197,17 @@ log "candidate: $CANDIDATE_SHA"
 log "backend:   changed=$BACKEND_CHANGED artifact=$([[ -n "$API_DIGEST" ]] && echo ready || echo absent)"
 log "frontend:  changed=$FRONTEND_CHANGED artifact=$([[ -n "$FRONTEND_DIGEST" ]] && echo ready || echo absent)"
 log "TV native: changed=$TV_CHANGED artifact=$([[ -n "$TV_DIGEST" ]] && echo ready || echo absent)"
+log "TV OTA:    changed=$TV_CHANGED artifact=$([[ -n "$TV_OTA_DIGEST" ]] && echo ready || echo absent)"
 log "migration: $([[ -n "$MIGRATIONS" ]] && echo present || echo none)"
 
 if [[ "$MODE" == "check" ]]; then
     if [[ "$BACKEND_CHANGED" == true && -z "$API_DIGEST" ]] || \
        [[ "$FRONTEND_CHANGED" == true && -z "$FRONTEND_DIGEST" ]]; then
         log "not deployable yet: required CI application image is missing"
+        exit 3
+    fi
+    if [[ "$TV_CHANGED" == true && -z "$TV_DIGEST" && -z "$TV_OTA_DIGEST" ]]; then
+        log "not deployable yet: no CI-built TV native or OTA artifact exists for the candidate"
         exit 3
     fi
     if [[ -n "$MIGRATIONS" ]]; then
@@ -189,6 +224,8 @@ fi
 [[ -z "$MIGRATIONS" ]] || fail "candidate contains database migrations; use deploy/FAST_DEPLOY.md manually"
 [[ "$BACKEND_CHANGED" != true || -n "$API_DIGEST" ]] || fail "required backend image is not published"
 [[ "$FRONTEND_CHANGED" != true || -n "$FRONTEND_DIGEST" ]] || fail "required frontend image is not published"
+[[ "$TV_CHANGED" != true || -n "$TV_DIGEST" || -n "$TV_OTA_DIGEST" ]] || \
+    fail "required TV native or OTA artifact is not published"
 
 root_available_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 root_used_percent="$(df -Pk / | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
@@ -287,6 +324,9 @@ fi
 if [[ -n "$TV_DIGEST" ]]; then
     deploy/pull-publish-tv-apk-image.sh --env-file "$ENV_FILE" "$TV_REPO@$TV_DIGEST"
 fi
+if [[ -n "$TV_OTA_DIGEST" ]]; then
+    deploy/pull-publish-tv-ota-image.sh --env-file "$ENV_FILE" "$TV_OTA_REPO@$TV_OTA_DIGEST"
+fi
 
 log "production update complete at $CANDIDATE_SHA"
-log "physical Fire Stick acceptance remains pending after a native TV publication"
+log "physical Fire Stick acceptance remains pending after a TV publication"

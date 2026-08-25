@@ -3,6 +3,11 @@
 All native APK/OTA operations use the single canonical
 [`../docs/tv-release.md`](../docs/tv-release.md) runbook.
 
+Ordinary OTA publication is Git-first: only the manual `TV OTA release` GitHub
+workflow signs and publishes an immutable GHCR bundle. Production only pulls it
+by digest and verifies/activates it; do not sign, export or build an OTA on the
+server, and do not add back a local `publish:ota` command.
+
 A **separate** Expo React Native application for the 10-foot TV experience,
 targeting **Fire Stick / Android TV** first. It is intentionally NOT the mobile
 app and NOT a full NubArca client — see the architecture strategy in
@@ -104,11 +109,19 @@ The NubArca TV artwork lives in `assets/brand/` (generated reproducibly by
 
 | Asset | Config field | Result |
 | --- | --- | --- |
-| `tv-icon-512.png` | `icon`, `android.icon` | app icon (all platforms / Android fallback) |
-| `tv-adaptive-icon-432.png` | `android.adaptiveIcon.foregroundImage` (`backgroundColor` `#0a0f1a`) | Android adaptive launcher icon |
-| `tv-banner-320x180.png` | `@react-native-tvos/config-tv` → `androidTVBanner` | `android:banner` in the manifest = the Android TV / Fire TV home-row banner |
-| `tv-lockup-1280.png`, `tv-lockup-640.png` | *(not wired)* | the "NubArca TV" lockup, kept for stores/docs; the in-app pairing header is text, not an image |
-| `tv-splash-1920x1080.png` | *(not wired)* | see below |
+| `nubarca-expo-app-icon-1024.png` | top-level `icon` | Expo application fallback |
+| `nubarca-android-launcher-icon-512.png` | `android.icon` | Android legacy launcher icon |
+| `nubarca-android-adaptive-foreground-432.png` | `android.adaptiveIcon.foregroundImage` (`backgroundColor` `#0a0f1a`) | Android adaptive launcher foreground |
+| `nubarca-android-tv-banner-320x180.png` | `@react-native-tvos/config-tv` → `androidTVBanner` | xhdpi `android:banner` = Android TV / Fire TV banner |
+| `nubarca-tv-lockup-transparent-1280w.png` | `PairingScreen` | responsive in-app pairing lockup |
+| `nubarca-fire-tv-banner-1280x720.png` | *(not wired)* | Amazon Appstore/promotional artwork |
+| `nubarca-tv-splash-1920x1080.png` | *(not wired)* | see below |
+
+Launcher categories, icons and banners are native APK resources. OTA updates
+can change the pairing screen and other Metro-bundled UI, but cannot make an old
+native installation acquire a missing Applications tile or new launcher art;
+install the current higher-`versionCode` APK and use the two-path acceptance in
+the release runbook.
 
 **No splash screen is configured.** Expo SDK 56 removed the top-level `splash`
 key from the app-config schema (only `web.splash` for PWAs remains) and moved
@@ -579,7 +592,10 @@ release procedure from the historical validation notes in this README.
 
 ## Device checklist (run on a real Fire Stick)
 
-- install + launch APK; pairing QR/code visible and readable at TV distance
+- install + launch APK; the complete NubArca TV lockup, pairing QR and code are
+  visible inside overscan and readable at TV distance (including 720p output)
+- when launcher resources changed, verify both a fresh install and an in-place
+  APK update from the previous native version; an OTA-only update is not this test
 - approve pairing from phone/browser → album list appears
 - **album covers + grid thumbnails render real photos, progressively** (not a long
   blank load then all placeholders); a brief "Caricamento…" spinner may flash first

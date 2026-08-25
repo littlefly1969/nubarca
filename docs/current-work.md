@@ -15,15 +15,19 @@ is built is described by `ARCHITECTURE.md`.
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
-  definitively signed APK and optionally publishes an immutable GHCR bundle.
-  Production pulls verified application/APK artifacts by digest; the guided
+  definitively signed APK and optionally publishes an immutable GHCR bundle. A
+  separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and
+  publishes a signed immutable GHCR bundle without contacting production.
+  Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path refuses migrations and never
   builds on the server
 - Storage: local content-addressed blobs with database-owned logical paths
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
   `NUBARCA_PUBLIC_ORIGIN`, `NUBARCA_STORAGE_ROOT`, `NUBARCA_SERVICE_ROOT`,
-  `NUBARCA_IMPORT_ROOT`, `NUBARCA_TV_APK_DIR` and
+  `NUBARCA_IMPORT_ROOT`, `NUBARCA_TV_APK_DIR`,
+  `NUBARCA_TV_OTA_STORAGE_ROOT`, `NUBARCA_TV_OTA_CERTIFICATE`,
+  `NUBARCA_TV_NODE` and
   `NUBARCA_ENCRYPTED_BACKUP_TARGET`, validated by
   `scripts/lib/operator-config.sh`, which fails closed on a missing value.
 
@@ -516,10 +520,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the COMMITTED identity in both directions (query typed, query cleared) — an
   earlier attempt handed them a pre-drafted identity and consequently proved
   nothing, which is the same flaw that let the original defect through.
-  Deferred, non-blocking: the fixed "Order: Relevance" row is still a
-  `FilterRow`, i.e. a Pressable with `accessibilityRole="button"` and a no-op
-  SELECT; it should become a true informational non-button row with its own
-  focus-fallback handling.
+  The fixed "Order: Relevance" statement is a non-focusable `FilterInfoRow`,
+  not a disabled/no-op button. It explains that semantic ranking determines the
+  order and cannot be edited; remembered Sort/Direction focus migrates to Apply
+  when those real controls disappear.
 - **What the media selection dock OFFERS is one pure model, and it is half
   capability, half permission.** `mediaSelectionCapabilities.ts` answers whether
   an action makes sense for THIS selection (all photos? Excluded scope? inside
@@ -632,3 +636,12 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reports so far do not distinguish them. `adb shell dumpsys package
   it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
   and cannot get it, so the evidence has to come from what the screen shows.
+- **TV full-screen editors are native windows, not elevated React siblings.**
+  A physical Fire Stick disproved the earlier `zIndex`/`elevation` fix: the
+  People picker received DPAD focus and scrolled, but remained painted behind
+  the media cover. `PanelShell` now uses React Native `Modal`, whose separate
+  native window makes both paint order and focus containment structural. The
+  surface remains opaque, the parent still makes the media grid non-focusable,
+  and Android BACK is handled through `Modal.onRequestClose`; `BackHandler`
+  does not receive events while a modal is open. The FlatList, local person-name
+  search, fixed Done action and include/exclude query contract are unchanged.

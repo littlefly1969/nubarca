@@ -6070,6 +6070,22 @@ video.lightbox-image {
   background: linear-gradient(to bottom, rgb(6 9 16 / 78%), transparent);
 }
 .face-viewer-identity { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1 1 auto; }
+/* When the photo was taken — secondary to its name, because the name is what
+   the reviewer recognises the picture by. */
+.face-viewer-date { font-size: 0.78rem; color: var(--fv-text-dim); }
+
+/* Whose face is highlighted, top right, opposite the photo's identity. It is
+   the answer to the question the reviewer is holding in their head, so it is
+   readable without opening anything — and it must not push the file name
+   around, hence the fixed alignment and the truncation on a long name. */
+.face-viewer-top-right {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 0.1rem;
+  flex: 0 1 auto; min-width: 0; text-align: right;
+}
+.face-viewer-person { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.face-viewer-person-label { font-size: 0.78rem; color: var(--fv-text-dim); }
+.face-viewer-person-name { font-size: 0.95rem; font-weight: 600; }
+.face-viewer-person .is-unassigned { color: var(--fv-text-dim); font-style: italic; font-size: 0.88rem; }
 .face-viewer-person { font-size: 0.95rem; line-height: 1.2; }
 .face-viewer-person.is-unassigned { color: var(--fv-text-dim); font-style: italic; }
 .face-viewer-file {
@@ -6104,29 +6120,22 @@ video.lightbox-image {
 .face-viewer-chrome-button:hover:not(:disabled) { background: var(--fv-chrome-hover); }
 .face-viewer-chrome-button:disabled { opacity: 0.4; cursor: default; }
 
-.face-viewer-more { position: relative; }
-.face-viewer-more-list {
-  position: absolute; z-index: 5; top: calc(100% + 6px); right: 0;
-  min-width: 16rem; max-width: min(22rem, calc(100vw - 2rem));
-  list-style: none; margin: 0; padding: 0.3rem;
-  background: #101725; border: 1px solid var(--fv-line);
-  border-radius: var(--radius-card); box-shadow: var(--shadow-lg);
-}
-.face-viewer-more-item {
-  display: flex; align-items: center; gap: 0.55rem;
-  width: 100%; padding: 0.5rem 0.55rem;
-  text-align: left; font: inherit; font-size: 0.85rem;
-  color: var(--fv-text); background: transparent;
-  border: none; border-radius: 8px; cursor: pointer;
-}
-.face-viewer-more-item .nc-icon { color: var(--fv-text-dim); flex: 0 0 auto; }
-.face-viewer-more-item:hover:not(:disabled) { background: var(--fv-chrome-hover); }
-.face-viewer-more-item:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- Stage ---- */
 .face-viewer-stage { position: relative; flex: 1; overflow: hidden; display: flex; align-items: center; justify-content: center; touch-action: none; }
-.face-viewer-canvas { position: relative; max-width: 100%; max-height: 100%; transform-origin: center center; will-change: transform; }
-.face-viewer-image { display: block; max-width: 92vw; max-height: 100%; user-select: none; }
+/* THE canvas rule: its size is set in PIXELS by the component, computed as the
+   contain-fit of the bitmap in the measured stage (faceViewerGeometry.ts). It
+   must not be given max-width/max-height here, and the image must not be given
+   any limit of its own — face boxes are percentages OF THIS BOX, so the moment
+   CSS is allowed to decide the picture's size independently, every box drifts
+   off its face by however much the two disagree. */
+.face-viewer-canvas { position: relative; transform-origin: center center; will-change: transform; }
+.face-viewer-image { display: block; width: 100%; height: 100%; user-select: none; }
+/* Before the stage is measured and the bitmap has loaded there is no honest
+   size yet: the picture is constrained so it cannot overflow, and no box is
+   drawn at all. */
+.face-viewer-canvas.is-measuring { max-width: 100%; max-height: 100%; }
+.face-viewer-canvas.is-measuring .face-viewer-image { width: auto; height: auto; max-width: 100%; max-height: 100%; }
 .face-viewer-box { position: absolute; border: 2px solid rgb(255 255 255 / 45%); border-radius: 4px; background: transparent; padding: 0; cursor: pointer; }
 .face-viewer-box.is-selected { border-color: var(--brand-cyan-glow); border-width: 3px; box-shadow: 0 0 0 2px rgb(0 212 255 / 40%); }
 
@@ -6153,8 +6162,19 @@ video.lightbox-image {
   color: var(--fv-text);
   background: linear-gradient(to top, rgb(6 9 16 / 82%), transparent);
 }
-/* Viewport tools: one compact cluster that must never read as a decision. */
-.face-viewer-tools { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+/* Two groups, one row: viewport tools on the left, face decisions on the right.
+   `space-between` on the bar pushes them to the two ends, and NEITHER group
+   wraps — a decision row that breaks in two reads as two unrelated toolbars.
+   The order within each group is fixed and never rearranges.
+   
+   When the width runs out the bar gives up TEXT before it gives up the row, and
+   it gives up the left half's text first. That is not an arbitrary choice: the
+   viewport tools are reversible, repeatable and iconographically conventional
+   (fit, centre, zoom), so an icon carries them; the decisions on the right
+   change data and have to keep their words. Each collapsed control keeps its
+   name as an aria-label and a tooltip, so nothing becomes an unlabelled
+   button. */
+.face-viewer-tools { display: flex; align-items: center; gap: 0.35rem; flex-wrap: nowrap; }
 .face-viewer-tool {
   display: inline-flex; align-items: center; gap: 0.4rem;
   height: 2.1rem; padding: 0 0.65rem;
@@ -6175,9 +6195,13 @@ video.lightbox-image {
    and is the only filled control in the viewer; ignore is secondary and
    deliberately NOT destructive-red — it sets a face aside, it deletes nothing;
    skip is tertiary, because deciding nothing is the weakest of the three. */
-.face-viewer-decisions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.face-viewer-decisions { display: flex; align-items: center; gap: 0.4rem; flex-wrap: nowrap; }
+/* No label in this bar ever breaks across two lines: a button whose text wraps
+   makes the row twice as tall and pushes the picture out of the way, which is
+   the opposite of what a photo surface should give up space for. */
 .face-viewer-secondary,
 .face-viewer-tertiary {
+  white-space: nowrap;
   display: inline-flex; align-items: center; gap: 0.4rem;
   height: 2.4rem; padding: 0 0.8rem;
   font: inherit; font-size: 0.85rem; line-height: 1;
@@ -6197,7 +6221,7 @@ video.lightbox-image {
 
 .face-viewer-decisions .assign-menu { flex: 0 0 auto; }
 .face-viewer-decisions .assign-menu-trigger {
-  width: auto; height: 2.4rem; padding: 0 1rem;
+  width: auto; height: 2.4rem; padding: 0 1rem; white-space: nowrap;
   font-size: 0.85rem; font-weight: 600; line-height: 1;
   color: var(--accent-contrast); background: var(--accent-strong);
   border: 1px solid transparent; border-radius: var(--radius-button); cursor: pointer;
@@ -6210,21 +6234,51 @@ video.lightbox-image {
   outline: 2px solid var(--brand-cyan-glow); outline-offset: 2px;
 }
 
+/* The bulk confirmation. One question, over the viewer, before one call. */
+.face-viewer-confirm-backdrop {
+  position: absolute; inset: 0; z-index: 3;
+  display: flex; align-items: center; justify-content: center;
+  background: rgb(6 9 16 / 70%);
+}
+.face-viewer-confirm {
+  max-width: min(26rem, 90vw);
+  display: flex; flex-direction: column; gap: 0.65rem;
+  padding: 1.1rem 1.25rem;
+  color: var(--fv-text);
+  background: #131824;
+  border: 1px solid var(--fv-line); border-radius: var(--radius-panel, 12px);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+.face-viewer-confirm-title { margin: 0; font-size: 1rem; }
+.face-viewer-confirm-body { margin: 0; color: var(--fv-text-dim); font-size: 0.88rem; }
+.face-viewer-confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+/* Not enough room for both halves in words. The viewport tools become icons —
+   named, tooltipped and in the same order — and the decisions keep their text.
+   1200px is where the Italian labels stop fitting on a 1280px desktop once the
+   bar's own padding is counted. */
+@media (max-width: 75rem) {
+  .face-viewer-tool-label { display: none; }
+  .face-viewer-tool { padding: 0 0.6rem; }
+}
+
 /* Narrow widths: the chrome recomposes instead of eating the photo. The two
    bottom clusters stack, the tools shed their labels, and the edge controls
    move in — the image stays the dominant element throughout. */
 @media (max-width: 720px) {
   .face-viewer-top { flex-wrap: wrap; gap: 0.5rem; }
-  .face-viewer-top-review { width: 100%; justify-content: flex-end; }
+  .face-viewer-top-right { align-items: flex-start; text-align: left; }
+  /* The two groups stack rather than overlap, and the photo keeps its space.
+     Inside each group the order is unchanged: what wraps is the LAYOUT, never
+     the sequence of the actions. */
   .face-viewer-bottom { flex-direction: column; align-items: stretch; gap: 0.5rem; padding-top: 0.5rem; }
-  .face-viewer-tools { justify-content: center; }
-  .face-viewer-tool span { display: none; }
+  .face-viewer-tools { justify-content: center; flex-wrap: wrap; }
+  .face-viewer-tool-label { display: none; }
   .face-viewer-tool { padding: 0 0.6rem; }
-  .face-viewer-decisions { justify-content: center; }
+  .face-viewer-decisions { justify-content: center; flex-wrap: wrap; }
   .face-viewer-edge { width: 2.4rem; height: 2.4rem; }
   .face-viewer-edge.is-prev { left: 0.35rem; }
   .face-viewer-edge.is-next { right: 0.35rem; }
-  .face-viewer-more-list { right: 0; }
 }
 
 /* Photo-centric review of undecided faces (ux/photo-face-review). */

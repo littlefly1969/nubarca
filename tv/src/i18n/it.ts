@@ -303,6 +303,8 @@ const it = {
   'filters.audioNo': 'Senza audio',
   'filters.sort': 'Ordina per',
   'filters.sort.relevance': 'Rilevanza',
+  'filters.relevanceLocked': 'La ricerca semantica stabilisce questo ordine e non può essere modificato.',
+  'filters.relevanceA11y': 'Ordine per rilevanza, stabilito dalla ricerca semantica e non modificabile',
   'filters.sort.created': 'Data di caricamento',
   'filters.sort.datetaken': 'Data di scatto',
   'filters.sort.name': 'Nome',

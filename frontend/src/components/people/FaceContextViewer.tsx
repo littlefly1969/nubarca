@@ -1,11 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, getFaceContext, ignoreFace, listPeople, type FaceContext, type Person } from '@nubarca/api-client';
 import { mediumPreviewUrl } from '../files/types';
 import { useAuth } from '../../auth/useAuth';
 import { Icon } from '../icons/Icon';
 import { AssignToPersonMenu } from './AssignToPersonMenu';
-import { isEditableKeyboardTarget, ownsKeyboardEvent } from '../keyboardOwnership';
+import { isEditableKeyboardTarget, isModalOwnedKey, ownsKeyboardEvent } from '../keyboardOwnership';
 import { useI18n } from '../../i18n';
+import {
+  FIT_TRANSFORM,
+  clamp,
+  computeContainCanvas,
+  focusTransform,
+} from './faceViewerGeometry';
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 8;
@@ -15,14 +21,20 @@ const MAX_ZOOM = 8;
 // zoom/pan/fit/focus, and previous/next navigation across the opening list.
 // Never loads the original bytes; never renders internals.
 //
-// The chrome is organised by PURPOSE, because the controls in here answer three
-// completely different questions and used to sit in one undifferentiated row:
+// THREE ZONES, three questions:
 //
-//   top      — where am I: close, file name, review progress, photo-level
-//              navigation, and the secondary bulk action
-//   edges    — which FACE am I looking at: prev/next, on the image itself
-//   bottom L — how am I looking at it: fit, focus, zoom (viewport tools)
-//   bottom R — what do I decide about it: assign (primary), ignore, skip
+//   top     — WHICH PHOTO is this: close, its name, and when it was taken.
+//             Nothing else. No actions at all, so the reviewer's eye has one
+//             place to read identity and never has to hunt for a control there.
+//   stage   — the picture, with the face boxes over it.
+//   bottom  — the whole operating surface, in two groups:
+//               left  — what am I LOOKING AT (next photo, fit, focus, zoom)
+//               right — what do I DECIDE (skip, ignore, ignore all, assign)
+//
+// The split is by consequence, not by frequency: everything on the left changes
+// only the view and touches no data; everything on the right resolves or defers
+// a face. Mixing them is how "ignore every face on this photo" once ended up
+// wedged between the zoom buttons.
 //
 // `onFaceIgnored` / `onFaceRestored` report a face LEAVING or REJOINING the pool
 // the caller opened this with. The caller owns `faceIds`, so it is the only place
@@ -81,40 +93,42 @@ export function FaceContextViewer({
   reviewControls?: FaceReviewControls;
 }) {
   const { invalidateAuth } = useAuth();
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
   const [activeFaceId, setActiveFaceId] = useState(faceIds[index]);
   const [ctx, setCtx] = useState<FaceContext | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [people, setPeople] = useState<Person[]>([]);
   const [refreshTick, setRefreshTick] = useState(0);
   const [ignoring, setIgnoring] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [confirmIgnoreAll, setConfirmIgnoreAll] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
-  const canvasRef = useRef<HTMLDivElement | null>(null);
+  // The stage's measured box and the bitmap's own size. The canvas is derived
+  // from the two and from nothing else — see faceViewerGeometry.
+  const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
+  // The bitmap's size CARRIES THE FILE IT CAME FROM. Storing the dimensions
+  // alone and clearing them in an effect leaves one painted frame in which the
+  // new photo's boxes are laid out against the previous photo's aspect ratio —
+  // an effect runs after paint, so the mismatch is visible before it is undone.
+  // Pairing them makes the check a render-time one, and the window disappears.
+  const [naturalSize, setNaturalSize] = useState<
+    { fileItemId: string; width: number; height: number } | null
+  >(null);
+  const stageRef = useRef<HTMLDivElement | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const moreRef = useRef<HTMLDivElement | null>(null);
-  const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const ignoreAllRef = useRef<HTMLButtonElement | null>(null);
+  const confirmRef = useRef<HTMLDivElement | null>(null);
+  const confirmCancelRef = useRef<HTMLButtonElement | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
+  // A double-click can land on a face that is NOT the one currently loaded. The
+  // dialog must describe the face that was clicked, so the request to open it
+  // waits here until that face's context has actually arrived — otherwise the
+  // reviewer double-clicks a stranger and is offered "Già assegnato a Mario".
+  const [pendingAssignFaceId, setPendingAssignFaceId] = useState<string | null>(null);
 
   // The displayed face follows the nav list unless the user clicks another box.
   useEffect(() => setActiveFaceId(faceIds[index]), [faceIds, index]);
-
-  const focusFace = useCallback((box: FaceContext['selectedBox']) => {
-    const el = canvasRef.current;
-    const cw = el?.clientWidth ?? 0;
-    const ch = el?.clientHeight ?? 0;
-    const targetZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, 0.6 / Math.max(box.width, box.height || 0.0001)));
-    const fx = box.x + box.width / 2;
-    const fy = box.y + box.height / 2;
-    setZoom(targetZoom);
-    setPan({ x: (0.5 - fx) * cw * targetZoom, y: (0.5 - fy) * ch * targetZoom });
-  }, []);
-
-  const fitImage = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -134,12 +148,90 @@ export function FaceContextViewer({
     return () => controller.abort();
   }, [activeFaceId, invalidateAuth, refreshTick]);
 
+  // The pending dialog opens only once its own face is the loaded one.
+  useEffect(() => {
+    if (pendingAssignFaceId === null || ctx?.selectedFaceId !== pendingAssignFaceId) return;
+    setPendingAssignFaceId(null);
+    setAssignOpen(true);
+  }, [pendingAssignFaceId, ctx?.selectedFaceId]);
+
+  // ---- geometry -------------------------------------------------------------
+  // The stage is measured rather than assumed: it is whatever is left between
+  // the two chrome rows, which changes with the viewport and with the chrome
+  // wrapping.
+  useLayoutEffect(() => {
+    const node = stageRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      setStageSize((prev) => (prev
+        && Math.abs(prev.width - rect.width) < 1
+        && Math.abs(prev.height - rect.height) < 1
+        ? prev
+        : { width: rect.width, height: rect.height }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [status]);
+
+  // Only a measurement belonging to THE PHOTO ON SCREEN counts. Anything else
+  // is the previous picture's, and a canvas built from it would be the wrong
+  // rectangle — which is the one thing the boxes cannot survive.
+  const natural = naturalSize !== null && naturalSize.fileItemId === ctx?.fileItemId
+    ? naturalSize
+    : null;
+
+  const canvas = useMemo(() => (stageSize && natural
+    ? computeContainCanvas({
+      availableWidth: stageSize.width,
+      availableHeight: stageSize.height,
+      naturalWidth: natural.width,
+      naturalHeight: natural.height,
+    })
+    : null), [stageSize, natural]);
+
+  // A NEW PHOTO always opens whole. Moving between two faces of the SAME photo
+  // deliberately keeps the viewport: the reviewer zoomed in for a reason, and
+  // resetting it on every face would undo that work several times per picture.
+  // The viewport itself is reset in an effect, which is safe: while the new
+  // photo's measurement has not arrived no box is drawn at all, so a frame at
+  // the previous zoom states nothing false about where a face is.
+  const fileItemId = ctx?.fileItemId;
+  useEffect(() => {
+    if (fileItemId === undefined) return;
+    setZoom(FIT_TRANSFORM.zoom);
+    setPan(FIT_TRANSFORM.pan);
+  }, [fileItemId]);
+
+  const fitImage = useCallback(() => {
+    setZoom(FIT_TRANSFORM.zoom);
+    setPan(FIT_TRANSFORM.pan);
+  }, []);
+
+  // Centre the selected face. Computed against the CANVAS, which is the picture,
+  // so the image and the boxes take one identical transform and a box that was
+  // over a face stays over it.
+  const focusFace = useCallback(() => {
+    if (!ctx || !canvas) return;
+    const next = focusTransform({
+      box: ctx.selectedBox,
+      canvas,
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+    });
+    setZoom(next.zoom);
+    setPan(next.pan);
+  }, [ctx, canvas]);
+
   // Ignore the face currently highlighted in the photo — and only that one.
   //
-  // The caller is told through onFaceIgnored, exactly as when the action came
-  // from inside the assign menu: this viewer does not own the sequence, so it
-  // cannot decide whether to advance or close. Reporting rather than refetching
-  // also avoids asking the server for a face we just removed from the pool.
+  // No confirmation: one face, one reversible decision. The caller is told
+  // through onFaceIgnored, exactly as when the action came from inside the
+  // assign menu — this viewer does not own the sequence, so it cannot decide
+  // whether to advance or close.
   const ignoreSelected = useCallback(async () => {
     if (!ctx || ignoring) return;
     const faceId = ctx.selectedFaceId;
@@ -163,17 +255,14 @@ export function FaceContextViewer({
   }, []);
   useEffect(() => { loadPeople(); }, [loadPeople]);
 
-  // The viewer opens at 100% (fit) with all boxes visible — the selected face is
-  // highlighted but NOT auto-zoomed. The user focuses it explicitly via "Centra
-  // volto". (No auto-focus effect on open.)
-
   const hasPrev = index > 0;
   const hasNext = index < faceIds.length - 1;
 
   // Shortcuts live on `window` so the photo answers arrows wherever focus is —
   // which means this viewer must decide for itself when a key is NOT its own.
-  // A modal opened on top of it (assign/move) owns the keyboard entirely, and an
-  // editable target owns its arrows as caret moves. See keyboardOwnership.ts.
+  // A modal opened on top of it (assign/move, the bulk confirmation) owns the
+  // keyboard entirely, and an editable target owns its arrows as caret moves.
+  // See keyboardOwnership.ts.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (!ownsKeyboardEvent(rootRef.current, e.target)) return;
@@ -186,26 +275,52 @@ export function FaceContextViewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [index, hasPrev, hasNext, onIndexChange, onClose]);
 
-  // The overflow menu closes on Escape and on an outside click, returning focus
-  // to its trigger. Its Escape is stopped so it does not also close the viewer.
+  // The bulk confirmation owns Escape while it is up, so dismissing the question
+  // does not also close the viewer behind it.
+  //
+  // It also has to own FOCUS. `aria-modal` is a promise to assistive technology,
+  // not a mechanism: without moving focus in, the keyboard stays on the controls
+  // underneath and the very next Tab walks a dialog the user cannot see they
+  // have left. `isModalOwnedKey` deliberately does NOT include Tab — that is
+  // what leaves focus traps possible — so the trap below is this dialog's own,
+  // exactly as AssignToPersonMenu implements its own.
   useEffect(() => {
-    if (!moreOpen) return;
-    function onDocPointer(e: MouseEvent) {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
-    }
+    if (!confirmIgnoreAll) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return;
+      if (!isModalOwnedKey(e.key)) return;
       e.stopPropagation();
-      setMoreOpen(false);
-      moreTriggerRef.current?.focus();
+      if (e.key === 'Escape') {
+        setConfirmIgnoreAll(false);
+        ignoreAllRef.current?.focus();
+      }
     }
-    document.addEventListener('mousedown', onDocPointer);
-    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey, true);
+    // Cancel, not the destructive answer: a question about several faces at
+    // once should not have "yes" one Enter away from an unaware keyboard.
+    const id = window.setTimeout(() => confirmCancelRef.current?.focus(), 0);
     return () => {
-      document.removeEventListener('mousedown', onDocPointer);
-      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey, true);
+      window.clearTimeout(id);
     };
-  }, [moreOpen]);
+  }, [confirmIgnoreAll]);
+
+  /** Keep Tab inside the confirmation while it is open. */
+  function onConfirmKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== 'Tab' || !confirmRef.current) return;
+    const focusable = confirmRef.current.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   function onPointerDown(e: React.PointerEvent) {
     drag.current = { x: e.clientX, y: e.clientY, panX: pan.x, panY: pan.y };
@@ -220,14 +335,40 @@ export function FaceContextViewer({
   }
 
   function zoomBy(factor: number) {
-    setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor)));
+    setZoom((z) => clamp(z * factor, MIN_ZOOM, MAX_ZOOM));
   }
+
+  /**
+   * Double-click a face box: select it AND open its assign dialog.
+   *
+   * A power shortcut for the action a reviewer takes most, on the object they
+   * are already pointing at. When the box is not the loaded face the request is
+   * parked in `pendingAssignFaceId` and consumed when that face's context
+   * arrives, so the dialog never describes the previous face.
+   */
+  function openAssignFor(faceId: string) {
+    if (ctx?.selectedFaceId === faceId) {
+      setAssignOpen(true);
+      return;
+    }
+    setActiveFaceId(faceId);
+    setPendingAssignFaceId(faceId);
+  }
+
+  // What the photo's date actually is. An "uploaded" source is the moment the
+  // file arrived, never a capture time, and captioning it "Scattata il" would
+  // state something false about the photograph.
+  const dateLine = ctx
+    ? (ctx.effectiveDateTakenSource === 'uploaded'
+      ? t('face.uploadedOn', { date: formatDate(ctx.effectiveDateTaken) })
+      : t('face.takenOn', { date: formatDate(ctx.effectiveDateTaken) }))
+    : null;
 
   return (
     <div className="face-viewer" role="dialog" aria-modal="true" aria-label={t('face.viewerAria')} ref={rootRef}>
       <button type="button" className="face-viewer-backdrop" aria-label={t('common.close')} onClick={onClose} />
 
-      {/* ---- Top chrome: where am I -------------------------------------- */}
+      {/* ---- Top: which photo is this. No actions live here. -------------- */}
       <header className="face-viewer-top">
         <button
           type="button"
@@ -239,71 +380,43 @@ export function FaceContextViewer({
         </button>
 
         <div className="face-viewer-identity">
-          {ctx?.personName
-            ? <strong className="face-viewer-person">{ctx.personName}</strong>
-            : <span className="face-viewer-person is-unassigned">{t('face.notAssigned')}</span>}
-          <span className="face-viewer-file" title={ctx?.fileName}>{ctx?.fileName}</span>
+          <span className="face-viewer-file" title={ctx?.fileName} data-testid="face-viewer-file-name">
+            {ctx?.fileName}
+          </span>
+          {dateLine && (
+            <span className="face-viewer-date" data-testid="face-viewer-date">{dateLine}</span>
+          )}
         </div>
 
-        {reviewControls && (
-          <div className="face-viewer-top-review">
+        {/* WHOSE face is highlighted, and where the reviewer is in the queue.
+            Both report; neither can be pressed. The person belongs here rather
+            than only inside the assign dialog: a reviewer looking at a face has
+            to be able to see who it is already filed under without opening
+            anything, and this viewer is the one component every face-photo
+            surface uses, so stating it here states it everywhere. */}
+        <div className="face-viewer-top-right">
+          <span className="face-viewer-person" data-testid="face-viewer-person">
+            {ctx?.personName
+              ? (
+                <>
+                  <span className="face-viewer-person-label">{t('face.faceOfLabel')}</span>
+                  {' '}
+                  <strong className="face-viewer-person-name">{ctx.personName}</strong>
+                </>
+              )
+              : <span className="is-unassigned">{t('face.notAssigned')}</span>}
+          </span>
+          {reviewControls && (
             <span className="face-viewer-progress" data-testid="face-viewer-progress">
               {reviewControls.progressLabel}
             </span>
-            <button
-              type="button"
-              className="face-viewer-chrome-button"
-              data-testid="face-viewer-next-photo"
-              disabled={!reviewControls.canNextPhoto}
-              onClick={reviewControls.onNextPhoto}
-            >
-              <Icon name="next-photo" size={16} />
-              <span>{t('people.photoReviewNextPhoto')}</span>
-            </button>
-
-            {/* The bulk "ignore everything still undecided here" is a real
-                shortcut, but it decides a whole photo at once — it belongs
-                behind an overflow, not beside the per-face decisions. */}
-            <div className="face-viewer-more" ref={moreRef}>
-              <button
-                ref={moreTriggerRef}
-                type="button"
-                className="face-viewer-icon-button"
-                data-testid="face-viewer-more"
-                aria-label={t('face.moreActions')}
-                aria-haspopup="menu"
-                aria-expanded={moreOpen}
-                onClick={() => setMoreOpen((v) => !v)}
-              >
-                <Icon name="more" size={18} />
-              </button>
-              {moreOpen && (
-                <ul className="face-viewer-more-list" role="menu" aria-label={t('face.moreActions')}>
-                  <li role="none">
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="face-viewer-more-item"
-                      disabled={reviewControls.ignoreRemainingBusy}
-                      onClick={() => {
-                        setMoreOpen(false);
-                        moreTriggerRef.current?.focus();
-                        reviewControls.onIgnoreRemaining();
-                      }}
-                    >
-                      <Icon name="eye-off" size={16} />
-                      <span>{t('people.photoReviewIgnoreAll')}</span>
-                    </button>
-                  </li>
-                </ul>
-              )}
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       <div
         className="face-viewer-stage"
+        ref={stageRef}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -313,18 +426,47 @@ export function FaceContextViewer({
         {status === 'error' && <p className="folder-error" role="alert">{t('face.photoUnavailable')}</p>}
         {status === 'ready' && ctx && (
           <div
-            ref={canvasRef}
-            className="face-viewer-canvas"
-            style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+            className={canvas ? 'face-viewer-canvas' : 'face-viewer-canvas is-measuring'}
+            data-testid="face-viewer-canvas"
+            style={canvas
+              ? {
+                width: `${canvas.width}px`,
+                height: `${canvas.height}px`,
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              }
+              : undefined}
           >
-            <img className="face-viewer-image" src={mediumPreviewUrl(ctx.fileItemId)} alt={ctx.fileName} draggable={false} />
-            {ctx.faces.map((fb) => {
+            <img
+              // Keyed by the file: a new photo mounts a new element, so it
+              // cannot show the previous picture's decoded frame and its load
+              // event cannot be skipped for an already-decoded one.
+              key={ctx.fileItemId}
+              className="face-viewer-image"
+              src={mediumPreviewUrl(ctx.fileItemId)}
+              alt={ctx.fileName}
+              draggable={false}
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setNaturalSize({
+                  fileItemId: ctx.fileItemId,
+                  width: img.naturalWidth,
+                  height: img.naturalHeight,
+                });
+              }}
+            />
+            {/* Boxes are percentages OF THE CANVAS, so they are only correct
+                once the canvas is the picture. Until then none is drawn — a box
+                placed against a provisional rectangle would sit beside its face
+                for a frame and then jump. */}
+            {canvas && ctx.faces.map((fb) => {
               const selected = fb.faceId === ctx.selectedFaceId;
               return (
                 <button
                   key={fb.faceId}
                   type="button"
                   className={selected ? 'face-viewer-box is-selected' : 'face-viewer-box'}
+                  data-testid="face-viewer-box"
+                  data-face-id={fb.faceId}
                   style={{
                     left: `${fb.box.x * 100}%`,
                     top: `${fb.box.y * 100}%`,
@@ -335,6 +477,10 @@ export function FaceContextViewer({
                   onClick={(e) => {
                     e.stopPropagation();
                     if (!selected) setActiveFaceId(fb.faceId);
+                  }}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    openAssignFor(fb.faceId);
                   }}
                 />
               );
@@ -367,20 +513,51 @@ export function FaceContextViewer({
         )}
       </div>
 
-      {/* ---- Bottom chrome: viewport tools | decisions -------------------- */}
+      {/* ---- Bottom: viewport tools | face decisions ---------------------- */}
       <footer className="face-viewer-bottom">
         <div className="face-viewer-tools" role="group" aria-label={t('face.viewToolsAria')}>
-          <button type="button" className="face-viewer-tool" onClick={fitImage}>
+          {/* Opening another photo changes WHAT I am looking at and decides no
+              face at all, which is why it sits with the viewport tools rather
+              than among the decisions. */}
+          {reviewControls && (
+            <button
+              type="button"
+              className="face-viewer-tool"
+              data-testid="face-viewer-next-photo"
+              // The label is hidden below a width where the row would otherwise
+              // wrap, so the NAME has to be stated on the button rather than
+              // read off the text — an icon-only control with no aria-label is
+              // an unnamed button to anything that is not looking at it.
+              aria-label={t('people.photoReviewNextPhoto')}
+              title={t('people.photoReviewNextPhoto')}
+              disabled={!reviewControls.canNextPhoto}
+              onClick={reviewControls.onNextPhoto}
+            >
+              <Icon name="next-photo" size={16} />
+              <span className="face-viewer-tool-label">{t('people.photoReviewNextPhoto')}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            className="face-viewer-tool"
+            data-testid="face-viewer-fit"
+            aria-label={t('face.showWholePhoto')}
+            title={t('face.showWholePhoto')}
+            onClick={fitImage}
+          >
             <Icon name="fit" size={16} />
-            <span>{t('face.showWholePhoto')}</span>
+            <span className="face-viewer-tool-label">{t('face.showWholePhoto')}</span>
           </button>
           <button
             type="button"
             className="face-viewer-tool"
-            onClick={() => ctx && focusFace(ctx.selectedBox)}
+            data-testid="face-viewer-focus"
+            aria-label={t('face.centerFace')}
+            title={t('face.centerFace')}
+            onClick={focusFace}
           >
             <Icon name="focus" size={16} />
-            <span>{t('face.centerFace')}</span>
+            <span className="face-viewer-tool-label">{t('face.centerFace')}</span>
           </button>
           <span className="face-viewer-zoom-group">
             <button
@@ -418,10 +595,6 @@ export function FaceContextViewer({
               </button>
             )}
             {!ctx.isIgnored && (
-              // Ignore is ALSO inside the assign menu, and that is where it was
-              // only reachable: a two-step action for the decision a reviewer
-              // makes most often after "this is X" — "this is nobody worth
-              // naming". Secondary here, never styled as a deletion.
               <button
                 type="button"
                 className="face-viewer-secondary"
@@ -433,11 +606,32 @@ export function FaceContextViewer({
                 <span>{t('face.ignoreFace')}</span>
               </button>
             )}
+            {/* Beside the single ignore, not hidden behind an overflow: it is
+                the same kind of answer at a different scale, and a reviewer
+                looking at a photo full of strangers should be able to see it.
+                It is the one action here that decides several faces at once, so
+                it is also the one that asks first. */}
+            {reviewControls && (
+              <button
+                type="button"
+                ref={ignoreAllRef}
+                className="face-viewer-secondary"
+                data-testid="face-viewer-ignore-all"
+                title={t('people.photoReviewIgnoreAllHelp')}
+                disabled={reviewControls.ignoreRemainingBusy}
+                onClick={() => setConfirmIgnoreAll(true)}
+              >
+                <Icon name="eye-off" size={16} />
+                <span>{t('people.photoReviewIgnoreAll')}</span>
+              </button>
+            )}
             <AssignToPersonMenu
               faceId={ctx.selectedFaceId}
               people={people}
               currentPersonId={ctx.personId}
               currentPersonName={ctx.personName}
+              open={assignOpen}
+              onOpenChange={setAssignOpen}
               // Ignore has MOVED OUT of the menu and into the button above:
               // offering it in both places is the same action twice in one
               // toolbar. The menu keeps it only for an already-ignored face,
@@ -471,6 +665,51 @@ export function FaceContextViewer({
           </div>
         )}
       </footer>
+
+      {/* One question, asked once, before one bulk call. Cancelling makes no
+          request at all. */}
+      {confirmIgnoreAll && reviewControls && (
+        <div className="face-viewer-confirm-backdrop">
+          <div
+            className="face-viewer-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('face.ignoreAllTitle')}
+            data-testid="face-viewer-ignore-all-confirm"
+            ref={confirmRef}
+            onKeyDown={onConfirmKeyDown}
+          >
+            <h3 className="face-viewer-confirm-title">{t('face.ignoreAllTitle')}</h3>
+            <p className="face-viewer-confirm-body">{t('face.ignoreAllQuestion')}</p>
+            <div className="face-viewer-confirm-actions">
+              <button
+                type="button"
+                ref={confirmCancelRef}
+                className="face-viewer-tertiary"
+                data-testid="face-viewer-ignore-all-cancel"
+                onClick={() => {
+                  setConfirmIgnoreAll(false);
+                  ignoreAllRef.current?.focus();
+                }}
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                className="face-viewer-secondary"
+                data-testid="face-viewer-ignore-all-accept"
+                disabled={reviewControls.ignoreRemainingBusy}
+                onClick={() => {
+                  setConfirmIgnoreAll(false);
+                  reviewControls.onIgnoreRemaining();
+                }}
+              >
+                {t('face.ignoreAllConfirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

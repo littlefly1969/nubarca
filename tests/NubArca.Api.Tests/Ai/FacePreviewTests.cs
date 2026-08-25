@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Ai;
@@ -260,6 +261,55 @@ public sealed class FacePreviewTests
         foreach (var n in Forbidden)
         {
             Assert.DoesNotContain(n, raw, StringComparison.Ordinal);
+        }
+    }
+
+    // The viewer captions the photo with a date, so the context carries one —
+    // and says WHICH fact it is. An uploaded-source date is an arrival time, not
+    // a capture time, and a client that could not tell them apart would caption
+    // every upload as though somebody had photographed it that day.
+    [Fact]
+    public async Task Context_Carries_The_Effective_Capture_Date_And_Its_Source()
+    {
+        using var f = Factory();
+        var profileId = await SeedProfileAsync(f);
+        var (_, client) = await f.CreateAuthenticatedClientAsync();
+        var (faceId, fileId) = await SeedFaceAsync(f, client, profileId, 400, 400, 0.2, 0.2, 0.3, 0.3);
+
+        var uploaded = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/people/faces/{faceId}/context");
+        // A freshly uploaded photo nobody has dated: the source says so.
+        Assert.Equal("uploaded", uploaded.GetProperty("effectiveDateTakenSource").GetString());
+        Assert.True(uploaded.GetProperty("effectiveDateTaken").GetDateTime() > DateTime.UtcNow.AddMinutes(-5));
+
+        // The owner states a capture date: the context follows the SAME
+        // precedence the gallery orders by, because it reads the same column.
+        var taken = new DateTime(2019, 7, 14, 10, 30, 0, DateTimeKind.Utc);
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var file = await db.FileItems.SingleAsync(x => x.Id == fileId);
+            file.EffectiveDateTaken = taken;
+            file.EffectiveDateTakenSource = "user";
+            await db.SaveChangesAsync();
+        }
+
+        var overridden = await client.GetFromJsonAsync<JsonElement>(
+            $"/api/people/faces/{faceId}/context");
+        Assert.Equal("user", overridden.GetProperty("effectiveDateTakenSource").GetString());
+        Assert.Equal(taken, overridden.GetProperty("effectiveDateTaken").GetDateTime());
+
+        // Still a caption, not a metadata document: no GPS, no camera, no
+        // embedded payload rode in with the date.
+        var raw = await (await client.GetAsync($"/api/people/faces/{faceId}/context"))
+            .Content.ReadAsStringAsync();
+        foreach (var forbidden in new[]
+                 {
+                     "gps", "latitude", "longitude", "camera", "make", "model",
+                     "exif", "embedded", "location", "orientation",
+                 })
+        {
+            Assert.DoesNotContain($"\"{forbidden}\"", raw, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

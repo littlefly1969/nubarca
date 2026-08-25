@@ -42,6 +42,9 @@ export function AssignToPersonMenu({
   currentPersonName = null,
   allowIgnore = false,
   isIgnored = false,
+  open: openProp,
+  onOpenChange,
+  hideTrigger = false,
   onChanged,
   onIgnored,
   onRestored,
@@ -53,13 +56,32 @@ export function AssignToPersonMenu({
   currentPersonName?: string | null;
   allowIgnore?: boolean;
   isIgnored?: boolean;
+  // Optional CONTROLLED mode. Supplied together, these let a surface open the
+  // dialog from something other than the trigger — the face viewer opens it on
+  // a double-click on the face box. Uncontrolled (both omitted) is unchanged.
+  //
+  // A contract rather than a ref that clicks the button: synthesising a click on
+  // the trigger works until the trigger is disabled, moved, or rendered
+  // conditionally, and then it fails silently in a way nothing can assert on.
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  // Render the dialog without its own trigger, for a caller whose entry point is
+  // elsewhere entirely.
+  hideTrigger?: boolean;
   onChanged: (personId: string | null) => void;
   onIgnored?: (faceId: string) => void;
   onRestored?: (faceId: string) => void;
   invalidateAuth?: () => void;
 }) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  // One `open` for the body of the component, whichever side owns it.
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : uncontrolledOpen;
+  const setOpen = useCallback((next: boolean) => {
+    if (!controlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  }, [controlled, onOpenChange]);
   const [query, setQuery] = useState('');
   const [newName, setNewName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -70,7 +92,7 @@ export function AssignToPersonMenu({
     setOpen(false);
     setQuery('');
     setNewName('');
-  }, []);
+  }, [setOpen]);
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -152,21 +174,26 @@ export function AssignToPersonMenu({
     }
   }
 
-  const triggerLabel = currentPersonId ? t('face.moveOrRemove') : t('face.assignToPerson');
-
   return (
     <div className="assign-menu">
-      <button
-        type="button"
-        className="assign-menu-trigger"
-        aria-label={triggerLabel}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        disabled={busy}
-        onClick={() => setOpen(true)}
-      >
-        {currentPersonId ? t('face.move') : t('face.assignToPersonEllipsis')}
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          className="assign-menu-trigger"
+          // No aria-label: the visible text now names the action exactly, and a
+          // label that said something slightly different would be the name
+          // assistive technology reads INSTEAD of the one on screen.
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          disabled={busy}
+          onClick={() => setOpen(true)}
+        >
+          {/* The control names what it will DO, which depends on whether this
+              face already belongs to somebody: "Assegna persona" for a face
+              nobody has claimed, "Modifica persona" for one that is filed. */}
+          {currentPersonId ? t('face.editPerson') : t('face.assignPerson')}
+        </button>
+      )}
 
       {open &&
         createPortal(

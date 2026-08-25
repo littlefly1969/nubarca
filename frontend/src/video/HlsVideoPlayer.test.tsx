@@ -256,10 +256,19 @@ describe('HlsVideoPlayer direct playback', () => {
       .mockReturnValue('maybe');
     const { video } = await renderPlayer();
 
-    expect(canPlay).toHaveBeenCalledWith('application/vnd.apple.mpegurl');
-    // Native playback: the element gets the master URL directly, and the level
-    // policy does not apply — WebKit owns its own ladder there.
-    expect(video.getAttribute('src')).toBe('/api/files/x/video');
+    // Both facts are established by the ATTACH EFFECT, not by the render that
+    // mounts the element — and `renderPlayer` returns as soon as the <video>
+    // is in the DOM, which in the direct-stream mode it also is. Asserting
+    // straight away therefore reads the state between React's commit and its
+    // passive-effect flush: fast enough locally, and a real failure on a loaded
+    // CI runner. Waiting is not a workaround here, it is the actual contract —
+    // "once the player has attached the source".
+    await waitFor(() => {
+      expect(canPlay).toHaveBeenCalledWith('application/vnd.apple.mpegurl');
+      // Native playback: the element gets the master URL directly, and the
+      // level policy does not apply — WebKit owns its own ladder there.
+      expect(video.getAttribute('src')).toBe('/api/files/x/video');
+    });
   });
 
   it('shows a first-frame indicator until the element can paint', async () => {
