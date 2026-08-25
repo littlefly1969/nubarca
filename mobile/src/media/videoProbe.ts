@@ -11,6 +11,11 @@
 //     the request is ABORTED the moment status + Content-Type are known, so a
 //     body is never buffered either way;
 //   * uses a FRESH AbortController per attempt and never touches res.body;
+//   * bounds EVERY attempt with attemptTimeoutMs — a fetch whose head never
+//     arrives cannot hold the probe forever (the timeout counts as ONE failed
+//     attempt inside the existing budget, it does not end the probe);
+//   * observes an optional caller signal: aborting it kills the active request
+//     AND the retry delay immediately, with NO further attempts;
 //   * retries only the "ladder still preparing" verdict (202), under a bounded
 //     attempt/retry budget, reporting each such verdict through onPhase so the
 //     caller can surface "preparing" while the loop is still running;
@@ -30,6 +35,10 @@
 export const VIDEO_PROBE_RANGE = 'bytes=0-0';
 export const VIDEO_PROBE_RETRY_MS = 3000;
 export const VIDEO_PROBE_MAX_ATTEMPTS = 10;
+// Wall-clock bound for ONE network attempt. Generous — real servers answer
+// heads in well under a second — but finite, so a black-holed connection can
+// never hold an attempt (and therefore the probe) indefinitely.
+export const VIDEO_PROBE_ATTEMPT_TIMEOUT_MS = 5000;
 
 /** The exact HLS MIME NubArca's VideoHlsServingService declares. */
 export const NUBARCA_HLS_MIME = 'application/vnd.apple.mpegurl';
@@ -78,10 +87,53 @@ export interface VideoProbeDeps {
    * are delivered through the promise instead.
    */
   onPhase?: (phase: VideoProbePhase) => void;
+  /**
+   * CALLER cancellation (MOBILE-VIDEO-PROBE-LIFECYCLE-01): aborting this
+   * signal terminates the WHOLE probe immediately — the active attempt is
+   * aborted through its own controller and the pending retry delay collapses.
+   * Deliberately distinct from attemptTimeoutMs, which only fails one attempt.
+   */
+  signal?: AbortSignal;
+  /**
+   * Per-attempt wall-clock bound: an attempt whose HEAD has not arrived within
+   * this budget gets its signal aborted and counts as ONE failed attempt (the
+   * normal retry budget still applies). Defaults to
+   * VIDEO_PROBE_ATTEMPT_TIMEOUT_MS, so no network attempt waits indefinitely.
+   */
+  attemptTimeoutMs?: number;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+function linkCallerAbort(
+  caller: AbortSignal | undefined,
+  controller: AbortController,
+): () => void {
+  if (!caller) return () => {};
+  if (caller.aborted) {
+    controller.abort();
+    return () => {};
+  }
+  const onAbort = () => controller.abort();
+  caller.addEventListener('abort', onAbort);
+  return () => caller.removeEventListener('abort', onAbort);
+}
+
+/** Retry delay that collapses IMMEDIATELY when the caller cancels — a plain
+ * `setTimeout` sleep would keep waiting through unmount/logout. */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const done = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done);
+  });
 }
 
 function readHeader(res: ProbeResponseLike, name: string): string | null {
@@ -153,10 +205,25 @@ export async function probeVideoSource(
     ((uri, init) => fetch(uri, init as RequestInit) as unknown as Promise<ProbeResponseLike>);
   const retryMs = deps.retryMs ?? VIDEO_PROBE_RETRY_MS;
   const maxAttempts = deps.maxAttempts ?? VIDEO_PROBE_MAX_ATTEMPTS;
+  const attemptTimeoutMs =
+    deps.attemptTimeoutMs ?? VIDEO_PROBE_ATTEMPT_TIMEOUT_MS;
+  const caller = deps.signal;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    // Caller already gone (e.g. cancelled during the retry delay): nothing
+    // further may start.
+    if (caller?.aborted) return { phase: 'unavailable' };
+
     const controller = new AbortController();
+    let unlinkCaller: () => void = () => {};
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     try {
+      // Caller cancellation aborts THIS ATTEMPT'S controller — the fetch
+      // itself dies, not just the surrounding await.
+      unlinkCaller = linkCallerAbort(caller, controller);
+      timer = setTimeout(() => controller.abort(), attemptTimeoutMs);
+
       const res = await doFetch(source.uri, {
         headers: { cookie: source.headers.cookie, range: VIDEO_PROBE_RANGE },
         signal: controller.signal,
@@ -169,15 +236,39 @@ export async function probeVideoSource(
       // There IS going to be a wait: tell the caller now instead of hiding
       // the preparing state until the loop finally settles.
       deps.onPhase?.(outcome.phase);
-      await sleep(retryMs);
     } catch {
-      // Transport-level failure mid-probe behaves like "still preparing" and
-      // consumes one attempt, keeping the bounded budget honest.
+      // WHY did this attempt die? Only a CALLER-triggered abort may terminate
+      // the whole probe from here:
+      //   * caller abort         → stop NOW: no retry, no delay;
+      //   * per-attempt timeout  → one FAILED attempt, budget still applies;
+      //   * transport failure    → existing retry behaviour.
+      if (caller?.aborted) return { phase: 'unavailable' };
       if (attempt >= maxAttempts) return { phase: 'unavailable' };
-      await sleep(retryMs);
+    } finally {
+      // Timers and listeners are released on EVERY exit path.
+      if (timer !== undefined) clearTimeout(timer);
+      unlinkCaller();
     }
+
+    // The wait before the next attempt must not outlive its caller either.
+    await abortableSleep(retryMs, caller);
   }
   return { phase: 'unavailable' };
+}
+
+/**
+ * Probe under a manager-owned AbortController — exactly the handle a screen
+ * effect needs: `cancel()` (cleanup/unmount) kills the in-flight attempt and
+ * any pending retry delay at once, and the settled outcome is safe to ignore
+ * because a cancelled probe resolves to a non-mountable verdict anyway.
+ */
+export function createManagedProbe(
+  source: VideoProbeSource,
+  deps: Omit<VideoProbeDeps, 'signal'> = {},
+): { cancel(): void; outcome: Promise<VideoProbeOutcome> } {
+  const controller = new AbortController();
+  const outcome = probeVideoSource(source, { ...deps, signal: controller.signal });
+  return { cancel: () => controller.abort(), outcome };
 }
 
 /**

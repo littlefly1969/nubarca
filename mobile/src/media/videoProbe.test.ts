@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   classifyVideoProbe,
+  createManagedProbe,
   probeVideoSource,
   resolveExpoVideoSource,
   type VideoProbeFetch,
@@ -17,6 +18,11 @@ const SRC = {
   uri: 'https://unit.test/api/files/own-1/video',
   headers: { cookie: 'NubArca.Auth=tok' },
 };
+
+/** Let one macrotask pass so an attempt can actually start/settle. */
+function settle(): Promise<void> {
+  return new Promise((done) => setImmediate(done));
+}
 
 interface RecordedRequest {
   url: string;
@@ -213,4 +219,114 @@ test('classify corners', () => {
   assert.deepEqual(classifyVideoProbe(206, 'application/json'), {
     phase: 'unavailable',
   });
+});
+
+// ── Time bounds & cancellation (MOBILE-VIDEO-PROBE-LIFECYCLE-01) ────────────
+
+test('hung fetch: EVERY attempt is time-bounded and the retry budget still holds', async () => {
+  let calls = 0;
+  const attemptSignals: AbortSignal[] = [];
+  // The server NEVER answers; only the attempt timeout can end an attempt —
+  // and the real fetch must be the one receiving the abort.
+  const fetch: VideoProbeFetch = (_uri, init) =>
+    new Promise((_resolve, reject) => {
+      calls += 1;
+      attemptSignals.push(init.signal);
+      init.signal.addEventListener('abort', () =>
+        reject(new Error('This operation was aborted')),
+      );
+    });
+
+  const outcome = await probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    attemptTimeoutMs: 20,
+    retryMs: 5,
+    maxAttempts: 3,
+  });
+
+  // Settles at all → the probe cannot hang indefinitely.
+  assert.equal(outcome.phase, 'unavailable');
+  // A timeout is ONE failed attempt: the configured budget was followed.
+  assert.equal(calls, 3);
+  for (const signal of attemptSignals) {
+    assert.equal(signal.aborted, true); // the FETCH got aborted, not a race
+  }
+});
+
+test('caller abort stops the ACTIVE request and no further attempt starts', async () => {
+  const caller = new AbortController();
+  let calls = 0;
+  let activeSignal: AbortSignal | null = null;
+  const fetch: VideoProbeFetch = (_uri, init) =>
+    new Promise((_resolve, reject) => {
+      calls += 1;
+      activeSignal = init.signal;
+      init.signal.addEventListener('abort', () =>
+        reject(new Error('This operation was aborted')),
+      );
+    });
+
+  const pending = probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    signal: caller.signal,
+    retryMs: 60_000, // would wait a full minute if cancellation were ignored
+    maxAttempts: 5,
+  });
+  await settle(); // attempt 1 is now in flight
+  assert.notEqual(activeSignal, null);
+  assert.equal(activeSignal!.aborted, false);
+
+  const started = Date.now();
+  caller.abort(); // "unmount"
+  const outcome = await pending;
+
+  assert.ok(Date.now() - started < 60_000); // stopped PROMPTLY
+  assert.equal(outcome.phase, 'unavailable');
+  assert.equal(activeSignal!.aborted, true); // active fetch signalled aborted
+  assert.equal(calls, 1); // no subsequent attempt
+});
+
+test('caller abort during the RETRY DELAY ends the wait and skips attempt N+1', async () => {
+  const caller = new AbortController();
+  let calls = 0;
+  // Transport failure on attempt 1 → the probe enters the pre-retry delay…
+  const fetch: VideoProbeFetch = async () => {
+    calls += 1;
+    throw new Error('network down');
+  };
+
+  const started = Date.now();
+  const pending = probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    signal: caller.signal,
+    retryMs: 30_000, // …a delay that must NOT be waited out after cancellation
+    maxAttempts: 3,
+  });
+  await settle(); // attempt 1 failed; the probe is now sleeping
+  caller.abort();
+
+  const outcome = await pending;
+  assert.ok(Date.now() - started < 30_000); // delay terminated immediately
+  assert.equal(outcome.phase, 'unavailable');
+  assert.equal(calls, 1); // attempt N+1 never started
+});
+
+test('createManagedProbe.cancel kills the live attempt exactly like cleanup must', async () => {
+  let activeSignal: AbortSignal | null = null;
+  const fetch: VideoProbeFetch = (_uri, init) =>
+    new Promise((_resolve, reject) => {
+      activeSignal = init.signal;
+      init.signal.addEventListener('abort', () =>
+        reject(new Error('This operation was aborted')),
+      );
+    });
+
+  const probe = createManagedProbe(SRC, { fetchImpl: fetch, retryMs: 60_000 });
+  await settle();
+  assert.notEqual(activeSignal, null);
+
+  probe.cancel(); // what VideoSlide's effect cleanup does
+  const outcome = await probe.outcome;
+  assert.equal(outcome.phase, 'unavailable'); // settles; safe to ignore
+  assert.equal(activeSignal!.aborted, true); // the request itself was cancelled
 });

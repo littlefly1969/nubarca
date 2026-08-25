@@ -21,9 +21,10 @@ import { AuthedImage } from './AuthedImage';
 import { ErrorState, LoadingState } from '../ui/states';
 import { useI18n } from '../i18n';
 import {
+  VIDEO_PROBE_ATTEMPT_TIMEOUT_MS,
   VIDEO_PROBE_MAX_ATTEMPTS,
   VIDEO_PROBE_RETRY_MS,
-  probeVideoSource,
+  createManagedProbe,
   type VideoContainer,
   type VideoProbeFetch,
 } from '../media/videoProbe';
@@ -65,28 +66,36 @@ export function VideoSlide({
     }
     let cancelled = false;
     setProbeState('probing');
-    void (async () => {
-      const outcome = await probeVideoSource(source, {
-        retryMs: VIDEO_PROBE_RETRY_MS,
-        maxAttempts: VIDEO_PROBE_MAX_ATTEMPTS,
-        // The promise settles only on the TERMINAL verdict; without this the
-        // transient 202 never reaches the UI and the slide reads
-        // "Caricamento..." for the whole ladder-preparation wait instead of
-        // switching to its dedicated "preparing" branch.
-        onPhase: (phase) => {
-          if (!cancelled && phase === 'preparing') setProbeState('preparing');
-        },
-        fetchImpl: ((
-          uri: string,
-          init: { headers: Record<string, string>; signal: AbortSignal },
-        ) => fetch(uri, init as RequestInit)) as unknown as VideoProbeFetch,
-      });
+    // ONE MANAGED PROBE per effect instance: its AbortController bounds every
+    // attempt in time and lets cleanup KILL the in-flight request and the
+    // retry delay outright, instead of only ignoring a late result.
+    const probe = createManagedProbe(source, {
+      retryMs: VIDEO_PROBE_RETRY_MS,
+      maxAttempts: VIDEO_PROBE_MAX_ATTEMPTS,
+      attemptTimeoutMs: VIDEO_PROBE_ATTEMPT_TIMEOUT_MS,
+      // The promise settles only on the TERMINAL verdict; without this the
+      // transient 202 never reaches the UI and the slide reads
+      // "Caricamento..." for the whole ladder-preparation wait instead of
+      // switching to its dedicated "preparing" branch.
+      onPhase: (phase) => {
+        if (!cancelled && phase === 'preparing') setProbeState('preparing');
+      },
+      fetchImpl: ((
+        uri: string,
+        init: { headers: Record<string, string>; signal: AbortSignal },
+      ) => fetch(uri, init as RequestInit)) as unknown as VideoProbeFetch,
+    });
+    void probe.outcome.then((outcome) => {
+      // Defence-in-depth: a verdict landing in the same tick as unmount — or
+      // the cancelled-probe settlement itself — must never touch state.
+      // Cancellation is never surfaced as unavailable/error here.
       if (cancelled) return;
       setProbeState(outcome.phase as ProbeState);
       setResolvedContainer(outcome.container ?? null);
-    })();
+    });
     return () => {
       cancelled = true;
+      probe.cancel();
     };
   }, [source]);
 
