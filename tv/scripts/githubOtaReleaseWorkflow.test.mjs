@@ -34,8 +34,10 @@ test('validated OTA bytes are published immutably and GitHub never contacts prod
   const imageVerify = workflow.indexOf('Verify OTA image contains the exact validated bundle');
   const push = workflow.indexOf("docker push '${{ steps.image.outputs.image }}'");
   assert.ok(bundle >= 0 && bundle < upload && upload < imageVerify && imageVerify < push);
-  assert.match(workflow, /nubarca-tv-ota:\$\{GITHUB_SHA\}/);
+  assert.match(workflow, /image=\$repository:\$\{GITHUB_SHA\}/);
   assert.match(workflow, /Manifest\.Digest/);
+  assert.match(workflow, /steps\.image\.outputs\.repository.*steps\.digest\.outputs\.digest/);
+  assert.doesNotMatch(workflow, /steps\.image\.outputs\.image.*steps\.digest\.outputs\.digest/);
   assert.doesNotMatch(workflow, /ssh(?:-keyscan|-add)?\b/);
   assert.doesNotMatch(workflow, /NUBARCA_PRODUCTION_SSH/);
 });
