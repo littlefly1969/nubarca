@@ -636,12 +636,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reports so far do not distinguish them. `adb shell dumpsys package
   it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
   and cannot get it, so the evidence has to come from what the screen shows.
-- **TV full-screen editors are native windows, not elevated React siblings.**
-  A physical Fire Stick disproved the earlier `zIndex`/`elevation` fix: the
-  People picker received DPAD focus and scrolled, but remained painted behind
-  the media cover. `PanelShell` now uses React Native `Modal`, whose separate
-  native window makes both paint order and focus containment structural. The
-  surface remains opaque, the parent still makes the media grid non-focusable,
-  and Android BACK is handled through `Modal.onRequestClose`; `BackHandler`
-  does not receive events while a modal is open. The FlatList, local person-name
-  search, fixed Done action and include/exclude query contract are unchanged.
+- **A TV full-screen editor flow owns one STABLE native window.** A physical
+  Fire Stick first disproved `zIndex`/`elevation`: the People picker received
+  DPAD focus and scrolled while remaining painted behind the prior surface.
+  Moving `PanelShell` to React Native `Modal` established the correct native
+  layer but did not by itself fix the transition, because entering People
+  still UNMOUNTED the filter modal and mounted another modal in the same React
+  commit. Fire OS could keep the dismissed filter surface painted in front
+  while focus was already in the new list. Across the filter-to-People
+  transition `LibraryFilterPanel` now keeps the same `PanelShell` host and
+  replaces only its body; the ordinary `LibraryPeoplePanel` body is
+  structurally forbidden from owning a panel or modal (its deeper on-screen
+  keyboard is still a deliberate nested editor). The surface remains opaque,
+  the media grid remains non-focusable, and Android BACK is handled through
+  `Modal.onRequestClose`. FlatList virtualization, local name search, fixed
+  Done and the include/exclude query contract are unchanged.

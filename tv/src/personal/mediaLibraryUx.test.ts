@@ -25,6 +25,7 @@ import { fixedEditorLayout, TV_VIEWPORTS, usableHeight } from '../lib/panelLayou
 const src = (path: string) => read(import.meta.url, path);
 
 const peoplePanel = src('../screens/library/LibraryPeoplePanel.tsx');
+const filterPanel = src('../screens/library/LibraryFilterPanel.tsx');
 const panelShell = src('../screens/gallery/PanelShell.tsx');
 const filterRow = src('../screens/library/FilterRow.tsx');
 const viewer = src('../screens/library/PersonalMediaViewer.tsx');
@@ -119,11 +120,19 @@ test('the People picker is virtualized, not an eager map', () => {
 });
 
 test('the FlatList is the only scroll owner in that panel', () => {
-  assert.match(peoplePanel, /body="custom"/);
+  assert.match(filterPanel, /editor\.kind === 'people'[\s\S]*?body="custom"/);
   assert.doesNotMatch(peoplePanel, /<ScrollView/, 'no nested scroll container');
   // JSX elements only — `useRef<FlatList<...>>` is a type, not a scroll owner.
   const lists = [...peoplePanel.matchAll(/<FlatList\s/g)].length;
   assert.equal(lists, 1, 'exactly one scrolling list');
+});
+
+test('entering People keeps one stable native panel host', () => {
+  assert.doesNotMatch(peoplePanel, /<PanelShell|<Modal/,
+    'the People body must not replace or nest the filter flow native window');
+  assert.match(filterPanel,
+    /editor\.kind === 'people'[\s\S]*?<PanelShell[\s\S]*?<LibraryPeoplePanel/,
+    'LibraryFilterPanel must remain the panel host while its body changes');
 });
 
 test('rows are keyed by stable person id', () => {

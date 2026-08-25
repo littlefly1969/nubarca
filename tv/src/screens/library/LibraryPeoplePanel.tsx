@@ -11,7 +11,6 @@ import {
 } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 import { FocusableButton } from '../../components/FocusableButton';
-import { PanelShell } from '../gallery/PanelShell';
 import { TvKeyboardPanel } from '../gallery/TvKeyboardPanel';
 import { FilterRow } from './FilterRow';
 import { listPersonalPeople, type TvPersonalPerson } from '../../api/personalPeople';
@@ -29,7 +28,15 @@ import {
   type PersonSelection,
 } from '../../personal/peoplePicker';
 
-// Person picker for the library filter panel.
+// Person-picker BODY for the library filter panel.
+//
+// LibraryFilterPanel owns the stable PanelShell/Modal across the transition
+// from the filter list into People. This component must never mount a second
+// panel host for its ordinary body: swapping Android dialogs at that boundary
+// was enough for the dismissed filter surface to remain painted in front while
+// focus moved through this list behind it on a physical Fire Stick. Its local
+// on-screen keyboard may still open a deeper modal and closes back into this
+// already-mounted body.
 //
 // WHAT THIS REPLACED, AND WHY IT HAD TO
 // -------------------------------------
@@ -201,8 +208,6 @@ export function LibraryPeoplePanel({
     setRemount((k) => k + 1);
   }, [people, unnamed]);
 
-  const title = t('gallery.peopleTitle');
-
   if (keyboardOpen) {
     return (
       <TvKeyboardPanel
@@ -217,40 +222,34 @@ export function LibraryPeoplePanel({
 
   if (load.kind === 'loading') {
     return (
-      <PanelShell title={title} onBack={onClose} body="fixed">
-        <View style={styles.stateBox}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.muted}>{t('filters.peopleLoading')}</Text>
-          <FocusableButton label={t('filters.back')} onPress={onClose} hasTVPreferredFocus />
-        </View>
-      </PanelShell>
+      <View style={styles.stateBox}>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={styles.muted}>{t('filters.peopleLoading')}</Text>
+        <FocusableButton label={t('filters.back')} onPress={onClose} hasTVPreferredFocus />
+      </View>
     );
   }
 
   if (load.kind === 'error') {
     return (
-      <PanelShell title={title} onBack={onClose} body="fixed">
-        <View style={styles.stateBox}>
-          <Text style={styles.muted}>{t('gallery.peopleLoadError')}</Text>
-          <FocusableButton
-            label={t('common.tryAgain')}
-            onPress={() => { focusRef.current = null; setAttempt((a) => a + 1); }}
-            hasTVPreferredFocus
-          />
-          <FocusableButton label={t('filters.back')} onPress={onClose} />
-        </View>
-      </PanelShell>
+      <View style={styles.stateBox}>
+        <Text style={styles.muted}>{t('gallery.peopleLoadError')}</Text>
+        <FocusableButton
+          label={t('common.tryAgain')}
+          onPress={() => { focusRef.current = null; setAttempt((a) => a + 1); }}
+          hasTVPreferredFocus
+        />
+        <FocusableButton label={t('filters.back')} onPress={onClose} />
+      </View>
     );
   }
 
   if (people.length === 0) {
     return (
-      <PanelShell title={title} onBack={onClose} body="fixed">
-        <View style={styles.stateBox}>
-          <Text style={styles.muted}>{t('gallery.peopleEmpty')}</Text>
-          <FocusableButton label={t('filters.back')} onPress={onClose} hasTVPreferredFocus />
-        </View>
-      </PanelShell>
+      <View style={styles.stateBox}>
+        <Text style={styles.muted}>{t('gallery.peopleEmpty')}</Text>
+        <FocusableButton label={t('filters.back')} onPress={onClose} hasTVPreferredFocus />
+      </View>
     );
   }
 
@@ -278,8 +277,7 @@ export function LibraryPeoplePanel({
             : fallbackKey;
 
   return (
-    <PanelShell title={title} onBack={onClose} body="custom">
-      <View key={remount} style={styles.body}>
+    <View key={remount} style={styles.body}>
         {/* Fixed header: summary, search, mode, clear. Not part of the
             scrollable region — these must stay reachable however long the
             person list is. */}
@@ -398,8 +396,7 @@ export function LibraryPeoplePanel({
             onFocusChange={(f) => { if (f) focusRef.current = DONE_KEY; }}
           />
         </View>
-      </View>
-    </PanelShell>
+    </View>
   );
 }
 
