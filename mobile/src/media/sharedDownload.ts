@@ -77,8 +77,11 @@ export function makeSharedDownloadOperationId(): string {
  * sheet, then remove EVERY file this invocation created — including when the
  * download, move or share fails, and when the user merely dismisses the sheet.
  *
- * Throws the ORIGINAL operation error; cleanup failures are swallowed so they
- * can never mask what actually went wrong for the user.
+ * Cleanup semantics:
+ *   operation FAILS (+ cleanup fails) -> the ORIGINAL operation error is
+ *   preserved: cleanup problems never mask what actually went wrong;
+ *   operation SUCCEEDS (+ cleanup fails) -> the cleanup failure is SURFACED:
+ *   a share that leaves private bytes on disk must never report success.
  */
 export async function runSharedAlbumOriginalDownload(
   io: SharedDownloadIo,
@@ -88,6 +91,7 @@ export async function runSharedAlbumOriginalDownload(
   if (!root) throw new Error('cache directory unavailable');
   const separator = root.endsWith('/') ? '' : '/';
   const operationDirectory = `${root}${separator}${SHARE_DIR_PREFIX}${io.makeOperationId()}`;
+  let operationFailed = false;
   try {
     await io.makeDirectoryAsync(operationDirectory, { intermediates: true });
     // The downloader needs SOME name before the server tells us the real one:
@@ -119,14 +123,23 @@ export async function runSharedAlbumOriginalDownload(
       mimeType: mimeType ?? undefined,
       dialogTitle: request.dialogTitle,
     });
+  } catch (error) {
+    operationFailed = true;
+    throw error;
   } finally {
     // One recursive delete owns every artifact of THIS invocation: the temp
     // download target, the moved final file and the directory itself. Runs on
     // every exit path; idempotent so an absent directory is not a failure.
     try {
       await io.deleteAsync(operationDirectory, { idempotent: true });
-    } catch {
-      /* best-effort: cleanup errors must not mask the operation error */
+    } catch (cleanupError) {
+      if (!operationFailed) {
+        // The operation SUCCEEDED: a failed cleanup means private bytes may
+        // remain on disk, which must never be reported as success.
+        throw cleanupError;
+      }
+      // The operation already failed: preserve ITS error — a best-effort
+      // cleanup problem must not mask what actually went wrong.
     }
   }
 }

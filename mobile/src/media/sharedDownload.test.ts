@@ -282,3 +282,21 @@ test('makeSharedDownloadOperationId is fresh per invocation', () => {
   assert.match(first, /^[a-z0-9]+-[a-z0-9]+$/);
 });
 
+test('GIVEN every step succeeds but cleanup fails THEN the operation rejects', async () => {
+  const h = createHarness({
+    ids: ['op-h'],
+    failDeleteWith: new Error('EBUSY: resource busy'),
+  });
+
+  await assert.rejects(
+    runSharedAlbumOriginalDownload(h.io, REQUEST),
+    /EBUSY: resource busy/,
+  );
+
+  // Success was NOT reported while the artifacts actually remained on disk —
+  // they are still present here, which is exactly why this must reject
+  // instead of resolving.
+  assert.equal(h.fs.exists(dirFor('op-h')), true);
+  assert.deepEqual(h.deletes, [{ path: dirFor('op-h'), idempotent: true }]);
+});
+
