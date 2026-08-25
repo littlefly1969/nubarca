@@ -50,13 +50,7 @@ export function sharedSlides(items: SharedAlbumItem[]): ViewerSlide[] {
       displayName: '', // shared items carry NO display name by contract
       imagePath: item.previewUrl,
       videoSource: src
-        ? {
-            uri: src.uri,
-            headers: src.headers,
-            // The shared /video route is HLS-ONLY (404 without the provider)
-            // and has no .m3u8 extension — declare the container explicitly.
-            contentType: 'hls',
-          }
+        ? { uri: src.uri, headers: src.headers }
         : null,
       posterUrl: item.posterUrl,
     };

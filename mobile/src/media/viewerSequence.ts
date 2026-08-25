@@ -17,15 +17,9 @@ export interface ViewerSlide {
   // Image: authenticated path/URL fetched by the image loader as-is.
   imagePath: string;
   // Video: FULLY-BUILT source (uri + cookie header snapshot), never rebuilt
-  // by the viewer; null when there is no playable source. Shared HLS sources
-  // carry contentType:'hls' because their route has no .m3u8 extension.
-  // Shared HLS sources carry the explicit container type expo-video needs
-  // when the route has no .m3u8 extension.
-  videoSource: {
-    uri: string;
-    headers: { cookie: string };
-    contentType?: 'hls';
-  } | null;
+  // by the viewer; null when there is no playable source. The container
+  // (hls vs progressive) is decided by the bounded Range probe, not here.
+  videoSource: { uri: string; headers: { cookie: string } } | null;
   posterUrl: string | null;
 }
 

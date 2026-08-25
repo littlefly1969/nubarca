@@ -9,7 +9,7 @@
 // Two audios can therefore never play at once: only the focused slide is ever
 // allowed to reach the playing state.
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import {
   useVideoPlayer,
@@ -20,12 +20,14 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { AuthedImage } from './AuthedImage';
 import { ErrorState, LoadingState } from '../ui/states';
 import { useI18n } from '../i18n';
+import {
+  VIDEO_PROBE_MAX_ATTEMPTS,
+  VIDEO_PROBE_RETRY_MS,
+  probeVideoSource,
+  type VideoContainer,
+  type VideoProbeFetch,
+} from '../media/videoProbe';
 import type { ViewerSlide } from '../media/viewerSequence';
-
-// Probe tuning: how long the slide waits for the HLS ladder to prepare
-// before declaring the video unavailable.
-const PROBE_RETRY_MS = 3000;
-const PROBE_MAX_ATTEMPTS = 10; // ≈30 s of "Preparing" window
 
 type ProbeState = 'probing' | 'ready' | 'preparing' | 'unavailable';
 
@@ -46,53 +48,55 @@ export function VideoSlide({
   // re-render can never hand useVideoPlayer a new object identity.
   const source = slide.videoSource;
 
-  // PREFLIGHT (acceptance): the shared /video route answers 202 while the HLS
-  // ladder prepares, 404 when HLS is off or the item is gone, and 200 only
-  // when real playback can start. The player mounts exclusively on a
-  // confirmed 200 — expo-video never sees the intermediate states. The same
-  // probe also covers the owned endpoint's 202-with-HLS behaviour.
-  const [probe, setProbe] = useState<ProbeState>(
+  // BOUNDED RANGE PROBE (acceptance contract fix — see media/videoProbe.ts):
+  // sends Range: bytes=0-0 with the session cookie, aborts each attempt as
+  // soon as the response head is known, and classifies per NubArca contracts
+  // (202 preparing / 404 unavailable / 206+video progressive / 200 HLS MIME
+  // → hls). The outcome resolves BOTH availability and container; the
+  // expo-video player mounts only on a confirmed ready.
+  const [probeState, setProbeState] = useState<ProbeState>(
     slide.videoSource ? 'probing' : 'unavailable',
   );
 
   useEffect(() => {
-    if (!source) return;
+    if (!source) {
+      setProbeState('unavailable');
+      return;
+    }
     let cancelled = false;
-    let attempt = 0;
+    setProbeState('probing');
     void (async () => {
-      while (!cancelled && attempt < PROBE_MAX_ATTEMPTS) {
-        attempt += 1;
-        try {
-          const res = await fetch(source.uri, { headers: source.headers });
-          if (cancelled) return;
-          if (res.ok) {
-            setProbe('ready');
-            return;
-          }
-          if (res.status === 202) {
-            setProbe('preparing');
-            await new Promise((r) => setTimeout(r, PROBE_RETRY_MS));
-            continue;
-          }
-          // 404 etc: HLS provider off, revoked membership, deleted item —
-          // all deliberate non-availability, never worth retrying.
-          setProbe('unavailable');
-          return;
-        } catch {
-          // A network hiccup mid-probe behaves like "still preparing".
-          setProbe('preparing');
-          await new Promise((r) => setTimeout(r, PROBE_RETRY_MS));
-        }
-      }
-      if (!cancelled) setProbe('unavailable'); // gave up waiting for the ladder
+      const outcome = await probeVideoSource(source, {
+        retryMs: VIDEO_PROBE_RETRY_MS,
+        maxAttempts: VIDEO_PROBE_MAX_ATTEMPTS,
+        fetchImpl: ((
+          uri: string,
+          init: { headers: Record<string, string>; signal: AbortSignal },
+        ) => fetch(uri, init as RequestInit)) as unknown as VideoProbeFetch,
+      });
+      if (cancelled) return;
+      setProbeState(outcome.phase as ProbeState);
+      setResolvedContainer(outcome.container ?? null);
     })();
     return () => {
       cancelled = true;
     };
   }, [source]);
 
-  const playerReady = source !== null && probe === 'ready';
-  const player: VideoPlayer = useVideoPlayer(playerReady ? source : null, (p) => {
+  // Resolved expo-video source: exists ONLY on a confirmed ready, carrying
+  // contentType:'hls' exactly when the server answered HLS.
+  const [resolvedContainer, setResolvedContainer] = useState<VideoContainer | null>(null);
+
+  const expoSource = useMemo(() => {
+    if (probeState !== 'ready') return null;
+    if (!source || resolvedContainer === null) return null;
+    const base = { uri: source.uri, headers: source.headers };
+    return resolvedContainer === 'hls'
+      ? { ...base, contentType: 'hls' as const }
+      : base;
+  }, [source, probeState, resolvedContainer]);
+
+  const player: VideoPlayer = useVideoPlayer(expoSource, (p) => {
     // Mount ≠ autoplay. Playback is owned exclusively by the `active` effect:
     // an unfocused neighbor must never start making noise.
     p.loop = false;
@@ -143,12 +147,15 @@ export function VideoSlide({
       }
       return;
     }
-    if (playerReady && ready && error === null) {
+    if (expoSource !== null && ready && error === null) {
       void player.play();
     }
-  }, [active, playerReady, ready, error, player]);
+  }, [active, expoSource, ready, error, player]);
 
-  if (source === null || probe === 'unavailable') {
+  const probing = probeState === 'probing';
+  const preparing = probeState === 'preparing';
+
+  if (source === null || probeState === 'unavailable') {
     // HLS off / item gone / no playable source: poster + explicit message.
     return (
       <View style={styles.centerDark}>
@@ -170,11 +177,11 @@ export function VideoSlide({
 
   return (
     <View style={[styles.full, styles.dark]}>
-      {(!ready || probe === 'preparing' || probe === 'probing') && (
+      {(!expoSource || probing || preparing) && (
         <View style={styles.loadingOverlay}>
           <LoadingState />
           <Text style={styles.loadingText}>
-            {probe === 'preparing' ? t('player.preparing') : t('player.loading')}
+            {preparing ? t('player.preparing') : t('player.loading')}
           </Text>
         </View>
       )}
