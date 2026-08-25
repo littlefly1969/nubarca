@@ -57,7 +57,7 @@ export function PanelShell({
   }, [onBack, onBackOverride]);
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} accessibilityViewIsModal>
       <Text style={styles.title}>{title}</Text>
       {body === 'scroll' ? (
         <ScrollView
@@ -86,6 +86,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    // Full-screen panels are rendered after the gallery, but Android can still
+    // promote focused/elevated tile descendants above a later sibling. Give
+    // the opaque focus scope its own explicit native layer so neither the
+    // People list nor its fixed Done action can be painted "under" the grid.
+    zIndex: 100,
+    elevation: 24,
     backgroundColor: colors.bg,
     paddingVertical: spacing.xl,
     paddingHorizontal: spacing.xl * 2,

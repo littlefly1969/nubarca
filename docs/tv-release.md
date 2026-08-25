@@ -74,6 +74,14 @@ OTA is safe only for changes compatible with the installed native runtime:
 React/TypeScript UI, focus/navigation logic, business/API-client logic and
 Metro-bundled images, fonts or other assets.
 
+An OTA never rewrites the installed Android manifest or launcher resources.
+In particular it cannot add `LAUNCHER`/`LEANBACK_LAUNCHER`, replace the legacy
+or adaptive application icon, replace the TV banner, or repair an installation
+whose native shell predates those declarations. Those devices must install a
+higher-`versionCode` APK. A fresh install and an in-place native upgrade are
+therefore separate acceptance cases; seeing a launcher tile after a fresh
+install does not prove an OTA-updated old APK has the same native resources.
+
 A new APK and runtime are required for an Expo SDK, `react-native-tvos`, native
 dependency, config plugin, AndroidManifest, permission, Kotlin/Java, Gradle,
 applicationId, versionCode, OTA certificate, update URL, production origin,
@@ -449,6 +457,14 @@ device, and is an additional check rather than the expected route.
 Then launch and verify pairing/session persistence, media playback and OTA
 cold-launch behaviour on the physical device. A changed applicationId cannot
 update in place and requires a fresh install and re-pair.
+
+For launcher acceptance, test both paths when the release changes manifest or
+artwork: (1) a fresh installation and (2) an in-place APK update from the
+previous native `versionCode`. Confirm the tile in Fire TV Applications after
+the launcher has refreshed. Do not use an OTA-only update for this check: it
+cannot change the Android resources under test. Record separately whether Fire
+OS presents the application-library tile as square/masked and whether it uses
+the Leanback banner on TV surfaces; those are different slots.
 
 Acceptance is performed by whoever holds the device. When that is not the agent
 running §10-§12, the agent reports acceptance as **pending** and hands over the

@@ -272,6 +272,12 @@ test('PanelShell no longer scrolls unconditionally', () => {
   assert.match(panelShell, /body = 'scroll'/, 'existing row panels keep their behaviour');
 });
 
+test('full-screen panels own an explicit native layer above the media grid', () => {
+  assert.match(panelShell, /zIndex:\s*100/);
+  assert.match(panelShell, /elevation:\s*24/);
+  assert.match(panelShell, /accessibilityViewIsModal/);
+});
+
 test('bounded editors are sized to fit rather than made scrollable', () => {
   assert.match(keyboard, /body="fixed"/);
   assert.match(keyboard, /fixedEditorLayout\(viewport, \{/);
