@@ -176,7 +176,7 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
       <PanelShell
         title={t('gallery.peopleTitle')}
         onBack={() => setEditor({ kind: 'none' })}
-        body="custom"
+        body="fixed"
       >
         <LibraryPeoplePanel
           include={filters.photo.includePeople}

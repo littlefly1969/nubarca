@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   StyleSheet,
   Text,
   View,
-  type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
 } from 'react-native';
 import { colors, font, spacing } from '../../theme';
 import { FocusableButton } from '../../components/FocusableButton';
@@ -19,12 +15,11 @@ import type { PeopleMode } from '../../personal/mediaWorkspaceQuery';
 import {
   filterPeopleByName,
   focusAfterSearch,
-  personItemLayout,
+  clampPeoplePage,
+  peoplePage,
+  peoplePageCount,
+  peoplePageForId,
   personMetaText,
-  PEOPLE_LIST_TUNING,
-  PERSON_ROW_HEIGHT,
-  reconcileFocusViewport,
-  visibleRowCount,
   type PersonSelection,
 } from '../../personal/peoplePicker';
 
@@ -38,34 +33,23 @@ import {
 // on-screen keyboard may still open a deeper modal and closes back into this
 // already-mounted body.
 //
-// WHAT THIS REPLACED, AND WHY IT HAD TO
-// -------------------------------------
-// The previous version rendered `people.map(...)` inside PanelShell's
-// ScrollView. On a demo library that looks fine; on a real one it is several
-// hundred focusable rows mounted at once on a Fire Stick, inside a container
-// that also wanted to scroll. Three different concerns — how many rows exist,
-// who owns scrolling, and where the remote is — were tangled in one JSX
-// expression, so none could be reasoned about separately.
+// WHAT THIS REPLACES, AND WHY
+// ---------------------------
+// On a physical Fire Stick the virtualized list mounted focusable rows and
+// accepted their selections, but did not paint their contents: only a thin
+// strip was visible. The selected-count header changing proved that data,
+// focus, and selection were all alive behind a broken native list viewport.
 //
-// Now: ONE FlatList owns the scrolling (PanelShell is in 'custom' body mode and
-// does not), row geometry is fixed so `getItemLayout` is exact, and the render
-// window is bounded. See personal/peoplePicker.ts for every number.
-//
-// WHO DECIDES FOCUS
-// -----------------
-// Android does. There is no nextFocusUp/nextFocusDown graph here, no D-pad
-// handling and no debounce. What this component does is REACT to the native
-// engine: when a row reports `onFocus`, the list is scrolled only if that row
-// has drifted out of a comfortable band of the viewport. That distinction is
-// the whole point — a JS navigator would eventually disagree with Android about
-// which row is focused, and the highlight and the selection would part company.
+// This component therefore has NO scroll or virtualized-list owner. It mounts
+// four ordinary rows at a time, with explicit previous/next page controls.
+// Every focusable person is consequently a visible child with real geometry.
 //
 // FINDING PERSON #87
 // ------------------
-// Virtualization makes a long list cheap to RENDER; it does nothing about it
-// being twenty seconds of D-pad away. So there is a local name search. It is
-// picker NAVIGATION only: it never touches include/exclude, never reaches the
-// backend, and is discarded when the picker closes.
+// Explicit pages prevent an eager hundred-row render, while the local name
+// search avoids traversing a large owner library one person at a time. Search
+// is picker NAVIGATION only: it never touches include/exclude, never reaches
+// the backend, and is discarded when the picker closes.
 interface Props {
   include: readonly string[];
   exclude: readonly string[];
@@ -87,6 +71,8 @@ type FocusKey = string;
 const SEARCH_KEY = 'search';
 const MODE_KEY = 'mode';
 const CLEAR_KEY = 'clear';
+const PREVIOUS_KEY = 'previous-page';
+const NEXT_KEY = 'next-page';
 const DONE_KEY = 'done';
 
 export function LibraryPeoplePanel({
@@ -96,17 +82,13 @@ export function LibraryPeoplePanel({
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
   const [search, setSearch] = useState('');
+  const [pageIndex, setPageIndex] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [remount, setRemount] = useState(0);
 
-  // Where the remote is. A ref, not state: this list is long and moving between
-  // people must never re-render the panel.
+  // Where the remote is. A ref avoids rerendering the panel on every focus
+  // movement; state changes only for a deliberate page/search transition.
   const focusRef = useRef<FocusKey | null>(null);
-  const listRef = useRef<FlatList<TvPersonalPerson> | null>(null);
-  // Viewport geometry, maintained from real layout/scroll events rather than
-  // assumed — the reconciliation is only exact if these are.
-  const firstVisibleRef = useRef(0);
-  const visibleCountRef = useRef(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,36 +147,6 @@ export function LibraryPeoplePanel({
     commit(nextInclude, nextExclude, mode, fallback);
   }, [stateOf, include, exclude, mode, commit]);
 
-  // --- native focus → viewport reconciliation ------------------------------
-
-  const onRowFocus = useCallback((personId: string, index: number) => {
-    focusRef.current = personId;
-    const request = reconcileFocusViewport({
-      focusedIndex: index,
-      firstVisibleIndex: firstVisibleRef.current,
-      visibleCount: visibleCountRef.current,
-      total: visible.length,
-    });
-    // Null is the common case: the row is already comfortably visible, so a
-    // held-down D-pad does not fight the scroller.
-    if (request === null) return;
-    listRef.current?.scrollToIndex({
-      index: request.index,
-      viewPosition: request.viewPosition,
-      animated: true,
-    });
-  }, [visible.length]);
-
-  const onListLayout = useCallback((event: LayoutChangeEvent) => {
-    visibleCountRef.current = visibleRowCount(event.nativeEvent.layout.height);
-  }, []);
-
-  const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    firstVisibleRef.current = Math.max(
-      0, Math.round(event.nativeEvent.contentOffset.y / PERSON_ROW_HEIGHT),
-    );
-  }, []);
-
   // --- search ---------------------------------------------------------------
 
   const applySearch = useCallback((value: string) => {
@@ -204,7 +156,9 @@ export function LibraryPeoplePanel({
     // A narrowed list may no longer contain the focused person. Hand focus on
     // deterministically rather than leave the remote on a row that is gone.
     const nextVisible = filterPeopleByName(people, next, unnamed);
-    focusRef.current = focusAfterSearch(nextVisible, focusRef.current, SEARCH_KEY);
+    const nextFocus = focusAfterSearch(nextVisible, focusRef.current, SEARCH_KEY);
+    focusRef.current = nextFocus;
+    setPageIndex(peoplePageForId(nextVisible, nextFocus));
     setRemount((k) => k + 1);
   }, [people, unnamed]);
 
@@ -253,7 +207,12 @@ export function LibraryPeoplePanel({
     );
   }
 
-  const fallbackKey = visible.length > 0 ? visible[0].id : SEARCH_KEY;
+  const safePageIndex = clampPeoplePage(pageIndex, visible.length);
+  const totalPages = peoplePageCount(visible.length);
+  const pagePeople = peoplePage(visible, safePageIndex);
+  const fallbackKey = pagePeople.length > 0 ? pagePeople[0].id : SEARCH_KEY;
+  const hasPreviousPage = safePageIndex > 0;
+  const hasNextPage = safePageIndex + 1 < totalPages;
   const includeCount = include.length;
   const selectedCount = includeCount + exclude.length;
   const showMode = includeCount >= 2;
@@ -272,15 +231,23 @@ export function LibraryPeoplePanel({
   const focusKey: FocusKey =
     wanted === MODE_KEY && showMode ? MODE_KEY
       : wanted === CLEAR_KEY && showClear ? CLEAR_KEY
-        : wanted === DONE_KEY || wanted === SEARCH_KEY ? wanted
-          : wanted !== null && visible.some((p) => p.id === wanted) ? wanted
+        : wanted === PREVIOUS_KEY && hasPreviousPage ? PREVIOUS_KEY
+          : wanted === NEXT_KEY && hasNextPage ? NEXT_KEY
+            : wanted === DONE_KEY || wanted === SEARCH_KEY ? wanted
+              : wanted !== null && pagePeople.some((p) => p.id === wanted) ? wanted
             : fallbackKey;
+
+  const goToPage = (requestedPage: number) => {
+    const nextPage = clampPeoplePage(requestedPage, visible.length);
+    const nextPeople = peoplePage(visible, nextPage);
+    focusRef.current = nextPeople[0]?.id ?? SEARCH_KEY;
+    setPageIndex(nextPage);
+    setRemount((k) => k + 1);
+  };
 
   return (
     <View key={remount} style={styles.body}>
-        {/* Fixed header: summary, search, mode, clear. Not part of the
-            scrollable region — these must stay reachable however long the
-            person list is. */}
+        {/* Fixed header: summary, search, mode, clear. */}
         <View style={styles.header}>
           <Text style={styles.hint}>
             {selectedCount === 0
@@ -338,34 +305,18 @@ export function LibraryPeoplePanel({
           )}
         </View>
 
-        {/* THE ONE SCROLL OWNER. */}
         {visible.length === 0 ? (
           <View style={styles.stateBox}>
             <Text style={styles.muted}>{t('filters.peopleSearchEmpty')}</Text>
           </View>
         ) : (
-          <FlatList
-            ref={listRef}
-            style={styles.list}
-            data={visible}
-            keyExtractor={(person) => person.id}
-            getItemLayout={(_, index) => personItemLayout(index)}
-            onLayout={onListLayout}
-            onScroll={onListScroll}
-            scrollEventThrottle={16}
-            showsVerticalScrollIndicator={false}
-            initialNumToRender={PEOPLE_LIST_TUNING.initialNumToRender}
-            maxToRenderPerBatch={PEOPLE_LIST_TUNING.maxToRenderPerBatch}
-            windowSize={PEOPLE_LIST_TUNING.windowSize}
-            // MUST stay false: on Android TV a clipped view is detached, and a
-            // detached view cannot hold focus.
-            removeClippedSubviews={PEOPLE_LIST_TUNING.removeClippedSubviews}
-            renderItem={({ item: person, index }) => {
+          <View style={styles.pageList}>
+            {pagePeople.map((person) => {
               const state = stateOf(person.id);
               const name = person.name ?? unnamed;
               const meta = personMetaText(state, person.faceCount, stateLabel);
               return (
-                <View style={styles.row}>
+                <View key={person.id} style={styles.row}>
                   <FilterRow
                     variant="person"
                     // The NAME alone. The face count belongs in the trailing
@@ -379,16 +330,43 @@ export function LibraryPeoplePanel({
                     // text is ellipsized.
                     accessibilityLabel={t('filters.rowA11y', { label: name, value: meta })}
                     hasTVPreferredFocus={focusKey === person.id}
-                    onFocus={() => onRowFocus(person.id, index)}
+                    onFocus={() => { focusRef.current = person.id; }}
                     onSelect={() => cyclePerson(person.id, fallbackKey)}
                   />
                 </View>
               );
-            }}
-          />
+            })}
+          </View>
         )}
 
         <View style={styles.actions}>
+          {totalPages > 1 && (
+            <>
+              <FocusableButton
+                label={t('filters.peoplePrevious')}
+                onPress={() => goToPage(safePageIndex - 1)}
+                disabled={!hasPreviousPage}
+                hasTVPreferredFocus={focusKey === PREVIOUS_KEY}
+                onFocusChange={(focused) => {
+                  if (focused) focusRef.current = PREVIOUS_KEY;
+                }}
+              />
+              <Text style={styles.pageLabel}>
+                {t('filters.peoplePage', {
+                  page: String(safePageIndex + 1), total: String(totalPages),
+                })}
+              </Text>
+              <FocusableButton
+                label={t('filters.peopleNext')}
+                onPress={() => goToPage(safePageIndex + 1)}
+                disabled={!hasNextPage}
+                hasTVPreferredFocus={focusKey === NEXT_KEY}
+                onFocusChange={(focused) => {
+                  if (focused) focusRef.current = NEXT_KEY;
+                }}
+              />
+            </>
+          )}
           <FocusableButton
             label={t('gallery.done')}
             onPress={onClose}
@@ -403,13 +381,14 @@ export function LibraryPeoplePanel({
 const styles = StyleSheet.create({
   body: { flex: 1, gap: spacing.sm },
   header: { gap: spacing.sm },
-  // flex:1 is what bounds the list's height, and a bounded height is what makes
-  // virtualization real rather than nominal.
-  list: { flex: 1 },
-  // Fixed height so getItemLayout is exact — no measurement, no async.
-  row: { height: PERSON_ROW_HEIGHT, justifyContent: 'center' },
+  pageList: { flex: 1, gap: spacing.xs },
+  row: { minHeight: 64, justifyContent: 'center' },
   stateBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   muted: { color: colors.muted, fontSize: font.body, textAlign: 'center' },
   hint: { color: colors.muted, fontSize: font.caption },
-  actions: { flexDirection: 'row', justifyContent: 'center', paddingTop: spacing.sm },
+  pageLabel: { minWidth: 132, color: colors.muted, fontSize: font.body, textAlign: 'center' },
+  actions: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, paddingTop: spacing.sm,
+  },
 });

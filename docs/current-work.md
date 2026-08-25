@@ -636,18 +636,19 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reports so far do not distinguish them. `adb shell dumpsys package
   it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
   and cannot get it, so the evidence has to come from what the screen shows.
-- **A TV full-screen editor flow owns one STABLE native window.** A physical
-  Fire Stick first disproved `zIndex`/`elevation`: the People picker received
-  DPAD focus and scrolled while remaining painted behind the prior surface.
-  Moving `PanelShell` to React Native `Modal` established the correct native
-  layer but did not by itself fix the transition, because entering People
-  still UNMOUNTED the filter modal and mounted another modal in the same React
-  commit. Fire OS could keep the dismissed filter surface painted in front
-  while focus was already in the new list. Across the filter-to-People
-  transition `LibraryFilterPanel` now keeps the same `PanelShell` host and
-  replaces only its body; the ordinary `LibraryPeoplePanel` body is
-  structurally forbidden from owning a panel or modal (its deeper on-screen
-  keyboard is still a deliberate nested editor). The surface remains opaque,
-  the media grid remains non-focusable, and Android BACK is handled through
-  `Modal.onRequestClose`. FlatList virtualization, local name search, fixed
-  Done and the include/exclude query contract are unchanged.
+- **The TV People chooser has no list viewport: it is explicitly paged.** A
+  physical Fire Stick supplied the decisive evidence after the stable native
+  window fix: an unseen person could receive focus and be selected, the
+  selected-count header changed, and only a thin strip of the person row was
+  painted. Data loading, focus, selection, and the panel layer were therefore
+  alive; the `FlatList` viewport was not drawing its focusable children with
+  usable geometry. The chooser now mounts at most four ordinary person rows at
+  a time and has no `FlatList`, `VirtualizedList`, `ScrollView`, clipping, or
+  programmatic scrolling. Search by name remains the fast route through a
+  large library, explicit Previous/Next controls cover every page without
+  omission or repetition, `Page X of Y` makes position visible, and Done stays
+  in the fixed footer. Search moves directly to the page containing its focus
+  target. The stable `LibraryFilterPanel`/`PanelShell` modal host remains in
+  place, as do the include/exclude cycle and query contract. This design is
+  covered for 200 people in tests but still requires physical Fire Stick
+  acceptance before the visual defect can be called closed.

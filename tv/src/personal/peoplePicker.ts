@@ -1,28 +1,17 @@
-// Policy for the TV People picker — virtualization, focus/viewport
-// reconciliation, local name search and row geometry. Pure, node-testable, no
-// React and no react-native import.
+// Policy for the TV People picker — explicit paging, local name search and row
+// geometry. Pure, node-testable, no React and no react-native import.
 //
 // WHY A POLICY MODULE AND NOT JUST A COMPONENT
 // --------------------------------------------
-// The picker previously did `people.map(...)` inside a ScrollView. With a real
-// owner library that is hundreds of focusable rows mounted at once, on a Fire
-// Stick, inside a panel that also wanted to scroll. Three separate problems —
-// how many rows exist, who scrolls, and where the remote is — were tangled in
-// one JSX expression, so none of them could be tested or reasoned about.
+// A physical Fire Stick gave the decisive failure mode: rows in a FlatList
+// could receive focus and selection while their content was not painted (only
+// a thin strip was visible). That makes any virtualized/scrolling solution the
+// wrong primitive here, even if it behaves correctly in tests.
 //
-// THE FOCUS RULE, STATED ONCE
-// ---------------------------
-// The NATIVE focus engine decides which row is focused. JavaScript never
-// decides UP/DOWN and never builds a nextFocusUp/nextFocusDown graph. What
-// JavaScript may do is REACT: when a row reports `onFocus`, keep that row
-// inside a comfortable band of the visible viewport. That is the difference
-// between "focus follows the viewport" (correct) and "JS navigates" (a second
-// authority that will eventually disagree with Android about which row is
-// focused — the classic TV bug where the highlight and the selection differ).
-//
-// Because row height is fixed and `getItemLayout` is therefore exact, this
-// reconciliation is arithmetic. It needs no timeout, no readiness probe and no
-// debounce.
+// The picker therefore mounts one small, explicit page at a time. Every
+// focusable person is an ordinary visible child; no native list viewport owns
+// its geometry. Search and previous/next page controls keep a large library
+// quick to navigate without mounting hundreds of focusables.
 
 export interface PickerPerson {
   readonly id: string;
@@ -32,94 +21,57 @@ export interface PickerPerson {
 
 export type PersonSelection = 'off' | 'include' | 'exclude';
 
-// --- virtualization ----------------------------------------------------------
+// --- explicit pages ---------------------------------------------------------
 
-/** One person row's fixed height in dp. Fixed is what makes getItemLayout exact. */
-export const PERSON_ROW_HEIGHT = 64;
+/** Four rows leave the complete chooser visible even in a 1280x720 TV window. */
+export const PEOPLE_PAGE_SIZE = 4;
 
-/**
- * FlatList tuning. Bounded on purpose: the point of the rewrite is that a
- * 400-person library never mounts 400 focusables.
- *
- * `removeClippedSubviews` is FALSE and must stay false. On Android TV it
- * detaches off-screen views, and a detached view cannot hold focus — which
- * produces exactly the "focus vanishes when scrolling fast" defect this picker
- * is meant to end.
- */
-export const PEOPLE_LIST_TUNING = {
-  initialNumToRender: 12,
-  maxToRenderPerBatch: 8,
-  windowSize: 5,
-  removeClippedSubviews: false,
-} as const;
-
-/** Exact geometry for FlatList.getItemLayout — no measurement, no async. */
-export function personItemLayout(index: number): {
-  length: number; offset: number; index: number;
-} {
-  return { length: PERSON_ROW_HEIGHT, offset: PERSON_ROW_HEIGHT * index, index };
+function checkedPageSize(pageSize: number): number {
+  if (!Number.isInteger(pageSize) || pageSize <= 0) {
+    throw new RangeError('pageSize must be a positive integer');
+  }
+  return pageSize;
 }
 
-/** How many whole rows fit in a viewport of `height` dp. At least one. */
-export function visibleRowCount(height: number): number {
-  return Math.max(1, Math.floor(height / PERSON_ROW_HEIGHT));
+/** There is always one logical page, including the empty-search state. */
+export function peoplePageCount(total: number, pageSize = PEOPLE_PAGE_SIZE): number {
+  const size = checkedPageSize(pageSize);
+  const safeTotal = Number.isFinite(total) ? Math.max(0, Math.trunc(total)) : 0;
+  return Math.max(1, Math.ceil(safeTotal / size));
 }
 
-// --- focus / viewport reconciliation ----------------------------------------
-
-export interface FocusViewport {
-  /** Index the native engine just reported focused. */
-  focusedIndex: number;
-  /** First index currently visible, derived from scroll offset. */
-  firstVisibleIndex: number;
-  /** How many rows the viewport shows. */
-  visibleCount: number;
-  /** Total rows in the list. */
-  total: number;
+/** Keep a requested zero-based page inside the current result set. */
+export function clampPeoplePage(
+  page: number,
+  total: number,
+  pageSize = PEOPLE_PAGE_SIZE,
+): number {
+  const last = peoplePageCount(total, pageSize) - 1;
+  const requested = Number.isFinite(page) ? Math.trunc(page) : 0;
+  return Math.max(0, Math.min(requested, last));
 }
 
-/**
- * Rows kept between the focused row and the viewport edge. Below this the row
- * is "approaching the boundary" and the list is scrolled to bring it back
- * toward the middle.
- */
-const FOCUS_SAFE_ROWS = 1;
-
-export interface ScrollRequest {
-  index: number;
-  /** 0 = top, 0.5 = centred, 1 = bottom. */
-  viewPosition: number;
+/** The only people mounted in the chooser at a given moment. */
+export function peoplePage<T>(
+  people: readonly T[],
+  page: number,
+  pageSize = PEOPLE_PAGE_SIZE,
+): T[] {
+  const size = checkedPageSize(pageSize);
+  const safePage = clampPeoplePage(page, people.length, size);
+  const start = safePage * size;
+  return people.slice(start, start + size);
 }
 
-/**
- * What (if anything) the list should do about a freshly focused row.
- *
- * Returns null when the row is already comfortably visible — which is the
- * common case, and the reason a held-down D-pad does not fight the scroller.
- * Otherwise it returns a deterministic target that recentres the row.
- */
-export function reconcileFocusViewport(viewport: FocusViewport): ScrollRequest | null {
-  const { focusedIndex, firstVisibleIndex, visibleCount, total } = viewport;
-  if (total <= 0 || focusedIndex < 0) return null;
-  // Everything fits: there is nothing to scroll.
-  if (total <= visibleCount) return null;
-
-  const lastVisibleIndex = firstVisibleIndex + visibleCount - 1;
-  // Shrink the safe band rather than let it invert on a very short viewport.
-  const margin = Math.min(FOCUS_SAFE_ROWS, Math.floor((visibleCount - 1) / 2));
-  const bandTop = firstVisibleIndex + margin;
-  const bandBottom = lastVisibleIndex - margin;
-
-  // The first and last rows of the whole list have no room to be centred, so
-  // reaching them is not a boundary violation.
-  const atListTop = focusedIndex <= margin;
-  const atListBottom = focusedIndex >= total - 1 - margin;
-  const insideBand = focusedIndex >= bandTop && focusedIndex <= bandBottom;
-  if (insideBand) return null;
-  if (atListTop && focusedIndex >= firstVisibleIndex && focusedIndex <= lastVisibleIndex) return null;
-  if (atListBottom && focusedIndex >= firstVisibleIndex && focusedIndex <= lastVisibleIndex) return null;
-
-  return { index: focusedIndex, viewPosition: 0.5 };
+/** Page containing a known person, or the first page when the id is absent. */
+export function peoplePageForId<T extends { readonly id: string }>(
+  people: readonly T[],
+  personId: string,
+  pageSize = PEOPLE_PAGE_SIZE,
+): number {
+  const size = checkedPageSize(pageSize);
+  const index = people.findIndex((person) => person.id === personId);
+  return index < 0 ? 0 : Math.floor(index / size);
 }
 
 // --- local name search -------------------------------------------------------
