@@ -272,10 +272,23 @@ test('PanelShell no longer scrolls unconditionally', () => {
   assert.match(panelShell, /body = 'scroll'/, 'existing row panels keep their behaviour');
 });
 
-test('full-screen panels own an explicit native layer above the media grid', () => {
-  assert.match(panelShell, /zIndex:\s*100/);
-  assert.match(panelShell, /elevation:\s*24/);
+test('full-screen panels own a native window above the media grid', () => {
+  assert.match(panelShell, /<Modal\s/);
+  assert.match(panelShell, /hardwareAccelerated/);
+  assert.match(panelShell, /onRequestClose=\{requestClose\}/);
+  assert.match(panelShell, /statusBarTranslucent/);
   assert.match(panelShell, /accessibilityViewIsModal/);
+  assert.match(panelShell, /container:\s*\{\s*flex:\s*1/);
+  assert.doesNotMatch(panelShell, /zIndex|elevation/,
+    'an ordinary sibling layer is not a reliable overlay on physical Fire TV');
+  assert.doesNotMatch(panelShell, /BackHandler/,
+    'Android delivers BACK through Modal.onRequestClose while the modal is open');
+});
+
+test('opening any library panel also makes the media grid non-interactive', () => {
+  assert.match(libraryScreen,
+    /const gridInteractive = panel === 'none' && viewerIndex === null/);
+  assert.match(libraryScreen, /const gridFocusable = gridInteractive && !overlayVisible/);
 });
 
 test('bounded editors are sized to fit rather than made scrollable', () => {
