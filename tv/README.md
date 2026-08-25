@@ -3,6 +3,11 @@
 All native APK/OTA operations use the single canonical
 [`../docs/tv-release.md`](../docs/tv-release.md) runbook.
 
+Ordinary OTA publication is Git-first: only the manual `TV OTA release` GitHub
+workflow signs and publishes an immutable GHCR bundle. Production only pulls it
+by digest and verifies/activates it; do not sign, export or build an OTA on the
+server, and do not add back a local `publish:ota` command.
+
 A **separate** Expo React Native application for the 10-foot TV experience,
 targeting **Fire Stick / Android TV** first. It is intentionally NOT the mobile
 app and NOT a full NubArca client — see the architecture strategy in

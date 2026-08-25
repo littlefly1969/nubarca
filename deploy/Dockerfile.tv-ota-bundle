@@ -1,0 +1,10 @@
+FROM scratch
+
+ARG GIT_SHA
+ARG RUNTIME_VERSION
+
+LABEL io.nubarca.artifact="tv-ota" \
+      org.opencontainers.image.revision="$GIT_SHA" \
+      io.nubarca.tv.runtime-version="$RUNTIME_VERSION"
+
+COPY . /release/
