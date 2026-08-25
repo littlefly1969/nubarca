@@ -162,6 +162,9 @@ describe('the header says which photo this is', () => {
     renderViewer(['f-1'], 0);
 
     const person = await screen.findByTestId('face-viewer-person');
+    // Visible, not merely present: a name the reviewer cannot read is the same
+    // as the name that was missing.
+    expect(person).toBeVisible();
     expect(person).toHaveTextContent('Alice');
     // In the header, opposite the photo's own identity.
     expect(document.querySelector('.face-viewer-top')!.contains(person)).toBe(true);
@@ -174,7 +177,9 @@ describe('the header says which photo this is', () => {
     });
     renderViewer(['f-1'], 0);
 
-    expect(await screen.findByTestId('face-viewer-person')).toHaveTextContent('Non assegnato');
+    const person = await screen.findByTestId('face-viewer-person');
+    expect(person).toBeVisible();
+    expect(person).toHaveTextContent('Non assegnato');
   });
 
   it('follows the selection to another face’s person', async () => {
