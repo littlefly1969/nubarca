@@ -636,12 +636,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   reports so far do not distinguish them. `adb shell dumpsys package
   it.littlefly.nubarca.tv` would settle it, but this operator has no ADB access
   and cannot get it, so the evidence has to come from what the screen shows.
-- **TV full-screen editors are native windows, not elevated React siblings.**
-  A physical Fire Stick disproved the earlier `zIndex`/`elevation` fix: the
-  People picker received DPAD focus and scrolled, but remained painted behind
-  the media cover. `PanelShell` now uses React Native `Modal`, whose separate
-  native window makes both paint order and focus containment structural. The
-  surface remains opaque, the parent still makes the media grid non-focusable,
-  and Android BACK is handled through `Modal.onRequestClose`; `BackHandler`
-  does not receive events while a modal is open. The FlatList, local person-name
-  search, fixed Done action and include/exclude query contract are unchanged.
+- **The TV People chooser uses a fixed two-pane landscape layout.** Physical
+  Fire Stick evidence disproved two successive structures. First, a native
+  list accepted focus and selection without painting usable rows. Replacing it
+  with four ordinary rows proved the data path, but a 960x540-ish logical TV
+  viewport then exposed the remaining geometry error: summary, Search, Match,
+  Clear, four people, page status, Previous/Next, and Done all competed for one
+  vertical column. The footer visibly overlaid the first person row. The current
+  chooser has no list or scroll viewport and no shared vertical budget: a fixed
+  left rail owns selection summary, stacked Search/Match/Clear controls and
+  Done; the right pane owns a stable 2x4 people grid, result/page heading and a
+  separate Previous/Next footer. Eight people per page reduce a 200-person
+  library to 25 pages, while local name search remains the fast route and jumps
+  directly to the page containing its focus target. Empty grid slots preserve
+  the four-row geometry on the final page. There are no absolute layers, fixed
+  row heights, negative offsets, virtualized lists, clipping, or programmatic
+  D-pad navigation. The stable `LibraryFilterPanel`/`PanelShell` modal host and
+  include/exclude/query contract remain unchanged. Source regressions cover the
+  exact overlap mechanism, but physical Fire Stick acceptance is still required
+  before the visual defect can be called closed.

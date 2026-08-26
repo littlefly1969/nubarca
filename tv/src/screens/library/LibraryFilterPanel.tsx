@@ -168,18 +168,29 @@ export function LibraryFilterPanel({ applied, resultCount, onApply, onCancel, on
 
   if (editor.kind === 'people') {
     return (
-      <LibraryPeoplePanel
-        include={filters.photo.includePeople}
-        exclude={filters.photo.excludePeople}
-        mode={filters.photo.includePeopleMode}
-        onChange={(include, exclude, mode) => patchPhoto({
-          includePeople: include,
-          excludePeople: exclude,
-          includePeopleMode: mode,
-        })}
-        onClose={() => setEditor({ kind: 'none' })}
-        onAuthError={onAuthError}
-      />
+      // Keep the SAME native modal host mounted while changing editor. Making
+      // LibraryPeoplePanel mount a second PanelShell replaced one Android
+      // dialog with another in the same commit; on Fire TV the dismissed
+      // filter surface could remain painted in front while DPAD focus had
+      // already entered the new People list behind it.
+      <PanelShell
+        title={t('gallery.peopleTitle')}
+        onBack={() => setEditor({ kind: 'none' })}
+        body="fixed"
+      >
+        <LibraryPeoplePanel
+          include={filters.photo.includePeople}
+          exclude={filters.photo.excludePeople}
+          mode={filters.photo.includePeopleMode}
+          onChange={(include, exclude, mode) => patchPhoto({
+            includePeople: include,
+            excludePeople: exclude,
+            includePeopleMode: mode,
+          })}
+          onClose={() => setEditor({ kind: 'none' })}
+          onAuthError={onAuthError}
+        />
+      </PanelShell>
     );
   }
 

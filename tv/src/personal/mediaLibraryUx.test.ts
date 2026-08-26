@@ -16,15 +16,17 @@ import {
   mergePagedTotal, TOTAL_UNCHANGED,
 } from './pagingTotals.ts';
 import {
-  filterPeopleByName, focusAfterSearch, personItemLayout, personMetaText,
-  PEOPLE_LIST_TUNING, PERSON_META_FLEX, PERSON_NAME_FLEX, PERSON_ROW_HEIGHT,
-  reconcileFocusViewport, visibleRowCount,
+  clampPeoplePage, filterPeopleByName, focusAfterSearch, peopleGridRows, peoplePage,
+  peoplePageCount, peoplePageForId, personMetaText, PEOPLE_GRID_COLUMNS,
+  PEOPLE_GRID_ROWS, PEOPLE_PAGE_SIZE,
+  PERSON_META_FLEX, PERSON_NAME_FLEX,
 } from './peoplePicker.ts';
 import { fixedEditorLayout, TV_VIEWPORTS, usableHeight } from '../lib/panelLayout.ts';
 
 const src = (path: string) => read(import.meta.url, path);
 
 const peoplePanel = src('../screens/library/LibraryPeoplePanel.tsx');
+const filterPanel = src('../screens/library/LibraryFilterPanel.tsx');
 const panelShell = src('../screens/gallery/PanelShell.tsx');
 const filterRow = src('../screens/library/FilterRow.tsx');
 const viewer = src('../screens/library/PersonalMediaViewer.tsx');
@@ -108,40 +110,52 @@ test('the viewer badge renders through the same policy', () => {
 
 // ---------------------------------------------------------------- people
 
-test('the People picker is virtualized, not an eager map', () => {
-  assert.match(peoplePanel, /<FlatList\s/);
-  // The rows come from FlatList data, never from a mapped array in JSX. Note
-  // the panel legitimately calls people.map elsewhere to build the id Set for
-  // the stale-selection count — what must not exist is a mapped RENDER.
-  assert.doesNotMatch(peoplePanel, /\{\s*(people|visible)\.map\(/,
-    'rendering the whole owner projection in JSX is what this replaced');
-  assert.match(peoplePanel, /data=\{visible\}/);
+test('the People picker uses the TV width: controls left, results right', () => {
+  assert.match(peoplePanel, /<View style=\{styles\.workspace\}>/);
+  assert.match(peoplePanel, /<View style=\{styles\.sidebar\}>/);
+  assert.match(peoplePanel, /<View style=\{styles\.resultsPane\}>/);
+  assert.match(peoplePanel, /workspace: \{[^}]*flexDirection: 'row'/);
+  assert.match(peoplePanel, /<View style=\{styles\.sidebarFooter\}>[\s\S]*?t\('gallery\.done'\)/);
 });
 
-test('the FlatList is the only scroll owner in that panel', () => {
-  assert.match(peoplePanel, /body="custom"/);
-  assert.doesNotMatch(peoplePanel, /<ScrollView/, 'no nested scroll container');
-  // JSX elements only — `useRef<FlatList<...>>` is a type, not a scroll owner.
-  const lists = [...peoplePanel.matchAll(/<FlatList\s/g)].length;
-  assert.equal(lists, 1, 'exactly one scrolling list');
+test('the People picker mounts one explicit 2x4 page of ordinary rows', () => {
+  assert.match(peoplePanel, /<View style=\{styles\.peopleGrid\}>/);
+  assert.match(peoplePanel, /Array\.from\(\{ length: PEOPLE_GRID_ROWS \}/);
+  assert.match(peoplePanel, /\{row\.map\(\(person\) =>/);
+  assert.doesNotMatch(peoplePanel, /\{\s*(people|visible)\.map\(/,
+    'the whole owner projection must never be mounted');
+  assert.equal(PEOPLE_GRID_COLUMNS, 2);
+  assert.equal(PEOPLE_GRID_ROWS, 4);
+  assert.equal(PEOPLE_PAGE_SIZE, 8, 'eight results use TV width without adding a fifth row');
+  assert.deepEqual(peopleGridRows(Array.from({ length: 8 }, (_, index) => index)),
+    [[0, 1], [2, 3], [4, 5], [6, 7]]);
+  assert.deepEqual(peopleGridRows([0, 1, 2]), [[0, 1], [2]]);
+  assert.throws(() => peopleGridRows([1], 0), /positive integer/);
+});
+
+test('the People picker has no native list or scroll viewport', () => {
+  assert.match(filterPanel, /editor\.kind === 'people'[\s\S]*?body="fixed"/);
+  for (const retired of [/<FlatList\s/, /<VirtualizedList\s/, /<ScrollView\s/,
+    /scrollToIndex/, /getItemLayout/, /onListScroll/, /onListLayout/]) {
+    assert.doesNotMatch(peoplePanel, retired,
+      'physical Fire Stick proved the focusable list viewport could fail to paint rows');
+  }
+});
+
+test('entering People keeps one stable native panel host', () => {
+  assert.doesNotMatch(peoplePanel, /<PanelShell|<Modal/,
+    'the People body must not replace or nest the filter flow native window');
+  assert.match(filterPanel,
+    /editor\.kind === 'people'[\s\S]*?<PanelShell[\s\S]*?<LibraryPeoplePanel/,
+    'LibraryFilterPanel must remain the panel host while its body changes');
 });
 
 test('rows are keyed by stable person id', () => {
-  assert.match(peoplePanel, /keyExtractor=\{\(person\) => person\.id\}/);
+  assert.match(peoplePanel, /<View key=\{person\.id\} style=\{styles\.personCell\}>/);
 });
 
-test('item layout is deterministic, so scrolling needs no timeout', () => {
-  assert.match(peoplePanel, /getItemLayout=\{\(_, index\) => personItemLayout\(index\)\}/);
-  assert.deepEqual(personItemLayout(0), { length: PERSON_ROW_HEIGHT, offset: 0, index: 0 });
-  assert.deepEqual(personItemLayout(10),
-    { length: PERSON_ROW_HEIGHT, offset: PERSON_ROW_HEIGHT * 10, index: 10 });
-  assert.doesNotMatch(peoplePanel, /setTimeout|setInterval|requestAnimationFrame/,
-    'deterministic geometry means no readiness timer is needed');
-});
-
-test('native onFocus drives the viewport — JavaScript never navigates', () => {
-  assert.match(peoplePanel, /onFocus=\{\(\) => onRowFocus\(person\.id, index\)\}/);
-  assert.match(peoplePanel, /reconcileFocusViewport\(/);
+test('native focus selects only a mounted row — JavaScript never navigates the D-pad', () => {
+  assert.match(peoplePanel, /onFocus=\{\(\) => \{ focusRef\.current = person\.id; \}\}/);
   for (const forbidden of [/nextFocusUp/, /nextFocusDown/, /nextFocusLeft/, /nextFocusRight/,
     /useTVEventHandler/, /eventType === 'up'/, /eventType === 'down'/]) {
     assert.doesNotMatch(peoplePanel, forbidden,
@@ -149,48 +163,58 @@ test('native onFocus drives the viewport — JavaScript never navigates', () => 
   }
 });
 
-test('a row already inside the safe band causes no scroll', () => {
-  for (const focusedIndex of [2, 3, 4, 5, 6]) {
-    assert.equal(
-      reconcileFocusViewport({ focusedIndex, firstVisibleIndex: 0, visibleCount: 8, total: 200 }),
-      null,
-      `index ${focusedIndex} is comfortably visible`,
-    );
+test('a 200-person library is complete across bounded pages', () => {
+  const people = Array.from({ length: 200 }, (_, index) => ({ id: String(index) }));
+  assert.equal(peoplePageCount(people.length), 25);
+  const visited = Array.from({ length: peoplePageCount(people.length) }, (_, page) =>
+    peoplePage(people, page)).flat();
+  assert.deepEqual(visited, people, 'paging must neither omit nor repeat a person');
+  assert.ok(peoplePage(people, 12).length <= PEOPLE_PAGE_SIZE,
+    'at most eight people are mounted');
+});
+
+test('page boundaries and page lookup are deterministic', () => {
+  assert.equal(clampPeoplePage(-10, 200), 0);
+  assert.equal(clampPeoplePage(999, 200), 24);
+  assert.equal(clampPeoplePage(Number.NaN, 200), 0);
+  assert.equal(peoplePageCount(Number.NaN), 1);
+  assert.equal(peoplePageForId(
+    Array.from({ length: 200 }, (_, index) => ({ id: String(index) })), '87'), 10);
+  assert.throws(() => peoplePageCount(10, 0), /positive integer/);
+});
+
+test('paging never shares geometry with people or the permanently mounted Done action', () => {
+  assert.match(peoplePanel, /t\('filters\.peoplePrevious'\)/);
+  assert.match(peoplePanel, /t\('filters\.peopleNext'\)/);
+  assert.match(peoplePanel, /t\('filters\.peoplePage'/);
+  assert.match(peoplePanel, /<View style=\{styles\.resultsHeader\}>[\s\S]*?t\('filters\.peoplePage'/);
+  assert.match(peoplePanel, /<View style=\{styles\.pager\}>[\s\S]*?peoplePrevious[\s\S]*?peopleNext/);
+  assert.doesNotMatch(peoplePanel, /<View style=\{styles\.pager\}>[\s\S]*?t\('gallery\.done'\)/);
+  assert.match(peoplePanel, /disabled=\{!hasPreviousPage\}/);
+  assert.match(peoplePanel, /disabled=\{!hasNextPage\}/);
+});
+
+test('the physical Fire Stick overlap cannot return through fixed row heights or layers', () => {
+  for (const forbidden of [/position:\s*'absolute'/, /zIndex/, /elevation/, /marginTop:\s*-/,
+    /minHeight:\s*64/, /styles\.pageList/, /styles\.actions/]) {
+    assert.doesNotMatch(peoplePanel, forbidden);
   }
+  assert.match(peoplePanel, /peopleGrid: \{ flex: 1, minHeight: 0/);
+  assert.match(peoplePanel, /gridRow: \{ flex: 1, minHeight: 0, flexDirection: 'row'/);
 });
 
-test('a row crossing the viewport boundary scrolls deterministically', () => {
-  assert.deepEqual(
-    reconcileFocusViewport({ focusedIndex: 7, firstVisibleIndex: 0, visibleCount: 8, total: 200 }),
-    { index: 7, viewPosition: 0.5 });
-  assert.deepEqual(
-    reconcileFocusViewport({ focusedIndex: 40, firstVisibleIndex: 0, visibleCount: 8, total: 200 }),
-    { index: 40, viewPosition: 0.5 });
+test('sidebar filter rows stack their copy instead of squeezing two long columns', () => {
+  assert.match(filterRow, /layout\?: 'split' \| 'stacked'/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleSearch/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleMode/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleClear/);
 });
 
-test('the ends of the list are not treated as boundary violations', () => {
-  // There is no room to centre row 0; scrolling for it would just jitter.
-  assert.equal(
-    reconcileFocusViewport({ focusedIndex: 0, firstVisibleIndex: 0, visibleCount: 8, total: 200 }),
-    null);
-  assert.equal(
-    reconcileFocusViewport({ focusedIndex: 199, firstVisibleIndex: 192, visibleCount: 8, total: 200 }),
-    null);
-  // And a list that fits entirely never scrolls.
-  assert.equal(
-    reconcileFocusViewport({ focusedIndex: 5, firstVisibleIndex: 0, visibleCount: 8, total: 6 }),
-    null);
-});
-
-test('a 200-person list never mounts 200 focusables', () => {
-  assert.ok(PEOPLE_LIST_TUNING.initialNumToRender <= 20);
-  assert.ok(PEOPLE_LIST_TUNING.maxToRenderPerBatch <= 20);
-  assert.ok(PEOPLE_LIST_TUNING.windowSize <= 10);
-  assert.equal(visibleRowCount(8 * PERSON_ROW_HEIGHT), 8);
-  // A clipped view is DETACHED on Android TV, and a detached view cannot hold
-  // focus — which is the "focus vanishes while scrolling" defect.
-  assert.equal(PEOPLE_LIST_TUNING.removeClippedSubviews, false);
-  assert.match(peoplePanel, /removeClippedSubviews=\{PEOPLE_LIST_TUNING\.removeClippedSubviews\}/);
+test('two-column person cards stack name and state so the name keeps useful width', () => {
+  assert.match(peoplePanel, /variant="person"\s*\n\s*layout="stacked"/);
+  assert.match(filterRow, /person && styles\.labelStackedPerson/);
+  assert.match(filterRow, /labelStackedPerson: \{ color: colors\.text, fontSize: font\.body \}/);
+  assert.match(filterRow, /valueStackedPerson: \{ color: colors\.muted, fontSize: font\.caption \}/);
 });
 
 const PEOPLE = [
@@ -229,6 +253,8 @@ test('search hands focus on deterministically when it removes the focused row', 
   assert.equal(focusAfterSearch([PEOPLE[0], PEOPLE[3]], 'b', 'search'), 'a');
   assert.equal(focusAfterSearch([], 'b', 'search'), 'search');
   assert.match(peoplePanel, /focusAfterSearch\(nextVisible, focusRef\.current, SEARCH_KEY\)/);
+  assert.match(peoplePanel, /setPageIndex\(peoplePageForId\(nextVisible, nextFocus\)\)/,
+    'a search result must open on the page where its focused person is mounted');
 });
 
 // ------------------------------------------------------- person row layout
@@ -267,7 +293,7 @@ test('accessibility gets the full, untruncated name', () => {
 // ------------------------------------------------------------- panel shell
 
 test('PanelShell no longer scrolls unconditionally', () => {
-  assert.match(panelShell, /export type PanelBodyMode = 'scroll' \| 'fixed' \| 'custom'/);
+  assert.match(panelShell, /export type PanelBodyMode = 'scroll' \| 'fixed'/);
   assert.match(panelShell, /body === 'scroll' \? \(/);
   assert.match(panelShell, /body = 'scroll'/, 'existing row panels keep their behaviour');
 });
