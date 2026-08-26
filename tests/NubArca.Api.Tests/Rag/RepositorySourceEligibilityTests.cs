@@ -64,6 +64,30 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
         => Assert.Equal(eligible, RepositorySourcePolicy.CheckPath(path).IsEligible);
 
     [Fact]
+    public void The_Evaluation_Set_Is_Not_Part_Of_The_Corpus_It_Measures()
+    {
+        // `RagGoldenSet.cs` holds the golden queries as string literals. Once
+        // the repository indexed itself, the best lexical match for a golden
+        // question became the file containing that exact sentence — it led
+        // three of four failures in the first real evaluation run and dropped
+        // MRR from 0.583 to 0.395. A benchmark that searches its own question
+        // list measures nothing.
+        Assert.False(RepositorySourcePolicy.CheckPath(
+            "src/NubArca.Api/Rag/Evaluation/RagGoldenSet.cs").IsEligible);
+        Assert.Equal(
+            "evaluation-set",
+            RepositorySourcePolicy.CheckPath(
+                "src/NubArca.Api/Rag/Evaluation/RagEvaluator.cs").Reason);
+
+        // The rest of the RAG substrate stays indexable — it is exactly the
+        // knowledge this domain exists to hold.
+        Assert.True(RepositorySourcePolicy.CheckPath(
+            "src/NubArca.Api/Rag/Retrieval/RagRetriever.cs").IsEligible);
+        Assert.True(RepositorySourcePolicy.CheckPath(
+            "src/NubArca.Api/Rag/Domains/RagDomainRegistry.cs").IsEligible);
+    }
+
+    [Fact]
     public void Source_Files_Are_Not_Denied_For_Describing_Credentials()
     {
         // The suspect-word rule applies to CONFIGURATION, not to code. Applied

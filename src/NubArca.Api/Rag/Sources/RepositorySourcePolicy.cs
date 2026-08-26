@@ -60,6 +60,20 @@ public static class RepositorySourcePolicy
         "tv/package-lock.json", "yarn.lock", "pnpm-lock.yaml", "Cargo.lock",
     };
 
+    /// THE EVALUATION SET IS NOT PART OF THE CORPUS IT MEASURES.
+    ///
+    /// `RagGoldenSet.cs` holds the golden queries as string literals, so once the
+    /// repository indexed itself, the single best lexical match for
+    /// "which code prevents an External model from using repository knowledge?"
+    /// became the file containing that exact sentence. It led three of four
+    /// failures in the first real evaluation run and dropped MRR from 0.583 to
+    /// 0.395 — a benchmark measuring its own question list, which is worth
+    /// nothing.
+    ///
+    /// This is a general rule rather than one file's exemption: a corpus that
+    /// contains the questions cannot answer them, it can only find them.
+    private const string EvaluationSetPrefix = "src/NubArca.Api/Rag/Evaluation/";
+
     /// File names that are never knowledge, whatever they contain. These are
     /// the shapes of key material itself.
     private static readonly string[] DeniedNameFragments =
@@ -164,6 +178,11 @@ public static class RepositorySourcePolicy
         var name = segments[^1];
 
         if (DeniedPaths.Contains(normalized)) return RepositoryEligibility.No("denied-path");
+
+        if (normalized.StartsWith(EvaluationSetPrefix, StringComparison.Ordinal))
+        {
+            return RepositoryEligibility.No("evaluation-set");
+        }
 
         foreach (var segment in segments)
         {
