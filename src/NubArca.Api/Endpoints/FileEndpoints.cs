@@ -10,6 +10,7 @@ using NubArca.Api.Ingestion;
 using NubArca.Api.Metadata;
 using NubArca.Api.Security;
 using NubArca.Api.Storage;
+using NubArca.Api.Uploads;
 
 namespace NubArca.Api.Endpoints;
 
@@ -610,8 +611,9 @@ public static class FileEndpoints
             [FromServices] IFolderService folders,
             [FromServices] IAuditLogger audit,
             [FromServices] IPostIngestionMediaPipelineService mediaPipeline,
+            [FromServices] IUploadIdempotencyService uploadOperations,
             CancellationToken cancellationToken) =>
-            await UploadFileAsync(httpContext, parentFolderId: null, files, folders, audit, mediaPipeline, cancellationToken))
+            await UploadFileAsync(httpContext, parentFolderId: null, files, folders, audit, mediaPipeline, uploadOperations, cancellationToken))
             .WithName("UploadRootFile").RequireAuthorization().DisableAntiforgery();
 
         app.MapPost("/api/folders/{id:guid}/files", async (
@@ -621,8 +623,9 @@ public static class FileEndpoints
             [FromServices] IFolderService folders,
             [FromServices] IAuditLogger audit,
             [FromServices] IPostIngestionMediaPipelineService mediaPipeline,
+            [FromServices] IUploadIdempotencyService uploadOperations,
             CancellationToken cancellationToken) =>
-            await UploadFileAsync(httpContext, parentFolderId: id, files, folders, audit, mediaPipeline, cancellationToken))
+            await UploadFileAsync(httpContext, parentFolderId: id, files, folders, audit, mediaPipeline, uploadOperations, cancellationToken))
             .WithName("UploadChildFile").RequireAuthorization().DisableAntiforgery();
 
         app.MapPatch("/api/files/{id:guid}/rename", async (
@@ -804,22 +807,78 @@ public static class FileEndpoints
         IFolderService folders,
         IAuditLogger audit,
         IPostIngestionMediaPipelineService mediaPipeline,
+        IUploadIdempotencyService uploadOperations,
         CancellationToken cancellationToken)
     {
         var ownerUserId = httpContext.GetCurrentUserId()!.Value;
         var ip = httpContext.Connection.RemoteIpAddress?.ToString();
 
-        if (!httpContext.Request.HasFormContentType)
+        // mobile-sync-v1: OPTIONAL operation-replay safety for clients whose
+        // transport can lose a response after the server durably committed
+        // (mobile sync). Absent header → behavior is byte-for-byte unchanged.
+        // Present + valid → this request becomes one REPLAYABLE logical
+        // operation: a retry with the same key returns the original FileSummary
+        // instead of ingesting twice. The key never influences blob identity
+        // (SHA-256 content addressing) and owner identity always comes from the
+        // authenticated cookie, so two accounts sharing a key stay isolated.
+        var idempotencyKey = httpContext.Request.Headers["Idempotency-Key"].FirstOrDefault();
+        if (idempotencyKey is not null && !UploadOperationKey.IsValid(idempotencyKey))
         {
-            return Results.BadRequest(new { error = "Expected multipart/form-data." });
+            return Results.BadRequest(new { error = "Invalid 'Idempotency-Key' header." });
         }
 
-        var form = await httpContext.Request.ReadFormAsync(cancellationToken);
-        var file = form.Files["file"] ?? form.Files.FirstOrDefault();
-        if (file is null)
+        Guid? claimToken = null;
+        if (idempotencyKey is not null)
         {
-            return Results.BadRequest(new { error = "Missing file part." });
+            var replay = await uploadOperations.FindCompletedResultAsync(
+                ownerUserId, idempotencyKey, cancellationToken);
+            if (replay is not null)
+            {
+                return Results.Ok(replay);
+            }
+
+            var claim = await uploadOperations.TryClaimAsync(
+                ownerUserId, idempotencyKey, UploadIdempotencyService.DefaultLease, cancellationToken);
+            switch (claim.Outcome)
+            {
+                case UploadClaimOutcome.AlreadyCompleted:
+                    // Raced a completing twin between lookup and claim: its
+                    // result is authoritative, read it back once more.
+                    replay = await uploadOperations.FindCompletedResultAsync(
+                        ownerUserId, idempotencyKey, cancellationToken);
+                    return replay is not null
+                        ? Results.Ok(replay)
+                        : Results.Json(
+                            new { error = "Upload operation is being processed.", code = "upload_in_progress", retryable = true },
+                            statusCode: StatusCodes.Status409Conflict);
+                case UploadClaimOutcome.InFlight:
+                    return Results.Json(
+                        new { error = "Upload operation is already in progress.", code = "upload_in_progress", retryable = true },
+                        statusCode: StatusCodes.Status409Conflict);
+                case UploadClaimOutcome.Claimed:
+                    claimToken = claim.Token;
+                    break;
+            }
         }
+
+        // `ingested` flips only after the file row AND its completion record are
+        // durable. The finally-style guard releases our claim on EVERY other
+        // exit — converted failures below, unexpected exceptions, cancellation —
+        // so a failed upload never leaves the key cached as in-progress.
+        var ingested = false;
+        try
+        {
+            if (!httpContext.Request.HasFormContentType)
+            {
+                return Results.BadRequest(new { error = "Expected multipart/form-data." });
+            }
+
+            var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+            var file = form.Files["file"] ?? form.Files.FirstOrDefault();
+            if (file is null)
+            {
+                return Results.BadRequest(new { error = "Missing file part." });
+            }
 
         // Slice 76: optional relative path (browser webkitRelativePath) for folder
         // upload, e.g. "Holiday/2024/IMG_001.jpg". Absent → normal single-file
@@ -828,57 +887,71 @@ public static class FileEndpoints
         // logical folders.
         var relativePath = form["relativePath"].ToString();
 
+        var parsed = RelativeUploadPath.Parse(
+            string.IsNullOrWhiteSpace(relativePath) ? null : relativePath,
+            file.FileName);
+
+        // Materialise the directory chain (no-op when there are no segments),
+        // then upload the file into the resolved leaf folder using the
+        // path's own file-name segment.
+        var targetFolderId = await folders.EnsureFolderPathAsync(
+            ownerUserId, parentFolderId, parsed.Directories, cancellationToken);
+
+        await using var stream = file.OpenReadStream();
+        var created = await files.CreateAsync(
+            ownerUserId,
+            targetFolderId,
+            parsed.FileName,
+            file.ContentType,
+            stream,
+            cancellationToken,
+            uploadOperationClaimToken: claimToken);
+
+        await audit.LogAsync(
+            userId: ownerUserId,
+            action: AuditActions.FileUpload,
+            entityType: AuditEntityTypes.File,
+            entityId: created.Id,
+            ipAddress: ip,
+            metadata: new { name = created.Name, mimeType = created.MimeType, sizeBytes = created.SizeBytes, parentFolderId = created.ParentFolderId },
+            cancellationToken: cancellationToken);
+
+        // Enqueue the bounded, idempotent post-ingestion media pipeline (medium
+        // preview + AI embedding + any pending metadata) WITHOUT blocking the
+        // response on decode/encode/inference. Best-effort: a scheduling failure
+        // never breaks the upload. Private Vault / non-media files schedule
+        // nothing (the service re-checks eligibility).
         try
         {
-            var parsed = RelativeUploadPath.Parse(
-                string.IsNullOrWhiteSpace(relativePath) ? null : relativePath,
-                file.FileName);
+            await mediaPipeline.OnFileIngestedAsync(ownerUserId, created.Id, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            httpContext.RequestServices
+                .GetRequiredService<ILoggerFactory>()
+                .CreateLogger("PostIngestion")
+                .LogWarning(ex, "Post-ingest scheduling failed after upload; file will be picked up by a later backfill.");
+        }
 
-            // Materialise the directory chain (no-op when there are no segments),
-            // then upload the file into the resolved leaf folder using the
-            // path's own file-name segment.
-            var targetFolderId = await folders.EnsureFolderPathAsync(
-                ownerUserId, parentFolderId, parsed.Directories, cancellationToken);
+        var summary = new FileSummary(
+            created.Id, created.Name, created.MimeType, created.SizeBytes, created.CreatedAt,
+            created.Width, created.Height);
 
-            await using var stream = file.OpenReadStream();
-            var created = await files.CreateAsync(
-                ownerUserId,
-                targetFolderId,
-                parsed.FileName,
-                file.ContentType,
-                stream,
-                cancellationToken);
-
-            await audit.LogAsync(
-                userId: ownerUserId,
-                action: AuditActions.FileUpload,
-                entityType: AuditEntityTypes.File,
-                entityId: created.Id,
-                ipAddress: ip,
-                metadata: new { name = created.Name, mimeType = created.MimeType, sizeBytes = created.SizeBytes, parentFolderId = created.ParentFolderId },
-                cancellationToken: cancellationToken);
-
-            // Enqueue the bounded, idempotent post-ingestion media pipeline (medium
-            // preview + AI embedding + any pending metadata) WITHOUT blocking the
-            // response on decode/encode/inference. Best-effort: a scheduling failure
-            // never breaks the upload. Private Vault / non-media files schedule
-            // nothing (the service re-checks eligibility).
-            try
-            {
-                await mediaPipeline.OnFileIngestedAsync(ownerUserId, created.Id, cancellationToken);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                httpContext.RequestServices
-                    .GetRequiredService<ILoggerFactory>()
-                    .CreateLogger("PostIngestion")
-                    .LogWarning(ex, "Post-ingest scheduling failed after upload; file will be picked up by a later backfill.");
-            }
-
-            var summary = new FileSummary(
-                created.Id, created.Name, created.MimeType, created.SizeBytes, created.CreatedAt,
-                created.Width, created.Height);
-            return Results.Created($"/api/files/{created.Id}/content", summary);
+        // The keyed operation was completed ATOMICALLY inside the FileItem
+        // transaction (see CreateAsync's claim-token parameter): past this
+        // point any retry with the same key replays this exact summary.
+        ingested = true;
+        return Results.Created($"/api/files/{created.Id}/content", summary);
+        }
+        catch (UploadOperationClaimLostException)
+        {
+            // Our claim disappeared mid-ingestion (expired-lease takeover /
+            // concurrent completion). Nothing was committed — the file row and
+            // the completion live or die together. Same retryable contract as
+            // any other in-flight ambiguity.
+            return Results.Json(
+                new { error = "Upload operation is being processed.", code = "upload_in_progress", retryable = true },
+                statusCode: StatusCodes.Status409Conflict);
         }
         catch (DuplicateFileNameException)
         {
@@ -922,6 +995,23 @@ public static class FileEndpoints
             return Results.Json(
                 new { error = "The uploaded file is too large. Check the server's maximum upload size." },
                 statusCode: StatusCodes.Status413PayloadTooLarge);
+        }
+        finally
+        {
+            // Failure/cancellation hygiene for the idempotency claim. Best-effort
+            // by design: a failed cleanup must never mask the real outcome, and
+            // the lease bounds any damage a skipped release could cause.
+            if (claimToken is not null && !ingested)
+            {
+                try
+                {
+                    await uploadOperations.ReleaseAsync(claimToken.Value, CancellationToken.None);
+                }
+                catch
+                {
+                    // Lease expiry is the safety net; see UploadOperation.
+                }
+            }
         }
     }
 

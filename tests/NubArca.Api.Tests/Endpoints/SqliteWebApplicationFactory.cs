@@ -178,6 +178,9 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.Replace(ServiceDescriptor.Singleton<NubArca.Api.Auth.Recovery.IEmailSender>(
                 sp => sp.GetRequiredService<NubArca.Api.Tests.Auth.RecordingEmailSender>()));
             services.AddScoped<IFileItemService, FileItemService>();
+            // mobile-sync-v1: mirrors Program.cs's Postgres-block registration.
+            services.AddScoped<NubArca.Api.Uploads.IUploadIdempotencyService,
+                NubArca.Api.Uploads.UploadIdempotencyService>();
             // deleted-content-import-skip: ledger + import skip evaluator
             // (Program.cs registers these inside the Postgres-only block).
             services.AddScoped<IDeletedContentTombstoneService, DeletedContentTombstoneService>();

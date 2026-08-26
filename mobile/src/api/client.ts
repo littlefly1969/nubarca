@@ -22,12 +22,24 @@ import { sessionCookieSource } from './sessionAccess.ts';
 export class ApiError extends Error {
   status: number;
   body: unknown;
+  /**
+   * Parsed Retry-After hint (epoch ms) when the failing response carried a
+   * valid one. Populated only for retryable statuses (429/503-style); sync's
+   * retry policy honors it, everything else ignores it.
+   */
+  retryAfterAtMs: number | null;
 
-  constructor(status: number, message: string, body: unknown = null) {
+  constructor(
+    status: number,
+    message: string,
+    body: unknown = null,
+    retryAfterAtMs: number | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.body = body;
+    this.retryAfterAtMs = retryAfterAtMs;
   }
 }
 
@@ -54,6 +66,16 @@ export const DEFAULT_TIMEOUT_MS = 20_000;
 
 export interface RequestOptions {
   json?: unknown;
+  /**
+   * Multipart body escape hatch for FILE-BACKED uploads: parts reference
+   * native file URIs ({ uri, name, type }) so original bytes stream through
+   * the native networking stack and never enter the JS heap. When present,
+   * `json` must be absent and no content-type is set (RN supplies the
+   * multipart boundary).
+   */
+  form?: FormData;
+  /** Extra headers for contract-relevant metadata (e.g. Idempotency-Key). */
+  headers?: Record<string, string>;
   signal?: AbortSignal;
   timeoutMs?: number;
   // True for endpoints whose 401 means "rejected credentials" rather than
@@ -97,12 +119,17 @@ async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const { json, signal, allow401 = false, cookieOverride } = options;
+  const { json, form, signal, allow401 = false, cookieOverride, headers: extraHeaders } = options;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const linked = linkSignals(signal, timeoutMs);
 
   const headers: Record<string, string> = {};
   if (json !== undefined) headers['content-type'] = 'application/json';
+  if (extraHeaders) {
+    for (const [name, value] of Object.entries(extraHeaders)) {
+      headers[name.toLowerCase()] = value;
+    }
+  }
   // Snapshot ONCE at request start: this request belongs to THIS session
   // generation even if a logout or account switch happens while it flies.
   const session = sessionCookieSource().snapshot();
@@ -113,7 +140,7 @@ async function request<T>(
     const res = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
-      body: json !== undefined ? JSON.stringify(json) : undefined,
+      body: json !== undefined ? JSON.stringify(json) : form ?? undefined,
       signal: linked.controller.signal,
       // Belt-and-suspenders hint; the manual jar above is the real mechanism.
       credentials: 'include',
@@ -133,19 +160,46 @@ async function request<T>(
 
     if (res.status === 204) return undefined as T;
 
+    if (!res.ok) {
+      // Retry-After is read BEFORE body parsing so sync can honor it even
+      // when the error body is opaque. Capped by the caller's policy later.
+      let retryAfterAtMs: number | null = null;
+      const retryAfterRaw = res.headers.get('retry-after');
+      if (retryAfterRaw && (res.status === 429 || res.status === 503)) {
+        const seconds = Number.parseInt(retryAfterRaw.trim(), 10);
+        if (/^\d+$/.test(retryAfterRaw.trim()) && Number.isFinite(seconds) && seconds >= 0) {
+          retryAfterAtMs = Date.now() + seconds * 1000;
+        } else {
+          const httpDate = Date.parse(retryAfterRaw);
+          if (!Number.isNaN(httpDate)) retryAfterAtMs = httpDate;
+        }
+      }
+
+      const text = await res.text();
+      let parsed: unknown = null;
+      try {
+        parsed = text ? (JSON.parse(text) as unknown) : null;
+      } catch {
+        parsed = text;
+      }
+
+      if (res.status === 401 && !allow401 && unauthorizedHandler) {
+        unauthorizedHandler();
+      }
+      throw new ApiError(
+        res.status,
+        `${method} ${path} → ${res.status}`,
+        parsed,
+        retryAfterAtMs,
+      );
+    }
+
     const text = await res.text();
     let parsed: unknown = null;
     try {
       parsed = text ? (JSON.parse(text) as unknown) : null;
     } catch {
       parsed = text;
-    }
-
-    if (!res.ok) {
-      if (res.status === 401 && !allow401 && unauthorizedHandler) {
-        unauthorizedHandler();
-      }
-      throw new ApiError(res.status, `${method} ${path} → ${res.status}`, parsed);
     }
     return parsed as T;
   } finally {

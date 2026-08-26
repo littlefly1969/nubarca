@@ -1,4 +1,4 @@
-// Bottom tabs: Photos / Videos / Albums / Files.
+// Bottom tabs: Photos / Videos / Albums / Files / Sync.
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -49,6 +49,15 @@ export default function TabsLayout(): React.JSX.Element {
           title: t('tabs.files'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="folder-open-outline" size={Math.min(size, iconSizes.l)} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="sync"
+        options={{
+          title: t('tabs.sync'),
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="sync-outline" size={Math.min(size, iconSizes.l)} color={color} />
           ),
         }}
       />

@@ -6,6 +6,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Folders;
 using NubArca.Api.Metadata;
 using NubArca.Api.Storage;
+using NubArca.Api.Uploads;
 using Npgsql;
 using SixLabors.ImageSharp;
 
@@ -95,7 +96,8 @@ public sealed class FileItemService : IFileItemService
         CancellationToken cancellationToken = default,
         FileCreateTimings? timings = null,
         bool generateSmallThumbnail = true,
-        bool extractEmbeddedMetadata = true)
+        bool extractEmbeddedMetadata = true,
+        Guid? uploadOperationClaimToken = null)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -285,6 +287,33 @@ public sealed class FileItemService : IFileItemService
                     try
                     {
                         await _db.SaveChangesAsync(cancellationToken);
+
+                        // mobile-sync-v1 crash boundary. The file row exists
+                        // only inside THIS transaction so far; completing the
+                        // caller's pending UploadOperation here makes the pair
+                        // (FileItem durable, operation Completed(file)) one
+                        // atomic commit. A lost response afterwards is absorbed
+                        // by replay; a crash BEFORE this point leaves nothing.
+                        if (uploadOperationClaimToken is Guid claimToken)
+                        {
+                            var completed = await _db.UploadOperations
+                                .Where(o => o.Id == claimToken
+                                    && o.Status == UploadOperationStatus.Pending)
+                                .ExecuteUpdateAsync(setter => setter
+                                    .SetProperty(o => o.Status, UploadOperationStatus.Completed)
+                                    .SetProperty(o => o.FileItemId, file.Id),
+                                    cancellationToken);
+                            if (completed == 0)
+                            {
+                                // Claim gone or no longer ours (expired-lease
+                                // takeover / concurrent completion). Committing
+                                // would strand a keyed upload without its
+                                // operation association — abort everything; the
+                                // client retries the same key later.
+                                throw new UploadOperationClaimLostException(claimToken);
+                            }
+                        }
+
                         await tx.CommitAsync(cancellationToken);
                         return;
                     }

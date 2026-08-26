@@ -627,7 +627,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
             sp.GetRequiredService<IFileItemService>(),
             sp.GetRequiredService<IMediaLibraryService>()));
     builder.Services.AddScoped<IFileItemService, FileItemService>();
-    // Slice 5: unified media-workspace query service behind /api/media and
+    // mobile-sync-v1: replay-safe owner uploads. Backed by AppDbContext so
+    // idempotency state survives restarts; scoped to share the request context.
+    builder.Services.AddScoped<NubArca.Api.Uploads.IUploadIdempotencyService,
+        NubArca.Api.Uploads.UploadIdempotencyService>();
     // /api/albums/{albumId}/media (library + album sources, one contract).
     builder.Services.AddScoped<
         NubArca.Api.Media.IMediaCollectionQueryService,
