@@ -364,17 +364,35 @@ services:
       # changing it silently invalidates existing tombstones. Blank = built-in
       # dev fallback (fine for a fresh deploy; set a real secret in .env).
       DeletedContent__Pepper: ${DeletedContent__Pepper:-}
-      # ---- optional external Smart Help -------------------------------------
+      # ---- optional Help assistant -------------------------------------------
       #
-      # An assistant that explains NubArca as a PRODUCT through an external
-      # provider. OFF unless an operator sets all four of Enabled/BaseUrl/
-      # ApiKey/Model; an unset key or model leaves it disabled rather than half
-      # configured. See docs/external-smart-help.md.
+      # An assistant that explains NubArca as a PRODUCT. OFF unless an operator
+      # enables it and names a model profile; an incomplete profile leaves it
+      # disabled rather than half configured. See docs/help-assistant.md.
+      #
+      # TRUST IS EXPLICIT and never inferred from the URL. `External` means the
+      # question leaves this installation and requires https:// plus a key;
+      # `LocalTrusted` is the operator asserting the endpoint is theirs, and may
+      # be plaintext and authless. An unknown or missing value is invalid, not
+      # "probably local".
       #
       # API ONLY, deliberately. The worker runs no Help endpoint and has no
       # reason to hold a third-party credential: a key that exists in two
       # containers is a key with two ways to leak, and the worker's logs and
       # crash dumps are a second surface for nothing gained.
+      Assistant__Enabled: ${Assistant__Enabled:-false}
+      Assistant__HelpModel: ${Assistant__HelpModel:-}
+      Assistant__Models__help-default__Protocol: ${Assistant__Models__help_default__Protocol:-OpenAiCompatible}
+      Assistant__Models__help-default__Trust: ${Assistant__Models__help_default__Trust:-}
+      Assistant__Models__help-default__BaseUrl: ${Assistant__Models__help_default__BaseUrl:-}
+      Assistant__Models__help-default__ApiKey: ${Assistant__Models__help_default__ApiKey:-}
+      Assistant__Models__help-default__Model: ${Assistant__Models__help_default__Model:-}
+      Assistant__Models__help-default__Label: ${Assistant__Models__help_default__Label:-}
+      Assistant__Models__help-default__TimeoutSeconds: ${Assistant__Models__help_default__TimeoutSeconds:-30}
+      Assistant__Models__help-default__MaxOutputTokens: ${Assistant__Models__help_default__MaxOutputTokens:-800}
+      # Legacy, kept so an installation configured before named profiles keeps
+      # working. Adapted into ONE External profile, and only when Assistant__* is
+      # absent. Deprecated: migrate to the block above.
       ExternalHelp__Enabled: ${ExternalHelp__Enabled:-false}
       ExternalHelp__BaseUrl: ${ExternalHelp__BaseUrl:-}
       ExternalHelp__ApiKey: ${ExternalHelp__ApiKey:-}

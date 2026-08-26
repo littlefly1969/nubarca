@@ -655,6 +655,47 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   include/exclude/query contract remain unchanged. Source regressions cover the
   exact overlap mechanism, but physical Fire Stick acceptance is still required
   before the visual defect can be called closed.
+- **The Help assistant's model has a TRUST classification, and it is never
+  inferred from the URL.** Protocol and trust are separate axes: an endpoint
+  speaks the OpenAI-compatible format whether it is a hosted provider or the
+  operator's own model server, and the format says nothing about who holds the
+  bytes. `Assistant__Models__<name>__Trust` is `External` or `LocalTrusted`,
+  stated by the operator per named profile; `ManagedLocal` exists in the enum,
+  is refused by validation, and must not be presented as implemented isolation.
+  Validation fails closed — unknown, empty, misspelled and NUMERIC values are
+  all invalid, and none of them becomes Local — and nothing a browser sends can
+  choose or override it, because the chat request has no model, trust or domain
+  field. `localhost` and RFC1918 addresses stay External when declared External
+  (a reverse proxy in front of a cloud API looks exactly like that), and a public
+  hostname stays LocalTrusted when declared LocalTrusted (a trusted GPU server
+  on another host is not on this LAN). The legacy `ExternalHelp__*` section is a
+  deprecation path adapted into ONE always-External profile, and only when no
+  `Assistant__*` value is set. There is deliberately no "allow insecure URL"
+  switch: a plaintext endpoint is `Trust=LocalTrusted`.
+- **Trust decides what a model is ELIGIBLE for; the feature decides what it
+  USES.** Effective capability is `model trust ∩ feature policy ∩ caller
+  permissions`. A LocalTrusted model is eligible for private context, private
+  RAG and read tools — and Help gives it none of them, because Help's operation
+  policy is public product knowledge. Configuring a local model makes Help
+  local; it does not make Help able to see anything new, and a test asserts that
+  on the outbound bytes. No trust level grants write tools or unconfirmed
+  execution: nothing changes because a model suggested it.
+- **Help knowledge is an explicit MANIFEST, not "every `docs/**.md`".**
+  `ProductHelpSources` names each approved document with an audience, an intent,
+  a source kind, a priority and feature aliases. The previous automatic rule let
+  an operations runbook compete on equal footing with the guidance somebody
+  asking "how do I use faces?" needs — and runbooks are longer, so they often
+  won. It remains an allowlist rather than a denylist of secrets, which now also
+  means a NEW public document is out until someone classifies it. User-facing
+  Help material lives in `docs/help/`. Retrieval is lexical, local and
+  deterministic — section-aware chunks, one shared IT/EN stopword set (Italian
+  `come` is also an English verb, so a language-switched list is the bug), a
+  bounded feature-alias catalogue, field-weighted BM25F and intent shaping — and
+  it is gated: `Score > 0` is not evidence, and below the gate Help makes NO
+  model call at all rather than paying a boundary crossing for an answer with no
+  documentation behind it. `help_knowledge_unavailable` (an administrator can
+  fix it) and `help_no_supporting_knowledge` (nobody can) are deliberately
+  different reasons.
 - **A keyed upload's FileItem and its idempotency completion are ONE commit.**
   `POST /api/files` accepts an optional `Idempotency-Key`; the claim it takes is
   finished inside the authoritative `FileItemService.CreateAsync` transaction

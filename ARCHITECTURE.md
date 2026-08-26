@@ -1031,6 +1031,30 @@ Detection and recognition use one face-package profile so detector and recognize
 
 People APIs support named people, suggested groups, assignment/removal, ignored and unassigned faces, similar-face review, photo projection, and preview regeneration. All operations are owner-scoped and return generic not-found behavior for foreign data.
 
+### 17.7 Assistant model trust and the `product-help` RAG domain
+
+The Assistant substrate is separate from the AI substrate above: it configures **language-model endpoints and retrieval**, where `AiOptions`/`AiProfile` configure embedding and vision capabilities. Its only consumer today is the optional Help assistant.
+
+Protocol and trust are independent axes. An endpoint speaks the OpenAI-compatible chat-completions format whether it is a hosted provider, an operator's own model server, or a future NubArca-managed runtime, so the format says nothing about who holds the bytes. `AssistantModelTrust` is stated by the operator per named model profile:
+
+- `External` — data may leave the trust boundary; `https://` and an API key are both required;
+- `LocalTrusted` — the operator asserts the endpoint is theirs; plaintext HTTP and an absent key are allowed, because that is what an internal model server usually is;
+- `ManagedLocal` — reserved for a runtime whose isolation NubArca owns. Not implemented, and refused by validation, so no installation can present a guarantee nothing provides.
+
+**Trust is never inferred from the endpoint URL**, in either direction, and no client-supplied value can influence it: the chat request contract has no model, profile, trust or domain field. Configuration validation fails closed on an unknown, empty, misspelled or numeric trust value, and parses by enum NAME so `Trust=1` cannot mean LocalTrusted.
+
+`AssistantCapabilityPolicy` maps trust to eligibility, and effective capability is an intersection:
+
+    model trust  ∩  feature operation policy  ∩  caller permissions
+
+`LocalTrusted` is eligible for private context, private RAG, read tools and proposed actions; `External` is eligible for public product context only; no trust level grants write tools or unconfirmed execution. Eligibility is not use — Help's own operation policy is public product knowledge, so a LocalTrusted Help receives no private library data. A future tool must therefore be reachable only through typed application services under the caller's own permissions, never as an authorization bypass.
+
+`IAssistantTextModel` is the runtime contract: messages in, completion text or a sanitized failure out. It has no tool, function, attachment or callback surface — not empty fields, absent ones — and no optional parameter reserving one. Tool calling, when it exists, belongs behind a separate interface so a text-only external Help cannot acquire tools because a shared type grew a property.
+
+`IRagRetriever` is the retrieval seam. A domain is a body of knowledge with one privacy story; `product-help` is public, built at image-build time from an explicit source manifest, and pinned to `NUBARCA_GIT_SHA`, which the application refuses to run against a mismatched corpus. Retrieval is lexical, local and deterministic — section-aware chunks, a shared Italian/English stopword set, a bounded feature-alias catalogue, field-weighted BM25F, intent shaping and an explicit evidence gate — and a retriever answers `Unavailable` for a domain that is not its own rather than substituting public evidence. Below the evidence gate Help makes **no model call at all**, so a question never crosses the boundary to buy an answer with no documentation behind it.
+
+Help conversations are not persisted. `docs/help-assistant.md` is the reference.
+
 ## 18. Private Vault
 
 Private Vault 0.3.0 is an exclusion and authorization boundary, not cryptographic at-rest encryption. `PrivateVault.EncryptionMode` is currently `none`; the original blob store remains the underlying byte store.
@@ -1191,6 +1215,15 @@ Every new route, service, query, job, or client feature must preserve all applic
 - Project safe DTOs in SQL; do not serialize EF entities.
 - Never expose `StorageKey`, physical path, SHA-256, global blob ID, password/token hashes, raw AI vectors, raw embedded metadata, or GPS coordinates.
 
+### 23.5 Assistant and model endpoints
+
+- Classify every model endpoint's trust explicitly; never infer it from the URL, and never let a client supply or override it.
+- Send a model only what the intersection of its trust and the feature's operation policy allows; eligibility by trust is not permission to use.
+- Keep the outbound request physically free of tools, functions, attachments and callbacks rather than passing empty ones.
+- Retrieve locally into bounded evidence; never give a model a way to ask for more.
+- Make no model call at all when there is no adequate approved evidence, whatever the endpoint's trust.
+- Log profile, trust, protocol, timing and status class only — never the question, conversation, answer, evidence text, base URL, key, or any raw body.
+
 ### 23.2 Public capability data
 
 - Validate token/hash, expiry, revocation, scope, and current target visibility on every request.
@@ -1317,6 +1350,7 @@ When changing a subsystem, review the following implementation anchors together 
 | Import/staging | `Ingestion/`, `Uploads/`, admin/staging route sections |
 | Organizer/export | `Organizer/`, `PhotoExport/` |
 | AI and People | `Ai/`, AI entities/configurations, `docs/ai-substrate.md`, `docs/ai-photo-pgvector.md` |
+| Assistant and Help RAG | `Assistant/`, `Rag/`, `Help/`, `Endpoints/HelpEndpoints.cs`, `docs/help-assistant.md`, `docs/help/` |
 | Party | `Party/`, Party entities, public/owner/TV route sections |
 | TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-release.md` (canonical operations), `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |

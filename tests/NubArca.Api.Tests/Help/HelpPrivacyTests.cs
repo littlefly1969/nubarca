@@ -1,30 +1,32 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using NubArca.Api.Assistant;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
-using NubArca.Api.Help;
+using NubArca.Api.Rag;
+using NubArca.Api.Rag.ProductHelp;
+using NubArca.Api.Tests.Assistant;
 using NubArca.Api.Tests.Endpoints;
 using Xunit;
 
 namespace NubArca.Api.Tests.Help;
 
-// B, C, E, F — the privacy boundary itself.
+// The privacy boundary itself.
 //
-// The premise of external Help is that an outside model learns about the PRODUCT
-// and never about the LIBRARY. That claim is worth exactly as much as the bytes
-// on the wire, so these tests seed unmistakable private data, ask an ordinary
-// Help question through the real endpoint, and read the COMPLETE outbound HTTP
-// body the fake provider received.
+// The premise of Help is that the model learns about the PRODUCT and never about
+// the LIBRARY. That claim is worth exactly as much as the bytes on the wire, so
+// these tests seed unmistakable private data, ask an ordinary Help question
+// through the real endpoint, and read the COMPLETE outbound HTTP body the fake
+// endpoint received.
 //
 // A test that only inspected a DTO would pass while a later change serialized
 // something extra. A test that only asserted "no sentinels" would also pass if
 // the body were empty — so it asserts that approved PUBLIC text IS present,
 // which is what makes the absence meaningful.
-public sealed class ExternalHelpPrivacyTests : IDisposable
+public sealed class HelpPrivacyTests : IDisposable
 {
     private const string Key = "SUPER_SECRET_EXTERNAL_HELP_KEY_XYZ";
 
@@ -40,38 +42,18 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
     private readonly SqliteWebApplicationFactory _factory;
     private readonly string _corpusPath;
 
-    public ExternalHelpPrivacyTests()
+    public HelpPrivacyTests()
     {
-        _corpusPath = Path.Combine(Path.GetTempPath(), $"help-corpus-{Guid.NewGuid():N}.json");
-        // A corpus with no revision: the running test host has no
-        // NUBARCA_GIT_SHA, so the gate cannot compare and accepts it. The
-        // revision behaviour itself is asserted separately below.
-        var corpus = new HelpCorpus(string.Empty, new[]
-        {
-            new HelpCorpusDocument("README.md", "NubArca", "README.md",
-                $"{PublicMarker}. Albums group photos into collections you name yourself."),
-            new HelpCorpusDocument("docs/albums.md", "Albums", "docs/albums.md",
-                "An album is a named collection. Adding a photo to an album never moves the file."),
-        });
-        File.WriteAllText(_corpusPath, JsonSerializer.Serialize(corpus));
+        _corpusPath = WriteCorpus();
 
-        Handler = new CapturingProviderHandler(
-            request => _respond(request));
-        _factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["ExternalHelp:Enabled"] = "true",
-            ["ExternalHelp:BaseUrl"] = "https://provider.example",
-            ["ExternalHelp:ApiKey"] = Key,
-            ["ExternalHelp:Model"] = "test-model-1",
-            ["ExternalHelp:ProviderLabel"] = "Test Provider",
-            ["ExternalHelp:CorpusPath"] = _corpusPath,
-        });
-        // The REAL OpenAiCompatibleChatCompletionClient stays in the pipeline —
-        // only its transport is replaced — because the bytes it produces are the
-        // thing under test. Swapping the whole IExternalHelpChatClient for a stub
-        // would test the stub.
+        Handler = new CapturingProviderHandler(request => _respond(request));
+        _factory = new SqliteWebApplicationFactory(ExternalConfiguration(_corpusPath, Key));
+        // The REAL OpenAiCompatibleTextModel stays in the pipeline — only its
+        // transport is replaced — because the bytes it produces are the thing
+        // under test. Swapping the whole IAssistantTextModel for a stub would
+        // test the stub.
         _factory.ConfigureExtraServices = services =>
-            services.AddHttpClient<IExternalHelpChatClient, OpenAiCompatibleChatCompletionClient>()
+            services.AddHttpClient<IAssistantTextModel, OpenAiCompatibleTextModel>()
                 .ConfigurePrimaryHttpMessageHandler(() => Handler);
         _factory.EnsureDatabaseCreated();
     }
@@ -87,11 +69,65 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         try { File.Delete(_corpusPath); } catch (IOException) { }
     }
 
+    /// One External profile, configured the way an operator would.
+    internal static Dictionary<string, string?> ExternalConfiguration(string corpusPath, string key)
+        => new()
+        {
+            ["Assistant:Enabled"] = "true",
+            ["Assistant:HelpModel"] = "help-default",
+            ["Assistant:Models:help-default:Protocol"] = "OpenAiCompatible",
+            ["Assistant:Models:help-default:Trust"] = "External",
+            ["Assistant:Models:help-default:BaseUrl"] = "https://provider.example",
+            ["Assistant:Models:help-default:ApiKey"] = key,
+            ["Assistant:Models:help-default:Model"] = "test-model-1",
+            ["Assistant:Models:help-default:Label"] = "Test Provider",
+            ["Assistant:Help:CorpusPath"] = corpusPath,
+        };
+
+    /// A tiny approved corpus, with the same structured metadata the real
+    /// builder produces — the evidence gate reads those fields, so a fixture
+    /// without them would be exercising a different retriever.
+    internal static string WriteCorpus()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"help-corpus-{Guid.NewGuid():N}.json");
+        // No revision: the test host has no NUBARCA_GIT_SHA, so the gate cannot
+        // compare and accepts it. The revision behaviour itself is asserted in
+        // ProductHelpCorpusBoundaryTests, where the gate lives.
+        var corpus = new ProductHelpCorpus(
+            RagDomainKey.ProductHelp.Value, string.Empty, new[]
+            {
+                new ProductHelpDocument(
+                    "docs/help/albums.md#1", "docs/help/albums.md", "Albums", "What an album is",
+                    $"{PublicMarker}. An album is a named collection you make yourself. "
+                    + "Adding a photo to an album never moves or copies the file.",
+                    Feature: "albums",
+                    Intent: ProductHelpVocabulary.Intent.HowTo,
+                    Audience: ProductHelpVocabulary.Audience.User,
+                    Language: ProductHelpVocabulary.Language.English,
+                    SourceKind: ProductHelpVocabulary.SourceKind.UserGuide,
+                    Aliases: new[] { "album", "albums", "raccolta", "collection" },
+                    Priority: 100),
+                new ProductHelpDocument(
+                    "README.md#1", "README.md", "NubArca", string.Empty,
+                    $"{PublicMarker} you run yourself.",
+                    Feature: "nubarca",
+                    Intent: ProductHelpVocabulary.Intent.Explanation,
+                    Audience: ProductHelpVocabulary.Audience.User,
+                    Language: ProductHelpVocabulary.Language.English,
+                    SourceKind: ProductHelpVocabulary.SourceKind.FeatureCatalog,
+                    Aliases: new[] { "nubarca", "overview" },
+                    Priority: 70),
+            });
+        File.WriteAllText(path, JsonSerializer.Serialize(corpus));
+        return path;
+    }
+
     /// Real private library content, carrying sentinels in every field an
     /// over-helpful implementation might be tempted to attach.
-    private async Task SeedPrivateLibraryAsync(Guid ownerId)
+    internal static async Task SeedPrivateLibraryAsync(
+        SqliteWebApplicationFactory factory, Guid ownerId)
     {
-        using var scope = _factory.Services.CreateScope();
+        using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         var blobId = Guid.NewGuid();
@@ -125,7 +161,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         await db.SaveChangesAsync();
     }
 
-    /// A logged-in client; the Help provider transport is the capturing fake.
+    /// A logged-in client; the model transport is the capturing fake.
     private async Task<(HttpClient Client, Guid OwnerId, CapturingProviderHandler Handler)> AuthenticatedAsync(
         Func<HttpRequestMessage, HttpResponseMessage>? respond = null,
         string email = "owner@example.com")
@@ -135,7 +171,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         return (client, ownerId, Handler);
     }
 
-    private static HttpContent Question(string text) => JsonContent.Create(new
+    internal static HttpContent Question(string text) => JsonContent.Create(new
     {
         message = text,
         history = new[]
@@ -145,13 +181,13 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         },
     });
 
-    // ---- B. the privacy sentinel test -------------------------------------
+    // ---- the privacy sentinel test ----------------------------------------
 
     [Fact]
     public async Task No_Private_Library_Data_Appears_In_The_Outbound_Provider_Request()
     {
         var (client, ownerId, handler) = await AuthenticatedAsync();
-        await SeedPrivateLibraryAsync(ownerId);
+        await SeedPrivateLibraryAsync(_factory, ownerId);
 
         var response = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
         response.EnsureSuccessStatusCode();
@@ -180,9 +216,10 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         // a test that pretended otherwise would be describing a product that
         // does not exist.
         var (client, ownerId, handler) = await AuthenticatedAsync();
-        await SeedPrivateLibraryAsync(ownerId);
+        await SeedPrivateLibraryAsync(_factory, ownerId);
 
-        await client.PostAsync("/api/help/ai/chat", Question($"What is {FileSentinel}?"));
+        await client.PostAsync(
+            "/api/help/ai/chat", Question($"How do albums work, and what is {FileSentinel}?"));
 
         Assert.Contains(FileSentinel, handler.Body!, StringComparison.Ordinal);
         // The ones they did NOT type are still absent.
@@ -193,11 +230,13 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
     [Fact]
     public async Task The_Request_Contract_Cannot_Carry_A_Private_Object_Reference()
     {
-        // Fields a client might hope to smuggle context through. The DTO has no
-        // such properties, so they are ignored at binding — and the assertion is
-        // that they reach neither the provider nor the answer.
+        // Fields a client might hope to smuggle context through — including a
+        // `domain`, which would point Help at a retrieval domain it was not
+        // meant to read. The DTO has no such properties, so they are ignored at
+        // binding, and the assertion is that they reach neither the model nor
+        // the answer.
         var (client, ownerId, handler) = await AuthenticatedAsync();
-        await SeedPrivateLibraryAsync(ownerId);
+        await SeedPrivateLibraryAsync(_factory, ownerId);
 
         var smuggle = JsonContent.Create(new
         {
@@ -207,6 +246,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
             personId = Guid.NewGuid(),
             currentMedia = FileSentinel,
             context = AlbumSentinel,
+            domain = "private-library",
             url = "https://example.invalid/leak",
         });
         var response = await client.PostAsync("/api/help/ai/chat", smuggle);
@@ -216,6 +256,35 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         Assert.DoesNotContain(FileSentinel, body, StringComparison.Ordinal);
         Assert.DoesNotContain(AlbumSentinel, body, StringComparison.Ordinal);
         Assert.DoesNotContain("example.invalid", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-library", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Client_Cannot_Override_The_Model_Or_Its_Trust()
+    {
+        // Which model answers, and what it may be given, is operator
+        // configuration read server-side. A browser that asks for a different
+        // one is answered by the configured External profile anyway.
+        var (client, _, handler) = await AuthenticatedAsync();
+
+        var response = await client.PostAsync("/api/help/ai/chat", JsonContent.Create(new
+        {
+            message = "How do albums work?",
+            trust = "LocalTrusted",
+            modelBoundary = "localTrusted",
+            model = "attacker-model",
+            baseUrl = "https://example.invalid",
+        }));
+        response.EnsureSuccessStatusCode();
+
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal("https://provider.example/v1/chat/completions", handler.Url!.ToString());
+        var body = JsonDocument.Parse(handler.Body!).RootElement;
+        Assert.Equal("test-model-1", body.GetProperty("model").GetString());
+
+        // And the status the browser is shown still says external.
+        var status = await (await client.GetAsync("/api/help/ai/status")).Content.ReadAsStringAsync();
+        Assert.Contains("\"modelBoundary\":\"external\"", status, StringComparison.Ordinal);
     }
 
     // ---- fail closed without approved product knowledge --------------------
@@ -224,30 +293,15 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
     public async Task No_Approved_Knowledge_Means_Zero_Outbound_Provider_Calls()
     {
         // A corpus that is simply not there. The OTHER way into this state — a
-        // corpus built from a different revision — is proven by
-        // HelpKnowledgeBoundaryTests.A_Corpus_From_A_Different_Revision_Is_Refused,
-        // at the retriever, where the revision logic lives.
-        //
-        // It is deliberately NOT re-proven here. Doing so would mean setting
-        // NUBARCA_GIT_SHA, which is process-wide, while xUnit runs test classes in
-        // parallel and that other class sets the same variable — a race between
-        // classes, which is exactly the intermittent failure this suite keeps
-        // trying to eliminate. Both tests reach the same service boundary
-        // (IsAvailable == false); only one of them needs to own the global.
+        // corpus built from a different revision — is proven at the loader in
+        // ProductHelpCorpusBoundaryTests, where the revision logic lives. Both
+        // reach the same service boundary (IsAvailable == false).
         var corpusPath = Path.Combine(Path.GetTempPath(), $"help-corpus-missing-{Guid.NewGuid():N}.json");
         var handler = new CapturingProviderHandler(_ => CapturingProviderHandler.Answer("unused"));
 
-        using var factory = new SqliteWebApplicationFactory(new Dictionary<string, string?>
-        {
-            ["ExternalHelp:Enabled"] = "true",
-            ["ExternalHelp:BaseUrl"] = "https://provider.example",
-            ["ExternalHelp:ApiKey"] = Key,
-            ["ExternalHelp:Model"] = "test-model-1",
-            ["ExternalHelp:ProviderLabel"] = "Test Provider",
-            ["ExternalHelp:CorpusPath"] = corpusPath,
-        });
+        using var factory = new SqliteWebApplicationFactory(ExternalConfiguration(corpusPath, Key));
         factory.ConfigureExtraServices = services =>
-            services.AddHttpClient<IExternalHelpChatClient, OpenAiCompatibleChatCompletionClient>()
+            services.AddHttpClient<IAssistantTextModel, OpenAiCompatibleTextModel>()
                 .ConfigurePrimaryHttpMessageHandler(() => handler);
         factory.EnsureDatabaseCreated();
 
@@ -257,12 +311,12 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         // An optional feature that cannot work, not an application error.
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains(HelpFailureReasons.KnowledgeUnavailable, body, StringComparison.Ordinal);
+        Assert.Contains(AssistantFailureReasons.KnowledgeUnavailable, body, StringComparison.Ordinal);
 
-        // THE ASSERTION THAT MATTERS. The provider is fully configured, so nothing
-        // but the guard stops the call — and the user's question must not leave
-        // NubArca to buy an answer improvised with no product documentation
-        // behind it.
+        // THE ASSERTION THAT MATTERS. The provider is fully configured, so
+        // nothing but the guard stops the call — and the user's question must
+        // not leave NubArca to buy an answer improvised with no product
+        // documentation behind it.
         Assert.Equal(0, handler.Calls);
         Assert.Null(handler.Body);
 
@@ -279,13 +333,32 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         }
     }
 
-    // ---- C. the API key -----------------------------------------------------
+    [Fact]
+    public async Task No_Strong_Evidence_Means_Zero_Outbound_Provider_Calls()
+    {
+        // The corpus is healthy and answers nothing here. `Score > 0` used to be
+        // enough, which bought a boundary crossing and an answer improvised from
+        // three irrelevant paragraphs.
+        var (client, ownerId, handler) = await AuthenticatedAsync();
+        await SeedPrivateLibraryAsync(_factory, ownerId);
+
+        var response = await client.PostAsync(
+            "/api/help/ai/chat", Question("quanto costa un abbonamento mensile premium?"));
+        response.EnsureSuccessStatusCode();
+
+        Assert.Equal(0, handler.Calls);
+        Assert.Null(handler.Body);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains(AssistantFailureReasons.NoSupportingKnowledge, body, StringComparison.Ordinal);
+    }
+
+    // ---- the API key -------------------------------------------------------
 
     [Fact]
     public async Task The_Api_Key_Appears_Only_In_The_Provider_Authorization_Header()
     {
         var (client, ownerId, handler) = await AuthenticatedAsync();
-        await SeedPrivateLibraryAsync(ownerId);
+        await SeedPrivateLibraryAsync(_factory, ownerId);
 
         var chat = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
         var chatBody = await chat.Content.ReadAsStringAsync();
@@ -304,7 +377,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         var leaky = JsonSerializer.Serialize(new { error = new { message = $"rejected key {Key}" } });
         var (client, ownerId, _) = await AuthenticatedAsync(
             _ => CapturingProviderHandler.Json(HttpStatusCode.Unauthorized, leaky));
-        await SeedPrivateLibraryAsync(ownerId);
+        await SeedPrivateLibraryAsync(_factory, ownerId);
 
         var response = await client.PostAsync("/api/help/ai/chat", Question("How do albums work?"));
 
@@ -313,7 +386,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         var body = await response.Content.ReadAsStringAsync();
         Assert.DoesNotContain(Key, body, StringComparison.Ordinal);
         Assert.DoesNotContain("rejected key", body, StringComparison.Ordinal);
-        Assert.Contains(HelpFailureReasons.ProviderUnauthorized, body, StringComparison.Ordinal);
+        Assert.Contains(AssistantFailureReasons.ProviderUnauthorized, body, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -323,6 +396,7 @@ public sealed class ExternalHelpPrivacyTests : IDisposable
         var body = await (await client.GetAsync("/api/help/ai/status")).Content.ReadAsStringAsync();
 
         Assert.Contains("Test Provider", body, StringComparison.Ordinal);
+        Assert.Contains("\"modelBoundary\":\"external\"", body, StringComparison.Ordinal);
         foreach (var secret in new[] { Key, "provider.example", "test-model-1", "Authorization", "apiKey" })
         {
             Assert.DoesNotContain(secret, body, StringComparison.OrdinalIgnoreCase);

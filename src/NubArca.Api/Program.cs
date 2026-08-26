@@ -385,10 +385,11 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
-    // Optional external Help: a per-USER budget, not per-IP. Every request costs
-    // an outbound call to a paid third party, and the callers here are
-    // authenticated, so the account is the meaningful subject.
-    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.ExternalHelpRateLimitPolicy, httpContext =>
+    // Optional Help: a per-USER budget, not per-IP. Every request costs an
+    // outbound call — to a paid third party, or to an endpoint with finite GPU —
+    // and the callers here are authenticated, so the account is the meaningful
+    // subject.
+    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.HelpChatRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.User?.Identity?.Name
                 ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -890,17 +891,41 @@ builder.Services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
 builder.Services.Configure<AiOptions>(
     builder.Configuration.GetSection(AiOptions.SectionName));
 
-// Optional external Smart Help. Disabled by default; the registration is
-// unconditional so the status endpoint can answer "not enabled" without the
-// container failing to build a service. Nothing registered here can read library
-// content — see ExternalHelpService's constructor.
+// The Assistant substrate and the optional Help feature. Disabled by default;
+// the registration is unconditional so the status endpoint can answer
+// "not enabled" without the container failing to build a service.
+//
+// Nothing registered here can read library content — see HelpAssistantService's
+// constructor. That holds for a LocalTrusted model too: trust decides what a
+// model is ELIGIBLE for, and Help's own operation policy is public product
+// knowledge, whichever side of the boundary the endpoint is on.
+builder.Services.Configure<NubArca.Api.Assistant.AssistantOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
+// Legacy `ExternalHelp__*`, adapted into one External profile when the
+// `Assistant` section is absent. A deprecation path, not the configuration
+// model — see ExternalHelpOptions.
 builder.Services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
     builder.Configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
-builder.Services.AddHttpClient<NubArca.Api.Help.IExternalHelpChatClient,
-    NubArca.Api.Help.OpenAiCompatibleChatCompletionClient>();
-builder.Services.AddSingleton<NubArca.Api.Help.IHelpKnowledgeRetriever,
-    NubArca.Api.Help.FileHelpKnowledgeRetriever>();
-builder.Services.AddScoped<NubArca.Api.Help.ExternalHelpService>();
+builder.Services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
+builder.Services.AddHttpClient<NubArca.Api.Assistant.IAssistantTextModel,
+    NubArca.Api.Assistant.OpenAiCompatibleTextModel>();
+
+// The `product-help` RAG domain: public, build-time, revision-pinned. Loaded
+// once at startup — the corpus ships in the image and cannot change under a
+// running process, and re-reading it per request would only add a filesystem
+// dependency to every Help question.
+builder.Services.AddSingleton<NubArca.Api.Rag.IRagRetriever>(sp =>
+{
+    var resolver = sp.GetRequiredService<NubArca.Api.Assistant.AssistantModelResolver>();
+    var log = sp.GetRequiredService<ILoggerFactory>()
+        .CreateLogger<NubArca.Api.Rag.ProductHelp.ProductHelpRetriever>();
+    return new NubArca.Api.Rag.ProductHelp.ProductHelpRetriever(
+        NubArca.Api.Rag.ProductHelp.ProductHelpCorpusLoader.Load(
+            resolver.HelpBounds.CorpusPath,
+            NubArca.Api.Rag.ProductHelp.ProductHelpCorpusLoader.RunningRevision,
+            log));
+});
+builder.Services.AddScoped<NubArca.Api.Help.HelpAssistantService>();
 
 // VSEM-01: canonical video temporal substrate (scene segments + sample
 // timestamps). Bound alongside AiOptions; disabled by default. The CLI/worker
