@@ -16,8 +16,9 @@ import {
   mergePagedTotal, TOTAL_UNCHANGED,
 } from './pagingTotals.ts';
 import {
-  clampPeoplePage, filterPeopleByName, focusAfterSearch, peoplePage,
-  peoplePageCount, peoplePageForId, personMetaText, PEOPLE_PAGE_SIZE,
+  clampPeoplePage, filterPeopleByName, focusAfterSearch, peopleGridRows, peoplePage,
+  peoplePageCount, peoplePageForId, personMetaText, PEOPLE_GRID_COLUMNS,
+  PEOPLE_GRID_ROWS, PEOPLE_PAGE_SIZE,
   PERSON_META_FLEX, PERSON_NAME_FLEX,
 } from './peoplePicker.ts';
 import { fixedEditorLayout, TV_VIEWPORTS, usableHeight } from '../lib/panelLayout.ts';
@@ -109,12 +110,27 @@ test('the viewer badge renders through the same policy', () => {
 
 // ---------------------------------------------------------------- people
 
-test('the People picker mounts one explicit page of ordinary rows', () => {
-  assert.match(peoplePanel, /<View style=\{styles\.pageList\}>/);
-  assert.match(peoplePanel, /\{pagePeople\.map\(\(person\) =>/);
+test('the People picker uses the TV width: controls left, results right', () => {
+  assert.match(peoplePanel, /<View style=\{styles\.workspace\}>/);
+  assert.match(peoplePanel, /<View style=\{styles\.sidebar\}>/);
+  assert.match(peoplePanel, /<View style=\{styles\.resultsPane\}>/);
+  assert.match(peoplePanel, /workspace: \{[^}]*flexDirection: 'row'/);
+  assert.match(peoplePanel, /<View style=\{styles\.sidebarFooter\}>[\s\S]*?t\('gallery\.done'\)/);
+});
+
+test('the People picker mounts one explicit 2x4 page of ordinary rows', () => {
+  assert.match(peoplePanel, /<View style=\{styles\.peopleGrid\}>/);
+  assert.match(peoplePanel, /Array\.from\(\{ length: PEOPLE_GRID_ROWS \}/);
+  assert.match(peoplePanel, /\{row\.map\(\(person\) =>/);
   assert.doesNotMatch(peoplePanel, /\{\s*(people|visible)\.map\(/,
     'the whole owner projection must never be mounted');
-  assert.equal(PEOPLE_PAGE_SIZE, 4, 'four rows leave the whole chooser visible at 720p');
+  assert.equal(PEOPLE_GRID_COLUMNS, 2);
+  assert.equal(PEOPLE_GRID_ROWS, 4);
+  assert.equal(PEOPLE_PAGE_SIZE, 8, 'eight results use TV width without adding a fifth row');
+  assert.deepEqual(peopleGridRows(Array.from({ length: 8 }, (_, index) => index)),
+    [[0, 1], [2, 3], [4, 5], [6, 7]]);
+  assert.deepEqual(peopleGridRows([0, 1, 2]), [[0, 1], [2]]);
+  assert.throws(() => peopleGridRows([1], 0), /positive integer/);
 });
 
 test('the People picker has no native list or scroll viewport', () => {
@@ -135,7 +151,7 @@ test('entering People keeps one stable native panel host', () => {
 });
 
 test('rows are keyed by stable person id', () => {
-  assert.match(peoplePanel, /<View key=\{person\.id\} style=\{styles\.row\}>/);
+  assert.match(peoplePanel, /<View key=\{person\.id\} style=\{styles\.personCell\}>/);
 });
 
 test('native focus selects only a mounted row — JavaScript never navigates the D-pad', () => {
@@ -149,31 +165,56 @@ test('native focus selects only a mounted row — JavaScript never navigates the
 
 test('a 200-person library is complete across bounded pages', () => {
   const people = Array.from({ length: 200 }, (_, index) => ({ id: String(index) }));
-  assert.equal(peoplePageCount(people.length), 50);
+  assert.equal(peoplePageCount(people.length), 25);
   const visited = Array.from({ length: peoplePageCount(people.length) }, (_, page) =>
     peoplePage(people, page)).flat();
   assert.deepEqual(visited, people, 'paging must neither omit nor repeat a person');
-  assert.ok(peoplePage(people, 25).length <= PEOPLE_PAGE_SIZE,
-    'at most four person rows are mounted');
+  assert.ok(peoplePage(people, 12).length <= PEOPLE_PAGE_SIZE,
+    'at most eight people are mounted');
 });
 
 test('page boundaries and page lookup are deterministic', () => {
   assert.equal(clampPeoplePage(-10, 200), 0);
-  assert.equal(clampPeoplePage(999, 200), 49);
+  assert.equal(clampPeoplePage(999, 200), 24);
   assert.equal(clampPeoplePage(Number.NaN, 200), 0);
   assert.equal(peoplePageCount(Number.NaN), 1);
   assert.equal(peoplePageForId(
-    Array.from({ length: 200 }, (_, index) => ({ id: String(index) })), '87'), 21);
+    Array.from({ length: 200 }, (_, index) => ({ id: String(index) })), '87'), 10);
   assert.throws(() => peoplePageCount(10, 0), /positive integer/);
 });
 
-test('large libraries expose explicit paging and a permanently mounted Done action', () => {
+test('paging never shares geometry with people or the permanently mounted Done action', () => {
   assert.match(peoplePanel, /t\('filters\.peoplePrevious'\)/);
   assert.match(peoplePanel, /t\('filters\.peopleNext'\)/);
   assert.match(peoplePanel, /t\('filters\.peoplePage'/);
-  assert.match(peoplePanel, /<View style=\{styles\.actions\}>[\s\S]*t\('gallery\.done'\)/);
+  assert.match(peoplePanel, /<View style=\{styles\.resultsHeader\}>[\s\S]*?t\('filters\.peoplePage'/);
+  assert.match(peoplePanel, /<View style=\{styles\.pager\}>[\s\S]*?peoplePrevious[\s\S]*?peopleNext/);
+  assert.doesNotMatch(peoplePanel, /<View style=\{styles\.pager\}>[\s\S]*?t\('gallery\.done'\)/);
   assert.match(peoplePanel, /disabled=\{!hasPreviousPage\}/);
   assert.match(peoplePanel, /disabled=\{!hasNextPage\}/);
+});
+
+test('the physical Fire Stick overlap cannot return through fixed row heights or layers', () => {
+  for (const forbidden of [/position:\s*'absolute'/, /zIndex/, /elevation/, /marginTop:\s*-/,
+    /minHeight:\s*64/, /styles\.pageList/, /styles\.actions/]) {
+    assert.doesNotMatch(peoplePanel, forbidden);
+  }
+  assert.match(peoplePanel, /peopleGrid: \{ flex: 1, minHeight: 0/);
+  assert.match(peoplePanel, /gridRow: \{ flex: 1, minHeight: 0, flexDirection: 'row'/);
+});
+
+test('sidebar filter rows stack their copy instead of squeezing two long columns', () => {
+  assert.match(filterRow, /layout\?: 'split' \| 'stacked'/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleSearch/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleMode/);
+  assert.match(peoplePanel, /layout="stacked"[\s\S]*?filters\.peopleClear/);
+});
+
+test('two-column person cards stack name and state so the name keeps useful width', () => {
+  assert.match(peoplePanel, /variant="person"\s*\n\s*layout="stacked"/);
+  assert.match(filterRow, /person && styles\.labelStackedPerson/);
+  assert.match(filterRow, /labelStackedPerson: \{ color: colors\.text, fontSize: font\.body \}/);
+  assert.match(filterRow, /valueStackedPerson: \{ color: colors\.muted, fontSize: font\.caption \}/);
 });
 
 const PEOPLE = [

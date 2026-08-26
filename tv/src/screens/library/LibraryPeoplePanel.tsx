@@ -16,10 +16,13 @@ import {
   filterPeopleByName,
   focusAfterSearch,
   clampPeoplePage,
+  peopleGridRows,
   peoplePage,
   peoplePageCount,
   peoplePageForId,
   personMetaText,
+  PEOPLE_GRID_COLUMNS,
+  PEOPLE_GRID_ROWS,
   type PersonSelection,
 } from '../../personal/peoplePicker';
 
@@ -40,9 +43,11 @@ import {
 // strip was visible. The selected-count header changing proved that data,
 // focus, and selection were all alive behind a broken native list viewport.
 //
-// This component therefore has NO scroll or virtualized-list owner. It mounts
-// four ordinary rows at a time, with explicit previous/next page controls.
-// Every focusable person is consequently a visible child with real geometry.
+// This component therefore has NO scroll or virtualized-list owner. Its
+// landscape layout has a fixed control rail on the left and a 2x4 people grid
+// on the right, with paging in a separate footer. Every focusable person is a
+// visible child with real geometry, and dynamic controls can never compress or
+// overlap the results.
 //
 // FINDING PERSON #87
 // ------------------
@@ -210,6 +215,7 @@ export function LibraryPeoplePanel({
   const safePageIndex = clampPeoplePage(pageIndex, visible.length);
   const totalPages = peoplePageCount(visible.length);
   const pagePeople = peoplePage(visible, safePageIndex);
+  const pageRows = peopleGridRows(pagePeople);
   const fallbackKey = pagePeople.length > 0 ? pagePeople[0].id : SEARCH_KEY;
   const hasPreviousPage = safePageIndex > 0;
   const hasNextPage = safePageIndex + 1 < totalPages;
@@ -247,8 +253,8 @@ export function LibraryPeoplePanel({
 
   return (
     <View key={remount} style={styles.body}>
-        {/* Fixed header: summary, search, mode, clear. */}
-        <View style={styles.header}>
+      <View style={styles.workspace}>
+        <View style={styles.sidebar}>
           <Text style={styles.hint}>
             {selectedCount === 0
               ? t('filters.peopleNone')
@@ -260,6 +266,7 @@ export function LibraryPeoplePanel({
           </Text>
 
           <FilterRow
+            layout="stacked"
             label={t('filters.peopleSearch')}
             value={search.length > 0 ? search : t('filters.any')}
             active={search.length > 0}
@@ -275,8 +282,11 @@ export function LibraryPeoplePanel({
 
           {showMode && (
             <FilterRow
+              layout="stacked"
               label={t('filters.peopleMode')}
-              value={mode === 'all' ? t('gallery.peopleModeAll') : t('gallery.peopleModeAny')}
+              value={mode === 'all'
+                ? t('filters.peopleModeAllShort')
+                : t('filters.peopleModeAnyShort')}
               active={mode === 'any'}
               opensEditor={false}
               accessibilityLabel={t('filters.rowA11y', {
@@ -293,6 +303,7 @@ export function LibraryPeoplePanel({
 
           {showClear && (
             <FilterRow
+              layout="stacked"
               label={t('filters.peopleClear')}
               value=""
               active={false}
@@ -303,92 +314,116 @@ export function LibraryPeoplePanel({
               onSelect={() => commit([], [], mode, fallbackKey)}
             />
           )}
+
+          <View style={styles.sidebarFooter}>
+            <FocusableButton
+              label={t('gallery.done')}
+              onPress={onClose}
+              hasTVPreferredFocus={focusKey === DONE_KEY}
+              onFocusChange={(f) => { if (f) focusRef.current = DONE_KEY; }}
+            />
+          </View>
         </View>
 
-        {visible.length === 0 ? (
-          <View style={styles.stateBox}>
-            <Text style={styles.muted}>{t('filters.peopleSearchEmpty')}</Text>
+        <View style={styles.resultsPane}>
+          <View style={styles.resultsHeader}>
+            <Text style={styles.resultsTitle}>
+              {t('filters.peopleResults', { count: String(visible.length) })}
+            </Text>
+            <Text style={styles.pageLabel}>
+              {t('filters.peoplePage', {
+                page: String(safePageIndex + 1), total: String(totalPages),
+              })}
+            </Text>
           </View>
-        ) : (
-          <View style={styles.pageList}>
-            {pagePeople.map((person) => {
-              const state = stateOf(person.id);
-              const name = person.name ?? unnamed;
-              const meta = personMetaText(state, person.faceCount, stateLabel);
-              return (
-                <View key={person.id} style={styles.row}>
-                  <FilterRow
-                    variant="person"
-                    // The NAME alone. The face count belongs in the trailing
-                    // meta, not concatenated here, or it becomes part of the
-                    // truncatable string and a long name loses it entirely.
-                    label={name}
-                    value={meta}
-                    active={state !== 'off'}
-                    opensEditor={false}
-                    // Screen readers get the FULL name even when the visible
-                    // text is ellipsized.
-                    accessibilityLabel={t('filters.rowA11y', { label: name, value: meta })}
-                    hasTVPreferredFocus={focusKey === person.id}
-                    onFocus={() => { focusRef.current = person.id; }}
-                    onSelect={() => cyclePerson(person.id, fallbackKey)}
-                  />
-                </View>
-              );
-            })}
-          </View>
-        )}
 
-        <View style={styles.actions}>
-          {totalPages > 1 && (
-            <>
-              <FocusableButton
-                label={t('filters.peoplePrevious')}
-                onPress={() => goToPage(safePageIndex - 1)}
-                disabled={!hasPreviousPage}
-                hasTVPreferredFocus={focusKey === PREVIOUS_KEY}
-                onFocusChange={(focused) => {
-                  if (focused) focusRef.current = PREVIOUS_KEY;
-                }}
-              />
-              <Text style={styles.pageLabel}>
-                {t('filters.peoplePage', {
-                  page: String(safePageIndex + 1), total: String(totalPages),
-                })}
-              </Text>
-              <FocusableButton
-                label={t('filters.peopleNext')}
-                onPress={() => goToPage(safePageIndex + 1)}
-                disabled={!hasNextPage}
-                hasTVPreferredFocus={focusKey === NEXT_KEY}
-                onFocusChange={(focused) => {
-                  if (focused) focusRef.current = NEXT_KEY;
-                }}
-              />
-            </>
+          {visible.length === 0 ? (
+            <View style={styles.stateBox}>
+              <Text style={styles.muted}>{t('filters.peopleSearchEmpty')}</Text>
+            </View>
+          ) : (
+            <View style={styles.peopleGrid}>
+              {Array.from({ length: PEOPLE_GRID_ROWS }, (_, rowIndex) => {
+                const row = pageRows[rowIndex] ?? [];
+                return (
+                  <View key={`row-${rowIndex}`} style={styles.gridRow}>
+                    {row.map((person) => {
+                      const state = stateOf(person.id);
+                      const name = person.name ?? unnamed;
+                      const meta = personMetaText(state, person.faceCount, stateLabel);
+                      return (
+                        <View key={person.id} style={styles.personCell}>
+                          <FilterRow
+                            variant="person"
+                            layout="stacked"
+                            label={name}
+                            value={meta}
+                            active={state !== 'off'}
+                            opensEditor={false}
+                            accessibilityLabel={t('filters.rowA11y', { label: name, value: meta })}
+                            hasTVPreferredFocus={focusKey === person.id}
+                            onFocus={() => { focusRef.current = person.id; }}
+                            onSelect={() => cyclePerson(person.id, fallbackKey)}
+                          />
+                        </View>
+                      );
+                    })}
+                    {row.length < PEOPLE_GRID_COLUMNS && <View style={styles.personCell} />}
+                  </View>
+                );
+              })}
+            </View>
           )}
-          <FocusableButton
-            label={t('gallery.done')}
-            onPress={onClose}
-            hasTVPreferredFocus={focusKey === DONE_KEY}
-            onFocusChange={(f) => { if (f) focusRef.current = DONE_KEY; }}
-          />
+
+          <View style={styles.pager}>
+            <FocusableButton
+              label={t('filters.peoplePrevious')}
+              onPress={() => goToPage(safePageIndex - 1)}
+              disabled={!hasPreviousPage}
+              hasTVPreferredFocus={focusKey === PREVIOUS_KEY}
+              onFocusChange={(focused) => {
+                if (focused) focusRef.current = PREVIOUS_KEY;
+              }}
+            />
+            <FocusableButton
+              label={t('filters.peopleNext')}
+              onPress={() => goToPage(safePageIndex + 1)}
+              disabled={!hasNextPage}
+              hasTVPreferredFocus={focusKey === NEXT_KEY}
+              onFocusChange={(focused) => {
+                if (focused) focusRef.current = NEXT_KEY;
+              }}
+            />
+          </View>
         </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  body: { flex: 1, gap: spacing.sm },
-  header: { gap: spacing.sm },
-  pageList: { flex: 1, gap: spacing.xs },
-  row: { minHeight: 64, justifyContent: 'center' },
+  body: { flex: 1, minHeight: 0 },
+  workspace: { flex: 1, minHeight: 0, flexDirection: 'row', gap: spacing.lg },
+  sidebar: {
+    width: '35%', flexShrink: 0, gap: spacing.sm,
+    borderRightWidth: 1, borderRightColor: colors.panelFocused, paddingRight: spacing.lg,
+  },
+  sidebarFooter: { marginTop: 'auto', paddingTop: spacing.sm },
+  resultsPane: { flex: 1, minWidth: 0 },
+  resultsHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  resultsTitle: { color: colors.text, fontSize: font.body, fontWeight: '700' },
+  peopleGrid: { flex: 1, minHeight: 0, gap: spacing.xs },
+  gridRow: { flex: 1, minHeight: 0, flexDirection: 'row', gap: spacing.sm },
+  personCell: { flex: 1, minWidth: 0, justifyContent: 'center' },
   stateBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
   muted: { color: colors.muted, fontSize: font.body, textAlign: 'center' },
   hint: { color: colors.muted, fontSize: font.caption },
-  pageLabel: { minWidth: 132, color: colors.muted, fontSize: font.body, textAlign: 'center' },
-  actions: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: spacing.sm, paddingTop: spacing.sm,
+  pageLabel: { color: colors.muted, fontSize: font.caption, textAlign: 'right' },
+  pager: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+    gap: spacing.md, paddingTop: spacing.sm,
   },
 });
