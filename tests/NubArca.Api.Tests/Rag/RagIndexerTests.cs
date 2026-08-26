@@ -212,6 +212,52 @@ public sealed class RagIndexerTests : IDisposable
         Assert.Equal(2, await _db.RagSources.CountAsync());
     }
 
+    [Fact]
+    public async Task LimitedRun_EmbedsOnlyTheSourcesItSaw()
+    {
+        // `--limit` capped enumeration and nothing else, so the embedding pass
+        // still walked every chunk in the domain — a command whose entire
+        // purpose is a bounded trial run starting an hour of inference over the
+        // whole corpus. Found by running it against the real repository.
+        SeedDeterministicProfile();
+        var full = Repository(
+            Source("src/A.cs", BodyA), Source("docs/b.md", BodyB), Source("docs/c.md", BodyC));
+        await IndexAsync(full);
+        var allChunks = await _db.RagChunks.CountAsync();
+
+        var outcome = await IndexAsync(full, embed: true, limit: 1);
+
+        Assert.True(outcome.Partial);
+        Assert.True(outcome.EmbeddingsCreated > 0, "the sources it did see are embedded");
+        Assert.True(outcome.EmbeddingsCreated < allChunks,
+            "a bounded run must not embed the whole corpus");
+
+        // Precisely: every embedding belongs to a chunk of the one source seen.
+        var embeddedSources = await (
+            from embedding in _db.RagChunkEmbeddings
+            join chunk in _db.RagChunks on embedding.ChunkId equals chunk.Id
+            select chunk.SourceId).Distinct().CountAsync();
+        Assert.Equal(1, embeddedSources);
+    }
+
+    [Fact]
+    public async Task A_Full_Run_After_A_Bounded_One_Embeds_The_Rest()
+    {
+        // Bounded work is resumable work: the embeddings already paid for are
+        // kept, and the complete run finishes the remainder.
+        SeedDeterministicProfile();
+        var full = Repository(
+            Source("src/A.cs", BodyA), Source("docs/b.md", BodyB), Source("docs/c.md", BodyC));
+        await IndexAsync(full);
+        await IndexAsync(full, embed: true, limit: 1);
+        var afterBounded = await _db.RagChunkEmbeddings.CountAsync();
+
+        await IndexAsync(full, embed: true);
+
+        Assert.Equal(await _db.RagChunks.CountAsync(), await _db.RagChunkEmbeddings.CountAsync());
+        Assert.True(await _db.RagChunkEmbeddings.CountAsync() > afterBounded);
+    }
+
     // ---- shared source snapshot conflict ------------------------------------
 
     [Fact]
