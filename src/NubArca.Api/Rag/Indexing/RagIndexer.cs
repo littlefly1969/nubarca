@@ -114,7 +114,7 @@ public sealed class RagIndexer : IRagIndexer
             state.SourcesRemoved = await RemoveDepartedAsync(domain.Key, seenSourceIds, cancellationToken);
         }
 
-        var embedding = await EmbedAsync(domain.Key, request, state, cancellationToken);
+        var embedding = await EmbedAsync(domain.Key, request, seenSourceIds, state, cancellationToken);
 
         _log.LogInformation(
             "rag index: domain={Domain} revision={Revision} partial={Partial} reconciled={Reconciled} "
@@ -375,7 +375,8 @@ public sealed class RagIndexer : IRagIndexer
     // ---- embeddings ---------------------------------------------------------
 
     private async Task<(string? ProfileKey, string? Reason)> EmbedAsync(
-        string domainKey, RagIndexRequest request, IndexState state, CancellationToken cancellationToken)
+        string domainKey, RagIndexRequest request, IReadOnlyCollection<Guid> seenSourceIds,
+        IndexState state, CancellationToken cancellationToken)
     {
         if (!request.EmbedPassages || request.DryRun) return (null, null);
 
@@ -386,6 +387,7 @@ public sealed class RagIndexer : IRagIndexer
         var provider = resolution.Provider!;
         var dimension = profile.Dimension!.Value;
         var now = _clock.GetUtcNow().UtcDateTime;
+        var seen = seenSourceIds.ToList();
 
         // Keyset paging over the chunks of this domain that have no embedding
         // for this profile. Never `ToListAsync()` over the corpus: the
@@ -396,7 +398,14 @@ public sealed class RagIndexer : IRagIndexer
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var page = await (
+            // A PARTIAL run embeds only the sources it actually saw.
+            //
+            // `--limit N` caps enumeration, and without this the embedding pass
+            // then walked every chunk in the domain anyway — so a command whose
+            // whole purpose is a bounded trial run started an hour of inference
+            // over the entire corpus. A partial run does partial work
+            // everywhere, not just in the half somebody remembered to bound.
+            var candidates =
                 from chunk in _db.RagChunks.AsNoTracking()
                 join membership in _db.RagDomainSources.AsNoTracking()
                     on chunk.SourceId equals membership.SourceId
@@ -404,8 +413,15 @@ public sealed class RagIndexer : IRagIndexer
                       && chunk.Id > cursor
                       && !_db.RagChunkEmbeddings.Any(
                           e => e.ChunkId == chunk.Id && e.ProfileId == profile.Id)
-                orderby chunk.Id
-                select new { chunk.Id, chunk.Text })
+                select new { chunk.Id, chunk.Text, chunk.SourceId };
+
+            if (request.IsPartial)
+            {
+                candidates = candidates.Where(c => seen.Contains(c.SourceId));
+            }
+
+            var page = await candidates
+                .OrderBy(c => c.Id)
                 .Take(64)
                 .ToListAsync(cancellationToken);
 
