@@ -154,7 +154,7 @@ jobs:
         run: npm run test:ota
 
   mobile:
-    name: Mobile typecheck
+    name: Mobile typecheck & tests
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -178,3 +178,20 @@ jobs:
 
       - name: Typecheck
         run: npm run lint
+
+      # The mobile automated suite: session-cookie hardening, pagination
+      # races, selection, authenticated media sources, API contracts,
+      # unified-album cards/capabilities, viewer privacy, logout order.
+      - name: Run tests
+        run: npm test
+
+      # Fails closed on a production config without an https origin; also
+      # proves app.config.js evaluates cleanly with plugins applied.
+      - name: Validate Expo config
+        run: npm run config
+
+      # VERIFIED, not declared: the production fail-closed rules are exercised
+      # under all four environment combinations (no origin / http / https /
+      # development), asserting Android cleartext and iOS ATS stay off.
+      - name: Production config gate
+        run: node scripts/verify-production-config.mjs
