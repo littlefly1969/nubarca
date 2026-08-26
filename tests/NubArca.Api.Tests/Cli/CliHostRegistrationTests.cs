@@ -244,6 +244,63 @@ public sealed class CliHostRegistrationTests : IDisposable
     }
 
     [Fact]
+    public void The_Rag_Substrate_Resolves_In_The_Cli_Host()
+    {
+        // The bug this exists for: `AddRagSubstrate` registered
+        // `RagDatabaseServices` as a factory resolving `RagDatabaseServices`,
+        // as a stand-in for "optional dependency". Wherever it ran AFTER
+        // `AddRagDatabase` — which is both the web host and the CLI — that
+        // registration won and the container recursed forever, so `rag query`
+        // hung with no output and no exception.
+        //
+        // Nothing caught it: the unit tests construct RagRetriever directly, and
+        // the endpoint test host registers its own graph LAST, which put the
+        // real registration back on top. Resolving through the actual CLI graph
+        // is the only shape of test that would have.
+        using var sp = BuildCliHost();
+        using var scope = sp.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.IRagRetriever>());
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Indexing.IRagIndexer>());
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Domains.IRagDomainRegistry>());
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.Storage.RagVectorIndexService>());
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Ai.TextEmbeddings.TextEmbeddingResolver>());
+
+        // One provider per domain, and exactly the two domains that exist.
+        var providers = scope.ServiceProvider
+            .GetServices<NubArca.Api.Rag.Sources.IRagSourceProvider>()
+            .Select(p => p.Domain)
+            .OrderBy(d => d, StringComparer.Ordinal)
+            .ToList();
+        Assert.Equal(
+            new[]
+            {
+                NubArca.Api.Rag.Domains.RagDomains.NubArcaRepository,
+                NubArca.Api.Rag.Domains.RagDomains.ProductHelp,
+            },
+            providers);
+    }
+
+    [Fact]
+    public void The_Rag_Retriever_Still_Resolves_Without_A_Database()
+    {
+        // An installation with no connection string answers Product Help from
+        // the corpus bundled in its image. The retriever must therefore build
+        // with its database half ABSENT rather than fail to resolve.
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        CliEntryPoint.ConfigureCliServices(services, configuration);
+        using var sp = services.BuildServiceProvider(validateScopes: true);
+        using var scope = sp.CreateScope();
+
+        Assert.NotNull(scope.ServiceProvider.GetService<NubArca.Api.Rag.IRagRetriever>());
+        Assert.Null(scope.ServiceProvider.GetService<NubArca.Api.Rag.Retrieval.RagDatabaseServices>());
+    }
+
+    [Fact]
     public void Worker_Host_Without_Connection_String_Builds_But_Offers_No_Job_Services()
     {
         var configuration = new ConfigurationBuilder()

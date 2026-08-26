@@ -4329,6 +4329,204 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("private_vault_access_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagChunk", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Heading")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TextHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId", "Ordinal")
+                        .IsUnique()
+                        .HasDatabaseName("ux_rag_chunks_source_ordinal");
+
+                    b.ToTable("rag_chunks", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_rag_chunks_ordinal_non_negative", "\"Ordinal\" >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagChunkEmbedding", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ChunkId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Dimension")
+                        .HasColumnType("integer");
+
+                    b.Property<byte[]>("EmbeddingBytes")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("ProfileId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProfileId")
+                        .HasDatabaseName("ix_rag_chunk_embeddings_profile");
+
+                    b.HasIndex("ChunkId", "ProfileId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_rag_chunk_embeddings_chunk_profile");
+
+                    b.ToTable("rag_chunk_embeddings", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_rag_chunk_embeddings_dimension_positive", "\"Dimension\" > 0");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagDomainSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DomainKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DomainKey")
+                        .HasDatabaseName("ix_rag_domain_sources_domain");
+
+                    b.HasIndex("SourceId");
+
+                    b.HasIndex("DomainKey", "SourceId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_rag_domain_sources_domain_source");
+
+                    b.ToTable("rag_domain_sources", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_rag_domain_sources_priority_range", "\"Priority\" >= 1 AND \"Priority\" <= 100");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagSource", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeLanguage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ContentHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("MetadataJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Revision")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SourceKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("ix_rag_sources_owner");
+
+                    b.HasIndex("Revision")
+                        .HasDatabaseName("ix_rag_sources_revision");
+
+                    b.HasIndex("SourceKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_rag_sources_key");
+
+                    b.ToTable("rag_sources", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.RemoteUploadChunk", b =>
                 {
                     b.Property<Guid>("ItemId")
@@ -5836,6 +6034,47 @@ namespace NubArca.Api.Data.Migrations
                         .HasForeignKey("PrivateVaultId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagChunk", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Rag.RagSource", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagChunkEmbedding", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Rag.RagChunk", null)
+                        .WithMany()
+                        .HasForeignKey("ChunkId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.Ai.AiProfile", null)
+                        .WithMany()
+                        .HasForeignKey("ProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagDomainSource", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Rag.RagSource", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Rag.RagSource", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.RemoteUploadChunk", b =>

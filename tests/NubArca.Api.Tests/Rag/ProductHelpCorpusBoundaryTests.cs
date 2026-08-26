@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.ProductHelp;
+using NubArca.Api.Rag.Retrieval;
 using Xunit;
 
 namespace NubArca.Api.Tests.Rag;
@@ -79,7 +80,7 @@ public sealed class ProductHelpCorpusBoundaryTests : IDisposable
 
         // …and the sentinel is unreachable through the retriever, which is the
         // surface that actually feeds the model.
-        var retriever = new ProductHelpRetriever(corpus);
+        var retriever = RagTestHarness.ForProductHelp(corpus);
         Assert.Empty(Ask(retriever, secret));
         var broad = Ask(retriever, "gruppi suggeriti volti");
         Assert.NotEmpty(broad);
@@ -159,7 +160,7 @@ public sealed class ProductHelpCorpusBoundaryTests : IDisposable
         // A manifest entry with no file is knowledge that silently stopped
         // shipping — a rename nobody noticed, which shows up as an assistant
         // that has become vaguer for no visible reason.
-        var root = ProductHelpRetrievalTests.RepositoryRoot();
+        var root = RagTestHarness.RepositoryRoot();
         foreach (var source in ProductHelpSources.Manifest)
         {
             Assert.True(
@@ -196,13 +197,13 @@ public sealed class ProductHelpCorpusBoundaryTests : IDisposable
 
         // Help that answered from a different revision would describe features
         // the installed release does not have, which is worse than no Help.
-        var mismatched = Load(path, running: "running-revision-bbb");
+        var mismatched = Status(Load(path, running: "running-revision-bbb"));
         Assert.False(mismatched.IsAvailable);
-        Assert.Empty(Ask(mismatched, "nubarca media library"));
+        Assert.Empty(Ask(Load(path, running: "running-revision-bbb"), "nubarca media library"));
 
         var matched = Load(path, running: "corpus-revision-aaa");
-        Assert.True(matched.IsAvailable);
-        Assert.Equal("corpus-revision-aaa", matched.Revision);
+        Assert.True(Status(matched).IsAvailable);
+        Assert.Equal("corpus-revision-aaa", Status(matched).Revision);
         Assert.NotEmpty(Ask(matched, "nubarca media library"));
     }
 
@@ -220,19 +221,24 @@ public sealed class ProductHelpCorpusBoundaryTests : IDisposable
     public void A_Missing_Corpus_Leaves_Help_Knowledge_Unavailable_Rather_Than_Failing()
     {
         var retriever = Load(Path.Combine(_root, "does-not-exist.json"), running: "any");
-        Assert.False(retriever.IsAvailable);
-        Assert.Null(retriever.Revision);
+        Assert.False(Status(retriever).IsAvailable);
+        Assert.Null(Status(retriever).Revision);
         Assert.Equal(
             RagRetrievalOutcome.Unavailable,
-            retriever.Retrieve(new RagQuery(RagDomainKey.ProductHelp, "anything", 5, 5000)).Outcome);
+            retriever.RetrieveAsync(new RagQuery(RagDomainKey.ProductHelp, "anything", 5, 5000))
+                .GetAwaiter().GetResult().Outcome);
     }
 
-    private static IReadOnlyList<RagEvidence> Ask(ProductHelpRetriever retriever, string question)
-        => retriever.Retrieve(new RagQuery(RagDomainKey.ProductHelp, question, 10, 10000)).Evidence;
+    private static RagDomainStatus Status(RagRetriever retriever)
+        => retriever.GetStatusAsync(RagDomainKey.ProductHelp).GetAwaiter().GetResult();
+
+    private static IReadOnlyList<RagEvidence> Ask(RagRetriever retriever, string question)
+        => retriever.RetrieveAsync(new RagQuery(RagDomainKey.ProductHelp, question, 10, 10000))
+            .GetAwaiter().GetResult().Evidence;
 
     /// Drives the same load path production uses rather than a test-only
     /// shortcut, so the revision gate itself is what is under test.
-    private static ProductHelpRetriever Load(string corpusPath, string running)
-        => new(ProductHelpCorpusLoader.Load(
-            corpusPath, running, NullLogger<ProductHelpRetriever>.Instance));
+    private static RagRetriever Load(string corpusPath, string running)
+        => RagTestHarness.ForProductHelp(ProductHelpCorpusLoader.Load(
+            corpusPath, running, NullLogger<ProductHelpCorpus>.Instance));
 }

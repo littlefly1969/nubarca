@@ -1031,7 +1031,7 @@ Detection and recognition use one face-package profile so detector and recognize
 
 People APIs support named people, suggested groups, assignment/removal, ignored and unassigned faces, similar-face review, photo projection, and preview regeneration. All operations are owner-scoped and return generic not-found behavior for foreign data.
 
-### 17.7 Assistant model trust and the `product-help` RAG domain
+### 17.7 Assistant model trust and the RAG platform
 
 The Assistant substrate is separate from the AI substrate above: it configures **language-model endpoints and retrieval**, where `AiOptions`/`AiProfile` configure embedding and vision capabilities. Its only consumer today is the optional Help assistant.
 
@@ -1051,9 +1051,17 @@ Protocol and trust are independent axes. An endpoint speaks the OpenAI-compatibl
 
 `IAssistantTextModel` is the runtime contract: messages in, completion text or a sanitized failure out. It has no tool, function, attachment or callback surface — not empty fields, absent ones — and no optional parameter reserving one. Tool calling, when it exists, belongs behind a separate interface so a text-only external Help cannot acquire tools because a shared type grew a property.
 
-`IRagRetriever` is the retrieval seam. A domain is a body of knowledge with one privacy story; `product-help` is public, built at image-build time from an explicit source manifest, and pinned to `NUBARCA_GIT_SHA`, which the application refuses to run against a mismatched corpus. Retrieval is lexical, local and deterministic — section-aware chunks, a shared Italian/English stopword set, a bounded feature-alias catalogue, field-weighted BM25F, intent shaping and an explicit evidence gate — and a retriever answers `Unavailable` for a domain that is not its own rather than substituting public evidence. Below the evidence gate Help makes **no model call at all**, so a question never crosses the boundary to buy an answer with no documentation behind it.
+`IRagRetriever` is the retrieval seam, and it is domain-general: Product Help is a consumer of the RAG platform, not its shape. A domain is a body of knowledge with one privacy story, and its policy — scope, privacy class, whether an owner is required, whether its evidence may reach an External model — is **defined in code** (`RagDomainRegistry`), never in an editable row. The database records which sources exist and which revision was indexed; it does not record whether evidence may leave the trust boundary, so no `UPDATE`, admin endpoint or restored backup can widen one.
 
-Help conversations are not persisted. `docs/help-assistant.md` is the reference.
+Two domains exist. `product-help` is `Public`, built from an explicit source manifest, pinned to `NUBARCA_GIT_SHA` and refused when the revision disagrees with the running build. `nubarca-repository` is `SystemInternal`: approved tracked files of a local checkout, for development, diagnostics and retrieval evaluation, and **never** available to an External model — deliberately so even though NubArca is public on GitHub today, because public hosting is a fact about this month rather than a property of the domain. A source exists once and may belong to both, with one set of chunks and one embedding per profile; domain membership is a separate table carrying that domain's own classification.
+
+`AssistantRagPolicy` is the intersection of model trust with domain policy, and it is enforced over the **evidence itself** before a prompt is constructed — so evidence stamped with a domain the caller did not ask for fails the request rather than reaching a provider.
+
+Retrieval is local, deterministic and **hybrid**. Lexical BM25F stays first-class — section-aware chunks, a shared Italian/English stopword set, a bounded feature-alias catalogue, per-domain field weights and intent shaping — because exact identifiers, configuration keys and file names are a permanent use case vectors are worse at. Optional semantic retrieval embeds the question through a LOCAL ONNX model (profile-driven, 384 dimensions, `query:`/`passage:` preprocessing owned by the provider) and searches a dimension-specific pgvector table filtered by domain and profile in the query. The two are fused by Reciprocal Rank Fusion over ranks rather than scores, because BM25F and cosine are not calibrated to the same scale. Canonical float32 embeddings are the truth and pgvector is a rebuildable accelerator, so SQLite and a Postgres without the extension degrade to lexical rather than failing. There is no hosted embedding path and nothing downloads weights.
+
+An explicit evidence gate can answer "no strong evidence"; below it Help makes **no model call at all**, so a question never crosses the boundary to buy an answer with no documentation behind it. Retrieval mode is reported (`lexical`, `hybrid`, `lexical-fallback-…`) rather than hidden. Query text, passage text and vectors are never logged, returned or sent to any service.
+
+Help conversations are not persisted. `docs/help-assistant.md` and `docs/rag-platform.md` are the references.
 
 ## 18. Private Vault
 
@@ -1350,7 +1358,7 @@ When changing a subsystem, review the following implementation anchors together 
 | Import/staging | `Ingestion/`, `Uploads/`, admin/staging route sections |
 | Organizer/export | `Organizer/`, `PhotoExport/` |
 | AI and People | `Ai/`, AI entities/configurations, `docs/ai-substrate.md`, `docs/ai-photo-pgvector.md` |
-| Assistant and Help RAG | `Assistant/`, `Rag/`, `Help/`, `Endpoints/HelpEndpoints.cs`, `docs/help-assistant.md`, `docs/help/` |
+| Assistant and RAG platform | `Assistant/`, `Rag/`, `Ai/TextEmbeddings/`, `Domain/Rag/`, `Help/`, `Endpoints/HelpEndpoints.cs`, `docs/rag-platform.md`, `docs/help-assistant.md`, `docs/help/` |
 | Party | `Party/`, Party entities, public/owner/TV route sections |
 | TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-release.md` (canonical operations), `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |

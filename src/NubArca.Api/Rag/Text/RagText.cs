@@ -1,14 +1,19 @@
 using System.Globalization;
 using System.Text;
 
-namespace NubArca.Api.Rag.ProductHelp;
+namespace NubArca.Api.Rag.Text;
 
-/// Normalization shared by the corpus builder and the query path.
+/// Normalization shared by every indexer and every query path.
 ///
 /// The two MUST agree. A document indexed with one tokenizer and queried with
 /// another retrieves nothing, and the failure looks like a ranking problem
 /// rather than a tokenizer problem — so there is exactly one of them, here.
-public static class ProductHelpText
+///
+/// It is domain-general on purpose. Product Help and the repository domain
+/// index different material and rank it differently, and they must still agree
+/// on what a word is: `face_previews` has to become the same two tokens whether
+/// it was typed into a question or read out of a migration.
+public static class RagText
 {
     /// Stopwords for BOTH interface languages, in one set.
     ///
@@ -100,6 +105,69 @@ public static class ProductHelpText
         => Tokenize(text).Where(t => !Stopwords.Contains(t)).ToList();
 
     public static bool IsStopword(string token) => Stopwords.Contains(token);
+
+    /// An identifier, broken into the words it is made of.
+    ///
+    /// `facesTabs` is one token to the tokenizer, and correctly so: somebody
+    /// typing it means that exact symbol. But somebody asking "where are the
+    /// face tabs defined" means the same thing in the words a person uses, and
+    /// no amount of ranking helps when the two share no token at all. So an
+    /// identifier is ALSO indexed as its parts, on the index side only — the
+    /// full token stays, so an exact query still matches exactly.
+    ///
+    /// The de-pluralized variant is here for a specific and repeatable reason:
+    /// code names things in the plural (`facesTabs`, `PeopleService`,
+    /// `FacePreviews`) and questions are asked in the singular. It is a bounded,
+    /// deterministic rule applied only to identifier parts — prose tokenization
+    /// is untouched, so it cannot change how a document or a question is read.
+    public static IReadOnlyList<string> IdentifierTerms(string? identifier)
+    {
+        var terms = new List<string>();
+        if (string.IsNullOrWhiteSpace(identifier)) return terms;
+
+        void Add(string term)
+        {
+            if (term.Length > 1 && !terms.Contains(term, StringComparer.Ordinal)) terms.Add(term);
+        }
+
+        foreach (var whole in Tokenize(identifier)) Add(whole);
+
+        var current = new StringBuilder();
+        var folded = Fold(identifier);
+        for (var i = 0; i < folded.Length; i++)
+        {
+            var ch = folded[i];
+            if (!char.IsLetterOrDigit(ch))
+            {
+                Flush();
+                continue;
+            }
+            // A capital after a lowercase, or before a lowercase that follows
+            // other capitals, starts a new word: `facesTabs`, `HTTPServer`.
+            var startsWord = char.IsUpper(ch)
+                             && current.Length > 0
+                             && (!char.IsUpper(current[^1])
+                                 || (i + 1 < folded.Length && char.IsLower(folded[i + 1])));
+            if (startsWord) Flush();
+            current.Append(char.ToLowerInvariant(ch));
+        }
+        Flush();
+
+        foreach (var singular in terms.ToList())
+        {
+            if (singular.Length > 3 && singular.EndsWith('s') && !singular.EndsWith("ss", StringComparison.Ordinal))
+            {
+                Add(singular[..^1]);
+            }
+        }
+        return terms;
+
+        void Flush()
+        {
+            if (current.Length > 0) Add(current.ToString());
+            current.Clear();
+        }
+    }
 
     public static bool LooksLikeHowTo(string? text)
         => Tokenize(text).Any(HowToMarkers.Contains);

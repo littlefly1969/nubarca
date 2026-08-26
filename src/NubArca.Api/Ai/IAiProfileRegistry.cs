@@ -44,6 +44,14 @@ public interface IAiProfileRegistry
     // never auto-run on startup. This branch is evaluation-only — no clustering,
     // names, or persisted face artifacts.
     Task<AiSeedResult> SeedOnnxFaceEvalProfilesAsync(CancellationToken cancellationToken = default);
+
+    // Idempotently seed the RAG text-embedding models + profiles (capability
+    // "text-embedding"): the deterministic dev/test one and the local ONNX one.
+    // NEITHER is made default — which profile embeds text is stated explicitly
+    // by `Rag:TextEmbeddingProfileKey`, so a second model appearing in the
+    // catalogue can never silently become the active one. Explicit-only
+    // (CLI `rag seed-profiles`); never auto-run on startup.
+    Task<AiSeedResult> SeedRagTextEmbeddingProfilesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record AiProfileCompatibility(bool IsCompatible, string? Reason)

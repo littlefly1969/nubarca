@@ -40,10 +40,11 @@ public static class HelpEndpoints
         // configuration, and a user needs to know whether the feature exists,
         // which service is involved, and whether their words leave the
         // installation.
-        app.MapGet("/api/help/ai/status", (
-            [FromServices] HelpAssistantService help) =>
+        app.MapGet("/api/help/ai/status", async (
+            [FromServices] HelpAssistantService help,
+            CancellationToken cancellationToken) =>
         {
-            var status = help.GetStatus();
+            var status = await help.GetStatusAsync(cancellationToken);
             return Results.Ok(new
             {
                 enabled = status.Enabled,

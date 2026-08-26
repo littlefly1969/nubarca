@@ -17,6 +17,11 @@ public static class AiCapabilities
     public const string ImageEmbedding = "image-embedding";
     public const string DocumentExtraction = "document-extraction";
     public const string DocumentEmbedding = "document-embedding";
+
+    // Generic LOCAL text embedding for the RAG substrate. Deliberately not
+    // named for any consumer: `product-help` and `nubarca-repository` share one
+    // capability, and a future owner-private domain will share it too.
+    public const string TextEmbedding = "text-embedding";
     public const string FaceDetection = "face-detection";
     public const string FaceEmbedding = "face-embedding";
     public const string FaceClustering = "face-clustering";

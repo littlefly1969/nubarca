@@ -49,4 +49,9 @@ public enum OnnxModel
     PhotoText,
     FaceDetector,
     FaceRecognizer,
+
+    // The RAG text-embedding tower. A separate logical model so its device
+    // placement is configured independently of the photo text tower — they are
+    // different models in different vector spaces that happen to both read text.
+    RagText,
 }

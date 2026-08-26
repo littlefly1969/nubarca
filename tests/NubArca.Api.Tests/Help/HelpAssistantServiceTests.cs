@@ -39,24 +39,33 @@ public sealed class HelpAssistantServiceTests
 
     private sealed class StubRetriever : IRagRetriever
     {
-        public StubRetriever(bool available, RagResult result)
+        public StubRetriever(bool available, RagRetrievalResult result)
         {
             IsAvailable = available;
             Result = result;
         }
 
-        public RagDomainKey Domain => RagDomainKey.ProductHelp;
         public bool IsAvailable { get; }
-        public string? Revision => IsAvailable ? "r" : null;
         public RagQuery? Asked { get; private set; }
-        private RagResult Result { get; }
+        private RagRetrievalResult Result { get; }
 
-        public RagResult Retrieve(RagQuery query)
+        public Task<RagRetrievalResult> RetrieveAsync(
+            RagQuery query, CancellationToken cancellationToken = default)
         {
             Asked = query;
-            return IsAvailable ? Result : RagResult.Unavailable;
+            return Task.FromResult(IsAvailable
+                ? Result
+                : RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.IndexUnavailable));
         }
+
+        public Task<RagDomainStatus> GetStatusAsync(
+            RagDomainKey domain, CancellationToken cancellationToken = default)
+            => Task.FromResult(new RagDomainStatus(
+                domain, IsAvailable, IsAvailable ? "r" : null, 1, 1, null, 0, 0, false, null));
     }
+
+    private static RagRetrievalResult Strong(params RagEvidence[] evidence)
+        => new(RagDomainKey.ProductHelp, RagRetrievalOutcome.Strong, evidence, RagRetrievalModes.Lexical);
 
     private static RagEvidence Evidence(string path = "docs/help/faces.md", string section = "Ignorati")
         => new(
@@ -74,7 +83,7 @@ public sealed class HelpAssistantServiceTests
             Score: 12.5);
 
     private static (HelpAssistantService Service, CountingModel Model, StubRetriever Knowledge) Build(
-        RagResult? retrieval = null,
+        RagRetrievalResult? retrieval = null,
         bool knowledgeAvailable = true,
         AssistantOptions? assistant = null,
         AssistantHelpOptions? bounds = null)
@@ -82,7 +91,7 @@ public sealed class HelpAssistantServiceTests
         var model = new CountingModel();
         var knowledge = new StubRetriever(
             knowledgeAvailable,
-            retrieval ?? new RagResult(RagRetrievalOutcome.Strong, new[] { Evidence() }));
+            retrieval ?? Strong(Evidence()));
 
         var options = assistant ?? new AssistantOptions
         {
@@ -134,7 +143,8 @@ public sealed class HelpAssistantServiceTests
     [Fact]
     public async Task NoStrongEvidence_DoesNotCallModel()
     {
-        var (service, model, _) = Build(RagResult.None);
+        var (service, model, _) = Build(
+            RagRetrievalResult.None(RagDomainKey.ProductHelp, RagRetrievalModes.Lexical));
 
         var answer = await service.AskAsync("quanto costa un abbonamento?", Array.Empty<HelpTurn>());
 
@@ -155,7 +165,7 @@ public sealed class HelpAssistantServiceTests
         Assert.False(answer.Ok);
         Assert.Equal(AssistantFailureReasons.Disabled, answer.Reason);
         Assert.Equal(0, model.Calls);
-        Assert.False(service.GetStatus().Enabled);
+        Assert.False((await service.GetStatusAsync()).Enabled);
     }
 
     [Fact]
@@ -206,9 +216,7 @@ public sealed class HelpAssistantServiceTests
     [Fact]
     public async Task Sources_Name_The_Section_So_An_Answer_Can_Be_Traced()
     {
-        var (service, _, _) = Build(new RagResult(
-            RagRetrievalOutcome.Strong,
-            new[] { Evidence(), Evidence(section: "Gruppi suggeriti") }));
+        var (service, _, _) = Build(Strong(Evidence(), Evidence(section: "Gruppi suggeriti")));
 
         var answer = await service.AskAsync("come uso i volti?", Array.Empty<HelpTurn>());
 
@@ -255,7 +263,7 @@ public sealed class HelpAssistantServiceTests
     [Theory]
     [InlineData(nameof(AssistantModelTrust.External), "external")]
     [InlineData(nameof(AssistantModelTrust.LocalTrusted), "localTrusted")]
-    public void Status_Reports_The_Boundary_So_The_Disclosure_Can_Be_True(
+    public async Task Status_Reports_The_Boundary_So_The_Disclosure_Can_Be_True(
         string trust, string expected)
     {
         var (service, _, _) = Build(assistant: new AssistantOptions
@@ -277,18 +285,18 @@ public sealed class HelpAssistantServiceTests
             },
         });
 
-        var status = service.GetStatus();
+        var status = await service.GetStatusAsync();
         Assert.True(status.Enabled);
         Assert.Equal(expected, status.ModelBoundary);
         Assert.Equal("A Label", status.ProviderLabel);
     }
 
     [Fact]
-    public void A_Disabled_Assistant_Reports_The_Safer_Boundary()
+    public async Task A_Disabled_Assistant_Reports_The_Safer_Boundary()
     {
         // Nothing is disclosed in this state, and of the two strings this is the
         // one to be wrong with.
         var (service, _, _) = Build(assistant: new AssistantOptions { Enabled = false });
-        Assert.Equal("external", service.GetStatus().ModelBoundary);
+        Assert.Equal("external", (await service.GetStatusAsync()).ModelBoundary);
     }
 }

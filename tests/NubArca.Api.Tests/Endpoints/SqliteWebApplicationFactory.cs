@@ -25,6 +25,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
 using NubArca.Api.Plates;
+using NubArca.Api.Rag;
 using NubArca.Api.ShareLinks;
 using NubArca.Api.Storage;
 using NubArca.Api.Tv;
@@ -301,6 +302,11 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // endpoint tests can resolve the AI services. AiOptions is bound by
             // Program.cs (outside the Postgres conditional), so it resolves here.
             services.AddAiSubstrate();
+            // RAG persistence + indexing. Mirrors the web/CLI host so an
+            // endpoint test exercises the SAME retriever production uses:
+            // without it `IRagRetriever` would resolve without its database
+            // half and the indexed-corpus path would be untested.
+            services.AddRagDatabase();
             // Slice 81: admin server-side import service.
             services.AddScoped<IAdminImportService, AdminImportService>();
             // Phase 2: photo date-taken organizer service.
