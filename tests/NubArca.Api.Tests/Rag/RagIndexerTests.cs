@@ -8,6 +8,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
+using NubArca.Api.Rag.Chunking;
 using NubArca.Api.Rag.Indexing;
 using NubArca.Api.Rag.Sources;
 using NubArca.Api.Rag.Storage;
@@ -128,6 +129,243 @@ public sealed class RagIndexerTests : IDisposable
         // deleted three releases ago.
         Assert.Empty(await _db.RagChunks
             .Where(c => !_db.RagSources.Any(s => s.Id == c.SourceId)).ToListAsync());
+    }
+
+    // ---- partial runs never reconcile ---------------------------------------
+
+    [Fact]
+    public async Task LimitedIndexRun_DoesNotRemoveUnseenSources()
+    {
+        // The bug: `rag index --limit 10` against a complete index saw ten
+        // sources and concluded that every other one had left the snapshot, so
+        // a command meant to do LESS work deleted most of the index.
+        var full = Repository(
+            Source("src/A.cs", BodyA), Source("docs/b.md", BodyB), Source("docs/c.md", BodyC));
+        await IndexAsync(full);
+        Assert.Equal(3, await _db.RagSources.CountAsync());
+
+        var outcome = await IndexAsync(full, limit: 1);
+
+        Assert.True(outcome.Partial);
+        Assert.False(outcome.ReconciliationPerformed);
+        Assert.Equal(0, outcome.SourcesRemoved);
+        Assert.Equal(3, await _db.RagSources.CountAsync());
+        Assert.Equal(3, await _db.RagDomainSources.CountAsync());
+    }
+
+    [Fact]
+    public async Task ZeroLimit_DoesNotRemoveExistingSources()
+    {
+        // The worst case of the same bug: a run that enumerated NOTHING would
+        // have concluded that the entire domain was gone.
+        var full = Repository(Source("src/A.cs", BodyA), Source("docs/b.md", BodyB));
+        await IndexAsync(full);
+
+        var outcome = await IndexAsync(full, limit: 0);
+
+        Assert.Equal(0, outcome.SourcesSeen);
+        Assert.True(outcome.Partial);
+        Assert.Equal(0, outcome.SourcesRemoved);
+        Assert.Equal(2, await _db.RagSources.CountAsync());
+    }
+
+    [Fact]
+    public async Task FullIndexRun_StillRemovesActuallyDepartedSources()
+    {
+        // The capability must survive the fix: a complete run is still allowed
+        // to conclude that a source it did not see has left.
+        await IndexAsync(Repository(Source("src/A.cs", BodyA), Source("docs/b.md", BodyB)));
+
+        var outcome = await IndexAsync(Repository(Source("src/A.cs", BodyA)));
+
+        Assert.False(outcome.Partial);
+        Assert.True(outcome.ReconciliationPerformed);
+        Assert.Equal(1, outcome.SourcesRemoved);
+        Assert.Equal(1, await _db.RagSources.CountAsync());
+    }
+
+    [Fact]
+    public async Task PartialRun_FollowedByFullRun_ReconcilesNormally()
+    {
+        await IndexAsync(Repository(
+            Source("src/A.cs", BodyA), Source("docs/b.md", BodyB), Source("docs/c.md", BodyC)));
+
+        await IndexAsync(Repository(Source("src/A.cs", BodyA)), limit: 1);
+        Assert.Equal(3, await _db.RagSources.CountAsync());
+
+        // The partial run deferred the decision; it did not cancel it.
+        var outcome = await IndexAsync(Repository(Source("src/A.cs", BodyA)));
+        Assert.Equal(2, outcome.SourcesRemoved);
+        Assert.Equal(1, await _db.RagSources.CountAsync());
+    }
+
+    [Fact]
+    public async Task DryRun_Reconciles_Nothing_And_Writes_Nothing()
+    {
+        await IndexAsync(Repository(Source("src/A.cs", BodyA), Source("docs/b.md", BodyB)));
+
+        var outcome = await Build(Repository(Source("src/A.cs", BodyA))).IndexAsync(
+            new RagIndexRequest(
+                RagDomains.NubArcaRepository, "/fixture", "test-revision", DryRun: true));
+
+        Assert.False(outcome.ReconciliationPerformed);
+        Assert.Equal(2, await _db.RagSources.CountAsync());
+    }
+
+    // ---- shared source snapshot conflict ------------------------------------
+
+    [Fact]
+    public async Task SharedSource_SameRevisionSameContent_IsReused()
+    {
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        var chunks = await _db.RagChunks.CountAsync();
+
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
+
+        Assert.Equal(1, await _db.RagSources.CountAsync());
+        Assert.Equal(chunks, await _db.RagChunks.CountAsync());
+        Assert.Equal(2, await _db.RagDomainSources.CountAsync());
+    }
+
+    [Fact]
+    public async Task SharedSource_DifferentRevision_IsRefusedWithoutMutation()
+    {
+        // One row owns Revision, ContentHash and the chunks. Indexing the other
+        // domain at a different commit would rewrite the bytes the first domain
+        // is serving — so it is refused rather than resolved.
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        var before = await SnapshotAsync();
+
+        var conflict = await Assert.ThrowsAsync<RagSharedSourceConflictException>(
+            () => IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-b"));
+
+        Assert.Equal(path, conflict.SourceKey);
+        Assert.Equal(RagDomains.ProductHelp, conflict.DomainKey);
+        Assert.Equal(before, await SnapshotAsync());
+    }
+
+    [Fact]
+    public async Task SharedSource_DifferentContent_IsRefusedWithoutMutation()
+    {
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        var before = await SnapshotAsync();
+
+        await Assert.ThrowsAsync<RagSharedSourceConflictException>(
+            () => IndexAsync(
+                Help(Source(path, BodyB + "\n\nUn paragrafo diverso.", feature: "faces")),
+                revision: "rev-a"));
+
+        Assert.Equal(before, await SnapshotAsync());
+    }
+
+    [Fact]
+    public async Task SharedSourceConflict_DoesNotDropExistingMembershipsOrEmbeddings()
+    {
+        SeedDeterministicProfile();
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), embed: true, revision: "rev-a");
+        var memberships = await _db.RagDomainSources.CountAsync();
+        var embeddings = await _db.RagChunkEmbeddings.CountAsync();
+        Assert.True(embeddings > 0);
+
+        await Assert.ThrowsAsync<RagSharedSourceConflictException>(
+            () => IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-b"));
+
+        Assert.Equal(memberships, await _db.RagDomainSources.CountAsync());
+        Assert.Equal(embeddings, await _db.RagChunkEmbeddings.CountAsync());
+    }
+
+    [Fact]
+    public async Task A_Source_Only_This_Domain_Owns_May_Change_Revision_Freely()
+    {
+        // The conflict is about SHARING, not about immutability. A source no
+        // other domain claims follows its snapshot forward normally.
+        await IndexAsync(Repository(Source("src/A.cs", BodyA)), revision: "rev-a");
+        await IndexAsync(Repository(Source("src/A.cs", BodyA + "\n// edited")), revision: "rev-b");
+
+        var source = await _db.RagSources.SingleAsync();
+        Assert.Equal("rev-b", source.Revision);
+    }
+
+    // ---- chunk interpretation version ---------------------------------------
+
+    [Fact]
+    public async Task SameContentNewIndexVersion_Rechunks()
+    {
+        // Chunks that an OLDER interpretation would have produced, over bytes
+        // that never changed. Content hashing alone keeps them forever, so
+        // improving a chunker would reach new files only and the corpus would
+        // quietly hold two interpretations at once.
+        await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+        await StaleChunksFromAnOlderInterpretationAsync(RagIndexFormat.Current - 1);
+
+        var outcome = await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+
+        Assert.True(outcome.ChunksUpdated > 0,
+            "a source chunked by an older interpretation must be rechunked");
+        Assert.DoesNotContain(
+            await _db.RagChunks.Select(c => c.Text).ToListAsync(),
+            t => t.Contains("OLD_INTERPRETATION", StringComparison.Ordinal));
+        Assert.Equal(RagIndexFormat.Current, (await _db.RagSources.SingleAsync()).IndexFormatVersion);
+    }
+
+    [Fact]
+    public async Task SameContentSameIndexVersion_DoesNotRechunk()
+    {
+        // The control for the test above: identical doctored chunks, but the
+        // CURRENT version. Nothing is rewritten, which is what proves the
+        // version — and not the doctoring — is what triggers a rechunk.
+        await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+        await StaleChunksFromAnOlderInterpretationAsync(RagIndexFormat.Current);
+
+        var outcome = await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+
+        Assert.Equal(0, outcome.ChunksUpdated);
+        Assert.Contains(
+            await _db.RagChunks.Select(c => c.Text).ToListAsync(),
+            t => t.Contains("OLD_INTERPRETATION", StringComparison.Ordinal));
+    }
+
+    /// Rewrites the stored chunks as though a different chunker had produced
+    /// them, and stamps the source with `version`.
+    private async Task StaleChunksFromAnOlderInterpretationAsync(int version)
+    {
+        foreach (var chunk in await _db.RagChunks.ToListAsync())
+        {
+            chunk.Text = $"OLD_INTERPRETATION {chunk.Ordinal}";
+            chunk.TextHash = RagHash.Sha256Hex(chunk.Text);
+        }
+        (await _db.RagSources.SingleAsync()).IndexFormatVersion = version;
+        await _db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task SameContentSameIndexVersion_ReusesChunks()
+    {
+        await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+        var outcome = await IndexAsync(Repository(Source("docs/b.md", BodyB)));
+
+        Assert.Equal(0, outcome.ChunksCreated);
+        Assert.Equal(0, outcome.ChunksUpdated);
+        Assert.True(outcome.ChunksUnchanged > 0);
+    }
+
+    [Fact]
+    public async Task IndexVersionRechunk_DropsEmbeddingsForChangedChunks()
+    {
+        SeedDeterministicProfile();
+        await IndexAsync(Repository(Source("docs/b.md", BodyB)), embed: true);
+        Assert.True(await _db.RagChunkEmbeddings.CountAsync() > 0);
+
+        // Chunk text must actually differ for an embedding to be stale: a
+        // rechunk producing byte-identical chunks correctly keeps its vectors.
+        await StaleChunksFromAnOlderInterpretationAsync(RagIndexFormat.Current - 1);
+
+        var outcome = await IndexAsync(Repository(Source("docs/b.md", BodyB)), embed: false);
+        Assert.True(outcome.EmbeddingsRemoved > 0);
     }
 
     // ---- two domains, one source --------------------------------------------
@@ -257,6 +495,73 @@ public sealed class RagIndexerTests : IDisposable
         Assert.Equal(chunks, await _db.RagChunks.Select(c => c.Id).OrderBy(i => i).ToListAsync());
     }
 
+    // ---- embedding failure is resumable, not fatal ---------------------------
+
+    [Fact]
+    public async Task Indexer_EmbeddingTimeout_ReturnsOutcomeInsteadOfCrashing()
+    {
+        // A slow model must not abort an index run with a native exception. The
+        // text is already written and useful — lexical retrieval works on it —
+        // so the run reports WHY it stopped embedding and stays resumable.
+        var profile = SeedDeterministicProfile();
+        var indexer = Build(
+            Repository(Source("docs/b.md", BodyB)),
+            embedding: new ThrowingEmbeddingProvider(RagFailureReasons.EmbeddingTimeout));
+
+        var outcome = await indexer.IndexAsync(new RagIndexRequest(
+            RagDomains.NubArcaRepository, "/fixture", "test-revision", EmbedPassages: true));
+
+        Assert.True(outcome.ChunksCreated > 0, "the text is indexed even when embedding stops");
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Equal(RagFailureReasons.EmbeddingTimeout, outcome.EmbeddingReason);
+        Assert.Equal(profile.Key, outcome.EmbeddingProfileKey);
+        Assert.True(await _db.RagChunks.AnyAsync());
+    }
+
+    [Fact]
+    public async Task Indexer_KeepsEmbeddingsWrittenBeforeATimeout()
+    {
+        // Resumable means the work already paid for is kept: re-running the
+        // index continues from where it stopped rather than starting over.
+        SeedDeterministicProfile();
+        var indexer = Build(
+            Repository(Source("docs/b.md", BodyB)),
+            embedding: new ThrowingEmbeddingProvider(
+                RagFailureReasons.EmbeddingTimeout, succeedFirst: 1));
+
+        var outcome = await indexer.IndexAsync(new RagIndexRequest(
+            RagDomains.NubArcaRepository, "/fixture", "test-revision", EmbedPassages: true));
+
+        Assert.Equal(1, outcome.EmbeddingsCreated);
+        Assert.Equal(RagFailureReasons.EmbeddingTimeout, outcome.EmbeddingReason);
+        Assert.Equal(1, await _db.RagChunkEmbeddings.CountAsync());
+    }
+
+    /// Fails after a configured number of successes, with a sanitized reason —
+    /// the shape a real provider produces on a model timeout.
+    private sealed class ThrowingEmbeddingProvider(string reason, int succeedFirst = 0)
+        : ITextEmbeddingProvider
+    {
+        private int _served;
+
+        public string Provider => AiProviders.Deterministic;
+
+        public TextEmbeddingReadiness CheckReadiness(AiProfile profile)
+            => TextEmbeddingReadiness.Ready;
+
+        public Task<TextEmbeddingResult> EmbedAsync(
+            AiProfile profile, string text, TextEmbeddingInputKind inputKind,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _served) > succeedFirst)
+            {
+                throw new TextEmbeddingUnavailableException(reason);
+            }
+            return new DeterministicTextEmbeddingProvider()
+                .EmbedAsync(profile, text, inputKind, cancellationToken);
+        }
+    }
+
     // ---- harness -------------------------------------------------------------
 
     private const string BodyA = """
@@ -280,6 +585,13 @@ public sealed class RagIndexerTests : IDisposable
 
         Apri un gruppo suggerito e scegli Assegna nome per dargli un'identità, oppure
         Aggiungi a persona esistente per unirlo a una persona già presente in libreria.
+        """;
+
+    private const string BodyC = """
+        # Album
+
+        Questa guida descrive come raccogliere le foto in un album condiviso,
+        abbastanza lunga da produrre almeno un chunk indicizzabile.
         """;
 
     private static RagSourceDescriptor Source(string key, string text, string? feature = null)
@@ -349,11 +661,36 @@ public sealed class RagIndexerTests : IDisposable
         FakeSourceProvider provider,
         bool embed = false,
         string revision = "test-revision",
-        string? profileKey = "rag-text-deterministic-v1")
+        string? profileKey = "rag-text-deterministic-v1",
+        int? limit = null)
         => Build(provider, profileKey).IndexAsync(
-            new RagIndexRequest(provider.Domain, "/fixture", revision, EmbedPassages: embed));
+            new RagIndexRequest(
+                provider.Domain, "/fixture", revision, EmbedPassages: embed, Limit: limit));
 
-    private RagIndexer Build(FakeSourceProvider provider, string? profileKey = "rag-text-deterministic-v1")
+    /// Everything an index run could have mutated, as one comparable value —
+    /// so a refusal can be asserted to have changed NOTHING rather than to have
+    /// changed nothing anybody thought to check.
+    private async Task<string> SnapshotAsync()
+    {
+        var sources = await _db.RagSources.AsNoTracking()
+            .OrderBy(s => s.SourceKey)
+            .Select(s => $"{s.SourceKey}|{s.Revision}|{s.ContentHash}|{s.IndexFormatVersion}")
+            .ToListAsync();
+        var memberships = await _db.RagDomainSources.AsNoTracking()
+            .OrderBy(m => m.DomainKey).ThenBy(m => m.SourceId)
+            .Select(m => $"{m.DomainKey}|{m.Priority}|{m.MetadataJson}")
+            .ToListAsync();
+        var chunks = await _db.RagChunks.AsNoTracking()
+            .OrderBy(c => c.SourceId).ThenBy(c => c.Ordinal)
+            .Select(c => $"{c.Ordinal}|{c.TextHash}")
+            .ToListAsync();
+        return string.Join("\n", sources.Concat(memberships).Concat(chunks));
+    }
+
+    private RagIndexer Build(
+        FakeSourceProvider provider,
+        string? profileKey = "rag-text-deterministic-v1",
+        ITextEmbeddingProvider? embedding = null)
     {
         var options = Options.Create(new RagOptions
         {
@@ -366,7 +703,7 @@ public sealed class RagIndexerTests : IDisposable
             RagDomainRegistry.Instance,
             new[] { provider },
             new TextEmbeddingResolver(
-                _db, new ITextEmbeddingProvider[] { new DeterministicTextEmbeddingProvider() }, options),
+                _db, new[] { embedding ?? new DeterministicTextEmbeddingProvider() }, options),
             serializer,
             new RagVectorIndexService(_db, serializer, TimeProvider.System),
             options,

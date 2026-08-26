@@ -138,6 +138,68 @@ Slice 1's manifest. Unclassified still means *not a member*, not *a low-priority
 member*: that rule is why an operations runbook stopped outranking the guidance
 somebody asking "how do I use faces?" actually needs.
 
+### Exactly one revision, actually read
+
+The repository provider reads Git OBJECTS at a resolved commit — `ls-tree` for
+the tree, `cat-file --batch` for the blobs — not files from the working tree. An
+index that stamps a source with a revision has to have read that revision;
+otherwise "this is how NubArca works at `943e37b`" describes whatever somebody
+had half-edited on disk when the command ran. A commit-ish resolves to a full
+40-character SHA before anything is written, so `--revision main` cannot mean
+something different next week, and an unresolvable one fails before any row
+changes.
+
+Tracked SYMLINKS are refused by mode, and their targets are never resolved,
+normalized or read. A link's blob is its target string, so following one imports
+whatever that path names — possibly outside the checkout entirely. Submodule
+entries are skipped for the same reason: there is no blob to read.
+
+Git runs at index time only.
+
+### Partial runs conclude nothing
+
+`rag index --limit N` is a PARTIAL run, and a partial run may not reconcile.
+"I did not see this source" means "it left the snapshot" only if the run could
+have seen it — so a capped pass over a complete index would otherwise interpret
+everything past the cap as deleted and remove its memberships, a command meant
+to do less work destroying most of the index. Completeness is derived from the
+REQUEST, never from how many sources were enumerated: inferring it from a count
+would make an empty repository look like a complete run that found nothing.
+`rag index` reports `partial` and `reconciliation_performed` on every run.
+
+### A shared source cannot hold two snapshots
+
+One row per source key is what makes a document shared by two domains cost one
+set of chunks and one embedding. That row also owns the revision, the content
+hash and those chunks — so indexing `nubarca-repository` at commit B would
+rewrite the bytes `product-help` is serving at commit A.
+
+The conflict is refused, not resolved: detaching the other domain, preferring the
+newer revision or duplicating under an ad-hoc key each pick a winner nobody
+asked for. `rag index` fails with `shared-source-snapshot-conflict` and names the
+file, and the fix is to index every domain that shares it at the same revision.
+A source only one domain claims follows its snapshot forward normally.
+
+### Mixed revisions fail closed
+
+Indexing commits incrementally, so an interrupted reindex can leave one domain
+holding sources from two commits. There is no honest single revision for that
+corpus — not the newest, not the most common, not the first — so retrieval
+refuses it with `rag_mixed_revision_index` until a complete reindex converges.
+That is a different condition from `rag_revision_mismatch`, which is a coherent
+index belonging to a different build: an operator fixes the first by finishing
+the reindex and the second by rebuilding the image.
+
+### Chunking has a version
+
+A source is reused only when its BYTES and NubArca's reading of them are both
+unchanged. `RagIndexFormat.Current` is the second half: change a chunker's
+heading rules, teach it a new declaration form, or change which symbols are
+extracted, and every already-indexed source would otherwise keep its old chunks
+forever — the improvement reaching new files only, and the corpus quietly
+becoming a mix of two interpretations. Bumping it is a deliberate act with a
+visible cost, and it is never derived from an application version.
+
 ## Chunking
 
 Markdown follows sections and carries a heading trail (`Volti › Gruppi
@@ -195,6 +257,14 @@ literal string.
 
 A missing model file is an availability condition with a reason code, and
 retrieval degrades to lexical.
+
+A TIMEOUT is a reason code too, and a resumable one: the text is already
+indexed, the embeddings that completed are kept, and re-running the index
+continues from where it stopped. The concurrency slot is released when the
+native inference actually stops, not when NubArca stops waiting for it —
+`Run` is a blocking native call, so releasing on the timeout let the next
+caller start a second one immediately and a configured concurrency of 1 could
+become N under a slow model.
 
 ## Bounds and privacy
 
@@ -255,10 +325,14 @@ count. It is a permanent regression canary, and a technical reference to
 The first real evaluation of `nubarca-repository` measured worse after the slice
 was committed than before it, and the reason was worth more than the score: the
 golden set is a C# file holding the golden queries as string literals, so once
-the repository indexed itself, the single best lexical match for
-*"which code prevents an External model from using repository knowledge?"* became
-the file containing that exact sentence. It led three of four failures and took
-MRR from 0.583 to 0.395.
+the repository indexed itself, the single best lexical match for a conceptual
+golden question became the file containing that exact sentence. It led three of
+four failures and took MRR from 0.583 to 0.395.
+
+Note what this paragraph does NOT do: quote the question. Describing a benchmark
+by pasting its prompt puts the prompt back in the corpus, and the guard would
+have to be widened until it excluded the documentation too. A test enforces
+this — see below.
 
 `src/NubArca.Api/Rag/Evaluation/` is therefore excluded from the repository
 corpus, as a rule rather than as one file's exemption: a corpus that contains
@@ -278,10 +352,12 @@ interesting part, and it is the argument for hybrid retrieval in one table:
 - **exact-identifier questions** — `PhotoVectorIndexService`, a test name, a
   configuration key, `face_previews table` — are answered first-hit by the
   lexical path, and no embedding model reliably does that;
-- **conceptual questions** — *"where is the external Help privacy boundary
-  enforced?"* — return plausible-but-not-expected sources: the documentation
-  about the boundary and the tests that assert it, rather than the service that
-  implements it. All three remaining failures are of this kind.
+- **conceptual questions** — the prose ones asking where a behaviour is
+  implemented — return plausible-but-not-expected sources: the documentation
+  about a boundary and the tests that assert it, rather than the service that
+  implements it. All three remaining failures are of this kind. The questions
+  themselves live in `RagGoldenSet` and are deliberately not quoted here, for the
+  reason above.
 
 That is the gap semantic retrieval exists to close, and it is the number to
 watch when a model is configured. It is recorded here rather than tuned away:

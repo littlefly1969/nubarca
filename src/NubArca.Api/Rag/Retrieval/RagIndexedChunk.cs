@@ -35,10 +35,16 @@ public sealed record RagIndexedChunk(
 /// `Revision` is a property of the SNAPSHOT, not of a chunk: a corpus that
 /// mixes revisions cannot be checked against the running build, and "which
 /// version of NubArca is this answer about" would have no answer.
+/// `IsMixedRevision` means the domain's sources came from more than one commit —
+/// an interrupted reindex, since indexing commits incrementally. Such a corpus
+/// is refused rather than served: half of it describes one release and half
+/// another, and no single revision is an honest answer to "which version is this
+/// about". It resolves itself once a complete reindex finishes.
 public sealed record RagCorpus(
     RagDomainKey Domain,
     string Revision,
-    IReadOnlyList<RagIndexedChunk> Chunks)
+    IReadOnlyList<RagIndexedChunk> Chunks,
+    bool IsMixedRevision = false)
 {
     public static RagCorpus Empty(RagDomainKey domain)
         => new(domain, string.Empty, Array.Empty<RagIndexedChunk>());

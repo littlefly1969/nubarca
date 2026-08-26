@@ -335,5 +335,7 @@ should not create a new permanent category of user data on its own.
   separate.
 - `tests/NubArca.Api.Tests/Rag/` — the manifest boundary, the revision gate, and
   golden retrieval against the REAL shipped sources, including the Italian
-  question that motivated the rewrite:
-  *"come faccio a utilizzare la funzione dei volti?"*
+  how-to about the Faces feature that motivated the rewrite. That question is
+  kept as a permanent canary in `RagGoldenSet`, and deliberately not quoted here:
+  this file is approved Product Help material, so writing the benchmark's own
+  prompt into it would let the corpus answer with a copy of the question.

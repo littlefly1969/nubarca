@@ -175,34 +175,61 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
     [Fact]
     public async Task UsesTrackedFilesOnly_And_Never_Reads_DotGit()
     {
-        Write("src/Service.cs", CSharpFixture);
-        Write("docs/guide.md", MarkdownFixture);
-        Write("untracked-experiment.cs", CSharpFixture);
-        Write(".git/config", "[remote \"origin\"]\n\turl = git@example.invalid:someone/nubarca.git\n");
-        Write(".env", "POSTGRES_PASSWORD=hunter2\n");
-        Write("src/bin/Debug/Generated.cs", CSharpFixture);
-
-        // The lister reports what git tracks. `.git/config` and the untracked
-        // experiment are on disk and are not in it — and `.env` and the build
-        // output ARE tracked here on purpose, because "tracked" is the first
-        // gate and not the last one.
-        var provider = new RepositorySnapshotSourceProvider(new FakeLister(
-            "src/Service.cs", "docs/guide.md", ".env", "src/bin/Debug/Generated.cs"));
+        // The snapshot is the COMMIT's tree. `.git/config` and an untracked
+        // experiment are not in it — and `.env` and the build output ARE, on
+        // purpose, because tracked is the first gate and not the last one.
+        var provider = new RepositorySnapshotSourceProvider(new FakeSnapshotReader()
+            .WithContent("src/Service.cs", CSharpFixture)
+            .WithContent("docs/guide.md", MarkdownFixture)
+            .WithContent(".env", "POSTGRES_PASSWORD=hunter2\n")
+            .WithContent("src/bin/Debug/Generated.cs", CSharpFixture));
 
         var keys = await KeysAsync(provider);
 
         Assert.Equal(new[] { "docs/guide.md", "src/Service.cs" }, keys.Order().ToArray());
-        Assert.DoesNotContain("untracked-experiment.cs", keys);
         Assert.DoesNotContain(".git/config", keys);
         Assert.DoesNotContain(".env", keys);
         Assert.DoesNotContain("src/bin/Debug/Generated.cs", keys);
     }
 
     [Fact]
+    public async Task TrackedSymlink_IsRejected_And_Its_Target_Is_Never_Read()
+    {
+        // A symlink's blob is its TARGET PATH, so following one imports whatever
+        // that path names — including a file outside the checkout entirely. It
+        // is refused by MODE, and the target is never resolved to decide whether
+        // it happens to be safe.
+        var provider = new RepositorySnapshotSourceProvider(new FakeSnapshotReader()
+            .WithContent("docs/guide.md", MarkdownFixture)
+            .WithContent("docs/escape.md", "/etc/shadow", mode: "120000")
+            .WithContent("vendored", "abc123", mode: "160000"));
+
+        var keys = await KeysAsync(provider);
+
+        Assert.Equal(new[] { "docs/guide.md" }, keys.ToArray());
+        Assert.DoesNotContain("docs/escape.md", keys);
+        Assert.DoesNotContain("vendored", keys);
+        Assert.Equal(1, provider.Tally.SkipReasons.GetValueOrDefault("symlink"));
+        Assert.Equal(1, provider.Tally.SkipReasons.GetValueOrDefault("submodule"));
+    }
+
+    [Fact]
+    public void The_Policy_Refuses_Link_Modes_Independently_Of_The_Reader()
+    {
+        // Stated as policy so a future implementation that went back to
+        // filesystem reads would still have to walk past an explicit refusal.
+        Assert.False(RepositorySourcePolicy.CheckGitMode("120000").IsEligible);
+        Assert.False(RepositorySourcePolicy.CheckGitMode("160000").IsEligible);
+        Assert.False(RepositorySourcePolicy.CheckGitMode(null).IsEligible);
+        Assert.True(RepositorySourcePolicy.CheckGitMode("100644").IsEligible);
+        Assert.True(RepositorySourcePolicy.CheckGitMode("100755").IsEligible);
+    }
+
+    [Fact]
     public async Task Sources_Carry_Revision_And_Content_Hash()
     {
-        Write("docs/guide.md", MarkdownFixture);
-        var provider = new RepositorySnapshotSourceProvider(new FakeLister("docs/guide.md"));
+        var provider = new RepositorySnapshotSourceProvider(
+            new FakeSnapshotReader().WithContent("docs/guide.md", MarkdownFixture));
 
         var sources = await ListAsync(provider, revision: "abc123def456");
         var source = Assert.Single(sources);
@@ -210,7 +237,7 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
         Assert.Equal("abc123def456", source.Revision);
         Assert.Equal(64, source.ContentHash.Length);
         Assert.Equal(
-            RagHash.Sha256Hex(await File.ReadAllBytesAsync(Path.Combine(_root, "docs/guide.md"))),
+            RagHash.Sha256Hex(System.Text.Encoding.UTF8.GetBytes(MarkdownFixture)),
             source.ContentHash);
         Assert.Equal(RagCodeLanguages.Markdown, source.CodeLanguage);
         Assert.Equal(RagSourceKinds.Documentation, source.SourceKind);
@@ -224,25 +251,25 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
     [Fact]
     public async Task An_Unchanged_File_Hashes_The_Same_And_An_Edited_One_Does_Not()
     {
-        Write("docs/guide.md", MarkdownFixture);
-        var provider = new RepositorySnapshotSourceProvider(new FakeLister("docs/guide.md"));
+        var reader = new FakeSnapshotReader().WithContent("docs/guide.md", MarkdownFixture);
+        var provider = new RepositorySnapshotSourceProvider(reader);
 
         var first = (await ListAsync(provider, "r1")).Single().ContentHash;
         var again = (await ListAsync(provider, "r1")).Single().ContentHash;
         Assert.Equal(first, again);
 
-        Write("docs/guide.md", MarkdownFixture + "\n\nUn paragrafo nuovo che cambia il contenuto.\n");
+        reader.WithContent(
+            "docs/guide.md", MarkdownFixture + "\n\nUn paragrafo nuovo che cambia il contenuto.\n");
         Assert.NotEqual(first, (await ListAsync(provider, "r1")).Single().ContentHash);
     }
 
     [Fact]
     public async Task The_Provider_Reports_Why_It_Skipped_Without_Listing_Every_Path()
     {
-        Write("src/Service.cs", CSharpFixture);
-        Write(".env", "SECRET=1\n");
-        Write("assets/logo.png", "not really a png but the extension decides");
-        var provider = new RepositorySnapshotSourceProvider(new FakeLister(
-            "src/Service.cs", ".env", "assets/logo.png"));
+        var provider = new RepositorySnapshotSourceProvider(new FakeSnapshotReader()
+            .WithContent("src/Service.cs", CSharpFixture)
+            .WithContent(".env", "SECRET=1\n")
+            .WithContent("assets/logo.png", "not really a png but the extension decides"));
 
         await ListAsync(provider, "r");
 
@@ -256,9 +283,10 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
     [Fact]
     public async Task A_Provider_Serves_Exactly_One_Domain()
     {
-        var repository = new RepositorySnapshotSourceProvider(new FakeLister());
+        var reader = new FakeSnapshotReader();
+        var repository = new RepositorySnapshotSourceProvider(reader);
         Assert.Equal(RagDomains.NubArcaRepository, repository.Domain);
-        Assert.Equal(RagDomains.ProductHelp, new ProductHelpSourceProvider().Domain);
+        Assert.Equal(RagDomains.ProductHelp, new ProductHelpSourceProvider(reader).Domain);
         await Task.CompletedTask;
     }
 
@@ -305,19 +333,67 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
     private async Task<List<string>> KeysAsync(IRagSourceProvider provider)
         => (await ListAsync(provider)).Select(s => s.SourceKey).ToList();
 
-    /// Stands in for `git ls-files`. The eligibility rules are what is worth
-    /// testing exhaustively; that git reports tracked files is git's problem.
-    private sealed class FakeLister(params string[] tracked) : IRepositoryFileLister
+    /// Stands in for a real Git checkout. The eligibility rules are what is
+    /// worth testing exhaustively; that git can read its own object store is
+    /// git's problem, and the real reader has its own integration test.
+    private sealed class FakeSnapshotReader : IRepositorySnapshotReader
     {
+        private readonly Dictionary<string, (string Mode, byte[] Content)> _entries = new(StringComparer.Ordinal);
+
+        public FakeSnapshotReader(params string[] paths)
+        {
+            foreach (var path in paths) _entries[path] = ("100644", Array.Empty<byte>());
+        }
+
+        public FakeSnapshotReader WithContent(string path, string content, string mode = "100644")
+        {
+            _entries[path] = (mode, System.Text.Encoding.UTF8.GetBytes(content));
+            return this;
+        }
+
         public Task<string> ResolveRootAsync(string path, CancellationToken cancellationToken = default)
             => Task.FromResult(path);
 
-        public Task<IReadOnlyList<string>> ListTrackedAsync(
-            string root, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<string>>(tracked);
-
         public Task<string> ResolveRevisionAsync(
-            string root, CancellationToken cancellationToken = default)
-            => Task.FromResult("fake-revision");
+            string root, string? revision = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(revision ?? "fake-revision");
+
+        public Task<IRepositorySnapshot> OpenAsync(
+            string root, string revision, CancellationToken cancellationToken = default)
+            => Task.FromResult<IRepositorySnapshot>(new FakeSnapshot(root, revision, _entries));
+    }
+
+    private sealed class FakeSnapshot : IRepositorySnapshot
+    {
+        private readonly Dictionary<string, (string Mode, byte[] Content)> _entries;
+
+        public FakeSnapshot(
+            string root, string revision, Dictionary<string, (string Mode, byte[] Content)> entries)
+        {
+            Root = root;
+            Revision = revision;
+            _entries = entries;
+            Entries = entries
+                .OrderBy(e => e.Key, StringComparer.Ordinal)
+                .Select(e => new RepositorySnapshotEntry(e.Key, e.Value.Mode, $"oid-{e.Key}"))
+                .ToList();
+        }
+
+        public string Root { get; }
+        public string Revision { get; }
+        public IReadOnlyList<RepositorySnapshotEntry> Entries { get; }
+
+        public Task<byte[]> ReadAsync(
+            RepositorySnapshotEntry entry, CancellationToken cancellationToken = default)
+        {
+            // Mirrors the real snapshot: a link's bytes are never handed out.
+            if (entry.IsSymbolicLink || entry.IsSubmodule)
+            {
+                throw new InvalidOperationException("Refusing to read a link entry as content.");
+            }
+            return Task.FromResult(_entries[entry.Path].Content);
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

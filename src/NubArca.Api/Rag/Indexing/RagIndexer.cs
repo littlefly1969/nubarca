@@ -102,7 +102,14 @@ public sealed class RagIndexer : IRagIndexer
             }
         }
 
-        if (!request.DryRun)
+        // RECONCILIATION IS ONLY EVER A COMPLETE RUN'S CONCLUSION.
+        //
+        // "I did not see this source" means "it left the snapshot" only if the
+        // run could have seen it. A `--limit 10` pass over a complete index saw
+        // ten sources and nothing else, and treating the remaining eighteen
+        // hundred as deleted removed their memberships — a partial run
+        // destroying most of the index it was asked to extend.
+        if (request.MayReconcile)
         {
             state.SourcesRemoved = await RemoveDepartedAsync(domain.Key, seenSourceIds, cancellationToken);
         }
@@ -110,9 +117,10 @@ public sealed class RagIndexer : IRagIndexer
         var embedding = await EmbedAsync(domain.Key, request, state, cancellationToken);
 
         _log.LogInformation(
-            "rag index: domain={Domain} revision={Revision} sources={Sources} chunks={Chunks} embeddings={Embeddings}",
-            domain.Key, Short(request.Revision), state.SourcesSeen,
-            state.ChunksCreated + state.ChunksUpdated, state.EmbeddingsCreated);
+            "rag index: domain={Domain} revision={Revision} partial={Partial} reconciled={Reconciled} "
+            + "sources={Sources} chunks={Chunks} embeddings={Embeddings}",
+            domain.Key, Short(request.Revision), request.IsPartial, request.MayReconcile,
+            state.SourcesSeen, state.ChunksCreated + state.ChunksUpdated, state.EmbeddingsCreated);
 
         return new RagIndexOutcome(
             domain.Key, request.Revision,
@@ -120,7 +128,9 @@ public sealed class RagIndexer : IRagIndexer
             state.SourcesRemoved,
             state.ChunksCreated, state.ChunksUpdated, state.ChunksRemoved, state.ChunksUnchanged,
             state.EmbeddingsCreated, state.EmbeddingsRemoved, state.VectorsIndexed,
-            embedding.ProfileKey, embedding.Reason);
+            embedding.ProfileKey, embedding.Reason,
+            Partial: request.IsPartial,
+            ReconciliationPerformed: request.MayReconcile);
     }
 
     // ---- sources ------------------------------------------------------------
@@ -132,7 +142,37 @@ public sealed class RagIndexer : IRagIndexer
         var source = await _db.RagSources
             .FirstOrDefaultAsync(s => s.SourceKey == descriptor.SourceKey, cancellationToken);
 
-        var contentChanged = source is null || source.ContentHash != descriptor.ContentHash;
+        // A SHARED SOURCE CANNOT REPRESENT TWO SNAPSHOTS AT ONCE.
+        //
+        // One row per SourceKey is what makes `docs/help/faces.md` cost one set
+        // of chunks and one embedding however many domains claim it. The same
+        // row also owns Revision, ContentHash and those chunks — so indexing
+        // `nubarca-repository` at commit B would silently rewrite the bytes
+        // `product-help` is serving at commit A, and Help would start answering
+        // from a revision it never agreed to.
+        //
+        // Refused rather than resolved. Detaching the other domain, picking the
+        // newer revision or duplicating under an ad-hoc key each pick a winner
+        // nobody asked for; the honest answer is that both domains must be
+        // indexed at the same revision, which is a thing the operator can
+        // actually do.
+        if (source is not null
+            && (source.Revision != descriptor.Revision || source.ContentHash != descriptor.ContentHash))
+        {
+            var claimedElsewhere = await _db.RagDomainSources.AnyAsync(
+                m => m.SourceId == source.Id && m.DomainKey != domainKey, cancellationToken);
+            if (claimedElsewhere)
+            {
+                throw new RagSharedSourceConflictException(descriptor.SourceKey, domainKey);
+            }
+        }
+
+        // Rechunk when the BYTES changed or when our reading of them did. The
+        // second half is why RagIndexFormat exists: without it, improving a
+        // chunker only ever reaches files that happen to be edited afterwards.
+        var contentChanged = source is null
+                             || source.ContentHash != descriptor.ContentHash
+                             || source.IndexFormatVersion != RagIndexFormat.Current;
 
         if (source is null)
         {
@@ -156,6 +196,7 @@ public sealed class RagIndexer : IRagIndexer
         source.SourceKind = descriptor.SourceKind;
         source.Revision = descriptor.Revision;
         source.ContentHash = descriptor.ContentHash;
+        source.IndexFormatVersion = RagIndexFormat.Current;
         source.Language = descriptor.Language;
         source.CodeLanguage = descriptor.CodeLanguage;
 

@@ -37,9 +37,18 @@ public class RagSource
     /// revision it describes cannot be checked against the running build.
     public string Revision { get; set; } = string.Empty;
 
-    /// SHA-256 of the source text, hex. The idempotence key for reindexing:
-    /// unchanged content keeps its chunks and therefore keeps its embeddings.
+    /// SHA-256 of the source BYTES, hex. Exactly that and nothing else — half of
+    /// the idempotence key for reindexing.
     public string ContentHash { get; set; } = string.Empty;
+
+    /// The chunk-interpretation version these chunks were produced by (see
+    /// RagIndexFormat). The other half of the idempotence key.
+    ///
+    /// Kept as its own column rather than folded into ContentHash, because a
+    /// hash that silently mixed in a version number would be documented as the
+    /// source's SHA-256 and not be one — and the first person to compare it
+    /// against `git hash-object` would be debugging the wrong thing.
+    public int IndexFormatVersion { get; set; }
 
     /// Natural language of the prose (see RagLanguages), where known.
     public string Language { get; set; } = string.Empty;

@@ -63,12 +63,15 @@ public static class RepositorySourcePolicy
     /// THE EVALUATION SET IS NOT PART OF THE CORPUS IT MEASURES.
     ///
     /// `RagGoldenSet.cs` holds the golden queries as string literals, so once the
-    /// repository indexed itself, the single best lexical match for
-    /// "which code prevents an External model from using repository knowledge?"
-    /// became the file containing that exact sentence. It led three of four
-    /// failures in the first real evaluation run and dropped MRR from 0.583 to
-    /// 0.395 — a benchmark measuring its own question list, which is worth
-    /// nothing.
+    /// repository indexed itself, the single best lexical match for a conceptual
+    /// golden question became the file containing that exact sentence. It led
+    /// three of four failures in the first real evaluation run and dropped MRR
+    /// from 0.583 to 0.395 — a benchmark measuring its own question list, which
+    /// is worth nothing.
+    ///
+    /// This comment deliberately does not quote the question either: a comment
+    /// is indexed source, so explaining the problem by restating the prompt
+    /// would recreate it. RagContaminationTests enforces that.
     ///
     /// This is a general rule rather than one file's exemption: a corpus that
     /// contains the questions cannot answer them, it can only find them.
@@ -159,6 +162,27 @@ public static class RepositorySourcePolicy
             ["LICENSE"] = RagCodeLanguages.Text,
             ["Makefile"] = RagCodeLanguages.Shell,
         };
+
+    /// Whether a Git tree entry's MODE may be treated as readable content.
+    ///
+    /// Stated as policy rather than left implicit in the reader, because the
+    /// dangerous behaviour is a filesystem read that FOLLOWS a link. The
+    /// predecessor read files through the working tree, so a tracked symlink
+    /// pointing at `/etc/shadow` or at a sibling checkout was simply read. The
+    /// Git-object reader cannot do that by construction — a symlink's blob is
+    /// its target STRING — but a future implementation could regress to
+    /// filesystem reads, and this is the assertion that would catch it.
+    ///
+    /// The target is never resolved, never normalized back into the repository,
+    /// and never read to decide whether it is safe. A link is refused for being
+    /// a link.
+    public static RepositoryEligibility CheckGitMode(string? mode) => mode switch
+    {
+        RepositorySnapshotEntry.SymbolicLinkMode => RepositoryEligibility.No("symlink"),
+        RepositorySnapshotEntry.SubmoduleMode => RepositoryEligibility.No("submodule"),
+        null or "" => RepositoryEligibility.No("unknown-mode"),
+        _ => RepositoryEligibility.Eligible,
+    };
 
     /// Path-only eligibility. Content is checked separately, because a caller
     /// that has not read the file yet should still be able to skip it.

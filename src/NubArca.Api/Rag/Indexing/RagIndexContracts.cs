@@ -19,7 +19,17 @@ public sealed record RagIndexOutcome(
     int EmbeddingsRemoved,
     int VectorsIndexed,
     string? EmbeddingProfileKey,
-    string? EmbeddingReason)
+    string? EmbeddingReason,
+
+    /// Whether this run saw only PART of the domain's snapshot.
+    ///
+    /// A partial run is not a statement about what the snapshot contains, so it
+    /// is never allowed to conclude that anything left it — see
+    /// `ReconciliationPerformed`.
+    bool Partial = false,
+
+    /// Whether departed sources were reconciled. False for a partial or dry run.
+    bool ReconciliationPerformed = false)
 {
     public static RagIndexOutcome Empty(string domain, string revision)
         => new(domain, revision, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, null, null);
@@ -31,13 +41,28 @@ public sealed record RagIndexOutcome(
 /// indexing text is seconds and embedding it is minutes, and an operator
 /// re-running the index after a rename should not silently pay for inference
 /// they did not ask for.
+///
+/// `Limit` makes the run PARTIAL, which is a stronger statement than "slower".
+/// A complete run may conclude that a source it did not see has left the
+/// snapshot; a partial run has seen nothing beyond its cap and may conclude
+/// nothing. `rag index --limit 10` against a complete index used to interpret
+/// every source after the tenth as deleted and remove its membership.
 public sealed record RagIndexRequest(
     string Domain,
     string RootPath,
     string Revision,
     bool EmbedPassages = false,
     int? Limit = null,
-    bool DryRun = false);
+    bool DryRun = false)
+{
+    /// A run that cannot have seen the whole snapshot. Derived from the REQUEST
+    /// rather than from how many sources happened to be enumerated: inferring
+    /// completeness from a count would make an empty repository look like a
+    /// complete run that found nothing, and delete the entire index.
+    public bool IsPartial => Limit is not null;
+
+    public bool MayReconcile => !IsPartial && !DryRun;
+}
 
 /// Idempotent indexing of one domain from one snapshot.
 ///
@@ -48,4 +73,23 @@ public sealed record RagIndexRequest(
 public interface IRagIndexer
 {
     Task<RagIndexOutcome> IndexAsync(RagIndexRequest request, CancellationToken cancellationToken = default);
+}
+
+/// One source is claimed by another domain at a different snapshot.
+///
+/// Fail-closed and NOT downgradeable to a warning: continuing would mutate a
+/// source row — and its chunks — out from under a domain that never asked for
+/// the new revision. The source key is a repository-relative citation path, so
+/// naming it tells the operator which file to look at without disclosing a
+/// filesystem layout or any content.
+public sealed class RagSharedSourceConflictException(string sourceKey, string domainKey)
+    : Exception(
+        $"Source '{sourceKey}' is already indexed by another domain at a different revision or content. "
+        + $"Reindex every domain that shares it at the same revision before indexing '{domainKey}'.")
+{
+    public const string Reason = "shared-source-snapshot-conflict";
+
+    public string SourceKey { get; } = sourceKey;
+
+    public string DomainKey { get; } = domainKey;
 }

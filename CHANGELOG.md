@@ -189,6 +189,35 @@ documents and a local assistant will use, without a redesign.
   top-3-expected-source against a golden set, with no LLM judging anything.
 - **Query text, passage text and vectors are never logged, returned or sent.**
 
+Hardening found by reviewing the pushed implementation, before anything private
+is introduced:
+
+- **A partial index run no longer deletes what it did not look at.**
+  `--limit N` used to reconcile as though it had seen the whole snapshot, so a
+  command asking for less work removed every membership past the cap.
+- **Repository bytes are read from the commit, not from the working tree.** The
+  indexer resolves a revision and then reads Git objects at it, so an index can
+  no longer stamp a commit SHA onto whatever was half-edited on disk. Tracked
+  symlinks are refused rather than followed, so no target outside the checkout
+  can be imported.
+- **A source shared by two domains cannot silently change revision under one of
+  them** — that conflict is refused and named, because the row owns the chunks
+  both domains are reading.
+- **A domain holding two revisions refuses to answer** until a reindex
+  converges, instead of picking a "most common" revision that means nothing.
+- **Reclassifying a document now invalidates the cached index.** All the ranking
+  metadata lives on the membership row, so a running server used to keep serving
+  the old classification until it restarted.
+- **A slow embedding model can no longer exceed its configured concurrency.**
+  The inference slot is released when the native call actually stops, not when
+  NubArca stops waiting for it, and a timeout is a sanitized resumable reason
+  rather than a crash.
+- **Improving a chunker now rechunks what is already indexed**, instead of
+  applying only to files somebody happens to edit afterwards.
+- **A benchmark question may not appear in the corpus it is measured against**,
+  enforced by a test — which immediately caught one that had been line-wrapped
+  back into the documentation.
+
 No user documents, media metadata, People or Faces became retrievable knowledge,
 and no assistant tools or actions were added. See
 [docs/rag-platform.md](docs/rag-platform.md).

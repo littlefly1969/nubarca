@@ -27,6 +27,13 @@ namespace NubArca.Api.Rag.Sources;
 /// manifest remains an allowlist.
 public sealed class ProductHelpSourceProvider : IRagSourceProvider
 {
+    private readonly IRepositorySnapshotReader _reader;
+
+    public ProductHelpSourceProvider(IRepositorySnapshotReader reader)
+    {
+        _reader = reader;
+    }
+
     public string Domain => RagDomains.ProductHelp;
 
     /// Manifest entries whose file was not found in the last enumeration. A
@@ -38,34 +45,43 @@ public sealed class ProductHelpSourceProvider : IRagSourceProvider
         RagSourceRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var root = Path.GetFullPath(request.RootPath);
+        // The SAME exact-revision snapshot the repository provider reads. A
+        // source shared by both domains has to be the same bytes at the same
+        // commit, and it cannot be if one provider reads Git objects and the
+        // other reads the working tree.
+        var root = Path.GetFullPath(
+            await _reader.ResolveRootAsync(Path.GetFullPath(request.RootPath), cancellationToken));
+        await using var snapshot = await _reader.OpenAsync(root, request.Revision, cancellationToken);
+
+        var byPath = snapshot.Entries.ToDictionary(e => e.Path, StringComparer.Ordinal);
         var missing = new List<string>();
 
-        // Manifest ORDER, not directory order: the index is deterministic across
+        // Manifest ORDER, not tree order: the index is deterministic across
         // machines and filesystems, which is what makes a golden retrieval test
         // meaningful.
         foreach (var source in ProductHelpSources.Manifest)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var full = Path.Combine(root, source.Path.Replace('/', Path.DirectorySeparatorChar));
-            byte[] bytes;
-            try
-            {
-                if (!File.Exists(full))
-                {
-                    missing.Add(source.Path);
-                    continue;
-                }
-                bytes = await File.ReadAllBytesAsync(full, cancellationToken);
-            }
-            catch (IOException)
+            if (!byPath.TryGetValue(source.Path, out var entry)
+                || !RepositorySourcePolicy.CheckGitMode(entry.Mode).IsEligible)
             {
                 missing.Add(source.Path);
                 continue;
             }
 
-            var text = System.Text.Encoding.UTF8.GetString(bytes).TrimStart('﻿');
+            byte[] bytes;
+            try
+            {
+                bytes = await snapshot.ReadAsync(entry, cancellationToken);
+            }
+            catch (RepositorySnapshotUnavailableException)
+            {
+                missing.Add(source.Path);
+                continue;
+            }
+
+            var text = System.Text.Encoding.UTF8.GetString(bytes).TrimStart('\ufeff');
             if (string.IsNullOrWhiteSpace(text)) { missing.Add(source.Path); continue; }
 
             var title = MarkdownTitle(text) ?? Path.GetFileNameWithoutExtension(source.Path);
@@ -75,7 +91,7 @@ public sealed class ProductHelpSourceProvider : IRagSourceProvider
                 Path: source.Path,
                 Title: title,
                 SourceKind: source.SourceKind,
-                Revision: request.Revision,
+                Revision: snapshot.Revision,
                 ContentHash: RagHash.Sha256Hex(bytes),
                 Language: source.Language,
                 CodeLanguage: RagCodeLanguages.Markdown,

@@ -37,34 +37,51 @@ public sealed class DatabaseRagCorpusSource : IRagCorpusSource
     public async Task<string> GetSignatureAsync(
         RagDomainKey domain, CancellationToken cancellationToken = default)
     {
-        // AGGREGATES, not rows, and deliberately over `rag_sources` alone.
+        // AGGREGATES, not rows, and deliberately never over `rag_chunks`.
         //
         // The chunk table is the large one — tens of thousands of rows holding
         // the corpus text — and touching it here would put a join over all of it
         // on the path of every question. It is also unnecessary: the indexer
         // stamps a source's `UpdatedAt` whenever its content hash changes, and a
-        // source's chunks only change when its content does. So the count, the
-        // newest stamp and the revision describe the corpus completely.
+        // source's chunks only change when its content does.
+        //
+        // MEMBERSHIP is included for a reason found by review rather than by a
+        // failing test. Ranking reads Priority, Feature, Aliases, Intent,
+        // Audience, SourceKind and Language — and all of them live on
+        // `rag_domain_sources`, not on the source. Reclassifying a document
+        // touches only the membership row, so a signature built from source
+        // timestamps alone would leave a running web process serving a lexical
+        // index built from the old classification until it restarted. The CLI
+        // clears its own cache after indexing; correctness must not depend on
+        // that, because the web host never runs it.
         var membership =
             from m in _db.RagDomainSources.AsNoTracking()
             join source in _db.RagSources.AsNoTracking() on m.SourceId equals source.Id
             where m.DomainKey == domain.Value
-            select new { source.Revision, source.CreatedAt, source.UpdatedAt };
+            select new
+            {
+                source.Revision,
+                SourceStamp = source.UpdatedAt ?? source.CreatedAt,
+                MembershipStamp = m.UpdatedAt ?? m.CreatedAt,
+            };
 
-        // Three scalar aggregates rather than one grouped projection: EF warns
-        // about `First` over an ungrouped-looking query, and a warning on every
-        // retrieval is noise an operator eventually stops reading.
         var count = await membership.CountAsync(cancellationToken);
         if (count == 0) return "empty";
 
-        var stamp = await membership.MaxAsync(x => x.UpdatedAt ?? x.CreatedAt, cancellationToken);
-        var revision = await membership
-            .OrderByDescending(x => x.UpdatedAt ?? x.CreatedAt)
-            .ThenBy(x => x.Revision)
-            .Select(x => x.Revision)
-            .FirstAsync(cancellationToken);
+        var sourceStamp = await membership.MaxAsync(x => x.SourceStamp, cancellationToken);
+        var membershipStamp = await membership.MaxAsync(x => x.MembershipStamp, cancellationToken);
 
-        return $"db:{count}:{stamp:O}:{revision}";
+        // Distinct revisions, not "the newest one": a domain holding two of them
+        // is a mixed snapshot, and RagRetriever refuses it. Counting here means
+        // the signature also changes as a reindex converges, so the cached index
+        // is rebuilt the moment the domain becomes coherent again.
+        var revisions = await membership
+            .Select(x => x.Revision)
+            .Distinct()
+            .OrderBy(r => r)
+            .ToListAsync(cancellationToken);
+
+        return $"db:{count}:{sourceStamp:O}:{membershipStamp:O}:{string.Join('|', revisions)}";
     }
 
     public async Task<RagCorpus> LoadAsync(
@@ -127,13 +144,22 @@ public sealed class DatabaseRagCorpusSource : IRagCorpusSource
                 ChunkId: row.ChunkId));
         }
 
-        var revision = rows
-            .GroupBy(r => r.Revision, StringComparer.Ordinal)
-            .OrderByDescending(g => g.Count())
-            .ThenBy(g => g.Key, StringComparer.Ordinal)
-            .First().Key;
+        // NO MODAL REVISION. A domain holding sources from two commits is not a
+        // snapshot with a majority opinion — it is an interrupted reindex, and
+        // picking the most common, newest or first revision would let the corpus
+        // claim a coherence it does not have. The empty revision marks it, and
+        // RagRetriever refuses to answer from it.
+        var revisions = rows
+            .Select(r => r.Revision)
+            .Where(r => !string.IsNullOrEmpty(r))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
 
-        return new RagCorpus(domain, revision, chunks);
+        return new RagCorpus(
+            domain,
+            revisions.Count == 1 ? revisions[0] : string.Empty,
+            chunks,
+            IsMixedRevision: revisions.Count > 1);
     }
 
     /// Path segments without their extension: `frontend/src/pages/PeoplePage.tsx`

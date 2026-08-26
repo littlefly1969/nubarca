@@ -172,6 +172,18 @@ public static class RagText
     public static bool LooksLikeHowTo(string? text)
         => Tokenize(text).Any(HowToMarkers.Contains);
 
+    /// The folded form of a text, for callers that must LOCATE a token inside
+    /// the original rather than tokenize it.
+    ///
+    /// Public because excerpting needs exactly this and nothing else: query
+    /// terms are folded and lowercased, so searching for `perche` in a chunk
+    /// containing `perché` finds nothing unless the haystack is folded the same
+    /// way. Fold() preserves length for every character NubArca indexes — it
+    /// removes only non-spacing marks, which folding already decomposed — so an
+    /// index into the folded text is an index into the original.
+    public static string FoldForSearch(string? text)
+        => string.IsNullOrEmpty(text) ? string.Empty : Fold(text).ToLowerInvariant();
+
     private static string Fold(string text)
     {
         var decomposed = text.Normalize(NormalizationForm.FormD);
