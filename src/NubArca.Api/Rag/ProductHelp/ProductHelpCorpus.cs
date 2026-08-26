@@ -2,42 +2,43 @@ using System.Text.Json.Serialization;
 
 namespace NubArca.Api.Rag.ProductHelp;
 
-/// Controlled vocabularies for the first domain.
+/// The controlled vocabulary the Product Help manifest classifies with.
 ///
-/// Small closed sets rather than free tags: ranking has to be able to prefer a
-/// user guide over a technical reference for a how-to question, and it can only
-/// do that if the values mean the same thing in every document. An open tag
-/// space would make every new source a new ranking special case.
+/// These are now ALIASES of the generic RAG vocabulary rather than a second set
+/// of strings. The values were always the same; keeping two declarations of
+/// them meant a domain could be classified with a constant the retriever's
+/// ranking profile does not recognise, and nothing would say so — the document
+/// would simply stop being preferred.
 public static class ProductHelpVocabulary
 {
     public static class Audience
     {
-        public const string User = "user";
-        public const string Admin = "admin";
-        public const string Technical = "technical";
+        public const string User = RagAudiences.User;
+        public const string Admin = RagAudiences.Admin;
+        public const string Technical = RagAudiences.Technical;
     }
 
     public static class Intent
     {
-        public const string HowTo = "how-to";
-        public const string Explanation = "explanation";
-        public const string Troubleshooting = "troubleshooting";
-        public const string Reference = "reference";
+        public const string HowTo = RagIntents.HowTo;
+        public const string Explanation = RagIntents.Explanation;
+        public const string Troubleshooting = RagIntents.Troubleshooting;
+        public const string Reference = RagIntents.Reference;
     }
 
     public static class SourceKind
     {
-        public const string UserGuide = "user-guide";
-        public const string UiContract = "ui-contract";
-        public const string FeatureCatalog = "feature-catalog";
-        public const string AdminGuide = "admin-guide";
-        public const string TechnicalReference = "technical-reference";
+        public const string UserGuide = RagSourceKinds.UserGuide;
+        public const string UiContract = RagSourceKinds.UiContract;
+        public const string FeatureCatalog = RagSourceKinds.FeatureCatalog;
+        public const string AdminGuide = RagSourceKinds.AdminGuide;
+        public const string TechnicalReference = RagSourceKinds.TechnicalReference;
     }
 
     public static class Language
     {
-        public const string Italian = "it";
-        public const string English = "en";
+        public const string Italian = RagLanguages.Italian;
+        public const string English = RagLanguages.English;
     }
 }
 

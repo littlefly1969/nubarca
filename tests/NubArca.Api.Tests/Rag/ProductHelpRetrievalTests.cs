@@ -1,5 +1,7 @@
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.ProductHelp;
+using NubArca.Api.Rag.Retrieval;
+using NubArca.Api.Rag.Text;
 using Xunit;
 
 namespace NubArca.Api.Tests.Rag;
@@ -17,16 +19,21 @@ public sealed class ProductHelpRetrievalTests
     /// which share accidental words with it and answer none of it.
     private const string ItalianFacesQuestion = "come faccio a utilizzare la funzione dei volti?";
 
-    private static readonly Lazy<ProductHelpRetriever> Shipped = new(() =>
-        new ProductHelpRetriever(ProductHelpCorpusBuilder.Build(RepositoryRoot(), "test-revision")));
+    // The REAL generic retriever over the REAL shipped corpus. Slice 2 moved
+    // Product Help behind a domain-general retriever; what these tests assert
+    // did not change, and neither did any of the numbers behind it.
+    private static readonly Lazy<RagRetriever> Shipped = new(() =>
+        RagTestHarness.ForProductHelp(RagTestHarness.ShippedProductHelp()));
 
     private static IReadOnlyList<RagEvidence> Ask(
         string question, int maxEvidence = 6, int maxCharacters = 12000)
-        => Shipped.Value.Retrieve(
-            new RagQuery(RagDomainKey.ProductHelp, question, maxEvidence, maxCharacters)).Evidence;
+        => Result(question, maxEvidence, maxCharacters).Evidence;
 
-    private static RagResult Result(string question)
-        => Shipped.Value.Retrieve(new RagQuery(RagDomainKey.ProductHelp, question, 6, 12000));
+    private static RagRetrievalResult Result(
+        string question, int maxEvidence = 6, int maxCharacters = 12000)
+        => Shipped.Value
+            .RetrieveAsync(new RagQuery(RagDomainKey.ProductHelp, question, maxEvidence, maxCharacters))
+            .GetAwaiter().GetResult();
 
     [Fact]
     public void The_Italian_Faces_Question_Retrieves_The_Faces_User_Guidance()
@@ -103,7 +110,7 @@ public sealed class ProductHelpRetrievalTests
         // stopword set, every English sentence containing "come" scored against
         // an Italian question — which is how a question about faces reached a
         // paragraph about how requests come in.
-        var terms = ProductHelpText.ContentTokens("come faccio a utilizzare la funzione dei volti?");
+        var terms = RagText.ContentTokens("come faccio a utilizzare la funzione dei volti?");
 
         Assert.DoesNotContain("come", terms);
         Assert.DoesNotContain("faccio", terms);
@@ -112,7 +119,7 @@ public sealed class ProductHelpRetrievalTests
 
         // And the same word is dropped from English text, so it can match
         // nothing from either side.
-        Assert.DoesNotContain("come", ProductHelpText.ContentTokens("requests come in over HTTP"));
+        Assert.DoesNotContain("come", RagText.ContentTokens("requests come in over HTTP"));
     }
 
     [Fact]
@@ -161,7 +168,7 @@ public sealed class ProductHelpRetrievalTests
         // known to be at the far end.
         var filler = string.Join("\n\n", Enumerable.Repeat(
             "Questa sezione descrive il comportamento generale della libreria multimediale.", 12));
-        var retriever = new ProductHelpRetriever(new ProductHelpCorpus(
+        var retriever = RagTestHarness.ForProductHelp(new ProductHelpCorpus(
             RagDomainKey.ProductHelp.Value, "r", new[]
             {
                 new ProductHelpDocument(
@@ -176,8 +183,9 @@ public sealed class ProductHelpRetrievalTests
                     Priority: 100),
             }));
 
-        var evidence = retriever.Retrieve(new RagQuery(
-            RagDomainKey.ProductHelp, "come ripristina i volti ignorati?", 1, 320)).Evidence;
+        var evidence = retriever.RetrieveAsync(new RagQuery(
+                RagDomainKey.ProductHelp, "come ripristina i volti ignorati?", 1, 320))
+            .GetAwaiter().GetResult().Evidence;
 
         Assert.Single(evidence);
         Assert.True(evidence[0].Text.Length <= 320);
@@ -204,7 +212,7 @@ public sealed class ProductHelpRetrievalTests
     [Fact]
     public void Chunks_Are_Section_Sized_Rather_Than_Four_Thousand_Characters()
     {
-        var corpus = ProductHelpCorpusBuilder.Build(RepositoryRoot(), "r");
+        var corpus = RagTestHarness.ShippedProductHelp("r");
         Assert.NotEmpty(corpus.Documents);
 
         // The old builder accumulated paragraphs to 4,000 characters, which
@@ -240,21 +248,13 @@ public sealed class ProductHelpRetrievalTests
         // A private domain will exist later. A feature holding a public
         // retriever must not silently receive public evidence when it asked for
         // something else — it must fail.
-        var result = Shipped.Value.Retrieve(
-            new RagQuery(new RagDomainKey("private-library"), ItalianFacesQuestion, 6, 12000));
+        var result = Shipped.Value
+            .RetrieveAsync(new RagQuery(new RagDomainKey("private-library"), ItalianFacesQuestion, 6, 12000))
+            .GetAwaiter().GetResult();
 
         Assert.Equal(RagRetrievalOutcome.Unavailable, result.Outcome);
         Assert.Empty(result.Evidence);
     }
 
-    internal static string RepositoryRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "NubArca.sln"))) return directory.FullName;
-            directory = directory.Parent;
-        }
-        throw new InvalidOperationException("could not locate the repository root (NubArca.sln)");
-    }
+    internal static string RepositoryRoot() => RagTestHarness.RepositoryRoot();
 }

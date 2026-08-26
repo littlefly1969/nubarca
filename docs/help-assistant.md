@@ -109,15 +109,25 @@ and distinct copy rather than one badge with different words.
 ## The `product-help` RAG domain
 
     scope       system / public
+    privacy     Public
+    external    allowed
     revision    NUBARCA_GIT_SHA
     private     none
     runtime     no repository access, no network
 
 Help asks `IRagRetriever` for the domain `product-help`, as a constant. A domain
-is a body of knowledge with ONE privacy story, so a future private domain is a
-separate domain rather than a filter over this one — and a retriever answers
-`Unavailable` for a domain that is not its own rather than quietly serving
-public evidence to something that asked for something else.
+is a body of knowledge with ONE privacy story, so a private domain is a separate
+domain rather than a filter over this one.
+
+`IRagRetriever` is domain-general — Help is a CONSUMER of the retrieval platform,
+not its shape. The platform, its second domain (`nubarca-repository`,
+system-internal and never available to an External model), the local ONNX
+embeddings and the hybrid lexical/vector retrieval are described in
+[docs/rag-platform.md](rag-platform.md). What matters here is that the domain
+is a constant Help passes, that nothing a client sends can change it, and that
+`AssistantRagPolicy` checks trust against the domain policy over the EVIDENCE
+before a prompt is built — so evidence from any other domain fails the request
+rather than reaching a provider.
 
 ### The source manifest
 
@@ -170,12 +180,15 @@ installation does not have, which is worse than no Help.
 
 ### Retrieval
 
-Lexical, local, deterministic. No vector database and no cloud embeddings in this
-version: sending text to an embedding service to decide what to send to a chat
-service would widen exactly the boundary the feature exists to keep narrow.
-Semantic retrieval is the next step, and it lands *behind* `IRagRetriever`.
+Local and deterministic. Lexical retrieval is always available and is a complete
+configuration on its own; optional semantic retrieval runs a LOCAL ONNX
+embedding model and is fused with it. There are no cloud embeddings and no
+hosted fallback — sending text to an embedding service to decide what to send to
+a chat service would widen exactly the boundary the feature exists to keep
+narrow. Semantic retrieval landed *behind* `IRagRetriever`, so everything below
+still describes what Help does.
 
-What it does that the predecessor did not:
+What lexical retrieval does that the predecessor did not:
 
 - **Section-aware chunks.** Roughly 800–1,800 characters, aligned to headings and
   paragraphs, each carrying its heading trail. The predecessor accumulated to

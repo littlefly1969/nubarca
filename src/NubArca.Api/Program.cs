@@ -38,6 +38,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
 using NubArca.Api.Plates;
+using NubArca.Api.Rag;
 using NubArca.Api.Security;
 using NubArca.Api.ShareLinks;
 using NubArca.Api.Storage;
@@ -807,6 +808,11 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // jobs. AiOptions is bound above (outside this block) so it always resolves.
     builder.Services.AddAiSubstrate();
 
+    // RAG persistence: the indexed corpus, canonical chunk embeddings, the
+    // pgvector accelerator and the indexer. Inert until an operator runs
+    // `rag index`; semantic retrieval stays off until `Rag:SemanticEnabled`.
+    builder.Services.AddRagDatabase();
+
     // Slice 93: web remote-staging upload (resumable browser chunks into
     // temporary staging, then handoff to the admin-import pipeline). The
     // cleanup sweeper is registered always but self-disables unless
@@ -910,21 +916,17 @@ builder.Services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
 builder.Services.AddHttpClient<NubArca.Api.Assistant.IAssistantTextModel,
     NubArca.Api.Assistant.OpenAiCompatibleTextModel>();
 
-// The `product-help` RAG domain: public, build-time, revision-pinned. Loaded
-// once at startup — the corpus ships in the image and cannot change under a
-// running process, and re-reading it per request would only add a filesystem
-// dependency to every Help question.
-builder.Services.AddSingleton<NubArca.Api.Rag.IRagRetriever>(sp =>
-{
-    var resolver = sp.GetRequiredService<NubArca.Api.Assistant.AssistantModelResolver>();
-    var log = sp.GetRequiredService<ILoggerFactory>()
-        .CreateLogger<NubArca.Api.Rag.ProductHelp.ProductHelpRetriever>();
-    return new NubArca.Api.Rag.ProductHelp.ProductHelpRetriever(
-        NubArca.Api.Rag.ProductHelp.ProductHelpCorpusLoader.Load(
-            resolver.HelpBounds.CorpusPath,
-            NubArca.Api.Rag.ProductHelp.ProductHelpCorpusLoader.RunningRevision,
-            log));
-});
+// The RAG substrate: named domains, their code-defined privacy policy, and the
+// generic retriever every consumer goes through. `product-help` is one domain
+// and Help is one consumer — the platform is not Help-shaped, so the semantic
+// layer landed BEHIND IRagRetriever rather than beside it.
+//
+// Registered unconditionally: the Product Help corpus ships in the image, so an
+// installation with no database still answers product questions lexically. The
+// indexed corpus and the vector table are added inside the Postgres block.
+builder.Services.Configure<NubArca.Api.Rag.RagOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
+builder.Services.AddRagSubstrate();
 builder.Services.AddScoped<NubArca.Api.Help.HelpAssistantService>();
 
 // VSEM-01: canonical video temporal substrate (scene segments + sample

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.Backends;
 using NubArca.Api.Ai.Onnx;
 using NubArca.Api.Ai.Onnx.Face;
+using NubArca.Api.Ai.TextEmbeddings;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 
@@ -152,6 +153,79 @@ public sealed class AiProfileRegistry : IAiProfileRegistry
             await _db.SaveChangesAsync(cancellationToken);
         }
 
+        return new AiSeedResult(modelsCreated, profilesCreated);
+    }
+
+    public async Task<AiSeedResult> SeedRagTextEmbeddingProfilesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var modelsCreated = 0;
+        var profilesCreated = 0;
+
+        // (model key, profile key, provider, dimension, config hash)
+        var wanted = new List<(string Model, string Profile, string Provider, int Dimension, string? Config)>
+        {
+            (DeterministicTextEmbeddingProvider.ModelKey,
+             DeterministicTextEmbeddingProvider.ProfileKey,
+             AiProviders.Deterministic,
+             DeterministicTextEmbeddingProvider.Dimension,
+             null),
+        };
+        foreach (var (profileKey, catalogKey) in RagTextEmbeddingModels.ProfileToCatalogKey)
+        {
+            var config = RagTextEmbeddingModels.Catalog[catalogKey];
+            wanted.Add((config.Key, profileKey, AiProviders.Onnx, config.Dimension, config.Key));
+        }
+
+        foreach (var (modelKey, profileKey, provider, dimension, configHash) in wanted)
+        {
+            var model = await _db.AiModels.FirstOrDefaultAsync(m => m.Key == modelKey, cancellationToken);
+            if (model is null)
+            {
+                model = new AiModel
+                {
+                    Id = Guid.NewGuid(),
+                    Key = modelKey,
+                    Provider = provider,
+                    Capability = AiCapabilities.TextEmbedding,
+                    Modality = AiModalities.Text,
+                    Version = 1,
+                    Dimension = dimension,
+                    DistanceMetric = AiDistanceMetrics.Cosine,
+                    Enabled = true,
+                    CreatedAt = now,
+                };
+                _db.AiModels.Add(model);
+                modelsCreated++;
+            }
+
+            if (await _db.AiProfiles.AnyAsync(p => p.Key == profileKey, cancellationToken)) continue;
+
+            _db.AiProfiles.Add(new AiProfile
+            {
+                Id = Guid.NewGuid(),
+                Key = profileKey,
+                AiModelId = model.Id,
+                Capability = AiCapabilities.TextEmbedding,
+                Modality = AiModalities.Text,
+                Dimension = dimension,
+                DistanceMetric = AiDistanceMetrics.Cosine,
+                // Never the capability default: model selection for RAG is an
+                // explicit configuration key, so "the newest profile" can never
+                // become the active one by appearing.
+                IsDefault = false,
+                Enabled = true,
+                ConfigHash = configHash,
+                CreatedAt = now,
+            });
+            profilesCreated++;
+        }
+
+        if (_db.ChangeTracker.HasChanges())
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
         return new AiSeedResult(modelsCreated, profilesCreated);
     }
 

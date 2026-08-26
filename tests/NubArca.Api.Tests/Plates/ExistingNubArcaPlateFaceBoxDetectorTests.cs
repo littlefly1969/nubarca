@@ -151,6 +151,8 @@ public sealed class ExistingNubArcaPlateFaceBoxDetectorTests
             => throw new NotSupportedException();
         public Task<AiSeedResult> SeedOnnxFaceEvalProfilesAsync(CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+        public Task<AiSeedResult> SeedRagTextEmbeddingProfilesAsync(CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
     }
 
     private sealed class FakeFaceDetector : IFaceDetector

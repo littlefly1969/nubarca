@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
+using NubArca.Api.Domain.Rag;
 
 namespace NubArca.Api.Data;
 
@@ -189,6 +190,15 @@ public class AppDbContext : DbContext
     // Short-lived, owner-scoped QR upload capabilities for the TV "Beauty Lab"
     // mobile-handoff flow (hash-only token; upload-into-lab authority only).
     public DbSet<AestheticUploadSession> AestheticUploadSessions => Set<AestheticUploadSession>();
+
+    // The generic RAG substrate: source identity, domain membership, passage,
+    // canonical embedding. SYSTEM knowledge (product help, the NubArca
+    // repository) — deliberately not the owner-private document tables above,
+    // whose ownership and privacy semantics are a user's own files.
+    public DbSet<RagSource> RagSources => Set<RagSource>();
+    public DbSet<RagDomainSource> RagDomainSources => Set<RagDomainSource>();
+    public DbSet<RagChunk> RagChunks => Set<RagChunk>();
+    public DbSet<RagChunkEmbedding> RagChunkEmbeddings => Set<RagChunkEmbedding>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

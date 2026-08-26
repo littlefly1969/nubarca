@@ -148,6 +148,51 @@ Conversations are not stored: they live in the browser, and a bounded slice
 rides with each request. See
 [docs/help-assistant.md](docs/help-assistant.md).
 
+### Local retrieval platform
+
+The retrieval behind Ask NubArca became a general capability. Product Help is now
+one **domain** on it rather than its shape — the same substrate is what private
+documents and a local assistant will use, without a redesign.
+
+- **Domains carry a privacy policy, defined in code.** `product-help` is public
+  and may ground an external model. `nubarca-repository` — NubArca's own approved
+  tracked source, for development and diagnostics — is system-internal and
+  **never** reaches an external model. That holds even though NubArca is public
+  on GitHub today: public hosting is a fact about this month, not a property of
+  the domain, and the rule has to stay right for an installation carrying local
+  patches or a private fork. The policy is a compiled table, so no database edit,
+  admin endpoint or restored backup can widen it — and the check runs over the
+  evidence itself, before a prompt exists.
+- **One source, many domains.** A document that is both repository knowledge and
+  approved product help is stored once, chunked once and embedded once, with a
+  membership row per domain. Each domain keeps its own classification of it.
+- **Retrieval is hybrid, and lexical stays first-class.** Optional local ONNX
+  text embeddings, a dimension-scoped pgvector index and Reciprocal Rank Fusion
+  join exact matching rather than replacing it — an identifier, a configuration
+  key or a file name is a permanent use case that vectors are worse at. The
+  fusion works on ranks rather than scores, because BM25 and cosine are not
+  calibrated to the same scale.
+- **Embeddings are local, and there is no hosted alternative.** Embedding is how
+  NubArca decides what to send; routing that through a third party would send the
+  whole corpus somewhere in order to work out what may leave. Model weights are
+  never committed and never downloaded — a missing model degrades retrieval to
+  lexical with a reason, and nothing becomes unhealthy.
+- **Semantic retrieval is off by default and fails soft.** Disabled, no profile,
+  missing model, missing pgvector and an unsupported dimension all fall back to
+  lexical and say which. Product Help keeps working with no database index at
+  all, from the corpus in the image.
+- **Operator diagnostics** — `rag domains`, `status`, `index`, `coverage`,
+  `query`, `evaluate`, `seed-profiles` and `validate-model`. `rag query` shows
+  what retrieval found and how each path ranked it, and never calls a generative
+  model: "retrieval found the wrong thing" and "the model wrote something wrong"
+  are fixed in different places. `rag evaluate` reports Recall@5, MRR and
+  top-3-expected-source against a golden set, with no LLM judging anything.
+- **Query text, passage text and vectors are never logged, returned or sent.**
+
+No user documents, media metadata, People or Faces became retrievable knowledge,
+and no assistant tools or actions were added. See
+[docs/rag-platform.md](docs/rag-platform.md).
+
 ### Google Cast
 
 A video can be sent to a Chromecast, a Google TV, an Android TV or any other

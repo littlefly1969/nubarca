@@ -1,6 +1,6 @@
-namespace NubArca.Api.Rag.ProductHelp;
+namespace NubArca.Api.Rag.Text;
 
-/// The product feature catalogue: the words people actually use for a feature,
+/// The PRODUCT feature catalogue: the words people actually use for a feature,
 /// in both interface languages, grouped by the concept they name.
 ///
 /// Retrieval needs this because the interface is Italian and much of the
@@ -10,10 +10,16 @@ namespace NubArca.Api.Rag.ProductHelp;
 ///
 /// Expansion is DETERMINISTIC, LOCAL and BOUNDED: a fixed table, no model, no
 /// network, and a hard cap on how many terms one question can become. It is
-/// also weaker than a literal hit — an expanded term contributes at a discount
-/// (see ProductHelpRetriever), so a document that uses the person's own words
+/// It belongs to product-facing domains. The repository domain does NOT expand
+/// through it: `persona` and `person` are the same concept to someone asking
+/// how to use NubArca, and are two different identifiers to someone asking
+/// where a class is declared — expanding there would blur the exact-symbol
+/// queries that are the whole reason a developer reaches for it.
+///
+/// Expansion is also weaker than a literal hit — an expanded term contributes at a discount
+/// (see RagLexicalIndex), so a document that uses the person's own words
 /// still wins.
-public static class ProductHelpAliases
+public static class RagAliasCatalog
 {
     /// Each group is one concept. Every token in a group expands to every other
     /// token in it.
@@ -35,7 +41,17 @@ public static class ProductHelpAliases
         new[] { "foto", "fotografia", "fotografie", "immagine", "immagini", "photo", "photos", "picture", "pictures", "image", "images" },
         new[] { "cassaforte", "vault", "privato", "private" },
         new[] { "miniatura", "miniature", "anteprima", "anteprime", "thumbnail", "thumbnails", "preview", "previews", "poster" },
-        new[] { "televisore", "television", "telecomando", "remote" },
+        // Casting and the television, as one concept. Somebody who wants to
+        // show photos on a TV says `trasmetto`, `casting`, `chromecast` or just
+        // `tv`, and the guidance is one document — so the vocabulary has to
+        // reach it from any of them. Verb forms are listed because Italian
+        // conjugates: `trasmetto` and `trasmetti` are the same question.
+        new[]
+        {
+            "tv", "televisore", "television", "telecomando", "remote",
+            "cast", "casting", "chromecast", "trasmetti", "trasmetto",
+            "trasmettere", "trasmissione", "proietta", "proiettare",
+        },
     };
 
     /// A question expands to at most this many terms. A person cannot make

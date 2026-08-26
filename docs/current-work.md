@@ -680,6 +680,45 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   local; it does not make Help able to see anything new, and a test asserts that
   on the outbound bytes. No trust level grants write tools or unconfirmed
   execution: nothing changes because a model suggested it.
+- **RAG is a PLATFORM; Product Help is one domain on it.** `IRagRetriever` is
+  domain-general, and a domain's policy — scope, privacy class, whether an owner
+  is required, whether its evidence may reach an External model — is defined in
+  CODE (`RagDomainRegistry`), never in an editable row. The database records
+  which sources exist and which revision was indexed; it does not record whether
+  evidence may leave the trust boundary, so no `UPDATE`, admin endpoint or
+  restored backup can widen one. `product-help` is Public and External-approved;
+  `nubarca-repository` is SystemInternal and is **never** available to an
+  External model — deliberately so even though NubArca is public on GitHub
+  today, because public hosting is a fact about this month rather than a
+  property of the domain. `AssistantRagPolicy` intersects model trust with
+  domain policy over the EVIDENCE, before a prompt exists.
+- **A source exists once and may belong to several domains.** `rag_sources` /
+  `rag_domain_sources` / `rag_chunks` / `rag_chunk_embeddings`: adding a domain
+  costs a membership row, not a second copy of the text and every vector.
+  Domain-specific classification (Product Help's feature, aliases, audience,
+  intent, priority) lives on the MEMBERSHIP, because it is that domain's opinion
+  — a C# file does not acquire an `intent=how-to` because the schema can hold
+  one. These tables are separate from the owner-private `document_*` tables and
+  from the photo/face vector tables on purpose.
+- **Retrieval is hybrid and lexical stays first-class.** Semantic retrieval is
+  OFF by default (`Rag__SemanticEnabled`), uses a LOCAL ONNX text-embedding
+  profile (`Rag__TextEmbeddingProfileKey`, 384 dimensions), and searches a
+  dimension-specific pgvector table filtered by domain AND profile in the query.
+  Fusion is RRF over ranks rather than scores, because BM25F and cosine are not
+  calibrated to the same scale. Canonical float32 bytes are the truth and
+  pgvector is a rebuildable accelerator, so SQLite and a Postgres without the
+  extension degrade to lexical. Every failure — disabled, no profile, missing
+  model, no pgvector, unsupported dimension — falls back and reports a reason in
+  the retrieval mode. There is NO hosted embedding path and nothing downloads
+  weights.
+- **Indexing is idempotent and revision-aware.** `rag index` is explicit and
+  CLI-driven; a source whose content hash is unchanged keeps its chunks, and a
+  chunk whose text hash is unchanged keeps its embedding. Sources that leave a
+  snapshot lose that domain's membership, and are deleted only when no domain
+  still claims them. The repository provider indexes APPROVED TRACKED files —
+  `git ls-files` is the first gate, not the last — and resolves the checkout's
+  top level, because every path rule is written against repository-root-relative
+  paths.
 - **Help knowledge is an explicit MANIFEST, not "every `docs/**.md`".**
   `ProductHelpSources` names each approved document with an audience, an intent,
   a source kind, a priority and feature aliases. The previous automatic rule let

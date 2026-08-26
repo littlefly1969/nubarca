@@ -190,6 +190,10 @@ public class AiOnnxOpenVinoOptions
     public string FaceDetectorDevice { get; set; } = "CPU";
     public string FaceRecognizerDevice { get; set; } = "CPU";
 
+    // The RAG text-embedding tower. Its own setting because it is its own model:
+    // the photo text tower and this one share nothing but a modality.
+    public string RagTextDevice { get; set; } = "CPU";
+
     // GPU inference precision. MUST be FP32 for output-equivalence with the CPU
     // reference / sidecar (FP16, the OpenVINO GPU default, measurably diverges).
     public string GpuPrecision { get; set; } = "FP32";
@@ -200,6 +204,7 @@ public class AiOnnxOpenVinoOptions
         OnnxModel.PhotoText => PhotoTextDevice,
         OnnxModel.FaceDetector => FaceDetectorDevice,
         OnnxModel.FaceRecognizer => FaceRecognizerDevice,
+        OnnxModel.RagText => RagTextDevice,
         _ => "CPU",
     };
 }
@@ -235,6 +240,7 @@ public sealed class AiOnnxOptionsValidator : IValidateOptions<AiOptions>
                 ("PhotoTextDevice", ov.PhotoTextDevice, false),
                 ("FaceDetectorDevice", ov.FaceDetectorDevice, false),
                 ("FaceRecognizerDevice", ov.FaceRecognizerDevice, false),
+                ("RagTextDevice", ov.RagTextDevice, false),
             })
             {
                 if (!IsValidDevice(device) && !(allowDual && OnnxDevice.IsDual(device)))
