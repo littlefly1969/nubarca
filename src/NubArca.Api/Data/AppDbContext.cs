@@ -64,6 +64,9 @@ public class AppDbContext : DbContext
     public DbSet<PrivateVaultAccessToken> PrivateVaultAccessTokens => Set<PrivateVaultAccessToken>();
     public DbSet<OwnerDeletedContentTombstone> OwnerDeletedContentTombstones => Set<OwnerDeletedContentTombstone>();
 
+    // Replayable owner ingestion operations (mobile-sync-v1). See Domain/UploadOperation.
+    public DbSet<UploadOperation> UploadOperations => Set<UploadOperation>();
+
     // Short-lived, single-video playback capabilities delegated to an external
     // Cast receiver (token hash only). See Domain/CastMediaGrant.
     public DbSet<CastMediaGrant> CastMediaGrants => Set<CastMediaGrant>();
