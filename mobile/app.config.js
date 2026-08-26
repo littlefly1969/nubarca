@@ -51,8 +51,23 @@ module.exports = {
     orientation: 'default',
     platforms: ['ios', 'android'],
     scheme: 'nubarca',
-    // Expo Router (SDK 54).
-    plugins: ['expo-router'],
+    // Expo Router (SDK 54) + media-library permission plugin (mobile-sync-v1):
+    // granular photo+video read access only, requested at enablement time —
+    // never at startup, never for location metadata.
+    plugins: [
+      'expo-router',
+      [
+        'expo-media-library',
+        {
+          saveToLibrary: false,
+          granularPermissions: ['photo', 'video'],
+          photosPermission:
+            'Allow NubArca to read the photos you choose so they can be synced to your own private library.',
+          videosPermission:
+            'Allow NubArca to read the videos you choose so they can be synced to your own private library.',
+        },
+      ],
+    ],
     experiments: {
       typedRoutes: true,
     },

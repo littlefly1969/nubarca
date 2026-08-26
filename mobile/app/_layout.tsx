@@ -15,6 +15,7 @@ import { I18nProvider, useI18n } from '../src/i18n';
 import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
 import { viewerIdentityKey } from '../src/media/viewerIdentity';
+import { SyncProvider } from '../src/sync/SyncProvider';
 import { colors } from '../src/ui/tokens';
 
 function IdentityKeyedViewerProvider({
@@ -40,24 +41,30 @@ function RootGate(): React.JSX.Element {
     return <Splash />;
   }
 
+  const userId = session.user?.id ?? 'anon';
+
   return (
     <>
       {session.status === 'unauthed' ? (
         // Redirect away from any deep link into authenticated routes.
         <Redirect href="/login" />
       ) : null}
-      <Stack
-        key={session.user?.id ?? 'anon'}
-        screenOptions={{
-          headerShown: false,
-          animation: 'slide_from_right',
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="login" options={{ animation: 'fade' }} />
-        <Stack.Screen name="album/[id]" />
-        <Stack.Screen name="media/[id]" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
-      </Stack>
+      {/* Sync owns per-account durable state, so its provider lives exactly
+          as long as one identity — remounted (and torn down) on any switch. */}
+      <SyncProvider key={userId} accountId={userId}>
+        <Stack
+          key={userId}
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+        >
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="login" options={{ animation: 'fade' }} />
+          <Stack.Screen name="album/[id]" />
+          <Stack.Screen name="media/[id]" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
+        </Stack>
+      </SyncProvider>
     </>
   );
 }

@@ -119,6 +119,44 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'gallery.whatFolder': 'this folder',
   'gallery.loadErrorHttp': "Couldn't load {what} (error {status}).",
   'gallery.loadErrorNetwork': "Couldn't load {what}. Check your connection.",
+
+  // Sync (mobile-sync-v1)
+  'tabs.sync': 'Sync',
+  'sync.currentStatus': 'Status',
+  'sync.status.off': 'Sync off',
+  'sync.status.permissionRequired': 'Permission required',
+  'sync.status.scanning': 'Looking for media…',
+  'sync.status.pending': 'Queued',
+  'sync.status.uploading': 'Uploading…',
+  'sync.status.paused': 'Paused',
+  'sync.status.waitingWifi': 'Waiting for Wi-Fi',
+  'sync.status.upToDate': 'Up to date',
+  'sync.status.attention': 'Some items need attention',
+  'sync.status.authRequired': 'Sign-in required',
+  'sync.enableLabel': 'Sync photos and videos',
+  'sync.requestingPermission': 'Requesting permission…',
+  'sync.permissionHint':
+    'Allow access to photos and videos to enable sync. You can limit access to selected items: only the visible ones will sync.',
+  'sync.waitingWifiHint':
+    'Wi-Fi is unavailable: uploads resume automatically once it returns.',
+  'sync.lastSync': 'Last successful sync',
+  'sync.never': 'never',
+  'sync.pendingCount': '{count} queued',
+  'sync.uploadingCount': '{count} uploading',
+  'sync.completedCount': '{count} done',
+  'sync.failedCount': '{count} failed',
+  'sync.controlsTitle': 'Controls',
+  'sync.syncNow': 'Sync now',
+  'sync.pause': 'Pause',
+  'sync.resume': 'Resume',
+  'sync.retryFailed': 'Retry failed items',
+  'sync.settingsTitle': 'Settings',
+  'sync.wifiOnly': 'Wi-Fi only',
+  'sync.newMediaOnlyNote': 'Only NEW photos and videos from now on will be synced.',
+  'sync.includeExisting': 'Also include existing photos and videos',
+  'sync.includeExistingOn': 'Existing photos and videos are included in sync.',
+  'sync.privacyNote':
+    'Sync uploads your media only to your own private NubArca library, never to shared albums. No location data or device inventory is transmitted separately. Turning Sync off deletes nothing — neither on this device nor in NubArca.',
 };
 
 export default en;

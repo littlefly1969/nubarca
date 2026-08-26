@@ -126,6 +126,45 @@ const it = {
 
   // Login extras
   'login.serverHint': 'Es. http://10.0.0.5:5177 in rete locale',
+
+  // Sync (mobile-sync-v1)
+  'tabs.sync': 'Sync',
+  'sync.currentStatus': 'Stato',
+  'sync.status.off': 'Sync disattivato',
+  'sync.status.permissionRequired': 'Permesso richiesto',
+  'sync.status.scanning': 'Ricerca media…',
+  'sync.status.pending': 'In coda',
+  'sync.status.uploading': 'Caricamento…',
+  'sync.status.paused': 'In pausa',
+  'sync.status.waitingWifi': 'In attesa del Wi-Fi',
+  'sync.status.upToDate': 'Tutto sincronizzato',
+  'sync.status.attention': 'Alcuni elementi richiedono attenzione',
+  'sync.status.authRequired': 'Autenticazione richiesta',
+  'sync.enableLabel': 'Sincronizza foto e video',
+  'sync.requestingPermission': 'Richiesta del permesso…',
+  'sync.permissionHint':
+    'Concedi l’accesso alle foto e ai video per attivare la sincronizzazione. Puoi limitare l’accesso ad alcune foto: verranno sincronizzate solo quelle visibili.',
+  'sync.waitingWifiHint': 'Il Wi-Fi è disattivo: i caricamenti riprenderanno automaticamente.',
+  'sync.lastSync': 'Ultima sincronizzazione',
+  'sync.never': 'mai',
+  'sync.pendingCount': '{count} in coda',
+  'sync.uploadingCount': '{count} in caricamento',
+  'sync.completedCount': '{count} completati',
+  'sync.failedCount': '{count} non riusciti',
+  'sync.controlsTitle': 'Controlli',
+  'sync.syncNow': 'Sincronizza ora',
+  'sync.pause': 'Pausa',
+  'sync.resume': 'Riprendi',
+  'sync.retryFailed': 'Riprova gli elementi non riusciti',
+  'sync.settingsTitle': 'Impostazioni',
+  'sync.wifiOnly': 'Solo su Wi-Fi',
+  'sync.newMediaOnlyNote':
+    'Saranno sincronizzate solo le NUOVE foto e i nuovi video a partire da ora.',
+  'sync.includeExisting': 'Includi anche le foto e i video esistenti',
+  'sync.includeExistingOn':
+    'Le foto e i video esistenti sono incluse nella sincronizzazione.',
+  'sync.privacyNote':
+    'La sincronizzazione carica i tuoi media solo nella tua libreria privata NubArca, mai negli album condivisi. Nessun dato di posizione o inventario del dispositivo viene inviato separatamente. Disattivare il Sync non cancella nulla né sul dispositivo né su NubArca.',
 } as const;
 
 export type MobileMessageKey = keyof typeof it;
