@@ -41,3 +41,19 @@ public readonly record struct UploadClaim(UploadClaimOutcome Outcome, Guid Token
     public static UploadClaim AlreadyCompleted() => new(UploadClaimOutcome.AlreadyCompleted, Guid.Empty);
     public static UploadClaim InFlight() => new(UploadClaimOutcome.InFlight, Guid.Empty);
 }
+
+// Thrown from inside the authoritative FileItem transaction when the pending
+// claim could not be completed there (token stale: expired-lease takeover,
+// concurrent completion, or released row). Rolling back is THE invariant: a
+// keyed upload must never commit a FileItem that lost its operation
+// association — the client simply retries the same key later.
+public sealed class UploadOperationClaimLostException : Exception
+{
+    public Guid ClaimToken { get; }
+
+    public UploadOperationClaimLostException(Guid claimToken)
+        : base("The upload operation claim is no longer pending; the keyed ingestion was aborted.")
+    {
+        ClaimToken = claimToken;
+    }
+}

@@ -22,6 +22,7 @@ import { SyncLedger } from './syncLedger.ts';
 import { mediaLibraryPort } from './mediaLibraryAdapter.ts';
 import { connectivityPort } from './connectivityAdapter.ts';
 import { uploadAssetViaOwnerEndpoint } from './uploader.ts';
+import { newOperationId } from './operationIdAdapter.ts';
 // The live SESSION GENERATION comes from the one owner-session store; it is
 // what makes stale completions from a previous login detectably stale.
 import { ownerSession } from '../api/session';
@@ -70,6 +71,7 @@ export function SyncProvider({
         generation: ownerSession.snapshot().generation,
       }),
       now: () => Date.now(),
+      newOperationId,
     });
     const unsubscribe = engine.subscribe(setSnapshot);
     engineRef.current = engine;

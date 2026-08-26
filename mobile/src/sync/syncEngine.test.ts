@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ensureLedgerSchema, SyncLedger } from './syncLedger.ts';
 import { SyncEngine } from './syncEngine.ts';
-import { buildOperationKey } from './syncPolicy.ts';
+import { isValidOperationKey } from './syncPolicy.ts';
 import { FakeServerUploader, makeHarness, until } from './syncTestHarness.ts';
 
 async function enableAndWaitForDiscovery(
@@ -35,10 +35,18 @@ test('enable → discover → upload: the full happy path persists completion', 
   // Every request went through the owner endpoint with an operation key and
   // a file:// URI — never base64, never a JS buffer.
   assert.equal(harness.uploader.requests.length, 5);
+  const seen = new Set<string>();
   for (const request of harness.uploader.requests) {
-    assert.match(request.operationKey, /^sv1\./);
+    // Grammar-safe, OPAQUE operation identity: one per logical upload, and
+    // carrying no readable account / asset / filename information.
+    assert.ok(isValidOperationKey(request.operationKey));
+    assert.ok(!request.operationKey.includes('acct-A'));
+    assert.ok(!request.operationKey.includes('asset-'));
+    assert.ok(!request.operationKey.includes('IMG_'));
+    seen.add(request.operationKey);
     assert.match(request.localUri, /^file:\/\//);
   }
+  assert.equal(seen.size, 5, 'each logical upload has its own operation identity');
   const snapshot = harness.engine.snapshot();
   assert.equal(snapshot.completedCount, 5);
   assert.ok(snapshot.lastSyncAt !== null);
@@ -67,11 +75,9 @@ test('bounded concurrency on a large synthetic library: never more than two in f
 
 test('ambiguous retry after a lost response: same key replays, exactly one logical ingestion', async () => {
   const harness = makeHarness({ totalAssets: 1 });
-  // Arm "response lost AFTER durable commit" BEFORE the attempt starts,
-  // keyed exactly as discovery will key it.
-  const asset = harness.mediaLibrary.assets[0];
-  const key = buildOperationKey('acct-A', asset.id, asset.modificationTime);
-  harness.uploader.faults.set(key, () => {
+  // Arm "response lost AFTER durable commit" on the FIRST attempt (request
+  // index 0 — deterministic for a single-asset queue).
+  harness.uploader.armFaultOnRequest(0, () => {
     throw new TypeError('Network request failed');
   });
 
@@ -84,10 +90,12 @@ test('ambiguous retry after a lost response: same key replays, exactly one logic
   harness.clock.value += 500;
   await until(() => harness.ledger.counts().completed === 1, 'retry completes');
 
-  const attemptsForKey = harness.uploader.requests.filter(
-    (request) => request.operationKey === key,
-  ).length;
-  assert.ok(attemptsForKey >= 2, 'the client actually retried');
+  assert.ok(harness.uploader.requests.length >= 2, 'the client actually retried');
+  // The retry reused the PERSISTED operation identity of the first attempt.
+  assert.equal(
+    harness.uploader.requests[1].operationKey,
+    harness.uploader.requests[0].operationKey,
+  );
   // The server committed ONCE; the retry was a REPLAY of the same result.
   assert.equal(harness.uploader.commitsByKey.size, 1, 'one logical commit only');
 
@@ -99,9 +107,9 @@ test('ambiguous retry after a lost response: same key replays, exactly one logic
 
 test('a permanently failing item never blocks unrelated items', async () => {
   const harness = makeHarness({ totalAssets: 4 });
-  const badAsset = harness.mediaLibrary.assets[0];
-  const badKey = buildOperationKey('acct-A', badAsset.id, badAsset.modificationTime);
-  harness.uploader.faults.set(badKey, () => {
+  // assets[0] is claimed first (discovery order) → request index 0 fails
+  // permanently with a 413.
+  harness.uploader.armFaultOnRequest(0, () => {
     throw Object.assign(new Error('too large'), { status: 413 });
   });
 
@@ -113,10 +121,8 @@ test('a permanently failing item never blocks unrelated items', async () => {
 
 test('429 honors Retry-After before retrying; the queue resumes afterwards', async () => {
   const harness = makeHarness({ totalAssets: 1 });
-  const asset = harness.mediaLibrary.assets[0];
-  const key = buildOperationKey('acct-A', asset.id, asset.modificationTime);
   const deadline = harness.clock.value + 500;
-  harness.uploader.faults.set(key, () => {
+  harness.uploader.armFaultOnRequest(0, () => {
     throw Object.assign(new Error('slow down'), {
       status: 429,
       retryAfterAtMs: deadline,
@@ -135,11 +141,48 @@ test('429 honors Retry-After before retrying; the queue resumes afterwards', asy
   harness.engine.detach();
 });
 
+test('409 upload_in_progress is deferred as retryable, never permanent', async () => {
+  const harness = makeHarness({ totalAssets: 1 });
+  // The structured in-flight conflict contract: same status code as a name
+  // conflict, but carrying the stable retryable marker — so an ambiguous
+  // concurrent retry defers instead of poisoning the queue as permanent.
+  harness.uploader.armFaultOnRequest(0, () => {
+    throw Object.assign(new Error('already processing'), {
+      status: 409,
+      body: {
+        error: 'Upload operation is already in progress.',
+        code: 'upload_in_progress',
+        retryable: true,
+      },
+    });
+  });
+
+  await enableAndWaitForDiscovery(harness);
+  await until(() => harness.ledger.counts().retryable === 1, 'in-flight conflict deferred');
+  assert.equal(harness.ledger.counts().permanent, 0);
+
+  harness.clock.value += 500;
+  await until(() => harness.ledger.counts().completed === 1, 'completes after deferral');
+  harness.engine.detach();
+});
+
+test('plain 409 duplicate-name conflict stays permanent', async () => {
+  const harness = makeHarness({ totalAssets: 1 });
+  // Ordinary duplicate filename: NO structured marker → permanent, so a real
+  // conflict can never spin forever through the retry machinery.
+  harness.uploader.armFaultOnRequest(0, () => {
+    throw Object.assign(new Error('POST /api/files → 409'), { status: 409 });
+  });
+
+  await enableAndWaitForDiscovery(harness);
+  await until(() => harness.ledger.counts().permanent === 1, 'duplicate-name 409 is permanent');
+  assert.equal(harness.ledger.counts().retryable, 0);
+  harness.engine.detach();
+});
+
 test('401 pauses sync as auth-required and parks items for post-login resume', async () => {
   const harness = makeHarness({ totalAssets: 2 });
-  const firstAsset = harness.mediaLibrary.assets[0];
-  const key = buildOperationKey('acct-A', firstAsset.id, firstAsset.modificationTime);
-  harness.uploader.faults.set(key, () => {
+  harness.uploader.armFaultOnRequest(0, () => {
     throw Object.assign(new Error('dead session'), { status: 401 });
   });
 
@@ -162,14 +205,12 @@ test('401 pauses sync as auth-required and parks items for post-login resume', a
 
 test('logout during upload: work stops for real and a late completion cannot mutate state', async () => {
   const harness = makeHarness({ totalAssets: 1 });
-  const asset = harness.mediaLibrary.assets[0];
-  const key = buildOperationKey('acct-A', asset.id, asset.modificationTime);
   // Hold the FIRST attempt in flight inside the "server" before it begins.
-  harness.uploader.holdOnce.add(key);
+  harness.uploader.holdRequest(0);
 
   harness.engine.attach();
   harness.engine.enable();
-  await until(() => harness.uploader.isHeld(key), 'held in flight');
+  await until(() => harness.uploader.isHeld(0), 'held in flight');
 
   // Log out: identity gone + provider teardown aborts the request.
   harness.signOut();
@@ -177,7 +218,7 @@ test('logout during upload: work stops for real and a late completion cannot mut
 
   // The held upload is then released — a completion for a DEAD session
   // context. It must touch nothing: no completed row may appear.
-  harness.uploader.releaseHeld(key);
+  harness.uploader.releaseHeld(0);
   await new Promise((resolve) => setTimeout(resolve, 20));
 
   assert.equal(harness.ledger.counts().completed, 0);
@@ -185,19 +226,18 @@ test('logout during upload: work stops for real and a late completion cannot mut
 
 test('restart during upload: stale uploading rows are requeued and retried with the SAME key', async () => {
   const first = makeHarness({ totalAssets: 1 });
-  const asset = first.mediaLibrary.assets[0];
-  const key = buildOperationKey('acct-A', asset.id, asset.modificationTime);
-  first.uploader.holdOnce.add(key);
+  first.uploader.holdRequest(0);
 
   first.engine.attach();
   first.engine.enable();
-  await until(() => first.uploader.isHeld(key), 'first attempt held mid-upload');
+  await until(() => first.uploader.isHeld(0), 'first attempt held mid-upload');
+  const persistedKey = first.uploader.requests[0].operationKey;
 
   // Simulate process death: engine gone while the ledger row stays
   // 'uploading' in the SAME database file. The late commit lands afterwards,
   // but its owner context is dead — nothing may be marked completed.
   first.engine.detach();
-  first.uploader.releaseHeld(key);
+  first.uploader.releaseHeld(0);
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(first.ledger.counts().completed, 0);
 
@@ -221,6 +261,7 @@ test('restart during upload: stale uploading rows are requeued and retried with 
     identity: () => ({ accountId: 'acct-A', generation: 1 }),
     now: () => 5_000_000,
     random: () => 0.5,
+    newOperationId: first.newOperationId, // same generator; irrelevant anyway
     config: { networkPollMs: 5, retryBaseDelayMs: 10, retryMaxDelayMs: 40 },
   });
 
@@ -229,10 +270,11 @@ test('restart during upload: stale uploading rows are requeued and retried with 
   engine2.enable();
   await until(() => ledger2.counts().completed === 1, 'recovered upload completes');
 
-  // The SAME operation key was reused → an idempotent server replays instead
-  // of creating a second logical ingestion for the same sync operation.
+  // The SAME PERSISTED operation key was reused (it comes from the ledger
+  // row, not from the generator) → an idempotent server replays instead of
+  // creating a second logical ingestion for the same sync operation.
   assert.equal(uploader2.requests.length, 1);
-  assert.equal(uploader2.requests[0].operationKey, key);
+  assert.equal(uploader2.requests[0].operationKey, persistedKey);
   engine2.detach();
 });
 

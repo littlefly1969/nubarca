@@ -23,7 +23,16 @@ public interface IFileItemService
         // detection facts inline and defers full embedded EXIF/IPTC/XMP/GPS
         // extraction to the asynchronous metadata.embedded.backfill job.
         // Browser uploads keep the inline default.
-        bool extractEmbeddedMetadata = true);
+        bool extractEmbeddedMetadata = true,
+        // mobile-sync-v1 crash boundary: when supplied (keyed idempotent
+        // uploads only), the pending UploadOperation claim is completed with
+        // the new FileItem's id INSIDE the same transaction that commits the
+        // file — "FileItem durable" and "operation Completed(file)" become one
+        // atomically observable fact. If the claim is no longer pending, a
+        // UploadOperationClaimLostException aborts the whole ingestion instead
+        // of committing an unassociated keyed upload. Null on every non-keyed
+        // path (browser uploads, admin/staging import): behavior unchanged.
+        Guid? uploadOperationClaimToken = null);
 
     Task<FileItem?> GetByIdAsync(
         Guid fileItemId,

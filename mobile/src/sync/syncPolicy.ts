@@ -44,6 +44,41 @@ export function classifyHttpFailure(status: number): ClassifiedFailure {
 }
 
 /**
+ * Structured signal the server sends on HTTP 409 when the conflict is NOT a
+ * duplicate name but "this idempotent operation is already being processed"
+ * (`{code:'upload_in_progress', retryable:true}`). Detected via the stable
+ * fields only — never from human-readable error text.
+ */
+function isInFlightConflict(err: unknown): boolean {
+  const body = (err as { body?: unknown } | null)?.body;
+  if (body === null || typeof body !== 'object') return false;
+  const record = body as Record<string, unknown>;
+  return (
+    record.retryable === true ||
+    record.code === 'upload_in_progress'
+  );
+}
+
+/**
+ * Classify a THROWN upload error end-to-end: HTTP statuses through the
+ * taxonomy above, with exactly one exception — an in-flight idempotency
+ * conflict (409 + structured retryable marker) is TRANSIENT and must be
+ * deferred, while an ordinary duplicate-name 409 (no such marker) stays
+ * permanent. Transport-level failures (no status) are network-class.
+ */
+export function classifyUploadError(err: unknown): ClassifiedFailure {
+  const status = (err as { status?: number } | null)?.status;
+  if (status === 409 && isInFlightConflict(err)) {
+    return { cls: 'retryable-status' };
+  }
+  if (typeof status === 'number') {
+    return classifyHttpFailure(status);
+  }
+  return { cls: 'network' };
+}
+
+
+/**
  * Parse a Retry-After header value into an absolute epoch-ms deadline,
  * capped at `nowMs + maxDelayMs`. Accepts delta-seconds and HTTP-date forms;
  * anything invalid yields null (caller falls back to ordinary backoff).
@@ -135,44 +170,36 @@ export function deriveUiStatus(snapshot: EngineSnapshot): SyncUiStatus {
 // ─── Operation keys ────────────────────────────────────────────────────────
 
 /**
- * Build the opaque OPERATION identity for one logical sync of one asset.
+ * Format a cryptographically random operation id from its raw bytes:
+ * 16 bytes of CSPRNG entropy → 32 lowercase hex characters.
  *
- * This is deliberately NOT a content hash: blob identity belongs to the
- * server's SHA-256 model. The key answers only "which logical ingestion is
- * this?" — stable across ambiguous retries of the SAME logical upload, and
- * different when the asset revision actually moved (that genuinely is another
- * logical upload).
+ * This is the OPERATION identity for one logical sync (see the ledger). It is
+ * deliberately NOT a content hash — blob identity belongs to the server's
+ * SHA-256 model — and it carries NO readable account/asset/inventory data:
+ * knowing an operation id proves nothing about its owner or content. The
+ * value is generated ONCE per logical ledger row (CSPRNG), persisted there,
+ * and reused unchanged across retries, restarts and ambiguous responses;
+ * only a genuinely NEW logical upload gets a different one.
  *
- * Format: `sv1.<16 hex>` — two salted FNV-1a rounds (64 effective bits),
- * inside the server's Idempotency-Key grammar [A-Za-z0-9._:-]{8,128},
- * carrying no readable inventory data.
+ * 32 hex chars sit inside the server's Idempotency-Key grammar
+ * [A-Za-z0-9._:-]{8,128}.
  */
-export function buildOperationKey(
-  accountId: string,
-  assetId: string,
-  revision: number,
-): string {
-  const payload = `${accountId} sv1 ${assetId} ${revision}`;
-  const a = fnv1a(payload, 0x811c9dc5);
-  const b = fnv1a(payload, 0x01000193);
-  const hex = (n: number) => (n >>> 0).toString(16).padStart(8, '0');
-  return `sv1.${hex(a)}${hex(b)}`;
-}
-
-function fnv1a(input: string, seed: number): number {
-  let hash = seed >>> 0;
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i);
-    // Math.imul keeps the round in 32-bit space.
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+export function formatOperationId(bytes: Uint8Array): string {
+  if (bytes.length < 16) {
+    throw new Error('Operation id needs at least 128 bits of entropy');
   }
-  return hash >>> 0;
+  let hex = '';
+  for (let i = 0; i < 16; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 /** True when the value fits the server's Idempotency-Key grammar. */
 export function isValidOperationKey(key: string): boolean {
   return /^[A-Za-z0-9._:-]{8,128}$/.test(key);
 }
+
 
 // ─── MIME hint mapping ─────────────────────────────────────────────────────
 

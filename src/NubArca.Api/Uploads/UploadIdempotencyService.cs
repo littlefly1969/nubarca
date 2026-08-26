@@ -25,12 +25,15 @@ public interface IUploadIdempotencyService
         TimeSpan lease,
         CancellationToken cancellationToken = default);
 
-    // Marks the claimed operation completed with the FileItem it produced.
-    // No-op when the token lost ownership meanwhile (crash-recovery takeover).
-    Task CompleteAsync(Guid claimToken, Guid fileItemId, CancellationToken cancellationToken = default);
+    // NOTE: there is deliberately NO standalone Complete method. Completion is
+    // performed INSIDE the authoritative FileItem transaction (see
+    // FileItemService.CreateAsync's optional claim-token parameter), making
+    // "FileItem durable" and "operation Completed(FileItemId)" one atomic fact.
+    // Any post-commit error (lost response included) is absorbed by replay.
 
-    // Failure path: removes a still-pending claim so the next attempt starts
-    // clean. Never touches a completed row and never another caller's token.
+    // Failure path before ingestion produced anything: removes a still-pending
+    // claim so the next attempt starts clean. Never touches a completed row and
+    // never another caller's token.
     Task ReleaseAsync(Guid claimToken, CancellationToken cancellationToken = default);
 }
 
@@ -173,21 +176,10 @@ public sealed class UploadIdempotencyService : IUploadIdempotencyService
         {
             // Unique index says the slot is taken (or the store hiccupped —
             // both resolve to "not ours"). Detach so the scoped context cannot
-            // re-attempt OUR insert during a later Complete/Save.
+            // re-attempt OUR insert during a later Save.
             _db.Entry(row).State = EntityState.Detached;
             return null;
         }
-    }
-
-    public async Task CompleteAsync(
-        Guid claimToken, Guid fileItemId, CancellationToken cancellationToken = default)
-    {
-        await _db.UploadOperations
-            .Where(o => o.Id == claimToken && o.Status == UploadOperationStatus.Pending)
-            .ExecuteUpdateAsync(setter => setter
-                .SetProperty(o => o.Status, UploadOperationStatus.Completed)
-                .SetProperty(o => o.FileItemId, fileItemId),
-                cancellationToken);
     }
 
     public async Task ReleaseAsync(Guid claimToken, CancellationToken cancellationToken = default)

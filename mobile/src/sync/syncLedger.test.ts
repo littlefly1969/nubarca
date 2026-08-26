@@ -172,6 +172,37 @@ test('settings persist per account and default conservatively', () => {
   });
 });
 
+test('operation identity persists across reopen; each logical op keeps its own id', () => {
+  const conn = nodeConnection(new DatabaseSync(':memory:'));
+  ensureLedgerSchema(conn);
+
+  // Generation happens once, at enqueue time.
+  const generated = ['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'];
+  const ledgerA = new SyncLedger(conn, 'account-A');
+  ledgerA.upsertDiscovered(
+    [
+      { assetId: 'asset-1', revision: 1, filename: 'a.jpg', isVideo: false, operationKey: generated[0] },
+      { assetId: 'asset-2', revision: 2, filename: 'b.jpg', isVideo: false, operationKey: generated[1] },
+    ],
+    10,
+  );
+
+  // Reopen the SAME database through a FRESH ledger instance — the persisted
+  // identities must come back unchanged and per-operation distinct.
+  const ledgerB = new SyncLedger(conn, 'account-A');
+  const claimed = ledgerB.claimDue(10, 20);
+  assert.equal(claimed.length, 2);
+  const keysById = new Map(claimed.map((row) => [row.assetId, row.operationKey]));
+  assert.equal(keysById.get('asset-1'), generated[0]);
+  assert.equal(keysById.get('asset-2'), generated[1]);
+  assert.notEqual(generated[0], generated[1]);
+
+  // Grammar check on real persisted values (32 hex = 128-bit CSPRNG output).
+  for (const key of keysById.values()) {
+    assert.ok(/^[0-9a-f]{32}$/.test(key));
+  }
+});
+
 test('retrying failures clears them without wiping completed history', () => {
   const { ledger } = openLedger('acct');
   ledger.upsertDiscovered([discovered('bad'), discovered('good')], 10);

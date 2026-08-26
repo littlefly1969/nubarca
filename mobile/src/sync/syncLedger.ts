@@ -103,7 +103,7 @@ export interface DiscoveredAssetInput {
   revision: number;
   filename: string | null;
   isVideo: boolean;
-  /** Precomputed via buildOperationKey() by the engine. */
+  /** Generated once via deps.newOperationId() by the engine. */
   operationKey: string;
 }
 

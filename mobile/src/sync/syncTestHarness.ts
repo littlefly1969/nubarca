@@ -91,29 +91,42 @@ export interface ServerRequest {
 export class FakeServerUploader {
   readonly commitsByKey = new Map<string, UploadedFile>();
   readonly requests: ServerRequest[] = [];
-  /** operationKey → one-shot fault thrown on the next attempt. */
-  readonly faults = new Map<string, () => never>();
-  /** Keys whose NEXT upload blocks until releaseHeld() is called. */
-  readonly holdOnce = new Set<string>();
-  private holdWaiters = new Map<string, Array<() => void>>();
+  /**
+   * Request-index → one-shot fault thrown on THAT attempt, AFTER the durable
+   * commit (models "server accepted, response lost"). Retries create new
+   * indices and proceed normally.
+   */
+  readonly armedFaults = new Map<number, () => never>();
+  /** Request indexes whose NEXT attempt parks mid-flight until released. */
+  readonly holdRequestsSet = new Set<number>();
+  private holdWaiters = new Map<number, Array<() => void>>();
   maxConcurrent = 0;
   current = 0;
 
-  releaseHeld(operationKey: string): void {
-    const waiters = this.holdWaiters.get(operationKey) ?? [];
-    this.holdWaiters.delete(operationKey);
+  armFaultOnRequest(index: number, thrower: () => never): void {
+    this.armedFaults.set(index, thrower);
+  }
+
+  holdRequest(index: number): void {
+    this.holdRequestsSet.add(index);
+  }
+
+  releaseHeld(index: number): void {
+    const waiters = this.holdWaiters.get(index) ?? [];
+    this.holdWaiters.delete(index);
     for (const waiter of waiters) waiter();
   }
 
   /** True while the held upload is parked inside the fake server. */
-  isHeld(operationKey: string): boolean {
-    return this.holdWaiters.has(operationKey);
+  isHeld(index: number): boolean {
+    return this.holdWaiters.has(index);
   }
 
   async upload(request: UploadRequest): Promise<UploadedFile> {
     this.current += 1;
     this.maxConcurrent = Math.max(this.maxConcurrent, this.current);
     try {
+      const index = this.requests.length;
       this.requests.push({
         operationKey: request.operationKey,
         localUri: request.localUri,
@@ -125,18 +138,18 @@ export class FakeServerUploader {
         throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       }
 
-      if (this.holdOnce.has(request.operationKey)) {
-        this.holdOnce.delete(request.operationKey);
+      if (this.holdRequestsSet.has(index)) {
+        this.holdRequestsSet.delete(index);
         await new Promise<void>((resolve) => {
-          const waiters = this.holdWaiters.get(request.operationKey) ?? [];
+          const waiters = this.holdWaiters.get(index) ?? [];
           waiters.push(resolve);
-          this.holdWaiters.set(request.operationKey, waiters);
+          this.holdWaiters.set(index, waiters);
         });
       }
 
-      const fault = this.faults.get(request.operationKey);
+      const fault = this.armedFaults.get(index);
       if (fault) {
-        this.faults.delete(request.operationKey);
+        this.armedFaults.delete(index);
       }
 
       const existing = this.commitsByKey.get(request.operationKey);
@@ -199,6 +212,17 @@ export function makeHarness(options?: { totalAssets?: number; accountId?: string
     generation: 1,
   };
 
+  // Deterministic, grammar-safe OPERATION identities in generation order —
+  // tests can assert "the SAME id was reused across retries/restarts" without
+  // knowing values upfront.
+  let opCounter = 0;
+  const operationIds: string[] = [];
+  const newOperationId = (): string => {
+    const id = `op-${String(++opCounter).padStart(6, '0')}`;
+    operationIds.push(id);
+    return id;
+  };
+
   const engine = new SyncEngine({
     ledger,
     mediaLibrary,
@@ -207,6 +231,7 @@ export function makeHarness(options?: { totalAssets?: number; accountId?: string
     identity: () => identityState,
     now: () => clock.value,
     random: () => 0.5,
+    newOperationId,
     config: {
       ...DEFAULT_CONFIG,
       networkPollMs: 5,
@@ -223,6 +248,9 @@ export function makeHarness(options?: { totalAssets?: number; accountId?: string
     uploader,
     clock,
     engine,
+    newOperationId,
+    /** Operation ids in generation order (discovery order). */
+    operationIds,
     setNetwork(next: NetworkState) {
       network = next;
       for (const listener of listeners) listener(next);

@@ -6,9 +6,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   backoffDelayMs,
-  buildOperationKey,
   classifyHttpFailure,
+  classifyUploadError,
   deriveUiStatus,
+  formatOperationId,
   isUploadAllowed,
   isValidOperationKey,
   mimeFromFilename,
@@ -119,16 +120,56 @@ test('UI status derivation covers every user-visible state', () => {
   assert.equal(deriveUiStatus(snapshot({ ...base, phase: 'idle' })), 'up-to-date');
 });
 
-test('operation keys are stable per logical op, distinct across ops and grammar-safe', () => {
-  const key = buildOperationKey('account-1', 'asset-42', 1700000000000);
-  assert.equal(key, buildOperationKey('account-1', 'asset-42', 1700000000000));
-  // Same asset, different revision → different LOGICAL operation.
-  assert.notEqual(key, buildOperationKey('account-1', 'asset-42', 1700000001000));
-  // Different owner → different key even for identical asset coordinates.
-  assert.notEqual(key, buildOperationKey('account-2', 'asset-42', 1700000000000));
-  assert.ok(isValidOperationKey(key));
-  assert.ok(!isValidOperationKey('short'));
-  assert.ok(!isValidOperationKey('has spaces inside'));
+test('operation ids: CSPRNG bytes format to grammar-safe opaque hex', () => {
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes[i] = (i * 17 + 3) % 256;
+  const id = formatOperationId(bytes);
+  assert.equal(id.length, 32, '128 bits of entropy → 32 hex chars');
+  assert.equal(id, id.toLowerCase());
+  assert.ok(isValidOperationKey(id));
+  // Same bytes → same formatting; different bytes → different identity.
+  assert.equal(formatOperationId(bytes), id);
+  const other = new Uint8Array(16);
+  other[0] = bytes[0] ^ 0xff;
+  assert.notEqual(formatOperationId(other), id);
+  // Entropy floor is enforced: fewer than 16 bytes is a programming error.
+  assert.throws(() => formatOperationId(new Uint8Array(8)));
+});
+
+test('classifyUploadError: structured in-flight 409 defers, plain duplicate-name 409 stays permanent', () => {
+  const inFlightBody = { code: 'upload_in_progress', retryable: true };
+  assert.equal(
+    classifyUploadError(Object.assign(new Error('x'), { status: 409, body: inFlightBody })).cls,
+    'retryable-status',
+  );
+  // The stable CODE alone is sufficient (never error text).
+  assert.equal(
+    classifyUploadError(Object.assign(new Error('x'), {
+      status: 409,
+      body: { code: 'upload_in_progress' },
+    })).cls,
+    'retryable-status',
+  );
+  // Ordinary duplicate-name conflicts carry no marker → permanent.
+  assert.equal(classifyUploadError(Object.assign(new Error('x'), { status: 409 })).cls, 'permanent-status');
+  assert.equal(
+    classifyUploadError(Object.assign(new Error('x'), { status: 409, body: {} })).cls,
+    'permanent-status',
+  );
+  assert.equal(
+    classifyUploadError(Object.assign(new Error('x'), { status: 409, body: { retryable: false } })).cls,
+    'permanent-status',
+  );
+});
+
+test('classifyUploadError: taxonomy passthrough and transport failures', () => {
+  assert.equal(classifyUploadError(Object.assign(new Error('x'), { status: 401 })).cls, 'auth');
+  assert.equal(classifyUploadError(Object.assign(new Error('x'), { status: 413 })).cls, 'permanent-status');
+  assert.equal(classifyUploadError(Object.assign(new Error('x'), { status: 503 })).cls, 'retryable-status');
+  assert.equal(
+    classifyUploadError(Object.assign(new Error('Network request failed'))).cls,
+    'network',
+  );
 });
 
 test('MIME hints cover common camera media without pretending authority', () => {

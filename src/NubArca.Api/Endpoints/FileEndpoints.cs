@@ -849,11 +849,11 @@ public static class FileEndpoints
                     return replay is not null
                         ? Results.Ok(replay)
                         : Results.Json(
-                            new { error = "Upload operation is being processed.", retryable = true },
+                            new { error = "Upload operation is being processed.", code = "upload_in_progress", retryable = true },
                             statusCode: StatusCodes.Status409Conflict);
                 case UploadClaimOutcome.InFlight:
                     return Results.Json(
-                        new { error = "Upload operation is already in progress.", retryable = true },
+                        new { error = "Upload operation is already in progress.", code = "upload_in_progress", retryable = true },
                         statusCode: StatusCodes.Status409Conflict);
                 case UploadClaimOutcome.Claimed:
                     claimToken = claim.Token;
@@ -904,7 +904,8 @@ public static class FileEndpoints
             parsed.FileName,
             file.ContentType,
             stream,
-            cancellationToken);
+            cancellationToken,
+            uploadOperationClaimToken: claimToken);
 
         await audit.LogAsync(
             userId: ownerUserId,
@@ -936,15 +937,21 @@ public static class FileEndpoints
             created.Id, created.Name, created.MimeType, created.SizeBytes, created.CreatedAt,
             created.Width, created.Height);
 
-        // Durable completion of THIS logical operation: past this point any
-        // retry with the same key replays this exact summary.
-        if (claimToken is not null)
-        {
-            await uploadOperations.CompleteAsync(claimToken.Value, created.Id, cancellationToken);
-        }
-
+        // The keyed operation was completed ATOMICALLY inside the FileItem
+        // transaction (see CreateAsync's claim-token parameter): past this
+        // point any retry with the same key replays this exact summary.
         ingested = true;
         return Results.Created($"/api/files/{created.Id}/content", summary);
+        }
+        catch (UploadOperationClaimLostException)
+        {
+            // Our claim disappeared mid-ingestion (expired-lease takeover /
+            // concurrent completion). Nothing was committed — the file row and
+            // the completion live or die together. Same retryable contract as
+            // any other in-flight ambiguity.
+            return Results.Json(
+                new { error = "Upload operation is being processed.", code = "upload_in_progress", retryable = true },
+                statusCode: StatusCodes.Status409Conflict);
         }
         catch (DuplicateFileNameException)
         {

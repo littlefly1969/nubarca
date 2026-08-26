@@ -655,3 +655,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   include/exclude/query contract remain unchanged. Source regressions cover the
   exact overlap mechanism, but physical Fire Stick acceptance is still required
   before the visual defect can be called closed.
+- **A keyed upload's FileItem and its idempotency completion are ONE commit.**
+  `POST /api/files` accepts an optional `Idempotency-Key`; the claim it takes is
+  finished inside the authoritative `FileItemService.CreateAsync` transaction
+  (its `uploadOperationClaimToken` parameter), never by a second call after the
+  file is already durable. There is deliberately no standalone `CompleteAsync`:
+  reintroducing one recreates the window where a crash leaves the file committed
+  while its operation stays pending, so a later retry of the same key becomes a
+  duplicate-name conflict instead of a replay. If the claim is no longer ours by
+  then (expired lease, takeover), the whole ingestion rolls back rather than
+  commit a keyed file with no operation association. Unkeyed uploads pass null
+  and are untouched. Two 409s exist and are NOT interchangeable: an ordinary
+  duplicate name answers a bare 409 (permanent), while an operation already in
+  flight answers 409 with `{code: "upload_in_progress", retryable: true}` — the
+  mobile classifier reads that structured marker only, never the message text,
+  which is why a concurrent retry defers instead of failing the item forever.
+  The mobile operation identity is 16 CSPRNG bytes (`expo-crypto`) as 32 hex
+  chars, generated once per ledger row and reused across every retry, restart
+  and ambiguous response; it is an operation identity, never content identity,
+  and carries no account, asset, filename or inventory information.

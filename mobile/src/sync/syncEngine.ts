@@ -30,8 +30,7 @@ import type {
 import type { SyncLedger, SyncLedgerRow } from './syncLedger.ts';
 import {
   backoffDelayMs,
-  buildOperationKey,
-  classifyHttpFailure,
+  classifyUploadError,
   isUploadAllowed,
   mimeFromFilename,
 } from './syncPolicy.ts';
@@ -57,6 +56,13 @@ export interface SyncEngineDeps {
   now(): number;
   random?: () => number;
   config?: Partial<SyncConfig>;
+  /**
+   * ONE fresh opaque OPERATION identity (≥128-bit CSPRNG, grammar-safe) per
+   * call. Generated at discovery time for each newly enqueued logical upload,
+   * persisted in the ledger, and reused unchanged across every retry/restart/
+   * ambiguous response of that logical upload.
+   */
+  newOperationId(): string;
 }
 
 export class SyncEngine {
@@ -441,7 +447,6 @@ export class SyncEngine {
    * baseline instead of trusting any fragile platform cursor.
    */
   async runDiscoveryPass(): Promise<{ pagesFetched: number; addedCount: number }> {
-    const accountId = this.deps.identity()?.accountId ?? '';
     const includeExisting = this.settings.includeExisting;
     const baselineMs = includeExisting
       ? 0
@@ -477,7 +482,9 @@ export class SyncEngine {
               revision: asset.modificationTime,
               filename: asset.filename,
               isVideo: asset.mediaType === 'video',
-              operationKey: buildOperationKey(accountId, asset.id, asset.modificationTime),
+              // ONE fresh opaque operation identity per logical upload,
+              // persisted with the row and reused by every retry/restart.
+              operationKey: this.deps.newOperationId(),
             })),
             nowMs,
           );
@@ -567,10 +574,9 @@ export class SyncEngine {
       return;
     }
 
-    const status = (err as { status?: number } | null)?.status;
-    if (typeof status === 'number') {
-      const verdict = classifyHttpFailure(status);
-      if (verdict.cls === 'auth') {
+    const verdict = classifyUploadError(err);
+    switch (verdict.cls) {
+      case 'auth': {
         // Session died mid-flight. Auth recovery owns this; park the item so
         // a post-relogin attach finds it immediately. Never spin on 401.
         this.authRequired = true;
@@ -578,23 +584,22 @@ export class SyncEngine {
         this.emit();
         return;
       }
-      if (verdict.cls === 'permanent-status') {
+      case 'permanent-status': {
         this.deps.ledger.markPermanentFailure(item.assetId, nowMs);
         return;
       }
-      // retryable-status → bounded backoff below; 429/503 honor Retry-After.
-      const retryAfterAtMs =
-        status === 429 || status === 503
-          ? ((err as { retryAfterAtMs?: number | null }).retryAfterAtMs ?? null)
-          : null;
-      this.scheduleRetry(item, retryAfterAtMs, nowMs);
-      return;
+      default: {
+        // network / timeout / retryable-status → bounded backoff below;
+        // 429/503 honor a server-provided Retry-After when present.
+        const status = (err as { status?: number } | null)?.status;
+        const retryAfterAtMs =
+          status === 429 || status === 503
+            ? ((err as { retryAfterAtMs?: number | null }).retryAfterAtMs ?? null)
+            : null;
+        this.scheduleRetry(item, retryAfterAtMs, nowMs);
+        return;
+      }
     }
-
-    // No status: transport-level failure (network drop / timeout). Both mean
-    // "try again later" — the server may or may not have committed, which is
-    // EXACTLY what the idempotency key exists for.
-    this.scheduleRetry(item, null, nowMs);
   }
 
   private scheduleRetry(
