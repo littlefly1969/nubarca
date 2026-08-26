@@ -718,6 +718,37 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   repository MRR from 0.583 to 0.395. `src/NubArca.Api/Rag/Evaluation/` is
   excluded from the repository corpus for that reason, as a rule rather than one
   file's exemption. Do not re-add it to make the corpus "complete".
+- **A partial index run concludes NOTHING about what left the snapshot.**
+  `rag index --limit N` sets `Partial`, and reconciliation is skipped. "I did not
+  see this source" means "it was deleted" only if the run could have seen it —
+  a capped pass over a complete index otherwise removes every membership past
+  the cap. Completeness comes from the REQUEST, never from a count of what was
+  enumerated, because an empty repository would then look like a complete run
+  that found nothing.
+- **One shared source cannot hold two snapshots.** A source row owns its
+  revision, content hash and chunks, so indexing domain B at a different commit
+  would rewrite what domain A is serving. That is refused
+  (`shared-source-snapshot-conflict`), not resolved: reindex every domain that
+  shares the source at the same revision. A source only one domain claims moves
+  forward normally.
+- **Repository bytes come from the COMMIT, not the working tree.** The provider
+  reads Git objects (`ls-tree` + `cat-file --batch`) at a resolved 40-character
+  SHA. Tracked symlinks are refused by mode and their targets are never
+  resolved or read; submodules are skipped. Git runs at index time only — the
+  query path never starts a process.
+- **A domain holding two revisions fails closed** (`rag_mixed_revision_index`)
+  until a complete reindex converges. There is no modal revision: picking the
+  newest, most common or first would let a half-reindexed corpus claim a
+  coherence it does not have.
+- **Chunk reuse is keyed on bytes AND `RagIndexFormat.Current`.** Changing a
+  chunker without bumping it leaves every already-indexed source on the old
+  interpretation forever.
+- **A benchmark question must not appear in the corpus it is measured against**,
+  and the guard is scoped per domain: repository queries against every eligible
+  file, Product Help queries against the manifest only. Identifier queries are
+  deliberately unguarded — `PhotoVectorIndexService` is SUPPOSED to occur in the
+  file that should win. `RagContaminationTests` enforces this, and it has
+  already caught a question line-wrapped back into documentation.
 - **Indexing is idempotent and revision-aware.** `rag index` is explicit and
   CLI-driven; a source whose content hash is unchanged keeps its chunks, and a
   chunk whose text hash is unchanged keeps its embedding. Sources that leave a

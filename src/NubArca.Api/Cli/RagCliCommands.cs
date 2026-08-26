@@ -99,19 +99,21 @@ internal static class RagCliCommands
             return 2;
         }
 
-        var revision = Arg(args, "--revision")
-                       ?? await sp.GetRequiredService<IRepositoryFileLister>().ResolveRevisionAsync(root)
-                       ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(revision))
+        // Resolved through Git to a FULL COMMIT SHA, so `--revision main` and a
+        // bare `HEAD` both become a thing that cannot later mean something else.
+        // An unresolvable commit-ish fails here, before any row is written.
+        var reader = sp.GetRequiredService<IRepositorySnapshotReader>();
+        string revision;
+        try
         {
-            revision = Environment.GetEnvironmentVariable("NUBARCA_GIT_SHA") ?? string.Empty;
+            var resolvedRoot = await reader.ResolveRootAsync(root);
+            revision = await reader.ResolveRevisionAsync(resolvedRoot, Arg(args, "--revision"));
         }
-        if (string.IsNullOrWhiteSpace(revision))
+        catch (RepositorySnapshotUnavailableException ex)
         {
-            // An index that cannot say which snapshot it describes cannot be
-            // checked against anything, so it is refused rather than stamped
-            // with a placeholder somebody would later read as real.
-            stderr.WriteLine("rag index: --revision (or a git checkout, or NUBARCA_GIT_SHA) is required.");
+            stderr.WriteLine($"rag index: {ex.Reason}"
+                             + (ex.Revision is null ? string.Empty : $" ({ex.Revision})"));
+            stderr.WriteLine("An index that cannot name the snapshot it describes is refused.");
             return 2;
         }
 
@@ -121,10 +123,34 @@ internal static class RagCliCommands
             Limit: Int(args, "--limit"),
             DryRun: Flag(args, "--dry-run"));
 
-        var outcome = await sp.GetRequiredService<IRagIndexer>().IndexAsync(request);
+        RagIndexOutcome outcome;
+        try
+        {
+            outcome = await sp.GetRequiredService<IRagIndexer>().IndexAsync(request);
+        }
+        catch (RagSharedSourceConflictException ex)
+        {
+            // Fail closed and say exactly which file and what to do. Continuing
+            // would rewrite a source another domain is serving at a different
+            // commit.
+            stderr.WriteLine($"rag index: {RagSharedSourceConflictException.Reason}");
+            stderr.WriteLine($"  source={ex.SourceKey}");
+            stderr.WriteLine("  Reindex every domain that shares this source at the same revision.");
+            return 1;
+        }
+        catch (RepositorySnapshotUnavailableException ex)
+        {
+            stderr.WriteLine($"rag index: {ex.Reason}");
+            return 1;
+        }
 
         stdout.WriteLine($"domain={outcome.Domain}");
         stdout.WriteLine($"revision={outcome.Revision}");
+        // A partial run saw only part of the snapshot and therefore concluded
+        // nothing about what left it. Reported, because "why did my --limit run
+        // not remove that stale source" has an answer and it is this line.
+        stdout.WriteLine($"partial={Bool(outcome.Partial)}");
+        stdout.WriteLine($"reconciliation_performed={Bool(outcome.ReconciliationPerformed)}");
         stdout.WriteLine($"sources_seen={outcome.SourcesSeen}");
         stdout.WriteLine(
             $"sources created={outcome.SourcesCreated} updated={outcome.SourcesUpdated} "

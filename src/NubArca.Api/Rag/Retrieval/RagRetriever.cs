@@ -101,6 +101,15 @@ public sealed class RagRetriever : IRagRetriever
         {
             return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.IndexUnavailable);
         }
+        if (index.Corpus.IsMixedRevision)
+        {
+            // An interrupted reindex left this domain describing two commits at
+            // once. Answering from it would mix two releases in one context.
+            _log.LogWarning(
+                "rag: {Domain} index holds more than one revision; retrieval disabled until a "
+                + "complete reindex finishes", domain.Key);
+            return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.MixedRevisionIndex);
+        }
         if (!AcceptsRevision(domain, index.Corpus.Revision))
         {
             _log.LogWarning(
@@ -158,7 +167,10 @@ public sealed class RagRetriever : IRagRetriever
 
         var index = await BuildIndexAsync(definition, cancellationToken);
         var revision = index?.Corpus.Revision;
-        var available = index is { IsEmpty: false } && AcceptsRevision(definition, revision ?? string.Empty);
+        var mixed = index?.Corpus.IsMixedRevision == true;
+        var available = index is { IsEmpty: false }
+                        && !mixed
+                        && AcceptsRevision(definition, revision ?? string.Empty);
 
         var resolution = _database is null
             ? TextEmbeddingResolution.Unavailable(RagFailureReasons.IndexUnavailable)
@@ -183,7 +195,9 @@ public sealed class RagRetriever : IRagRetriever
             ? (semanticAvailable ? null : resolution.Reason ?? RagFailureReasons.PgvectorUnavailable)
             : index is null or { IsEmpty: true }
                 ? RagFailureReasons.IndexUnavailable
-                : RagFailureReasons.RevisionMismatch;
+                : mixed
+                    ? RagFailureReasons.MixedRevisionIndex
+                    : RagFailureReasons.RevisionMismatch;
 
         return new RagDomainStatus(
             domain,

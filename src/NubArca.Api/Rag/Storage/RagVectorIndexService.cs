@@ -20,7 +20,10 @@ public sealed record RagVectorNeighbor(Guid ChunkId, double Score);
 /// production path degrades to lexical instead of failing.
 ///
 /// It is a SEPARATE vector space from photos and faces, in its own table. The
-/// concept is shared; the space is not. Mixing a 384-dimension text vector into
+/// concept is shared; the space is not.
+///
+/// The domain and profile predicates below constrain the ROWS RETURNED. They do
+/// not prefilter the approximate index's traversal — see SearchAsync. Mixing a 384-dimension text vector into
 /// a table of 1152-dimension image vectors would be arithmetically impossible,
 /// and mixing two text profiles into one table would be arithmetically possible
 /// and silently meaningless — which is why every read filters by ProfileId
@@ -110,12 +113,23 @@ WHERE v.""ProfileId"" = @p AND m.""DomainKey"" = @d;";
 
     /// Nearest chunks WITHIN one domain, for one profile.
     ///
-    /// The domain filter is pushed into the query rather than applied to the
-    /// results, so the ANN limit applies to that domain's chunks only. A
-    /// post-filter would mean asking for the ten nearest chunks in the database
-    /// and hoping some of them belong to the domain the caller is allowed to
-    /// read — which is the shape of an isolation bug even when it happens to
-    /// return the right rows.
+    /// WHAT THIS GUARANTEES, PRECISELY: every row this returns belongs to the
+    /// requested domain and profile, because the predicate is in the SQL and
+    /// PostgreSQL applies it. No chunk from another domain can come back.
+    ///
+    /// WHAT IT DOES NOT GUARANTEE: that the HNSW graph traversal itself visited
+    /// only that domain. pgvector walks one global index and the filter is
+    /// applied around it, so a highly selective filter can cost RECALL — the
+    /// search may exhaust its candidate budget on rows the predicate then
+    /// rejects and return fewer near neighbours than exist. That is a quality
+    /// property, not an isolation one, and both domains here are large enough
+    /// relative to the index that it does not bite today.
+    ///
+    /// It will bite when Slice 3 adds `WHERE OwnerUserId = @owner`, where one
+    /// person's chunks may be a thousandth of the table. Adding that predicate
+    /// to this same index is NOT equivalent to a physically owner-prefiltered
+    /// ANN search, and owner-private retrieval must choose and measure a
+    /// strategy rather than assume it is.
     ///
     /// Returns null when the backend is unavailable, so the caller falls back to
     /// lexical rather than reporting an empty semantic result as an answer.

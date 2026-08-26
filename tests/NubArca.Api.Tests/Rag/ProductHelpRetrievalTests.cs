@@ -197,6 +197,38 @@ public sealed class ProductHelpRetrievalTests
     }
 
     [Fact]
+    public void CenterOnMatch_FindsDiacriticFoldedTerm()
+    {
+        // The tokenizer folds diacritics, so a question typed `perche` produces
+        // the term `perche` — and the chunk says `perché`. Excerpt centering
+        // searched the raw lowercased text for that term, found nothing, and
+        // silently fell back to cutting from character zero: the exact failure
+        // match-centering exists to prevent, for every accented Italian word.
+        var filler = string.Join(" ", Enumerable.Repeat(
+            "Una frase di riempimento che occupa spazio nel chunk.", 20));
+        var text = $"{filler} Il gruppo è suggerito perché i volti si somigliano molto.";
+
+        var excerpt = RagLexicalIndex.CenterOnMatch(text, new[] { "perche" }, 200);
+
+        Assert.True(excerpt.Length <= 200);
+        Assert.Contains("perché", excerpt, StringComparison.Ordinal);
+        // A WINDOW around the match, not the head of the chunk.
+        Assert.StartsWith("… ", excerpt, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CenterOnMatch_RemainsWithinBudget()
+    {
+        var text = string.Join(" ", Enumerable.Repeat("parola", 500)) + " perché finale";
+
+        foreach (var budget in new[] { 40, 120, 400, 4000 })
+        {
+            var excerpt = RagLexicalIndex.CenterOnMatch(text, new[] { "perche" }, budget);
+            Assert.True(excerpt.Length <= budget, $"budget {budget} produced {excerpt.Length}");
+        }
+    }
+
+    [Fact]
     public void The_Ignored_Faces_Workflow_Is_Reachable_In_The_Shipped_Corpus()
     {
         // One of the workflows the Faces guidance has to cover, asked the way

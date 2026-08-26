@@ -118,23 +118,71 @@ public sealed class OnnxTextEmbeddingProvider : ITextEmbeddingProvider, IDisposa
         var prepared = RagTextEmbeddingModels.PrefixFor(config, inputKind) + text;
 
         await _gate.WaitAsync(cancellationToken);
+
+        // THE SLOT BELONGS TO THE NATIVE WORK, NOT TO THE WAIT.
+        //
+        // ONNX Runtime's Run is a blocking native call. A timeout on WaitAsync
+        // proves only that WE stopped waiting — the native inference is still
+        // running, still holding a session and still using CPU. Releasing the
+        // semaphore in a `finally` at that moment let the next caller start a
+        // second inference immediately, so a configured concurrency of 1 could
+        // become 2, 3, N under a slow model: exactly the unbounded native
+        // parallelism the gate exists to prevent, and the failure mode that
+        // took the evaluation host down once already.
+        //
+        // So the release is attached to the WORK's completion, not to this
+        // method's exit. On timeout the caller gets a sanitized failure now, and
+        // the slot stays held until the native call actually returns.
+        var work = Task.Run(() => Run(prepared, config, modelPath, tokenizerPath), CancellationToken.None);
+        var released = 0;
+        void ReleaseOnce()
+        {
+            if (Interlocked.Exchange(ref released, 1) == 0) _gate.Release();
+        }
+        _ = work.ContinueWith(
+            _ => ReleaseOnce(), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
         try
         {
-            var work = Task.Run(() => Run(prepared, config, modelPath, tokenizerPath), cancellationToken);
             var vector = timeoutSeconds > 0
                 ? await work.WaitAsync(TimeSpan.FromSeconds(timeoutSeconds), cancellationToken)
                 : await work.WaitAsync(cancellationToken);
             return new TextEmbeddingResult(vector, config.Dimension, AiDistanceMetrics.Cosine);
         }
-        finally
+        catch (TimeoutException)
         {
-            _gate.Release();
+            // Resumable, not fatal: the indexer keeps the text it already wrote
+            // and reports the reason, and retrieval falls back to lexical.
+            throw new TextEmbeddingUnavailableException(RagFailureReasons.EmbeddingTimeout);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TextEmbeddingUnavailableException)
+        {
+            throw;
+        }
+        catch
+        {
+            // A native failure's message can name a model path. It never leaves
+            // this method.
+            throw new TextEmbeddingUnavailableException(RagFailureReasons.EmbeddingFailed);
         }
     }
+
+    /// The inference call itself, as a seam a test can replace with controlled
+    /// blocking work. Overridable rather than an interface because everything
+    /// around it — the gate, the timeout, the sanitizing — is what is under
+    /// test, and extracting those would test a different object.
+    internal Func<string, TextEmbeddingModelConfig, string, string, float[]>? RunOverride { get; set; }
 
     private float[] Run(
         string text, TextEmbeddingModelConfig config, string modelPath, string tokenizerPath)
     {
+        if (RunOverride is { } over) return over(text, config, modelPath, tokenizerPath);
+
         var tokenizer = _tokenizers.GetOrAdd(
             tokenizerPath,
             p => new Lazy<HuggingFaceTokenizer>(

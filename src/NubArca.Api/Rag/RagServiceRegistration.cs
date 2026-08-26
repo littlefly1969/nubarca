@@ -86,7 +86,7 @@ public static class RagServiceRegistration
         // One provider per domain. A provider serves exactly one domain, so
         // there is no argument that makes the repository provider write into
         // `product-help`.
-        services.AddSingleton<IRepositoryFileLister, GitRepositoryFileLister>();
+        services.AddSingleton<IRepositorySnapshotReader, GitRepositorySnapshotReader>();
         services.AddScoped<IRagSourceProvider, RepositorySnapshotSourceProvider>();
         services.AddScoped<IRagSourceProvider, ProductHelpSourceProvider>();
 

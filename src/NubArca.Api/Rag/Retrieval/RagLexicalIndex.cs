@@ -208,14 +208,22 @@ public sealed class RagLexicalIndex
         if (budget <= 0) return string.Empty;
         if (text.Length <= budget) return text;
 
-        var haystack = text.ToLowerInvariant();
+        // Folded the SAME way the query terms were. `ToLowerInvariant()` alone
+        // lowercases `perché` to `perché`, and the term it is being compared
+        // against is `perche` — so an Italian question about anything accented
+        // silently fell back to cutting from character zero, which is the exact
+        // failure match-centering exists to prevent.
+        var haystack = RagText.FoldForSearch(text);
         var match = -1;
         foreach (var term in terms)
         {
             var at = haystack.IndexOf(term, StringComparison.Ordinal);
             if (at >= 0 && (match < 0 || at < match)) match = at;
         }
-        if (match < 0) return Trim(text, 0, budget);
+        // Folding preserves offsets, so a position found in `haystack` is the
+        // same position in `text` and the excerpt is cut from the ORIGINAL —
+        // accents and all.
+        if (match < 0 || haystack.Length != text.Length) return Trim(text, 0, budget);
 
         // A third of the window before the match, so the sentence it sits in has
         // its beginning.

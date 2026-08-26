@@ -18,11 +18,11 @@ namespace NubArca.Api.Rag.Sources;
 /// running is a confidently wrong statement.
 public sealed class RepositorySnapshotSourceProvider : IRagSourceProvider
 {
-    private readonly IRepositoryFileLister _lister;
+    private readonly IRepositorySnapshotReader _reader;
 
-    public RepositorySnapshotSourceProvider(IRepositoryFileLister lister)
+    public RepositorySnapshotSourceProvider(IRepositorySnapshotReader reader)
     {
-        _lister = lister;
+        _reader = reader;
     }
 
     public string Domain => RagDomains.NubArcaRepository;
@@ -40,15 +40,41 @@ public sealed class RepositorySnapshotSourceProvider : IRagSourceProvider
         // in: every path rule below is written against repository-root-relative
         // paths, so resolving it here is what keeps `--source .` from meaning
         // something different depending on where it was typed.
+        // The CHECKOUT's root, not whatever directory the caller happened to be
+        // in: every path rule below is written against repository-root-relative
+        // paths, so resolving it here is what keeps `--source .` from meaning
+        // something different depending on where it was typed.
         var root = Path.GetFullPath(
-            await _lister.ResolveRootAsync(Path.GetFullPath(request.RootPath), cancellationToken));
-        var tracked = await _lister.ListTrackedAsync(root, cancellationToken);
-        var tally = new RepositoryScanTally(tracked.Count);
+            await _reader.ResolveRootAsync(Path.GetFullPath(request.RootPath), cancellationToken));
 
-        foreach (var relativePath in tracked)
+        // The bytes come from the COMMIT, not from the working tree. An index
+        // that stamps a source with a revision has to have read that revision:
+        // otherwise "this is how NubArca works at 943e37b" describes whatever
+        // somebody had half-edited on disk when the command ran.
+        await using var snapshot = await _reader.OpenAsync(root, request.Revision, cancellationToken);
+
+        var tally = new RepositoryScanTally(snapshot.Entries.Count);
+
+        foreach (var entry in snapshot.Entries)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // A symlink's blob is its target path, and following it would import
+            // whatever that path names — including something outside the
+            // checkout entirely. It is refused by MODE, before anything reads
+            // it, and the target is never resolved to decide whether it is safe.
+            if (entry.IsSymbolicLink)
+            {
+                tally.Skip("symlink");
+                continue;
+            }
+            if (entry.IsSubmodule)
+            {
+                tally.Skip("submodule");
+                continue;
+            }
+
+            var relativePath = entry.Path;
             var path = RepositorySourcePolicy.CheckPath(relativePath);
             if (!path.IsEligible)
             {
@@ -56,27 +82,12 @@ public sealed class RepositorySnapshotSourceProvider : IRagSourceProvider
                 continue;
             }
 
-            var full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            // A tracked path can be absent from the working tree (a sparse
-            // checkout, a partial clone), and a deleted-but-tracked file is not
-            // an error worth stopping an index run for.
-            if (!File.Exists(full))
-            {
-                tally.Skip("missing");
-                continue;
-            }
-
             byte[] bytes;
             try
             {
-                bytes = await File.ReadAllBytesAsync(full, cancellationToken);
+                bytes = await snapshot.ReadAsync(entry, cancellationToken);
             }
-            catch (IOException)
-            {
-                tally.Skip("unreadable");
-                continue;
-            }
-            catch (UnauthorizedAccessException)
+            catch (RepositorySnapshotUnavailableException)
             {
                 tally.Skip("unreadable");
                 continue;
@@ -105,7 +116,9 @@ public sealed class RepositorySnapshotSourceProvider : IRagSourceProvider
                 Path: relativePath,
                 Title: TitleOf(relativePath, text, codeLanguage),
                 SourceKind: kind,
-                Revision: request.Revision,
+                // The snapshot's own revision, so a descriptor cannot claim one
+                // commit while carrying another's bytes.
+                Revision: snapshot.Revision,
                 ContentHash: RagHash.Sha256Hex(bytes),
                 // Prose language is asserted only where a provider knows it.
                 // Guessing at the natural language of a C# file would put a

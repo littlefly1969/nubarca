@@ -38,3 +38,25 @@ public static class RagChunkSizes
     /// And never past here. One indivisible region longer than this is cut.
     public const int HardCharacters = 3000;
 }
+
+/// The version of NubArca's CHUNK INTERPRETATION.
+///
+/// Content hash alone decides whether a source is rechunked, which is correct
+/// for "did the bytes change" and silently wrong for "did our reading of them
+/// change". Edit MarkdownRagChunker's heading rules, teach
+/// SourceCodeRagChunker a new declaration form, or change which symbols are
+/// extracted, and every already-indexed source keeps its old chunks forever —
+/// the improvement reaches new files only, and a corpus quietly becomes a mix
+/// of two interpretations.
+///
+/// So a source is unchanged for reuse only when the bytes AND this number are
+/// unchanged. Bumping it is a deliberate developer act with a visible cost: the
+/// next index run rechunks everything and re-embeds what it rechunked. It is
+/// never derived from an application version, because a release that did not
+/// touch chunking should not pay for one.
+public static class RagIndexFormat
+{
+    /// 1 — Slice 2's chunkers. Increment when chunk boundaries, headings or
+    /// extracted symbols would come out differently for identical bytes.
+    public const int Current = 1;
+}

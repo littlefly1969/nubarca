@@ -29,6 +29,11 @@ public class RagSourceConfiguration : IEntityTypeConfiguration<RagSource>
         builder.Property(s => s.Path).HasMaxLength(512).IsRequired();
         builder.Property(s => s.Revision).HasMaxLength(64).IsRequired();
         builder.Property(s => s.ContentHash).HasMaxLength(64).IsRequired();
+        // Defaults to 0 for rows written before the column existed, which is not
+        // any released format version — so the first index run after upgrading
+        // rechunks them, which is exactly right: nothing knows how those chunks
+        // were produced.
+        builder.Property(s => s.IndexFormatVersion).HasDefaultValue(0);
         builder.Property(s => s.Language).HasMaxLength(16).IsRequired();
         builder.Property(s => s.CodeLanguage).HasMaxLength(32).IsRequired();
         builder.Property(s => s.MetadataJson).HasColumnType("text");
