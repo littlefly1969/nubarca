@@ -8,7 +8,7 @@
 // a thin strip was visible). That makes any virtualized/scrolling solution the
 // wrong primitive here, even if it behaves correctly in tests.
 //
-// The picker therefore mounts one small, explicit page at a time. Every
+// The picker therefore mounts one small, explicit 2x4 page at a time. Every
 // focusable person is an ordinary visible child; no native list viewport owns
 // its geometry. Search and previous/next page controls keep a large library
 // quick to navigate without mounting hundreds of focusables.
@@ -23,8 +23,10 @@ export type PersonSelection = 'off' | 'include' | 'exclude';
 
 // --- explicit pages ---------------------------------------------------------
 
-/** Four rows leave the complete chooser visible even in a 1280x720 TV window. */
-export const PEOPLE_PAGE_SIZE = 4;
+/** A landscape TV uses width as well as height: two columns, four rows. */
+export const PEOPLE_GRID_COLUMNS = 2;
+export const PEOPLE_GRID_ROWS = 4;
+export const PEOPLE_PAGE_SIZE = PEOPLE_GRID_COLUMNS * PEOPLE_GRID_ROWS;
 
 function checkedPageSize(pageSize: number): number {
   if (!Number.isInteger(pageSize) || pageSize <= 0) {
@@ -72,6 +74,19 @@ export function peoplePageForId<T extends { readonly id: string }>(
   const size = checkedPageSize(pageSize);
   const index = people.findIndex((person) => person.id === personId);
   return index < 0 ? 0 : Math.floor(index / size);
+}
+
+/** Split one bounded page into native-focus-friendly horizontal rows. */
+export function peopleGridRows<T>(
+  people: readonly T[],
+  columns = PEOPLE_GRID_COLUMNS,
+): T[][] {
+  const width = checkedPageSize(columns);
+  const rows: T[][] = [];
+  for (let start = 0; start < people.length; start += width) {
+    rows.push(people.slice(start, start + width));
+  }
+  return rows;
 }
 
 // --- local name search -------------------------------------------------------

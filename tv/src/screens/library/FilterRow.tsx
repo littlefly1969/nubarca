@@ -48,14 +48,18 @@ interface Props {
   // identity as the user cycled it. The person share is fixed and independent
   // of what the trailing text currently says.
   variant?: 'filter' | 'person';
+  // A narrow sidebar cannot give two long strings useful horizontal columns.
+  // Stacked keeps the same focus treatment but puts the value below its label.
+  layout?: 'split' | 'stacked';
 }
 
 export function FilterRow({
   label, value, active, opensEditor, accessibilityLabel,
-  hasTVPreferredFocus = false, onSelect, onFocus, variant = 'filter',
+  hasTVPreferredFocus = false, onSelect, onFocus, variant = 'filter', layout = 'split',
 }: Props) {
   const [focused, setFocused] = useState(false);
   const person = variant === 'person';
+  const stacked = layout === 'stacked';
   return (
     <Pressable
       accessibilityRole="button"
@@ -67,28 +71,61 @@ export function FilterRow({
       onPress={onSelect}
       style={[styles.outer, focused && styles.outerFocused]}
     >
-      <View style={[styles.inner, focused && styles.innerFocused]}>
-        <Text
-          style={[
-            styles.label,
-            person && styles.labelPerson,
-            active && styles.labelActive,
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >
-          {focused ? '▸ ' : ''}{active ? '● ' : ''}{label}
-        </Text>
-        <Text
-          style={[
-            styles.value,
-            person && styles.valuePerson,
-            active && styles.valueActive,
-          ]}
-          numberOfLines={1}
-        >
-          {value}
-        </Text>
+      <View style={[styles.inner, stacked && styles.innerStacked, focused && styles.innerFocused]}>
+        {stacked ? (
+          <View style={styles.stackedCopy}>
+            <Text
+              style={[
+                styles.label,
+                styles.labelStacked,
+                person && styles.labelStackedPerson,
+                active && styles.labelActive,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {focused ? '▸ ' : ''}{active ? '● ' : ''}{label}
+            </Text>
+            {value.length > 0 && (
+              <Text
+                style={[
+                  styles.value,
+                  styles.valueStacked,
+                  person && styles.valueStackedPerson,
+                  active && styles.valueActive,
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                {value}
+              </Text>
+            )}
+          </View>
+        ) : (
+          <>
+            <Text
+              style={[
+                styles.label,
+                person && styles.labelPerson,
+                active && styles.labelActive,
+              ]}
+              numberOfLines={1}
+              ellipsizeMode="tail"
+            >
+              {focused ? '▸ ' : ''}{active ? '● ' : ''}{label}
+            </Text>
+            <Text
+              style={[
+                styles.value,
+                person && styles.valuePerson,
+                active && styles.valueActive,
+              ]}
+              numberOfLines={1}
+            >
+              {value}
+            </Text>
+          </>
+        )}
         <Text style={styles.disclosure}>{opensEditor ? '›' : ''}</Text>
       </View>
     </Pressable>
@@ -118,6 +155,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   innerFocused: { borderColor: colors.accent },
+  innerStacked: { paddingVertical: spacing.xs },
+  stackedCopy: { flex: 1, minWidth: 0, gap: 2 },
   // Fixed shares so the values line up in a readable column. The value gets the
   // larger one: labels are short nouns, values carry composed summaries, and at
   // 720p the row has roughly 650dp of text width to divide between them.
@@ -126,9 +165,13 @@ const styles = StyleSheet.create({
   // than push its sibling out of the row; without it the name would overflow
   // instead of truncating.
   labelPerson: { flex: PERSON_NAME_FLEX, minWidth: 0, flexGrow: 1, color: colors.text },
+  labelStacked: { flex: 0, color: colors.muted, fontSize: font.caption, fontWeight: '700' },
+  labelStackedPerson: { color: colors.text, fontSize: font.body },
   labelActive: { color: colors.text, fontWeight: '800' },
   value: { flex: 6, color: colors.muted, fontSize: font.body, textAlign: 'right' },
   valuePerson: { flex: PERSON_META_FLEX, flexGrow: 0, flexShrink: 0 },
+  valueStacked: { flex: 0, color: colors.text, textAlign: 'left' },
+  valueStackedPerson: { color: colors.muted, fontSize: font.caption },
   valueActive: { color: colors.text, fontWeight: '700' },
   disclosure: { width: 24, color: colors.muted, fontSize: font.body, textAlign: 'right' },
 });
