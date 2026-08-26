@@ -4995,9 +4995,11 @@ public static class CliEntryPoint
     }
     // help-knowledge build --source <dir> --out <file> --revision <sha>
     //
-    // The corpus is an ALLOWLIST of public product documentation (see
-    // HelpCorpusBuilder). Nothing operator-specific, nothing secret and nothing
-    // untracked can enter it, because entry requires being named.
+    // The corpus is the `product-help` RAG domain, built from an explicit
+    // MANIFEST of public product documentation (see ProductHelpSources).
+    // Nothing operator-specific, nothing secret and nothing untracked can enter
+    // it, because entry requires being named — and a document nobody classified
+    // is out even when it is public.
     private static Task<int> BuildHelpKnowledge(string[] args, TextWriter stdout, TextWriter stderr)
     {
         var source = ArgValue(args, "--source") ?? ".";
@@ -5018,10 +5020,10 @@ public static class CliEntryPoint
             return Task.FromResult(2);
         }
 
-        var corpus = NubArca.Api.Help.HelpCorpusBuilder.Build(source, revision);
+        var corpus = NubArca.Api.Rag.ProductHelp.ProductHelpCorpusBuilder.Build(source, revision);
         if (corpus.Documents.Count == 0)
         {
-            stderr.WriteLine("help-knowledge build: no eligible public documents were found.");
+            stderr.WriteLine("help-knowledge build: no approved product-help documents were found.");
             return Task.FromResult(1);
         }
 
@@ -5030,9 +5032,18 @@ public static class CliEntryPoint
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         File.WriteAllText(output, json);
 
+        stdout.WriteLine($"domain={corpus.Domain}");
         stdout.WriteLine($"revision={revision}");
         stdout.WriteLine($"documents={corpus.Documents.Count}");
         stdout.WriteLine($"sources={corpus.Documents.Select(d => d.Path).Distinct().Count()}");
+        // A manifest entry with no file is a rename nobody noticed: the build
+        // still succeeds, and it says which knowledge silently stopped shipping.
+        foreach (var missing in NubArca.Api.Rag.ProductHelp.ProductHelpSources.Manifest
+                     .Select(s => s.Path)
+                     .Where(p => !corpus.Documents.Any(d => d.Path == p)))
+        {
+            stderr.WriteLine($"help-knowledge build: approved source not found: {missing}");
+        }
         stdout.WriteLine($"out={output}");
         return Task.FromResult(0);
     }

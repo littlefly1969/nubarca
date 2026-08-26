@@ -101,6 +101,53 @@ equal the permissions in force before it. `isAdmin` survives only as a computed
 compatibility field on `/api/auth/me` and the admin import user picker; nothing
 stores it.
 
+### Ask NubArca
+
+An optional assistant that explains NubArca **as a product**. It is off until an
+operator configures a model, and it answers from the documentation shipped with
+the running release — never from the library.
+
+- **Protocol and trust are separate.** An endpoint speaks the OpenAI-compatible
+  chat format whether it is a hosted provider or the operator's own model
+  server, so the format says nothing about who holds the bytes. Each named model
+  profile states `Trust=External` or `Trust=LocalTrusted`, and NubArca **never
+  guesses it from the URL** — `localhost` is what a reverse proxy in front of a
+  cloud API looks like, and a trusted GPU server on another host is not on this
+  LAN. An unknown, empty or numeric value is invalid rather than "probably
+  local", and no browser request can choose or override it.
+- **Local means eligible, not powerful.** Effective capability is
+  `model trust ∩ feature policy ∩ caller permissions`. A trusted local model is
+  eligible for private context and read tools; Help gives it neither, because
+  Help's own policy is public product knowledge. Configuring a local model makes
+  Help local — it does not make Help able to see anything new. No trust level
+  grants write tools or unconfirmed execution.
+- **The boundary is structural.** The Help service's constructor holds a
+  text-only model runtime, a retriever, the model resolver and a logger — no
+  database, no storage, no people, no albums, no search. The outbound request has
+  no `tools`, `functions` or `tool_choice`, absent rather than empty, and the
+  runtime interface has no optional parameter reserving one. The chat request
+  has no field for a file, album, person, search, URL or retrieval domain.
+- **Answers are grounded, or there is no answer.** Product knowledge comes from
+  an explicit manifest of approved documents, each classified by audience,
+  intent and kind, replacing "every `docs/**.md`" — which let an operations
+  runbook outrank the guidance somebody asking "how do I use faces?" needed.
+  Retrieval is local and deterministic: section-aware chunks, one shared
+  Italian/English stopword set, a feature-alias catalogue, field-weighted
+  ranking, and an evidence gate. Below the gate NubArca makes **no model call at
+  all**, rather than paying a boundary crossing for an answer improvised from
+  irrelevant paragraphs.
+- **Faces guidance** was written for the assistant, in Italian and English, and
+  is held against the interface it describes: a test fails if a tab is renamed
+  without the guidance following.
+- **The disclosure tells the truth about which model answered** — distinct copy
+  and a distinct badge for external and local, and deliberately no claim that a
+  local endpoint has no internet egress, because NubArca does not run that
+  process and cannot prove it.
+
+Conversations are not stored: they live in the browser, and a bounded slice
+rides with each request. See
+[docs/help-assistant.md](docs/help-assistant.md).
+
 ### Google Cast
 
 A video can be sent to a Chromecast, a Google TV, an Android TV or any other

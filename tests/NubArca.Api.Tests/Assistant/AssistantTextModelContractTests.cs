@@ -1,13 +1,11 @@
 using System.Net;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
-using NubArca.Api.Help;
+using NubArca.Api.Assistant;
 using Xunit;
 
-namespace NubArca.Api.Tests.Help;
+namespace NubArca.Api.Tests.Assistant;
 
 /// Captures the COMPLETE outbound request — URL, headers and raw body bytes —
 /// and answers with whatever the test tells it to.
@@ -47,51 +45,55 @@ internal sealed class CapturingProviderHandler : HttpMessageHandler
         JsonSerializer.Serialize(new { choices = new[] { new { message = new { role = "assistant", content = text } } } }));
 }
 
-// A. The OpenAI-compatible provider contract, exercised against a fake provider.
+// The OpenAI-compatible protocol adapter, exercised against a fake endpoint.
 //
 // No test here reaches a real provider: an automated suite that depends on a
 // third party is a suite that fails for reasons that have nothing to do with the
 // code, and one that quietly costs money.
-public sealed class ExternalHelpProviderContractTests
+public sealed class AssistantTextModelContractTests
 {
     private const string Key = "SUPER_SECRET_EXTERNAL_HELP_KEY_XYZ";
 
-    private static (OpenAiCompatibleChatCompletionClient Client, CapturingProviderHandler Handler) Build(
-        Func<HttpRequestMessage, HttpResponseMessage> respond,
-        Action<ExternalHelpOptions>? tweak = null)
+    internal static AssistantModelProfile ExternalProfile(
+        string baseUrl = "https://provider.example/",
+        string apiKey = Key,
+        int maxOutputTokens = 321,
+        int timeoutSeconds = 30)
+        => new(
+            Key: "help-default",
+            Protocol: AssistantModelProtocol.OpenAiCompatible,
+            Trust: AssistantModelTrust.External,
+            BaseUrl: baseUrl,
+            ApiKey: apiKey,
+            Model: "test-model-1",
+            Label: "Test Provider",
+            TimeoutSeconds: timeoutSeconds,
+            MaxOutputTokens: maxOutputTokens);
+
+    private static (OpenAiCompatibleTextModel Model, CapturingProviderHandler Handler) Build(
+        Func<HttpRequestMessage, HttpResponseMessage> respond)
     {
-        var options = new ExternalHelpOptions
-        {
-            Enabled = true,
-            BaseUrl = "https://provider.example/",
-            ApiKey = Key,
-            Model = "test-model-1",
-            ProviderLabel = "Test Provider",
-            MaxOutputTokens = 321,
-        };
-        tweak?.Invoke(options);
         var handler = new CapturingProviderHandler(respond);
-        var client = new OpenAiCompatibleChatCompletionClient(
+        var model = new OpenAiCompatibleTextModel(
             new HttpClient(handler),
-            Options.Create(options),
-            NullLogger<OpenAiCompatibleChatCompletionClient>.Instance);
-        return (client, handler);
+            NullLogger<OpenAiCompatibleTextModel>.Instance);
+        return (model, handler);
     }
 
-    private static readonly IReadOnlyList<HelpChatMessage> Conversation = new[]
+    private static readonly IReadOnlyList<AssistantMessage> Conversation = new[]
     {
-        new HelpChatMessage(HelpChatRole.System, "system rules"),
-        new HelpChatMessage(HelpChatRole.User, "earlier question"),
-        new HelpChatMessage(HelpChatRole.Assistant, "earlier answer"),
-        new HelpChatMessage(HelpChatRole.User, "how do albums work?"),
+        new AssistantMessage(AssistantRole.System, "system rules"),
+        new AssistantMessage(AssistantRole.User, "earlier question"),
+        new AssistantMessage(AssistantRole.Assistant, "earlier answer"),
+        new AssistantMessage(AssistantRole.User, "how do albums work?"),
     };
 
     [Fact]
     public async Task Posts_The_Compatible_Shape_And_Extracts_The_Answer()
     {
-        var (client, handler) = Build(_ => CapturingProviderHandler.Answer("Albums group photos."));
+        var (model, handler) = Build(_ => CapturingProviderHandler.Answer("Albums group photos."));
 
-        var result = await client.CompleteAsync(Conversation);
+        var result = await model.CompleteAsync(ExternalProfile(), Conversation);
 
         Assert.True(result.Ok);
         Assert.Equal("Albums group photos.", result.Text);
@@ -110,12 +112,12 @@ public sealed class ExternalHelpProviderContractTests
         Assert.Equal("how do albums work?", messages[^1].GetProperty("content").GetString());
     }
 
-    // D. The model is given NO capabilities — not empty ones, absent ones.
+    // The model is given NO capabilities — not empty ones, absent ones.
     [Fact]
     public async Task The_Request_Carries_No_Tool_Surface_At_All()
     {
-        var (client, handler) = Build(_ => CapturingProviderHandler.Answer("ok"));
-        await client.CompleteAsync(Conversation);
+        var (model, handler) = Build(_ => CapturingProviderHandler.Answer("ok"));
+        await model.CompleteAsync(ExternalProfile(), Conversation);
 
         var body = JsonDocument.Parse(handler.Body!).RootElement;
         foreach (var forbidden in new[]
@@ -137,20 +139,43 @@ public sealed class ExternalHelpProviderContractTests
         }
     }
 
+    [Fact]
+    public async Task A_LocalTrusted_Endpoint_Works_Over_Http_Without_A_Key()
+    {
+        // What an operator's own llama.cpp/Ollama/vLLM server usually is: plain
+        // HTTP on the container network, no auth. Refusing it would push people
+        // towards declaring a real external provider "local" to make it work.
+        var (model, handler) = Build(_ => CapturingProviderHandler.Answer("local answer"));
+        var local = ExternalProfile() with
+        {
+            Trust = AssistantModelTrust.LocalTrusted,
+            BaseUrl = "http://model.internal:11434",
+            ApiKey = string.Empty,
+        };
+
+        var result = await model.CompleteAsync(local, Conversation);
+
+        Assert.True(result.Ok);
+        Assert.Equal("http://model.internal:11434/v1/chat/completions", handler.Url!.ToString());
+        // No empty `Bearer `: some local servers reject the header outright when
+        // it carries nothing.
+        Assert.Null(handler.Authorization);
+    }
+
     [Theory]
-    [InlineData(HttpStatusCode.Unauthorized, HelpFailureReasons.ProviderUnauthorized)]
-    [InlineData(HttpStatusCode.Forbidden, HelpFailureReasons.ProviderUnauthorized)]
-    [InlineData(HttpStatusCode.TooManyRequests, HelpFailureReasons.ProviderRateLimited)]
-    [InlineData(HttpStatusCode.InternalServerError, HelpFailureReasons.ProviderUnavailable)]
-    [InlineData(HttpStatusCode.BadGateway, HelpFailureReasons.ProviderUnavailable)]
+    [InlineData(HttpStatusCode.Unauthorized, AssistantFailureReasons.ProviderUnauthorized)]
+    [InlineData(HttpStatusCode.Forbidden, AssistantFailureReasons.ProviderUnauthorized)]
+    [InlineData(HttpStatusCode.TooManyRequests, AssistantFailureReasons.ProviderRateLimited)]
+    [InlineData(HttpStatusCode.InternalServerError, AssistantFailureReasons.ProviderUnavailable)]
+    [InlineData(HttpStatusCode.BadGateway, AssistantFailureReasons.ProviderUnavailable)]
     public async Task Provider_Failures_Become_Sanitized_Reasons(HttpStatusCode status, string reason)
     {
         // The provider's own error body is deliberately something that must never
         // reach a user: it quotes the request back, key and all.
         var leaky = JsonSerializer.Serialize(new { error = new { message = $"bad request with {Key}" } });
-        var (client, _) = Build(_ => CapturingProviderHandler.Json(status, leaky));
+        var (model, _) = Build(_ => CapturingProviderHandler.Json(status, leaky));
 
-        var result = await client.CompleteAsync(Conversation);
+        var result = await model.CompleteAsync(ExternalProfile(), Conversation);
 
         Assert.False(result.Ok);
         Assert.Equal(reason, result.Reason);
@@ -161,10 +186,10 @@ public sealed class ExternalHelpProviderContractTests
     [Fact]
     public async Task A_Malformed_Body_Is_Reported_As_Malformed_Not_Thrown()
     {
-        var (client, _) = Build(_ => CapturingProviderHandler.Json(HttpStatusCode.OK, "{ this is not json"));
-        var result = await client.CompleteAsync(Conversation);
+        var (model, _) = Build(_ => CapturingProviderHandler.Json(HttpStatusCode.OK, "{ this is not json"));
+        var result = await model.CompleteAsync(ExternalProfile(), Conversation);
         Assert.False(result.Ok);
-        Assert.Equal(HelpFailureReasons.ProviderMalformed, result.Reason);
+        Assert.Equal(AssistantFailureReasons.ProviderMalformed, result.Reason);
     }
 
     [Fact]
@@ -172,34 +197,32 @@ public sealed class ExternalHelpProviderContractTests
     {
         // Well-formed, successful, and useless. Returning ok=true with nothing in
         // it would show the user an empty bubble and no explanation.
-        var (client, _) = Build(_ => CapturingProviderHandler.Json(
+        var (model, _) = Build(_ => CapturingProviderHandler.Json(
             HttpStatusCode.OK, JsonSerializer.Serialize(new { choices = Array.Empty<object>() })));
-        var result = await client.CompleteAsync(Conversation);
+        var result = await model.CompleteAsync(ExternalProfile(), Conversation);
         Assert.False(result.Ok);
-        Assert.Equal(HelpFailureReasons.ProviderEmpty, result.Reason);
+        Assert.Equal(AssistantFailureReasons.ProviderEmpty, result.Reason);
     }
 
     [Fact]
     public async Task A_Slow_Provider_Times_Out_Rather_Than_Hanging()
     {
-        var (client, _) = Build(
-            _ =>
-            {
-                Thread.Sleep(TimeSpan.FromSeconds(2));
-                return CapturingProviderHandler.Answer("too late");
-            },
-            o => o.TimeoutSeconds = 1);
+        var (model, _) = Build(_ =>
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(2));
+            return CapturingProviderHandler.Answer("too late");
+        });
 
-        var result = await client.CompleteAsync(Conversation);
+        var result = await model.CompleteAsync(ExternalProfile(timeoutSeconds: 1), Conversation);
         Assert.False(result.Ok);
-        Assert.Equal(HelpFailureReasons.ProviderTimeout, result.Reason);
+        Assert.Equal(AssistantFailureReasons.ProviderTimeout, result.Reason);
     }
 
     [Fact]
     public async Task A_Cancelled_Caller_Is_Not_Mistaken_For_A_Timeout()
     {
         using var cts = new CancellationTokenSource();
-        var (client, _) = Build(_ =>
+        var (model, _) = Build(_ =>
         {
             cts.Cancel();
             Thread.Sleep(50);
@@ -207,22 +230,6 @@ public sealed class ExternalHelpProviderContractTests
         });
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => client.CompleteAsync(Conversation, cts.Token));
-    }
-
-    [Fact]
-    public async Task An_Unusable_Configuration_Never_Reaches_The_Network()
-    {
-        // http:// with the insecure escape hatch closed: the key would otherwise
-        // travel in a plaintext Authorization header.
-        var (client, handler) = Build(
-            _ => CapturingProviderHandler.Answer("unused"),
-            o => o.BaseUrl = "http://provider.example");
-
-        var result = await client.CompleteAsync(Conversation);
-
-        Assert.False(result.Ok);
-        Assert.Equal(HelpFailureReasons.NotConfigured, result.Reason);
-        Assert.Equal(0, handler.Calls);
+            () => model.CompleteAsync(ExternalProfile(), Conversation, cts.Token));
     }
 }
