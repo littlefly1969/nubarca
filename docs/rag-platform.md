@@ -125,8 +125,12 @@ git ls-files  +  path policy  +  content checks  =  indexable source
 
 `git ls-files` is the FIRST gate, not the last. `.git` internals, untracked
 files, build output, dependencies, lockfiles, generated bundles, secret material
-and binaries are all excluded; `.env.example` is allowed by NAME, as an
-explicitly classified example. Git runs at index time only — answering a
+and binaries are all excluded, and so is the retrieval evaluation set — see
+below. `.env.example` is allowed by NAME, as an explicitly classified example.
+The suspect words `secret`, `credential`, `password` and `token` disqualify a
+CONFIGURATION file and not a source file: applied to everything they excluded
+`AddTvPersonalSecretScheme.cs` and `PasswordResetToken.cs`, which are precisely
+the answer to "how does NubArca handle credentials". Git runs at index time only — answering a
 question never touches a checkout.
 
 `ProductHelpSourceProvider` is a **projection** of the same checkout through
@@ -246,15 +250,43 @@ backup-and-restore runbook that mentions faces, and is longer, so it won on word
 count. It is a permanent regression canary, and a technical reference to
 `face_previews` is not an acceptable answer to it either.
 
+### The corpus must not contain the question list
+
+The first real evaluation of `nubarca-repository` measured worse after the slice
+was committed than before it, and the reason was worth more than the score: the
+golden set is a C# file holding the golden queries as string literals, so once
+the repository indexed itself, the single best lexical match for
+*"which code prevents an External model from using repository knowledge?"* became
+the file containing that exact sentence. It led three of four failures and took
+MRR from 0.583 to 0.395.
+
+`src/NubArca.Api/Rag/Evaluation/` is therefore excluded from the repository
+corpus, as a rule rather than as one file's exemption: a corpus that contains
+the questions cannot answer them, it can only find them. Everything else in
+`Rag/` stays indexed — it is exactly the knowledge this domain exists to hold.
+
 `nubarca-repository` is measured with `rag evaluate` against an indexed
 checkout, not in the fast suite: building a 22,000-chunk index is not something
 a unit test should do. What the fast suite does assert is that every expectation
 in the repository golden set still names a file that exists, so a rename cannot
-silently invalidate half the set. Exact-identifier questions
-(`PhotoVectorIndexService`, a test name, a configuration key) are answered well
-by the lexical path; conceptual ones ("where is the privacy boundary enforced?")
-are the cases semantic retrieval is there to lift, and they are the ones to
-watch when a model is configured.
+silently invalidate half the set.
+
+The lexical-only baseline over 1,891 sources and 22,717 chunks at revision
+`943e37b` is Recall@5 **0.800**, MRR **0.575**, 7/10 top-3. The split is the
+interesting part, and it is the argument for hybrid retrieval in one table:
+
+- **exact-identifier questions** — `PhotoVectorIndexService`, a test name, a
+  configuration key, `face_previews table` — are answered first-hit by the
+  lexical path, and no embedding model reliably does that;
+- **conceptual questions** — *"where is the external Help privacy boundary
+  enforced?"* — return plausible-but-not-expected sources: the documentation
+  about the boundary and the tests that assert it, rather than the service that
+  implements it. All three remaining failures are of this kind.
+
+That is the gap semantic retrieval exists to close, and it is the number to
+watch when a model is configured. It is recorded here rather than tuned away:
+raising it by adjusting weights until these ten questions pass would improve the
+score and not the product.
 
 ## Deliberately not in this slice
 

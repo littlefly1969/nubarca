@@ -711,6 +711,13 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   model, no pgvector, unsupported dimension — falls back and reports a reason in
   the retrieval mode. There is NO hosted embedding path and nothing downloads
   weights.
+- **A retrieval corpus must not contain the questions it is measured with.**
+  `RagGoldenSet.cs` holds the golden queries as string literals, so once the
+  repository indexed itself the best lexical match for a golden question became
+  the file containing that exact sentence: it led three of four failures and took
+  repository MRR from 0.583 to 0.395. `src/NubArca.Api/Rag/Evaluation/` is
+  excluded from the repository corpus for that reason, as a rule rather than one
+  file's exemption. Do not re-add it to make the corpus "complete".
 - **Indexing is idempotent and revision-aware.** `rag index` is explicit and
   CLI-driven; a source whose content hash is unchanged keeps its chunks, and a
   chunk whose text hash is unchanged keeps its embedding. Sources that leave a

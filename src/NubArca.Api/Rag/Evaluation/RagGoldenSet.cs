@@ -146,7 +146,13 @@ public static class RagGoldenSet
             "PhotoVectorIndexService", "src/NubArca.Api/Ai/Photos/PhotoVectorIndexService.cs"),
         new RagGoldenCase(
             RagDomains.NubArcaRepository, RagLanguages.English,
-            "face_previews table", "src/NubArca.Api/Data/Configurations/Ai/FacePreviewConfiguration.cs"),
+            // The migration that CREATES the table is as good an answer as the
+            // EF configuration that describes it — arguably better. The first
+            // real evaluation run said so, and the expectation was wrong rather
+            // than the ranking.
+            "face_previews table",
+            "src/NubArca.Api/Data/Configurations/Ai/FacePreviewConfiguration.cs",
+            "src/NubArca.Api/Data/Migrations/20260702232708_AddFacePreviews.cs"),
         new RagGoldenCase(
             RagDomains.NubArcaRepository, RagLanguages.English,
             "RevisionMismatch_DoesNotCallModel",
