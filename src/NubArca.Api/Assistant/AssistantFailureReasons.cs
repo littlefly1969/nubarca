@@ -22,4 +22,19 @@ public static class AssistantFailureReasons
     /// question well enough to be worth grounding on. Distinct from
     /// KnowledgeUnavailable because the operator has nothing to fix.
     public const string NoSupportingKnowledge = "help_no_supporting_knowledge";
+
+    /// `Assistant__PrivateKnowledgeModel` names a model that resolves fine and
+    /// is not LocalTrusted.
+    ///
+    /// Its OWN code rather than the generic `not_configured`, because the two
+    /// have completely different fixes and only one of them is a mistake worth
+    /// naming: "you have not set this up" versus "you pointed your own documents
+    /// at a model outside your boundary, and NubArca will not do that". An
+    /// operator seeing `help_not_configured` would go looking for a typo.
+    public const string PrivateModelNotLocal = "private_model_not_local";
+
+    /// The private corpus has nothing indexed for this owner yet. Distinct from
+    /// a missing model: nobody has anything to answer FROM, and the fix is to
+    /// index documents rather than to configure an endpoint.
+    public const string PrivateKnowledgeUnavailable = "private_knowledge_unavailable";
 }

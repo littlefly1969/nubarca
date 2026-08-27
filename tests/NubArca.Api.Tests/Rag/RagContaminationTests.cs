@@ -31,21 +31,23 @@ namespace NubArca.Api.Tests.Rag;
 // contain the canary.
 public sealed class RagContaminationTests
 {
-    [Fact]
+    [SkippableFact]
     public void Guarded_Repository_Queries_Do_Not_Appear_In_Any_Eligible_Source()
     {
+        Skip.IfNot(GitIsAvailable(), "git is not available to read the tracked snapshot.");
+
         var root = RagTestHarness.RepositoryRoot();
         var guarded = RagGoldenSet.Repository.Where(c => c.Conceptual).ToList();
         Assert.NotEmpty(guarded);
 
         var offences = new List<string>();
-        foreach (var file in EligibleRepositoryFiles(root))
+        foreach (var (path, text) in EligibleRepositorySources(root))
         {
-            var normalized = Normalize(File.ReadAllText(file));
+            var normalized = Normalize(text);
             foreach (var golden in guarded)
             {
                 if (!normalized.Contains(Normalize(golden.Query), StringComparison.Ordinal)) continue;
-                offences.Add($"{Relative(root, file)} repeats: \"{golden.Query}\"");
+                offences.Add($"{path} repeats: \"{golden.Query}\"");
             }
         }
 
@@ -96,14 +98,43 @@ public sealed class RagContaminationTests
         Assert.All(unguarded, q => Assert.DoesNotContain('?', q));
     }
 
-    [Fact]
+    [SkippableFact]
     public void The_Evaluation_Implementation_Is_Not_Repository_Eligible()
     {
+        Skip.IfNot(GitIsAvailable(), "git is not available to read the tracked snapshot.");
+
         var root = RagTestHarness.RepositoryRoot();
 
         Assert.DoesNotContain(
-            EligibleRepositoryFiles(root).Select(f => Relative(root, f)),
+            EligibleRepositorySources(root).Select(s => s.Path),
             p => p.StartsWith("src/NubArca.Api/Rag/Evaluation/", StringComparison.Ordinal));
+    }
+
+    [SkippableFact]
+    public void An_Untracked_File_Is_Not_Part_Of_The_Guarded_Corpus()
+    {
+        // The reason this guard reads the SNAPSHOT rather than the working tree.
+        // A developer's stray file is not in any installation's corpus, so it
+        // must not be able to fail this test — and, symmetrically, must not be
+        // able to hide contamination by being the thing that was checked.
+        Skip.IfNot(GitIsAvailable(), "git is not available to read the tracked snapshot.");
+
+        var root = RagTestHarness.RepositoryRoot();
+        var stray = Path.Combine(root, $"untracked-contamination-probe-{Guid.NewGuid():N}.md");
+        var guarded = RagGoldenSet.Repository.First(c => c.Conceptual).Query;
+
+        try
+        {
+            File.WriteAllText(stray, $"# Scratch\n\n{guarded}\n");
+
+            var paths = EligibleRepositorySources(root).Select(s => s.Path).ToList();
+
+            Assert.DoesNotContain(paths, p => p.Contains("untracked-contamination-probe", StringComparison.Ordinal));
+        }
+        finally
+        {
+            try { File.Delete(stray); } catch (IOException) { }
+        }
     }
 
     [Fact]
@@ -126,17 +157,81 @@ public sealed class RagContaminationTests
     /// Every tracked-and-eligible file, decided by the SAME policy the indexer
     /// uses. A private copy of the rules here would drift, and the drift would
     /// always be in the direction of the test passing.
-    private static IEnumerable<string> EligibleRepositoryFiles(string root)
+    /// The TRACKED SNAPSHOT, read exactly the way the indexer reads it.
+    ///
+    /// The predecessor walked the working tree. That enumerated files the corpus
+    /// does not contain — an untracked scratch file, a half-finished note, a
+    /// local experiment — so a developer with a stray `.cs` in their checkout
+    /// could fail this guard for something no installation would ever index, and
+    /// the corpus this benchmark is measured against could differ from the one
+    /// the benchmark is guarded against. A guard measuring a different corpus
+    /// than the evaluation is a guard that is right by coincidence.
+    ///
+    /// `git ls-tree` at HEAD, the mode check, the path policy and the size
+    /// bound, in that order, are what `RepositorySnapshotSourceProvider` does.
+    /// Reusing the reader rather than re-implementing it is the point: a private
+    /// copy of the rules would drift, and the drift would always be in the
+    /// direction of the test passing.
+    private static IReadOnlyList<(string Path, string Text)> EligibleRepositorySources(string root)
     {
-        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-        {
-            var relative = Relative(root, file);
-            if (!RepositorySourcePolicy.CheckPath(relative).IsEligible) continue;
+        var reader = new GitRepositorySnapshotReader();
+        var revision = reader.ResolveRevisionAsync(root).GetAwaiter().GetResult();
+        using var snapshotHandle = new SnapshotHandle(
+            reader.OpenAsync(root, revision).GetAwaiter().GetResult());
+        var snapshot = snapshotHandle.Snapshot;
 
-            // Untracked files are not in the corpus either, but this walk cannot
-            // see the index; the path policy already removes build output and
-            // dependencies, which is what the walk would otherwise drown in.
-            yield return file;
+        var sources = new List<(string, string)>();
+        foreach (var entry in snapshot.Entries)
+        {
+            if (entry.IsSymbolicLink || entry.IsSubmodule) continue;
+            if (!RepositorySourcePolicy.CheckPath(entry.Path).IsEligible) continue;
+            if (!RepositorySourcePolicy.CheckSize(entry.Size).IsEligible) continue;
+
+            byte[] bytes;
+            try
+            {
+                bytes = snapshot.ReadAsync(entry).GetAwaiter().GetResult();
+            }
+            catch (RepositorySnapshotUnavailableException)
+            {
+                continue;
+            }
+
+            if (!RepositorySourcePolicy.CheckContent(entry.Path, bytes).IsEligible) continue;
+            sources.Add((entry.Path, System.Text.Encoding.UTF8.GetString(bytes)));
+        }
+        return sources;
+    }
+
+    /// `IAsyncDisposable` in a synchronous test method, without an async void.
+    private sealed class SnapshotHandle : IDisposable
+    {
+        public SnapshotHandle(IRepositorySnapshot snapshot) => Snapshot = snapshot;
+
+        public IRepositorySnapshot Snapshot { get; }
+
+        public void Dispose() => Snapshot.DisposeAsync().AsTask().GetAwaiter().GetResult();
+    }
+
+    private static bool GitIsAvailable()
+    {
+        try
+        {
+            using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git")
+            {
+                ArgumentList = { "--version" },
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            if (process is null) return false;
+            process.WaitForExit(10_000);
+            return process.ExitCode == 0;
+        }
+        catch (Exception ex) when (ex is SystemException)
+        {
+            return false;
         }
     }
 

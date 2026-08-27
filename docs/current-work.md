@@ -735,12 +735,58 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the cap. Completeness comes from the REQUEST, never from a count of what was
   enumerated, because an empty repository would then look like a complete run
   that found nothing.
-- **One shared source cannot hold two snapshots.** A source row owns its
-  revision, content hash and chunks, so indexing domain B at a different commit
-  would rewrite what domain A is serving. That is refused
-  (`shared-source-snapshot-conflict`), not resolved: reindex every domain that
-  shares the source at the same revision. A source only one domain claims moves
-  forward normally.
+- **The REVISION lives on the domain membership, not on the source.** A source
+  row is one content interpretation — `(SourceKey, ContentHash,
+  IndexFormatVersion)` — and a membership says which snapshot ITS domain is
+  using that content at. That is what lets two domains sharing a document
+  upgrade one at a time, in either order: the bytes did not change, so nothing
+  is re-derived and each membership moves its own revision forward. Putting the
+  revision on the source deadlocked the release lifecycle, because advancing the
+  repository rewrote what Help was serving and Help could not go first for the
+  same reason. A row only THIS domain uses is still rewritten in place, so an
+  ordinary `git pull` keeps the ordinal-by-ordinal chunk and embedding reuse; a
+  row another domain is serving forks instead, and the superseded row is deleted
+  when its LAST membership leaves. Do not "simplify" this back into one row per
+  key.
+- **Git object reads are bounded BEFORE allocation, and a stalled `cat-file`
+  session is killed rather than reused.** `ls-tree -l` carries the blob size, so
+  an oversized object is refused from the tree entry; `GitCatFileSession` also
+  enforces a ceiling from the response header before `new byte[size]`. Any read
+  that stops mid-response leaves bytes queued on a single-conversation stream, so
+  the session is faulted and the process killed — resynchronising would mean
+  consuming exactly what was being refused. Cancellation is NOT a timeout: it
+  reaches the caller as `OperationCanceledException`, because reporting a
+  cancelled index as `git-object-read-timeout` records a permanent-looking
+  failure for something the operator did on purpose.
+- **Semantic retrieval is configured PER DOMAIN**
+  (`Rag__Domains__<key>__SemanticEnabled` / `__TextEmbeddingProfileKey`), because
+  `multilingual-e5-small` moves Product Help's MRR up and the repository's
+  Recall@5 down. The installation-wide values remain an explicit fallback, and
+  the per-domain switch is NULLABLE so "unmentioned" and "false" stay different —
+  otherwise adding a `Domains` entry for one domain silently disables another.
+  An **OwnerPrivate domain never inherits**: it must state both its switch and
+  its profile, derived from the domain's privacy class rather than from a list of
+  keys.
+- **Owner-private knowledge is `user-documents`, and derived rows are not
+  authority.** Private content lives in `document_texts` / `document_chunks` /
+  `document_chunk_embeddings` — owner-scoped by schema — never in `rag_sources`.
+  Every private read joins the LIVE `FileItem` through
+  `OwnerDocumentEligibility`, so deleting a file or moving it into the Private
+  Vault removes its answers on the next question; cleanup is housekeeping and
+  never the boundary. Vault exclusion is the global `PrivateVaultId == null`
+  query filter — nothing in that context calls `IgnoreQueryFilters()`. Blob
+  identity is not knowledge authority: two owners of the same deduplicated bytes
+  have independent extractions. The private lexical index is built per request
+  and deliberately NOT cached, and private semantic retrieval is exact cosine
+  over the owner's eligible vectors — a global ANN index with an owner predicate
+  is not an owner-prefiltered search and fails silently.
+- **`Assistant__PrivateKnowledgeModel` must be `LocalTrusted`, with no
+  fallback.** Not to Help's model, which is the one place allowed to be
+  External, and not to anything else. An External configuration yields ZERO
+  provider calls and its own reason code `private_model_not_local`; the question
+  itself never leaves, not only the evidence. The private chat DTO carries a
+  message and a bounded history and has no field for an owner, a domain, an
+  object id, a model or a trust level.
 - **Repository bytes come from the COMMIT, not the working tree.** The provider
   reads Git objects (`ls-tree` + `cat-file --batch`) at a resolved 40-character
   SHA. Tracked symlinks are refused by mode and their targets are never

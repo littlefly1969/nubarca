@@ -27,6 +27,7 @@ public sealed class AssistantModelResolver
     public const string LegacyExternalHelpKey = "legacy-external-help";
 
     private readonly AssistantModelResolution _helpModel;
+    private readonly AssistantModelResolution _privateKnowledgeModel;
     private readonly AssistantHelpOptions _helpBounds;
 
     public AssistantModelResolver(
@@ -48,6 +49,15 @@ public sealed class AssistantModelResolver
             _helpModel = ResolveLegacy(legacy.Value);
         }
 
+        // The private model is resolved from the NEW configuration only. The
+        // legacy `ExternalHelp__*` shape predates the trust axis and is always
+        // adapted as External, so there is nothing in it that could ever satisfy
+        // the LocalTrusted requirement — and pretending to look would suggest it
+        // might.
+        _privateKnowledgeModel = IsConfigured(options)
+            ? ResolvePrivateKnowledgeModel(options)
+            : AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
+
         // Safe operational facts only: which profile, which classification.
         // Never the URL, never the key, never the model id.
         if (_helpModel.Profile is { } profile)
@@ -60,6 +70,13 @@ public sealed class AssistantModelResolver
 
     /// The model the Help feature uses, or why it has none.
     public AssistantModelResolution HelpModel => _helpModel;
+
+    /// The model that may read the caller's OWN DOCUMENTS, or why there is none.
+    ///
+    /// Guaranteed `LocalTrusted` when usable. Every caller can therefore treat
+    /// "usable" as "may be given private evidence" without repeating the trust
+    /// check — and, more importantly, without any of them being able to skip it.
+    public AssistantModelResolution PrivateKnowledgeModel => _privateKnowledgeModel;
 
     /// Bounds and corpus location for the Help feature.
     public AssistantHelpOptions HelpBounds => _helpBounds;
@@ -81,6 +98,43 @@ public sealed class AssistantModelResolver
             return AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
         }
         return Validate(options.HelpModel, model);
+    }
+
+    /// The private-knowledge model: a named profile that must ALSO be
+    /// LocalTrusted.
+    ///
+    /// Two separate refusals, and the second one is the point of this method.
+    /// Everything Validate checks — protocol, trust parsed by name, no
+    /// ManagedLocal, a usable URL — applies here too. On top of it, a model that
+    /// resolves perfectly well and happens to be External is refused for THIS
+    /// use, because the question a person asks about their own documents is
+    /// itself private and the evidence certainly is.
+    ///
+    /// Refused at CONFIGURATION time rather than at request time, so an
+    /// installation that pointed this at a provider has a feature that is off
+    /// rather than a feature that leaks. There is no fallback to Help's model
+    /// and no fallback to anything else: unusable means no private answers.
+    private static AssistantModelResolution ResolvePrivateKnowledgeModel(AssistantOptions options)
+    {
+        if (!options.Enabled) return AssistantModelResolution.Unusable(AssistantFailureReasons.Disabled);
+        if (string.IsNullOrWhiteSpace(options.PrivateKnowledgeModel))
+        {
+            return AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
+        }
+        if (!options.Models.TryGetValue(options.PrivateKnowledgeModel, out var model) || model is null)
+        {
+            return AssistantModelResolution.Unusable(AssistantFailureReasons.NotConfigured);
+        }
+
+        var resolved = Validate(options.PrivateKnowledgeModel, model);
+        if (resolved.Profile is not { } profile)
+        {
+            return resolved;
+        }
+
+        return profile.Trust == AssistantModelTrust.LocalTrusted
+            ? resolved
+            : AssistantModelResolution.Unusable(AssistantFailureReasons.PrivateModelNotLocal);
     }
 
     /// Public so configuration tests drive the REAL decision rather than a

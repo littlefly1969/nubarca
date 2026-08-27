@@ -87,7 +87,18 @@ public sealed record RagEvidence(
     string Revision = "",
     int? LexicalRank = null,
     int? VectorRank = null,
-    int FusionRank = 0);
+    int FusionRank = 0,
+
+    /// WHOSE knowledge this is, for an owner-scoped domain. Null for every
+    /// system domain, which belongs to the installation rather than a person.
+    ///
+    /// INTERNAL PROVENANCE, exactly like `Revision` and the rank fields: it
+    /// exists so AssistantRagPolicy can check the evidence itself rather than
+    /// trust that whoever retrieved it used the right owner, and it is never
+    /// part of an HTTP response, a citation, a log line or a prompt. An owner id
+    /// reaching a model would be a stable identifier for a person attached to
+    /// text about them.
+    Guid? OwnerUserId = null);
 
 /// Why a retrieval returned what it did.
 ///
@@ -158,5 +169,10 @@ public interface IRagRetriever
 {
     Task<RagRetrievalResult> RetrieveAsync(RagQuery query, CancellationToken cancellationToken = default);
 
-    Task<RagDomainStatus> GetStatusAsync(RagDomainKey domain, CancellationToken cancellationToken = default);
+    /// `ownerUserId` is required for an owner-scoped domain and ignored by every
+    /// system one. Optional in the signature so the system callers stay honest
+    /// about having no owner, rather than passing `Guid.Empty` and making the
+    /// interesting case invisible.
+    Task<RagDomainStatus> GetStatusAsync(
+        RagDomainKey domain, Guid? ownerUserId = null, CancellationToken cancellationToken = default);
 }
