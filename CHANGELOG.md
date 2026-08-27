@@ -8,6 +8,13 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **The signed APK now reaches the login screen instead of closing from the
+  Android splash.** The release had autolinked `expo-font` 57 beside Expo SDK
+  54's `expo-modules-core` 3, producing a native `NoSuchMethodError` before
+  JavaScript could start. `expo-font` is now an explicit SDK-owned dependency,
+  every autolinked Expo Android module is checked against the SDK 54 version
+  map, and both PR CI and the signed release run cold-launch the generated APK
+  in an Android emulator. Mobile advances to `0.2.2` (`versionCode` 3).
 - **Cold start on a fresh installation no longer initializes authenticated
   sync storage before login.** The SQLite ledger now uses Expo's database-name
   contract, its parent is created synchronously by Expo, and an optional sync
