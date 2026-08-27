@@ -75,18 +75,26 @@ chunks to a Product Help caller fails the request instead of leaking them.
 ## Sources, membership, chunks, embeddings
 
 ```text
-rag_sources           one row per document, identified by SourceKey
-rag_domain_sources    membership: this source belongs to this domain
+rag_sources           one CONTENT interpretation of a document
+                      identity: (SourceKey, ContentHash, IndexFormatVersion)
+rag_domain_sources    membership: this domain uses that content, at this revision
 rag_chunks            one retrievable passage
 rag_chunk_embeddings  canonical float32 vector per (chunk, profile)
 
 rag_chunk_embedding_vectors_384    pgvector accelerator, derived
 ```
 
-A source exists **once**. `docs/help/faces.md` is one row whether it is only
-repository knowledge or also approved Product Help, with one set of chunks and
-one embedding per profile, and two membership rows. Adding a domain costs a
-membership row rather than a second copy of the text and every vector.
+A source exists **once per interpretation of its bytes**. `docs/help/faces.md` is
+one row whether it is only repository knowledge or also approved Product Help,
+with one set of chunks and one embedding per profile, and two membership rows.
+Adding a domain costs a membership row rather than a second copy of the text and
+every vector.
+
+What a source row deliberately does NOT carry is the revision. Content identity
+is what the document is, what its bytes are and how NubArca read them; which
+snapshot a domain is using those bytes at is that domain's claim, and it lives on
+the membership. See "A shared source may hold two snapshots" below for the
+release lifecycle that separation exists for.
 
 Domain-specific classification — Product Help's feature name, aliases, audience,
 intent and editorial priority — lives on the MEMBERSHIP. It is that domain's
@@ -100,7 +108,8 @@ The concept is shared; the ownership semantics and the vector spaces are not.
 
 ## Provenance and revision
 
-Every source carries its **revision** and a SHA-256 **content hash**.
+Every source carries a SHA-256 **content hash**; every domain membership carries
+the **revision** that domain is describing.
 
 - `product-help` is REVISION-GATED: an index built from a different revision
   than the running build is refused, because Help that describes a feature this
@@ -167,28 +176,58 @@ REQUEST, never from how many sources were enumerated: inferring it from a count
 would make an empty repository look like a complete run that found nothing.
 `rag index` reports `partial` and `reconciliation_performed` on every run.
 
-### A shared source cannot hold two snapshots
+### A shared source may hold two snapshots
 
-One row per source key is what makes a document shared by two domains cost one
-set of chunks and one embedding. That row also owns the revision, the content
-hash and those chunks — so indexing `nubarca-repository` at commit B would
-rewrite the bytes `product-help` is serving at commit A.
+Domains sharing a document upgrade **one at a time, in either order**.
 
-The conflict is refused, not resolved: detaching the other domain, preferring the
-newer revision or duplicating under an ad-hoc key each pick a winner nobody
-asked for. `rag index` fails with `shared-source-snapshot-conflict` and names the
-file, and the fix is to index every domain that shares it at the same revision.
-A source only one domain claims follows its snapshot forward normally.
+The predecessor could not. One row per source key owned the revision AND the
+bytes AND the chunks, so indexing `nubarca-repository` at commit B rewrote what
+`product-help` was serving at commit A. That was refused — correctly, because
+detaching the other domain, preferring the newer revision or duplicating under an
+ad-hoc key each pick a winner nobody asked for. But Help could not go first for
+exactly the same reason, so two domains sharing a file could only ever move in
+one atomic multi-domain reindex, and a release lifecycle with no legal first step
+is not a lifecycle.
+
+Splitting content identity from snapshot membership dissolves it:
+
+```text
+rev A   repository ─┐
+                    ├─ source(faces.md, hash₁)     one row, one set of chunks
+        help       ─┘
+
+rev B   repository ─── source(faces.md, hash₁)     bytes unchanged: NOTHING
+        help       ─── source(faces.md, hash₁)     is re-derived, revisions
+                                                   move independently
+```
+
+The common case does not write at all. A file unchanged between A and B is the
+same content row, so the second domain's upgrade is one membership revision
+moving forward — zero chunks and zero embeddings re-derived.
+
+A file that DID change is the interesting one, and there are two shapes:
+
+- **only this domain uses the row** — it is rewritten IN PLACE, so the
+  ordinal-by-ordinal chunk comparison still applies and an edit to one paragraph
+  still costs one embedding. This is the ordinary `git pull` case, and forking
+  unconditionally would have thrown away every vector of every edited file;
+- **another domain is serving the row** — it is never rewritten. A second content
+  row is created, the two coexist for exactly as long as the two domains
+  disagree, and the old one is deleted when its LAST membership leaves it.
 
 ### Mixed revisions fail closed
 
 Indexing commits incrementally, so an interrupted reindex can leave one domain
-holding sources from two commits. There is no honest single revision for that
+holding memberships from two commits. There is no honest single revision for that
 corpus — not the newest, not the most common, not the first — so retrieval
 refuses it with `rag_mixed_revision_index` until a complete reindex converges.
 That is a different condition from `rag_revision_mismatch`, which is a coherent
 index belonging to a different build: an operator fixes the first by finishing
 the reindex and the second by rebuilding the image.
+
+Note what this is measured over. Two **domains** at two revisions is an ordinary
+sequential upgrade and is nobody's incoherence; one **domain** at two revisions
+is still the thing that fails closed.
 
 ### Chunking has a version
 

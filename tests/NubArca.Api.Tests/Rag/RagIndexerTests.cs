@@ -258,7 +258,18 @@ public sealed class RagIndexerTests : IDisposable
         Assert.True(await _db.RagChunkEmbeddings.CountAsync() > afterBounded);
     }
 
-    // ---- shared source snapshot conflict ------------------------------------
+    // ---- sequential domain upgrade ------------------------------------------
+    //
+    // The predecessor kept the revision on the SOURCE row, which is also where
+    // the bytes and the chunks live. Two domains sharing a file could therefore
+    // never move: advancing the repository to commit B rewrote what Product Help
+    // was serving at A, and Help could not go first for the same reason. It was
+    // refused — correctly — and the result was a release lifecycle with no legal
+    // first step.
+    //
+    // Revision now lives on the MEMBERSHIP, so the tests below are the lifecycle
+    // that used to be impossible: one domain at a time, in either order, with
+    // nothing re-derived when the bytes did not change.
 
     [Fact]
     public async Task SharedSource_SameRevisionSameContent_IsReused()
@@ -275,66 +286,261 @@ public sealed class RagIndexerTests : IDisposable
     }
 
     [Fact]
-    public async Task SharedSource_DifferentRevision_IsRefusedWithoutMutation()
+    public async Task SharedUnchangedSource_CanAdvanceRepositoryBeforeHelp()
     {
-        // One row owns Revision, ContentHash and the chunks. Indexing the other
-        // domain at a different commit would rewrite the bytes the first domain
-        // is serving — so it is refused rather than resolved.
+        // The exact move that used to be denied in both directions.
         const string path = "docs/help/faces.md";
         await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
-        var before = await SnapshotAsync();
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
 
-        var conflict = await Assert.ThrowsAsync<RagSharedSourceConflictException>(
-            () => IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-b"));
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-b");
 
-        Assert.Equal(path, conflict.SourceKey);
-        Assert.Equal(RagDomains.ProductHelp, conflict.DomainKey);
-        Assert.Equal(before, await SnapshotAsync());
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.NubArcaRepository));
+        // Help never asked to move, and did not.
+        Assert.Equal("rev-a", await RevisionOfAsync(RagDomains.ProductHelp));
+        Assert.Equal(1, await _db.RagSources.CountAsync());
     }
 
     [Fact]
-    public async Task SharedSource_DifferentContent_IsRefusedWithoutMutation()
+    public async Task SharedUnchangedSource_CanAdvanceHelpBeforeRepository()
     {
+        // And the other order, because "whichever domain you index first is
+        // wrong" was the whole defect.
         const string path = "docs/help/faces.md";
         await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
-        var before = await SnapshotAsync();
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
 
-        await Assert.ThrowsAsync<RagSharedSourceConflictException>(
-            () => IndexAsync(
-                Help(Source(path, BodyB + "\n\nUn paragrafo diverso.", feature: "faces")),
-                revision: "rev-a"));
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-b");
 
-        Assert.Equal(before, await SnapshotAsync());
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.ProductHelp));
+        Assert.Equal("rev-a", await RevisionOfAsync(RagDomains.NubArcaRepository));
+        Assert.Equal(1, await _db.RagSources.CountAsync());
     }
 
     [Fact]
-    public async Task SharedSourceConflict_DoesNotDropExistingMembershipsOrEmbeddings()
+    public async Task SharedUnchangedSource_ReusesChunksAcrossDifferentMembershipRevisions()
     {
         SeedDeterministicProfile();
         const string path = "docs/help/faces.md";
         await IndexAsync(Repository(Source(path, BodyB)), embed: true, revision: "rev-a");
-        var memberships = await _db.RagDomainSources.CountAsync();
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), embed: true, revision: "rev-a");
+
+        var chunkIds = await _db.RagChunks.Select(c => c.Id).OrderBy(i => i).ToListAsync();
+        var embeddingIds = await _db.RagChunkEmbeddings.Select(e => e.Id).OrderBy(i => i).ToListAsync();
+        Assert.NotEmpty(embeddingIds);
+
+        var outcome = await IndexAsync(
+            Repository(Source(path, BodyB)), embed: true, revision: "rev-b");
+
+        // A revision is a claim about a snapshot, not a property of the bytes.
+        // Moving it must cost nothing — no rechunk, no re-inference.
+        Assert.Equal(0, outcome.ChunksCreated);
+        Assert.Equal(0, outcome.ChunksUpdated);
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Equal(chunkIds, await _db.RagChunks.Select(c => c.Id).OrderBy(i => i).ToListAsync());
+        Assert.Equal(
+            embeddingIds,
+            await _db.RagChunkEmbeddings.Select(e => e.Id).OrderBy(i => i).ToListAsync());
+    }
+
+    [Fact]
+    public async Task ChangedSharedSource_CreatesNewContentIdentity_WithoutMutatingTheOtherDomain()
+    {
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
+        var helpBefore = await DomainSnapshotAsync(RagDomains.ProductHelp);
+
+        var changed = BodyB + "\n\n## Nuova sezione\n\nUn paragrafo aggiunto in fondo.\n";
+        await IndexAsync(Repository(Source(path, changed)), revision: "rev-b");
+
+        // Two content rows: one per interpretation, for exactly as long as the
+        // two domains disagree.
+        Assert.Equal(2, await _db.RagSources.CountAsync());
+        Assert.Equal(2, await _db.RagDomainSources.CountAsync());
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.NubArcaRepository));
+        Assert.Equal("rev-a", await RevisionOfAsync(RagDomains.ProductHelp));
+
+        // The bytes Help is serving are the bytes Help asked for. This is the
+        // property the refused conflict was protecting, now held without a
+        // refusal.
+        Assert.Equal(helpBefore, await DomainSnapshotAsync(RagDomains.ProductHelp));
+        // ...and the repository is on the new ones. (The markdown chunker lifts
+        // `## Nuova sezione` into the chunk HEADING, so the body is what to look
+        // for in the text.)
+        Assert.Contains(
+            await ChunkTextOfAsync(RagDomains.NubArcaRepository),
+            t => t.Contains("Un paragrafo aggiunto in fondo", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            await ChunkTextOfAsync(RagDomains.ProductHelp),
+            t => t.Contains("Un paragrafo aggiunto in fondo", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MovingSecondDomainToNewContent_ReusesTheNewSource_AndRemovesTheOld()
+    {
+        // The completion of the upgrade: the second domain arrives at content
+        // the first already derived, so nothing is chunked, and the superseded
+        // row leaves with its last membership.
+        const string path = "docs/help/faces.md";
+        var changed = BodyB + "\n\n## Nuova sezione\n\nUn paragrafo aggiunto in fondo.\n";
+
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
+        await IndexAsync(Repository(Source(path, changed)), revision: "rev-b");
+        // The chunks of the content the repository already derived — the ones
+        // Help is about to adopt without re-deriving anything.
+        var newContent = await ChunkTextOfAsync(RagDomains.NubArcaRepository);
+
+        var outcome = await IndexAsync(
+            Help(Source(path, changed, feature: "faces")), revision: "rev-b");
+
+        Assert.Equal(0, outcome.ChunksCreated);
+        Assert.Equal(0, outcome.ChunksUpdated);
+        Assert.Equal(1, await _db.RagSources.CountAsync());
+        Assert.Equal(2, await _db.RagDomainSources.CountAsync());
+        // Exactly the repository's chunks, and only those: the superseded row
+        // left with Help's last membership on it.
+        Assert.Equal(newContent, await ChunkTextOfAsync(RagDomains.ProductHelp));
+        Assert.Equal(newContent.Length, await _db.RagChunks.CountAsync());
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.ProductHelp));
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.NubArcaRepository));
+    }
+
+    [Fact]
+    public async Task OldSource_IsRemovedOnlyAfterTheLastMembershipLeaves()
+    {
+        const string path = "docs/help/faces.md";
+        var changed = BodyB + "\n\n## Nuova sezione\n\nUn paragrafo aggiunto in fondo.\n";
+
+        await IndexAsync(Repository(Source(path, BodyB)), revision: "rev-a");
+        await IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-a");
+
+        await IndexAsync(Repository(Source(path, changed)), revision: "rev-b");
+        // Help is still on it, so it survives — with its chunks, which Help is
+        // answering from.
+        Assert.Equal(2, await _db.RagSources.CountAsync());
+        Assert.NotEmpty(await ChunkTextOfAsync(RagDomains.ProductHelp));
+
+        await IndexAsync(Help(Source(path, changed, feature: "faces")), revision: "rev-b");
+        Assert.Equal(1, await _db.RagSources.CountAsync());
+        // Chunks of the departed content go with it rather than being orphaned.
+        Assert.Empty(await _db.RagChunks
+            .Where(c => !_db.RagSources.Any(s => s.Id == c.SourceId)).ToListAsync());
+    }
+
+    [Fact]
+    public async Task SequentialDomainUpgrade_A_To_B_CompletesWithoutDeadlock()
+    {
+        // A whole snapshot moving one domain at a time: one file shared and
+        // unchanged, one file shared and edited, one file only the repository
+        // has. No step is refused, and the end state is coherent.
+        SeedDeterministicProfile();
+        const string shared = "docs/help/faces.md";
+        const string edited = "docs/help/albums.md";
+        var editedB = BodyC + "\n\nUna riga aggiunta nella revisione B del documento.\n";
+
+        await IndexAsync(
+            Repository(Source(shared, BodyB), Source(edited, BodyC), Source("src/A.cs", BodyA)),
+            embed: true, revision: "rev-a");
+        await IndexAsync(
+            Help(Source(shared, BodyB, feature: "faces"), Source(edited, BodyC, feature: "albums")),
+            embed: true, revision: "rev-a");
+
+        await IndexAsync(
+            Repository(Source(shared, BodyB), Source(edited, editedB), Source("src/A.cs", BodyA)),
+            embed: true, revision: "rev-b");
+
+        // Mid-upgrade the two domains disagree, and both are internally coherent.
+        Assert.Equal(new[] { "rev-b" }, await RevisionsOfAsync(RagDomains.NubArcaRepository));
+        Assert.Equal(new[] { "rev-a" }, await RevisionsOfAsync(RagDomains.ProductHelp));
+
+        await IndexAsync(
+            Help(Source(shared, BodyB, feature: "faces"), Source(edited, editedB, feature: "albums")),
+            embed: true, revision: "rev-b");
+
+        Assert.Equal(new[] { "rev-b" }, await RevisionsOfAsync(RagDomains.NubArcaRepository));
+        Assert.Equal(new[] { "rev-b" }, await RevisionsOfAsync(RagDomains.ProductHelp));
+        // Converged: one content row per key again, nothing stranded.
+        Assert.Equal(3, await _db.RagSources.CountAsync());
+        Assert.Equal(
+            3, await _db.RagSources.Select(s => s.SourceKey).Distinct().CountAsync());
+    }
+
+    [Fact]
+    public async Task SameContentAcrossDomains_DoesNotDuplicateEmbedding()
+    {
+        SeedDeterministicProfile();
+        const string path = "docs/help/faces.md";
+        await IndexAsync(Repository(Source(path, BodyB)), embed: true, revision: "rev-a");
         var embeddings = await _db.RagChunkEmbeddings.CountAsync();
         Assert.True(embeddings > 0);
 
-        await Assert.ThrowsAsync<RagSharedSourceConflictException>(
-            () => IndexAsync(Help(Source(path, BodyB, feature: "faces")), revision: "rev-b"));
+        // Different membership revision, same bytes: still one vector per chunk.
+        await IndexAsync(
+            Help(Source(path, BodyB, feature: "faces")), embed: true, revision: "rev-b");
 
-        Assert.Equal(memberships, await _db.RagDomainSources.CountAsync());
         Assert.Equal(embeddings, await _db.RagChunkEmbeddings.CountAsync());
+        Assert.Equal(1, await _db.RagSources.CountAsync());
     }
 
     [Fact]
     public async Task A_Source_Only_This_Domain_Owns_May_Change_Revision_Freely()
     {
-        // The conflict is about SHARING, not about immutability. A source no
-        // other domain claims follows its snapshot forward normally.
+        // Nothing about the new model makes an unshared source expensive: it is
+        // rewritten in place and follows its snapshot forward.
         await IndexAsync(Repository(Source("src/A.cs", BodyA)), revision: "rev-a");
+        var sourceId = (await _db.RagSources.SingleAsync()).Id;
+
         await IndexAsync(Repository(Source("src/A.cs", BodyA + "\n// edited")), revision: "rev-b");
 
-        var source = await _db.RagSources.SingleAsync();
-        Assert.Equal("rev-b", source.Revision);
+        Assert.Equal(sourceId, (await _db.RagSources.SingleAsync()).Id);
+        Assert.Equal("rev-b", await RevisionOfAsync(RagDomains.NubArcaRepository));
     }
+
+    [Fact]
+    public async Task UnsharedSource_ContentChange_StillReusesUnchangedChunkEmbeddings()
+    {
+        // Forking a content row on every edit would have been simpler and would
+        // have thrown away every vector of every changed file on every `git
+        // pull`. The in-place path exists so an edit still costs the chunks it
+        // touched.
+        SeedDeterministicProfile();
+        await IndexAsync(Repository(Source("docs/b.md", BodyB)), embed: true, revision: "rev-a");
+        var before = await _db.RagChunkEmbeddings.Select(e => e.Id).OrderBy(i => i).ToListAsync();
+        Assert.NotEmpty(before);
+
+        var edited = BodyB + "\n\n## Nuova sezione\n\n"
+            + "Un paragrafo aggiunto in fondo al documento, abbastanza lungo da diventare un chunk.\n";
+        var outcome = await IndexAsync(
+            Repository(Source("docs/b.md", edited)), embed: true, revision: "rev-b");
+
+        Assert.True(outcome.ChunksUnchanged > 0);
+        Assert.All(before, id => Assert.Contains(id, _db.RagChunkEmbeddings.Select(e => e.Id)));
+    }
+
+    /// The single revision this domain claims. Fails the test rather than
+    /// silently picking one when a domain holds more than one.
+    private async Task<string> RevisionOfAsync(string domainKey)
+        => Assert.Single(await RevisionsOfAsync(domainKey));
+
+    private async Task<string[]> RevisionsOfAsync(string domainKey)
+        => await _db.RagDomainSources
+            .Where(m => m.DomainKey == domainKey)
+            .Select(m => m.Revision)
+            .Distinct()
+            .OrderBy(r => r)
+            .ToArrayAsync();
+
+    /// The chunk text a domain would actually answer from, through its
+    /// memberships — which is the only way to see WHICH content row it is on.
+    private async Task<string[]> ChunkTextOfAsync(string domainKey)
+        => await (
+            from chunk in _db.RagChunks
+            join membership in _db.RagDomainSources on chunk.SourceId equals membership.SourceId
+            where membership.DomainKey == domainKey
+            orderby chunk.Ordinal
+            select chunk.Text).ToArrayAsync();
 
     // ---- chunk interpretation version ---------------------------------------
 
@@ -528,16 +734,16 @@ public sealed class RagIndexerTests : IDisposable
     }
 
     [Fact]
-    public async Task Sources_Record_The_Revision_They_Were_Indexed_From()
+    public async Task Memberships_Record_The_Revision_They_Were_Indexed_From()
     {
         await IndexAsync(Repository(Source("src/A.cs", BodyA)), revision: "aaa111");
-        Assert.Equal("aaa111", (await _db.RagSources.SingleAsync()).Revision);
+        Assert.Equal("aaa111", await RevisionOfAsync(RagDomains.NubArcaRepository));
 
         // Same content, new checkout: the revision moves and the chunks do not.
         var chunks = await _db.RagChunks.Select(c => c.Id).OrderBy(i => i).ToListAsync();
         await IndexAsync(Repository(Source("src/A.cs", BodyA)), revision: "bbb222");
 
-        Assert.Equal("bbb222", (await _db.RagSources.SingleAsync()).Revision);
+        Assert.Equal("bbb222", await RevisionOfAsync(RagDomains.NubArcaRepository));
         Assert.Equal(chunks, await _db.RagChunks.Select(c => c.Id).OrderBy(i => i).ToListAsync());
     }
 
@@ -713,24 +919,23 @@ public sealed class RagIndexerTests : IDisposable
             new RagIndexRequest(
                 provider.Domain, "/fixture", revision, EmbedPassages: embed, Limit: limit));
 
-    /// Everything an index run could have mutated, as one comparable value —
-    /// so a refusal can be asserted to have changed NOTHING rather than to have
-    /// changed nothing anybody thought to check.
-    private async Task<string> SnapshotAsync()
+    /// Everything ONE DOMAIN would answer from, as a single comparable value —
+    /// so "indexing the other domain changed nothing here" can be asserted
+    /// wholesale rather than for whichever fields somebody thought to check.
+    private async Task<string> DomainSnapshotAsync(string domainKey)
     {
-        var sources = await _db.RagSources.AsNoTracking()
-            .OrderBy(s => s.SourceKey)
-            .Select(s => $"{s.SourceKey}|{s.Revision}|{s.ContentHash}|{s.IndexFormatVersion}")
+        var rows = await (
+            from chunk in _db.RagChunks.AsNoTracking()
+            join source in _db.RagSources.AsNoTracking() on chunk.SourceId equals source.Id
+            join membership in _db.RagDomainSources.AsNoTracking()
+                on source.Id equals membership.SourceId
+            where membership.DomainKey == domainKey
+            orderby source.SourceKey, chunk.Ordinal
+            select $"{source.SourceKey}|{membership.Revision}|{source.ContentHash}"
+                   + $"|{source.IndexFormatVersion}|{membership.Priority}|{membership.MetadataJson}"
+                   + $"|{chunk.Ordinal}|{chunk.TextHash}")
             .ToListAsync();
-        var memberships = await _db.RagDomainSources.AsNoTracking()
-            .OrderBy(m => m.DomainKey).ThenBy(m => m.SourceId)
-            .Select(m => $"{m.DomainKey}|{m.Priority}|{m.MetadataJson}")
-            .ToListAsync();
-        var chunks = await _db.RagChunks.AsNoTracking()
-            .OrderBy(c => c.SourceId).ThenBy(c => c.Ordinal)
-            .Select(c => $"{c.Ordinal}|{c.TextHash}")
-            .ToListAsync();
-        return string.Join("\n", sources.Concat(memberships).Concat(chunks));
+        return string.Join("\n", rows);
     }
 
     private RagIndexer Build(

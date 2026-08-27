@@ -25,6 +25,10 @@ namespace NubArca.Api.Rag.Indexing;
 /// memberships left is removed entirely — chunks, embeddings and vector rows
 /// following by cascade. An index that only ever grows would keep answering from
 /// a file somebody deleted three releases ago.
+///
+/// A source row is CONTENT and a membership row is a snapshot claim, so domains
+/// sharing a document upgrade independently and sequentially. See
+/// UpsertSourceAsync for why that separation exists and what it replaced.
 public sealed class RagIndexer : IRagIndexer
 {
     private readonly AppDbContext _db;
@@ -135,75 +139,107 @@ public sealed class RagIndexer : IRagIndexer
 
     // ---- sources ------------------------------------------------------------
 
+    /// Resolve the descriptor to a CONTENT row, point this domain's membership
+    /// at it, and leave every other domain's membership exactly where it was.
+    ///
+    /// This is the whole source lifecycle, and it replaces a fail-closed rule
+    /// that could not be satisfied. The predecessor kept one row per source key
+    /// carrying the revision AND the bytes AND the chunks, so advancing
+    /// `nubarca-repository` from A to B rewrote what `product-help` was serving
+    /// at A. Refusing that was right; the problem was that Help could not go
+    /// first either, so two domains sharing a file could only ever move in one
+    /// atomic multi-domain reindex — and a release lifecycle that has no legal
+    /// first step is not a lifecycle.
+    ///
+    /// Content identity is (SourceKey, ContentHash, IndexFormatVersion). The
+    /// deadlock dissolves because the common case does not write at all: a file
+    /// unchanged between A and B is the SAME content row, so the second domain's
+    /// upgrade is one membership revision moving forward and zero chunks and
+    /// zero embeddings re-derived.
+    ///
+    /// When the bytes DID change there are two shapes, and telling them apart is
+    /// what keeps reindexing cheap. If this domain is the only one using the row,
+    /// it is rewritten IN PLACE, so the ordinal-by-ordinal chunk comparison still
+    /// applies and an edit to one paragraph still costs one embedding. Forking a
+    /// new content row unconditionally would have been simpler and would have
+    /// thrown away every vector of every edited file on every `git pull` — the
+    /// exact cost the content hashing exists to avoid. A row ANOTHER domain is
+    /// serving is never rewritten: that one forks, and the two rows coexist for
+    /// exactly as long as the two domains disagree.
     private async Task<Guid> UpsertSourceAsync(
         RagSourceDescriptor descriptor, string domainKey, DateTime now,
         IndexState state, CancellationToken cancellationToken)
     {
-        var source = await _db.RagSources
-            .FirstOrDefaultAsync(s => s.SourceKey == descriptor.SourceKey, cancellationToken);
+        // Every content row this key has. Usually one; two while a shared source
+        // is mid-upgrade.
+        var candidates = await _db.RagSources
+            .Where(s => s.SourceKey == descriptor.SourceKey)
+            .ToListAsync(cancellationToken);
 
-        // A SHARED SOURCE CANNOT REPRESENT TWO SNAPSHOTS AT ONCE.
-        //
-        // One row per SourceKey is what makes `docs/help/faces.md` cost one set
-        // of chunks and one embedding however many domains claim it. The same
-        // row also owns Revision, ContentHash and those chunks — so indexing
-        // `nubarca-repository` at commit B would silently rewrite the bytes
-        // `product-help` is serving at commit A, and Help would start answering
-        // from a revision it never agreed to.
-        //
-        // Refused rather than resolved. Detaching the other domain, picking the
-        // newer revision or duplicating under an ad-hoc key each pick a winner
-        // nobody asked for; the honest answer is that both domains must be
-        // indexed at the same revision, which is a thing the operator can
-        // actually do.
-        if (source is not null
-            && (source.Revision != descriptor.Revision || source.ContentHash != descriptor.ContentHash))
-        {
-            var claimedElsewhere = await _db.RagDomainSources.AnyAsync(
-                m => m.SourceId == source.Id && m.DomainKey != domainKey, cancellationToken);
-            if (claimedElsewhere)
-            {
-                throw new RagSharedSourceConflictException(descriptor.SourceKey, domainKey);
-            }
-        }
+        var exact = candidates.FirstOrDefault(s =>
+            s.ContentHash == descriptor.ContentHash
+            && s.IndexFormatVersion == RagIndexFormat.Current);
 
-        // Rechunk when the BYTES changed or when our reading of them did. The
-        // second half is why RagIndexFormat exists: without it, improving a
-        // chunker only ever reaches files that happen to be edited afterwards.
-        var contentChanged = source is null
-                             || source.ContentHash != descriptor.ContentHash
-                             || source.IndexFormatVersion != RagIndexFormat.Current;
+        RagSource source;
+        bool rechunk;
 
-        if (source is null)
+        if (exact is not null)
         {
-            source = new RagSource { Id = Guid.NewGuid(), CreatedAt = now };
-            _db.RagSources.Add(source);
-            state.SourcesCreated++;
-        }
-        else if (contentChanged || source.Revision != descriptor.Revision)
-        {
-            source.UpdatedAt = now;
-            if (contentChanged) state.SourcesUpdated++; else state.SourcesUnchanged++;
+            // Nothing to derive: these bytes, read this way, are already indexed.
+            // All that can happen here is this domain's membership adopting them.
+            source = exact;
+            state.SourcesUnchanged++;
+
+            // Except when the row has no chunks — an indexing run interrupted
+            // between the source insert and the chunk insert. Its hash says
+            // "already done", so the chunk count is what actually answers whether
+            // it is.
+            rechunk = !await _db.RagChunks.AnyAsync(
+                c => c.SourceId == source.Id, cancellationToken);
         }
         else
         {
-            state.SourcesUnchanged++;
+            var mine = await ContentRowUsedByAsync(candidates, domainKey, cancellationToken);
+            var sharedWithAnotherDomain = mine is not null
+                && await _db.RagDomainSources.AnyAsync(
+                    m => m.SourceId == mine.Id && m.DomainKey != domainKey, cancellationToken);
+
+            if (mine is not null && !sharedWithAnotherDomain)
+            {
+                // Ours alone: follow the content forward in place and keep every
+                // chunk whose text did not change, with its embedding.
+                source = mine;
+                state.SourcesUpdated++;
+            }
+            else
+            {
+                source = new RagSource { Id = Guid.NewGuid(), CreatedAt = now };
+                _db.RagSources.Add(source);
+                // CREATED counts a document the index had never seen. UPDATED
+                // covers a fork of a key that already existed, which is what an
+                // operator reads after the first domain of a shared upgrade.
+                if (candidates.Count > 0) state.SourcesUpdated++; else state.SourcesCreated++;
+            }
+
+            rechunk = true;
         }
 
         source.SourceKey = descriptor.SourceKey;
         source.Path = descriptor.Path;
         source.Title = descriptor.Title;
         source.SourceKind = descriptor.SourceKind;
-        source.Revision = descriptor.Revision;
         source.ContentHash = descriptor.ContentHash;
         source.IndexFormatVersion = RagIndexFormat.Current;
         source.Language = descriptor.Language;
         source.CodeLanguage = descriptor.CodeLanguage;
 
-        await UpsertMembershipAsync(source.Id, domainKey, descriptor, now, cancellationToken);
-
-        if (contentChanged)
+        if (rechunk)
         {
+            // The corpus cache signature is built from this stamp, and a source's
+            // chunks change only when its content does. A rewrite that left it
+            // alone would leave a running web host serving the previous text
+            // until it restarted.
+            source.UpdatedAt = now;
             await ReplaceChunksAsync(source.Id, descriptor, now, state, cancellationToken);
         }
         else
@@ -212,8 +248,87 @@ public sealed class RagIndexer : IRagIndexer
                 .CountAsync(c => c.SourceId == source.Id, cancellationToken);
         }
 
+        await UpsertMembershipAsync(source.Id, domainKey, descriptor, now, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+
+        // THIS domain's memberships on the key's OTHER content rows are stale
+        // the moment it adopts this one — a domain describes one snapshot, so it
+        // cannot be using two interpretations of the same document at once.
+        // Other domains' memberships are untouched, which is the point.
+        var superseded = candidates
+            .Where(c => c.Id != source.Id)
+            .Select(c => c.Id)
+            .ToList();
+        if (superseded.Count > 0)
+        {
+            await ReleaseSupersededAsync(domainKey, superseded, cancellationToken);
+        }
+
         return source.Id;
+    }
+
+    /// The content row this domain is currently using for this key, if any.
+    ///
+    /// This is what makes "rewrite in place" safe to ask about: the question is
+    /// never "is some row for this key free", it is "is the row I am already
+    /// serving free", and a row another domain also holds is not.
+    private async Task<RagSource?> ContentRowUsedByAsync(
+        IReadOnlyList<RagSource> candidates, string domainKey, CancellationToken cancellationToken)
+    {
+        if (candidates.Count == 0) return null;
+
+        var ids = candidates.Select(c => c.Id).ToList();
+        var mineId = await _db.RagDomainSources
+            .Where(m => m.DomainKey == domainKey && ids.Contains(m.SourceId))
+            .Select(m => (Guid?)m.SourceId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return mineId is null ? null : candidates.First(c => c.Id == mineId.Value);
+    }
+
+    /// Drop this domain's membership of superseded content, then delete the
+    /// content that nothing points at any more.
+    ///
+    /// The order is the invariant: a content row survives exactly as long as its
+    /// LAST membership. Deleting it when the first domain moves would take the
+    /// chunks the other domain is still answering from.
+    private async Task ReleaseSupersededAsync(
+        string domainKey, IReadOnlyList<Guid> supersededSourceIds, CancellationToken cancellationToken)
+    {
+        var stale = await _db.RagDomainSources
+            .Where(m => m.DomainKey == domainKey && supersededSourceIds.Contains(m.SourceId))
+            .ToListAsync(cancellationToken);
+        if (stale.Count > 0)
+        {
+            _db.RagDomainSources.RemoveRange(stale);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        await RemoveUnclaimedSourcesAsync(supersededSourceIds, cancellationToken);
+    }
+
+    /// Delete source content rows no membership claims. Chunks, embeddings and
+    /// vector rows follow by cascade.
+    private async Task<int> RemoveUnclaimedSourcesAsync(
+        IReadOnlyList<Guid> sourceIds, CancellationToken cancellationToken)
+    {
+        if (sourceIds.Count == 0) return 0;
+
+        var stillClaimed = await _db.RagDomainSources
+            .Where(m => sourceIds.Contains(m.SourceId))
+            .Select(m => m.SourceId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var removable = sourceIds.Distinct().Except(stillClaimed).ToList();
+        if (removable.Count == 0) return 0;
+
+        var sources = await _db.RagSources
+            .Where(s => removable.Contains(s.Id))
+            .ToListAsync(cancellationToken);
+        _db.RagSources.RemoveRange(sources);
+        await _db.SaveChangesAsync(cancellationToken);
+        return sources.Count;
     }
 
     private async Task UpsertMembershipAsync(
@@ -235,6 +350,7 @@ public sealed class RagIndexer : IRagIndexer
                 Id = Guid.NewGuid(),
                 DomainKey = domainKey,
                 SourceId = sourceId,
+                Revision = descriptor.Revision,
                 Priority = priority,
                 MetadataJson = metadata,
                 CreatedAt = now,
@@ -242,11 +358,13 @@ public sealed class RagIndexer : IRagIndexer
             return;
         }
 
-        if (membership.Priority == priority
+        if (membership.Revision == descriptor.Revision
+            && membership.Priority == priority
             && string.Equals(membership.MetadataJson, metadata, StringComparison.Ordinal))
         {
             return;
         }
+        membership.Revision = descriptor.Revision;
         membership.Priority = priority;
         membership.MetadataJson = metadata;
         membership.UpdatedAt = now;
@@ -352,22 +470,8 @@ public sealed class RagIndexer : IRagIndexer
         _db.RagDomainSources.RemoveRange(departed);
         await _db.SaveChangesAsync(cancellationToken);
 
-        var orphanIds = departed.Select(m => m.SourceId).Distinct().ToList();
-        var stillClaimed = await _db.RagDomainSources
-            .Where(m => orphanIds.Contains(m.SourceId))
-            .Select(m => m.SourceId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        var removable = orphanIds.Except(stillClaimed).ToList();
-        if (removable.Count > 0)
-        {
-            var sources = await _db.RagSources
-                .Where(s => removable.Contains(s.Id))
-                .ToListAsync(cancellationToken);
-            _db.RagSources.RemoveRange(sources);
-            await _db.SaveChangesAsync(cancellationToken);
-        }
+        await RemoveUnclaimedSourcesAsync(
+            departed.Select(m => m.SourceId).Distinct().ToList(), cancellationToken);
 
         return departed.Count;
     }

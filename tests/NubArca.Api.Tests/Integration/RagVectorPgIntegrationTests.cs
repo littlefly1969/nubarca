@@ -262,7 +262,6 @@ public sealed class RagVectorPgIntegrationTests : IAsyncLifetime
             Path = sourceKey,
             Title = sourceKey,
             SourceKind = RagSourceKinds.Documentation,
-            Revision = "pg-revision",
             ContentHash = RagHash.Sha256Hex(body),
             Language = RagLanguages.English,
             CodeLanguage = RagCodeLanguages.Markdown,
@@ -274,6 +273,7 @@ public sealed class RagVectorPgIntegrationTests : IAsyncLifetime
             Id = Guid.NewGuid(),
             DomainKey = domain,
             SourceId = source.Id,
+            Revision = "pg-revision",
             Priority = 60,
             CreatedAt = DateTime.UtcNow,
         });

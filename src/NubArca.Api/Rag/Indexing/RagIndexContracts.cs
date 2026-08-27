@@ -74,22 +74,3 @@ public interface IRagIndexer
 {
     Task<RagIndexOutcome> IndexAsync(RagIndexRequest request, CancellationToken cancellationToken = default);
 }
-
-/// One source is claimed by another domain at a different snapshot.
-///
-/// Fail-closed and NOT downgradeable to a warning: continuing would mutate a
-/// source row — and its chunks — out from under a domain that never asked for
-/// the new revision. The source key is a repository-relative citation path, so
-/// naming it tells the operator which file to look at without disclosing a
-/// filesystem layout or any content.
-public sealed class RagSharedSourceConflictException(string sourceKey, string domainKey)
-    : Exception(
-        $"Source '{sourceKey}' is already indexed by another domain at a different revision or content. "
-        + $"Reindex every domain that shares it at the same revision before indexing '{domainKey}'.")
-{
-    public const string Reason = "shared-source-snapshot-conflict";
-
-    public string SourceKey { get; } = sourceKey;
-
-    public string DomainKey { get; } = domainKey;
-}

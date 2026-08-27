@@ -128,16 +128,6 @@ internal static class RagCliCommands
         {
             outcome = await sp.GetRequiredService<IRagIndexer>().IndexAsync(request);
         }
-        catch (RagSharedSourceConflictException ex)
-        {
-            // Fail closed and say exactly which file and what to do. Continuing
-            // would rewrite a source another domain is serving at a different
-            // commit.
-            stderr.WriteLine($"rag index: {RagSharedSourceConflictException.Reason}");
-            stderr.WriteLine($"  source={ex.SourceKey}");
-            stderr.WriteLine("  Reindex every domain that shares this source at the same revision.");
-            return 1;
-        }
         catch (RepositorySnapshotUnavailableException ex)
         {
             stderr.WriteLine($"rag index: {ex.Reason}");

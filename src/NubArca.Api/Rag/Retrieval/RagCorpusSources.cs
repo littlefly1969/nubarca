@@ -60,7 +60,9 @@ public sealed class DatabaseRagCorpusSource : IRagCorpusSource
             where m.DomainKey == domain.Value
             select new
             {
-                source.Revision,
+                // The MEMBERSHIP's revision: which snapshot this domain says it
+                // is describing. The source row carries content, not a snapshot.
+                m.Revision,
                 SourceStamp = source.UpdatedAt ?? source.CreatedAt,
                 MembershipStamp = m.UpdatedAt ?? m.CreatedAt,
             };
@@ -97,7 +99,7 @@ public sealed class DatabaseRagCorpusSource : IRagCorpusSource
             select new Row(
                 chunk.Id, chunk.Ordinal, chunk.Heading, chunk.Text, chunk.MetadataJson,
                 source.SourceKey, source.Path, source.Title, source.SourceKind,
-                source.Language, source.Revision,
+                source.Language, membership.Revision,
                 membership.Priority, membership.MetadataJson))
             .ToListAsync(cancellationToken);
 
@@ -144,11 +146,15 @@ public sealed class DatabaseRagCorpusSource : IRagCorpusSource
                 ChunkId: row.ChunkId));
         }
 
-        // NO MODAL REVISION. A domain holding sources from two commits is not a
-        // snapshot with a majority opinion — it is an interrupted reindex, and
+        // NO MODAL REVISION. A domain holding MEMBERSHIPS from two commits is not
+        // a snapshot with a majority opinion — it is an interrupted reindex, and
         // picking the most common, newest or first revision would let the corpus
         // claim a coherence it does not have. The empty revision marks it, and
         // RagRetriever refuses to answer from it.
+        //
+        // Note what this is now measured over. Two DOMAINS at two revisions is
+        // an ordinary sequential upgrade and is none of this domain's business;
+        // one domain at two revisions is still the thing that fails closed.
         var revisions = rows
             .Select(r => r.Revision)
             .Where(r => !string.IsNullOrEmpty(r))
