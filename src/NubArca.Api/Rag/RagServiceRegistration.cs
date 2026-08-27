@@ -87,6 +87,14 @@ public static class RagServiceRegistration
         // where "forgot to pass it" becomes "answered from everybody's".
         services.AddScoped<Retrieval.OwnerDocumentCorpusSource>();
         services.AddScoped<Retrieval.OwnerDocumentVectorRetriever>();
+        // The parsers, and the registry that resolves one by format. Registered
+        // as the interface so a host can add a family without this file
+        // learning about it, and singletons because a parser holds no
+        // per-request state — it is handed bytes and returns blocks.
+        services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
+            Ai.Documents.NativeTextExtractionProvider>();
+        services.AddSingleton<Ai.Documents.DocumentExtractionProviders>();
+
         services.AddScoped<Ai.Documents.OwnerDocumentIndexer>();
 
         services.AddScoped<RagDatabaseServices>();

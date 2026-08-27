@@ -51,6 +51,7 @@ public sealed class OwnerDocumentIndexer
     private readonly IBlobStorage _storage;
     private readonly TextEmbeddingResolver _embeddings;
     private readonly IAiVectorSerializer _serializer;
+    private readonly DocumentExtractionProviders _providers;
     private readonly IOptions<DocumentExtractionOptions> _options;
     private readonly TimeProvider _clock;
     private readonly ILogger<OwnerDocumentIndexer> _log;
@@ -60,6 +61,7 @@ public sealed class OwnerDocumentIndexer
         IBlobStorage storage,
         TextEmbeddingResolver embeddings,
         IAiVectorSerializer serializer,
+        DocumentExtractionProviders providers,
         IOptions<DocumentExtractionOptions> options,
         TimeProvider clock,
         ILogger<OwnerDocumentIndexer> log)
@@ -68,6 +70,7 @@ public sealed class OwnerDocumentIndexer
         _storage = storage;
         _embeddings = embeddings;
         _serializer = serializer;
+        _providers = providers;
         _options = options;
         _clock = clock;
         _log = log;
@@ -224,21 +227,47 @@ public sealed class OwnerDocumentIndexer
             return null;
         }
 
-        var extraction = NativeTextExtractor.Extract(file.MimeType, bytes, options);
-        if (!extraction.Ok)
+        // THE PARSER IS RESOLVED, NOT BRANCHED ON. Today one family is
+        // registered and this reads like ceremony; it is the shape that keeps
+        // the indexer an orchestrator once four of them exist, instead of a
+        // class that also walks XML and speaks a subprocess protocol.
+        var provider = _providers.For(DocumentFormatKind.NativeText);
+        if (provider is null)
         {
-            state.Skip(extraction.Reason!);
+            // No parser compiled in for this family. An installation fact, not a
+            // verdict about the document — the next pass tries again.
+            state.Skip(DocumentExtractionReasons.UnsupportedDocumentFormat);
+            return null;
+        }
+
+        var outcome = await provider.ExtractAsync(
+            new DocumentExtractionRequest(bytes, file.Name, file.MimeType, options),
+            cancellationToken);
+
+        if (!outcome.Ok)
+        {
+            state.Skip(outcome.Reason!);
+
+            // A PERMANENT verdict is recorded; an environment failure is not.
+            // The distinction is the whole reason the outcome carries it: a
+            // missing binary or an unloadable native library marking somebody's
+            // documents permanently unreadable is a configuration mistake
+            // becoming data loss.
+            if (!outcome.IsPermanent) return null;
             // A CONTENT verdict is recorded so the operator can see why, and so
             // the next pass does not read the same unreadable bytes again. It is
             // stored against the blob that produced it, so replacing the file
             // with something readable re-opens the question.
             await RecordSkipAsync(
-                ownerUserId, file, profile, extraction.Reason!, cancellationToken);
+                ownerUserId, file, profile, outcome.Reason!, cancellationToken);
             return null;
         }
 
+        var artifact = outcome.Artifact!;
+        var text = DocumentTextCanonicalizer.Canonicalize(artifact.Blocks);
+
         var now = _clock.GetUtcNow().UtcDateTime;
-        var textHash = RagHash.Sha256Hex(extraction.Text!);
+        var textHash = RagHash.Sha256Hex(text);
         var chunksAreCurrent = existing is not null
                                && existing.TextHash == textHash
                                && existing.ChunkFormatVersion == OwnerDocumentChunkFormat.Current
@@ -266,13 +295,13 @@ public sealed class OwnerDocumentIndexer
         // otherwise keep the previous owner's authority in a cache row.
         existing.OwnerUserId = ownerUserId;
         existing.SourceBlobObjectId = file.BlobObjectId;
-        existing.Source = DocumentTextSources.Native;
+        existing.Source = artifact.Source;
         existing.Status = AiArtifactStatuses.Completed;
         existing.ErrorCode = null;
         existing.TextHash = textHash;
-        existing.Text = extraction.Text;
-        existing.CharCount = extraction.Text!.Length;
-        existing.Language = extraction.Language;
+        existing.Text = text;
+        existing.CharCount = text.Length;
+        existing.Language = artifact.Language;
         existing.ChunkFormatVersion = OwnerDocumentChunkFormat.Current;
         state.Extracted++;
 
@@ -293,7 +322,7 @@ public sealed class OwnerDocumentIndexer
         if (!chunksAreCurrent)
         {
             await ReplaceChunksAsync(
-                existing, extraction.Text!, profile, options, state, now, cancellationToken);
+                existing, text, profile, options, state, now, cancellationToken);
             state.Chunked++;
         }
 

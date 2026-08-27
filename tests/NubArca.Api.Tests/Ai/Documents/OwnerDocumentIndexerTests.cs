@@ -860,6 +860,8 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
                 new ITextEmbeddingProvider[] { new DeterministicTextEmbeddingProvider() },
                 new RagSemanticProfileResolver(RagDomainRegistry.Instance, options)),
             new AiVectorSerializer(),
+            new DocumentExtractionProviders(
+                new IDocumentExtractionProvider[] { new NativeTextExtractionProvider() }),
             Options.Create(new DocumentExtractionOptions()),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);
