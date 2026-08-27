@@ -93,7 +93,22 @@ public static class RagServiceRegistration
         // per-request state — it is handed bytes and returns blocks.
         services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
             Ai.Documents.NativeTextExtractionProvider>();
+        services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
+            Ai.Documents.WordDocumentExtractionProvider>();
+        services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
+            Ai.Documents.SpreadsheetExtractionProvider>();
+        services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
+            Ai.Documents.PresentationExtractionProvider>();
+        services.AddSingleton<Ai.Documents.IDocumentExtractionProvider,
+            Ai.Documents.PdfExtractionProvider>();
         services.AddSingleton<Ai.Documents.DocumentExtractionProviders>();
+
+        // The OCR seam and the renderer. Both singletons: the renderer serialises
+        // access to a native library that is not documented as thread-safe, and
+        // the OCR provider holds the installation-wide concurrency gate.
+        services.AddSingleton<Ai.Documents.IDocumentOcrProvider,
+            Ai.Documents.TesseractOcrProvider>();
+        services.AddSingleton<Ai.Documents.PdfPageRenderer>();
 
         services.AddScoped<Ai.Documents.OwnerDocumentIndexer>();
 

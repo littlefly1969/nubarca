@@ -71,7 +71,20 @@ public static class OwnerDocumentEligibility
     /// and must not be able to widen the first by accident.
     public static IQueryable<FileItem> Extractable(IQueryable<FileItem> files, Guid ownerUserId)
         => Eligible(files, ownerUserId)
-            .Where(f => SupportedContentTypes.Contains(f.MimeType));
+            .Where(f => SupportedContentTypes.Contains(f.MimeType)
+                        || RichContentTypes.Contains(f.MimeType)
+                        // A GENERIC UPLOAD TYPE PLUS A RICH EXTENSION buys a
+                        // bounded LOOK, and nothing more. Plenty of clients send
+                        // OOXML packages as `application/octet-stream`, so
+                        // refusing those outright would make rich ingestion
+                        // depend on which uploader somebody happened to use. The
+                        // extension never decides what the file IS — the probe
+                        // reads the bytes and can still refuse it.
+                        || (GenericContentTypes.Contains(f.MimeType)
+                            && (f.Name.ToLower().EndsWith(".pdf")
+                                || f.Name.ToLower().EndsWith(".docx")
+                                || f.Name.ToLower().EndsWith(".xlsx")
+                                || f.Name.ToLower().EndsWith(".pptx"))));
 
     /// The allowlist as a materialized array so EF can translate `Contains` into
     /// an `IN (…)`. Mirrors NativeTextExtractor.IsSupportedContentType, which
@@ -91,10 +104,29 @@ public static class OwnerDocumentEligibility
         "text/yaml",
     };
 
+    /// Rich document families, declared. Candidacy only: the bytes decide.
+    private static readonly string[] RichContentTypes =
+    {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    };
+
+    /// Types that say nothing. Candidates only alongside a rich extension.
+    private static readonly string[] GenericContentTypes =
+    {
+        "application/octet-stream",
+        "application/zip",
+        "application/x-zip-compressed",
+    };
+
     /// Exposed so a test can assert this list and the extractor's agree. Two
     /// lists that must match are two lists that will not, unless something
     /// compares them.
     public static IReadOnlyList<string> DeclaredContentTypes => SupportedContentTypes;
+
+    public static IReadOnlyList<string> DeclaredRichContentTypes => RichContentTypes;
 
     /// The chunk-level boundary: the SAME rule, one join, for every caller that
     /// touches a person's derived rows.

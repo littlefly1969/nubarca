@@ -74,6 +74,43 @@ public static class DocumentExtractionReasons
 
     /// More entries than the bound allows.
     public const string OfficeTooManyEntries = "office-too-many-entries";
+
+    /// More paragraphs, cells, rows, sheets or slides than the bounds allow.
+    ///
+    /// A REFUSAL, not a truncation. Indexing the first N sheets of a workbook
+    /// and calling the document complete produces an answer drawn from part of
+    /// somebody's spreadsheet that is indistinguishable, to them, from an answer
+    /// drawn from all of it.
+    public const string DocumentTooComplex = "document-too-complex";
+
+    /// More pages than the PDF bound allows.
+    public const string PdfTooManyPages = "pdf-too-many-pages";
+
+    // ---- environment, never a verdict ---------------------------------------
+    //
+    // Each of these describes THIS INSTALLATION at THIS MOMENT. None is ever
+    // written to `DocumentText.ErrorCode`, because a missing binary marking
+    // somebody's documents permanently unreadable is a configuration mistake
+    // turning into data loss. The next pass tries again.
+
+    /// No OCR provider configured, or its engine is not installed.
+    public const string OcrUnavailable = "ocr-unavailable";
+
+    /// Recognition did not finish inside its budget. The process is killed.
+    public const string OcrTimeout = "ocr-timeout";
+
+    /// The engine failed or produced nothing usable.
+    public const string OcrProcessFailed = "ocr-process-failed";
+
+    /// The engine produced more output than the bound allows — untrusted
+    /// process output, so the cap is on what is READ, not on what is promised.
+    public const string OcrOutputTooLarge = "ocr-output-too-large";
+
+    /// The PDF renderer could not be loaded — a native dependency problem.
+    public const string PdfRendererUnavailable = "pdf-renderer-unavailable";
+
+    /// Rendering one page failed.
+    public const string PdfRenderFailed = "pdf-render-failed";
 }
 
 /// Bounds on native text extraction.
@@ -132,6 +169,24 @@ public sealed class DocumentExtractionOptions
     /// Ceiling on any single part inside the package.
     public int MaxOfficePartBytes { get; set; } = 64 * 1024 * 1024;
 
+    // Structural bounds, per format. Each of these is a completeness-critical
+    // limit: a document past one is REFUSED rather than partially indexed.
+
+    public int MaxDocxParagraphs { get; set; } = 20_000;
+    public int MaxDocxTableCells { get; set; } = 50_000;
+
+    public int MaxWorkbookSheets { get; set; } = 200;
+    public int MaxWorkbookRowsPerSheet { get; set; } = 50_000;
+    public int MaxWorkbookColumnsPerSheet { get; set; } = 512;
+    public int MaxWorkbookNonEmptyCells { get; set; } = 500_000;
+
+    /// Ceiling on a single formula expression carried into the text. Author
+    /// controlled, and a formula can be thousands of characters.
+    public int MaxFormulaCharacters { get; set; } = 200;
+
+    public int MaxPresentationSlides { get; set; } = 1_000;
+    public int MaxSlideTextCharacters { get; set; } = 20_000;
+
     public int EffectiveMinimumCharacters => Math.Clamp(MinimumCharacters, 1, 10_000);
 
     /// The hard ceiling no configuration can exceed, for every source-byte
@@ -151,6 +206,45 @@ public sealed class DocumentExtractionOptions
 
     public int EffectiveMaxOfficePartBytes
         => Math.Clamp(MaxOfficePartBytes, 1, AbsoluteMaxSourceBytes);
+
+    public int EffectiveMaxDocxParagraphs => Math.Clamp(MaxDocxParagraphs, 1, 500_000);
+    public int EffectiveMaxDocxTableCells => Math.Clamp(MaxDocxTableCells, 1, 2_000_000);
+    public int EffectiveMaxWorkbookSheets => Math.Clamp(MaxWorkbookSheets, 1, 5_000);
+    public int EffectiveMaxWorkbookRowsPerSheet => Math.Clamp(MaxWorkbookRowsPerSheet, 1, 1_048_576);
+    public int EffectiveMaxWorkbookColumnsPerSheet => Math.Clamp(MaxWorkbookColumnsPerSheet, 1, 16_384);
+    public int EffectiveMaxWorkbookNonEmptyCells => Math.Clamp(MaxWorkbookNonEmptyCells, 1, 5_000_000);
+    // ---- PDF and OCR ---------------------------------------------------------
+
+    public int MaxPdfPages { get; set; } = 500;
+    public int MaxOcrPages { get; set; } = 200;
+    public int OcrRenderDpi { get; set; } = 200;
+    public int MaxRenderPixels { get; set; } = 10_000_000;
+    public int OcrPageTimeoutSeconds { get; set; } = 30;
+    public int MaxOcrCharactersPerPage { get; set; } = 40_000;
+
+    /// Installation-wide OCR concurrency. Recognition is CPU-expensive and
+    /// several owners can index at once, so one sequential indexer loop is not a
+    /// bound on how many engine processes exist.
+    public int MaxConcurrentOcrPages { get; set; } = 1;
+
+    /// Whether OCR runs at all. Off by default, like every other AI capability.
+    public bool OcrEnabled { get; set; }
+
+    /// Recognition languages, as engine tokens. Validated against what is
+    /// actually installed; nothing is ever downloaded.
+    public string OcrLanguages { get; set; } = "eng";
+
+    public int EffectiveMaxPdfPages => Math.Clamp(MaxPdfPages, 1, 20_000);
+    public int EffectiveMaxOcrPages => Math.Clamp(MaxOcrPages, 0, 5_000);
+    public int EffectiveOcrRenderDpi => Math.Clamp(OcrRenderDpi, 72, 600);
+    public int EffectiveMaxRenderPixels => Math.Clamp(MaxRenderPixels, 100_000, 40_000_000);
+    public int EffectiveOcrPageTimeoutSeconds => Math.Clamp(OcrPageTimeoutSeconds, 1, 300);
+    public int EffectiveMaxOcrCharactersPerPage => Math.Clamp(MaxOcrCharactersPerPage, 100, 500_000);
+    public int EffectiveMaxConcurrentOcrPages => Math.Clamp(MaxConcurrentOcrPages, 1, 4);
+
+    public int EffectiveMaxFormulaCharacters => Math.Clamp(MaxFormulaCharacters, 10, 4_000);
+    public int EffectiveMaxPresentationSlides => Math.Clamp(MaxPresentationSlides, 1, 20_000);
+    public int EffectiveMaxSlideTextCharacters => Math.Clamp(MaxSlideTextCharacters, 100, 500_000);
 
     /// The source ceiling that applies to ONE format. Callers ask this rather
     /// than picking a field, so a new format cannot quietly inherit the text
