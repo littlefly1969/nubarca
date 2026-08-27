@@ -694,6 +694,144 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
             current.Select(d => d.OwnerUserId).OrderBy(g => g));
     }
 
+    // ---- same bytes vs changed bytes ----------------------------------------
+    //
+    // The two halves of the swap rule are opposites and the code has to tell
+    // them apart, because "the extraction that is current failed to be replaced"
+    // means something completely different depending on whose bytes failed.
+    //
+    // Same blob: a second extractor is having a go at a document that is
+    // already being read perfectly well. It may promote itself on success and
+    // must change nothing otherwise — an upgrade that withdraws a working
+    // document from its owner's corpus is data loss wearing a version number.
+    //
+    // Changed blob: the file is no longer the thing the current row describes.
+    // The old reading must stop being authority whatever happens next, because
+    // the alternative is answering a question about a replaced document with
+    // full confidence and no symptom.
+
+    [Fact]
+    public async Task Same_Bytes_A_Failing_New_Profile_Does_Not_Withdraw_A_Working_Reading()
+    {
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+        var working = await _db.DocumentTexts.SingleAsync();
+        Assert.True(working.IsCurrent);
+        Assert.Equal(AiArtifactStatuses.Completed, working.Status);
+
+        // A second extraction profile refuses the SAME blob — a parser added
+        // later that cannot handle this format.
+        await RecordSkipForSecondProfileAsync(file, working.SourceBlobObjectId);
+
+        var rows = await _db.DocumentTexts.OrderBy(d => d.Status).ToListAsync();
+        Assert.Equal(2, rows.Count);
+
+        // The working reading keeps authority; the refusal is recorded as
+        // provenance and is not current.
+        var current = await _db.DocumentTexts.Where(d => d.IsCurrent).SingleAsync();
+        Assert.Equal(working.Id, current.Id);
+        Assert.Equal(AiArtifactStatuses.Completed, current.Status);
+
+        // And it is still answerable, which is the thing that would have been
+        // lost.
+        var corpus = await new NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource(_db)
+            .LoadAsync(_owner);
+        Assert.NotEmpty(corpus.Chunks);
+    }
+
+    [Fact]
+    public async Task Same_Bytes_A_Succeeding_New_Profile_Takes_Over_Atomically()
+    {
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+        var first = await _db.DocumentTexts.SingleAsync();
+
+        // The successful upgrade path: same blob, newer reading, promoted only
+        // once it is complete.
+        var second = await AddCompletedReadingForSecondProfileAsync(
+            file, first.SourceBlobObjectId);
+
+        Assert.Equal(2, await _db.DocumentTexts.CountAsync());
+        var current = await _db.DocumentTexts.Where(d => d.IsCurrent).SingleAsync();
+        Assert.Equal(second.Id, current.Id);
+        Assert.False(await _db.DocumentTexts.Where(d => d.Id == first.Id).Select(d => d.IsCurrent).SingleAsync());
+    }
+
+    [Fact]
+    public async Task Changed_Bytes_A_Retryable_Failure_Leaves_No_Current_Knowledge()
+    {
+        // THE HOLE THIS TEST EXISTS FOR. The blob changed and storage cannot be
+        // read — an environment failure, so no content verdict is recorded and
+        // the pass returns having produced nothing. If the previous reading were
+        // still current, the corpus would answer questions about the OLD
+        // document as though it described the file the person now has.
+        var profile = SeedEmbeddingProfile();
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+        Assert.True(await _db.DocumentTexts.SingleAsync() is { IsCurrent: true });
+
+        var replacement = await WriteBlobAsync(
+            "Un contenuto completamente diverso, che non parla di caldaie.");
+        file.BlobObjectId = replacement.Id;
+        file.SizeBytes = replacement.SizeBytes;
+        await _db.SaveChangesAsync();
+
+        // The new bytes are unreadable from storage. Retryable, not a verdict.
+        foreach (var path in Directory.EnumerateFiles(
+                     _storageRoot, "*", SearchOption.AllDirectories))
+        {
+            File.Delete(path);
+        }
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        // Nothing completed for the new bytes, and nothing current at all.
+        Assert.Contains("unreadable", outcome.SkipReasons);
+        Assert.Empty(await _db.DocumentTexts.Where(d => d.IsCurrent).ToListAsync());
+
+        // Not retrievable and not embeddable, through the shared boundary.
+        var corpus = await new NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource(_db)
+            .LoadAsync(_owner);
+        Assert.Empty(corpus.Chunks);
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+    }
+
+    [Fact]
+    public async Task Changed_Bytes_Recover_When_The_New_Bytes_Become_Readable()
+    {
+        // The control for the test above: the refusal is a pause, not a
+        // tombstone. Once storage answers again the new document is extracted
+        // and becomes current on its own.
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+
+        const string replacementText = """
+            # Contratto di manutenzione
+
+            Il contratto prevede una verifica annuale programmata e un intervento
+            di emergenza entro quarantotto ore dalla segnalazione del guasto.
+            """;
+        var replacement = await WriteBlobAsync(replacementText);
+        var storedPath = Directory.EnumerateFiles(
+            _storageRoot, "*", SearchOption.AllDirectories).ToList();
+        file.BlobObjectId = replacement.Id;
+        file.SizeBytes = replacement.SizeBytes;
+        await _db.SaveChangesAsync();
+
+        var moved = storedPath.ToDictionary(p => p, p => p + ".hidden");
+        foreach (var (from, to) in moved) File.Move(from, to);
+        await Indexer().IndexOwnerAsync(_owner);
+        Assert.Empty(await _db.DocumentTexts.Where(d => d.IsCurrent).ToListAsync());
+
+        foreach (var (from, to) in moved) File.Move(to, from);
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var current = await _db.DocumentTexts.Where(d => d.IsCurrent).SingleAsync();
+        Assert.Equal(AiArtifactStatuses.Completed, current.Status);
+        Assert.Equal(replacement.Id, current.SourceBlobObjectId);
+        Assert.Contains("manutenzione", current.Text!, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ---- fixture ------------------------------------------------------------
 
     private OwnerDocumentIndexer Indexer(string? semantic = null, bool globalSemantic = false)
@@ -725,6 +863,68 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
             Options.Create(new DocumentExtractionOptions()),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);
+    }
+
+    /// A second profile REFUSING the same blob, written the way the indexer
+    /// writes a content verdict.
+    private async Task RecordSkipForSecondProfileAsync(FileItem file, Guid blobObjectId)
+    {
+        var profile = SeedSecondExtractionProfile();
+        var readableElsewhere = await _db.DocumentTexts.AnyAsync(
+            d => d.FileItemId == file.Id
+                 && d.IsCurrent
+                 && d.Status == AiArtifactStatuses.Completed
+                 && d.SourceBlobObjectId == blobObjectId);
+
+        _db.DocumentTexts.Add(new DocumentText
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = file.Id,
+            OwnerUserId = _owner,
+            ProfileId = profile.Id,
+            SourceBlobObjectId = blobObjectId,
+            Source = DocumentTextSources.Native,
+            Status = AiArtifactStatuses.Skipped,
+            ErrorCode = "unsupported-document-format",
+            ChunkFormatVersion = OwnerDocumentChunkFormat.Current,
+            IsCurrent = !readableElsewhere,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+    }
+
+    /// A second profile SUCCEEDING on the same blob, promoted atomically.
+    private async Task<DocumentText> AddCompletedReadingForSecondProfileAsync(
+        FileItem file, Guid blobObjectId)
+    {
+        var profile = SeedSecondExtractionProfile();
+
+        foreach (var superseded in await _db.DocumentTexts
+                     .Where(d => d.FileItemId == file.Id && d.IsCurrent).ToListAsync())
+        {
+            superseded.IsCurrent = false;
+        }
+        await _db.SaveChangesAsync();
+
+        var row = new DocumentText
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = file.Id,
+            OwnerUserId = _owner,
+            ProfileId = profile.Id,
+            SourceBlobObjectId = blobObjectId,
+            Source = DocumentTextSources.Native,
+            Status = AiArtifactStatuses.Completed,
+            TextHash = RagHash.Sha256Hex(Manual),
+            Text = Manual,
+            CharCount = Manual.Length,
+            ChunkFormatVersion = OwnerDocumentChunkFormat.Current,
+            IsCurrent = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _db.DocumentTexts.Add(row);
+        await _db.SaveChangesAsync();
+        return row;
     }
 
     /// A second extraction profile, which is what rich ingestion adds: another
