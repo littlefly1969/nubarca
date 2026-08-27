@@ -307,9 +307,15 @@ money per run, and not be reproducible.
 release actually ships, and the floors are asserted there
 (`RagGoldenEvaluationTests`): Recall@5 ≥ 0.90 and MRR ≥ 0.80, with every golden
 question required to put its expected source in the top three and no forbidden
-source leading. The lexical baseline currently clears those comfortably —
-Recall@5 1.000, MRR 0.938, 16/16 — from the database index and from the bundled
-corpus alike, which is what makes the two paths interchangeable.
+source leading. The lexical baseline clears those comfortably — Recall@5 1.000,
+MRR 0.938, 16/16 — from the database index and from the bundled corpus alike,
+which is what makes the two paths interchangeable.
+
+With semantic retrieval enabled against `multilingual-e5-small`, the same
+sixteen questions measure Recall@5 1.000, **MRR 0.969**, 16/16 in `hybrid` mode.
+Recall was already perfect, so the gain is entirely in RANKING — the right
+source moving up — which is the half that decides what a model actually reads
+when six chunks of context are sent.
 
 One query is kept forever:
 
@@ -345,9 +351,8 @@ a unit test should do. What the fast suite does assert is that every expectation
 in the repository golden set still names a file that exists, so a rename cannot
 silently invalidate half the set.
 
-The lexical-only baseline over 1,891 sources and 22,717 chunks at revision
-`943e37b` is Recall@5 **0.800**, MRR **0.575**, 7/10 top-3. The split is the
-interesting part, and it is the argument for hybrid retrieval in one table:
+The lexical-only baseline over 1,891 sources and 22,717 chunks is Recall@5
+**0.800**, MRR **0.575**, 7/10 top-3. The split is the interesting part:
 
 - **exact-identifier questions** — `PhotoVectorIndexService`, a test name, a
   configuration key, `face_previews table` — are answered first-hit by the
@@ -359,10 +364,34 @@ interesting part, and it is the argument for hybrid retrieval in one table:
   themselves live in `RagGoldenSet` and are deliberately not quoted here, for the
   reason above.
 
-That is the gap semantic retrieval exists to close, and it is the number to
-watch when a model is configured. It is recorded here rather than tuned away:
-raising it by adjusting weights until these ten questions pass would improve the
-score and not the product.
+That was the gap semantic retrieval was expected to close. Measured against
+`multilingual-e5-small` over the full 23,745-chunk index, it did not:
+
+| | Recall@5 | MRR | top-3 |
+|---|---|---|---|
+| `product-help` lexical | 1.000 | 0.938 | 16/16 |
+| `product-help` **hybrid** | 1.000 | **0.969** | 16/16 |
+| `nubarca-repository` lexical | **0.800** | 0.575 | **7/10** |
+| `nubarca-repository` hybrid | 0.700 | **0.625** | 6/10 |
+
+Product Help improves exactly where there was room — a few hundred chunks of
+curated PROSE, recall already perfect, so the gain is ranking, which is the half
+that decides what a model actually reads.
+
+The repository does not. MRR rises and Recall@5 falls, because a general-purpose
+multilingual SENTENCE model asked to discriminate among 23,745 chunks of mostly
+source code returns plausible neighbours that are wrong — a frontend test file
+for a backend question — and those neighbours displace correct results that
+lexical had found. Semantic similarity between two paragraphs of English prose
+is a much stronger signal than semantic similarity between two blocks of C#.
+
+That is recorded, not tuned. Adjusting RRF weights or the ranking profile until
+these ten questions pass would move the score and not the product. What it
+actually argues is that the repository domain wants either a code-aware
+embedding model or a different fusion weighting, and choosing one means
+measuring it — which is a decision with its own slice, not a knob to turn here.
+Lexical remains the better default for that domain today, and
+`Rag__SemanticEnabled` is per installation.
 
 ## Deliberately not in this slice
 
