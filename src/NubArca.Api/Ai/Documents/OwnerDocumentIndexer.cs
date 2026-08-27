@@ -151,6 +151,24 @@ public sealed class OwnerDocumentIndexer
         Guid ownerUserId, CandidateFile file, AiProfile profile,
         DocumentExtractionOptions options, IndexState state, CancellationToken cancellationToken)
     {
+        // THE BYTES CHANGED, SO THE OLD READING IS NOT ABOUT THIS FILE ANY MORE.
+        //
+        // First, before the size gate, before storage is opened, before anything
+        // can fail — because every one of the paths below can return without
+        // producing a replacement, and each of them would otherwise leave a
+        // completed extraction of the PREVIOUS blob standing as the current
+        // reading of the file. That is the worst available outcome: the
+        // questioner gets a confident answer, drawn from a document that has
+        // been replaced, with nothing anywhere reporting a problem. A file with
+        // no current row is merely unanswerable, which is recoverable and
+        // visible.
+        //
+        // Only bytes that DISAGREE are demoted. A newer extraction profile
+        // reading the same unchanged blob must not take a valid document
+        // offline while it works — that case promotes on success and is handled
+        // after extraction.
+        await DemoteSupersededBytesAsync(file.Id, file.BlobObjectId, cancellationToken);
+
         // SIZE BEFORE BYTES. `FileItem.SizeBytes` is recorded at upload, so an
         // oversized document is refused without opening the blob at all. A limit
         // enforced after reading is a report, not a bound.
@@ -282,6 +300,49 @@ public sealed class OwnerDocumentIndexer
         return existing.Id;
     }
 
+    /// A current reading of bytes the file no longer has stops being authority.
+    ///
+    /// Deliberately narrow: it demotes only rows whose recorded blob DISAGREES
+    /// with the file's current one. Blobs are content-addressed and immutable,
+    /// so "different id" is exactly "different content" — there is no heuristic
+    /// here and no timestamp involved.
+    ///
+    /// Called before any work that can fail, which is the whole point. The
+    /// spec's rule is that once a FileItem points at new bytes, the old
+    /// extraction must stop being authoritative for the file, and it must stop
+    /// BEFORE the replacement is attempted rather than after it succeeds —
+    /// otherwise a parse that never finishes leaves the previous document
+    /// answering questions about a file that no longer contains it.
+    private async Task DemoteSupersededBytesAsync(
+        Guid fileItemId, Guid currentBlobObjectId, CancellationToken cancellationToken)
+    {
+        var stale = await _db.DocumentTexts
+            .Where(d => d.FileItemId == fileItemId
+                        && d.IsCurrent
+                        && d.SourceBlobObjectId != currentBlobObjectId)
+            .ToListAsync(cancellationToken);
+
+        if (stale.Count == 0) return;
+
+        foreach (var row in stale)
+        {
+            row.IsCurrent = false;
+        }
+
+        // THE CHUNKS STAY. Demotion is a statement about authority, not about
+        // content, and `IsCurrent` is exactly what makes them unreachable — the
+        // shared boundary requires it, so a demoted row's chunks are already
+        // inert without deleting anything.
+        //
+        // Deleting them here would also be expensive in a way that is easy to
+        // miss: when this same row is re-completed for the new bytes,
+        // ReplaceChunksAsync compares ordinal by ordinal and drops only the
+        // chunks that actually changed, so editing one paragraph costs one
+        // embedding. Clearing them first would throw that away and make every
+        // content edit re-embed the whole document.
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     /// Every other extraction of this file stops being authority.
     ///
     /// Today there is one production extraction profile and this ordinarily
@@ -355,15 +416,33 @@ public sealed class OwnerDocumentIndexer
         row.CharCount = null;
         row.ChunkFormatVersion = OwnerDocumentChunkFormat.Current;
 
-        // A REFUSAL IS ALSO A READING. "These bytes cannot be read" is what
-        // NubArca currently knows about this file, so it becomes the current
-        // row and supersedes whatever came before — otherwise an earlier
-        // successful extraction of DIFFERENT bytes would stay authoritative and
-        // keep answering questions about a file that has since been replaced
-        // with something unreadable. The chunks were already removed above; this
-        // is the same statement at the level of which row is authority.
-        await DemoteOtherDerivationsAsync(file.Id, row.Id, cancellationToken);
-        row.IsCurrent = true;
+        // A REFUSAL IS A READING, BUT IT DOES NOT OUTRANK A WORKING ONE.
+        //
+        // Which of the two this is depends entirely on whose bytes were
+        // refused. If the file's blob changed, the previous reading was already
+        // demoted on the way in, nothing else describes these bytes, and this
+        // verdict is what NubArca currently knows about the file — it becomes
+        // current, and the chunks removed above go with it.
+        //
+        // If the blob did NOT change, this is a second extractor refusing a
+        // document that another profile is reading perfectly well. Promoting
+        // here would let a newly-added parser that cannot handle a format
+        // silently withdraw a working document from its owner's corpus — the
+        // upgrade would look like data loss. So the skip is recorded as
+        // provenance and the working reading keeps its authority.
+        var readableElsewhere = await _db.DocumentTexts.AnyAsync(
+            d => d.FileItemId == file.Id
+                 && d.Id != row.Id
+                 && d.IsCurrent
+                 && d.Status == AiArtifactStatuses.Completed
+                 && d.SourceBlobObjectId == file.BlobObjectId,
+            cancellationToken);
+
+        if (!readableElsewhere)
+        {
+            await DemoteOtherDerivationsAsync(file.Id, row.Id, cancellationToken);
+            row.IsCurrent = true;
+        }
 
         await _db.SaveChangesAsync(cancellationToken);
     }
