@@ -56,8 +56,26 @@ WORKDIR /app
 # recommends, apt lists removed) to satisfy the probe. This is a runtime-image
 # fix only — no application, schema, or behaviour change.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends libgssapi-krb5-2 ffmpeg \
+    && apt-get install -y --no-install-recommends \
+        libgssapi-krb5-2 \
+        ffmpeg \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        tesseract-ocr-ita \
     && rm -rf /var/lib/apt/lists/*
+# Slice 4: local OCR for scanned PDFs. Installed in the IMAGE, with its language
+# data, because the alternative is a download at document-index time — a network
+# call from the one component whose entire promise is that it makes none. English
+# and Italian are the shipped set; an operator adds more by installing further
+# `tesseract-ocr-*` packages, and NubArca refuses a language it cannot find
+# rather than fetching it.
+#
+# OCR is still OFF by default, like every other AI capability. Its presence in
+# the image is what makes `Ai__DocumentExtraction__OcrEnabled=true` work without
+# a first-run surprise; it is not what turns it on. An installation that never
+# enables it never starts the process, and a host WITHOUT the package boots
+# perfectly well — readiness reports `ocr_unavailable` and PDFs that need
+# recognition are retryable rather than permanently refused.
 # ffmpeg (above) also provides ffprobe. Both are used by the OPTIONAL external
 # media providers: Media__VideoPosterProvider=ffmpeg extracts real video poster
 # frames, and Media__VideoMetadataProvider=ffprobe reads container/stream

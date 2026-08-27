@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Data;
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
 using NubArca.Api.Rag.Retrieval;
@@ -100,6 +101,41 @@ internal static class DocumentsCliCommands
         stdout.WriteLine($"chunks={stats.Chunks}");
         stdout.WriteLine($"semantic_enabled={(semantic.Enabled ? "true" : "false")}");
         stdout.WriteLine($"embedding_profile={semantic.ProfileKey ?? "(none)"}");
+
+        // PER-FORMAT COUNTS, AND NOTHING ELSE. An operator needs to know that
+        // twelve PDFs were read and three refused; they do not need — and must
+        // never be shown here — a filename, a sheet name, a slide title or an
+        // excerpt. The counts come from the extraction PROFILE, which is the one
+        // record of which parser produced what.
+        var database = sp.GetRequiredService<AppDbContext>();
+        var byProfile = await database.DocumentTexts.AsNoTracking()
+            .Where(d => d.OwnerUserId == owner && d.IsCurrent)
+            .Join(database.AiProfiles.AsNoTracking(), d => d.ProfileId, p => p.Id,
+                (d, p) => new { p.Key, d.Status })
+            .GroupBy(x => new { x.Key, x.Status })
+            .Select(g => new { g.Key.Key, g.Key.Status, Count = g.Count() })
+            .ToListAsync();
+
+        int CountFor(string profileKey) => byProfile
+            .Where(x => x.Key == profileKey && x.Status == AiArtifactStatuses.Completed)
+            .Sum(x => x.Count);
+
+        stdout.WriteLine($"native_documents={CountFor(DocumentTextSources.NativeProfileKey)}");
+        stdout.WriteLine($"pdf_documents={CountFor(DocumentTextSources.PdfProfileKey)}");
+        stdout.WriteLine($"docx_documents={CountFor(DocumentTextSources.WordProfileKey)}");
+        stdout.WriteLine($"xlsx_documents={CountFor(DocumentTextSources.SpreadsheetProfileKey)}");
+        stdout.WriteLine($"pptx_documents={CountFor(DocumentTextSources.PresentationProfileKey)}");
+        stdout.WriteLine(
+            $"skipped_documents={byProfile.Where(x => x.Status == AiArtifactStatuses.Skipped).Sum(x => x.Count)}");
+
+        // OCR readiness, sanitized. Never the executable path, never the
+        // tessdata directory — a diagnostic carrying a filesystem path is
+        // exactly what the privacy rules forbid.
+        var ocr = sp.GetService<IDocumentOcrProvider>();
+        var readiness = ocr?.CheckReadiness();
+        stdout.WriteLine($"ocr_provider={ocr?.Provider ?? "(none)"}");
+        stdout.WriteLine($"ocr_ready={(readiness?.IsReady == true ? "true" : "false")}");
+        stdout.WriteLine($"ocr_reason={readiness?.Reason ?? "(none)"}");
 
         if (semantic.Enabled && semantic.ProfileKey is not null)
         {

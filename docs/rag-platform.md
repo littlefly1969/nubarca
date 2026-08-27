@@ -492,6 +492,122 @@ hash, `StorageKey`, filesystem path or owner id. A citation exists so a person
 can open their document, not so anything can address it, and an identifier on
 the wire is a durable handle to private content sitting in somebody else's logs.
 
+## Rich document ingestion
+
+A supported document in somebody's library is compiled into owner-private text
+locally, and nothing about the boundary changes: rich extraction changes WHAT can
+become eligible document text, never who owns it, who may retrieve it, which
+model may see it, or how that model is authorized.
+
+### Supported, and deliberately not
+
+| Family | Read | Not read |
+|---|---|---|
+| Native text | the allowlisted text types | — |
+| PDF | page text, with local OCR for pages whose text is unusable | JavaScript, launch/submit/URI actions, embedded files; form-field values are excluded in this slice |
+| Word `.docx` | paragraphs, heading path, lists, tables as rows, footnotes/endnotes, inserted tracked changes, hyperlink display text | deleted tracked-change text, macros, embedded objects, custom XML, hyperlink targets |
+| Excel `.xlsx` | visible sheets, used cells, shared/inline strings, numbers, booleans, errors, cached formula results, bounded formula expressions | hidden and very-hidden sheets, formula EVALUATION, macros, external workbook links, embedded files |
+| PowerPoint `.pptx` | visible slides, titles, bullets, tables, speaker notes, shape/image alt text | hidden slides, embedded media, OCR of embedded images, actions, external links |
+
+Out of scope entirely, and refused by name so an operator can read why: legacy
+binary `.doc`/`.xls`/`.ppt`, macro-enabled `.docm`/`.xlsm`/`.pptm`, and
+password-protected documents of either family.
+
+### Format comes from the bytes
+
+The declared content type and the filename answer exactly one question — is
+opening this file worth doing — and never what it IS. Both are attacker
+controlled and both are routinely wrong by accident; clients upload OOXML
+packages as `application/octet-stream` constantly.
+
+Acceptance requires the package to declare its own main part, and a filename that
+contradicts that declaration is REFUSED rather than resolved in either direction.
+A DOCX renamed `.xlsx` reaching the spreadsheet parser is not a cosmetic
+mis-route: it is untrusted input arriving somewhere written for a different
+structure.
+
+### Packages are hostile structured input
+
+Entry count, per-entry size and total uncompressed size are read from the archive
+DIRECTORY and enforced before the Open XML SDK sees the package. That ordering is
+the point — a compression bomb is refused on the strength of what it claims about
+itself, before a byte is expanded. Reading first and measuring afterwards is how a
+bomb wins.
+
+Nothing is extracted to disk; traversal-shaped entries are refused anyway, because
+the package is malformed by OPC's own rules and a later change that does
+materialize a part must not be the first place anyone notices. External package
+relationships are never dereferenced — a document containing
+`https://example.invalid/SECRET`, `file:///etc/passwd` or a UNC path gets its
+display text extracted and its target ignored.
+
+**Parsing means reading visible document information. It never means executing
+document behaviour.** An Excel formula is text and a cached number, never a
+computation. A PowerPoint action is ignored. A macro makes the format refused.
+
+### One reading is authority
+
+`DocumentText.IsCurrent` says which extraction of a file answers questions, with a
+filtered unique index behind it and the shared eligibility boundary requiring it.
+Resolving that by "latest timestamp" or "first completed" would let a clock or an
+index decide which interpretation of somebody's document they are answered from,
+and every such answer looks correct.
+
+- **Bytes changed** → the old reading stops being authority BEFORE the
+  replacement is attempted, so a parse that never finishes cannot leave a
+  replaced document answering questions. A permanent content verdict for the new
+  bytes becomes current; a retryable failure leaves nothing current, which is
+  visible and recovers.
+- **Same bytes, newer parser** → the working reading keeps authority until the
+  new one succeeds. A parser that cannot handle a format must not be able to
+  withdraw a working document from its owner's corpus.
+
+Historical rows are kept as provenance and are neither retrieved nor embedded.
+
+### Location is typed
+
+`LocatorKind` / `LocatorIndex` / `LocatorLabel` carry where a chunk sits in its
+own document's units, and `DocumentChunk.Page` stays a real PDF page.
+
+| Format | Kind | Index | Label | Page |
+|---|---|---|---|---|
+| native text | — | — | — | — |
+| PDF | `page` | page number | — | same page number |
+| DOCX | `section` | section ordinal | heading path | — |
+| XLSX | `sheet` | sheet ordinal | sheet name | — |
+| PPTX | `slide` | slide number | slide title | — |
+
+A chunk never crosses a page, a slide or a sheet: a passage that does cites a
+place that does not exist. Typed rather than a formatted citation string because
+two readers need it — the citation builder, and a future visual derivative that
+must point at the same page without parsing "Slide 7 — Launch plan" back into
+structure.
+
+### OCR
+
+Local, off by default, and a child PROCESS rather than an in-process library. A
+managed wrapper binds native code into the API, where a crash in an image decoder
+handed an attacker-chosen page takes the process with it and a hang cannot be
+interrupted; a child can be killed, which is what makes the page timeout a bound
+rather than a report.
+
+The page travels on stdin and the text comes back on stdout, so no private page is
+ever written to a temp file. Arguments go through an argument vector, never a
+shell string. Stdout is read under a hard cap because it is untrusted process
+output; stderr is drained and never logged, since it carries paths. Cancellation
+reaches the caller as itself — an operator's deliberate stop must not be recorded
+as a timeout.
+
+Nothing is ever downloaded. A configured language that is not installed makes OCR
+report not-ready; the production image ships `eng` and `ita`. An installation
+without the engine boots normally and reports PDFs needing recognition as
+retryable, never permanently refused.
+
+Tesseract is the BASELINE behind the seam, not a claim about NubArca's final OCR
+quality. A stronger local document model enters through the same interface later
+without touching owner authorization, `DocumentText`, RAG trust or Assistant
+policy.
+
 ## Bounds and privacy
 
 Every stage is bounded server-side: query characters, lexical candidates, vector
