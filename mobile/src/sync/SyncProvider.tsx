@@ -54,51 +54,63 @@ export function SyncProvider({
   const [snapshot, setSnapshot] = useState<EngineSnapshot | null>(null);
 
   useEffect(() => {
-    let disposed = false;
-    const conn = openAccountLedgerConnection(accountId);
-    if (disposed) {
-      conn.close();
-      return;
-    }
-    const ledger = new SyncLedger(conn, accountId);
-    const engine = new SyncEngine({
-      ledger,
-      mediaLibrary: mediaLibraryPort,
-      connectivity: connectivityPort,
-      uploader: uploadAssetViaOwnerEndpoint,
-      identity: () => ({
-        accountId,
-        generation: ownerSession.snapshot().generation,
-      }),
-      now: () => Date.now(),
-      newOperationId,
-    });
-    const unsubscribe = engine.subscribe(setSnapshot);
-    engineRef.current = engine;
-    engine.attach();
+    let conn: ReturnType<typeof openAccountLedgerConnection> | null = null;
+    let engine: SyncEngine | null = null;
+    let unsubscribe: (() => void) | null = null;
+    let unsubscribeNetwork: (() => void) | undefined;
+    let appStateSubscription: ReturnType<typeof AppState.addEventListener> | null = null;
 
-    // Network changes wake a Waiting-for-Wi-Fi engine without polling.
-    const unsubscribeNetwork = connectivityPort.onNetworkChange?.(() => {
-      engine.notifyNetworkChanged();
-    });
+    try {
+      conn = openAccountLedgerConnection(accountId);
+      const ledger = new SyncLedger(conn, accountId);
+      engine = new SyncEngine({
+        ledger,
+        mediaLibrary: mediaLibraryPort,
+        connectivity: connectivityPort,
+        uploader: uploadAssetViaOwnerEndpoint,
+        identity: () => ({
+          accountId,
+          generation: ownerSession.snapshot().generation,
+        }),
+        now: () => Date.now(),
+        newOperationId,
+      });
+      unsubscribe = engine.subscribe(setSnapshot);
+      engineRef.current = engine;
+      engine.attach();
 
-    // Foreground recovery is the honest guarantee: on 'active', re-check
-    // permission + policy and continue. Backgrounding needs no action —
-    // uploads may continue briefly at the OS's discretion, and foreground
-    // recovery always converges.
-    const appStateSubscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') engine.resumeForeground();
-    });
+      // Network changes wake a Waiting-for-Wi-Fi engine without polling.
+      unsubscribeNetwork = connectivityPort.onNetworkChange?.(() => {
+        engine?.notifyNetworkChanged();
+      });
 
-    return () => {
-      disposed = true;
-      appStateSubscription.remove();
-      unsubscribeNetwork?.();
-      unsubscribe();
-      engine.detach();
+      // Foreground recovery is the honest guarantee: on 'active', re-check
+      // permission + policy and continue. Backgrounding needs no action —
+      // uploads may continue briefly at the OS's discretion, and foreground
+      // recovery always converges.
+      appStateSubscription = AppState.addEventListener('change', (state) => {
+        if (state === 'active') engine?.resumeForeground();
+      });
+    } catch (error) {
+      // Sync is optional background functionality. A corrupt/unavailable local
+      // ledger must never make the authenticated gallery unusable.
+      console.error('Mobile sync initialization failed', error);
+      unsubscribe?.();
+      engine?.detach();
       engineRef.current = null;
       setSnapshot(null);
-      conn.close();
+      conn?.close();
+      return;
+    }
+
+    return () => {
+      appStateSubscription?.remove();
+      unsubscribeNetwork?.();
+      unsubscribe?.();
+      engine?.detach();
+      engineRef.current = null;
+      setSnapshot(null);
+      conn?.close();
     };
   }, [accountId]);
 

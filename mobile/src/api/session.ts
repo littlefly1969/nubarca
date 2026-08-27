@@ -8,13 +8,24 @@ import {
   SESSION_STORAGE_KEY,
   type SessionCookieStorage,
 } from './sessionCookie.ts';
+import { withDeadline } from '../lib/promiseDeadline.ts';
+
+const SECURE_STORE_READ_TIMEOUT_MS = 5_000;
+
+function readSecureItem(key: string): Promise<string | null> {
+  return withDeadline(
+    SecureStore.getItemAsync(key),
+    SECURE_STORE_READ_TIMEOUT_MS,
+    `SecureStore read timed out for ${key}`,
+  );
+}
 
 // SecureStore adapter. Values are small (one cookie pair); SecureStore's
 // per-key size limit comfortably covers it. The iOS keychain item is pinned
 // to this-device-unlocked so a session never migrates to a fresh device via
 // an unencrypted backup, and is unreachable while the device is locked.
 const secureStorage: SessionCookieStorage = {
-  getItem: (key) => SecureStore.getItemAsync(key),
+  getItem: readSecureItem,
   setItem: (key, value) =>
     SecureStore.setItemAsync(key, value, {
       keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -35,7 +46,7 @@ export async function persistBaseUrl(baseUrl: string): Promise<void> {
 }
 
 export async function getStoredBaseUrl(): Promise<string | null> {
-  return SecureStore.getItemAsync(BASE_URL_KEY);
+  return readSecureItem(BASE_URL_KEY);
 }
 
 // Full sign-out hygiene: drop the durable cookie. The base URL survives so
