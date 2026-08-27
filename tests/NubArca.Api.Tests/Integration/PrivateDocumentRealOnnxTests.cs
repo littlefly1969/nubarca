@@ -262,6 +262,8 @@ public sealed class PrivateDocumentRealOnnxTests : IDisposable
             _storage,
             Embeddings(modelDir),
             new AiVectorSerializer(),
+            new DocumentExtractionProviders(
+                new IDocumentExtractionProvider[] { new NativeTextExtractionProvider() }),
             Options.Create(new DocumentExtractionOptions()),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);

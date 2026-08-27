@@ -28,6 +28,52 @@ public static class DocumentExtractionReasons
 
     /// Decodes to nothing worth retrieving.
     public const string Empty = "empty";
+
+    // ---- rich ingestion ------------------------------------------------------
+    //
+    // All permanent CONTENT verdicts: the same bytes under the same profile earn
+    // the same answer next week, so recording them against the blob is honest
+    // and saves reading them again. Environment failures — a missing OCR binary,
+    // a renderer that will not load — are counted elsewhere and never written
+    // here, because a temporarily absent dependency must not mark somebody's
+    // document permanently unreadable.
+
+    /// The bytes are not a format NubArca reads. Distinct from
+    /// UnsupportedContentType, which is a verdict about the DECLARED type: this
+    /// one survived the declaration and failed on evidence.
+    public const string UnsupportedDocumentFormat = "unsupported-document-format";
+
+    /// A `.docm`/`.xlsm`/`.pptm` package. Refused as a format rather than
+    /// parsed-with-macros-ignored: the safe subset of a macro-enabled document
+    /// is a judgement this slice does not make, and refusing is a sentence an
+    /// operator can read.
+    public const string MacroEnabledOffice = "macro-enabled-office";
+
+    /// Legacy binary Office — `.doc`, `.xls`, `.ppt`. An OLE compound file, a
+    /// completely different format from OOXML, and out of scope.
+    public const string LegacyOfficeFormat = "legacy-office-format";
+
+    /// Password-protected. An encrypted OOXML package is a compound file
+    /// wrapping the real one, so it never looks like a readable document; there
+    /// is nothing to extract without a credential NubArca does not have and
+    /// must not ask for.
+    public const string EncryptedDocument = "encrypted-document";
+
+    /// Claims to be an Office package and is not one: no content types part, no
+    /// relationships, or a main part that does not match what the extension
+    /// promised.
+    public const string OfficePackageInvalid = "office-package-invalid";
+
+    /// The package's total UNCOMPRESSED size is past the bound. This is the
+    /// compression-bomb refusal, and it is decided from the archive directory
+    /// before a single entry is decompressed.
+    public const string OfficePackageTooLarge = "office-package-too-large";
+
+    /// One entry inside the package is past the per-part bound.
+    public const string OfficeEntryTooLarge = "office-entry-too-large";
+
+    /// More entries than the bound allows.
+    public const string OfficeTooManyEntries = "office-too-many-entries";
 }
 
 /// Bounds on native text extraction.
@@ -60,7 +106,63 @@ public sealed class DocumentExtractionOptions
     public int EffectiveMaxCharacters => Math.Clamp(MaxCharacters, 1, 8_000_000);
     public int EffectiveMaxChunks => Math.Clamp(MaxChunks, 1, 50_000);
     public int EffectiveMaxChunkCharacters => Math.Clamp(MaxChunkCharacters, 200, 8_000);
+    // ---- rich document source bounds ----------------------------------------
+    //
+    // Per format, because 4 MiB is the right ceiling for a text file and the
+    // wrong one for an Office package: a `.docx` carries images that contribute
+    // nothing to extraction and still count against the source size, so one
+    // universal limit either refuses ordinary documents or lets a text file be
+    // enormous. Every one of these is clamped; none of them has a value meaning
+    // "unlimited".
+
+    /// Ceiling on the SOURCE bytes of a PDF.
+    public int MaxPdfSourceBytes { get; set; } = 64 * 1024 * 1024;
+
+    /// Ceiling on the SOURCE bytes of an Office Open XML package.
+    public int MaxOfficeSourceBytes { get; set; } = 64 * 1024 * 1024;
+
+    /// How many entries an Office package may contain.
+    public int MaxOfficeEntries { get; set; } = 2_000;
+
+    /// Total UNCOMPRESSED bytes the package may expand to. The bomb bound: it is
+    /// read from the archive directory, so it is decided before anything is
+    /// decompressed.
+    public int MaxOfficeUncompressedBytes { get; set; } = 256 * 1024 * 1024;
+
+    /// Ceiling on any single part inside the package.
+    public int MaxOfficePartBytes { get; set; } = 64 * 1024 * 1024;
+
     public int EffectiveMinimumCharacters => Math.Clamp(MinimumCharacters, 1, 10_000);
+
+    /// The hard ceiling no configuration can exceed, for every source-byte
+    /// bound. A limit an operator can raise without end is not a limit.
+    public const int AbsoluteMaxSourceBytes = 256 * 1024 * 1024;
+
+    public int EffectiveMaxPdfSourceBytes
+        => Math.Clamp(MaxPdfSourceBytes, 1, AbsoluteMaxSourceBytes);
+
+    public int EffectiveMaxOfficeSourceBytes
+        => Math.Clamp(MaxOfficeSourceBytes, 1, AbsoluteMaxSourceBytes);
+
+    public int EffectiveMaxOfficeEntries => Math.Clamp(MaxOfficeEntries, 1, 50_000);
+
+    public int EffectiveMaxOfficeUncompressedBytes
+        => Math.Clamp(MaxOfficeUncompressedBytes, 1, 1024 * 1024 * 1024);
+
+    public int EffectiveMaxOfficePartBytes
+        => Math.Clamp(MaxOfficePartBytes, 1, AbsoluteMaxSourceBytes);
+
+    /// The source ceiling that applies to ONE format. Callers ask this rather
+    /// than picking a field, so a new format cannot quietly inherit the text
+    /// limit by being forgotten in a switch.
+    public int SourceBytesFor(DocumentFormatKind format) => format switch
+    {
+        DocumentFormatKind.Pdf => EffectiveMaxPdfSourceBytes,
+        DocumentFormatKind.WordOpenXml
+            or DocumentFormatKind.SpreadsheetOpenXml
+            or DocumentFormatKind.PresentationOpenXml => EffectiveMaxOfficeSourceBytes,
+        _ => EffectiveMaxSourceBytes,
+    };
 }
 
 /// Extracted text, or a sanitized reason there is none.
