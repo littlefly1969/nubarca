@@ -402,6 +402,24 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // Private documents: a per-USER budget, like Help, and a SEPARATE bucket.
+    // These answers run local inference on the operator's own hardware — a
+    // different cost with a different shape — and one bucket would let a busy
+    // Help user starve somebody asking about their own manual, or the reverse.
+    options.AddPolicy(
+        NubArca.Api.Endpoints.PrivateDocumentAssistantEndpoints.PrivateChatRateLimitPolicy,
+        httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.User?.Identity?.Name
+                    ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
+
     options.AddPolicy(VaultUnlockRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -929,6 +947,28 @@ builder.Services.Configure<NubArca.Api.Rag.RagOptions>(
 builder.Services.AddRagSubstrate();
 builder.Services.AddScoped<NubArca.Api.Help.HelpAssistantService>();
 
+// Owner-private documents. Bounds for local text extraction, and the one
+// service that answers "from MY documents" — LocalTrusted only, owner derived
+// server-side. Registered unconditionally like Help: with no configured private
+// model it resolves as disabled and presents no surface implying otherwise.
+builder.Services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
+    builder.Configuration.GetSection(
+        NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
+
+// An EXPLICIT factory, because the private corpus source exists only when a
+// database does and the built-in container has no notion of an optional
+// constructor parameter — it validates the whole graph at startup, so a plain
+// `AddScoped<T>()` here stopped a connection-string-less host from booting at
+// all. A host with no database is a supported configuration; it simply has no
+// private knowledge, and the feature says so.
+builder.Services.AddScoped(sp => new NubArca.Api.Ai.Documents.PrivateDocumentAssistantService(
+    sp.GetRequiredService<NubArca.Api.Assistant.IAssistantTextModel>(),
+    sp.GetRequiredService<NubArca.Api.Rag.IRagRetriever>(),
+    sp.GetRequiredService<NubArca.Api.Assistant.AssistantModelResolver>(),
+    sp.GetService<NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource>(),
+    sp.GetRequiredService<NubArca.Api.Rag.IRagSemanticProfileResolver>(),
+    sp.GetRequiredService<ILogger<NubArca.Api.Ai.Documents.PrivateDocumentAssistantService>>()));
+
 // VSEM-01: canonical video temporal substrate (scene segments + sample
 // timestamps). Bound alongside AiOptions; disabled by default. The CLI/worker
 // host binds the same section (parity — see CliEntryPoint).
@@ -1183,6 +1223,7 @@ app.MapAdminAiEndpoints();
 // implementation.
 app.MapPeopleEndpoints();
 app.MapHelpEndpoints();
+app.MapPrivateDocumentAssistantEndpoints();
 
 // Media Library (gallery membership rules + per-file exclusion) and Photo
 // Organizer (owner-scoped date-taken reorganization) endpoints live in

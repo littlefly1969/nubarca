@@ -388,6 +388,110 @@ native inference actually stops, not when NubArca stops waiting for it —
 caller start a second one immediately and a configured concurrency of 1 could
 become N under a slow model.
 
+## Owner-private documents
+
+`user-documents` is the first domain whose knowledge belongs to a PERSON rather
+than to the installation. Everything below exists because that one change makes
+every previous assumption need re-checking.
+
+```text
+FileItem the owner currently owns, is active, is not in the Vault,
+is in their media library, and whose type NubArca reads as text
+        │
+        ▼   local extraction — no PDF, no OCR, no Office, no network
+document_texts            (owner + file + extraction profile)
+        │
+        ▼   deterministic bounded chunking, own format version
+document_chunks           (owner denormalized onto every row)
+        │
+        ▼   local ONNX passage embeddings, profile-scoped
+document_chunk_embeddings
+        │
+        ▼   owner-prefiltered lexical + exact cosine, then RRF
+bounded evidence  →  LocalTrusted model  →  grounded answer
+```
+
+Private content lives in `document_texts` / `document_chunks` /
+`document_chunk_embeddings`, NOT in `rag_sources`. Forcing it through the system
+tables for symmetry would put a person's text in the table every system domain
+reads, one forgotten `WHERE` away from a cross-owner answer. What is shared is
+the CONTRACTS — chunking, embedding, fusion, the evidence gate, domain policy —
+not the storage.
+
+### Derived rows are not authority
+
+A `DocumentText`, its chunks and its vectors record an extraction that happened
+at some point in the past. Between then and now the file may have been deleted
+or moved into the Private Vault. So **every read joins the live `FileItem`**
+through `OwnerDocumentEligibility`, and a chunk whose file no longer qualifies is
+not in the corpus at all — not filtered out afterwards.
+
+That is deliberately not left to cleanup. A sweeper that deletes orphaned rows
+runs on a schedule; a boundary that only holds once it has run fails for as long
+as it is behind. Deleting a file removes its answers on the very next question,
+because the join stops matching. The tests leave the derived rows in place on
+purpose.
+
+Vault exclusion is structural rather than remembered: `FileItem` carries a global
+query filter of `PrivateVaultId == null`, and nothing in this bounded context
+says `IgnoreQueryFilters()`.
+
+### Owner-prefiltered, not owner-filtered
+
+Lexical retrieval builds an index from ONE person's rows, so there is nothing of
+anybody else's to rank. The private index is **never cached across requests**:
+keying the cache by `(domain, owner)` would keep every questioner's private
+index resident for the life of the process, and would make "which index does
+this caller get" a question answered by a cache key — where being wrong once is
+a privacy incident. Building it per question costs a scan of one person's text.
+
+Semantic retrieval is **exact cosine over the owner's eligible vectors**, not an
+approximate index with a predicate. `ORDER BY embedding <=> query LIMIT 10`
+against a global HNSW with `WHERE OwnerUserId = …` is not an owner-prefiltered
+nearest-neighbour search: the traversal covers everybody's vectors and the
+predicate filters what it happens to surface, so a person with few documents in
+a large installation silently gets fewer and worse results. An index per owner
+and partitioning are both real designs that want a benchmark this slice does not
+have; a few thousand dot products is microseconds, and the candidate set is
+bounded regardless.
+
+### The model boundary
+
+`Assistant__PrivateKnowledgeModel` names the model, and it must resolve to
+`LocalTrusted`. There is **no fallback** — not to Help's model, which is the one
+place in the product allowed to be External, and not to anything else. An
+installation that points this at a provider gets a feature that is OFF, with its
+own reason code `private_model_not_local` rather than a generic
+"not configured" that would send an operator hunting for a typo.
+
+An External configuration produces **zero provider calls**. Not a clean body —
+no body, because the resolver refuses to hand the service a usable non-local
+profile at all. The question itself never leaves either: "what does my contract
+say about termination" has already disclosed something, and evidence is not the
+only private part of a request.
+
+`POST /api/assistant/documents/chat` carries a message and a bounded history and
+nothing else. No owner, no domain, no file id, no model, no trust. A client
+cannot point it somewhere else because the shape it posts into has nowhere to
+put the instruction — a stronger statement than a server that accepts such
+fields and promises to ignore them.
+
+Retrieved document text is UNTRUSTED evidence, delimited and named as reference
+material. That framing is hardening, not a control: a determined injection can
+say anything, and phrasing does not stop it. What stops it is that the model has
+no tools, no functions, no `tool_choice`, no second retrieval round, no database
+handle, no filesystem and no action — and the owner was fixed before the
+evidence was read. The worst a hostile document achieves is a wrong answer to
+one question.
+
+### What a citation may say
+
+The document's NAME and the SECTION heading — both things the owner wrote or
+chose. Never a `FileItemId`, `DocumentTextId`, chunk id, `BlobObjectId`, blob
+hash, `StorageKey`, filesystem path or owner id. A citation exists so a person
+can open their document, not so anything can address it, and an identifier on
+the wire is a durable handle to private content sitting in somebody else's logs.
+
 ## Bounds and privacy
 
 Every stage is bounded server-side: query characters, lexical candidates, vector
@@ -410,8 +514,27 @@ dotnet NubArca.Api.dll rag coverage --domain nubarca-repository
 dotnet NubArca.Api.dll rag query    --domain product-help "come faccio a utilizzare la funzione dei volti?"
 dotnet NubArca.Api.dll rag evaluate --domain product-help
 dotnet NubArca.Api.dll rag seed-profiles
-dotnet NubArca.Api.dll rag validate-model
+dotnet NubArca.Api.dll rag validate-model --domain product-help
 ```
+
+The owner-private corpus has its OWN verb, and every subcommand requires
+`--owner`:
+
+```bash
+dotnet NubArca.Api.dll documents status --owner <user-id>
+dotnet NubArca.Api.dll documents index  --owner <user-id> --embed
+dotnet NubArca.Api.dll documents index  --owner <user-id> --limit 20
+```
+
+A separate verb rather than `rag index --domain user-documents --owner …`,
+because which corpus a command touches should be visible in the command that was
+typed rather than in its arguments. There is deliberately no "all owners" mode:
+the one legitimate use — backfilling after enabling the feature — is served by
+running it per owner, which is also the form that can be stopped halfway without
+ambiguity. Nothing these commands print is a document name, a heading, an
+excerpt or a storage key; an operator diagnosing an indexing problem needs counts
+and reason tokens, and a terminal that echoed somebody's filenames would put them
+in a scrollback buffer, a screenshot and a support ticket.
 
 `rag query` is diagnostic and never calls a generative model. When Help gives a
 bad answer the two candidate causes — retrieval found the wrong thing, or the
@@ -447,6 +570,40 @@ Before the retrieval rewrite it returned `docs/OPERATIONS.md` — a
 backup-and-restore runbook that mentions faces, and is longer, so it won on word
 count. It is a permanent regression canary, and a technical reference to
 `face_previews` is not an acceptable answer to it either.
+
+### The private set, and what it does not prove
+
+`user-documents` is measured in the fast suite against a SYNTHETIC, non-secret
+library of one person's documents — a boiler manual, travel notes, project
+notes, configuration notes and a recipe — with six question shapes: an exact
+phrase, a paraphrase sharing almost no vocabulary with its document, a question
+by filename, a multi-sentence question, an exact configuration key, and one the
+corpus cannot answer.
+
+| | Recall@5 | MRR | top-3 |
+|---|---|---|---|
+| `user-documents` lexical | 1.000 | 1.000 | 5/5 |
+| `user-documents` hybrid | 1.000 | 1.000 | 5/5 |
+
+**Read that with the caveat it deserves.** Five documents on five unrelated
+topics is an EASY set: every question has exactly one plausible target, so
+first-hit is close to the floor rather than a result. It says the private path
+works end to end — extraction, chunking, owner-prefiltered ranking, fusion, the
+evidence gate — and it does not say private retrieval is good. The asserted
+floors are a regression tripwire, deliberately loose, and tuning weights until
+six questions score better would move the number and not the product.
+
+Hybrid matches lexical exactly here, and that is expected rather than
+encouraging: the fast suite's embedding provider hashes text into a vector
+rather than modelling meaning, so what this measures is that RRF does not LOSE
+what lexical found. Real semantic quality wants `multilingual-e5-small` against
+a corpus with genuinely competing documents, which is a measurement with its own
+slice — the same conclusion the repository domain reached.
+
+The sixth question is the one that must fail. A corpus that answers everything is
+guessing, and for "answer from MY documents" a confident answer with nothing
+behind it is the worst outcome, so it is asserted to return no strong evidence
+and make no model call.
 
 ### The corpus must not contain the question list
 
@@ -512,15 +669,42 @@ these ten questions pass would move the score and not the product. What it
 actually argues is that the repository domain wants either a code-aware
 embedding model or a different fusion weighting, and choosing one means
 measuring it — which is a decision with its own slice, not a knob to turn here.
-Lexical remains the better default for that domain today, and
-`Rag__SemanticEnabled` is per installation.
+Lexical remains the better default for that domain today, and semantic
+enablement is now per domain (`Rag__Domains__<key>__SemanticEnabled`).
 
-## Deliberately not in this slice
+## Deliberately not in this platform yet
 
-No private/owner RAG. No user documents, OCR, media metadata, People or Faces as
-retrievable knowledge. No Assistant read tools, no actions, no writes. No
+Owner-private RAG now EXISTS, for native text documents. What is still out:
+
+**Ingestion.** No PDF, no OCR, no DOCX/XLSX/PPTX, no email, no web crawling. The
+failure modes of a document parser are memory and code execution, and the way to
+not have them is to not have a parser — so this slice ships a decoder and a set
+of refusals. Richer ingestion is the next meaningful capability, on top of this
+same boundary rather than beside it.
+
+**Other private knowledge.** Media metadata, People and Faces are not
+retrievable knowledge. Neither is Private Vault content — vaulted documents are
+not extracted, chunked, embedded, indexed, retrieved or sent, and that is a
+property of the schema rather than a rule to remember.
+
+**Sharing.** No shared-document RAG: a file shared WITH somebody is not owned by
+them, and being able to see something was never the test for knowledge
+authority. No cross-owner admin search either — an administrator's authority
+over an installation is not authority over a person's documents.
+
+**The Assistant.** No read tools, no write tools, no actions, no ToolBroker. No
 cross-domain retrieval and no model-directed domain hopping. No LLM query
-rewriting or reranking. No hosted embeddings. No GitHub at query time. No Git
-writes and no code execution. The production image does not ship the repository:
-repository dogfooding is a development, test and operator indexing source, and
-Product Help remains the production-facing domain.
+rewriting or reranking. No server-side chat persistence.
+
+**Everything hosted.** No hosted embeddings, no external private generation, no
+automatic model downloads, no GitHub at query time, no Git writes, no code
+execution.
+
+**Retrieval sophistication.** No per-owner HNSW index and no partitioning —
+exact cosine over an owner's eligible vectors is correct, and the alternatives
+want a benchmark against a real corpus. No code-aware model for the repository
+domain: the measurement above argues for one, and choosing it means measuring it.
+
+The production image does not ship the repository: repository dogfooding is a
+development, test and operator indexing source. Product Help and
+`user-documents` are the production-facing domains.

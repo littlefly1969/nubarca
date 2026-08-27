@@ -59,7 +59,8 @@ public sealed class HelpAssistantServiceTests
         }
 
         public Task<RagDomainStatus> GetStatusAsync(
-            RagDomainKey domain, CancellationToken cancellationToken = default)
+            RagDomainKey domain, Guid? ownerUserId = null,
+            CancellationToken cancellationToken = default)
             => Task.FromResult(new RagDomainStatus(
                 domain, IsAvailable, IsAvailable ? "r" : null, 1, 1, null, 0, 0, false, null));
     }

@@ -74,7 +74,8 @@ public sealed class HelpAssistantService
     public async Task<HelpAssistantStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
         var profile = _resolver.HelpModel.Profile;
-        var status = await _knowledge.GetStatusAsync(Domain.DomainKey, cancellationToken);
+        var status = await _knowledge.GetStatusAsync(
+            Domain.DomainKey, cancellationToken: cancellationToken);
         return new HelpAssistantStatus(
             Enabled: profile is not null,
             ProviderLabel: profile?.Label ?? string.Empty,

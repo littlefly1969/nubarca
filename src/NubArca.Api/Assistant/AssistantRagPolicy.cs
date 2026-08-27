@@ -25,58 +25,89 @@ public static class AssistantRagPolicy
 {
     /// May a model at this trust level be grounded on this domain at all?
     public static bool MayGroundOn(AssistantModelTrust trust, RagDomainDefinition domain)
-    {
-        // No owner-private domain is activated in this slice, and this is the
-        // line that keeps "the enum has the value" from becoming "the feature
-        // has the capability". A domain that needs an owner needs an
-        // authorization design that does not exist yet.
-        if (domain.PrivacyClass == RagPrivacyClass.OwnerPrivate
-            || domain.Scope == RagDomainScope.Owner
-            || domain.RequiresOwner)
-        {
-            return false;
-        }
-
-        return trust switch
+        => trust switch
         {
             // TWO conditions, deliberately redundant. `ExternalGenerationAllowed`
             // is the domain author's explicit decision; `Public` is the privacy
             // classification. A future domain that sets one and forgets the other
             // fails closed rather than shipping the more permissive reading.
+            //
+            // OwnerPrivate is neither, so a person's own documents can never
+            // satisfy this branch — including with an optimistic
+            // `ExternalGenerationAllowed: true` written into a definition,
+            // because the privacy class still has to be Public.
             AssistantModelTrust.External =>
                 domain.ExternalGenerationAllowed && domain.PrivacyClass == RagPrivacyClass.Public,
 
-            // The operator asserts control of this endpoint, so knowledge about
-            // their own installation may be used to answer their own questions.
+            // The operator asserts control of this endpoint. That covers
+            // knowledge about their own installation, and — since Slice 3 — the
+            // OWNER'S OWN documents, which is the entire point of a local model:
+            // a person's private text may be read by something running on their
+            // own hardware and by nothing else.
+            //
+            // Eligibility is not authorization. Passing here means "a
+            // LocalTrusted model may see owner-private evidence"; it does NOT
+            // mean this caller may see THIS owner's. That is Refuse's job below,
+            // and the two are separate on purpose — a check that answered both
+            // questions at once would have no way to say which one failed.
             AssistantModelTrust.LocalTrusted =>
-                domain.PrivacyClass is RagPrivacyClass.Public or RagPrivacyClass.SystemInternal,
+                domain.PrivacyClass is RagPrivacyClass.Public
+                    or RagPrivacyClass.SystemInternal
+                    or RagPrivacyClass.OwnerPrivate,
 
             // ManagedLocal and anything added later: nothing, until whoever adds
             // it says what it may do.
             _ => false,
         };
-    }
 
     /// The gate. Returns null when the evidence may be used, or a sanitized
     /// reason code when it may not.
+    ///
+    /// `ownerUserId` is the AUTHENTICATED caller, derived server-side. It is
+    /// required for an owner-scoped domain and must match every piece of
+    /// evidence: retrieval already restricted the corpus to that owner, and this
+    /// re-checks the result, because "the query was scoped correctly" and "the
+    /// evidence belongs to this person" are two statements and only the second
+    /// one is the thing that must be true.
     public static string? Refuse(
         AssistantModelTrust trust,
         RagDomainDefinition domain,
-        IReadOnlyList<RagEvidence> evidence)
+        IReadOnlyList<RagEvidence> evidence,
+        Guid? ownerUserId = null)
     {
         if (!MayGroundOn(trust, domain))
         {
             return RagFailureReasons.DomainNotAllowed;
         }
 
-        // Evidence from a domain other than the one that was asked for never
-        // reaches a prompt, whatever its own policy says. The requested domain
-        // is what the operation was reviewed against.
+        // AN OWNER-SCOPED DOMAIN WITH NO OWNER IS REFUSED, not answered broadly.
+        // This is the check that survives a future caller who builds their own
+        // query and forgets: there is no owner to compare against, so there is
+        // no evidence that can pass.
+        if (domain.RequiresOwner && (ownerUserId is not { } caller || caller == Guid.Empty))
+        {
+            return RagFailureReasons.OwnerRequired;
+        }
+
         foreach (var item in evidence)
         {
+            // Evidence from a domain other than the one that was asked for never
+            // reaches a prompt, whatever its own policy says. The requested
+            // domain is what the operation was reviewed against.
             if (!string.Equals(item.Domain.Value, domain.Key, StringComparison.Ordinal))
             {
                 return RagFailureReasons.DomainNotAllowed;
+            }
+
+            if (!domain.RequiresOwner) continue;
+
+            // Unstamped is refused as firmly as wrong. A piece of owner-private
+            // evidence that cannot say whose it is has no claim to be in this
+            // person's answer, and treating "null" as "probably fine" is exactly
+            // how a system domain's chunk would slip into a private prompt.
+            if (item.OwnerUserId != ownerUserId)
+            {
+                return RagFailureReasons.OwnerRequired;
             }
         }
 

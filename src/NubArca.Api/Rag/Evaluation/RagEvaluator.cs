@@ -50,11 +50,17 @@ public sealed class RagEvaluator
         _retriever = retriever;
     }
 
+    /// `ownerUserId` is required for an owner-scoped domain and ignored by every
+    /// system one — measuring `user-documents` means measuring ONE person's
+    /// corpus, because there is no other kind. Optional in the signature so the
+    /// system callers stay honest about having no owner rather than passing
+    /// `Guid.Empty` and making the interesting case invisible.
     public async Task<RagEvaluationReport> EvaluateAsync(
         string domain,
         IReadOnlyList<RagGoldenCase> cases,
         int maxEvidence = 5,
         int maxCharacters = 12000,
+        Guid? ownerUserId = null,
         CancellationToken cancellationToken = default)
     {
         var key = new RagDomainKey(domain);
@@ -68,7 +74,8 @@ public sealed class RagEvaluator
             cancellationToken.ThrowIfCancellationRequested();
 
             var result = await _retriever.RetrieveAsync(
-                new RagQuery(key, golden.Query, maxEvidence, maxCharacters), cancellationToken);
+                new RagQuery(key, golden.Query, ownerUserId, maxEvidence, maxCharacters),
+                cancellationToken);
             mode = result.Mode;
             profile ??= result.EmbeddingProfileKey;
             revision ??= result.Revision;

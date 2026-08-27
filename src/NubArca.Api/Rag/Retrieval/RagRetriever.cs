@@ -18,7 +18,9 @@ public sealed record RagDatabaseServices(
     DatabaseRagCorpusSource Corpus,
     RagVectorRetriever Vectors,
     TextEmbeddingResolver Embeddings,
-    RagVectorIndexService VectorIndex);
+    RagVectorIndexService VectorIndex,
+    OwnerDocumentCorpusSource? OwnerDocuments = null,
+    OwnerDocumentVectorRetriever? OwnerVectors = null);
 
 /// The domain-general retriever: lexical, semantic when configured, fused.
 ///
@@ -99,7 +101,7 @@ public sealed class RagRetriever : IRagRetriever
             text = text[..options.EffectiveQueryCharacters];
         }
 
-        var index = await BuildIndexAsync(domain, cancellationToken);
+        var index = await BuildIndexAsync(domain, query.OwnerUserId, cancellationToken);
         if (index is null || index.IsEmpty)
         {
             return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.IndexUnavailable);
@@ -130,13 +132,24 @@ public sealed class RagRetriever : IRagRetriever
         // here rather than inside it keeps a disabled domain from paying for an
         // embedding call it is going to discard.
         var semanticEnabled = _semantic.Resolve(query.Domain).Enabled;
-        var semantic = semanticEnabled && _database is { } services
-            ? await services.Vectors.SearchAsync(
-                index, text, options.EffectiveVectorCandidates, cancellationToken)
-            : RagVectorSearchOutcome.Unavailable(
-                semanticEnabled
-                    ? RagFailureReasons.IndexUnavailable
-                    : RagFailureReasons.EmbeddingDisabled);
+        var semantic = (semanticEnabled, _database, domain.RequiresOwner) switch
+        {
+            // Owner-scoped: exact cosine over THIS owner's eligible vectors. A
+            // separate retriever rather than a WHERE clause on the shared one,
+            // because "approximate index plus an owner predicate" is not an
+            // owner-prefiltered search — see OwnerDocumentVectorRetriever.
+            (true, { OwnerVectors: { } ownerVectors }, true) =>
+                await ownerVectors.SearchAsync(
+                    index, query.OwnerUserId ?? Guid.Empty, text,
+                    options.EffectiveVectorCandidates, cancellationToken),
+
+            (true, { } services, false) =>
+                await services.Vectors.SearchAsync(
+                    index, text, options.EffectiveVectorCandidates, cancellationToken),
+
+            (true, _, _) => RagVectorSearchOutcome.Unavailable(RagFailureReasons.IndexUnavailable),
+            _ => RagVectorSearchOutcome.Unavailable(RagFailureReasons.EmbeddingDisabled),
+        };
 
         var mode = semantic.IsAvailable
             ? RagRetrievalModes.Hybrid
@@ -165,7 +178,7 @@ public sealed class RagRetriever : IRagRetriever
     }
 
     public async Task<RagDomainStatus> GetStatusAsync(
-        RagDomainKey domain, CancellationToken cancellationToken = default)
+        RagDomainKey domain, Guid? ownerUserId = null, CancellationToken cancellationToken = default)
     {
         if (!_domains.TryGet(domain.Value, out var definition))
         {
@@ -173,7 +186,17 @@ public sealed class RagRetriever : IRagRetriever
                 RagFailureReasons.DomainUnknown);
         }
 
-        var index = await BuildIndexAsync(definition, cancellationToken);
+        // Status is a READ of the same corpus, so it obeys the same rule: an
+        // owner-scoped domain has no installation-wide status to report, and
+        // asking without an owner answers `rag_owner_required` rather than
+        // reporting somebody's counts to whoever asked.
+        if (definition.RequiresOwner && (ownerUserId is not { } o || o == Guid.Empty))
+        {
+            return new RagDomainStatus(domain, false, null, 0, 0, null, 0, 0, false,
+                RagFailureReasons.OwnerRequired);
+        }
+
+        var index = await BuildIndexAsync(definition, ownerUserId, cancellationToken);
         var revision = index?.Corpus.Revision;
         var mixed = index?.Corpus.IsMixedRevision == true;
         var available = index is { IsEmpty: false }
@@ -228,9 +251,33 @@ public sealed class RagRetriever : IRagRetriever
     /// falling back is what keeps Help working on an installation that has never
     /// run `rag index`.
     private async Task<RagLexicalIndex?> BuildIndexAsync(
-        RagDomainDefinition domain, CancellationToken cancellationToken)
+        RagDomainDefinition domain, Guid? ownerUserId, CancellationToken cancellationToken)
     {
         var key = domain.DomainKey;
+
+        // AN OWNER-SCOPED DOMAIN IS BUILT FRESH, EVERY TIME, AND NEVER CACHED.
+        //
+        // The cache is keyed by domain, and widening that key to (domain, owner)
+        // would be two lines and two problems. It would keep every questioner's
+        // private index resident for the life of the process — an unbounded map
+        // of people's documents, held in memory, that nothing evicts. And it
+        // would make "which index does this caller get" a question answered by
+        // a cache key, where being wrong once means answering one person from
+        // another's documents.
+        //
+        // Building it per question costs a scan of ONE person's text. That is a
+        // corpus of hundreds to a few thousand chunks, not the twenty-three
+        // thousand the repository domain has, and it is the right trade for the
+        // one domain where a cache-key bug is a privacy incident.
+        if (domain.RequiresOwner)
+        {
+            if (ownerUserId is not { } owner || owner == Guid.Empty) return null;
+            if (_database?.OwnerDocuments is not { } documents) return null;
+
+            var corpus = await documents.LoadAsync(owner, cancellationToken);
+            return corpus.IsEmpty ? null : new RagLexicalIndex(corpus, RagRankingProfiles.For(key));
+        }
+
         if (_database is { } services)
         {
             var databaseSignature = await services.Corpus.GetSignatureAsync(key, cancellationToken);
@@ -325,7 +372,12 @@ public sealed class RagRetriever : IRagRetriever
                 Revision: string.IsNullOrEmpty(chunk.Revision) ? revision : chunk.Revision,
                 LexicalRank: candidate.LexicalRank,
                 VectorRank: candidate.VectorRank,
-                FusionRank: candidate.Rank));
+                FusionRank: candidate.Rank,
+                // The owner the QUERY was scoped to. Stamping it here — where
+                // the corpus that produced this chunk was built from exactly
+                // that owner's eligible files — is what lets the Assistant gate
+                // verify the evidence instead of taking retrieval's word for it.
+                OwnerUserId: query.OwnerUserId));
         }
 
         return evidence;

@@ -28,6 +28,20 @@ public sealed class AssistantOptions
     /// Which entry of `Models` the Help feature uses.
     public string HelpModel { get; set; } = string.Empty;
 
+    /// Which entry of `Models` answers questions about the caller's OWN
+    /// DOCUMENTS (`Assistant__PrivateKnowledgeModel=my-local-llm`).
+    ///
+    /// Its own key, deliberately not a fallback to `HelpModel`. Help is allowed
+    /// to be an External provider — that is the one place in the product where
+    /// it is — and inheriting it here would mean an operator who configured Help
+    /// once had silently pointed their own documents at a hosted model. There is
+    /// no fallback of any kind: unset means the private feature is off.
+    ///
+    /// The named profile must additionally be `LocalTrusted`. That is checked in
+    /// AssistantModelResolver, not here, because it is a property of the resolved
+    /// model rather than of the string.
+    public string PrivateKnowledgeModel { get; set; } = string.Empty;
+
     /// Case-insensitive because a profile name is an operator's label, and
     /// `HelpModel: Help-Default` matching `Models: help-default` is the
     /// behaviour a person expects from configuration.

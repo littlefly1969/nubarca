@@ -170,24 +170,83 @@ public sealed class RagDomainPolicyTests
     }
 
     [Fact]
-    public void No_Model_May_Yet_Be_Grounded_On_Owner_Private_Knowledge()
+    public void Only_A_LocalTrusted_Model_May_Be_Grounded_On_Owner_Private_Knowledge()
     {
-        // Registering the domain does NOT activate it. There is no private
-        // Assistant operation and no owner-scoped retrieval path yet, so the
-        // gate refuses owner-private evidence at every trust level — including
-        // LocalTrusted, which will be the one allowed once the operation that
-        // derives the owner server-side exists.
         var owned = RagDomainRegistry.UserDocuments;
 
+        // A local model running on the operator's own hardware is the entire
+        // point: a person's private text may be read by that and by nothing
+        // else.
+        Assert.True(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, owned));
         Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, owned));
-        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, owned));
+        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.ManagedLocal, owned));
 
-        // …and a definition somebody wrote optimistically stays refused, because
-        // the owner-scope check runs before the trust switch.
+        // An optimistic definition does not help: External requires the privacy
+        // class to be Public as well, and OwnerPrivate never is. The two
+        // conditions are deliberately redundant so a domain that sets one and
+        // forgets the other fails closed.
         var optimistic = owned with { ExternalGenerationAllowed = true };
         Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, optimistic));
-        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, optimistic));
     }
+
+    [Fact]
+    public void Eligibility_Is_Not_Authorization_For_Owner_Private_Evidence()
+    {
+        // `MayGroundOn` says a LocalTrusted model MAY see owner-private
+        // evidence. It does not say THIS caller may see THIS owner's, and the
+        // two are separate checks on purpose — a single check answering both
+        // would have no way to say which one failed.
+        var owned = RagDomainRegistry.UserDocuments;
+        var owner = Guid.NewGuid();
+        var evidence = new[] { OwnedEvidence(owner) };
+
+        // The happy path.
+        Assert.Null(AssistantRagPolicy.Refuse(
+            AssistantModelTrust.LocalTrusted, owned, evidence, owner));
+
+        // No owner at all: refused rather than answered broadly. This is the
+        // check that survives a future caller who builds their own query.
+        Assert.Equal(
+            RagFailureReasons.OwnerRequired,
+            AssistantRagPolicy.Refuse(AssistantModelTrust.LocalTrusted, owned, evidence, null));
+
+        // Somebody ELSE's evidence, with a valid caller.
+        Assert.Equal(
+            RagFailureReasons.OwnerRequired,
+            AssistantRagPolicy.Refuse(
+                AssistantModelTrust.LocalTrusted, owned, new[] { OwnedEvidence(Guid.NewGuid()) },
+                owner));
+
+        // UNSTAMPED evidence is refused as firmly as wrong. Treating a null
+        // owner as "probably fine" is exactly how a system domain's chunk would
+        // slip into a private prompt.
+        Assert.Equal(
+            RagFailureReasons.OwnerRequired,
+            AssistantRagPolicy.Refuse(
+                AssistantModelTrust.LocalTrusted, owned, new[] { OwnedEvidence(null) }, owner));
+
+        // And an External model never gets this far, whoever is asking.
+        Assert.Equal(
+            RagFailureReasons.DomainNotAllowed,
+            AssistantRagPolicy.Refuse(AssistantModelTrust.External, owned, evidence, owner));
+    }
+
+    private static RagEvidence OwnedEvidence(Guid? owner) => new(
+        Id: "chunk-1",
+        Domain: RagDomainKey.UserDocuments,
+        Path: "manuale.md",
+        Title: "manuale.md",
+        Section: "Manutenzione",
+        Text: "Il filtro va pulito ogni sei mesi.",
+        Feature: string.Empty,
+        SourceKind: RagSourceKinds.Documentation,
+        Audience: string.Empty,
+        Intent: string.Empty,
+        Language: RagLanguages.Italian,
+        Score: 1.0,
+        SourceKey: "manuale.md",
+        Revision: "owner-library",
+        OwnerUserId: owner);
 
     [Fact]
     public void OwnerScopedRetrieval_RefusesAQueryWithNoOwner()

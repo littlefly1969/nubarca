@@ -120,6 +120,19 @@ public static class CliEntryPoint
                     sp => RagCliCommands.RunAsync(sub, rest, sp, stdout, stderr),
                     stderr);
 
+            // The OWNER-PRIVATE document corpus, deliberately its own verb.
+            // `rag` operates on installation-wide knowledge that belongs to
+            // nobody; these commands operate on one named person's documents and
+            // require `--owner` on every one of them. Making that a different
+            // command rather than a flag on the same one means which corpus is
+            // being touched is visible in the command that was typed.
+            case ("documents", _) when sub.Length > 0:
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => DocumentsCliCommands.RunAsync(
+                        new[] { sub }.Concat(rest).ToArray(), sp, stdout, stderr),
+                    stderr);
+
             case ("users", "ensure"):
                 return await DispatchAsync(
                     serviceProviderFactory,
@@ -2371,6 +2384,13 @@ public static class CliEntryPoint
         services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
         services.Configure<NubArca.Api.Rag.RagOptions>(
             configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
+        // Extraction bounds bind here too, so `documents index` obeys the same
+        // ceilings the web host does. A CLI running with different bounds than
+        // the application is a CLI that writes rows the application would have
+        // refused.
+        services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
+            configuration.GetSection(
+                NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
         services.AddRagSubstrate();
 
         services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
@@ -4781,7 +4801,9 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll rag query --domain <key> \"<question>\"");
         stdout.WriteLine("  dotnet NubArca.Api.dll rag evaluate --domain <key>");
         stdout.WriteLine("  dotnet NubArca.Api.dll rag seed-profiles");
-        stdout.WriteLine("  dotnet NubArca.Api.dll rag validate-model [--profile <key>]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag validate-model [--profile <key>] [--domain <key>]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents status --owner <user-id>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents index  --owner <user-id> [--limit N] [--embed]");
         stdout.WriteLine();
         stdout.WriteLine("rag");
         stdout.WriteLine("  Diagnostics for the local retrieval substrate. `rag query` shows what");
@@ -4789,6 +4811,13 @@ public static class CliEntryPoint
         stdout.WriteLine("  generative model. `rag domains` prints each domain's privacy class");
         stdout.WriteLine("  and whether its evidence may reach an External model — that policy");
         stdout.WriteLine("  is defined in code, not in the database.");
+        stdout.WriteLine();
+        stdout.WriteLine("documents");
+        stdout.WriteLine("  The OWNER-PRIVATE document corpus. Every subcommand requires");
+        stdout.WriteLine("  --owner: there is no all-owners mode, and which corpus is being");
+        stdout.WriteLine("  touched is visible in the command rather than in its arguments.");
+        stdout.WriteLine("  Prints counts and reason tokens only — never a document name, a");
+        stdout.WriteLine("  heading, an excerpt or a storage key.");
         stdout.WriteLine();
         stdout.WriteLine("users ensure");
         stdout.WriteLine("  Creates the user if missing. With an existing user, leaves the");

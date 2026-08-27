@@ -21,6 +21,9 @@ public class DocumentChunkConfiguration : IEntityTypeConfiguration<DocumentChunk
         builder.Property(c => c.Id)
             .ValueGeneratedNever();
 
+        builder.Property(c => c.Heading)
+            .HasMaxLength(512);
+
         builder.Property(c => c.Text)
             .HasColumnType("text");
 

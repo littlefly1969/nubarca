@@ -79,6 +79,16 @@ public static class RagServiceRegistration
         services.AddScoped<RagVectorIndexService>();
         services.AddScoped<TextEmbeddingResolver>();
         services.AddScoped<RagVectorRetriever>();
+
+        // The OWNER-PRIVATE half. Separate types rather than owner parameters on
+        // the system ones: `user-documents` reads different tables, ranks a
+        // different way and cannot be queried without an owner, and a shared
+        // implementation with an optional owner argument is exactly the shape
+        // where "forgot to pass it" becomes "answered from everybody's".
+        services.AddScoped<Retrieval.OwnerDocumentCorpusSource>();
+        services.AddScoped<Retrieval.OwnerDocumentVectorRetriever>();
+        services.AddScoped<Ai.Documents.OwnerDocumentIndexer>();
+
         services.AddScoped<RagDatabaseServices>();
 
         // Local text embedding. Both providers are registered; which one runs is

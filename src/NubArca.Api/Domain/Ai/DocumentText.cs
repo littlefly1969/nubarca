@@ -5,13 +5,40 @@ namespace NubArca.Api.Domain.Ai;
 // inside the owner's boundary; never exposed through public APIs.
 //
 // `Text` is internal-only (like BlobMetadata.RawMetadataJson) — it is never
-// placed in a normal/public DTO. Phase 0A defines the container only; nothing
-// populates it yet.
+// placed in a normal/public DTO.
+//
+// A ROW HERE IS NOT AUTHORITY. It is a cache of an extraction that happened at
+// some point in the past, and the file it describes may since have been deleted
+// or moved into the Private Vault. Retrieval re-establishes eligibility from
+// the live FileItem on every question — see OwnerDocumentEligibility. Cleaning
+// these rows up is housekeeping, not the privacy boundary.
 public class DocumentText
 {
     public Guid Id { get; set; }
 
     public Guid FileItemId { get; set; }
+
+    // WHICH BYTES were extracted. Blobs are content-addressed and immutable, so
+    // this is an exact idempotence key: unchanged means the same object id, and
+    // a content change is always a different one.
+    //
+    // It is what makes a rename or a move cost nothing. Those are DB-only
+    // operations that leave the blob alone, so the extraction, the chunks and
+    // every embedding are still correct — and re-deriving them would be an hour
+    // of inference bought by renaming a folder.
+    //
+    // INTERNAL ONLY, like every other blob identifier: it never appears in a
+    // DTO, a log line, a citation or a prompt.
+    public Guid SourceBlobObjectId { get; set; }
+
+    // How the text was READ into chunks. Its own version, deliberately not
+    // RagIndexFormat: bumping the system one re-chunks the repository corpus,
+    // and people's own documents should not pay for a change that did not
+    // affect how they are read. See OwnerDocumentChunkFormat.
+    //
+    // Defaults to 0, which is not any released format, so the first pass after
+    // an upgrade re-chunks rows written before the column existed.
+    public int ChunkFormatVersion { get; set; }
 
     // Explicit owner scope (the file's owner), denormalized for owner-scoped
     // queries and isolation checks.
