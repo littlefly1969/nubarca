@@ -718,6 +718,16 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   repository MRR from 0.583 to 0.395. `src/NubArca.Api/Rag/Evaluation/` is
   excluded from the repository corpus for that reason, as a rule rather than one
   file's exemption. Do not re-add it to make the corpus "complete".
+- **Semantic retrieval helps PROSE and does not currently help the repository.**
+  Measured against `multilingual-e5-small` on the full index: `product-help`
+  MRR 0.938 → 0.969 (recall already 1.000, 16/16); `nubarca-repository`
+  MRR 0.575 → 0.625 but Recall@5 0.800 → 0.700 and top-3 7/10 → 6/10. A
+  general-purpose SENTENCE model discriminating among 23,745 chunks of mostly
+  source code returns plausible-but-wrong neighbours that displace correct
+  lexical hits. Recorded rather than tuned — adjusting fusion weights until the
+  ten benchmark questions pass would move the score and not the product. Lexical
+  remains the better default for the repository domain, and
+  `Rag__SemanticEnabled` is per installation.
 - **A partial index run concludes NOTHING about what left the snapshot.**
   `rag index --limit N` sets `Partial`, and reconciliation is skipped. "I did not
   see this source" means "it was deleted" only if the run could have seen it —
