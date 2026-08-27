@@ -1031,6 +1031,48 @@ Detection and recognition use one face-package profile so detector and recognize
 
 People APIs support named people, suggested groups, assignment/removal, ignored and unassigned faces, similar-face review, photo projection, and preview regeneration. All operations are owner-scoped and return generic not-found behavior for foreign data.
 
+### 17.7 Assistant model trust and the RAG platform
+
+The Assistant substrate is separate from the AI substrate above: it configures **language-model endpoints and retrieval**, where `AiOptions`/`AiProfile` configure embedding and vision capabilities. Its only consumer today is the optional Help assistant.
+
+Protocol and trust are independent axes. An endpoint speaks the OpenAI-compatible chat-completions format whether it is a hosted provider, an operator's own model server, or a future NubArca-managed runtime, so the format says nothing about who holds the bytes. `AssistantModelTrust` is stated by the operator per named model profile:
+
+- `External` — data may leave the trust boundary; `https://` and an API key are both required;
+- `LocalTrusted` — the operator asserts the endpoint is theirs; plaintext HTTP and an absent key are allowed, because that is what an internal model server usually is;
+- `ManagedLocal` — reserved for a runtime whose isolation NubArca owns. Not implemented, and refused by validation, so no installation can present a guarantee nothing provides.
+
+**Trust is never inferred from the endpoint URL**, in either direction, and no client-supplied value can influence it: the chat request contract has no model, profile, trust or domain field. Configuration validation fails closed on an unknown, empty, misspelled or numeric trust value, and parses by enum NAME so `Trust=1` cannot mean LocalTrusted.
+
+`AssistantCapabilityPolicy` maps trust to eligibility, and effective capability is an intersection:
+
+    model trust  ∩  feature operation policy  ∩  caller permissions
+
+`LocalTrusted` is eligible for private context, private RAG, read tools and proposed actions; `External` is eligible for public product context only; no trust level grants write tools or unconfirmed execution. Eligibility is not use — Help's own operation policy is public product knowledge, so a LocalTrusted Help receives no private library data. A future tool must therefore be reachable only through typed application services under the caller's own permissions, never as an authorization bypass.
+
+`IAssistantTextModel` is the runtime contract: messages in, completion text or a sanitized failure out. It has no tool, function, attachment or callback surface — not empty fields, absent ones — and no optional parameter reserving one. Tool calling, when it exists, belongs behind a separate interface so a text-only external Help cannot acquire tools because a shared type grew a property.
+
+`IRagRetriever` is the retrieval seam, and it is domain-general: Product Help is a consumer of the RAG platform, not its shape. A domain is a body of knowledge with one privacy story, and its policy — scope, privacy class, whether an owner is required, whether its evidence may reach an External model — is **defined in code** (`RagDomainRegistry`), never in an editable row. The database records which sources exist and which revision was indexed; it does not record whether evidence may leave the trust boundary, so no `UPDATE`, admin endpoint or restored backup can widen one.
+
+Three domains exist. `product-help` is `Public`, built from an explicit source manifest, pinned to `NUBARCA_GIT_SHA` and refused when the revision disagrees with the running build. `nubarca-repository` is `SystemInternal`: approved tracked files of a local checkout, for development, diagnostics and retrieval evaluation, and **never** available to an External model — deliberately so even though NubArca is public on GitHub today, because public hosting is a fact about this month rather than a property of the domain. A system source exists once and may belong to both, with one set of chunks and one embedding per profile.
+
+Domain membership is a separate table, and it carries the **revision**: a source row is one content interpretation `(SourceKey, ContentHash, IndexFormatVersion)` and a membership says which snapshot ITS domain is using that content at. That separation is what lets two domains sharing a document upgrade one at a time in either order. The predecessor put the revision on the source row, so advancing the repository rewrote what Product Help was serving, Help could not go first for the same reason, and a release lifecycle had no legal first step. A row only one domain uses is still rewritten in place, so an ordinary `git pull` keeps the ordinal-by-ordinal chunk reuse; a row another domain is serving forks instead, and the old one is deleted when its last membership leaves.
+
+`user-documents` is `OwnerPrivate` and the first domain whose knowledge belongs to a **person**. It requires an owner to retrieve at all, and no configuration key, database column or client parameter can make its evidence reachable by an External model. Its content lives in `document_texts` / `document_chunks` / `document_chunk_embeddings` — owner-scoped by schema — rather than in `rag_sources`, because forcing private text into the tables every system domain reads is one forgotten `WHERE` away from a cross-owner answer. What the two share is the contracts: chunking, embedding, fusion, the evidence gate and domain policy.
+
+Derived rows are **not** authority. A `DocumentText` records an extraction that happened in the past, and the file may since have been deleted or moved into the Private Vault, so every private read joins the live `FileItem` through `OwnerDocumentEligibility` and a chunk whose file no longer qualifies is not in the corpus at all. Cleanup is housekeeping; a boundary that only holds once a sweeper has run fails for as long as it is behind. Vault exclusion is structural — `FileItem` carries a global `PrivateVaultId == null` query filter and nothing in that bounded context bypasses it. Blob identity is never knowledge authority: two owners holding the same deduplicated bytes have two independent extractions, and one deleting their file does not touch the other's.
+
+The private lexical index is built per request and never cached, because keying a cache by `(domain, owner)` would hold every questioner's private index for the life of the process and make "which index does this caller get" a question a wrong key answers badly. Private semantic retrieval is **exact cosine over the owner's eligible vectors**, not an approximate index with an owner predicate — a global HNSW traversal filtered afterwards is not an owner-prefiltered search, and it fails silently by returning fewer and worse rows.
+
+`AssistantRagPolicy` is the intersection of model trust with domain policy, and it is enforced over the **evidence itself** before a prompt is constructed — so evidence stamped with a domain the caller did not ask for fails the request rather than reaching a provider. For an owner-scoped domain it also requires the authenticated OWNER, and every piece of evidence must carry it: unstamped is refused as firmly as wrong, because treating "null" as "probably fine" is exactly how a system domain's chunk would slip into a private prompt.
+
+The private operation (`POST /api/assistant/documents/chat`) derives the owner from the request's identity and the domain from a constant. Its DTO carries a message and a bounded history and has no field for an owner, a domain, an object id, a model or a trust level — a client cannot redirect it because the shape it posts into has nowhere to put the instruction. `Assistant__PrivateKnowledgeModel` must resolve to `LocalTrusted` with **no fallback**, and an External configuration produces zero provider calls: the resolver refuses to supply a usable non-local profile, so the question itself never leaves either.
+
+Retrieval is local, deterministic and **hybrid**. Lexical BM25F stays first-class — section-aware chunks, a shared Italian/English stopword set, a bounded feature-alias catalogue, per-domain field weights and intent shaping — because exact identifiers, configuration keys and file names are a permanent use case vectors are worse at. Optional semantic retrieval embeds the question through a LOCAL ONNX model (profile-driven, 384 dimensions, `query:`/`passage:` preprocessing owned by the provider) and searches a dimension-specific pgvector table filtered by domain and profile in the query. The two are fused by Reciprocal Rank Fusion over ranks rather than scores, because BM25F and cosine are not calibrated to the same scale. Canonical float32 embeddings are the truth and pgvector is a rebuildable accelerator, so SQLite and a Postgres without the extension degrade to lexical rather than failing. There is no hosted embedding path and nothing downloads weights.
+
+An explicit evidence gate can answer "no strong evidence"; below it Help makes **no model call at all**, so a question never crosses the boundary to buy an answer with no documentation behind it. Retrieval mode is reported (`lexical`, `hybrid`, `lexical-fallback-…`) rather than hidden. Query text, passage text and vectors are never logged, returned or sent to any service.
+
+Help conversations are not persisted. `docs/help-assistant.md` and `docs/rag-platform.md` are the references.
+
 ## 18. Private Vault
 
 Private Vault 0.3.0 is an exclusion and authorization boundary, not cryptographic at-rest encryption. `PrivateVault.EncryptionMode` is currently `none`; the original blob store remains the underlying byte store.
@@ -1191,6 +1233,15 @@ Every new route, service, query, job, or client feature must preserve all applic
 - Project safe DTOs in SQL; do not serialize EF entities.
 - Never expose `StorageKey`, physical path, SHA-256, global blob ID, password/token hashes, raw AI vectors, raw embedded metadata, or GPS coordinates.
 
+### 23.5 Assistant and model endpoints
+
+- Classify every model endpoint's trust explicitly; never infer it from the URL, and never let a client supply or override it.
+- Send a model only what the intersection of its trust and the feature's operation policy allows; eligibility by trust is not permission to use.
+- Keep the outbound request physically free of tools, functions, attachments and callbacks rather than passing empty ones.
+- Retrieve locally into bounded evidence; never give a model a way to ask for more.
+- Make no model call at all when there is no adequate approved evidence, whatever the endpoint's trust.
+- Log profile, trust, protocol, timing and status class only — never the question, conversation, answer, evidence text, base URL, key, or any raw body.
+
 ### 23.2 Public capability data
 
 - Validate token/hash, expiry, revocation, scope, and current target visibility on every request.
@@ -1317,6 +1368,8 @@ When changing a subsystem, review the following implementation anchors together 
 | Import/staging | `Ingestion/`, `Uploads/`, admin/staging route sections |
 | Organizer/export | `Organizer/`, `PhotoExport/` |
 | AI and People | `Ai/`, AI entities/configurations, `docs/ai-substrate.md`, `docs/ai-photo-pgvector.md` |
+| Assistant and RAG platform | `Assistant/`, `Rag/`, `Ai/TextEmbeddings/`, `Domain/Rag/`, `Help/`, `Endpoints/HelpEndpoints.cs`, `docs/rag-platform.md`, `docs/help-assistant.md`, `docs/help/` |
+| Owner-private documents | `Ai/Documents/`, `Rag/Retrieval/OwnerDocument*`, `Endpoints/PrivateDocumentAssistantEndpoints.cs`, `Cli/DocumentsCliCommands.cs`, document entities/configurations |
 | Party | `Party/`, Party entities, public/owner/TV route sections |
 | TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-release.md` (canonical operations), `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |

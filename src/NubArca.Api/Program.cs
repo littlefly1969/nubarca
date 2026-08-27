@@ -38,6 +38,7 @@ using NubArca.Api.Metadata;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
 using NubArca.Api.Plates;
+using NubArca.Api.Rag;
 using NubArca.Api.Security;
 using NubArca.Api.ShareLinks;
 using NubArca.Api.Storage;
@@ -141,6 +142,13 @@ builder.Services.AddOpenApi(options =>
 
         foreach (var pathItem in document.Paths.Values)
         {
+            // OpenApi 2.0 models Operations as nullable; a path item that
+            // declares no operation has nothing to retag.
+            if (pathItem.Operations is null)
+            {
+                continue;
+            }
+
             foreach (var operation in pathItem.Operations.Values)
             {
                 if (operation.Tags is null
@@ -385,10 +393,11 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
-    // Optional external Help: a per-USER budget, not per-IP. Every request costs
-    // an outbound call to a paid third party, and the callers here are
-    // authenticated, so the account is the meaningful subject.
-    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.ExternalHelpRateLimitPolicy, httpContext =>
+    // Optional Help: a per-USER budget, not per-IP. Every request costs an
+    // outbound call — to a paid third party, or to an endpoint with finite GPU —
+    // and the callers here are authenticated, so the account is the meaningful
+    // subject.
+    options.AddPolicy(NubArca.Api.Endpoints.HelpEndpoints.HelpChatRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.User?.Identity?.Name
                 ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -399,6 +408,24 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
+
+    // Private documents: a per-USER budget, like Help, and a SEPARATE bucket.
+    // These answers run local inference on the operator's own hardware — a
+    // different cost with a different shape — and one bucket would let a busy
+    // Help user starve somebody asking about their own manual, or the reverse.
+    options.AddPolicy(
+        NubArca.Api.Endpoints.PrivateDocumentAssistantEndpoints.PrivateChatRateLimitPolicy,
+        httpContext =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.User?.Identity?.Name
+                    ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 20,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                    AutoReplenishment = true,
+                }));
 
     options.AddPolicy(VaultUnlockRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
@@ -806,6 +833,11 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // jobs. AiOptions is bound above (outside this block) so it always resolves.
     builder.Services.AddAiSubstrate();
 
+    // RAG persistence: the indexed corpus, canonical chunk embeddings, the
+    // pgvector accelerator and the indexer. Inert until an operator runs
+    // `rag index`; semantic retrieval stays off until `Rag:SemanticEnabled`.
+    builder.Services.AddRagDatabase();
+
     // Slice 93: web remote-staging upload (resumable browser chunks into
     // temporary staging, then handoff to the admin-import pipeline). The
     // cleanup sweeper is registered always but self-disables unless
@@ -890,17 +922,59 @@ builder.Services.Configure<NubArca.Api.Aesthetics.AestheticsOptions>(
 builder.Services.Configure<AiOptions>(
     builder.Configuration.GetSection(AiOptions.SectionName));
 
-// Optional external Smart Help. Disabled by default; the registration is
-// unconditional so the status endpoint can answer "not enabled" without the
-// container failing to build a service. Nothing registered here can read library
-// content — see ExternalHelpService's constructor.
+// The Assistant substrate and the optional Help feature. Disabled by default;
+// the registration is unconditional so the status endpoint can answer
+// "not enabled" without the container failing to build a service.
+//
+// Nothing registered here can read library content — see HelpAssistantService's
+// constructor. That holds for a LocalTrusted model too: trust decides what a
+// model is ELIGIBLE for, and Help's own operation policy is public product
+// knowledge, whichever side of the boundary the endpoint is on.
+builder.Services.Configure<NubArca.Api.Assistant.AssistantOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
+// Legacy `ExternalHelp__*`, adapted into one External profile when the
+// `Assistant` section is absent. A deprecation path, not the configuration
+// model — see ExternalHelpOptions.
 builder.Services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
     builder.Configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
-builder.Services.AddHttpClient<NubArca.Api.Help.IExternalHelpChatClient,
-    NubArca.Api.Help.OpenAiCompatibleChatCompletionClient>();
-builder.Services.AddSingleton<NubArca.Api.Help.IHelpKnowledgeRetriever,
-    NubArca.Api.Help.FileHelpKnowledgeRetriever>();
-builder.Services.AddScoped<NubArca.Api.Help.ExternalHelpService>();
+builder.Services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
+builder.Services.AddHttpClient<NubArca.Api.Assistant.IAssistantTextModel,
+    NubArca.Api.Assistant.OpenAiCompatibleTextModel>();
+
+// The RAG substrate: named domains, their code-defined privacy policy, and the
+// generic retriever every consumer goes through. `product-help` is one domain
+// and Help is one consumer — the platform is not Help-shaped, so the semantic
+// layer landed BEHIND IRagRetriever rather than beside it.
+//
+// Registered unconditionally: the Product Help corpus ships in the image, so an
+// installation with no database still answers product questions lexically. The
+// indexed corpus and the vector table are added inside the Postgres block.
+builder.Services.Configure<NubArca.Api.Rag.RagOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
+builder.Services.AddRagSubstrate();
+builder.Services.AddScoped<NubArca.Api.Help.HelpAssistantService>();
+
+// Owner-private documents. Bounds for local text extraction, and the one
+// service that answers "from MY documents" — LocalTrusted only, owner derived
+// server-side. Registered unconditionally like Help: with no configured private
+// model it resolves as disabled and presents no surface implying otherwise.
+builder.Services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
+    builder.Configuration.GetSection(
+        NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
+
+// An EXPLICIT factory, because the private corpus source exists only when a
+// database does and the built-in container has no notion of an optional
+// constructor parameter — it validates the whole graph at startup, so a plain
+// `AddScoped<T>()` here stopped a connection-string-less host from booting at
+// all. A host with no database is a supported configuration; it simply has no
+// private knowledge, and the feature says so.
+builder.Services.AddScoped(sp => new NubArca.Api.Ai.Documents.PrivateDocumentAssistantService(
+    sp.GetRequiredService<NubArca.Api.Assistant.IAssistantTextModel>(),
+    sp.GetRequiredService<NubArca.Api.Rag.IRagRetriever>(),
+    sp.GetRequiredService<NubArca.Api.Assistant.AssistantModelResolver>(),
+    sp.GetService<NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource>(),
+    sp.GetRequiredService<NubArca.Api.Rag.IRagSemanticProfileResolver>(),
+    sp.GetRequiredService<ILogger<NubArca.Api.Ai.Documents.PrivateDocumentAssistantService>>()));
 
 // VSEM-01: canonical video temporal substrate (scene segments + sample
 // timestamps). Bound alongside AiOptions; disabled by default. The CLI/worker
@@ -1156,6 +1230,7 @@ app.MapAdminAiEndpoints();
 // implementation.
 app.MapPeopleEndpoints();
 app.MapHelpEndpoints();
+app.MapPrivateDocumentAssistantEndpoints();
 
 // Media Library (gallery membership rules + per-file exclusion) and Photo
 // Organizer (owner-scoped date-taken reorganization) endpoints live in

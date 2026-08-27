@@ -655,6 +655,180 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   include/exclude/query contract remain unchanged. Source regressions cover the
   exact overlap mechanism, but physical Fire Stick acceptance is still required
   before the visual defect can be called closed.
+- **The Help assistant's model has a TRUST classification, and it is never
+  inferred from the URL.** Protocol and trust are separate axes: an endpoint
+  speaks the OpenAI-compatible format whether it is a hosted provider or the
+  operator's own model server, and the format says nothing about who holds the
+  bytes. `Assistant__Models__<name>__Trust` is `External` or `LocalTrusted`,
+  stated by the operator per named profile; `ManagedLocal` exists in the enum,
+  is refused by validation, and must not be presented as implemented isolation.
+  Validation fails closed — unknown, empty, misspelled and NUMERIC values are
+  all invalid, and none of them becomes Local — and nothing a browser sends can
+  choose or override it, because the chat request has no model, trust or domain
+  field. `localhost` and RFC1918 addresses stay External when declared External
+  (a reverse proxy in front of a cloud API looks exactly like that), and a public
+  hostname stays LocalTrusted when declared LocalTrusted (a trusted GPU server
+  on another host is not on this LAN). The legacy `ExternalHelp__*` section is a
+  deprecation path adapted into ONE always-External profile, and only when no
+  `Assistant__*` value is set. There is deliberately no "allow insecure URL"
+  switch: a plaintext endpoint is `Trust=LocalTrusted`.
+- **Trust decides what a model is ELIGIBLE for; the feature decides what it
+  USES.** Effective capability is `model trust ∩ feature policy ∩ caller
+  permissions`. A LocalTrusted model is eligible for private context, private
+  RAG and read tools — and Help gives it none of them, because Help's operation
+  policy is public product knowledge. Configuring a local model makes Help
+  local; it does not make Help able to see anything new, and a test asserts that
+  on the outbound bytes. No trust level grants write tools or unconfirmed
+  execution: nothing changes because a model suggested it.
+- **RAG is a PLATFORM; Product Help is one domain on it.** `IRagRetriever` is
+  domain-general, and a domain's policy — scope, privacy class, whether an owner
+  is required, whether its evidence may reach an External model — is defined in
+  CODE (`RagDomainRegistry`), never in an editable row. The database records
+  which sources exist and which revision was indexed; it does not record whether
+  evidence may leave the trust boundary, so no `UPDATE`, admin endpoint or
+  restored backup can widen one. `product-help` is Public and External-approved;
+  `nubarca-repository` is SystemInternal and is **never** available to an
+  External model — deliberately so even though NubArca is public on GitHub
+  today, because public hosting is a fact about this month rather than a
+  property of the domain. `AssistantRagPolicy` intersects model trust with
+  domain policy over the EVIDENCE, before a prompt exists.
+- **A source exists once and may belong to several domains.** `rag_sources` /
+  `rag_domain_sources` / `rag_chunks` / `rag_chunk_embeddings`: adding a domain
+  costs a membership row, not a second copy of the text and every vector.
+  Domain-specific classification (Product Help's feature, aliases, audience,
+  intent, priority) lives on the MEMBERSHIP, because it is that domain's opinion
+  — a C# file does not acquire an `intent=how-to` because the schema can hold
+  one. These tables are separate from the owner-private `document_*` tables and
+  from the photo/face vector tables on purpose.
+- **Retrieval is hybrid and lexical stays first-class.** Semantic retrieval is
+  OFF by default (`Rag__SemanticEnabled`), uses a LOCAL ONNX text-embedding
+  profile (`Rag__TextEmbeddingProfileKey`, 384 dimensions), and searches a
+  dimension-specific pgvector table filtered by domain AND profile in the query.
+  Fusion is RRF over ranks rather than scores, because BM25F and cosine are not
+  calibrated to the same scale. Canonical float32 bytes are the truth and
+  pgvector is a rebuildable accelerator, so SQLite and a Postgres without the
+  extension degrade to lexical. Every failure — disabled, no profile, missing
+  model, no pgvector, unsupported dimension — falls back and reports a reason in
+  the retrieval mode. There is NO hosted embedding path and nothing downloads
+  weights.
+- **A retrieval corpus must not contain the questions it is measured with.**
+  `RagGoldenSet.cs` holds the golden queries as string literals, so once the
+  repository indexed itself the best lexical match for a golden question became
+  the file containing that exact sentence: it led three of four failures and took
+  repository MRR from 0.583 to 0.395. `src/NubArca.Api/Rag/Evaluation/` is
+  excluded from the repository corpus for that reason, as a rule rather than one
+  file's exemption. Do not re-add it to make the corpus "complete".
+- **Semantic retrieval helps PROSE and does not currently help the repository.**
+  Measured against `multilingual-e5-small` on the full index: `product-help`
+  MRR 0.938 → 0.969 (recall already 1.000, 16/16); `nubarca-repository`
+  MRR 0.575 → 0.625 but Recall@5 0.800 → 0.700 and top-3 7/10 → 6/10. A
+  general-purpose SENTENCE model discriminating among 23,745 chunks of mostly
+  source code returns plausible-but-wrong neighbours that displace correct
+  lexical hits. Recorded rather than tuned — adjusting fusion weights until the
+  ten benchmark questions pass would move the score and not the product. Lexical
+  remains the better default for the repository domain, and
+  `Rag__SemanticEnabled` is per installation.
+- **A partial index run concludes NOTHING about what left the snapshot.**
+  `rag index --limit N` sets `Partial`, and reconciliation is skipped. "I did not
+  see this source" means "it was deleted" only if the run could have seen it —
+  a capped pass over a complete index otherwise removes every membership past
+  the cap. Completeness comes from the REQUEST, never from a count of what was
+  enumerated, because an empty repository would then look like a complete run
+  that found nothing.
+- **The REVISION lives on the domain membership, not on the source.** A source
+  row is one content interpretation — `(SourceKey, ContentHash,
+  IndexFormatVersion)` — and a membership says which snapshot ITS domain is
+  using that content at. That is what lets two domains sharing a document
+  upgrade one at a time, in either order: the bytes did not change, so nothing
+  is re-derived and each membership moves its own revision forward. Putting the
+  revision on the source deadlocked the release lifecycle, because advancing the
+  repository rewrote what Help was serving and Help could not go first for the
+  same reason. A row only THIS domain uses is still rewritten in place, so an
+  ordinary `git pull` keeps the ordinal-by-ordinal chunk and embedding reuse; a
+  row another domain is serving forks instead, and the superseded row is deleted
+  when its LAST membership leaves. Do not "simplify" this back into one row per
+  key.
+- **Git object reads are bounded BEFORE allocation, and a stalled `cat-file`
+  session is killed rather than reused.** `ls-tree -l` carries the blob size, so
+  an oversized object is refused from the tree entry; `GitCatFileSession` also
+  enforces a ceiling from the response header before `new byte[size]`. Any read
+  that stops mid-response leaves bytes queued on a single-conversation stream, so
+  the session is faulted and the process killed — resynchronising would mean
+  consuming exactly what was being refused. Cancellation is NOT a timeout: it
+  reaches the caller as `OperationCanceledException`, because reporting a
+  cancelled index as `git-object-read-timeout` records a permanent-looking
+  failure for something the operator did on purpose.
+- **Semantic retrieval is configured PER DOMAIN**
+  (`Rag__Domains__<key>__SemanticEnabled` / `__TextEmbeddingProfileKey`), because
+  `multilingual-e5-small` moves Product Help's MRR up and the repository's
+  Recall@5 down. The installation-wide values remain an explicit fallback, and
+  the per-domain switch is NULLABLE so "unmentioned" and "false" stay different —
+  otherwise adding a `Domains` entry for one domain silently disables another.
+  An **OwnerPrivate domain never inherits**: it must state both its switch and
+  its profile, derived from the domain's privacy class rather than from a list of
+  keys.
+- **Owner-private knowledge is `user-documents`, and derived rows are not
+  authority.** Private content lives in `document_texts` / `document_chunks` /
+  `document_chunk_embeddings` — owner-scoped by schema — never in `rag_sources`.
+  Every private read joins the LIVE `FileItem` through
+  `OwnerDocumentEligibility`, so deleting a file or moving it into the Private
+  Vault removes its answers on the next question; cleanup is housekeeping and
+  never the boundary. Vault exclusion is the global `PrivateVaultId == null`
+  query filter — nothing in that context calls `IgnoreQueryFilters()`. Blob
+  identity is not knowledge authority: two owners of the same deduplicated bytes
+  have independent extractions. The private lexical index is built per request
+  and deliberately NOT cached, and private semantic retrieval is exact cosine
+  over the owner's eligible vectors — a global ANN index with an owner predicate
+  is not an owner-prefiltered search and fails silently.
+- **`Assistant__PrivateKnowledgeModel` must be `LocalTrusted`, with no
+  fallback.** Not to Help's model, which is the one place allowed to be
+  External, and not to anything else. An External configuration yields ZERO
+  provider calls and its own reason code `private_model_not_local`; the question
+  itself never leaves, not only the evidence. The private chat DTO carries a
+  message and a bounded history and has no field for an owner, a domain, an
+  object id, a model or a trust level.
+- **Repository bytes come from the COMMIT, not the working tree.** The provider
+  reads Git objects (`ls-tree` + `cat-file --batch`) at a resolved 40-character
+  SHA. Tracked symlinks are refused by mode and their targets are never
+  resolved or read; submodules are skipped. Git runs at index time only — the
+  query path never starts a process.
+- **A domain holding two revisions fails closed** (`rag_mixed_revision_index`)
+  until a complete reindex converges. There is no modal revision: picking the
+  newest, most common or first would let a half-reindexed corpus claim a
+  coherence it does not have.
+- **Chunk reuse is keyed on bytes AND `RagIndexFormat.Current`.** Changing a
+  chunker without bumping it leaves every already-indexed source on the old
+  interpretation forever.
+- **A benchmark question must not appear in the corpus it is measured against**,
+  and the guard is scoped per domain: repository queries against every eligible
+  file, Product Help queries against the manifest only. Identifier queries are
+  deliberately unguarded — `PhotoVectorIndexService` is SUPPOSED to occur in the
+  file that should win. `RagContaminationTests` enforces this, and it has
+  already caught a question line-wrapped back into documentation.
+- **Indexing is idempotent and revision-aware.** `rag index` is explicit and
+  CLI-driven; a source whose content hash is unchanged keeps its chunks, and a
+  chunk whose text hash is unchanged keeps its embedding. Sources that leave a
+  snapshot lose that domain's membership, and are deleted only when no domain
+  still claims them. The repository provider indexes APPROVED TRACKED files —
+  `git ls-files` is the first gate, not the last — and resolves the checkout's
+  top level, because every path rule is written against repository-root-relative
+  paths.
+- **Help knowledge is an explicit MANIFEST, not "every `docs/**.md`".**
+  `ProductHelpSources` names each approved document with an audience, an intent,
+  a source kind, a priority and feature aliases. The previous automatic rule let
+  an operations runbook compete on equal footing with the guidance somebody
+  asking "how do I use faces?" needs — and runbooks are longer, so they often
+  won. It remains an allowlist rather than a denylist of secrets, which now also
+  means a NEW public document is out until someone classifies it. User-facing
+  Help material lives in `docs/help/`. Retrieval is lexical, local and
+  deterministic — section-aware chunks, one shared IT/EN stopword set (Italian
+  `come` is also an English verb, so a language-switched list is the bug), a
+  bounded feature-alias catalogue, field-weighted BM25F and intent shaping — and
+  it is gated: `Score > 0` is not evidence, and below the gate Help makes NO
+  model call at all rather than paying a boundary crossing for an answer with no
+  documentation behind it. `help_knowledge_unavailable` (an administrator can
+  fix it) and `help_no_supporting_knowledge` (nobody can) are deliberately
+  different reasons.
 - **A keyed upload's FileItem and its idempotency completion are ONE commit.**
   `POST /api/files` accepts an optional `Idempotency-Key`; the claim it takes is
   finished inside the authoritative `FileItemService.CreateAsync` transaction

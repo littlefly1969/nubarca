@@ -27,6 +27,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Jobs;
 using NubArca.Api.Jobs.Handlers;
 using NubArca.Api.Plates;
+using NubArca.Api.Rag;
 using NubArca.Api.MediaLibrary;
 using NubArca.Api.Organizer;
 using NubArca.Api.PhotoExport;
@@ -69,6 +70,7 @@ public static class CliEntryPoint
             "ai",
             "plates",
             "help-knowledge",
+            "rag",
             "--help", "-h", "help",
         };
 
@@ -105,6 +107,31 @@ public static class CliEntryPoint
             // no database, so it is dispatched directly.
             case ("help-knowledge", "build"):
                 return await BuildHelpKnowledge(rest, stdout, stderr);
+
+            // RAG substrate diagnostics: domains and their code-defined policy,
+            // index state, indexing from a checkout, retrieval with its ranking
+            // explained, and the golden evaluation. `rag query` never calls a
+            // generative model — it answers "did retrieval find the right
+            // thing", which is a different question from "was the answer good"
+            // and is fixed in a different place.
+            case ("rag", _) when sub.Length > 0:
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => RagCliCommands.RunAsync(sub, rest, sp, stdout, stderr),
+                    stderr);
+
+            // The OWNER-PRIVATE document corpus, deliberately its own verb.
+            // `rag` operates on installation-wide knowledge that belongs to
+            // nobody; these commands operate on one named person's documents and
+            // require `--owner` on every one of them. Making that a different
+            // command rather than a flag on the same one means which corpus is
+            // being touched is visible in the command that was typed.
+            case ("documents", _) when sub.Length > 0:
+                return await DispatchAsync(
+                    serviceProviderFactory,
+                    sp => DocumentsCliCommands.RunAsync(
+                        new[] { sub }.Concat(rest).ToArray(), sp, stdout, stderr),
+                    stderr);
 
             case ("users", "ensure"):
                 return await DispatchAsync(
@@ -2321,6 +2348,12 @@ public static class CliEntryPoint
                     NubArca.Api.Ai.Video.Faces.VideoFaceAnalysisOptions.SectionName));
             services.AddAiSubstrate();
 
+            // RAG persistence + indexing. The CLI is where indexing happens, so
+            // this host needs the same graph the web host has — a divergence
+            // here would mean `rag index` and `rag query` disagreed about what
+            // the index contains.
+            services.AddRagDatabase();
+
             // Plates (Targhe): the worker runs the plates.analyze ALPR job, so the
             // Plates service graph + its config must be present under the CLI/worker
             // host too (parity with the web host).
@@ -2340,6 +2373,25 @@ public static class CliEntryPoint
                 configuration.GetSection(NubArca.Api.Aesthetics.AestheticsOptions.SectionName));
             services.AddNubArcaAesthetics();
         }
+
+        // The Assistant/RAG substrate, outside the Postgres block for the same
+        // reason the web host keeps it there: the domain registry and the
+        // bundled Product Help corpus need no database.
+        services.Configure<NubArca.Api.Assistant.AssistantOptions>(
+            configuration.GetSection(NubArca.Api.Assistant.AssistantOptions.SectionName));
+        services.Configure<NubArca.Api.Help.ExternalHelpOptions>(
+            configuration.GetSection(NubArca.Api.Help.ExternalHelpOptions.SectionName));
+        services.AddSingleton<NubArca.Api.Assistant.AssistantModelResolver>();
+        services.Configure<NubArca.Api.Rag.RagOptions>(
+            configuration.GetSection(NubArca.Api.Rag.RagOptions.SectionName));
+        // Extraction bounds bind here too, so `documents index` obeys the same
+        // ceilings the web host does. A CLI running with different bounds than
+        // the application is a CLI that writes rows the application would have
+        // refused.
+        services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
+            configuration.GetSection(
+                NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
+        services.AddRagSubstrate();
 
         services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
         services.AddSingleton(TimeProvider.System);
@@ -4742,6 +4794,30 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll ai face <models|seed-profiles|detect-test|embed-test|compare|benchmark|sample-pairs>");
         stdout.WriteLine("  dotnet NubArca.Api.dll plates models validate     [alpr|face-redaction]");
         stdout.WriteLine("  dotnet NubArca.Api.dll plates benchmark <alpr|face-redaction> --image <path> [--runs N]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag domains");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag status --domain <key>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag index --domain <key> [--source <dir>] [--revision <sha>] [--embed]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag coverage --domain <key>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag query --domain <key> \"<question>\"");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag evaluate --domain <key>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag seed-profiles");
+        stdout.WriteLine("  dotnet NubArca.Api.dll rag validate-model [--profile <key>] [--domain <key>]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents status --owner <user-id>");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents index  --owner <user-id> [--limit N] [--embed]");
+        stdout.WriteLine();
+        stdout.WriteLine("rag");
+        stdout.WriteLine("  Diagnostics for the local retrieval substrate. `rag query` shows what");
+        stdout.WriteLine("  retrieval found and how each path ranked it; it never calls a");
+        stdout.WriteLine("  generative model. `rag domains` prints each domain's privacy class");
+        stdout.WriteLine("  and whether its evidence may reach an External model — that policy");
+        stdout.WriteLine("  is defined in code, not in the database.");
+        stdout.WriteLine();
+        stdout.WriteLine("documents");
+        stdout.WriteLine("  The OWNER-PRIVATE document corpus. Every subcommand requires");
+        stdout.WriteLine("  --owner: there is no all-owners mode, and which corpus is being");
+        stdout.WriteLine("  touched is visible in the command rather than in its arguments.");
+        stdout.WriteLine("  Prints counts and reason tokens only — never a document name, a");
+        stdout.WriteLine("  heading, an excerpt or a storage key.");
         stdout.WriteLine();
         stdout.WriteLine("users ensure");
         stdout.WriteLine("  Creates the user if missing. With an existing user, leaves the");
@@ -4995,9 +5071,11 @@ public static class CliEntryPoint
     }
     // help-knowledge build --source <dir> --out <file> --revision <sha>
     //
-    // The corpus is an ALLOWLIST of public product documentation (see
-    // HelpCorpusBuilder). Nothing operator-specific, nothing secret and nothing
-    // untracked can enter it, because entry requires being named.
+    // The corpus is the `product-help` RAG domain, built from an explicit
+    // MANIFEST of public product documentation (see ProductHelpSources).
+    // Nothing operator-specific, nothing secret and nothing untracked can enter
+    // it, because entry requires being named — and a document nobody classified
+    // is out even when it is public.
     private static Task<int> BuildHelpKnowledge(string[] args, TextWriter stdout, TextWriter stderr)
     {
         var source = ArgValue(args, "--source") ?? ".";
@@ -5018,10 +5096,10 @@ public static class CliEntryPoint
             return Task.FromResult(2);
         }
 
-        var corpus = NubArca.Api.Help.HelpCorpusBuilder.Build(source, revision);
+        var corpus = NubArca.Api.Rag.ProductHelp.ProductHelpCorpusBuilder.Build(source, revision);
         if (corpus.Documents.Count == 0)
         {
-            stderr.WriteLine("help-knowledge build: no eligible public documents were found.");
+            stderr.WriteLine("help-knowledge build: no approved product-help documents were found.");
             return Task.FromResult(1);
         }
 
@@ -5030,9 +5108,18 @@ public static class CliEntryPoint
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
         File.WriteAllText(output, json);
 
+        stdout.WriteLine($"domain={corpus.Domain}");
         stdout.WriteLine($"revision={revision}");
         stdout.WriteLine($"documents={corpus.Documents.Count}");
         stdout.WriteLine($"sources={corpus.Documents.Select(d => d.Path).Distinct().Count()}");
+        // A manifest entry with no file is a rename nobody noticed: the build
+        // still succeeds, and it says which knowledge silently stopped shipping.
+        foreach (var missing in NubArca.Api.Rag.ProductHelp.ProductHelpSources.Manifest
+                     .Select(s => s.Path)
+                     .Where(p => !corpus.Documents.Any(d => d.Path == p)))
+        {
+            stderr.WriteLine($"help-knowledge build: approved source not found: {missing}");
+        }
         stdout.WriteLine($"out={output}");
         return Task.FromResult(0);
     }

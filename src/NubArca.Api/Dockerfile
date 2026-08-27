@@ -8,9 +8,9 @@ RUN dotnet restore src/NubArca.Api/NubArca.Api.csproj
 COPY src/NubArca.Api/ src/NubArca.Api/
 RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
-# ---- public Help knowledge, built from THIS source revision -------------------
+# ---- the product-help RAG domain, built from THIS source revision -------------
 #
-# The optional external Help assistant is shown a bounded set of PUBLIC product
+# The optional Help assistant is shown a bounded set of PUBLIC product
 # documentation and nothing else. Building the corpus here, rather than fetching
 # anything at runtime, is what makes that set finite and reviewable: no GitHub
 # token, no network dependency, no rate limit, and documentation that matches the
@@ -20,8 +20,11 @@ RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish
 # revision disagrees with its own build, so Help cannot describe a feature the
 # installed release does not have.
 #
-# Only the allowlisted public documents are copied in — the builder would ignore
-# anything else, and not copying it means it was never in the layer either.
+# Membership is decided by ProductHelpSources.Manifest, which names each approved
+# document and who it is for. Only public product material is copied in at all —
+# the builder would ignore anything else, and not copying it means it was never
+# in the layer either. A manifest entry with no file is reported on stderr, so a
+# rename that silently stops shipping knowledge is visible in the build log.
 ARG GIT_SHA=unknown
 COPY README.md ARCHITECTURE.md ./
 COPY docs/ docs/

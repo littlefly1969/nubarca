@@ -8509,13 +8509,21 @@ video.lightbox-image {
    width: the position is what a person actually drags. */
 .cast-mini__volume { flex: 0 0 5rem; width: 5rem; }
 
-/* Ask NubArca — the optional external Help assistant (feat/external-smart-help). */
+/* Ask NubArca — the optional Help assistant. */
 .help-ai { max-width: 52rem; }
 .help-ai-header { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+/* The default badge is the EXTERNAL one, in the warning colour: a question
+   leaving the installation is the state worth noticing at a glance. */
 .help-ai-badge {
   font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 0.15rem 0.45rem; border-radius: 999px;
   border: 1px solid var(--warning-border, #f59e0b); color: var(--warning-border, #f59e0b);
+}
+/* A trusted local endpoint is a different fact, so it gets a different colour
+   rather than the same badge with different words — the two are meant to be
+   distinguishable without reading. */
+.help-ai-badge--local {
+  border-color: var(--success-border, #10b981); color: var(--success-border, #10b981);
 }
 /* The disclosure is body text, not fine print: it is the thing a person needs
    to read before typing, so it is not styled to be skipped. */

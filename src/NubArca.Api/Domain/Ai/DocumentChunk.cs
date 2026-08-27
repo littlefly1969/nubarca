@@ -18,6 +18,14 @@ public class DocumentChunk
     // Position of the chunk within the document.
     public int Ordinal { get; set; }
 
+    // The section this chunk came from, as a heading trail
+    // ("Manutenzione › Pulizia filtro"). Two jobs: ranking weights it well above
+    // body text, because a private document's section titles are usually what it
+    // is about; and it is the only part of a chunk that is safe to show as a
+    // CITATION next to the filename, since a heading is a label rather than
+    // content.
+    public string? Heading { get; set; }
+
     // Chunk text. INTERNAL ONLY — never serialized to a normal DTO.
     public string? Text { get; set; }
 

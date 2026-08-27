@@ -55,6 +55,14 @@ public class DocumentTextConfiguration : IEntityTypeConfiguration<DocumentText>
         builder.HasIndex(d => d.OwnerUserId)
             .HasDatabaseName("ix_document_texts_owner");
 
+        // Not a foreign key to BlobObject on purpose. This column records WHICH
+        // BYTES were read, for idempotence; it is not a reference that should
+        // keep a blob alive or cascade when one is purged. Reference counting is
+        // FileItem's job, and adding a second referent here would make a cache
+        // row participate in storage lifetime.
+        builder.HasIndex(d => d.SourceBlobObjectId)
+            .HasDatabaseName("ix_document_texts_source_blob");
+
         builder.HasOne<FileItem>()
             .WithMany()
             .HasForeignKey(d => d.FileItemId)
