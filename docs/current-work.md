@@ -674,3 +674,16 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   chars, generated once per ledger row and reused across every retry, restart
   and ambiguous response; it is an operation identity, never content identity,
   and carries no account, asset, filename or inventory information.
+- **The mobile Android test binary and Play binary are ONE release variant.**
+  `Mobile Android release` is manual, protected-main-only and emits a signed APK
+  for direct physical-phone testing plus an AAB for Play from the same source,
+  version contract and dedicated upload key. The release contract pins package,
+  monotonically increasing versionCode, API 36 target, Android 7 floor and the
+  public signer fingerprint; the Expo config consumes it rather than duplicating
+  identity. GitHub sees private key bytes only after repository tests pass,
+  validates the AAB with pinned Google bundletool, validates the universal APK
+  generated back FROM that AAB, gates 16 KB native-library alignment and emits
+  provenance attestations. The APK is the pre-Play sideload path; after Play App
+  Signing enrollment, internal testing is the accepted path because Play signs
+  delivered APKs with its separate app-signing key. The key may never be shared
+  with TV or replaced to fix a build. `docs/mobile-release.md` is the runbook.

@@ -227,6 +227,19 @@ Legacy `/gallery` and `/videos` routes redirect into the unified `/media` worksp
 
 It is not a synchronization agent and does not mirror the full web feature set.
 
+The Android native release is produced by a manual, protected-main GitHub
+workflow rather than by an operator workstation. One tracked mobile release
+contract owns applicationId, version/versionCode, SDK floor/target and the
+public upload-certificate fingerprint. A dedicated upload key signs both a
+direct-test APK and a Play-ready AAB from the same release variant; key bytes
+exist only in the `mobile-production` GitHub Environment and an offline operator
+backup. CI validates the AAB with Google's pinned bundletool, generates and
+checks an APK from that exact bundle, gates 16 KB native-library compatibility,
+and attests both public artifacts. Google Play App Signing is the intended store
+boundary: GitHub retains the upload key, while Play protects the distinct app
+signing key used for store-delivered installations. See
+[`docs/mobile-release.md`](docs/mobile-release.md).
+
 ### 6.4 TV client
 
 `tv/` is an Expo/React Native TV application based on `react-native-tvos`. It uses an explicit reducer-driven flow rather than a general navigation framework:

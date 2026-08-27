@@ -1,0 +1,309 @@
+name: Mobile Android release
+
+# Manual, main-only release build. It emits both forms from one source tree:
+# an APK for direct phone testing and an AAB for Google Play / internal testing.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_version_code:
+        description: Exact mobile release-contract versionCode
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: mobile-android-release-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and validate signed Android APK + Play AAB
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment: mobile-production
+    env:
+      CI: true
+      NODE_ENV: production
+      NUBARCA_PUBLIC_ORIGIN: ${{ vars.NUBARCA_PUBLIC_ORIGIN }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Enforce mobile-release policy
+        id: release
+        env:
+          CONFIRMED_VERSION_CODE: ${{ inputs.confirm_version_code }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./mobile/release-contract.json').version")"
+          version_code="$(node -p "require('./mobile/release-contract.json').versionCode")"
+          package_name="$(node -p "require('./mobile/release-contract.json').package")"
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Mobile release builds are allowed only from main; got $GITHUB_REF" >&2
+            exit 1
+          }
+          [[ "$CONFIRMED_VERSION_CODE" == "$version_code" ]] || {
+            echo "confirm_version_code must exactly equal $version_code" >&2
+            exit 1
+          }
+          [[ -n "${NUBARCA_PUBLIC_ORIGIN:-}" ]] || {
+            echo "Missing mobile-production variable: NUBARCA_PUBLIC_ORIGIN" >&2
+            exit 1
+          }
+          {
+            echo "version=$version"
+            echo "version_code=$version_code"
+            echo "package=$package_name"
+            echo "artifact_name=nubarca-mobile-${version}-vc${version_code}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK packages
+        run: |
+          set -euo pipefail
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          sdkmanager_path=""
+          for candidate in \
+            "$sdk_root/cmdline-tools/latest/bin/sdkmanager" \
+            "$sdk_root"/cmdline-tools/*/bin/sdkmanager \
+            "$sdk_root/tools/bin/sdkmanager"; do
+            if [[ -x "$candidate" ]]; then
+              sdkmanager_path="$candidate"
+              break
+            fi
+          done
+          [[ -n "$sdkmanager_path" ]] || {
+            echo "Android sdkmanager not found below $sdk_root" >&2
+            exit 1
+          }
+          {
+            echo "ANDROID_HOME=$sdk_root"
+            echo "ANDROID_SDK_ROOT=$sdk_root"
+          } >> "$GITHUB_ENV"
+          {
+            dirname "$sdkmanager_path"
+            echo "$sdk_root/platform-tools"
+            echo "$sdk_root/build-tools/36.0.0"
+            echo "$sdk_root/cmdline-tools/latest/bin"
+            echo "$sdk_root/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          } >> "$GITHUB_PATH"
+          "$sdkmanager_path" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci --include=dev
+
+      - name: Typecheck mobile application
+        working-directory: mobile
+        run: npm run lint
+
+      - name: Run mobile tests
+        working-directory: mobile
+        run: npm test
+
+      - name: Verify production Expo configuration
+        working-directory: mobile
+        run: node scripts/verify-production-config.mjs
+
+      - name: Install pinned Google bundletool
+        run: |
+          set -euo pipefail
+          bundletool="$RUNNER_TEMP/bundletool-all-1.18.3.jar"
+          curl --fail --silent --show-error --location \
+            --output "$bundletool" \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          printf '%s  %s\n' \
+            a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29 \
+            "$bundletool" | sha256sum --check --status
+          echo "BUNDLETOOL_JAR=$bundletool" >> "$GITHUB_ENV"
+
+      - name: Check required signing configuration
+        env:
+          KEYSTORE: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!name:-}" ]] || {
+              echo "Missing mobile-production signing secret: $name" >&2
+              exit 1
+            }
+          done
+
+      # Repository-controlled code is fully checked before private key bytes
+      # are decoded onto the ephemeral runner.
+      - name: Materialize upload key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          signing="$RUNNER_TEMP/nubarca-mobile-signing"
+          install -d -m 0700 "$signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$signing/upload.jks"
+          printf '%s' "$STORE_PASSWORD" > "$signing/store-password"
+          printf '%s' "$KEY_PASSWORD" > "$signing/key-password"
+          chmod 0600 "$signing/upload.jks" "$signing/store-password" "$signing/key-password"
+          {
+            echo "NUBARCA_MOBILE_UPLOAD_STORE_FILE=$signing/upload.jks"
+            echo "NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD_FILE=$signing/store-password"
+            echo "NUBARCA_MOBILE_UPLOAD_KEY_PASSWORD_FILE=$signing/key-password"
+            echo "NUBARCA_MOBILE_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
+          } >> "$GITHUB_ENV"
+
+      - name: Verify upload-key identity
+        env:
+          STORE_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          expected="$(node -p "require('./mobile/release-contract.json').uploadSignerSha256")"
+          actual="$(keytool -list -v \
+            -keystore "$NUBARCA_MOBILE_UPLOAD_STORE_FILE" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$NUBARCA_MOBILE_UPLOAD_KEY_ALIAS" 2>/dev/null \
+            | awk -F': ' '/SHA256:/{gsub(":", "", $2); print tolower($2); exit}')"
+          [[ "$actual" == "$expected" ]] || {
+            echo "Configured keystore is not the tracked NubArca mobile upload key." >&2
+            exit 1
+          }
+          keytool -exportcert -rfc \
+            -keystore "$NUBARCA_MOBILE_UPLOAD_STORE_FILE" \
+            -storepass "$STORE_PASSWORD" \
+            -alias "$NUBARCA_MOBILE_UPLOAD_KEY_ALIAS" \
+            -file "$RUNNER_TEMP/nubarca-mobile-upload-certificate.pem" \
+            >/dev/null
+
+      - name: Generate native Android project
+        working-directory: mobile
+        run: npm run android:prebuild
+
+      - name: Build signed APK and Play app bundle
+        working-directory: mobile/android
+        env:
+          STORE_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.NUBARCA_MOBILE_UPLOAD_KEY_PASSWORD }}
+        run: >-
+          ./gradlew --no-daemon
+          -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=2g -Dfile.encoding=UTF-8"
+          "-PNUBARCA_MOBILE_UPLOAD_STORE_FILE=$NUBARCA_MOBILE_UPLOAD_STORE_FILE"
+          "-PNUBARCA_MOBILE_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD"
+          "-PNUBARCA_MOBILE_UPLOAD_KEY_ALIAS=$NUBARCA_MOBILE_UPLOAD_KEY_ALIAS"
+          "-PNUBARCA_MOBILE_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
+          :app:assembleRelease :app:bundleRelease
+
+      - name: Validate bundle and generate its universal test APK
+        id: paths
+        run: |
+          set -euo pipefail
+          apk="mobile/android/app/build/outputs/apk/release/app-release.apk"
+          aab="mobile/android/app/build/outputs/bundle/release/app-release.aab"
+          apks="$RUNNER_TEMP/nubarca-mobile-from-aab.apks"
+          universal="$RUNNER_TEMP/nubarca-mobile-universal-from-aab.apk"
+          java -jar "$BUNDLETOOL_JAR" validate --bundle="$aab"
+          java -jar "$BUNDLETOOL_JAR" build-apks \
+            --bundle="$aab" \
+            --output="$apks" \
+            --mode=universal \
+            --ks="$NUBARCA_MOBILE_UPLOAD_STORE_FILE" \
+            --ks-key-alias="$NUBARCA_MOBILE_UPLOAD_KEY_ALIAS" \
+            --ks-pass="file:$NUBARCA_MOBILE_UPLOAD_STORE_PASSWORD_FILE" \
+            --key-pass="file:$NUBARCA_MOBILE_UPLOAD_KEY_PASSWORD_FILE"
+          unzip -p "$apks" universal.apk > "$universal"
+          node mobile/scripts/validate-android-artifacts.mjs \
+            "$apk" "$aab" "$universal" "$BUNDLETOOL_JAR"
+          {
+            echo "apk=$apk"
+            echo "aab=$aab"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release artifact
+        id: artifact
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          VERSION_CODE: ${{ steps.release.outputs.version_code }}
+          PACKAGE_NAME: ${{ steps.release.outputs.package }}
+        run: |
+          set -euo pipefail
+          dist="TestResults/${{ steps.release.outputs.artifact_name }}"
+          install -d -m 0755 "$dist"
+          apk_name="nubarca-mobile-v${VERSION_CODE}.apk"
+          aab_name="nubarca-mobile-v${VERSION_CODE}.aab"
+          install -m 0644 '${{ steps.paths.outputs.apk }}' "$dist/$apk_name"
+          install -m 0644 '${{ steps.paths.outputs.aab }}' "$dist/$aab_name"
+          install -m 0644 "$RUNNER_TEMP/nubarca-mobile-upload-certificate.pem" \
+            "$dist/nubarca-mobile-upload-certificate.pem"
+          DIST="$dist" node -e '
+            const fs = require("node:fs");
+            const contract = require("./mobile/release-contract.json");
+            const metadata = {
+              sourceSha: process.env.GITHUB_SHA,
+              sourceRepository: process.env.GITHUB_REPOSITORY,
+              publicOrigin: process.env.NUBARCA_PUBLIC_ORIGIN,
+              ...contract,
+            };
+            fs.writeFileSync(`${process.env.DIST}/release-metadata.json`, `${JSON.stringify(metadata, null, 2)}\n`);
+          '
+          (cd "$dist" && sha256sum "$apk_name" "$aab_name" \
+            nubarca-mobile-upload-certificate.pem release-metadata.json > SHA256SUMS)
+          (cd "$dist" && sha256sum --check SHA256SUMS)
+          {
+            echo "dist=$dist"
+            echo "apk_name=$apk_name"
+            echo "aab_name=$aab_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Attest APK and AAB provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: |
+            ${{ steps.artifact.outputs.dist }}/*.apk
+            ${{ steps.artifact.outputs.dist }}/*.aab
+
+      - name: Upload signed Android release
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.release.outputs.artifact_name }}
+          path: ${{ steps.artifact.outputs.dist }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Release summary
+        if: always()
+        run: |
+          {
+            echo "## NubArca mobile Android release"
+            echo
+            echo "- Source: \`$GITHUB_SHA\`"
+            echo "- Package: \`${{ steps.release.outputs.package }}\`"
+            echo "- Version: \`${{ steps.release.outputs.version }}\`"
+            echo "- Version code: \`${{ steps.release.outputs.version_code }}\`"
+            echo "- Phone testing: install \`${{ steps.artifact.outputs.apk_name }}\`"
+            echo "- Google Play: upload \`${{ steps.artifact.outputs.aab_name }}\`"
+            echo "- Physical phone acceptance: **pending**"
+          } >> "$GITHUB_STEP_SUMMARY"
