@@ -14,6 +14,18 @@ public class DocumentChunkConfiguration : IEntityTypeConfiguration<DocumentChunk
             t.HasCheckConstraint(
                 "ck_document_chunks_ordinal_non_negative",
                 "\"Ordinal\" >= 0");
+
+            // A page is a 1-based position in a document, so 0 is not a small
+            // page — it is an uninitialised int that got written. Same for the
+            // locator index. Null means "this format has no such position",
+            // which is a different statement and stays legal.
+            t.HasCheckConstraint(
+                "ck_document_chunks_page_positive",
+                "\"Page\" IS NULL OR \"Page\" >= 1");
+
+            t.HasCheckConstraint(
+                "ck_document_chunks_locator_index_positive",
+                "\"LocatorIndex\" IS NULL OR \"LocatorIndex\" >= 1");
         });
 
         builder.HasKey(c => c.Id);
@@ -29,6 +41,16 @@ public class DocumentChunkConfiguration : IEntityTypeConfiguration<DocumentChunk
 
         builder.Property(c => c.TextHash)
             .HasMaxLength(64);
+
+        // Bounded, like every other string a document can influence. The kind is
+        // a small closed vocabulary; the label is a heading path, a sheet name
+        // or a slide title, all of which come from the document itself and are
+        // therefore attacker-controlled length.
+        builder.Property(c => c.LocatorKind)
+            .HasMaxLength(32);
+
+        builder.Property(c => c.LocatorLabel)
+            .HasMaxLength(512);
 
         builder.Property(c => c.CreatedAt)
             .HasColumnType("timestamp with time zone");

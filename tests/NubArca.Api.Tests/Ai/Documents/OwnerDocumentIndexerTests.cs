@@ -526,6 +526,174 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         Assert.Equal(new[] { keptDocument }, embeddedDocuments);
     }
 
+    // ---- which reading of a file is authority -------------------------------
+    //
+    // Slice 3 had one extraction profile, so "the row for this file" and "the
+    // extraction of this file" were the same sentence and nothing had to choose.
+    // Rich ingestion makes several readings of one file ordinary, and the moment
+    // that becomes true, a retrieval that resolves authority by timestamp or by
+    // query order starts answering questions from a superseded interpretation
+    // with no symptom that anything went wrong.
+
+    [Fact]
+    public async Task An_Extraction_Becomes_The_Current_Reading_Of_Its_File()
+    {
+        await AddFileAsync("boiler-manual.md", Manual);
+
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var document = await _db.DocumentTexts.SingleAsync();
+        Assert.True(document.IsCurrent);
+    }
+
+    [Fact]
+    public async Task A_Second_Profiles_Reading_Supersedes_The_First()
+    {
+        // The shape rich ingestion introduces: the same bytes read again by a
+        // different extractor. Both rows are completed and both describe the
+        // file honestly — and exactly one of them may answer a question.
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+        var first = await _db.DocumentTexts.SingleAsync();
+
+        var second = new DocumentText
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = file.Id,
+            OwnerUserId = _owner,
+            ProfileId = SeedSecondExtractionProfile().Id,
+            SourceBlobObjectId = first.SourceBlobObjectId,
+            Source = DocumentTextSources.Native,
+            Status = AiArtifactStatuses.Completed,
+            TextHash = first.TextHash,
+            Text = first.Text,
+            CharCount = first.CharCount,
+            ChunkFormatVersion = OwnerDocumentChunkFormat.Current,
+            IsCurrent = false,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _db.DocumentTexts.Add(second);
+        await _db.SaveChangesAsync();
+
+        // Two completed rows, one current. The historical one is provenance, not
+        // authority: it records which profile produced what, which is what a
+        // later extractor upgrade reads.
+        Assert.Equal(2, await _db.DocumentTexts.CountAsync());
+        Assert.Equal(
+            first.Id,
+            await _db.DocumentTexts.Where(d => d.IsCurrent).Select(d => d.Id).SingleAsync());
+    }
+
+    [Fact]
+    public async Task A_Skip_Verdict_Supersedes_An_Earlier_Successful_Reading()
+    {
+        // The file was readable, then it was replaced with something that is
+        // not. Without the swap, the old extraction of DIFFERENT bytes would
+        // stay current and keep answering questions about a document that no
+        // longer says any of it.
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+        Assert.True(await _db.DocumentTexts.SingleAsync() is { IsCurrent: true });
+
+        var binary = await WriteBlobAsync("\u0000\u0001\u0002 not text at all \u0000");
+        file.BlobObjectId = binary.Id;
+        file.SizeBytes = binary.SizeBytes;
+        await _db.SaveChangesAsync();
+
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var document = await _db.DocumentTexts.SingleAsync();
+        Assert.Equal(AiArtifactStatuses.Skipped, document.Status);
+        Assert.True(document.IsCurrent);
+        // The old bytes stopped being authority, chunks included. A corpus that
+        // kept them would answer from a version of the file that is gone.
+        Assert.Empty(await _db.DocumentChunks.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_Historical_Reading_Is_Neither_Retrieved_Nor_Embedded()
+    {
+        // The rows are all still there — the chunks of the superseded reading
+        // included — and none of them is evidence. This is the property the
+        // whole flag exists for, checked through the shared boundary rather than
+        // by trusting that something cleaned up.
+        var profile = SeedEmbeddingProfile();
+        await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        var document = await _db.DocumentTexts.SingleAsync();
+        document.IsCurrent = false;
+        await _db.SaveChangesAsync();
+
+        var corpus = await new NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource(_db)
+            .LoadAsync(_owner);
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(await _db.DocumentChunks.AnyAsync(), "the chunks must still be there");
+        Assert.Empty(corpus.Chunks);
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_File_Cannot_Hold_Two_Current_Readings()
+    {
+        // The database refuses it. Application discipline would not be enough:
+        // two current rows throw nowhere, they just quietly make one question
+        // answerable from two interpretations of the same document.
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer().IndexOwnerAsync(_owner);
+        var first = await _db.DocumentTexts.SingleAsync();
+
+        _db.DocumentTexts.Add(new DocumentText
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = file.Id,
+            OwnerUserId = _owner,
+            ProfileId = SeedSecondExtractionProfile().Id,
+            SourceBlobObjectId = first.SourceBlobObjectId,
+            Source = DocumentTextSources.Native,
+            Status = AiArtifactStatuses.Completed,
+            ChunkFormatVersion = OwnerDocumentChunkFormat.Current,
+            IsCurrent = true,
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        await Assert.ThrowsAnyAsync<DbUpdateException>(() => _db.SaveChangesAsync());
+    }
+
+    [Fact]
+    public async Task Two_Owners_Sharing_Bytes_Keep_Independent_Current_Readings()
+    {
+        // Deduplication is a storage fact. The uniqueness is per FILE, so the
+        // same blob held by two people is two files, two extractions and two
+        // current rows — a constraint scoped to the blob would have made one
+        // person's document supersede another's.
+        var other = Guid.NewGuid();
+        _db.Users.Add(new User
+        {
+            Id = other,
+            Email = $"other-{Guid.NewGuid():N}@example.invalid",
+            DisplayName = "Other",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var mine = await AddFileAsync("mine.md", Manual);
+        var theirs = await AddFileAsync("theirs.md", Manual, owner: other);
+        // Content-addressed storage: identical text is one blob.
+        Assert.Equal(mine.BlobObjectId, theirs.BlobObjectId);
+
+        await Indexer().IndexOwnerAsync(_owner);
+        await Indexer().IndexOwnerAsync(other);
+
+        var current = await _db.DocumentTexts.Where(d => d.IsCurrent).ToListAsync();
+        Assert.Equal(2, current.Count);
+        Assert.Equal(
+            new[] { _owner, other }.OrderBy(g => g),
+            current.Select(d => d.OwnerUserId).OrderBy(g => g));
+    }
+
     // ---- fixture ------------------------------------------------------------
 
     private OwnerDocumentIndexer Indexer(string? semantic = null, bool globalSemantic = false)
@@ -557,6 +725,36 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
             Options.Create(new DocumentExtractionOptions()),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);
+    }
+
+    /// A second extraction profile, which is what rich ingestion adds: another
+    /// way of reading the same file.
+    private AiProfile SeedSecondExtractionProfile()
+    {
+        var model = new AiModel
+        {
+            Id = Guid.NewGuid(),
+            Key = "doc-second-extractor-" + Guid.NewGuid().ToString("N")[..8],
+            Provider = AiProviders.None,
+            Capability = AiCapabilities.DocumentExtraction,
+            Modality = AiModalities.Text,
+            Enabled = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var profile = new AiProfile
+        {
+            Id = Guid.NewGuid(),
+            Key = "doc-second-extractor-profile-" + Guid.NewGuid().ToString("N")[..8],
+            AiModelId = model.Id,
+            Capability = AiCapabilities.DocumentExtraction,
+            Modality = AiModalities.Text,
+            Enabled = true,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _db.AiModels.Add(model);
+        _db.AiProfiles.Add(profile);
+        _db.SaveChanges();
+        return profile;
     }
 
     private AiProfile SeedEmbeddingProfile(string key = "rag-text-deterministic-v1")
