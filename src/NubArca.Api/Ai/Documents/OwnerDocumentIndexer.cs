@@ -181,13 +181,22 @@ public sealed class OwnerDocumentIndexer
             return null;
         }
 
-        var existing = await _db.DocumentTexts
-            .FirstOrDefaultAsync(
-                d => d.FileItemId == file.Id && d.ProfileId == profile.Id, cancellationToken);
-
         // NOTHING TO DO, AND NOTHING READ. Same bytes, same reading of them —
         // which is exactly the rename-and-move case, because those are DB-only
         // operations that leave the content-addressed blob alone.
+        //
+        // Asked of the CURRENT row rather than of this profile's row, and that
+        // distinction is what makes idempotence work at all now that a file's
+        // reading may belong to any of five parsers. Looking up by the profile
+        // the caller happens to hold finds nothing for a DOCX — whose reading
+        // lives under the Word profile — so every rich document in every library
+        // would be re-read, re-parsed and re-chunked on every single pass. The
+        // current row is the authority, and whether it still describes these
+        // bytes is exactly the question being asked.
+        var existing = await _db.DocumentTexts
+            .FirstOrDefaultAsync(
+                d => d.FileItemId == file.Id && d.IsCurrent, cancellationToken);
+
         if (existing is not null
             && existing.SourceBlobObjectId == file.BlobObjectId
             && existing.ChunkFormatVersion == OwnerDocumentChunkFormat.Current
@@ -227,11 +236,41 @@ public sealed class OwnerDocumentIndexer
             return null;
         }
 
-        // THE PARSER IS RESOLVED, NOT BRANCHED ON. Today one family is
-        // registered and this reads like ceremony; it is the shape that keeps
-        // the indexer an orchestrator once four of them exist, instead of a
-        // class that also walks XML and speaks a subprocess protocol.
-        var provider = _providers.For(DocumentFormatKind.NativeText);
+        // THE BYTES DECIDE THE FORMAT, and the format decides the parser.
+        //
+        // Neither the declared MIME type nor the extension is consulted here:
+        // both were used earlier, to decide whether opening the file was worth
+        // doing, and that is the only question they are allowed to answer. A
+        // DOCX renamed `.xlsx` reaching the spreadsheet parser is untrusted
+        // input arriving somewhere written for a different structure.
+        var probe = NativeTextExtractor.IsSupportedContentType(file.MimeType)
+            ? DocumentProbeResult.Accepted(DocumentFormatKind.NativeText, file.MimeType)
+            : DocumentFormatProbe.Probe(bytes, file.Name, options);
+
+        if (!probe.Ok)
+        {
+            state.Skip(probe.Reason!);
+            await RecordSkipAsync(ownerUserId, file, profile, probe.Reason!, cancellationToken);
+            return null;
+        }
+
+        var format = probe.Format!.Value;
+
+        // THE PER-FORMAT SOURCE BOUND, checked now that the format is known.
+        // 4 MiB is right for a text file and wrong for an Office package, which
+        // carries images that contribute nothing to extraction and still count.
+        if (file.SizeBytes > options.SourceBytesFor(format))
+        {
+            state.Skip(DocumentExtractionReasons.TooLarge);
+            await RecordSkipAsync(
+                ownerUserId, file, profile, DocumentExtractionReasons.TooLarge, cancellationToken);
+            return null;
+        }
+
+        // THE PARSER IS RESOLVED, NOT BRANCHED ON. That keeps the indexer an
+        // orchestrator rather than a class that also walks XML, decodes
+        // spreadsheet cells and speaks a subprocess protocol.
+        var provider = _providers.For(format);
         if (provider is null)
         {
             // No parser compiled in for this family. An installation fact, not a
@@ -240,8 +279,14 @@ public sealed class OwnerDocumentIndexer
             return null;
         }
 
+        // THE PROFILE FOLLOWS THE PARSER. One lineage per family, so improving
+        // the spreadsheet reading does not re-extract every Word document in
+        // every library.
+        profile = await ProfileForAsync(provider, cancellationToken);
+
         var outcome = await provider.ExtractAsync(
-            new DocumentExtractionRequest(bytes, file.Name, file.MimeType, options),
+            new DocumentExtractionRequest(
+                bytes, file.Name, probe.CanonicalMimeType ?? file.MimeType, options),
             cancellationToken);
 
         if (!outcome.Ok)
@@ -265,6 +310,13 @@ public sealed class OwnerDocumentIndexer
 
         var artifact = outcome.Artifact!;
         var text = DocumentTextCanonicalizer.Canonicalize(artifact.Blocks);
+
+        // Re-resolved for the parser's own profile. The early-exit check above
+        // used the caller's default; the row that is written belongs to the
+        // lineage that produced it.
+        existing = await _db.DocumentTexts
+            .FirstOrDefaultAsync(
+                d => d.FileItemId == file.Id && d.ProfileId == profile.Id, cancellationToken);
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var textHash = RagHash.Sha256Hex(text);
@@ -322,11 +374,83 @@ public sealed class OwnerDocumentIndexer
         if (!chunksAreCurrent)
         {
             await ReplaceChunksAsync(
-                existing, text, profile, options, state, now, cancellationToken);
+                existing, artifact.Blocks, profile, options, state, now, cancellationToken);
             state.Chunked++;
         }
 
         return existing.Id;
+    }
+
+    /// Writes a chunk's typed location, and `Page` only where a page exists.
+    ///
+    /// The one rule worth stating: `Page` is a real PDF page. A slide number, a
+    /// sheet ordinal or a Word pseudo-page in that column would render as
+    /// "Page 4" in a citation for a document that has no pages, and a later
+    /// reader cannot tell the difference without joining back to discover the
+    /// format. The locator carries those; `Page` stays null.
+    private static void ApplyLocator(DocumentChunk chunk, DocumentLocator locator)
+    {
+        chunk.LocatorKind = locator.Kind == DocumentLocatorKinds.Text ? null : locator.Kind;
+        chunk.LocatorIndex = locator.Index;
+        chunk.LocatorLabel = Truncate(locator.Label, 512);
+        chunk.Page = locator.Page;
+    }
+
+    private static string? Truncate(string? value, int max)
+        => value is null ? null : value.Length <= max ? value : value[..max];
+
+    /// The extraction profile for one parser, created on first use.
+    ///
+    /// Per family, never shared. The profile is the lineage a re-extraction is
+    /// keyed by, so one profile across every rich format would make an
+    /// improvement to the spreadsheet reading re-extract every Word document in
+    /// every library — the cost of a change landing on people it did not affect.
+    private async Task<AiProfile> ProfileForAsync(
+        IDocumentExtractionProvider provider, CancellationToken cancellationToken)
+    {
+        var key = provider.ProfileKey;
+        if (key == DocumentTextSources.NativeProfileKey)
+        {
+            return await ExtractionProfileAsync(cancellationToken);
+        }
+
+        var profile = await _db.AiProfiles
+            .FirstOrDefaultAsync(p => p.Key == key, cancellationToken);
+        if (profile is not null) return profile;
+
+        var modelKey = key + "-model";
+        var model = await _db.AiModels.FirstOrDefaultAsync(m => m.Key == modelKey, cancellationToken);
+        if (model is null)
+        {
+            model = new AiModel
+            {
+                Id = Guid.NewGuid(),
+                Key = modelKey,
+                // No inference model is involved in Office parsing; PDF may
+                // invoke OCR, and that provider is named on the OCR profile
+                // rather than smuggled in here.
+                Provider = AiProviders.None,
+                Capability = AiCapabilities.DocumentExtraction,
+                Modality = AiModalities.Text,
+                Enabled = true,
+                CreatedAt = _clock.GetUtcNow().UtcDateTime,
+            };
+            _db.AiModels.Add(model);
+        }
+
+        profile = new AiProfile
+        {
+            Id = Guid.NewGuid(),
+            Key = key,
+            AiModelId = model.Id,
+            Capability = AiCapabilities.DocumentExtraction,
+            Modality = AiModalities.Text,
+            Enabled = true,
+            CreatedAt = _clock.GetUtcNow().UtcDateTime,
+        };
+        _db.AiProfiles.Add(profile);
+        await _db.SaveChangesAsync(cancellationToken);
+        return profile;
     }
 
     /// A current reading of bytes the file no longer has stops being authority.
@@ -486,11 +610,26 @@ public sealed class OwnerDocumentIndexer
     /// one describes text that no longer exists, and surplus ordinals are
     /// deleted with their embeddings following by cascade.
     private async Task ReplaceChunksAsync(
-        DocumentText document, string text, AiProfile profile,
+        DocumentText document, IReadOnlyList<ExtractedDocumentBlock> blocks, AiProfile profile,
         DocumentExtractionOptions options, IndexState state, DateTime now,
         CancellationToken cancellationToken)
     {
-        var drafts = OwnerDocumentChunker.Chunk(text, options);
+        // NATIVE TEXT KEEPS ITS OWN SPLITTER. It arrives as one block with no
+        // interior structure, and the Markdown chunker knows how to find the
+        // headings inside it — running the structural chunker over it instead
+        // would produce one enormous chunk and lose every section title.
+        //
+        // Everything else is already structured, and the structure is a hard
+        // boundary: a chunk must never span two slides, two sheets or two PDF
+        // pages, because a passage that does cites a place that does not exist.
+        var drafts = blocks.Count == 1
+                     && blocks[0].Locator.Kind == DocumentLocatorKinds.Text
+            ? OwnerDocumentChunker.Chunk(blocks[0].Text, options)
+                .Select(d => new RichChunkDraft(
+                    d.Ordinal, d.Heading, d.Text, d.StartOffset, d.EndOffset,
+                    DocumentLocator.None))
+                .ToList()
+            : RichDocumentChunker.Chunk(blocks, options);
         var existing = await _db.DocumentChunks
             .Where(c => c.DocumentTextId == document.Id && c.ProfileId == profile.Id)
             .OrderBy(c => c.Ordinal)
@@ -514,12 +653,13 @@ public sealed class OwnerDocumentIndexer
                 chunk.OwnerUserId = document.OwnerUserId;
                 chunk.StartOffset = draft.StartOffset >= 0 ? draft.StartOffset : null;
                 chunk.EndOffset = draft.EndOffset >= 0 ? draft.EndOffset : null;
+                ApplyLocator(chunk, draft.Locator);
                 state.ChunksUpdated++;
                 state.EmbeddingsRemoved += await DropEmbeddingsAsync(chunk.Id, cancellationToken);
                 continue;
             }
 
-            _db.DocumentChunks.Add(new DocumentChunk
+            var created = new DocumentChunk
             {
                 Id = Guid.NewGuid(),
                 DocumentTextId = document.Id,
@@ -534,11 +674,10 @@ public sealed class OwnerDocumentIndexer
                 TextHash = hash,
                 StartOffset = draft.StartOffset >= 0 ? draft.StartOffset : null,
                 EndOffset = draft.EndOffset >= 0 ? draft.EndOffset : null,
-                // Native text has no pages. Null rather than 1: a page number
-                // that was invented is worse than one that is absent.
-                Page = null,
                 CreatedAt = now,
-            });
+            };
+            ApplyLocator(created, draft.Locator);
+            _db.DocumentChunks.Add(created);
             state.ChunksCreated++;
         }
 
@@ -801,4 +940,28 @@ public static class DocumentTextSources
     public const string NativeModelKey = "native-text-extraction-v1";
 
     public const string NativeProfileKey = "doc-native-text-v1";
+
+    // ---- rich ingestion ------------------------------------------------------
+    //
+    // One profile per FAMILY, not one for "rich documents". They are separate so
+    // that changing how spreadsheets are read does not force every Word document
+    // in every library to be extracted again — the profile is the lineage a
+    // re-extraction is keyed by, and a shared one would make each parser's
+    // improvements everybody else's cost.
+
+    public const string Word = "docx";
+    public const string WordModelKey = "openxml-word-extraction-v1";
+    public const string WordProfileKey = "doc-openxml-word-v1";
+
+    public const string Spreadsheet = "xlsx";
+    public const string SpreadsheetModelKey = "openxml-spreadsheet-extraction-v1";
+    public const string SpreadsheetProfileKey = "doc-openxml-spreadsheet-v1";
+
+    public const string Presentation = "pptx";
+    public const string PresentationModelKey = "openxml-presentation-extraction-v1";
+    public const string PresentationProfileKey = "doc-openxml-presentation-v1";
+
+    public const string Pdf = "pdf";
+    public const string PdfModelKey = "pdf-local-ocr-extraction-v1";
+    public const string PdfProfileKey = "doc-pdf-local-ocr-v1";
 }

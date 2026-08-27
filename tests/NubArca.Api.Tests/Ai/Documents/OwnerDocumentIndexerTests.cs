@@ -11,6 +11,7 @@ using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
+using NubArca.Api.Rag.Retrieval;
 using NubArca.Api.Storage;
 using Xunit;
 
@@ -625,14 +626,25 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         document.IsCurrent = false;
         await _db.SaveChangesAsync();
 
-        var corpus = await new NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource(_db)
-            .LoadAsync(_owner);
-        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
-
+        // Asserted WITHOUT re-indexing, deliberately. Running the indexer again
+        // would re-establish a reading for a file that has none — which is
+        // correct product behaviour and would make this test pass for the wrong
+        // reason. What is being checked is the boundary itself: while the row is
+        // historical, and with every chunk still sitting in the table, it is
+        // neither retrievable nor embeddable.
         Assert.True(await _db.DocumentChunks.AnyAsync(), "the chunks must still be there");
+
+        var corpus = await new OwnerDocumentCorpusSource(_db).LoadAsync(_owner);
         Assert.Empty(corpus.Chunks);
-        Assert.Equal(0, outcome.EmbeddingsCreated);
-        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+
+        var embeddable = await OwnerDocumentEligibility
+            .EligibleChunks(
+                _db.DocumentChunks.AsNoTracking(),
+                _db.DocumentTexts.AsNoTracking(),
+                _db.FileItems.AsNoTracking(),
+                _owner)
+            .CountAsync();
+        Assert.Equal(0, embeddable);
     }
 
     [Fact]
@@ -832,6 +844,235 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         Assert.Contains("manutenzione", current.Text!, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ---- rich formats, end to end -------------------------------------------
+    //
+    // Through the real indexer, not the parsers directly: what these check is
+    // everything BETWEEN a parser and a corpus — that the probe routed the file,
+    // that the per-family profile was created, that the locator survived into
+    // the chunk row, and that `Page` stayed null for the formats that have no
+    // pages.
+
+    [Fact]
+    public async Task A_Word_Document_Becomes_Chunks_With_Section_Locators()
+    {
+        await AddBinaryFileAsync(
+            "contratto.docx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+        var outcome = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(1, outcome.Extracted);
+        var chunks = await _db.DocumentChunks.OrderBy(c => c.Ordinal).ToListAsync();
+        Assert.NotEmpty(chunks);
+
+        Assert.All(chunks, c =>
+        {
+            Assert.Equal(DocumentLocatorKinds.Section, c.LocatorKind);
+            // Open XML does not describe pages; any number here would be
+            // invented, and a citation saying "page 7" that is not page 7 is
+            // worse than one naming the section.
+            Assert.Null(c.Page);
+        });
+
+        Assert.Contains(chunks, c =>
+            c.Heading == "Contratto › Risoluzione › Preavviso");
+        // The deleted clause is in the package and not in the document.
+        Assert.DoesNotContain(chunks, c =>
+            (c.Text ?? "").Contains("TESTO_CANCELLATO_SENTINELLA", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_Workbook_Becomes_Sheet_Scoped_Chunks()
+    {
+        await AddBinaryFileAsync(
+            "budget.xlsx", OfficeDocumentFixtures.Budget(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var chunks = await _db.DocumentChunks.ToListAsync();
+        Assert.NotEmpty(chunks);
+        Assert.All(chunks, c =>
+        {
+            Assert.Equal(DocumentLocatorKinds.Sheet, c.LocatorKind);
+            Assert.Equal("Previsione", c.LocatorLabel);
+            Assert.Equal(1, c.LocatorIndex);
+            // A sheet ordinal in `Page` would render as "Page 1" for a document
+            // that has no pages.
+            Assert.Null(c.Page);
+        });
+
+        var text = string.Join("\n", chunks.Select(c => c.Text));
+        Assert.Contains("Reparto=Ingegneria", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("SENTINELLA_FOGLIO_NASCOSTO", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_Presentation_Never_Produces_A_Chunk_Spanning_Two_Slides()
+    {
+        await AddBinaryFileAsync(
+            "piano.pptx", OfficeDocumentFixtures.LaunchPlan(),
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var chunks = await _db.DocumentChunks.ToListAsync();
+        Assert.NotEmpty(chunks);
+
+        // Every chunk names exactly one slide. A passage spanning two cites a
+        // place that does not exist.
+        Assert.All(chunks, c =>
+        {
+            Assert.Equal(DocumentLocatorKinds.Slide, c.LocatorKind);
+            Assert.NotNull(c.LocatorIndex);
+            Assert.Null(c.Page);
+        });
+        Assert.Single(chunks.Select(c => c.LocatorIndex).Distinct());
+
+        var text = string.Join("\n", chunks.Select(c => c.Text));
+        Assert.Contains("14 marzo", text, StringComparison.Ordinal);
+        Assert.Contains("magazzino", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("SENTINELLA_SLIDE_NASCOSTA", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Each_Family_Gets_Its_Own_Extraction_Lineage()
+    {
+        // Separate profiles so that improving the spreadsheet reading does not
+        // re-extract every Word document in every library. A shared one would
+        // make each parser's improvements everybody else's cost.
+        await AddBinaryFileAsync(
+            "contratto.docx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        await AddBinaryFileAsync(
+            "budget.xlsx", OfficeDocumentFixtures.Budget(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        await AddFileAsync("note.md", Manual);
+
+        await Indexer().IndexOwnerAsync(_owner);
+
+        var byProfile = await _db.DocumentTexts
+            .Join(_db.AiProfiles, d => d.ProfileId, p => p.Id, (d, p) => p.Key)
+            .Distinct().ToListAsync();
+
+        Assert.Contains(DocumentTextSources.WordProfileKey, byProfile);
+        Assert.Contains(DocumentTextSources.SpreadsheetProfileKey, byProfile);
+        Assert.Contains(DocumentTextSources.NativeProfileKey, byProfile);
+
+        // And each is the current reading of its own file.
+        Assert.Equal(3, await _db.DocumentTexts.CountAsync(d => d.IsCurrent));
+    }
+
+    [Fact]
+    public async Task A_Renamed_Package_Is_Refused_Rather_Than_Sent_To_The_Wrong_Parser()
+    {
+        // The routing rule, end to end. The package says Word, the name says
+        // Excel, and the answer is neither — a parser written for one structure
+        // handed another is where bugs stop being theoretical.
+        await AddBinaryFileAsync(
+            "in-realta-word.xlsx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+        var outcome = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(0, outcome.Extracted);
+        Assert.Contains(DocumentExtractionReasons.OfficePackageInvalid, outcome.SkipReasons);
+
+        var document = await _db.DocumentTexts.SingleAsync();
+        Assert.Equal(AiArtifactStatuses.Skipped, document.Status);
+        Assert.Empty(await _db.DocumentChunks.ToListAsync());
+    }
+
+    [Fact]
+    public async Task An_Office_Package_Uploaded_As_Octet_Stream_Is_Still_Read()
+    {
+        // Plenty of clients upload OOXML generically. Refusing those would make
+        // rich ingestion depend on which uploader somebody happened to use — and
+        // the extension only buys a bounded look; the bytes still decide.
+        await AddBinaryFileAsync(
+            "contratto.docx", OfficeDocumentFixtures.Contract(), "application/octet-stream");
+
+        var outcome = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(1, outcome.Extracted);
+        Assert.NotEmpty(await _db.DocumentChunks.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_Vaulted_Rich_Document_Is_Never_Read()
+    {
+        // Isolation is not tested only with `.md`. Every new extraction family
+        // passes through the same owner authority.
+        var file = await AddBinaryFileAsync(
+            "contratto.docx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+        var vault = new PrivateVault
+        {
+            Id = Guid.NewGuid(), OwnerUserId = _owner, CreatedAt = DateTime.UtcNow,
+        };
+        _db.PrivateVaults.Add(vault);
+        file.PrivateVaultId = vault.Id;
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(0, outcome.FilesSeen);
+        Assert.Empty(await _db.DocumentTexts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Another_Owners_Rich_Document_Is_Never_Seen()
+    {
+        var other = Guid.NewGuid();
+        _db.Users.Add(new User
+        {
+            Id = other,
+            Email = $"other-{Guid.NewGuid():N}@example.invalid",
+            DisplayName = "Other",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        await AddBinaryFileAsync(
+            "mio.docx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+        await AddBinaryFileAsync(
+            "loro.xlsx", OfficeDocumentFixtures.Budget(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            owner: other);
+
+        var outcome = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(1, outcome.FilesSeen);
+        Assert.All(await _db.DocumentTexts.ToListAsync(), d => Assert.Equal(_owner, d.OwnerUserId));
+    }
+
+    [Fact]
+    public async Task Renaming_A_Rich_Document_Costs_Nothing()
+    {
+        var file = await AddBinaryFileAsync(
+            "contratto.docx", OfficeDocumentFixtures.Contract(),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+
+        await Indexer().IndexOwnerAsync(_owner);
+        var hashes = await _db.DocumentChunks
+            .OrderBy(c => c.Ordinal).Select(c => c.TextHash).ToListAsync();
+
+        // A rename is a DB-only operation that leaves the content-addressed blob
+        // alone, so nothing has to be re-read, re-parsed or re-chunked.
+        file.Name = "contratto-2027.docx";
+        await _db.SaveChangesAsync();
+
+        var second = await Indexer().IndexOwnerAsync(_owner);
+
+        Assert.Equal(1, second.Unchanged);
+        Assert.Equal(0, second.Extracted);
+        Assert.Equal(
+            hashes,
+            await _db.DocumentChunks.OrderBy(c => c.Ordinal).Select(c => c.TextHash).ToListAsync());
+    }
+
     // ---- fixture ------------------------------------------------------------
 
     private OwnerDocumentIndexer Indexer(string? semantic = null, bool globalSemantic = false)
@@ -860,8 +1101,17 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
                 new ITextEmbeddingProvider[] { new DeterministicTextEmbeddingProvider() },
                 new RagSemanticProfileResolver(RagDomainRegistry.Instance, options)),
             new AiVectorSerializer(),
+            // Every parser the container registers, so these tests exercise the
+            // routing the product actually does rather than a subset chosen
+            // here.
             new DocumentExtractionProviders(
-                new IDocumentExtractionProvider[] { new NativeTextExtractionProvider() }),
+                new IDocumentExtractionProvider[]
+                {
+                    new NativeTextExtractionProvider(),
+                    new WordDocumentExtractionProvider(),
+                    new SpreadsheetExtractionProvider(),
+                    new PresentationExtractionProvider(),
+                }),
             Options.Create(new DocumentExtractionOptions()),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);
@@ -1012,6 +1262,49 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         _db.BlobObjects.Add(blob);
         await _db.SaveChangesAsync();
         return blob;
+    }
+
+    /// A file whose bytes are not text — an Office package, a PDF.
+    private async Task<FileItem> AddBinaryFileAsync(
+        string name, byte[] content, string mime, Guid? owner = null)
+    {
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant();
+        var storageKey = $"objects/{sha[..2]}/{sha[2..4]}/{sha}";
+        var path = Path.Combine(_storageRoot, storageKey.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllBytesAsync(path, content);
+
+        var blob = await _db.BlobObjects.FirstOrDefaultAsync(b => b.Sha256 == sha);
+        if (blob is null)
+        {
+            blob = new BlobObject
+            {
+                Id = Guid.NewGuid(),
+                Sha256 = sha,
+                StorageKey = storageKey,
+                SizeBytes = content.Length,
+                ReferenceCount = 1,
+                CreatedAt = DateTime.UtcNow,
+            };
+            _db.BlobObjects.Add(blob);
+            await _db.SaveChangesAsync();
+        }
+
+        var file = new FileItem
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = owner ?? _owner,
+            BlobObjectId = blob.Id,
+            Name = name,
+            MimeType = mime,
+            SizeBytes = content.Length,
+            CreatedAt = DateTime.UtcNow,
+            EffectiveDateTaken = DateTime.UtcNow,
+            EffectiveDateTakenSource = "uploaded",
+        };
+        _db.FileItems.Add(file);
+        await _db.SaveChangesAsync();
+        return file;
     }
 
     private async Task<FileItem> AddFileAsync(
