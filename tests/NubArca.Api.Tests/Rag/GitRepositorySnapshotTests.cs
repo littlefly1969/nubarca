@@ -247,6 +247,72 @@ public sealed class GitRepositorySnapshotTests : IDisposable
         }
     }
 
+    [SkippableFact]
+    public async Task Entries_Carry_The_Blob_Size_Git_Reported()
+    {
+        Skip.IfNot(_available, "git is not available.");
+
+        // The size is what lets an oversized object be refused before it is
+        // allocated, so it has to be REAL. `ls-tree -l` right-aligns it in a
+        // padded column and prints `-` for anything that is not a blob, which is
+        // exactly the kind of format a fake fixture gets wrong in the direction
+        // that looks fine.
+        var small = "# A\n\nun documento breve.\n";
+        var larger = "# B\n\n" + new string('x', 5000) + "\n";
+        Write("docs/small.md", small);
+        Write("docs/larger.md", larger);
+        Git("add", "-A");
+        Git("commit", "-m", "sizes");
+
+        var reader = new GitRepositorySnapshotReader();
+        await using var snapshot = await reader.OpenAsync(
+            _root, await reader.ResolveRevisionAsync(_root));
+
+        var smallEntry = snapshot.Entries.Single(e => e.Path == "docs/small.md");
+        var largerEntry = snapshot.Entries.Single(e => e.Path == "docs/larger.md");
+
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(small), smallEntry.Size);
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(larger), largerEntry.Size);
+
+        // …and it agrees with what reading them actually produces, which is the
+        // property the bound depends on.
+        Assert.Equal(smallEntry.Size, (await snapshot.ReadAsync(smallEntry)).LongLength);
+        Assert.Equal(largerEntry.Size, (await snapshot.ReadAsync(largerEntry)).LongLength);
+    }
+
+    [SkippableFact]
+    public async Task A_Symlink_Entry_Carries_A_Size_And_Is_Still_Never_Read()
+    {
+        Skip.IfNot(_available, "git is not available.");
+        Skip.If(OperatingSystem.IsWindows(), "Symlink creation needs privileges on Windows.");
+
+        // A link's blob is its target path, so `ls-tree -l` reports a perfectly
+        // ordinary small size for it. Passing the size gate must not be mistaken
+        // for being eligible.
+        Write("docs/guide.md", "# Guida\n\nun documento vero\n");
+        try
+        {
+            File.CreateSymbolicLink(Path.Combine(_root, "docs", "escape.md"), "/etc/passwd");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Skip.If(true, "symlinks are not creatable here.");
+            return;
+        }
+        Git("add", "-A");
+        Git("commit", "-m", "link");
+
+        var reader = new GitRepositorySnapshotReader();
+        await using var snapshot = await reader.OpenAsync(
+            _root, await reader.ResolveRevisionAsync(_root));
+
+        var link = snapshot.Entries.Single(e => e.Path == "docs/escape.md");
+        Assert.True(link.IsSymbolicLink);
+        Assert.Equal("/etc/passwd".Length, link.Size);
+        Assert.True(RepositorySourcePolicy.CheckSize(link.Size).IsEligible);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => snapshot.ReadAsync(link));
+    }
+
     // ---- fixture -------------------------------------------------------------
 
     private void Write(string relativePath, string content)

@@ -3,13 +3,20 @@ using System.Text;
 
 namespace NubArca.Api.Rag.Sources;
 
-/// One entry of a Git tree: what it is, where it is, and which object holds it.
+/// One entry of a Git tree: what it is, where it is, which object holds it, and
+/// HOW BIG that object is.
 ///
 /// Deliberately WITHOUT content. The bytes are fetched separately and only for
 /// entries the source policy accepted, so a tracked `.env` is never read into
 /// this process at all — refusing to index a file and refusing to open it are
 /// different strengths of the same statement, and this is the stronger one.
-public sealed record RepositorySnapshotEntry(string Path, string Mode, string ObjectId)
+///
+/// `Size` is why the listing pays for `-l`. Without it the only way to learn how
+/// large a blob is was to read it, so "this file is too large to index" was a
+/// verdict reached AFTER allocating it in full — which is not a bound, it is a
+/// report. A tracked multi-gigabyte object is now refused from the tree entry,
+/// before the object store is asked for anything.
+public sealed record RepositorySnapshotEntry(string Path, string Mode, string ObjectId, long Size)
 {
     /// Git's mode for a symbolic link. The blob's content is the LINK TARGET,
     /// not a file — see RepositorySourcePolicy for why that is refused rather
@@ -19,6 +26,10 @@ public sealed record RepositorySnapshotEntry(string Path, string Mode, string Ob
     /// A gitlink: a submodule's commit, recorded in the parent tree. There is
     /// no blob to read.
     public const string SubmoduleMode = "160000";
+
+    /// `ls-tree -l` prints `-` for anything that is not a blob. Size is then
+    /// genuinely unknown, and an unknown size must never read as "small".
+    public const long UnknownSize = -1;
 
     public bool IsSymbolicLink => Mode == SymbolicLinkMode;
 
@@ -132,9 +143,11 @@ public sealed class GitRepositorySnapshotReader : IRepositorySnapshotReader
         // newline in it, and splitting on '\n' would turn one such file into two
         // paths that do not exist. `--full-tree` because ls-tree is otherwise
         // relative to the current directory, which is how the predecessor
-        // silently indexed one subdirectory.
+        // silently indexed one subdirectory. `-l` for the blob SIZE, which is
+        // what lets an oversized object be refused before it is allocated
+        // instead of after.
         var listing = await RunBytesAsync(
-            root, new[] { "ls-tree", "-r", "-z", "--full-tree", revision }, cancellationToken)
+            root, new[] { "ls-tree", "-r", "-z", "-l", "--full-tree", revision }, cancellationToken)
             ?? throw new RepositorySnapshotUnavailableException("tree-unreadable", revision);
 
         var entries = ParseTree(listing);
@@ -151,7 +164,13 @@ public sealed class GitRepositorySnapshotReader : IRepositorySnapshotReader
         }
     }
 
-    /// `<mode> SP <type> SP <object> TAB <path> NUL`, repeated.
+    /// `<mode> SP <type> SP <object> SP <size> TAB <path> NUL`, repeated.
+    ///
+    /// `-l` right-aligns the size in a padded column, so the header is split on
+    /// runs of spaces rather than on single ones. A non-blob prints `-` there,
+    /// and a listing written by a git without `-l` has no fourth field at all —
+    /// both parse to UnknownSize rather than to zero, because a size that is not
+    /// known must not read as a size that is small.
     internal static IReadOnlyList<RepositorySnapshotEntry> ParseTree(byte[] listing)
     {
         var entries = new List<RepositorySnapshotEntry>();
@@ -165,10 +184,15 @@ public sealed class GitRepositorySnapshotReader : IRepositorySnapshotReader
             var header = record[..tab].Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (header.Length < 3) continue;
 
+            var size = header.Length >= 4 && long.TryParse(header[3], out var parsed) && parsed >= 0
+                ? parsed
+                : RepositorySnapshotEntry.UnknownSize;
+
             entries.Add(new RepositorySnapshotEntry(
                 Path: record[(tab + 1)..].Replace('\\', '/'),
                 Mode: header[0],
-                ObjectId: header[2]));
+                ObjectId: header[2],
+                Size: size));
         }
 
         // Ordinal by path, so an index run visits the tree the same way on every

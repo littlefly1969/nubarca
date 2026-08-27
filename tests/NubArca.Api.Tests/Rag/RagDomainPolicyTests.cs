@@ -146,30 +146,57 @@ public sealed class RagDomainPolicyTests
     }
 
     [Fact]
-    public void OwnerPrivateDomain_IsNotAccidentallyEnabled()
+    public void The_Owner_Private_Domain_Is_UserDocuments_And_Every_Field_Is_Restrictive()
     {
-        // No domain uses owner scope yet. When one does, it must not inherit
-        // "LocalTrusted may read it" from this slice's rules by default — an
-        // owner-private domain needs an authorization design, and the absence of
-        // one is refused rather than assumed.
-        Assert.All(Registry.List(), d =>
+        // `user-documents` exists as POLICY. Its definition is the whole
+        // statement — there is no configuration key, database column or client
+        // parameter that can soften any of these four fields.
+        var owned = Assert.Single(
+            Registry.List().Where(d => d.PrivacyClass == RagPrivacyClass.OwnerPrivate));
+
+        Assert.Equal(RagDomains.UserDocuments, owned.Key);
+        Assert.Equal(RagDomainScope.Owner, owned.Scope);
+        Assert.True(owned.RequiresOwner);
+        Assert.False(owned.ExternalGenerationAllowed);
+
+        // Every OTHER domain is installation-wide and needs no owner, so the
+        // owner requirement cannot be satisfied by accident somewhere else.
+        Assert.All(Registry.List().Where(d => d.Key != RagDomains.UserDocuments), d =>
         {
             Assert.Equal(RagDomainScope.System, d.Scope);
             Assert.NotEqual(RagPrivacyClass.OwnerPrivate, d.PrivacyClass);
             Assert.False(d.RequiresOwner);
         });
+    }
 
-        var future = new RagDomainDefinition(
-            "user-documents", RagDomainScope.Owner, RagPrivacyClass.OwnerPrivate,
-            RequiresOwner: true, ExternalGenerationAllowed: false);
+    [Fact]
+    public void No_Model_May_Yet_Be_Grounded_On_Owner_Private_Knowledge()
+    {
+        // Registering the domain does NOT activate it. There is no private
+        // Assistant operation and no owner-scoped retrieval path yet, so the
+        // gate refuses owner-private evidence at every trust level — including
+        // LocalTrusted, which will be the one allowed once the operation that
+        // derives the owner server-side exists.
+        var owned = RagDomainRegistry.UserDocuments;
 
-        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, future));
-        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, future));
+        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, owned));
+        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, owned));
 
-        // …and even a definition somebody wrote optimistically stays refused,
-        // because the owner-scope check runs before the trust switch.
-        var optimistic = future with { ExternalGenerationAllowed = true };
+        // …and a definition somebody wrote optimistically stays refused, because
+        // the owner-scope check runs before the trust switch.
+        var optimistic = owned with { ExternalGenerationAllowed = true };
         Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.External, optimistic));
+        Assert.False(AssistantRagPolicy.MayGroundOn(AssistantModelTrust.LocalTrusted, optimistic));
+    }
+
+    [Fact]
+    public void OwnerScopedRetrieval_RefusesAQueryWithNoOwner()
+    {
+        // The structural half of the same statement, and the one that survives a
+        // future caller: retrieval refuses before it reads anything, so a
+        // forgotten owner is a rejected request rather than a broad answer.
+        Assert.True(Registry.GetRequired(RagDomains.UserDocuments).RequiresOwner);
+        Assert.Null(new RagQuery(RagDomainKey.UserDocuments, "qualsiasi domanda", 5, 4000).OwnerUserId);
     }
 
     [Fact]

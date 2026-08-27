@@ -484,7 +484,12 @@ public sealed class RagIndexer : IRagIndexer
     {
         if (!request.EmbedPassages || request.DryRun) return (null, null);
 
-        var resolution = await _embeddings.ResolveAsync(cancellationToken);
+        // The profile THIS domain embeds with. Indexing and retrieval must
+        // resolve identically or a domain would be searched in a space it was
+        // never written into — which is not an error anything would report, just
+        // cosine distances between two unrelated coordinate systems.
+        var resolution = await _embeddings.ResolveAsync(
+            new RagDomainKey(domainKey), cancellationToken);
         if (!resolution.IsAvailable) return (null, resolution.Reason);
 
         var profile = resolution.Profile!;

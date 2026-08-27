@@ -11,6 +11,10 @@ public static class RagDomains
     /// NubArca's own approved tracked source, at one revision. Development,
     /// diagnostics and retrieval evaluation — never an External model.
     public const string NubArcaRepository = "nubarca-repository";
+
+    /// One person's own library documents. Retrievable only on behalf of the
+    /// owner, and never grounded on by a model outside the trust boundary.
+    public const string UserDocuments = "user-documents";
 }
 
 /// Resolves a domain key to its policy.
@@ -63,8 +67,28 @@ public sealed class RagDomainRegistry : IRagDomainRegistry
         RequiresOwner: false,
         ExternalGenerationAllowed: false);
 
+    /// The first owner-private domain, and the reason every "reserved" branch in
+    /// this substrate was written before there was anything to reserve it for.
+    ///
+    /// Every field is the restrictive value, and none of them is reachable from
+    /// configuration. `RequiresOwner` is the one that matters most: retrieval
+    /// refuses a query with no owner before it reads anything, so "forgot the
+    /// WHERE clause" cannot become "read somebody else's documents" — the
+    /// request is rejected rather than answered broadly.
+    ///
+    /// `ExternalGenerationAllowed: false` is not a default that happens to be
+    /// off. A person's own documents may not be sent outside the trust boundary
+    /// to be summarized, and there is no configuration key, database column or
+    /// client parameter that says otherwise.
+    public static RagDomainDefinition UserDocuments { get; } = new(
+        Key: RagDomains.UserDocuments,
+        Scope: RagDomainScope.Owner,
+        PrivacyClass: RagPrivacyClass.OwnerPrivate,
+        RequiresOwner: true,
+        ExternalGenerationAllowed: false);
+
     private static readonly IReadOnlyList<RagDomainDefinition> All =
-        new[] { ProductHelp, NubArcaRepository };
+        new[] { ProductHelp, NubArcaRepository, UserDocuments };
 
     private static readonly IReadOnlyDictionary<string, RagDomainDefinition> ByKey =
         All.ToDictionary(d => d.Key, StringComparer.Ordinal);

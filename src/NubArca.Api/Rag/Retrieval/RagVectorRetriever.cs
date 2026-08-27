@@ -41,7 +41,11 @@ public sealed class RagVectorRetriever
         int take,
         CancellationToken cancellationToken = default)
     {
-        var resolution = await _embeddings.ResolveAsync(cancellationToken);
+        // THIS domain's profile. The index already knows which domain it is, so
+        // the question "which model embeds this question" is answered by the
+        // corpus being searched rather than by an installation-wide setting that
+        // is right for one domain and wrong for the other.
+        var resolution = await _embeddings.ResolveAsync(index.Corpus.Domain, cancellationToken);
         if (!resolution.IsAvailable)
         {
             return RagVectorSearchOutcome.Unavailable(

@@ -33,6 +33,11 @@ public static class RagServiceRegistration
         // One built index per domain, rebuilt when the corpus signature changes.
         services.AddSingleton<RagLexicalIndexCache>();
 
+        // Which domain embeds with which model. A singleton like the registry it
+        // reads: the answer is a compiled policy plus configuration, and neither
+        // depends on a request.
+        services.AddSingleton<IRagSemanticProfileResolver, RagSemanticProfileResolver>();
+
         // The corpus that ships INSIDE the image. Loaded once at startup: it
         // cannot change under a running process, and re-reading it per request
         // would add a filesystem dependency to every Help question.
@@ -59,6 +64,7 @@ public static class RagServiceRegistration
             sp.GetRequiredService<BundledProductHelpCorpusSource>(),
             sp.GetRequiredService<RagLexicalIndexCache>(),
             sp.GetRequiredService<IOptions<RagOptions>>(),
+            sp.GetRequiredService<IRagSemanticProfileResolver>(),
             sp.GetRequiredService<ILogger<RagRetriever>>()));
 
         return services;

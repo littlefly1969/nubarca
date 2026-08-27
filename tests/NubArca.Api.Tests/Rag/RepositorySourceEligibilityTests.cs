@@ -170,7 +170,76 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
         Assert.False(RepositorySourcePolicy.CheckContent("a.md", huge).IsEligible);
     }
 
+    [Fact]
+    public void SizeIsRefusableWithoutTheBytes()
+    {
+        // The same verdict as CheckContent, reached from a number instead of
+        // from an allocation. That is the entire difference between a bound and
+        // a report.
+        Assert.False(RepositorySourcePolicy.CheckSize(RepositorySourcePolicy.MaximumBytes + 1).IsEligible);
+        Assert.Equal(
+            "too-large",
+            RepositorySourcePolicy.CheckSize(RepositorySourcePolicy.MaximumBytes + 1).Reason);
+        Assert.True(RepositorySourcePolicy.CheckSize(RepositorySourcePolicy.MaximumBytes).IsEligible);
+        Assert.True(RepositorySourcePolicy.CheckSize(0).IsEligible);
+
+        // A size git did not report is not a small size. It falls through to the
+        // content check rather than being refused or waved past.
+        Assert.True(RepositorySourcePolicy.CheckSize(RepositorySnapshotEntry.UnknownSize).IsEligible);
+    }
+
     // ---- the provider --------------------------------------------------------
+
+    [Fact]
+    public async Task OversizedTrackedBlob_IsRejectedBeforeContentRead()
+    {
+        // A tracked blob whose SIZE disqualifies it must never be fetched. The
+        // predecessor learned the size by reading the object, so `too-large` was
+        // a verdict delivered after allocating the thing it was refusing — and a
+        // tracked multi-gigabyte file was an OutOfMemoryException in a service.
+        var reader = new FakeSnapshotReader()
+            .WithContent("docs/guide.md", MarkdownFixture)
+            .WithDeclaredSize(
+                "docs/enormous.md", MarkdownFixture, RepositorySourcePolicy.MaximumBytes + 1);
+
+        var keys = await KeysAsync(new RepositorySnapshotSourceProvider(reader));
+
+        Assert.DoesNotContain("docs/enormous.md", keys);
+        Assert.Contains("docs/guide.md", keys);
+        // Not merely absent from the output — never opened.
+        var opened = Assert.Single(reader.Opened);
+        Assert.DoesNotContain("docs/enormous.md", opened.Read);
+        Assert.Contains("docs/guide.md", opened.Read);
+    }
+
+    [Fact]
+    public async Task NormalBlob_UnderLimit_StillReads()
+    {
+        // The control. A size gate that refused everything would pass the test
+        // above and delete the corpus.
+        var reader = new FakeSnapshotReader()
+            .WithDeclaredSize("docs/guide.md", MarkdownFixture, RepositorySourcePolicy.MaximumBytes);
+
+        var keys = await KeysAsync(new RepositorySnapshotSourceProvider(reader));
+
+        Assert.Contains("docs/guide.md", keys);
+        Assert.Contains("docs/guide.md", Assert.Single(reader.Opened).Read);
+    }
+
+    [Fact]
+    public async Task OversizedSymlink_RemainsUnreadForTheOlderReason()
+    {
+        // Two independent refusals must not become one. A link is refused by
+        // MODE whatever its size says, so a future change to the size rule
+        // cannot quietly start dereferencing links.
+        var reader = new FakeSnapshotReader()
+            .WithContent("docs/escape.md", "/etc/passwd", mode: RepositorySnapshotEntry.SymbolicLinkMode);
+
+        var keys = await KeysAsync(new RepositorySnapshotSourceProvider(reader));
+
+        Assert.DoesNotContain("docs/escape.md", keys);
+        Assert.Empty(Assert.Single(reader.Opened).Read);
+    }
 
     [Fact]
     public async Task UsesTrackedFilesOnly_And_Never_Reads_DotGit()
@@ -338,18 +407,33 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
     /// git's problem, and the real reader has its own integration test.
     private sealed class FakeSnapshotReader : IRepositorySnapshotReader
     {
-        private readonly Dictionary<string, (string Mode, byte[] Content)> _entries = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, (string Mode, byte[] Content, long DeclaredSize)> _entries = new(StringComparer.Ordinal);
 
         public FakeSnapshotReader(params string[] paths)
         {
-            foreach (var path in paths) _entries[path] = ("100644", Array.Empty<byte>());
+            foreach (var path in paths) _entries[path] = ("100644", Array.Empty<byte>(), 0);
         }
 
         public FakeSnapshotReader WithContent(string path, string content, string mode = "100644")
         {
-            _entries[path] = (mode, System.Text.Encoding.UTF8.GetBytes(content));
+            var bytes = System.Text.Encoding.UTF8.GetBytes(content);
+            _entries[path] = (mode, bytes, bytes.LongLength);
             return this;
         }
+
+        /// A tree entry that CLAIMS a size without the fixture allocating one.
+        /// Reading it hands back the small body, so a test that gets content
+        /// back has proven the size gate did not fire — which is the whole
+        /// point, and is not something a real 4 GB blob could demonstrate.
+        public FakeSnapshotReader WithDeclaredSize(string path, string content, long declaredSize)
+        {
+            _entries[path] = ("100644", System.Text.Encoding.UTF8.GetBytes(content), declaredSize);
+            return this;
+        }
+
+        /// The snapshots this reader handed out, so a test can ask which entries
+        /// were actually opened.
+        public List<FakeSnapshot> Opened { get; } = new();
 
         public Task<string> ResolveRootAsync(string path, CancellationToken cancellationToken = default)
             => Task.FromResult(path);
@@ -360,28 +444,38 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
 
         public Task<IRepositorySnapshot> OpenAsync(
             string root, string revision, CancellationToken cancellationToken = default)
-            => Task.FromResult<IRepositorySnapshot>(new FakeSnapshot(root, revision, _entries));
+        {
+            var snapshot = new FakeSnapshot(root, revision, _entries);
+            Opened.Add(snapshot);
+            return Task.FromResult<IRepositorySnapshot>(snapshot);
+        }
     }
 
-    private sealed class FakeSnapshot : IRepositorySnapshot
+    internal sealed class FakeSnapshot : IRepositorySnapshot
     {
-        private readonly Dictionary<string, (string Mode, byte[] Content)> _entries;
+        private readonly Dictionary<string, (string Mode, byte[] Content, long DeclaredSize)> _entries;
 
         public FakeSnapshot(
-            string root, string revision, Dictionary<string, (string Mode, byte[] Content)> entries)
+            string root, string revision, Dictionary<string, (string Mode, byte[] Content, long DeclaredSize)> entries)
         {
             Root = root;
             Revision = revision;
             _entries = entries;
             Entries = entries
                 .OrderBy(e => e.Key, StringComparer.Ordinal)
-                .Select(e => new RepositorySnapshotEntry(e.Key, e.Value.Mode, $"oid-{e.Key}"))
+                .Select(e => new RepositorySnapshotEntry(
+                    e.Key, e.Value.Mode, $"oid-{e.Key}", e.Value.DeclaredSize))
                 .ToList();
         }
 
         public string Root { get; }
         public string Revision { get; }
         public IReadOnlyList<RepositorySnapshotEntry> Entries { get; }
+
+        /// Every path that reached this method is one the provider decided to
+        /// read. Recording them is how "it was never opened" is asserted as a
+        /// fact rather than inferred from the absence of a source.
+        public List<string> Read { get; } = new();
 
         public Task<byte[]> ReadAsync(
             RepositorySnapshotEntry entry, CancellationToken cancellationToken = default)
@@ -391,6 +485,7 @@ public sealed class RepositorySourceEligibilityTests : IDisposable
             {
                 throw new InvalidOperationException("Refusing to read a link entry as content.");
             }
+            Read.Add(entry.Path);
             return Task.FromResult(_entries[entry.Path].Content);
         }
 

@@ -13,6 +13,7 @@ public sealed record RagDomainKey(string Value)
 {
     public static RagDomainKey ProductHelp { get; } = new(RagDomains.ProductHelp);
     public static RagDomainKey NubArcaRepository { get; } = new(RagDomains.NubArcaRepository);
+    public static RagDomainKey UserDocuments { get; } = new(RagDomains.UserDocuments);
 
     public override string ToString() => Value;
 }

@@ -52,13 +52,20 @@ internal static class RagCliCommands
     private static Task<int> DomainsAsync(IServiceProvider sp, TextWriter stdout)
     {
         var registry = sp.GetRequiredService<IRagDomainRegistry>();
+        var semantic = sp.GetRequiredService<IRagSemanticProfileResolver>();
         foreach (var domain in registry.List())
         {
+            var settings = semantic.Resolve(domain.DomainKey);
             stdout.WriteLine($"domain={domain.Key}");
             stdout.WriteLine($"  scope={domain.Scope}");
             stdout.WriteLine($"  privacy={domain.PrivacyClass}");
             stdout.WriteLine($"  requires_owner={Bool(domain.RequiresOwner)}");
             stdout.WriteLine($"  external_generation_allowed={Bool(domain.ExternalGenerationAllowed)}");
+            // Semantic settings are PER DOMAIN, so an operator has to be able to
+            // read which one each domain actually resolved to rather than infer
+            // it from one global switch and a fallback rule.
+            stdout.WriteLine($"  semantic_enabled={Bool(settings.Enabled)}");
+            stdout.WriteLine($"  embedding_profile={settings.ProfileKey ?? "(none)"}");
         }
         return Task.FromResult(0);
     }
@@ -329,11 +336,25 @@ internal static class RagCliCommands
     private static async Task<int> ValidateModelAsync(
         string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
     {
-        var options = sp.GetRequiredService<IOptions<RagOptions>>().Value;
-        var key = Arg(args, "--profile") ?? options.TextEmbeddingProfileKey;
+        // `--profile` wins; otherwise the profile a NAMED DOMAIN resolved to.
+        // There is no installation-wide "the" embedding profile any more, so
+        // validating one means saying which domain's model is being validated.
+        var key = Arg(args, "--profile");
+        if (string.IsNullOrWhiteSpace(key) && Arg(args, "--domain") is { } requested)
+        {
+            if (!TryDomain(args, sp, stderr, out var domain)) return 2;
+            key = sp.GetRequiredService<IRagSemanticProfileResolver>()
+                .Resolve(domain.DomainKey).ProfileKey;
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                stderr.WriteLine(
+                    $"rag validate-model: domain '{requested}' has no text-embedding profile configured.");
+                return 2;
+            }
+        }
         if (string.IsNullOrWhiteSpace(key))
         {
-            stderr.WriteLine("rag validate-model: --profile (or Rag:TextEmbeddingProfileKey) is required.");
+            stderr.WriteLine("rag validate-model: --profile or --domain is required.");
             return 2;
         }
 

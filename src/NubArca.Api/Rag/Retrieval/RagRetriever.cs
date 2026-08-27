@@ -47,6 +47,7 @@ public sealed class RagRetriever : IRagRetriever
     private readonly BundledProductHelpCorpusSource _bundled;
     private readonly RagLexicalIndexCache _cache;
     private readonly IOptions<RagOptions> _options;
+    private readonly IRagSemanticProfileResolver _semantic;
     private readonly ILogger<RagRetriever> _log;
 
     public RagRetriever(
@@ -55,6 +56,7 @@ public sealed class RagRetriever : IRagRetriever
         BundledProductHelpCorpusSource bundled,
         RagLexicalIndexCache cache,
         IOptions<RagOptions> options,
+        IRagSemanticProfileResolver semantic,
         ILogger<RagRetriever> log)
     {
         _domains = domains;
@@ -62,6 +64,7 @@ public sealed class RagRetriever : IRagRetriever
         _bundled = bundled;
         _cache = cache;
         _options = options;
+        _semantic = semantic;
         _log = log;
     }
 
@@ -122,11 +125,16 @@ public sealed class RagRetriever : IRagRetriever
         var shape = RagQueryShape.For(text, ranking.ExpandAliases);
         var lexical = index.Search(shape, options.EffectiveLexicalCandidates);
 
-        var semantic = options.SemanticEnabled && _database is { } services
+        // PER DOMAIN. The repository stays lexical while Help is hybrid, because
+        // that is what the two of them measured — and skipping the vector path
+        // here rather than inside it keeps a disabled domain from paying for an
+        // embedding call it is going to discard.
+        var semanticEnabled = _semantic.Resolve(query.Domain).Enabled;
+        var semantic = semanticEnabled && _database is { } services
             ? await services.Vectors.SearchAsync(
                 index, text, options.EffectiveVectorCandidates, cancellationToken)
             : RagVectorSearchOutcome.Unavailable(
-                options.SemanticEnabled
+                semanticEnabled
                     ? RagFailureReasons.IndexUnavailable
                     : RagFailureReasons.EmbeddingDisabled);
 
@@ -174,7 +182,7 @@ public sealed class RagRetriever : IRagRetriever
 
         var resolution = _database is null
             ? TextEmbeddingResolution.Unavailable(RagFailureReasons.IndexUnavailable)
-            : await _database.Embeddings.ResolveAsync(cancellationToken);
+            : await _database.Embeddings.ResolveAsync(domain, cancellationToken);
         long embeddings = 0, vectors = 0;
         var semanticAvailable = false;
         if (resolution.IsAvailable && _database is not null)
