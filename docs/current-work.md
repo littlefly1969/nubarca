@@ -857,7 +857,14 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   identity. GitHub sees private key bytes only after repository tests pass,
   validates the AAB with pinned Google bundletool, validates the universal APK
   generated back FROM that AAB, gates 16 KB native-library alignment and emits
-  provenance attestations. The APK is the pre-Play sideload path; after Play App
-  Signing enrollment, internal testing is the accepted path because Play signs
-  delivered APKs with its separate app-signing key. The key may never be shared
-  with TV or replaced to fix a build. `docs/mobile-release.md` is the runbook.
+  provenance attestations. PR CI cold-launches a debug APK with Metro on an API
+  35 emulator, and the release workflow cold-launches the exact signed APK with
+  no Metro; both require the rendered `NubArca` login surface, because a live
+  Android process can still be a React Native error screen. Autolinked Expo
+  modules are checked against SDK 54's bundled native-module map, and
+  `expo-font` stays an explicit SDK-owned dependency so npm cannot hoist an
+  ABI-incompatible peer version. The APK is the pre-Play sideload path; after
+  Play App Signing enrollment, internal testing is the accepted path because
+  Play signs delivered APKs with its separate app-signing key. The key may never
+  be shared with TV or replaced to fix a build. `docs/mobile-release.md` is the
+  runbook.
