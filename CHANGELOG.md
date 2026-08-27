@@ -23,6 +23,26 @@ originating repository and is deliberately not reproduced here.
   forever. The Expo status-bar package is aligned with SDK 54. Mobile advances
   to `0.2.1` (`versionCode` 2) so the corrected signed APK can update the first
   test build in place.
+- **Device-media synchronization ships.** The mobile client is a first-class
+  authenticated gallery; it ingests locally stored photos and videos one-way into
+  the owner's private library via the owner-scoped `POST /api/files` path. Sync is
+  explicitly opt-in (off by default), defaults to new-media-only via a per-account
+  baseline, and is driven by a per-account SQLite ledger with a 16-byte CSPRNG
+  operation id sent as the `Idempotency-Key` (operation identity, never a SHA-256
+  content hash — blob dedup stays server-side). Uploads default to Wi-Fi only and
+  background execution is best-effort.
+- **Signed Android release pipeline.** A manual, protected-main workflow emits a
+  signed direct-test APK and a Play-ready AAB from one release variant and one
+  upload key, pinned by `mobile/release-contract.json`; Google Play App Signing is
+  the store boundary.
+
+### TV client
+
+- NubArca TV advances to `1.0.10` (`versionCode` 12) with OTA runtime
+  `nubarca-tv-native-11`. OTA bundles are published through the protected-main
+  GitHub workflow as signed immutable artefacts that production pulls by digest;
+  the ordinary OTA signer never contacts production or rebuilds the APK on the
+  server.
 
 ### Identity & Access
 
@@ -43,10 +63,11 @@ about — rather than an invisible exception on one account.
   default, because that is what every pre-role non-admin account became:
   existing users keep exactly the access they had. A role's identity is an
   immutable server-generated key, so renaming one never re-points a single user.
-- **Permissions** — one catalogue of thirteen feature-surface keys
+- **Permissions** — one catalogue of fourteen feature-surface keys
   (`people.access`, `semantic-search.access`, `laboratory.access` and its two
-  sections, `cloud-functions.access`, `private-vault.access`, `tv.manage`, and
-  five separate administration permissions). The catalogue is authoritative: an
+  sections, `cloud-functions.access`, `private-vault.access`, `tv.manage`,
+  `cast.access`, and five separate administration permissions). The catalogue is
+  authoritative: an
   unknown key is rejected server-side and never stored, and so is a Laboratory
   section without the Laboratory shell.
 - **No privilege escalation** — `admin.roles.manage` can only ever be held

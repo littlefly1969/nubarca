@@ -41,7 +41,7 @@ local content-addressed blob storage and Docker Compose deployment.
 | | |
 | --- | --- |
 | server / web release | `0.3.0` |
-| NubArca TV | `1.0.1`, `versionCode` 2, runtime `nubarca-tv-native-2` (not advanced) |
+| NubArca TV | `1.0.10`, `versionCode` 12, runtime `nubarca-tv-native-11` (advanced) |
 | tracked files | 1,677 |
 | tracked bytes | 46,394,244 (44.2 MiB) |
 | identity contract | holds over all tracked text files; zero installation-specific values |

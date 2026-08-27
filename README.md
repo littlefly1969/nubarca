@@ -50,7 +50,7 @@ PostgreSQL owns the logical world — users, folders, files, metadata, shares an
 
 ## Deliberate non-goals
 
-NubArca does not currently provide WebDAV, desktop/mobile synchronization, DASH streaming, collaborative editing, calendar, contacts, chat, plugins or public registration.
+NubArca does not currently provide WebDAV, desktop filesystem synchronization, DASH streaming, collaborative editing, calendar, contacts, chat, plugins or public registration. The mobile client performs a one-way device-media ingest into the owner's library (see [Architecture](ARCHITECTURE.md) §6.3) rather than acting as a general-purpose sync or filesystem mirror.
 
 ## Getting started
 

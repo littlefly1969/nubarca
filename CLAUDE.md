@@ -90,7 +90,7 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
 - Every implemented feature has tests; run build + tests after each task.
 - Implement only the requested scope. Out of scope unless explicitly requested:
   WebDAV, plugin system, calendar, contacts, chat, collaborative editing,
-  desktop/mobile sync, HLS/DASH transcoding, advanced permissions, public
+  desktop sync, DASH transcoding, advanced permissions, public
   registration.
 
 ## Production deployment rules
