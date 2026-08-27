@@ -151,8 +151,8 @@ rides with each request. See
 ### Local retrieval platform
 
 The retrieval behind Ask NubArca became a general capability. Product Help is now
-one **domain** on it rather than its shape — the same substrate is what private
-documents and a local assistant will use, without a redesign.
+one **domain** on it rather than its shape — and the same substrate now carries
+owner-private documents and a local assistant, with no redesign.
 
 - **Domains carry a privacy policy, defined in code.** `product-help` is public
   and may ground an external model. `nubarca-repository` — NubArca's own approved
@@ -200,9 +200,19 @@ is introduced:
   no longer stamp a commit SHA onto whatever was half-edited on disk. Tracked
   symlinks are refused rather than followed, so no target outside the checkout
   can be imported.
-- **A source shared by two domains cannot silently change revision under one of
-  them** — that conflict is refused and named, because the row owns the chunks
-  both domains are reading.
+- **Content identity and domain snapshot are separate, so two domains sharing a
+  source upgrade one at a time.** A source row is one content interpretation
+  `(SourceKey, ContentHash, IndexFormatVersion)`; the **membership** records
+  which snapshot its own domain reads that content at. A file unchanged between
+  two revisions is the same row, so the second domain's upgrade moves one
+  revision forward and re-derives nothing — identical content, chunks and
+  embeddings are reused. A row only one domain uses is rewritten in place, so an
+  ordinary edit still costs one embedding; a row another domain is serving forks
+  instead, and the old one is deleted when its last membership leaves. The
+  predecessor kept the revision on the source row: advancing the repository
+  rewrote what Product Help was serving, that conflict was refused — correctly —
+  and Help could not go first for the same reason, which left a release
+  lifecycle with no legal first step.
 - **A domain holding two revisions refuses to answer** until a reindex
   converges, instead of picking a "most common" revision that means nothing.
 - **Reclassifying a document now invalidates the cached index.** All the ranking
@@ -217,10 +227,86 @@ is introduced:
 - **A benchmark question may not appear in the corpus it is measured against**,
   enforced by a test — which immediately caught one that had been line-wrapped
   back into the documentation.
+- **An oversized tracked file is refused before it is read.** `ls-tree -l`
+  carries each entry's blob size, so the verdict comes from the tree entry
+  rather than from reading the object — size used to be learned by loading the
+  thing being refused, which made a tracked multi-gigabyte file an
+  `OutOfMemoryException` inside a service. Underneath it, the `cat-file` session
+  enforces its own ceiling from the object header before allocating, because
+  that number arrives from a subprocess and a caller who forgot to check must
+  not be able to turn it into an allocation.
+- **A dead `cat-file` session is killed, never resynchronized or reused.** Every
+  blob read is time-bounded. The stream is a single conversation, so anything
+  that abandons a response leaves those bytes queued and the next read would
+  parse blob content as a header, returning every later object as somebody
+  else's; resynchronising would mean consuming exactly the work being refused.
+  The process is killed instead, the session faults, and every later call fails
+  immediately with a sanitized reason.
+- **Cancelling an index run is no longer reported as a repository timeout.**
+  A delay linked to the caller's token completes the instant a run is cancelled,
+  so the race read "the delay won" as "Git was too slow" and gave a
+  permanent-looking failure to something the operator did on purpose.
+  Cancellation now reaches the caller as itself; only the reason differs.
 
-No user documents, media metadata, People or Faces became retrievable knowledge,
-and no assistant tools or actions were added. See
+Media metadata, People and Faces did not become retrievable knowledge. See
 [docs/rag-platform.md](docs/rag-platform.md).
+
+### Owner-private document knowledge
+
+`user-documents` is NubArca's first **OwnerPrivate** retrieval domain: the first
+knowledge in the system that belongs to a person rather than to the product. A
+supported native text document in somebody's library becomes extracted text,
+chunks and local vectors, and a LocalTrusted model answers questions from it —
+with nothing of anybody else's in the request, and nothing at all leaving the
+installation.
+
+- **Extraction and chunking are local and native.** A supported text document is
+  read, extracted and chunked on the installation's own hardware; no document,
+  and no fragment of one, is sent anywhere to be understood.
+- **Text embeddings are local and profile-scoped.** Private vectors are produced
+  by the same local ONNX embedding path as the rest of the platform and keyed by
+  profile, so a profile change re-derives rather than silently mixing
+  dimensions. There is no hosted embedding alternative here either.
+- **Retrieval is owner-scoped before ranking, not after it.** The lexical index
+  is built from one person's rows for that request, and semantic retrieval is
+  exact cosine over that owner's eligible vectors. An approximate index with an
+  owner predicate would not be an owner-prefiltered search — the traversal would
+  cover everybody and the filter would only decide what surfaced, which silently
+  gives a person with few documents fewer and worse results. Owner scoping
+  therefore happens before ranking and before any limit is applied.
+- **Derived rows are not authority; the live `FileItem` is.** A `DocumentText`
+  records an extraction that happened in the past, and the file may since have
+  been deleted or moved into the Private Vault. Every private read joins the
+  live `FileItem`, so a chunk whose file no longer qualifies is not in the
+  corpus at all. Cleanup is housekeeping: a boundary that only holds once a
+  sweeper has run is broken for as long as that sweeper is behind. Blob identity
+  is never knowledge authority — two owners holding the same deduplicated bytes
+  have two independent extractions.
+- **Private storage is separate, not symmetric.** Private content lives in
+  `document_texts` / `document_chunks` / `document_chunk_embeddings`, which are
+  owner-scoped by schema, and never in `rag_sources`. Forcing it through the
+  system tables for symmetry would put a person's text in the table every system
+  domain reads, one forgotten `WHERE` away from a cross-owner answer. What the
+  two share is the contracts: chunking, embedding, fusion, the evidence gate and
+  domain policy.
+- **Only a LocalTrusted model may receive private evidence, and only a bounded,
+  approved slice of it.** The policy is the intersection of model trust with
+  domain policy, enforced over the evidence itself before a prompt exists. For
+  an owner-scoped domain it also requires the authenticated owner, and every
+  piece of evidence must carry it: unstamped evidence is refused as firmly as
+  wrong evidence, because treating "null" as "probably fine" is exactly how a
+  system domain's chunk would reach a private prompt.
+- **An External model receives zero calls for the private-documents operation.**
+  `Assistant__PrivateKnowledgeModel` must resolve to `LocalTrusted` with no
+  fallback; an External configuration produces no provider call at all, so the
+  question itself never leaves either. The operation derives the owner from the
+  request's identity and the domain from a constant, and its request shape has
+  no field for an owner, a domain, an object id, a model or a trust level — a
+  client cannot redirect it, because there is nowhere to put the instruction.
+
+Owner-private document knowledge is now supported through the dedicated
+`user-documents` boundary. This does not add Assistant tools, actions, arbitrary
+filesystem access, cross-owner retrieval, or External private generation.
 
 ### Google Cast
 

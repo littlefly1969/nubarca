@@ -142,6 +142,13 @@ builder.Services.AddOpenApi(options =>
 
         foreach (var pathItem in document.Paths.Values)
         {
+            // OpenApi 2.0 models Operations as nullable; a path item that
+            // declares no operation has nothing to retag.
+            if (pathItem.Operations is null)
+            {
+                continue;
+            }
+
             foreach (var operation in pathItem.Operations.Values)
             {
                 if (operation.Tags is null
