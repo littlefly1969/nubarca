@@ -63,8 +63,13 @@ public sealed class ProductHelpSourceProvider : IRagSourceProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // Size is checked from the TREE ENTRY like everywhere else. The
+            // manifest is curated, so this should never fire — which is exactly
+            // why it must not be the one path that allocates whatever a blob
+            // claims to be before noticing.
             if (!byPath.TryGetValue(source.Path, out var entry)
-                || !RepositorySourcePolicy.CheckGitMode(entry.Mode).IsEligible)
+                || !RepositorySourcePolicy.CheckGitMode(entry.Mode).IsEligible
+                || !RepositorySourcePolicy.CheckSize(entry.Size).IsEligible)
             {
                 missing.Add(source.Path);
                 continue;

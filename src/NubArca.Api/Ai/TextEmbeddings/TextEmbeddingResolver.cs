@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Rag;
+using NubArca.Api.Rag.Domains;
 
 namespace NubArca.Api.Ai.TextEmbeddings;
 
@@ -29,33 +29,35 @@ public sealed class TextEmbeddingResolver
 {
     private readonly AppDbContext _db;
     private readonly IEnumerable<ITextEmbeddingProvider> _providers;
-    private readonly IOptions<RagOptions> _options;
+    private readonly IRagSemanticProfileResolver _semantic;
 
     public TextEmbeddingResolver(
         AppDbContext db,
         IEnumerable<ITextEmbeddingProvider> providers,
-        IOptions<RagOptions> options)
+        IRagSemanticProfileResolver semantic)
     {
         _db = db;
         _providers = providers;
-        _options = options;
+        _semantic = semantic;
     }
 
-    public async Task<TextEmbeddingResolution> ResolveAsync(CancellationToken cancellationToken = default)
+    /// The profile THIS DOMAIN embeds with, or a sanitized reason it has none.
+    ///
+    /// The domain is required rather than defaulted. There is no
+    /// installation-wide "the embedding profile" any more — Product Help and the
+    /// repository measured differently enough that one answer for both was
+    /// actively wrong — and a parameterless overload would quietly reintroduce
+    /// one for whichever caller forgot.
+    public async Task<TextEmbeddingResolution> ResolveAsync(
+        RagDomainKey domain, CancellationToken cancellationToken = default)
     {
-        var options = _options.Value;
-        if (!options.SemanticEnabled)
+        var settings = _semantic.Resolve(domain);
+        if (!settings.Enabled)
         {
             return TextEmbeddingResolution.Unavailable(RagFailureReasons.EmbeddingDisabled);
         }
 
-        var key = options.TextEmbeddingProfileKey;
-        if (string.IsNullOrWhiteSpace(key))
-        {
-            return TextEmbeddingResolution.Unavailable(RagFailureReasons.EmbeddingProfileUnavailable);
-        }
-
-        return await ResolveProfileAsync(key, cancellationToken);
+        return await ResolveProfileAsync(settings.ProfileKey!, cancellationToken);
     }
 
     /// Resolve a NAMED profile regardless of the `SemanticEnabled` switch, for

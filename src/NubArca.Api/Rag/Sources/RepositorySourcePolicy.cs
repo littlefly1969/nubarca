@@ -255,6 +255,20 @@ public static class RepositorySourcePolicy
             : RepositoryEligibility.Eligible;
     }
 
+    /// Size eligibility from the TREE ENTRY, before any bytes exist.
+    ///
+    /// CheckContent below asks the same question of a byte array, which means
+    /// the array had to be allocated to ask it — a report rather than a bound. A
+    /// tracked multi-gigabyte blob is refused here, from the size `ls-tree -l`
+    /// already printed, and the object store is never asked for it.
+    ///
+    /// An UNKNOWN size is not refused: `-l` prints `-` for a non-blob, and those
+    /// are already excluded by mode. It falls through to the content check,
+    /// which still has the last word — but with the low-level allocation ceiling
+    /// in GitCatFileSession underneath it.
+    public static RepositoryEligibility CheckSize(long size)
+        => size > MaximumBytes ? RepositoryEligibility.No("too-large") : RepositoryEligibility.Eligible;
+
     /// Content eligibility: size, emptiness, and the one check an extension can
     /// never make — whether the bytes are actually text.
     public static RepositoryEligibility CheckContent(string relativePath, byte[] bytes)

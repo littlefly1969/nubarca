@@ -49,12 +49,20 @@ A domain is a body of knowledge with ONE privacy story.
 |---|---|---|---|---|
 | `product-help` | System | Public | no | **allowed** |
 | `nubarca-repository` | System | SystemInternal | no | **denied** |
+| `user-documents` | Owner | OwnerPrivate | **yes** | **denied** |
 
 Policy lives in `RagDomainRegistry` — in **code**, not in a database row. The
 database records which sources exist and which revision was indexed; it does not
 record whether evidence may leave the trust boundary. If it did, one `UPDATE`,
 one careless admin endpoint or one backup restored from a fork could turn
 `SystemInternal` into `Public`.
+
+`user-documents` is registered as POLICY and is not yet activated: there is no
+owner-scoped source provider and no private Assistant operation, and the
+Assistant gate refuses owner-private evidence at every trust level until the
+operation that derives the owner server-side exists. Registering it first is
+deliberate — the definition is the restrictive statement, and every later piece
+has to be built against it rather than alongside it.
 
 `nubarca-repository` is not External-safe even though NubArca is public on
 GitHub today. Public hosting is a fact about this month, not a property of the
@@ -165,6 +173,42 @@ entries are skipped for the same reason: there is no blob to read.
 
 Git runs at index time only.
 
+### The object store is read under a bound, or not at all
+
+`ls-tree` is asked for `-l`, so every entry carries its blob SIZE before anything
+is opened:
+
+```text
+path eligible  →  mode eligible  →  size known and under the limit  →  read blob
+```
+
+That ordering is the point. Size used to be learned by reading the object, so
+`too-large` was a verdict delivered after allocating the thing it refused, and a
+tracked multi-gigabyte blob was an `OutOfMemoryException` in a service — from a
+file nothing was ever going to index. Underneath it, `GitCatFileSession` enforces
+its own hard ceiling from the `cat-file` header before `new byte[size]`, because
+that number comes from a subprocess and a caller that forgot to check must not be
+able to turn it into an allocation.
+
+Every blob read is also TIME-bounded. A `--batch` that stops answering would
+otherwise hang an index run forever with no reason code and no way out.
+
+A session that stops mid-response is **dead**. The stream is a single
+conversation — one object id in, a header and exactly that many bytes out — so
+anything that abandons a response leaves those bytes queued, and the next read
+would parse blob content as a header and return every later object as somebody
+else's. Resynchronising means consuming what is left, which is the work being
+refused. So the process is killed, the session is faulted, and every later call
+fails immediately: `git-object-read-timeout`, `git-object-too-large`, sanitized,
+carrying no git stderr and no filesystem path.
+
+Cancellation is **not** a timeout. `Task.Delay` linked to the caller's token
+completes the instant a run is cancelled, and reading that as "git was too slow"
+reported every cancelled index as a repository failure — a permanent-looking
+error for something the operator did on purpose. The damage to the stream is the
+same and the session dies either way; the reason is not, and an
+`OperationCanceledException` reaches the caller as itself.
+
 ### Partial runs conclude nothing
 
 `rag index --limit N` is a PARTIAL run, and a partial run may not reconcile.
@@ -274,6 +318,45 @@ wrong.
 
 Retrieval modes are observable: `lexical`, `hybrid`, or
 `lexical-fallback-<reason>`. A degraded run says it is degraded.
+
+### Semantic is configured PER DOMAIN
+
+One switch for the whole substrate stopped being defensible the moment it was
+measured. Against `multilingual-e5-small`, Product Help's MRR goes from 0.938 to
+0.969 and the repository's Recall@5 goes from 0.800 **down** to 0.700. Those are
+not two opinions about one setting.
+
+```text
+Rag__Domains__product-help__SemanticEnabled=true
+Rag__Domains__product-help__TextEmbeddingProfileKey=rag-text-multilingual-e5-small-v1
+
+Rag__Domains__nubarca-repository__SemanticEnabled=false
+
+Rag__Domains__user-documents__SemanticEnabled=true
+Rag__Domains__user-documents__TextEmbeddingProfileKey=rag-text-multilingual-e5-small-v1
+```
+
+`Rag__SemanticEnabled` and `Rag__TextEmbeddingProfileKey` remain as an
+installation-wide default, so an installation configured before this existed
+keeps working. A domain that says nothing inherits it; a domain that says
+`false` is off; and the two are different states, which is why the per-domain
+setting is nullable — if "unmentioned" and "false" were the same value, adding a
+`Domains` entry for the repository would silently turn Product Help off.
+
+**An OwnerPrivate domain never inherits.** `user-documents` requires both its
+switch and its profile key stated explicitly, because "semantic was turned on
+for Help eighteen months ago" is not a decision anybody made about a person's
+own documents. The rule is derived from the domain's privacy class rather than
+from its key, so the next owner-private domain gets it without anyone
+remembering to add it to a list.
+
+Indexing and retrieval resolve through the same resolver. They have to: a domain
+searched in a coordinate system it was never written into produces cosine
+distances between two unrelated spaces, and nothing would report it.
+
+`rag domains` prints each domain's resolved `semantic_enabled` and
+`embedding_profile`, so the answer is readable rather than inferred from a global
+switch and a fallback rule.
 
 ## Embeddings are local
 

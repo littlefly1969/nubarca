@@ -138,13 +138,8 @@ public sealed class RagRepositoryRetrievalTests
     {
         // The Assistant's gate reads the evidence's domain rather than the
         // request's, so retrieval has to put the right one there.
-        var retriever = new RagRetriever(
-            NubArca.Api.Rag.Domains.RagDomainRegistry.Instance,
-            database: null,
-            new BundledProductHelpCorpusSource(RagTestHarness.ShippedProductHelp()),
-            new RagLexicalIndexCache(),
-            Options.Create(new RagOptions()),
-            NullLogger<RagRetriever>.Instance);
+        var retriever = RagTestHarness.Build(
+            new BundledProductHelpCorpusSource(RagTestHarness.ShippedProductHelp()));
 
         var result = await retriever.RetrieveAsync(new RagQuery(
             RagDomainKey.ProductHelp, "come faccio a utilizzare la funzione dei volti?", 5, 8000));

@@ -954,7 +954,9 @@ public sealed class RagIndexerTests : IDisposable
             RagDomainRegistry.Instance,
             new[] { provider },
             new TextEmbeddingResolver(
-                _db, new[] { embedding ?? new DeterministicTextEmbeddingProvider() }, options),
+                _db,
+                new[] { embedding ?? new DeterministicTextEmbeddingProvider() },
+                RagTestHarness.SemanticResolver(options.Value)),
             serializer,
             new RagVectorIndexService(_db, serializer, TimeProvider.System),
             options,

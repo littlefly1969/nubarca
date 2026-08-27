@@ -128,10 +128,44 @@ public static class RagRankingProfiles
             _ => 0.95,
         });
 
+    // ---- user-documents ----------------------------------------------------
+    //
+    // Somebody's own prose, and the thing it does NOT have is editorial
+    // metadata. Product Help's weights lean on a curated feature name, aliases,
+    // intent and audience; a document in a person's library has a filename, its
+    // headings and its text, and inventing a classification for it would be a
+    // guess presented as a signal.
+    //
+    // So the shape is Help's without the manifest: heading and title carry real
+    // weight because a private document's section titles are usually what it is
+    // about, alias expansion is OFF because there is no vocabulary to expand
+    // against, and there is no priority to multiply by — one person's documents
+    // do not rank each other editorially.
+    public static RagRankingProfile UserDocuments { get; } = new(
+        Domain: RagDomains.UserDocuments,
+        // No feature field exists for these, so its weight is irrelevant rather
+        // than tuned; stated explicitly so it cannot read as an oversight.
+        FeatureWeight: 1.0,
+        SectionWeight: 2.5,
+        TitleWeight: 2.5,
+        BodyWeight: 1.0,
+        ExpandedTermWeight: 0.45,
+        // Help's gate, not the repository's. These are natural-language
+        // questions over prose, and the lower code-shaped floor exists for rare
+        // identifiers that a private corpus has no equivalent of.
+        MinimumScore: 0.35,
+        RelativeFloor: 0.25,
+        ExpandAliases: false,
+        // Deliberately flat. Every boost available here would be a judgement
+        // about which of a person's own documents matters more, which is not
+        // something NubArca knows.
+        Boost: (_, _) => 1.0);
+
     public static RagRankingProfile For(RagDomainKey domain) => domain.Value switch
     {
         RagDomains.ProductHelp => ProductHelp,
         RagDomains.NubArcaRepository => Repository,
+        RagDomains.UserDocuments => UserDocuments,
         _ => throw new ArgumentOutOfRangeException(
             nameof(domain), $"No ranking profile for RAG domain '{domain.Value}'."),
     };

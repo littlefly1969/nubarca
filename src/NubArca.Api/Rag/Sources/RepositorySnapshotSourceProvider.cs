@@ -82,6 +82,17 @@ public sealed class RepositorySnapshotSourceProvider : IRagSourceProvider
                 continue;
             }
 
+            // SIZE BEFORE BYTES. The tree already said how big the blob is, so
+            // an oversized one is skipped without allocating it — the same
+            // verdict CheckContent would reach, reached before the cost it
+            // exists to avoid.
+            var size = RepositorySourcePolicy.CheckSize(entry.Size);
+            if (!size.IsEligible)
+            {
+                tally.Skip(size.Reason);
+                continue;
+            }
+
             byte[] bytes;
             try
             {

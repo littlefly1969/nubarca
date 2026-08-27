@@ -214,13 +214,9 @@ public sealed class RagCorpusCacheTests : IDisposable
         AddChunk(b, "Gli album raccolgono le foto senza spostarle.");
         await _db.SaveChangesAsync();
 
-        var retriever = new RagRetriever(
-            RagDomainRegistry.Instance,
-            new RagDatabaseServices(_corpus, null!, null!, null!),
+        var retriever = RagTestHarness.Build(
             new BundledProductHelpCorpusSource(ProductHelpCorpusStub()),
-            new RagLexicalIndexCache(),
-            Options.Create(new RagOptions()),
-            NullLogger<RagRetriever>.Instance);
+            database: new RagDatabaseServices(_corpus, null!, null!, null!));
 
         var result = await retriever.RetrieveAsync(
             new RagQuery(RagDomainKey.ProductHelp, "volti gruppi suggeriti assegna nome", 5, 4000));

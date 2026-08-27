@@ -20,13 +20,29 @@ namespace NubArca.Api.Tests.Rag;
 internal static class RagTestHarness
 {
     internal static RagRetriever ForProductHelp(ProductHelpCorpus corpus, RagOptions? options = null)
-        => new(
+        => Build(new BundledProductHelpCorpusSource(corpus), options);
+
+    /// The production retriever, wired the way the container wires it — the
+    /// REAL semantic resolver included, so a test cannot accidentally prove that
+    /// a domain is semantic when the shipped configuration says it is not.
+    internal static RagRetriever Build(
+        BundledProductHelpCorpusSource bundled,
+        RagOptions? options = null,
+        RagDatabaseServices? database = null)
+    {
+        var resolved = Options.Create(options ?? new RagOptions());
+        return new RagRetriever(
             RagDomainRegistry.Instance,
-            database: null,
-            new BundledProductHelpCorpusSource(corpus),
+            database,
+            bundled,
             new RagLexicalIndexCache(),
-            Options.Create(options ?? new RagOptions()),
+            resolved,
+            SemanticResolver(resolved.Value),
             NullLogger<RagRetriever>.Instance);
+    }
+
+    internal static IRagSemanticProfileResolver SemanticResolver(RagOptions options)
+        => new RagSemanticProfileResolver(RagDomainRegistry.Instance, Options.Create(options));
 
     /// The Product Help corpus built from the sources this release actually
     /// ships, from the repository the tests are running in.
