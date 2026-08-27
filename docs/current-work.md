@@ -837,6 +837,41 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   An **OwnerPrivate domain never inherits**: it must state both its switch and
   its profile, derived from the domain's privacy class rather than from a list of
   keys.
+- **One reading of a file is authority, and it is a stored fact.**
+  `DocumentText.IsCurrent`, with a filtered unique index behind it and the shared
+  `OwnerDocumentEligibility.EligibleChunks` boundary requiring it alongside
+  completion. Rich ingestion gives a file several possible readings — a PDF read
+  as native text before the PDF pipeline existed, a workbook re-read by a newer
+  extractor — and resolving which one answers by "latest timestamp" or "first
+  completed" lets a clock or an index decide, producing a plausible answer from a
+  superseded interpretation with no symptom. Two rules that look alike and are
+  opposites: when the BYTES change the old reading stops being authority BEFORE
+  the replacement is attempted, so a parse that never finishes cannot leave a
+  replaced document answering questions; when the bytes are UNCHANGED and a newer
+  parser fails or refuses, the working reading keeps authority, because an
+  upgrade that withdraws a working document is data loss with a version number.
+  Historical rows are kept as provenance and are neither retrieved nor embedded.
+- **Rich document format comes from the BYTES; the name and the MIME type only
+  decide whether to look.** An OOXML package must declare its own main part, and
+  a filename contradicting that declaration is refused rather than routed —
+  handing a DOCX to the spreadsheet parser is untrusted input arriving somewhere
+  written for a different structure. Archive bounds are read from the ZIP
+  DIRECTORY and enforced before the Open XML SDK sees the package, so a
+  compression bomb is refused before a byte is expanded. External package
+  relationships are never dereferenced, Excel formulas are never evaluated,
+  hidden sheets and hidden slides are not ingested, and deleted tracked-change
+  text is not part of the document. `DocumentChunk.Page` is a real PDF page and
+  nothing else; slides, sheets and Word sections live in the typed locator, since
+  a field meaning "page-like thing" cannot be read without knowing the format.
+- **OCR is a child process, off by default, and downloads nothing.** A managed
+  wrapper binds native code into the API where a hang cannot be interrupted; a
+  child can be killed, which is what makes the page timeout a bound. The page
+  goes in on stdin so no private page is written to a temp file, stdout is read
+  under a hard cap because it is untrusted process output, stderr is drained and
+  never logged since it carries paths, and cancellation reaches the caller as
+  itself rather than as a timeout. A language that is not installed makes OCR
+  not-ready; an installation with no engine boots normally and reports affected
+  PDFs as retryable, never permanently refused.
 - **Owner-private knowledge is `user-documents`, and derived rows are not
   authority.** Private content lives in `document_texts` / `document_chunks` /
   `document_chunk_embeddings` — owner-scoped by schema — never in `rag_sources`.

@@ -438,6 +438,83 @@ Owner-private document knowledge is now supported through the dedicated
 `user-documents` boundary. This does not add Assistant tools, actions, arbitrary
 filesystem access, cross-owner retrieval, or External private generation.
 
+### Rich document ingestion
+
+A person can now put a PDF, Word document, Excel workbook or PowerPoint
+presentation in their library and ask NubArca about it. A scanned PDF is
+recognised locally. Citations keep a location a person can turn to — a page, a
+heading path, a sheet, a slide.
+
+Nothing about the privacy boundary moved. Rich extraction changes WHAT can become
+eligible document text; it does not change who owns it, who may retrieve it,
+which model may see it, or how that model is authorized.
+
+- **Format is decided from the bytes.** The declared content type and the
+  filename answer one question — is opening this file worth doing — and never
+  what it is. An Office package must declare its own main part, and a filename
+  that contradicts the declaration is refused rather than resolved in either
+  direction: a DOCX renamed `.xlsx` reaching the spreadsheet parser is untrusted
+  input arriving somewhere written for a different structure. Legacy binary
+  Office, macro-enabled packages and password-protected documents are refused by
+  name — legacy and encrypted share their first eight bytes, so without looking
+  further every protected file would be reported as a 1997 Word document.
+- **Packages are treated as hostile structured input.** Entry count, per-entry
+  size and total uncompressed size are read from the archive DIRECTORY and
+  enforced before the Open XML SDK is handed the package, so a compression bomb
+  is refused on the strength of what it claims about itself, before a byte is
+  expanded. Nothing is extracted to disk; traversal-shaped entries are refused
+  anyway; external package relationships are never dereferenced. **Parsing means
+  reading visible document information — it never means executing document
+  behaviour.**
+- **Word keeps what the document says.** The heading path comes from the
+  document's own outline levels, tables are rows rather than loose cells, and
+  deleted tracked-change text is excluded: somebody who struck a clause and sent
+  the file for review has said that clause is gone. A hyperlink contributes its
+  display text and never its target. No page numbers, because Open XML does not
+  describe pages — pagination is a layout-engine result and any number here would
+  be invented.
+- **Excel is read, never run.** A formula is extracted as its expression plus the
+  value the workbook last stored, and NubArca does not recalculate it or claim it
+  did. Hidden sheets are not ingested: that is where lookup tables and scratch
+  work live, and importing them would surface material the author took out of
+  their own view. Rows carry their headers, because the relationship between a
+  label and its value is the only reason the table exists.
+- **PowerPoint keeps slide boundaries, and speaker notes are ingested** as their
+  own block — the slide says "Pilot" and the notes say why the date moved.
+  Hidden slides are not.
+- **PDF renders only what it cannot read.** Page text first; a page is recognised
+  only when its own text is unusable, judged by a bounded deterministic heuristic
+  rather than by a length check that a scanner's header stamp passes and a
+  broken-font page passes too. A page needing recognition that cannot get it
+  makes the whole extraction unavailable rather than publishing a document
+  quietly missing its scanned pages.
+- **OCR is local, off by default, and a child process.** A managed wrapper binds
+  native code into the API where a hang cannot be interrupted; a child can be
+  killed, which is what makes the page timeout a bound rather than a report. The
+  page travels on stdin, so no private page is written to a temp file. Stdout is
+  read under a hard cap because it is untrusted process output. Nothing is
+  downloaded — a language that is not installed makes OCR report not-ready, and
+  an installation with no engine boots normally with affected PDFs reported
+  retryable rather than permanently refused. Tesseract is the baseline behind a
+  provider seam, not a claim about final OCR quality.
+- **One reading of a file is authority.** `DocumentText.IsCurrent`, with a
+  filtered unique index and the shared eligibility boundary requiring it.
+  Resolving that by timestamp or query order would let a clock decide which
+  interpretation of somebody's document answers them, and every such answer looks
+  correct. When bytes change the old reading stops being authority before the
+  replacement is attempted; when bytes are unchanged and a newer parser fails,
+  the working reading keeps it.
+- **Location is typed, and `Page` stays a real PDF page.** Slides, sheets and
+  Word sections live in `LocatorKind`/`LocatorIndex`/`LocatorLabel`, because a
+  field meaning "page-like thing" cannot be read without knowing the format and
+  the reader that forgets renders "Page 4" for a spreadsheet.
+
+No visual or page embeddings, no reranker, no query rewriting and no retrieval
+tuning: rich text becomes ordinary passage text and flows through the retrieval
+that already existed. No Assistant tools or actions were added, no legacy or
+macro-enabled Office is parsed, and images embedded in documents are not
+recognised.
+
 ### Google Cast
 
 A video can be sent to a Chromecast, a Google TV, an Android TV or any other
