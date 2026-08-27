@@ -28,8 +28,15 @@ namespace NubArca.Api.Rag.Retrieval;
 /// there is a measurement to do and a slice to do it in.
 ///
 /// The candidate set is bounded regardless, so a library that grew past what
-/// this approach suits degrades into "the most recent N" rather than into an
-/// unbounded read.
+/// this approach suits degrades into an ARBITRARY N rather than into an
+/// unbounded read. Arbitrary, not newest: the bound is applied after ordering by
+/// `chunk.Id`, and those ids are random v4 GUIDs, so their sort order carries no
+/// chronology whatsoever — it is stable between two identical questions and
+/// otherwise meaningless. Ordering exists to make the truncation deterministic,
+/// not to make it a good choice. An owner past `MaxCandidateVectors` is getting
+/// a silently partial semantic pass, and picking WHICH partial set is worth
+/// having deserves the benchmark this slice does not have; recency, if it ever
+/// becomes the answer, needs a timestamp column to order by.
 public sealed class OwnerDocumentVectorRetriever
 {
     /// Ceiling on how many of an owner's vectors are ranked in one question.
@@ -115,20 +122,17 @@ public sealed class OwnerDocumentVectorRetriever
         // profile is matched exactly, because two profiles are two coordinate
         // systems and a cosine between them is a number with no meaning.
         var candidates = await (
-            from embedding in _db.DocumentChunkEmbeddings.AsNoTracking()
-            join chunk in _db.DocumentChunks.AsNoTracking()
-                on embedding.DocumentChunkId equals chunk.Id
-            join document in _db.DocumentTexts.AsNoTracking()
-                on chunk.DocumentTextId equals document.Id
-            join file in OwnerDocumentEligibility.Eligible(_db.FileItems.AsNoTracking(), ownerUserId)
-                on document.FileItemId equals file.Id
+            from row in OwnerDocumentEligibility.EligibleChunks(
+                _db.DocumentChunks.AsNoTracking(),
+                _db.DocumentTexts.AsNoTracking(),
+                _db.FileItems.AsNoTracking(),
+                ownerUserId)
+            join embedding in _db.DocumentChunkEmbeddings.AsNoTracking()
+                on row.Chunk.Id equals embedding.DocumentChunkId
             where embedding.ProfileId == profile.Id
                   && embedding.Dimension == dimension
-                  && chunk.OwnerUserId == ownerUserId
-                  && document.OwnerUserId == ownerUserId
-                  && document.Status == AiArtifactStatuses.Completed
-            orderby chunk.Id
-            select new { chunk.Id, embedding.EmbeddingBytes })
+            orderby row.Chunk.Id
+            select new { row.Chunk.Id, embedding.EmbeddingBytes })
             .Take(MaxCandidateVectors)
             .ToListAsync(cancellationToken);
 

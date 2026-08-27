@@ -28,7 +28,22 @@ public sealed record RagIndexedChunk(
     string Audience,
     string Intent,
     int Priority,
-    Guid ChunkId = default);
+    Guid ChunkId = default,
+
+    /// WHOSE knowledge this chunk is, for an owner-scoped domain. Null for
+    /// every system domain, whose knowledge belongs to the installation.
+    ///
+    /// Stamped by the corpus source from the LIVE owner the eligibility join
+    /// verified — never from the query that asked. The difference is the whole
+    /// point: an owner copied off the request and back onto the evidence proves
+    /// only that the request was consistent with itself, so a later gate
+    /// comparing the two would be checking the caller against the caller. This
+    /// field is what the corpus actually contained, so the gate compares two
+    /// independently-derived facts.
+    ///
+    /// Internal provenance, like `Revision`: never a response field, a citation,
+    /// a log line or anything a prompt sees.
+    Guid? OwnerUserId = null);
 
 /// A domain's complete lexical corpus at one revision.
 ///

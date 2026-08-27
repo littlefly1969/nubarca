@@ -43,15 +43,26 @@ public sealed class OwnerDocumentCorpusSource
     /// value, because an EMPTY revision is how the system domains say "this
     /// index is incoherent, refuse it". A private corpus is never incoherent in
     /// that sense: it is whatever the owner currently has.
+    /// `limit` bounds what is READ, and is deliberately not a page size. The
+    /// caller passes its ceiling plus one so that "at the limit" and "past it"
+    /// are distinguishable from the row count alone: reading exactly the ceiling
+    /// would make a corpus that is one chunk too large indistinguishable from
+    /// one that fits, and the difference decides between an answer and a
+    /// refusal. Nothing here truncates to fit — a caller that asked for max + 1
+    /// and got max + 1 back is expected to refuse.
     public async Task<RagCorpus> LoadAsync(
-        Guid ownerUserId, CancellationToken cancellationToken = default)
+        Guid ownerUserId, int? limit = null, CancellationToken cancellationToken = default)
     {
         if (ownerUserId == Guid.Empty) return RagCorpus.Empty(RagDomainKey.UserDocuments);
+        if (limit is <= 0) return RagCorpus.Empty(RagDomainKey.UserDocuments);
 
-        var rows = await EligibleChunks(ownerUserId)
+        var query = EligibleChunks(ownerUserId)
             .OrderBy(r => r.Name).ThenBy(r => r.Ordinal)
             .Select(r => new Row(
-                r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId, r.FileItemId))
+                r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId,
+                r.FileItemId, r.OwnerUserId));
+
+        var rows = await (limit is { } cap ? query.Take(cap) : query)
             .ToListAsync(cancellationToken);
 
         if (rows.Count == 0) return RagCorpus.Empty(RagDomainKey.UserDocuments);
@@ -87,7 +98,14 @@ public sealed class OwnerDocumentCorpusSource
                 Audience: string.Empty,
                 Intent: string.Empty,
                 Priority: 50,
-                ChunkId: row.ChunkId));
+                ChunkId: row.ChunkId,
+                // THE LIVE OWNER, from the FileItem the eligibility join just
+                // verified — not the chunk's denormalized copy and not whoever
+                // asked. This is the fact the Assistant's gate checks the
+                // caller against, so it has to come from the corpus rather than
+                // from the request, or the check compares the request to
+                // itself.
+                OwnerUserId: row.OwnerUserId));
         }
 
         return new RagCorpus(RagDomainKey.UserDocuments, PrivateRevision, chunks);
@@ -125,38 +143,40 @@ public sealed class OwnerDocumentCorpusSource
             .LongCountAsync(cancellationToken);
     }
 
-    /// The ONE join every private read goes through.
+    /// This corpus's projection of the ONE shared private boundary.
     ///
-    /// Owner appears TWICE on purpose — once on the chunk, once through the
-    /// eligibility predicate on the file — and they are not redundant. The chunk
-    /// column is a denormalized copy written at extraction time, and the
-    /// FileItem is the live truth. Requiring both means neither a stale copy nor
-    /// a re-parented file can produce a chunk this caller may read.
+    /// The rule itself lives in `OwnerDocumentEligibility.EligibleChunks` and is
+    /// stated once there, because retrieval, vector retrieval and EMBEDDING all
+    /// have to ask the identical question — owner on the chunk, a completed
+    /// extraction, and a file that is still eligible right now. When each caller
+    /// spelled its own join, the embedder's spelling was missing the live file
+    /// entirely.
     ///
-    /// The Private Vault needs no clause here beyond the explicit one inside
+    /// The Private Vault needs no clause beyond the explicit one inside
     /// OwnerDocumentEligibility: `FileItem` carries a global query filter of
-    /// `PrivateVaultId == null`, and nothing in this file says
+    /// `PrivateVaultId == null`, and nothing in this bounded context says
     /// `IgnoreQueryFilters()`. A vaulted document is invisible to this join by
     /// construction.
     private IQueryable<EligibleRow> EligibleChunks(Guid ownerUserId)
-        => from chunk in _db.DocumentChunks.AsNoTracking()
-           join document in _db.DocumentTexts.AsNoTracking()
-               on chunk.DocumentTextId equals document.Id
-           join file in OwnerDocumentEligibility.Eligible(_db.FileItems.AsNoTracking(), ownerUserId)
-               on document.FileItemId equals file.Id
-           where chunk.OwnerUserId == ownerUserId
-                 && document.OwnerUserId == ownerUserId
-                 && document.Status == AiArtifactStatuses.Completed
-           select new EligibleRow
-           {
-               ChunkId = chunk.Id,
-               Ordinal = chunk.Ordinal,
-               Heading = chunk.Heading,
-               Text = chunk.Text,
-               Name = file.Name,
-               DocumentTextId = document.Id,
-               FileItemId = file.Id,
-           };
+        => OwnerDocumentEligibility
+            .EligibleChunks(
+                _db.DocumentChunks.AsNoTracking(),
+                _db.DocumentTexts.AsNoTracking(),
+                _db.FileItems.AsNoTracking(),
+                ownerUserId)
+            .Select(r => new EligibleRow
+            {
+                ChunkId = r.Chunk.Id,
+                Ordinal = r.Chunk.Ordinal,
+                Heading = r.Chunk.Heading,
+                Text = r.Chunk.Text,
+                Name = r.File.Name,
+                DocumentTextId = r.Document.Id,
+                FileItemId = r.File.Id,
+                // The LIVE owner. Read off the FileItem the predicate matched,
+                // so it is the same value the boundary was enforced with.
+                OwnerUserId = r.File.OwnerUserId,
+            });
 
     /// The revision token a private corpus carries.
     ///
@@ -176,11 +196,12 @@ public sealed class OwnerDocumentCorpusSource
         public string Name { get; init; } = string.Empty;
         public Guid DocumentTextId { get; init; }
         public Guid FileItemId { get; init; }
+        public Guid OwnerUserId { get; init; }
     }
 
     private sealed record Row(
         Guid ChunkId, int Ordinal, string? Heading, string? Text,
-        string Name, Guid DocumentTextId, Guid FileItemId);
+        string Name, Guid DocumentTextId, Guid FileItemId, Guid OwnerUserId);
 }
 
 /// Safe counts about one owner's private corpus. Numbers only — never a name,

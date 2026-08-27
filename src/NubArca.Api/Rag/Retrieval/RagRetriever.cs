@@ -101,10 +101,16 @@ public sealed class RagRetriever : IRagRetriever
             text = text[..options.EffectiveQueryCharacters];
         }
 
-        var index = await BuildIndexAsync(domain, query.OwnerUserId, cancellationToken);
+        // BEFORE ANY MODEL IS TOUCHED. The ceiling is checked while the corpus is
+        // being built, which is upstream of the query embedding and far upstream
+        // of generation — so an over-limit private library costs zero provider
+        // calls, not one embedding call and then a refusal.
+        var built = await BuildIndexAsync(domain, query.OwnerUserId, cancellationToken);
+        var index = built.Index;
         if (index is null || index.IsEmpty)
         {
-            return RagRetrievalResult.Unavailable(query.Domain, RagFailureReasons.IndexUnavailable);
+            return RagRetrievalResult.Unavailable(
+                query.Domain, built.Reason ?? RagFailureReasons.IndexUnavailable);
         }
         if (index.Corpus.IsMixedRevision)
         {
@@ -196,7 +202,8 @@ public sealed class RagRetriever : IRagRetriever
                 RagFailureReasons.OwnerRequired);
         }
 
-        var index = await BuildIndexAsync(definition, ownerUserId, cancellationToken);
+        var built = await BuildIndexAsync(definition, ownerUserId, cancellationToken);
+        var index = built.Index;
         var revision = index?.Corpus.Revision;
         var mixed = index?.Corpus.IsMixedRevision == true;
         var available = index is { IsEmpty: false }
@@ -225,7 +232,7 @@ public sealed class RagRetriever : IRagRetriever
         var reason = available
             ? (semanticAvailable ? null : resolution.Reason ?? RagFailureReasons.PgvectorUnavailable)
             : index is null or { IsEmpty: true }
-                ? RagFailureReasons.IndexUnavailable
+                ? built.Reason ?? RagFailureReasons.IndexUnavailable
                 : mixed
                     ? RagFailureReasons.MixedRevisionIndex
                     : RagFailureReasons.RevisionMismatch;
@@ -250,7 +257,20 @@ public sealed class RagRetriever : IRagRetriever
     /// preferring it is also what makes semantic Help possible at all — and
     /// falling back is what keeps Help working on an installation that has never
     /// run `rag index`.
-    private async Task<RagLexicalIndex?> BuildIndexAsync(
+    /// An index, or the sanitized reason there is none.
+    ///
+    /// The reason exists because "empty" and "too large to hold" are opposite
+    /// conditions that a bare null cannot tell apart, and an operator reading
+    /// `rag_index_unavailable` for a library of a million chunks would go
+    /// looking for the wrong problem entirely.
+    private readonly record struct IndexOutcome(RagLexicalIndex? Index, string? Reason)
+    {
+        public static readonly IndexOutcome None = new(null, null);
+        public static IndexOutcome Refused(string reason) => new(null, reason);
+        public static IndexOutcome Built(RagLexicalIndex index) => new(index, null);
+    }
+
+    private async Task<IndexOutcome> BuildIndexAsync(
         RagDomainDefinition domain, Guid? ownerUserId, CancellationToken cancellationToken)
     {
         var key = domain.DomainKey;
@@ -271,11 +291,39 @@ public sealed class RagRetriever : IRagRetriever
         // one domain where a cache-key bug is a privacy incident.
         if (domain.RequiresOwner)
         {
-            if (ownerUserId is not { } owner || owner == Guid.Empty) return null;
-            if (_database?.OwnerDocuments is not { } documents) return null;
+            if (ownerUserId is not { } owner || owner == Guid.Empty) return IndexOutcome.None;
+            if (_database?.OwnerDocuments is not { } documents) return IndexOutcome.None;
 
-            var corpus = await documents.LoadAsync(owner, cancellationToken);
-            return corpus.IsEmpty ? null : new RagLexicalIndex(corpus, RagRankingProfiles.For(key));
+            // THE CEILING IS ENFORCED BEFORE THE INDEX IS BUILT, NOT AFTER.
+            //
+            // Every other domain is bounded at INDEX time, by RagIndexer, which
+            // refuses a corpus past `MaxIndexedChunks`. A private corpus never
+            // passes through the indexer at all — it is assembled per request
+            // from one person's rows — so without this it was the one path that
+            // read an unbounded corpus straight into memory, once per question,
+            // on a shared process.
+            //
+            // Read max + 1 and refuse at max + 1. That is what makes the bound
+            // detectable rather than invisible: `Take(max)` would silently hand
+            // back an arbitrary alphabetical prefix of somebody's library, and
+            // an answer drawn from a fraction of a person's documents is
+            // indistinguishable, to them, from an answer drawn from all of them.
+            // A refusal is legible; a quiet truncation is a wrong answer with a
+            // confident tone.
+            var ceiling = _options.Value.EffectiveMaxIndexedChunks;
+            var corpus = await documents.LoadAsync(owner, ceiling + 1, cancellationToken);
+            if (corpus.Chunks.Count > ceiling)
+            {
+                // Count only — never the owner, never a name, never a title.
+                _log.LogWarning(
+                    "rag: {Domain} corpus exceeds the configured chunk ceiling ({Ceiling}); "
+                    + "retrieval refused", domain.Key, ceiling);
+                return IndexOutcome.Refused(RagFailureReasons.CorpusTooLarge);
+            }
+
+            return corpus.IsEmpty
+                ? IndexOutcome.None
+                : IndexOutcome.Built(new RagLexicalIndex(corpus, RagRankingProfiles.For(key)));
         }
 
         if (_database is { } services)
@@ -283,16 +331,16 @@ public sealed class RagRetriever : IRagRetriever
             var databaseSignature = await services.Corpus.GetSignatureAsync(key, cancellationToken);
             if (databaseSignature != "empty")
             {
-                return await _cache.GetOrBuildAsync(
-                    key, databaseSignature, ct => services.Corpus.LoadAsync(key, ct), cancellationToken);
+                return IndexOutcome.Built(await _cache.GetOrBuildAsync(
+                    key, databaseSignature, ct => services.Corpus.LoadAsync(key, ct), cancellationToken));
             }
         }
 
         var bundledSignature = await _bundled.GetSignatureAsync(key, cancellationToken);
-        if (bundledSignature == "empty") return null;
+        if (bundledSignature == "empty") return IndexOutcome.None;
 
-        return await _cache.GetOrBuildAsync(
-            key, bundledSignature, ct => _bundled.LoadAsync(key, ct), cancellationToken);
+        return IndexOutcome.Built(await _cache.GetOrBuildAsync(
+            key, bundledSignature, ct => _bundled.LoadAsync(key, ct), cancellationToken));
     }
 
     /// REVISION GATE, for the domain that ships with a release.
@@ -373,11 +421,24 @@ public sealed class RagRetriever : IRagRetriever
                 LexicalRank: candidate.LexicalRank,
                 VectorRank: candidate.VectorRank,
                 FusionRank: candidate.Rank,
-                // The owner the QUERY was scoped to. Stamping it here — where
-                // the corpus that produced this chunk was built from exactly
-                // that owner's eligible files — is what lets the Assistant gate
-                // verify the evidence instead of taking retrieval's word for it.
-                OwnerUserId: query.OwnerUserId));
+                // COPIED FROM THE CHUNK, never from the query.
+                //
+                // Stamping `query.OwnerUserId` here would make the Assistant's
+                // owner gate circular: it compares evidence owner against the
+                // authenticated caller, and if this field were the caller's own
+                // id written back out, that comparison could only ever confirm
+                // that the request agreed with itself. Every chunk in an
+                // owner-scoped corpus is stamped by the corpus source from the
+                // live owner its eligibility join verified, so the gate now
+                // checks retrieval's OUTPUT against the caller — two facts
+                // derived independently, which is the only version of the check
+                // that can fail when something is wrong.
+                //
+                // A system chunk carries null and stays null. The gate refuses
+                // unstamped evidence for an owner-scoped domain, so a system
+                // chunk that reached a private result fails there rather than
+                // being relabelled with the caller's id on the way past.
+                OwnerUserId: chunk.OwnerUserId));
         }
 
         return evidence;

@@ -441,15 +441,34 @@ public sealed class OwnerDocumentIndexer
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // OWNER FIRST, in the query. Every candidate is filtered by owner
-            // before anything is taken, so a paging bug cannot page into
-            // somebody else's chunks.
-            var candidates = _db.DocumentChunks.AsNoTracking()
-                .Where(c => c.OwnerUserId == ownerUserId
-                            && c.Id > cursor
+            // THE SAME LIVE BOUNDARY RETRIEVAL USES, not the chunk's own owner
+            // column.
+            //
+            // Owner first in the query, so a paging bug cannot page into
+            // somebody else's chunks — but owner alone is a derived row reading
+            // a derived row. A chunk survives its file: deleting a document,
+            // moving it into the Private Vault or dropping it out of the library
+            // leaves `document_chunks` intact until housekeeping catches up, and
+            // selecting candidates by `OwnerUserId` alone would spend local
+            // inference minting FRESH vectors for exactly those rows. Retrieval
+            // would still refuse to read them, so nothing would leak — but the
+            // indexer would be re-arming stale content on every pass, and a
+            // document the owner deleted would keep acquiring new derived data
+            // for as long as the sweeper was behind.
+            //
+            // So embedding joins the live `FileItem` through the same predicate
+            // retrieval joins, and a chunk that is not readable does not become
+            // embeddable either.
+            var candidates = OwnerDocumentEligibility
+                .EligibleChunks(
+                    _db.DocumentChunks.AsNoTracking(),
+                    _db.DocumentTexts.AsNoTracking(),
+                    _db.FileItems.AsNoTracking(),
+                    ownerUserId)
+                .Where(r => r.Chunk.Id > cursor
                             && !_db.DocumentChunkEmbeddings.Any(
-                                e => e.DocumentChunkId == c.Id && e.ProfileId == profile.Id))
-                .Select(c => new { c.Id, c.Text, c.DocumentTextId });
+                                e => e.DocumentChunkId == r.Chunk.Id && e.ProfileId == profile.Id))
+                .Select(c => new { c.Chunk.Id, c.Chunk.Text, c.Chunk.DocumentTextId });
 
             // A PARTIAL run embeds only what it saw, exactly like the system
             // indexer: a bounded trial run must not start an hour of inference
