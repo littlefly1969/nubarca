@@ -41,7 +41,7 @@ The workflow uses the `mobile-production` GitHub Environment, restricted to
 protected branches. It requires this Environment variable:
 
 ```text
-NUBARCA_PUBLIC_ORIGIN=https://nanocloud.littlefly.it
+NUBARCA_PUBLIC_ORIGIN=https://your-nubarca-origin.example
 ```
 
 and these Environment secrets:
