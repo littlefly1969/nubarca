@@ -57,10 +57,12 @@ test('PR CI builds and cold-launches an Android APK', () => {
   assert.match(ciWorkflow, /adb shell getprop sys_boot_completed|adb shell getprop sys\.boot_completed/);
   assert.match(ciWorkflow, /npx expo start --localhost --port 8081/);
   assert.match(ciWorkflow, /adb reverse tcp:8081 tcp:8081/);
+  assert.match(ciWorkflow, /export ANDROID_AVD_HOME="\$RUNNER_TEMP\/android-avd"/);
 });
 
 test('signed release cold-launches the exact APK before publication', () => {
   assert.match(workflow, /system-images;android-35;default;x86_64/);
+  assert.match(workflow, /export ANDROID_AVD_HOME="\$RUNNER_TEMP\/android-avd"/);
   assert.match(
     workflow,
     /smoke-android-startup\.sh[\s\\]+mobile\/android\/app\/build\/outputs\/apk\/release\/app-release\.apk/,

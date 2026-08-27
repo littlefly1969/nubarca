@@ -287,6 +287,8 @@ jobs:
         run: |
           set -euo pipefail
           sudo chmod 0666 /dev/kvm
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_AVD_HOME"
           printf 'no\n' | avdmanager create avd \
             --force \
             --name nubarca-ci-api35 \
