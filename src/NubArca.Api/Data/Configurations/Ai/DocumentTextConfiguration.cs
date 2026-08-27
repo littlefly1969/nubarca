@@ -55,6 +55,23 @@ public class DocumentTextConfiguration : IEntityTypeConfiguration<DocumentText>
         builder.HasIndex(d => d.OwnerUserId)
             .HasDatabaseName("ix_document_texts_owner");
 
+        // AT MOST ONE CURRENT EXTRACTION PER FILE, enforced by the database.
+        //
+        // A filtered unique index rather than application discipline, because
+        // the failure it prevents is silent. Two current rows do not throw
+        // anywhere: retrieval simply joins both, and somebody's question gets
+        // answered from a mixture of two readings of their document with no
+        // symptom that anything is wrong. A partial index turns that into a
+        // write that cannot commit, at the moment it is attempted.
+        //
+        // Filtered on IsCurrent so historical rows are unconstrained — there may
+        // be any number of superseded readings of one file, and they are the
+        // provenance a future extractor upgrade reads.
+        builder.HasIndex(d => d.FileItemId)
+            .IsUnique()
+            .HasFilter("\"IsCurrent\"")
+            .HasDatabaseName("ux_document_texts_current_per_file");
+
         // Not a foreign key to BlobObject on purpose. This column records WHICH
         // BYTES were read, for idempotence; it is not a reference that should
         // keep a blob alive or cascade when one is purged. Reference counting is

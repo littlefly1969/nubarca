@@ -258,6 +258,18 @@ public sealed class OwnerDocumentIndexer
         existing.ChunkFormatVersion = OwnerDocumentChunkFormat.Current;
         state.Extracted++;
 
+        // THIS READING BECOMES THE CURRENT ONE, and any other reading of the
+        // same file stops being authority in the same save.
+        //
+        // Two statements, one transaction, in this order — the demotion has to
+        // be visible to the database before the promotion, or the filtered
+        // unique index sees two current rows for one file and refuses the write.
+        // That refusal is the point: it is the constraint proving there is never
+        // a moment when a question could be answered from two interpretations of
+        // one document at once.
+        await DemoteOtherDerivationsAsync(file.Id, existing.Id, cancellationToken);
+        existing.IsCurrent = true;
+
         await _db.SaveChangesAsync(cancellationToken);
 
         if (!chunksAreCurrent)
@@ -268,6 +280,33 @@ public sealed class OwnerDocumentIndexer
         }
 
         return existing.Id;
+    }
+
+    /// Every other extraction of this file stops being authority.
+    ///
+    /// Today there is one production extraction profile and this ordinarily
+    /// matches nothing. It exists because the rich profiles arriving on top of
+    /// it make several readings of one file normal, and the moment a second
+    /// profile writes is exactly the moment nobody remembers to add this.
+    ///
+    /// The rows are kept, not deleted: which profile produced what is the
+    /// provenance a later extractor upgrade reads, and losing it would make an
+    /// upgrade indistinguishable from a first extraction.
+    private async Task DemoteOtherDerivationsAsync(
+        Guid fileItemId, Guid keepId, CancellationToken cancellationToken)
+    {
+        var superseded = await _db.DocumentTexts
+            .Where(d => d.FileItemId == fileItemId && d.Id != keepId && d.IsCurrent)
+            .ToListAsync(cancellationToken);
+
+        if (superseded.Count == 0) return;
+
+        foreach (var row in superseded)
+        {
+            row.IsCurrent = false;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     /// A permanent CONTENT skip, recorded against the bytes that caused it.
@@ -315,6 +354,17 @@ public sealed class OwnerDocumentIndexer
         row.Text = null;
         row.CharCount = null;
         row.ChunkFormatVersion = OwnerDocumentChunkFormat.Current;
+
+        // A REFUSAL IS ALSO A READING. "These bytes cannot be read" is what
+        // NubArca currently knows about this file, so it becomes the current
+        // row and supersedes whatever came before — otherwise an earlier
+        // successful extraction of DIFFERENT bytes would stay authoritative and
+        // keep answering questions about a file that has since been replaced
+        // with something unreadable. The chunks were already removed above; this
+        // is the same statement at the level of which row is authority.
+        await DemoteOtherDerivationsAsync(file.Id, row.Id, cancellationToken);
+        row.IsCurrent = true;
+
         await _db.SaveChangesAsync(cancellationToken);
     }
 

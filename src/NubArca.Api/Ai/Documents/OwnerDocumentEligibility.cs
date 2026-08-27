@@ -101,12 +101,13 @@ public static class OwnerDocumentEligibility
     ///
     /// `Eligible` above answers "may this file become knowledge". This answers
     /// the question every consumer actually asks — "may this CHUNK be used" —
-    /// and it exists because the answer has three parts that are easy to write
-    /// two of. The chunk's owner column is a denormalized copy written at
-    /// extraction time; the document must be a COMPLETED extraction; and the
-    /// file must still be eligible right now. Requiring all three means neither
-    /// a stale copy, nor a half-written extraction, nor a file that has since
-    /// been deleted, vaulted, excluded or re-parented can contribute.
+    /// and it exists because the answer has four parts that are easy to write
+    /// three of. The chunk's owner column is a denormalized copy written at
+    /// extraction time; the document must be the CURRENT interpretation of its
+    /// file; it must be a COMPLETED extraction; and the file must still be
+    /// eligible right now. Requiring all four means neither a stale copy, nor a
+    /// superseded reading, nor a half-written extraction, nor a file that has
+    /// since been deleted, vaulted, excluded or re-parented can contribute.
     ///
     /// Retrieval, vector retrieval and EMBEDDING all go through here. That last
     /// one is the reason this is a shared method rather than a query repeated in
@@ -124,6 +125,14 @@ public static class OwnerDocumentEligibility
            join file in Eligible(files, ownerUserId) on document.FileItemId equals file.Id
            where chunk.OwnerUserId == ownerUserId
                  && document.OwnerUserId == ownerUserId
+                 // THE CURRENT READING, not merely a completed one. A file may
+                 // carry several completed extractions — the native-text pass
+                 // that read a PDF before the PDF pipeline existed, or the
+                 // profile that preceded an extractor upgrade — and every one of
+                 // them is a plausible-looking answer drawn from a superseded
+                 // interpretation. Authority is the stored flag, uniquely
+                 // indexed, never a timestamp or an ordering convention.
+                 && document.IsCurrent
                  && document.Status == AiArtifactStatuses.Completed
            select new EligibleChunk { Chunk = chunk, Document = document, File = file };
 

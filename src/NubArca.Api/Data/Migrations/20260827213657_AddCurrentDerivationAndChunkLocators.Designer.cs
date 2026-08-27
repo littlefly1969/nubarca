@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using NubArca.Api.Data;
@@ -11,9 +12,11 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827213657_AddCurrentDerivationAndChunkLocators")]
+    partial class AddCurrentDerivationAndChunkLocators
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2172,9 +2175,6 @@ namespace NubArca.Api.Data.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
-                    b.Property<bool>("CanManagePartyMessages")
-                        .HasColumnType("boolean");
-
                     b.Property<DateTime?>("DeclinedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3438,9 +3438,6 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<int>("PhotoSlideSeconds")
                         .HasColumnType("integer");
 
-                    b.Property<bool>("RequireMessageApproval")
-                        .HasColumnType("boolean");
-
                     b.Property<bool>("RequireUploadApproval")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
@@ -3559,72 +3556,6 @@ namespace NubArca.Api.Data.Migrations
                         .HasDatabaseName("ix_party_face_search_sessions_owner_album_expires");
 
                     b.ToTable("party_face_search_sessions", (string)null);
-                });
-
-            modelBuilder.Entity("NubArca.Api.Domain.PartyMessage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("AlbumId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Body")
-                        .IsRequired()
-                        .HasMaxLength(240)
-                        .HasColumnType("character varying(240)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DisplayName")
-                        .HasMaxLength(80)
-                        .HasColumnType("character varying(80)");
-
-                    b.Property<DateTime?>("HeroPromotedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("HeroPromotedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime?>("ModeratedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("ModeratedByUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("OwnerUserId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("PartyAlbumLinkId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("PartyParticipantId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("AlbumId");
-
-                    b.HasIndex("OwnerUserId");
-
-                    b.HasIndex("PartyParticipantId");
-
-                    b.HasIndex("PartyAlbumLinkId", "HeroPromotedAt")
-                        .HasDatabaseName("ix_party_messages_link_hero_promoted");
-
-                    b.HasIndex("PartyAlbumLinkId", "Status", "CreatedAt")
-                        .HasDatabaseName("ix_party_messages_link_status_created");
-
-                    b.ToTable("party_messages", (string)null);
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.PartyParticipant", b =>
@@ -5962,32 +5893,6 @@ namespace NubArca.Api.Data.Migrations
                         .HasForeignKey("OwnerUserId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-                });
-
-            modelBuilder.Entity("NubArca.Api.Domain.PartyMessage", b =>
-                {
-                    b.HasOne("NubArca.Api.Domain.Album", null)
-                        .WithMany()
-                        .HasForeignKey("AlbumId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("NubArca.Api.Domain.User", null)
-                        .WithMany()
-                        .HasForeignKey("OwnerUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("NubArca.Api.Domain.PartyAlbumLink", null)
-                        .WithMany()
-                        .HasForeignKey("PartyAlbumLinkId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("NubArca.Api.Domain.PartyParticipant", null)
-                        .WithMany()
-                        .HasForeignKey("PartyParticipantId")
-                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.PartyParticipant", b =>

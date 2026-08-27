@@ -46,6 +46,27 @@ public class DocumentText
 
     public Guid ProfileId { get; set; }
 
+    // IS THIS THE CURRENT READING OF THIS FILE?
+    //
+    // Slice 3 had one production extraction profile, so "the extraction of this
+    // file" and "the row for this file" were the same statement and nothing had
+    // to choose. Rich ingestion breaks that: a PDF may have been read once by
+    // the native-text profile and once by the PDF pipeline, and a file can carry
+    // several completed rows describing the same bytes at different times.
+    //
+    // Retrieval must not resolve that by convention. "Latest timestamp", "first
+    // completed", "highest priority source" and "whatever the query ordered by"
+    // are all ways of letting a race, a clock or an index decide which
+    // interpretation of somebody's document answers their question — and each
+    // one fails silently, producing a plausible answer from a superseded
+    // reading. So authority is a stored fact with an enforced uniqueness: at
+    // most one current row per FileItem, and only a current row is evidence.
+    //
+    // Historical rows are kept rather than deleted. They record which profile
+    // produced what, which is the provenance a future extractor upgrade needs;
+    // they are simply not authority any more.
+    public bool IsCurrent { get; set; }
+
     // How the text was obtained ("native" | "pdf" | "ocr").
     public string Source { get; set; } = string.Empty;
 

@@ -33,7 +33,39 @@ public class DocumentChunk
 
     public int? StartOffset { get; set; }
     public int? EndOffset { get; set; }
+
+    // A REAL PDF PAGE, and nothing else.
+    //
+    // The tempting shortcut is to let this mean "page-like thing" and store a
+    // slide number, a sheet ordinal or a Word pseudo-page in it. That would make
+    // `Page` a field whose meaning depends on a format recorded elsewhere, which
+    // is the same as having no meaning: a later reader — a citation builder, a
+    // visual derivative, a diagnostic query — cannot interpret it without
+    // joining back to find out what kind of document it came from, and the one
+    // that forgets produces a confident nonsense like "Page 4" for a
+    // spreadsheet. Word is the sharpest case: Open XML markup does not define
+    // the pages Word renders, so any number here would be invented. Null is the
+    // honest value for every format that has no pages.
     public int? Page { get; set; }
+
+    // WHERE IN ITS OWN DOCUMENT this chunk is, in that document's own units.
+    //
+    // Typed rather than a formatted string, because two different readers need
+    // it: the citation builder, which turns it into something a person
+    // recognises, and a future visual derivative that has to point at the same
+    // page/slide/sheet without parsing a citation back into structure. A string
+    // like "Slide 7 — Launch plan" serves the first and defeats the second.
+    //
+    //   format        Kind        Index              Label
+    //   native text   text/null   null               null
+    //   PDF           page        1-based page       null
+    //   DOCX          section     section ordinal    heading path
+    //   XLSX          sheet       sheet ordinal      sheet name
+    //   PPTX          slide       1-based slide      slide title
+    public string? LocatorKind { get; set; }
+    public int? LocatorIndex { get; set; }
+    public string? LocatorLabel { get; set; }
+
     public int? TokenCount { get; set; }
 
     public DateTime CreatedAt { get; set; }

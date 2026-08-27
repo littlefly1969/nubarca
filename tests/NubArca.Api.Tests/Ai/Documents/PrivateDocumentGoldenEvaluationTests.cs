@@ -409,6 +409,10 @@ public sealed class PrivateDocumentGoldenEvaluationTests : IDisposable
             SourceBlobObjectId = blob.Id,
             Source = DocumentTextSources.Native,
             Status = AiArtifactStatuses.Completed,
+            // The fixture seeds a document as the CURRENT reading of its
+            // file, which is what every one of these tests means by
+            // "this person has this document indexed".
+            IsCurrent = true,
             TextHash = RagHash.Sha256Hex(body),
             Text = body,
             CharCount = body.Length,
