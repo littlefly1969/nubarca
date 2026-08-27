@@ -31,6 +31,7 @@ PACKAGE = ROOT / "assets" / "brand" / "nubarca"
 RUNTIME = PACKAGE / "runtime"
 WEB_PUBLIC = ROOT / "frontend" / "public" / "brand"
 TV_ASSETS = ROOT / "tv" / "assets" / "brand"
+MOBILE_ASSETS = ROOT / "mobile" / "assets" / "brand"
 
 # canonical path (relative to runtime/) -> destination directory
 COPIES: list[tuple[str, Path]] = [
@@ -76,6 +77,9 @@ COPIES: list[tuple[str, Path]] = [
         "nubarca-tv-lockup-transparent-1800w.png",
         "nubarca-tv-splash-1920x1080.png",
     )],
+    # --- Mobile Android launcher --------------------------------------------
+    ("pwa/nubarca-expo-app-icon-1024.png", MOBILE_ASSETS),
+    ("tv/nubarca-android-adaptive-foreground-432.png", MOBILE_ASSETS),
 ]
 
 
@@ -128,7 +132,7 @@ def main() -> int:
                 copied += 1
 
     # A reference board must never reach a bundled directory.
-    for dest_dir in (WEB_PUBLIC, TV_ASSETS):
+    for dest_dir in (WEB_PUBLIC, TV_ASSETS, MOBILE_ASSETS):
         if not dest_dir.exists():
             continue
         for stray in dest_dir.iterdir():

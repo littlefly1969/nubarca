@@ -2,7 +2,7 @@
 //
 // The fail-closed rules in app.config.js are VERIFIED through the REAL Expo
 // pipeline — `expo config` evaluates the file exactly like a build would:
-//   * production without EXPO_PUBLIC_NUBARCA_API_BASE_URL must FAIL;
+//   * production without NUBARCA_PUBLIC_ORIGIN must FAIL;
 //   * production with an http:// origin must FAIL;
 //   * production with an https:// origin must PASS and ship with Android
 //     cleartext DISABLED and iOS arbitrary loads OFF.
@@ -10,13 +10,18 @@
 
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 
 const mobileDir = new URL('..', import.meta.url).pathname;
+const require = createRequire(import.meta.url);
+const release = require('../release-contract.json');
 
 function runExpoConfig(nodeEnv, baseUrl) {
   const env = { ...process.env, NODE_ENV: nodeEnv };
-  if (baseUrl === undefined) delete env.EXPO_PUBLIC_NUBARCA_API_BASE_URL;
-  else env.EXPO_PUBLIC_NUBARCA_API_BASE_URL = baseUrl;
+  delete env.NUBARCA_PUBLIC_ORIGIN;
+  delete env.EXPO_PUBLIC_NUBARCA_API_BASE_URL;
+  delete env.NUBARCA_MOBILE_API_BASE_URL;
+  if (baseUrl !== undefined) env.NUBARCA_PUBLIC_ORIGIN = baseUrl;
 
   const res = spawnSync(
     'npx',
@@ -57,6 +62,10 @@ check('production with an https:// origin passes with cleartext OFF', () => {
   assert.equal(r.ok, true, `expo config failed:\n${r.stderr}`);
   const cfg = JSON.parse(r.stdout);
   assert.equal(cfg.extra.apiBaseUrl, 'https://example.invalid');
+  assert.equal(cfg.extra.releaseVersion, release.version);
+  assert.equal(cfg.extra.releaseVersionCode, release.versionCode);
+  assert.equal(cfg.android?.package, release.package);
+  assert.equal(cfg.android?.versionCode, release.versionCode);
   assert.equal(
     cfg.android?.usesCleartextTraffic,
     false,
@@ -68,6 +77,17 @@ check('production with an https:// origin passes with cleartext OFF', () => {
     false,
     'iOS arbitrary loads MUST be disabled in production',
   );
+});
+
+check('production rejects a URL that is not exactly an origin', () => {
+  for (const value of [
+    'https://example.invalid/path',
+    'https://example.invalid?query=yes',
+    'https://user@example.invalid',
+  ]) {
+    const r = runExpoConfig('production', value);
+    assert.notEqual(r.ok, true, `${value} should have failed`);
+  }
 });
 
 check('development still allows the loopback default over cleartext', () => {
@@ -82,4 +102,3 @@ if (failures > 0) {
   process.exit(1);
 }
 console.log('\nProduction config gate: all checks passed');
-

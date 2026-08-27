@@ -3,7 +3,8 @@
 // Mirrors the TV app's configuration discipline (tv/app.config.js):
 //   * development may target loopback / LAN over cleartext http;
 //   * a PRODUCTION build (NODE_ENV=production) requires an explicit HTTPS
-//     origin supplied by the operator via EXPO_PUBLIC_NUBARCA_API_BASE_URL and
+//     origin supplied by the operator via NUBARCA_PUBLIC_ORIGIN (with the
+//     historical EXPO_PUBLIC_NUBARCA_API_BASE_URL alias still accepted) and
 //     FAILS CLOSED otherwise — never a hardcoded host, never a silent
 //     localhost fallback, and cleartext disabled.
 //
@@ -11,30 +12,28 @@
 // operator configuration, not product source, so it is never committed.
 
 const DEV_DEFAULT_BASE_URL = 'http://localhost:5177';
+const { normalizePublicOrigin, readReleaseContract } = require('./scripts/release-contract.cjs');
+const release = readReleaseContract();
 
 const isProduction = process.env.NODE_ENV === 'production';
 const explicitBaseUrl = (
+  process.env.NUBARCA_PUBLIC_ORIGIN ||
   process.env.EXPO_PUBLIC_NUBARCA_API_BASE_URL ||
   process.env.NUBARCA_MOBILE_API_BASE_URL ||
   ''
 ).replace(/\/$/, '');
 
-let apiBaseUrl: string;
+let apiBaseUrl;
 if (isProduction) {
   if (!explicitBaseUrl) {
     throw new Error(
-      'Production mobile builds require EXPO_PUBLIC_NUBARCA_API_BASE_URL ' +
+      'Production mobile builds require NUBARCA_PUBLIC_ORIGIN (or ' +
+        'EXPO_PUBLIC_NUBARCA_API_BASE_URL) ' +
         '(the installation https:// origin). Failing closed instead of ' +
         'building an app that cannot reach any server.',
     );
   }
-  if (!explicitBaseUrl.startsWith('https://')) {
-    throw new Error(
-      'Production mobile builds require an https:// API origin; got: ' +
-        explicitBaseUrl,
-    );
-  }
-  apiBaseUrl = explicitBaseUrl;
+  apiBaseUrl = normalizePublicOrigin(explicitBaseUrl);
 } else {
   apiBaseUrl = explicitBaseUrl || DEV_DEFAULT_BASE_URL;
 }
@@ -45,12 +44,13 @@ const usesCleartextTraffic = apiBaseUrl.startsWith('http://');
 
 module.exports = {
   expo: {
-    name: 'NubArca',
+    name: release.applicationName,
     slug: 'nubarca-mobile',
-    version: '0.2.0',
+    version: release.version,
     orientation: 'default',
     platforms: ['ios', 'android'],
     scheme: 'nubarca',
+    icon: './assets/brand/nubarca-expo-app-icon-1024.png',
     // Expo Router (SDK 54) + media-library permission plugin (mobile-sync-v1):
     // granular photo+video read access only, requested at enablement time —
     // never at startup, never for location metadata.
@@ -67,17 +67,28 @@ module.exports = {
             'Allow NubArca to read the videos you choose so they can be synced to your own private library.',
         },
       ],
+      // `expo prebuild --clean` regenerates android/. This plugin is therefore
+      // the durable release-signing authority and refuses a debug-key fallback.
+      './plugins/withReleaseSigning',
     ],
     experiments: {
       typedRoutes: true,
     },
     extra: {
       apiBaseUrl,
+      releaseVersion: release.version,
+      releaseVersionCode: release.versionCode,
     },
     android: {
       // Reserved for the phone binary — see tv/app.config.js: the TV package
       // deliberately does NOT use this applicationId.
-      package: 'it.littlefly.nubarca',
+      package: release.package,
+      versionCode: release.versionCode,
+      icon: './assets/brand/nubarca-expo-app-icon-1024.png',
+      adaptiveIcon: {
+        foregroundImage: './assets/brand/nubarca-android-adaptive-foreground-432.png',
+        backgroundColor: '#0A0F1A',
+      },
       usesCleartextTraffic,
       // Privacy-explicit (release-gate review): an owner's media library and
       // account session must never ride unencrypted device backups.
