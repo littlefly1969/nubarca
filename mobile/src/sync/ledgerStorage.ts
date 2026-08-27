@@ -6,7 +6,6 @@
 // account hash — no email, no display name. The session cookie itself
 // stays exclusively in SecureStore.
 
-import * as FileSystem from 'expo-file-system/legacy';
 import * as SQLite from 'expo-sqlite';
 import type { SqlConnection } from './sqlPort.ts';
 import type { SqlRow, SqlStatement, SqlValue } from './sqlPort.ts';
@@ -33,16 +32,13 @@ export function openAccountLedgerConnection(accountId: string): SqlConnection {
   // Opaque, stable per-account namespace; hex digest avoids any filesystem-
   // sensitive characters from server ids.
   const namespace = fnv1aHex(accountId);
-  const directory = `${FileSystem.documentDirectory ?? ''}sync`;
-  const path = `${directory}/ledger-${namespace}.db`;
+  const databaseName = `sync-ledger-${namespace}.db`;
 
-  // The directory does not exist on first use; expo-file-system throws when
-  // asked to create an existing one, so make it best-effort idempotent.
-  void FileSystem.makeDirectoryAsync(directory, { intermediates: true }).catch(
-    () => undefined,
-  );
-
-  const db = SQLite.openDatabaseSync(path);
+  // openDatabaseSync takes a FILE NAME, not a file:// path. Expo resolves it
+  // below defaultDatabaseDirectory and creates the parent synchronously before
+  // opening. This removes the first-install race where an async mkdir and the
+  // immediate synchronous open competed with one another.
+  const db = SQLite.openDatabaseSync(databaseName);
   db.execSync('PRAGMA journal_mode = WAL');
   db.execSync('PRAGMA foreign_keys = OFF'); // ledger is self-contained
 

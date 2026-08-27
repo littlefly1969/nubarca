@@ -41,31 +41,55 @@ function RootGate(): React.JSX.Element {
     return <Splash />;
   }
 
-  const userId = session.user?.id ?? 'anon';
-
-  return (
-    <>
-      {session.status === 'unauthed' ? (
-        // Redirect away from any deep link into authenticated routes.
+  if (session.status === 'unauthed') {
+    return (
+      <>
+        {/* A fresh install must reach login without opening authenticated
+            storage or starting background services. */}
         <Redirect href="/login" />
-      ) : null}
-      {/* Sync owns per-account durable state, so its provider lives exactly
-          as long as one identity — remounted (and torn down) on any switch. */}
-      <SyncProvider key={userId} accountId={userId}>
-        <Stack
-          key={userId}
-          screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-          }}
-        >
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="login" options={{ animation: 'fade' }} />
-          <Stack.Screen name="album/[id]" />
-          <Stack.Screen name="media/[id]" options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
-        </Stack>
-      </SyncProvider>
-    </>
+        <AppStack identityKey="signed-out" />
+      </>
+    );
+  }
+
+  // The public context shape deliberately exposes user as nullable. Keep this
+  // boundary defensive even though SessionProvider emits a user for `authed`.
+  if (session.user === null) {
+    return (
+      <>
+        <Redirect href="/login" />
+        <AppStack identityKey="missing-session-user" />
+      </>
+    );
+  }
+
+  const userId = session.user.id;
+  return (
+    // Sync owns authenticated, per-account durable state. Never construct it
+    // for the signed-out pseudo-identity: a storage fault must not gate login.
+    <SyncProvider key={userId} accountId={userId}>
+      <AppStack identityKey={userId} />
+    </SyncProvider>
+  );
+}
+
+function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
+  return (
+    <Stack
+      key={identityKey}
+      screenOptions={{
+        headerShown: false,
+        animation: 'slide_from_right',
+      }}
+    >
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="login" options={{ animation: 'fade' }} />
+      <Stack.Screen name="album/[id]" />
+      <Stack.Screen
+        name="media/[id]"
+        options={{ presentation: 'fullScreenModal', animation: 'fade' }}
+      />
+    </Stack>
   );
 }
 

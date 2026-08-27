@@ -6,6 +6,17 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Mobile Android
+
+- **Cold start on a fresh installation no longer initializes authenticated
+  sync storage before login.** The SQLite ledger now uses Expo's database-name
+  contract, its parent is created synchronously by Expo, and an optional sync
+  initialization failure cannot take down the gallery. SecureStore reads are
+  bounded so a native storage fault cannot leave the restore screen spinning
+  forever. The Expo status-bar package is aligned with SDK 54. Mobile advances
+  to `0.2.1` (`versionCode` 2) so the corrected signed APK can update the first
+  test build in place.
+
 ### Identity & Access
 
 Authorization moved from a single `IsAdmin` boolean to roles and feature
