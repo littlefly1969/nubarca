@@ -44,7 +44,7 @@ public sealed class PrivateDocumentBoundaryTests : IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
 
-    public void Build(bool external = false)
+    private void Build(bool external = false)
     {
         _handler = new CapturingProviderHandler(
             _ => CapturingProviderHandler.Answer("Il filtro va pulito ogni sei mesi."));
