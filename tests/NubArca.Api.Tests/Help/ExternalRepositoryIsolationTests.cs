@@ -180,7 +180,6 @@ public sealed class ExternalRepositoryIsolationTests : IDisposable
             Path = "src/NubArca.Api/Ai/Faces/PeopleService.cs",
             Title = "PeopleService.cs",
             SourceKind = RagSourceKinds.SourceCode,
-            Revision = "sentinel-revision",
             ContentHash = RagHash.Sha256Hex(RepositorySentinel),
             Language = RagLanguages.Italian,
             CodeLanguage = RagCodeLanguages.CSharp,
@@ -192,6 +191,7 @@ public sealed class ExternalRepositoryIsolationTests : IDisposable
             Id = Guid.NewGuid(),
             DomainKey = RagDomains.NubArcaRepository,
             SourceId = source.Id,
+            Revision = "sentinel-revision",
             Priority = 65,
             CreatedAt = DateTime.UtcNow,
         });

@@ -101,8 +101,8 @@ public sealed class RagCorpusCacheTests : IDisposable
         Seed();
         var before = await SignatureAsync();
 
-        var second = AddSource("docs/help/albums.md", "rev-a");
-        AddMembership(second, RagDomains.ProductHelp);
+        var second = AddSource("docs/help/albums.md");
+        AddMembership(second, RagDomains.ProductHelp, "rev-a");
         await _db.SaveChangesAsync();
 
         Assert.NotEqual(before, await SignatureAsync());
@@ -138,13 +138,11 @@ public sealed class RagCorpusCacheTests : IDisposable
         // Indexing commits incrementally, so an interrupted reindex leaves one
         // domain describing two commits. There is no honest single revision for
         // that corpus — not the newest, not the most common, not the first.
-        var a = AddSource("docs/help/faces.md", "rev-a");
-        AddMembership(a, RagDomains.ProductHelp);
-        AddChunk(a, "il flusso dei volti");
-        var b = AddSource("docs/help/albums.md", "rev-b");
-        AddMembership(b, RagDomains.ProductHelp);
-        AddChunk(b, "gli album condivisi");
-        await _db.SaveChangesAsync();
+        //
+        // Note what this is measured over now: ONE domain's memberships. Two
+        // DOMAINS at two revisions is an ordinary sequential upgrade and is
+        // nobody's incoherence — see TwoDomains_AtDifferentRevisions_...
+        await SeedMixedRevisionHelpAsync();
 
         var corpus = await _corpus.LoadAsync(RagDomainKey.ProductHelp);
 
@@ -163,19 +161,41 @@ public sealed class RagCorpusCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task CompletedReindex_ClearsMixedRevisionState()
+    public async Task TwoDomains_AtDifferentRevisions_AreEachCoherent()
     {
-        var a = AddSource("docs/help/faces.md", "rev-a");
-        AddMembership(a, RagDomains.ProductHelp);
-        AddChunk(a, "il flusso dei volti");
-        var b = AddSource("docs/help/albums.md", "rev-b");
-        AddMembership(b, RagDomains.ProductHelp);
-        AddChunk(b, "gli album condivisi");
+        // A shared, unchanged document mid-upgrade: one content row, two
+        // memberships, two revisions. Under the old model this state could not
+        // exist — the revision lived on the row both domains pointed at. It is
+        // now the NORMAL state between the first domain's reindex and the
+        // second's, and neither domain is mixed.
+        var shared = AddSource("docs/help/faces.md");
+        AddMembership(shared, RagDomains.NubArcaRepository, "rev-b");
+        AddMembership(shared, RagDomains.ProductHelp, "rev-a");
+        AddChunk(shared, "il flusso dei volti");
         await _db.SaveChangesAsync();
+
+        var help = await _corpus.LoadAsync(RagDomainKey.ProductHelp);
+        var repository = await _corpus.LoadAsync(RagDomainKey.NubArcaRepository);
+
+        Assert.False(help.IsMixedRevision);
+        Assert.Equal("rev-a", help.Revision);
+        Assert.False(repository.IsMixedRevision);
+        Assert.Equal("rev-b", repository.Revision);
+    }
+
+    [Fact]
+    public async Task CompletedDomainUpgrade_ClearsMixedRevisionState()
+    {
+        await SeedMixedRevisionHelpAsync();
         Assert.True((await _corpus.LoadAsync(RagDomainKey.ProductHelp)).IsMixedRevision);
 
-        // The reindex converges: every source now names one commit.
-        foreach (var source in await _db.RagSources.ToListAsync()) source.Revision = "rev-b";
+        // The reindex converges: every MEMBERSHIP of this domain now names one
+        // commit. Other domains' memberships are not consulted and not touched.
+        foreach (var membership in await _db.RagDomainSources
+            .Where(m => m.DomainKey == RagDomains.ProductHelp).ToListAsync())
+        {
+            membership.Revision = "rev-b";
+        }
         await _db.SaveChangesAsync();
 
         var corpus = await _corpus.LoadAsync(RagDomainKey.ProductHelp);
@@ -186,11 +206,11 @@ public sealed class RagCorpusCacheTests : IDisposable
     [Fact]
     public async Task MixedRevisionDomain_ReturnsNoEvidence()
     {
-        var a = AddSource("docs/help/faces.md", "rev-a");
-        AddMembership(a, RagDomains.ProductHelp);
+        var a = AddSource("docs/help/faces.md");
+        AddMembership(a, RagDomains.ProductHelp, "rev-a");
         AddChunk(a, "Apri Volti e scegli Assegna nome per il gruppo suggerito.");
-        var b = AddSource("docs/help/albums.md", "rev-b");
-        AddMembership(b, RagDomains.ProductHelp);
+        var b = AddSource("docs/help/albums.md");
+        AddMembership(b, RagDomains.ProductHelp, "rev-b");
         AddChunk(b, "Gli album raccolgono le foto senza spostarle.");
         await _db.SaveChangesAsync();
 
@@ -215,18 +235,32 @@ public sealed class RagCorpusCacheTests : IDisposable
     private static NubArca.Api.Rag.ProductHelp.ProductHelpCorpus ProductHelpCorpusStub()
         => NubArca.Api.Rag.ProductHelp.ProductHelpCorpus.Empty;
 
+    /// One domain holding memberships from two commits — an interrupted reindex.
+    private async Task SeedMixedRevisionHelpAsync()
+    {
+        var a = AddSource("docs/help/faces.md");
+        AddMembership(a, RagDomains.ProductHelp, "rev-a");
+        AddChunk(a, "il flusso dei volti");
+        var b = AddSource("docs/help/albums.md");
+        AddMembership(b, RagDomains.ProductHelp, "rev-b");
+        AddChunk(b, "gli album condivisi");
+        await _db.SaveChangesAsync();
+    }
+
     private Task<string> SignatureAsync() => _corpus.GetSignatureAsync(RagDomainKey.ProductHelp);
 
     private RagDomainSource Seed()
     {
-        var source = AddSource("docs/help/faces.md", "rev-a");
-        var membership = AddMembership(source, RagDomains.ProductHelp);
+        var source = AddSource("docs/help/faces.md");
+        var membership = AddMembership(source, RagDomains.ProductHelp, "rev-a");
         AddChunk(source, "Apri Volti e scegli Assegna nome.");
         _db.SaveChanges();
         return membership;
     }
 
-    private RagSource AddSource(string key, string revision)
+    /// A CONTENT row. It carries no revision — which snapshot a domain is using
+    /// these bytes at is the membership's claim, not the bytes' property.
+    private RagSource AddSource(string key)
     {
         var source = new RagSource
         {
@@ -235,7 +269,6 @@ public sealed class RagCorpusCacheTests : IDisposable
             Path = key,
             Title = key,
             SourceKind = RagSourceKinds.Documentation,
-            Revision = revision,
             ContentHash = RagHash.Sha256Hex(key),
             Language = RagLanguages.Italian,
             CodeLanguage = RagCodeLanguages.Markdown,
@@ -246,13 +279,14 @@ public sealed class RagCorpusCacheTests : IDisposable
         return source;
     }
 
-    private RagDomainSource AddMembership(RagSource source, string domain)
+    private RagDomainSource AddMembership(RagSource source, string domain, string revision)
     {
         var membership = new RagDomainSource
         {
             Id = Guid.NewGuid(),
             DomainKey = domain,
             SourceId = source.Id,
+            Revision = revision,
             Priority = 100,
             CreatedAt = new DateTime(2026, 8, 27, 10, 0, 0, DateTimeKind.Utc),
         };

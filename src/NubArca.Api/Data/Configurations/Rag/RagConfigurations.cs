@@ -27,7 +27,6 @@ public class RagSourceConfiguration : IEntityTypeConfiguration<RagSource>
         builder.Property(s => s.SourceKind).HasMaxLength(64).IsRequired();
         builder.Property(s => s.Title).HasMaxLength(512).IsRequired();
         builder.Property(s => s.Path).HasMaxLength(512).IsRequired();
-        builder.Property(s => s.Revision).HasMaxLength(64).IsRequired();
         builder.Property(s => s.ContentHash).HasMaxLength(64).IsRequired();
         // Defaults to 0 for rows written before the column existed, which is not
         // any released format version — so the first index run after upgrading
@@ -40,14 +39,21 @@ public class RagSourceConfiguration : IEntityTypeConfiguration<RagSource>
         builder.Property(s => s.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(s => s.UpdatedAt).HasColumnType("timestamp with time zone");
 
-        // One row per source, whatever it is a member of. This uniqueness is
-        // what makes "the same file in two domains" cost a membership row
-        // instead of a second copy of its text and vectors.
-        builder.HasIndex(s => s.SourceKey)
+        // One row per CONTENT INTERPRETATION: the key, its bytes, and how they
+        // were read. This uniqueness is what makes "the same file in two
+        // domains" cost a membership row instead of a second copy of its text
+        // and vectors — including while the two domains sit at two different
+        // revisions during a sequential upgrade, because the revision is not
+        // part of this identity.
+        //
+        // NOT unique on SourceKey alone. That was the old shape, and it forced a
+        // shared document's bytes to be rewritten in place whenever either
+        // domain moved, which is precisely the mutation that had to be refused.
+        builder.HasIndex(s => new { s.SourceKey, s.ContentHash, s.IndexFormatVersion })
             .IsUnique()
-            .HasDatabaseName("ux_rag_sources_key");
+            .HasDatabaseName("ux_rag_sources_key_content_format");
 
-        builder.HasIndex(s => s.Revision).HasDatabaseName("ix_rag_sources_revision");
+        builder.HasIndex(s => s.SourceKey).HasDatabaseName("ix_rag_sources_key");
         builder.HasIndex(s => s.OwnerUserId).HasDatabaseName("ix_rag_sources_owner");
 
         // Restrict rather than Cascade: system knowledge has no owner today, and
@@ -75,6 +81,7 @@ public class RagDomainSourceConfiguration : IEntityTypeConfiguration<RagDomainSo
         builder.Property(m => m.Id).ValueGeneratedNever();
 
         builder.Property(m => m.DomainKey).HasMaxLength(64).IsRequired();
+        builder.Property(m => m.Revision).HasMaxLength(64).IsRequired();
         builder.Property(m => m.MetadataJson).HasColumnType("text");
         builder.Property(m => m.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(m => m.UpdatedAt).HasColumnType("timestamp with time zone");
@@ -84,6 +91,11 @@ public class RagDomainSourceConfiguration : IEntityTypeConfiguration<RagDomainSo
             .HasDatabaseName("ux_rag_domain_sources_domain_source");
 
         builder.HasIndex(m => m.DomainKey).HasDatabaseName("ix_rag_domain_sources_domain");
+
+        // Revision is the domain's snapshot claim, and `rag status` asks for the
+        // distinct set of them per domain on every question.
+        builder.HasIndex(m => new { m.DomainKey, m.Revision })
+            .HasDatabaseName("ix_rag_domain_sources_domain_revision");
 
         // A source disappearing from the snapshot takes its memberships with it.
         builder.HasOne<RagSource>()
