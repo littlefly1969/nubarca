@@ -1,4 +1,5 @@
 using NubArca.Api.Domain;
+using NubArca.Api.Domain.Ai;
 using NubArca.Api.MediaLibrary;
 
 namespace NubArca.Api.Ai.Documents;
@@ -95,9 +96,52 @@ public static class OwnerDocumentEligibility
     /// compares them.
     public static IReadOnlyList<string> DeclaredContentTypes => SupportedContentTypes;
 
+    /// The chunk-level boundary: the SAME rule, one join, for every caller that
+    /// touches a person's derived rows.
+    ///
+    /// `Eligible` above answers "may this file become knowledge". This answers
+    /// the question every consumer actually asks — "may this CHUNK be used" —
+    /// and it exists because the answer has three parts that are easy to write
+    /// two of. The chunk's owner column is a denormalized copy written at
+    /// extraction time; the document must be a COMPLETED extraction; and the
+    /// file must still be eligible right now. Requiring all three means neither
+    /// a stale copy, nor a half-written extraction, nor a file that has since
+    /// been deleted, vaulted, excluded or re-parented can contribute.
+    ///
+    /// Retrieval, vector retrieval and EMBEDDING all go through here. That last
+    /// one is the reason this is a shared method rather than a query repeated in
+    /// each file: an embedder that selects candidates by `chunk.OwnerUserId`
+    /// alone is reading a derived row as authority, and it will happily spend
+    /// local inference giving fresh vectors to a document its owner deleted last
+    /// week — re-arming stale rows instead of leaving them inert.
+    public static IQueryable<EligibleChunk> EligibleChunks(
+        IQueryable<DocumentChunk> chunks,
+        IQueryable<DocumentText> documents,
+        IQueryable<FileItem> files,
+        Guid ownerUserId)
+        => from chunk in chunks
+           join document in documents on chunk.DocumentTextId equals document.Id
+           join file in Eligible(files, ownerUserId) on document.FileItemId equals file.Id
+           where chunk.OwnerUserId == ownerUserId
+                 && document.OwnerUserId == ownerUserId
+                 && document.Status == AiArtifactStatuses.Completed
+           select new EligibleChunk { Chunk = chunk, Document = document, File = file };
+
     /// Deliberately unused here, and referenced so the relationship is
     /// discoverable: media surfaces narrow through MediaLibraryScopePolicy, and
     /// this predicate uses the same Active meaning rather than a second opinion
     /// about what "in the library" means.
     public static readonly int ActiveDbValue = MediaLibraryScopePolicy.ActiveDbValue;
+}
+
+/// One eligible chunk with the rows that made it eligible.
+///
+/// The live `File` is carried rather than discarded because the callers need
+/// what only it can honestly answer: the display name for a citation, and the
+/// OWNER — which is verified live truth here, not the copy on the chunk.
+public sealed class EligibleChunk
+{
+    public DocumentChunk Chunk { get; init; } = null!;
+    public DocumentText Document { get; init; } = null!;
+    public FileItem File { get; init; } = null!;
 }

@@ -357,6 +357,175 @@ public sealed class OwnerDocumentIndexerTests : IDisposable
         Assert.Equal(1, await _db.DocumentTexts.CountAsync());
     }
 
+    // ---- embedding goes through the LIVE boundary ---------------------------
+    //
+    // The adversarial shape for all of these is the same, and it is the reason
+    // they exist: index the document while it is perfectly ordinary, THEN take
+    // the file away, then ask for embeddings. The chunks are still sitting in
+    // `document_chunks` — deliberately, because cleanup is housekeeping and
+    // these tests refuse to let a sweeper be the thing that makes them pass.
+    //
+    // Retrieval already refuses to read those rows, so nothing here is a leak.
+    // What it would be is a person's deleted document quietly acquiring FRESH
+    // derived data, produced by local inference, every time the indexer ran —
+    // stale rows being re-armed rather than left inert. An embedder that selects
+    // candidates by `chunk.OwnerUserId` alone does exactly that.
+
+    [Fact]
+    public async Task Embedding_Skips_Chunks_Whose_File_Was_Vaulted()
+    {
+        var profile = SeedEmbeddingProfile();
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        var vault = new PrivateVault
+        {
+            Id = Guid.NewGuid(), OwnerUserId = _owner, CreatedAt = DateTime.UtcNow,
+        };
+        _db.PrivateVaults.Add(vault);
+        file.PrivateVaultId = vault.Id;
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(await _db.DocumentChunks.AnyAsync(), "the stale chunks must still be there");
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Embedding_Skips_Chunks_Whose_File_Was_Deleted()
+    {
+        var profile = SeedEmbeddingProfile();
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        file.DeletedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(await _db.DocumentChunks.AnyAsync());
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Embedding_Skips_Chunks_Whose_File_Left_The_Library()
+    {
+        var profile = SeedEmbeddingProfile();
+        var file = await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        // The owner told NubArca not to process this one. Producing a fresh
+        // embedding for it is processing.
+        file.MediaLibraryState = MediaLibraryState.Excluded;
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(await _db.DocumentChunks.AnyAsync());
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Embedding_Skips_Chunks_Whose_Extraction_Never_Completed()
+    {
+        // ONLY the document status separates this from the happy path: the file
+        // is still owned, undeleted, unvaulted and in the library, and its
+        // chunks from the earlier successful pass are all still there.
+        //
+        // Keeping it non-completed takes some care, because a re-index REPAIRS a
+        // failed extraction — correctly — and a repaired document is completed
+        // and ought to be embedded. So the bytes go away underneath it: storage
+        // can no longer be read, extraction is skipped as unreadable rather than
+        // reaching a verdict, and the document is still sitting at Failed when
+        // the embedding pass looks at it.
+        var profile = SeedEmbeddingProfile();
+        await AddFileAsync("boiler-manual.md", Manual);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        var document = await _db.DocumentTexts.SingleAsync();
+        document.Status = AiArtifactStatuses.Failed;
+        await _db.SaveChangesAsync();
+        foreach (var path in Directory.EnumerateFiles(
+                     _storageRoot, "*", SearchOption.AllDirectories))
+        {
+            File.Delete(path);
+        }
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.Equal(
+            AiArtifactStatuses.Failed,
+            await _db.DocumentTexts.Select(d => d.Status).SingleAsync());
+        Assert.True(await _db.DocumentChunks.AnyAsync());
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Embedding_Skips_Chunks_Stamped_With_This_Owner_But_Owned_By_Another()
+    {
+        // THE DENORMALIZED COPY IS WRONG, and the live rows are right. Whatever
+        // wrote this — a bug, a bad backfill, a restored table — the chunk claims
+        // to belong to `_owner` while the document and the file belong to
+        // somebody else. Owner-on-the-chunk alone would embed it.
+        var profile = SeedEmbeddingProfile();
+        var other = Guid.NewGuid();
+        _db.Users.Add(new User
+        {
+            Id = other,
+            Email = $"other-{Guid.NewGuid():N}@example.invalid",
+            DisplayName = "Other",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        await AddFileAsync("theirs.md", Manual, owner: other);
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(other);
+
+        foreach (var chunk in await _db.DocumentChunks.ToListAsync())
+        {
+            chunk.OwnerUserId = _owner;
+        }
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(await _db.DocumentChunks.AnyAsync());
+        Assert.Equal(0, outcome.EmbeddingsCreated);
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Embedding_Still_Runs_For_The_Documents_That_Are_Fine()
+    {
+        // The control. Every refusal above has to be the boundary doing its job
+        // rather than embedding being broken, and only this test can say which.
+        var profile = SeedEmbeddingProfile();
+        var kept = await AddFileAsync("kept.md", Manual);
+        var removed = await AddFileAsync(
+            "removed.md", Manual + "\n\nUn secondo documento con contenuto diverso.");
+        await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner);
+
+        removed.DeletedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        var outcome = await Indexer(semantic: profile.Key).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.True(outcome.EmbeddingsCreated > 0);
+
+        var keptDocument = await _db.DocumentTexts
+            .Where(d => d.FileItemId == kept.Id).Select(d => d.Id).SingleAsync();
+        var embeddedDocuments = await _db.DocumentChunkEmbeddings
+            .Join(_db.DocumentChunks, e => e.DocumentChunkId, c => c.Id, (e, c) => c.DocumentTextId)
+            .Distinct().ToListAsync();
+
+        Assert.Equal(new[] { keptDocument }, embeddedDocuments);
+    }
+
     // ---- fixture ------------------------------------------------------------
 
     private OwnerDocumentIndexer Indexer(string? semantic = null, bool globalSemantic = false)

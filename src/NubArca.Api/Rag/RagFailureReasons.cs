@@ -20,6 +20,15 @@ public static class RagFailureReasons
     /// reindex, and that one by rebuilding the image.
     public const string MixedRevisionIndex = "rag_mixed_revision_index";
     public const string OwnerRequired = "rag_owner_required";
+
+    /// The corpus is larger than the configured in-memory chunk ceiling.
+    ///
+    /// Distinct from IndexUnavailable, which means there is nothing to read: a
+    /// person whose library outgrew the bound has plenty to read and NubArca is
+    /// refusing to hold it all at once. Truncating instead would be worse than
+    /// the refusal — it would answer from a silent, arbitrary fraction of
+    /// somebody's documents while looking exactly like a complete answer.
+    public const string CorpusTooLarge = "rag_corpus_too_large";
     public const string NoStrongEvidence = "rag_no_strong_evidence";
 
     public const string EmbeddingDisabled = "text_embedding_disabled";
