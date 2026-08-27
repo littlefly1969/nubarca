@@ -34,7 +34,7 @@ test('one release run builds and validates both sideload APK and Play AAB', () =
   const bundleValidate = workflow.indexOf('"$BUNDLETOOL_JAR" validate');
   const bundleInstall = workflow.indexOf('"$BUNDLETOOL_JAR" build-apks');
   const validate = workflow.indexOf('validate-android-artifacts.mjs');
-  const upload = workflow.indexOf('actions/upload-artifact@v4');
+  const upload = workflow.indexOf('actions/upload-artifact@v7');
   assert.ok(build >= 0 && build < bundleValidate);
   assert.ok(bundleValidate < bundleInstall);
   assert.ok(bundleInstall < validate);
