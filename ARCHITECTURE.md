@@ -248,6 +248,19 @@ and videos into the authenticated owner's private NubArca library:
   and per-item retry budgets are bounded, and background work is best-effort at
   Android's discretion — foreground resume is the only guaranteed recovery path.
 
+Authenticated thumbnails and medium previews on Android currently use an
+authenticated fetch followed by a data URI, because the native image component
+does not reliably forward the owner cookie. One singleton loader deduplicates
+in-flight requests and retains only a bounded LRU (250 entries and a 48 MiB
+data-URI budget); originals and videos never enter it. At most six image fetches
+run concurrently. When a finishing request hands its occupied permit directly
+to a queued waiter, the active permit count stays unchanged; only a release with
+no waiter decrements it. Every timeout, response failure and conversion failure
+returns its permit from `finally`. Logout advances a generation and clears
+cached bytes without resetting permits held by real fetches: results from the
+previous generation may settle for their original caller, but can never
+repopulate the new session's cache.
+
 The Android native release is produced by a manual, protected-main GitHub
 workflow rather than by an operator workstation. One tracked mobile release
 contract owns applicationId, version/versionCode, SDK floor/target and the
@@ -1309,7 +1322,9 @@ Testcontainers coverage validates provider-specific behavior such as filtered un
 
 - frontend: Vitest and Testing Library for routing, workspace state, viewer/actions, public pages, and API contracts;
 - TV: Node tests for the Personal state machine, OTA lifecycle, gallery query/source behavior, keep-awake, proportional rows, focus remapping, video classification, and remote mapping;
-- mobile: TypeScript type-checking through its `lint` script; the current package does not declare a dedicated automated test suite.
+- mobile: Node tests for session/cookie boundaries, API and timeout contracts,
+  authenticated image-loader cache/concurrency/generation behavior, gallery
+  models and the sync engine, plus TypeScript type-checking through `lint`.
 
 ### 24.5 Required regression themes
 

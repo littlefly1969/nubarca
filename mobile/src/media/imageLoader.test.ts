@@ -57,6 +57,84 @@ function okResponse(bytes: number): Promise<StubResponse> {
   return Promise.resolve({ ok: true, status: 200, blob: async () => fakeBlob(bytes) });
 }
 
+interface ControlledRequest {
+  url: string;
+  respond: (status?: number, bytes?: number) => void;
+}
+
+interface ControlledFetch {
+  pending: ControlledRequest[];
+  active: number;
+  maxActive: number;
+}
+
+function installControlledFetch(): ControlledFetch {
+  const state: ControlledFetch = { pending: [], active: 0, maxActive: 0 };
+  installFetch((url, init) =>
+    new Promise<StubResponse>((resolve, reject) => {
+      state.active += 1;
+      state.maxActive = Math.max(state.maxActive, state.active);
+      let settled = false;
+
+      const settle = (result: () => void) => {
+        if (settled) return;
+        settled = true;
+        state.active -= 1;
+        result();
+      };
+      init?.signal?.addEventListener('abort', () =>
+        settle(() => reject(new Error('aborted by controlled fetch'))),
+      );
+      state.pending.push({
+        url,
+        respond: (status = 200, bytes = 8) =>
+          settle(() =>
+            resolve({
+              ok: status >= 200 && status < 300,
+              status,
+              blob: async () => fakeBlob(bytes),
+            }),
+          ),
+      });
+    }),
+  );
+  return state;
+}
+
+async function waitFor(
+  condition: () => boolean,
+  message: string,
+  timeoutMs = 750,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(message);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function within<T>(promise: Promise<T>, message: string, timeoutMs = 750): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function respondToPending(
+  state: ControlledFetch,
+  responseFor: (request: ControlledRequest) => number = () => 200,
+): void {
+  const wave = state.pending.splice(0);
+  for (const request of wave) request.respond(responseFor(request));
+}
+
 beforeEach(() => {
   __testReset();
   __testConfigureLimits({
@@ -111,6 +189,139 @@ test('concurrent loads of one path share a single fetch', async () => {
   const [a, b] = await Promise.all([loadImage('/p/x'), loadImage('/p/x')]);
   assert.equal(a, b);
   assert.equal(fetched, 1);
+});
+
+test('queued image loads transfer permits and remain live after a full drain', async () => {
+  const controlled = installControlledFetch();
+  const batch = Array.from({ length: 12 }, (_, index) => loadImage(`/p/live-${index}`));
+
+  await waitFor(
+    () => controlled.pending.length === 6,
+    'the first six image requests did not acquire their slots',
+  );
+  assert.equal(getImageStats().active, 6);
+  assert.equal(getImageStats().queued, 6);
+
+  respondToPending(controlled);
+  await waitFor(
+    () => controlled.pending.length === 6,
+    'queued image requests did not receive transferred slots',
+  );
+  respondToPending(controlled);
+  await within(Promise.all(batch), 'the queued image batch did not drain');
+
+  const afterBatch = getImageStats();
+  const thirteenth = loadImage('/p/live-after-drain');
+  await waitFor(
+    () => controlled.pending.length === 1,
+    'the request after the drained batch never acquired a slot',
+  );
+  respondToPending(controlled);
+  await within(thirteenth, 'the request after the drained batch never completed');
+
+  assert.ok(controlled.maxActive <= 6, `observed ${controlled.maxActive} concurrent fetches`);
+  assert.equal(afterBatch.active, 0);
+  assert.equal(afterBatch.queued, 0);
+  assert.equal(afterBatch.inFlight, 0);
+  assert.equal(getImageStats().active, 0);
+  assert.equal(getImageStats().queued, 0);
+  assert.equal(getImageStats().inFlight, 0);
+});
+
+test('repeated queued bursts return the image loader to idle after every drain', async () => {
+  const controlled = installControlledFetch();
+
+  for (let burst = 0; burst < 3; burst += 1) {
+    const batch = Array.from({ length: 12 }, (_, index) =>
+      loadImage(`/p/burst-${burst}-${index}`),
+    );
+    await waitFor(
+      () => controlled.pending.length === 6,
+      `burst ${burst + 1} did not start its first wave`,
+    );
+    respondToPending(controlled);
+    await waitFor(
+      () => controlled.pending.length === 6,
+      `burst ${burst + 1} did not advance its queued wave`,
+    );
+    respondToPending(controlled);
+    await within(Promise.all(batch), `burst ${burst + 1} did not drain`);
+
+    const stats = getImageStats();
+    assert.equal(stats.active, 0, `burst ${burst + 1} leaked active permits`);
+    assert.equal(stats.queued, 0, `burst ${burst + 1} leaked queued waiters`);
+    assert.equal(stats.inFlight, 0, `burst ${burst + 1} leaked in-flight loads`);
+  }
+  assert.ok(controlled.maxActive <= 6, `observed ${controlled.maxActive} concurrent fetches`);
+});
+
+test('a permanently failing queued request releases its slot and the queue stays live', async () => {
+  const controlled = installControlledFetch();
+  const failingPath = '/p/queued-failure';
+  const paths = [
+    ...Array.from({ length: 11 }, (_, index) => `/p/failure-batch-${index}`),
+    failingPath,
+  ];
+  const batch = paths.map((path) => loadImage(path));
+
+  await waitFor(() => controlled.pending.length === 6, 'failure batch did not start');
+  respondToPending(controlled);
+  await waitFor(() => controlled.pending.length === 6, 'failure batch queue did not advance');
+  respondToPending(controlled, (request) => (request.url.endsWith(failingPath) ? 404 : 200));
+
+  const results = await within(Promise.allSettled(batch), 'failure batch did not settle');
+  assert.equal(results.filter((result) => result.status === 'rejected').length, 1);
+  assert.equal(results.at(-1)?.status, 'rejected');
+  assert.equal(getImageStats().active, 0);
+  assert.equal(getImageStats().queued, 0);
+  assert.equal(getImageStats().inFlight, 0);
+
+  const afterFailure = loadImage('/p/after-queued-failure');
+  await waitFor(
+    () => controlled.pending.length === 1,
+    'a request after the queued failure never acquired a slot',
+  );
+  respondToPending(controlled);
+  await within(afterFailure, 'a request after the queued failure never completed');
+  assert.ok(controlled.maxActive <= 6, `observed ${controlled.maxActive} concurrent fetches`);
+  assert.equal(getImageStats().active, 0);
+});
+
+test('logout generation isolation does not corrupt active or queued permits', async () => {
+  const controlled = installControlledFetch();
+  const oldGeneration = Array.from({ length: 12 }, (_, index) =>
+    loadImage(`/p/pre-logout-${index}`),
+  );
+
+  await waitFor(() => controlled.pending.length === 6, 'pre-logout batch did not start');
+  assert.equal(getImageStats().queued, 6);
+  clearImageCache();
+  respondToPending(controlled);
+  await waitFor(
+    () => controlled.pending.length === 6,
+    'pre-logout queued requests did not receive transferred slots',
+  );
+  respondToPending(controlled);
+  await within(Promise.all(oldGeneration), 'pre-logout generation did not drain');
+
+  const afterOldGeneration = getImageStats();
+  assert.equal(afterOldGeneration.cached, 0);
+  assert.equal(afterOldGeneration.totalBytes, 0);
+  assert.equal(afterOldGeneration.active, 0);
+  assert.equal(afterOldGeneration.queued, 0);
+  assert.equal(afterOldGeneration.inFlight, 0);
+
+  const newGeneration = loadImage('/p/post-logout');
+  await waitFor(
+    () => controlled.pending.length === 1,
+    'the post-logout generation never acquired a slot',
+  );
+  respondToPending(controlled);
+  await within(newGeneration, 'the post-logout generation never completed');
+  assert.equal(getImageStats().cached, 1);
+  assert.equal(getImageStats().active, 0);
+  assert.equal(getImageStats().queued, 0);
+  assert.equal(getImageStats().inFlight, 0);
 });
 
 test('transient 500 is retried up to MAX_ATTEMPTS then succeeds', async () => {

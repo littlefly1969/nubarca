@@ -8,6 +8,11 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **Authenticated images no longer stop globally after sustained browsing.**
+  The six-request image semaphore now transfers an occupied permit directly to
+  a queued fetch without incrementing its active count. Diagnostics expose only
+  aggregate active/queued counts, and regression coverage proves liveness after
+  queued bursts, permanent failures and logout generation changes.
 - **The signed APK now reaches the login screen instead of closing from the
   Android splash.** The release had autolinked `expo-font` 57 beside Expo SDK
   54's `expo-modules-core` 3, producing a native `NoSuchMethodError` before
