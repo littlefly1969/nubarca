@@ -17,6 +17,9 @@ export interface AlbumPartyStatus {
   // When true, new guest uploads wait for owner approval before appearing on the
   // public party page / TV. Default false (immediate visibility).
   requireUploadApproval: boolean;
+  // When true, new guest MESSAGES wait for approval before reaching the TV.
+  // Independent of requireUploadApproval, and owner-only to change.
+  requireMessageApproval: boolean;
   // Slideshow timing (seconds) and per-participant quotas (0 = unlimited)
   // for the ACTIVE link. Present on every status response.
   photoSlideSeconds: number;
@@ -66,10 +69,12 @@ export function setAlbumPartyMode(
   uploadEnabled?: boolean,
   requireUploadApproval?: boolean,
   signal?: AbortSignal,
+  requireMessageApproval?: boolean,
 ): Promise<AlbumPartyStatus> {
   const json: Record<string, boolean> = { enabled };
   if (uploadEnabled !== undefined) json.uploadEnabled = uploadEnabled;
   if (requireUploadApproval !== undefined) json.requireUploadApproval = requireUploadApproval;
+  if (requireMessageApproval !== undefined) json.requireMessageApproval = requireMessageApproval;
   return api<AlbumPartyStatus>(`/api/albums/${albumId}/party-settings`, {
     method: 'PATCH',
     json,
@@ -367,5 +372,91 @@ export function getPartyFaceSearch(
   return api<PartyFaceSearchResponse>(
     `/api/party/${encodeURIComponent(token)}/face-search/${encodeURIComponent(searchId)}`,
     { signal },
+  );
+}
+
+// --- Party guest MESSAGES ---
+//
+// A text-only channel beside the photo/video stream. Nothing here touches the
+// media contract: a message is never a PartyItem and never a TV album item.
+
+export type PartyMessageStatus = 'pending' | 'visible' | 'hidden' | 'rejected';
+
+export interface PartyMessage {
+  id: string;
+  // The name the guest chose to type, or null when they signed nothing. Never
+  // an empty string, so the UI has one case to handle.
+  displayName: string | null;
+  // PLAIN TEXT. Render it as text — never through dangerouslySetInnerHTML, a
+  // Markdown renderer, or any URI interpretation.
+  text: string;
+  status: PartyMessageStatus;
+  createdAt: string;
+  moderatedAt: string | null;
+  isHero: boolean;
+  heroPromotedAt: string | null;
+}
+
+export interface PartyMessageList {
+  albumId: string;
+  // False when no party is currently running on this album: the queue is empty
+  // because there is no event, not because nobody has written anything.
+  partyActive: boolean;
+  requireMessageApproval: boolean;
+  // False for a delegate. The delegate moderates messages and never sees the
+  // owner-only party settings — though the SERVER, not this flag, enforces it.
+  isOwner: boolean;
+  items: PartyMessage[];
+}
+
+export function listPartyMessages(
+  albumId: string,
+  signal?: AbortSignal,
+): Promise<PartyMessageList> {
+  return api<PartyMessageList>(`/api/albums/${albumId}/party-messages`, { signal });
+}
+
+export type PartyMessageAction =
+  | 'approve'
+  | 'reject'
+  | 'hide'
+  | 'restore'
+  | 'promote-hero'
+  | 'demote-hero';
+
+// Owner or delegate. 204 No Content; the caller refreshes the list. Promoting
+// a message that is not currently visible is a 400 — the UI only offers Hero on
+// live messages, so this is the backstop rather than an expected path.
+export function moderatePartyMessage(
+  albumId: string,
+  messageId: string,
+  action: PartyMessageAction,
+  signal?: AbortSignal,
+): Promise<void> {
+  return api<void>(
+    `/api/albums/${albumId}/party-messages/${messageId}/${action}`,
+    { method: 'POST', signal },
+  );
+}
+
+// --- Public guest message submission (anonymous, upload-token scoped) ---
+
+export interface PartyMessageSubmission {
+  id: string;
+  // 'pending' when the host reads greetings before they go up, else 'visible'.
+  status: 'visible' | 'pending';
+  createdAt: string;
+}
+
+// The UPLOAD token, not the view token: writing is contributing, and the same
+// switch that closes photo uploads closes this.
+export function submitPartyMessage(
+  uploadToken: string,
+  message: { displayName?: string | null; text: string },
+  signal?: AbortSignal,
+): Promise<PartyMessageSubmission> {
+  return api<PartyMessageSubmission>(
+    `/api/party/${encodeURIComponent(uploadToken)}/messages`,
+    { method: 'POST', json: message, signal },
   );
 }
