@@ -288,7 +288,7 @@ internal static class OfficeDocumentFixtures
             notesPart.NotesSlide = new NotesSlide(new CommonSlideData(notesTree), new ColorMapOverride());
         }
 
-        presentationPart.Presentation.SlideIdList!.AppendChild(new SlideId
+        presentationPart.Presentation!.SlideIdList!.AppendChild(new SlideId
         {
             Id = id,
             RelationshipId = presentationPart.GetIdOfPart(slidePart),

@@ -36,6 +36,20 @@ public sealed class PdfPageRenderer
     public async Task<(byte[]? Png, string? Reason)> RenderAsync(
         ReadOnlyMemory<byte> pdfBytes, int pageIndex, CancellationToken cancellationToken = default)
     {
+        // A RUNTIME GUARD RATHER THAN AN ANNOTATION. Declaring the supported
+        // platforms would propagate the attribute up through the PDF provider
+        // and the indexer into everything that touches a document, making a
+        // native rendering detail part of half the codebase's signature. Checked
+        // here, an unsupported host produces the same environment reason a
+        // missing native library does — retryable, never a verdict about
+        // somebody's document.
+        if (!OperatingSystem.IsLinux()
+            && !OperatingSystem.IsWindows()
+            && !OperatingSystem.IsMacOS())
+        {
+            return (null, DocumentExtractionReasons.PdfRendererUnavailable);
+        }
+
         var options = _options.Value;
 
         await Native.WaitAsync(cancellationToken);
