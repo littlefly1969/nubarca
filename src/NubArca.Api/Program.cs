@@ -58,6 +58,7 @@ const string PartyPublicRateLimitPolicy = "party-public";
 const string PartyPublicMediaRateLimitPolicy = "party-public-media";
 const string PartyUploadRateLimitPolicy = "party-upload";
 const string PartyFaceSearchRateLimitPolicy = "party-face-search";
+const string PartyMessageRateLimitPolicy = "party-message";
 const string SemanticSearchRateLimitPolicy = "semantic-search";
 const string TvPersonalInterpretRateLimitPolicy = "tv-personal-interpret";
 const string BeautyLabUploadRateLimitPolicy = "beauty-lab-upload";
@@ -319,6 +320,14 @@ var partyUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:
 // tight per-IP window as the party upload path.
 var beautyLabUploadPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:BeautyLabUpload:PermitLimit") ?? 30;
 var beautyLabUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:BeautyLabUpload:WindowSeconds") ?? 60;
+// Anonymous party MESSAGES cost almost nothing to serve, which is exactly why
+// they need their own limit rather than none: a 120-character insert is the
+// cheapest way to fill a party's TV with noise. Tighter than viewing, looser
+// than uploading — a guest writes a handful of greetings an evening, not one a
+// second. Party-public surfaces all partition per IP, so a coach party behind
+// one NAT shares a bucket; the limit is set high enough for that.
+var partyMessagePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyMessage:PermitLimit") ?? 20;
+var partyMessageWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyMessage:WindowSeconds") ?? 60;
 // Anonymous party FACE SEARCH runs face detection + embedding per request, the
 // most expensive public party operation, so it gets the tightest per-IP window.
 var partyFaceSearchPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyFaceSearch:PermitLimit") ?? 15;
@@ -500,6 +509,17 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = beautyLabUploadPermitLimit,
                 Window = TimeSpan.FromSeconds(beautyLabUploadWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    options.AddPolicy(PartyMessageRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyMessagePermitLimit,
+                Window = TimeSpan.FromSeconds(partyMessageWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
@@ -738,6 +758,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyFaceSearchService, NubArca.Api.Party.PartyFaceSearchService>();
+    // Guest party MESSAGES: a text-only domain beside the media pipeline, with
+    // its own narrow owner-or-delegate authorization gate.
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are

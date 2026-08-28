@@ -13,12 +13,14 @@ public interface IPartyLinkService
     // is created. `uploadEnabled` sets the upload sub-switch (null = keep an
     // existing link's value, or default true for a new link). `requireApproval`
     // sets the upload-approval mode (null = keep an existing link's value, or
-    // default false for a new link) without rotating tokens. Returns null when
-    // the album is missing/foreign.
+    // default false for a new link) without rotating tokens.
+    // `requireMessageApproval` does the same for guest MESSAGES, independently
+    // of the upload mode. Returns null when the album is missing/foreign.
     Task<PartyEnableResult?> EnableAsync(
         Guid ownerUserId, Guid albumId, Guid createdByUserId,
         bool? uploadEnabled = null,
         bool? requireApproval = null,
+        bool? requireMessageApproval = null,
         CancellationToken cancellationToken = default);
 
     // Disables party mode on the owner's album: revokes every active link

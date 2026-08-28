@@ -128,7 +128,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             {
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
-                "PartyUpload", "BeautyLabUpload", "PartyFaceSearch",
+                "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate"
             })
             {
@@ -250,6 +250,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
             services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();
             services.AddScoped<NubArca.Api.Party.IPartyFaceSearchService, NubArca.Api.Party.PartyFaceSearchService>();
+            services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
+            services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
             services.AddScoped<StorageReconciliationService>();
             // Slice 97: refcount audit/repair.
             services.AddScoped<BlobReferenceAuditService>();

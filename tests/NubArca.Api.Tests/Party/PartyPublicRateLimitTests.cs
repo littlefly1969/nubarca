@@ -115,6 +115,58 @@ public sealed class PartyPublicRateLimitTests
     }
 
     [Fact]
+    public async Task Guest_Messages_Have_Their_Own_Bucket_Separate_From_Upload_And_View()
+    {
+        // A 120-character insert is the cheapest way to flood a party's screen,
+        // so "messages are small" is a reason to limit them, not to skip it.
+        using var f = Factory(
+            ("RateLimits:Party:PermitLimit", "50"),
+            ("RateLimits:PartyMedia:PermitLimit", "50"),
+            ("RateLimits:PartyUpload:PermitLimit", "50"),
+            ("RateLimits:PartyMessage:PermitLimit", "2"),
+            ("RateLimits:PartyMessage:WindowSeconds", "60"));
+        var setup = await SetupPartyAsync(f);
+        var anon = f.CreateClient();
+        var url = $"/api/party/{setup.UploadToken}/messages";
+
+        for (var i = 0; i < 2; i++)
+        {
+            var response = await anon.PostAsJsonAsync(url, new { text = $"ciao {i}" });
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await anon.PostAsJsonAsync(url, new { text = "una di troppo" })).StatusCode);
+
+        // Spending the message bucket must not have cost the guest their photos
+        // or their view of the album — the buckets are genuinely separate.
+        Assert.NotEqual(HttpStatusCode.TooManyRequests,
+            (await anon.PostAsync($"/api/party/{setup.UploadToken}/upload", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,
+            (await anon.GetAsync($"/api/party/{setup.ViewToken}/items")).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Rejected_Message_Still_Costs_A_Permit()
+    {
+        // The limit is on REQUESTS, not on accepted messages: otherwise a flood
+        // of invalid bodies would be free, which is the cheapest flood of all.
+        using var f = Factory(
+            ("RateLimits:PartyMessage:PermitLimit", "2"),
+            ("RateLimits:PartyMessage:WindowSeconds", "60"));
+        var setup = await SetupPartyAsync(f);
+        var anon = f.CreateClient();
+        var url = $"/api/party/{setup.UploadToken}/messages";
+
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await anon.PostAsJsonAsync(url, new { text = "   " })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await anon.PostAsJsonAsync(url, new { text = new string('a', 121) })).StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests,
+            (await anon.PostAsJsonAsync(url, new { text = "valido" })).StatusCode);
+    }
+
+    [Fact]
     public async Task Invalid_And_Missing_Token_Behavior_Stays_Generic_404()
     {
         using var f = Factory();
@@ -129,6 +181,8 @@ public sealed class PartyPublicRateLimitTests
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{token}/media/{fileId}/thumbnail")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{token}/media/{fileId}/preview")).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{token}/media/{fileId}/download")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await anon.PostAsJsonAsync($"/api/party/{token}/messages", new { text = "ciao" })).StatusCode);
     }
 
     [Fact]
