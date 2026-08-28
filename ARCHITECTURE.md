@@ -1,7 +1,7 @@
 # NubArca Architecture
 
 > **Architecture baseline:** NubArca **0.3.0**
-> **Repository snapshot:** `main`, reviewed on 2026-07-27
+> **Repository snapshot:** `main`, reviewed on 2026-08-27
 > **Document role:** authoritative architectural description of the implementation currently present in this repository.
 
 ## 1. Authority, scope, and reading rules
@@ -11,7 +11,7 @@ The repository is the source of truth for NubArca 0.3.0. This document describes
 - `src/NubArca.Api/` — backend, CLI, worker, persistence, storage, media, AI, TV, and bounded contexts;
 - `frontend/` — authenticated web application and public browser surfaces;
 - `tv/` — native React Native TV application;
-- `mobile/` — authenticated read-only mobile gallery application;
+- `mobile/` — authenticated Expo/React Native client with one-way device-media sync into the owner's library;
 - `deploy/`, root Compose files, and scripts — production topology and operational tooling;
 - `tests/NubArca.Api.Tests/`, frontend tests, and TV tests — executable contracts and safety regressions;
 - EF Core migrations and entity configurations — authoritative persisted schema and database constraints.
@@ -34,11 +34,11 @@ NubArca is a self-hosted personal cloud optimized for a single server and a smal
 - segregated private or specialist surfaces: Private Vault, Plates, and Aesthetics Lab;
 - paired TV access, a PIN-protected Personal Area, native TV media playback, and TV OTA updates.
 
-NubArca is not designed as a horizontally scaled SaaS control plane. The production defaults deliberately target one PostgreSQL instance, one API instance, and at most one active job worker on a personal server. The schema is multi-user and every private operation is owner-scoped, but the authorization model is intentionally simple: authenticated users own their content, and one boolean admin role controls operator functions.
+NubArca is not designed as a horizontally scaled SaaS control plane. The production defaults deliberately target one PostgreSQL instance, one API instance, and at most one active job worker on a personal server. The schema is multi-user and every private operation is owner-scoped, but the authorization model is intentionally single-level — USER → ROLE → PERMISSIONS: a user holds exactly one role, the role owns its permissions, and the built-in Administrator role controls operator functions (see §7.1).
 
 The following are not current product capabilities:
 
-- WebDAV or filesystem synchronization clients;
+- WebDAV, or generic filesystem synchronization clients (the mobile client is a one-way device-media ingest client — see §6.3);
 - public user registration;
 - collaborative document editing or complex ACLs;
 - calendar, contacts, mail, or chat;
@@ -178,7 +178,7 @@ These fragments are selected according to the deployed inference topology and co
 | `src/NubArca.Api/Plates/` | Segregated ALPR and privacy-redaction domain |
 | `src/NubArca.Api/Aesthetics/` | Segregated HumanAesExpert/Beauty Lab domain |
 | `frontend/` | React web application, public Party/upload pages, browser TV fallback |
-| `mobile/` | Expo authenticated read-only gallery client |
+| `mobile/` | Expo authenticated gallery client with one-way device-media sync |
 | `tv/` | Native React Native TV client, pairing/personal state machine, media cache, OTA |
 | `tests/NubArca.Api.Tests/` | Service, endpoint, security, storage, scheduler, integration, and regression tests |
 | `deploy/` and `scripts/` | First deployment, production validation, backup/restore, model and TV publication tooling |
@@ -218,14 +218,35 @@ Legacy `/gallery` and `/videos` routes redirect into the unified `/media` worksp
 
 ### 6.3 Mobile client
 
-`mobile/` is an Expo/React Native client with a deliberately small state machine:
+`mobile/` is an authenticated Expo/React Native client. On launch it restores a
+persisted session cookie from secure storage, validates it through `/api/auth/me`,
+and shows login when absent or expired; otherwise it presents the owner's media
+gallery. It does not mirror the full web feature set.
 
-- restore a persisted cookie from secure storage;
-- validate it through `/api/auth/me`;
-- show login when absent or expired;
-- show the authenticated read-only gallery when valid.
+In addition to browsing and playback, the client offers **device-media
+synchronization** — a one-way, explicitly opt-in ingestion of locally stored photos
+and videos into the authenticated owner's private NubArca library:
 
-It is not a synchronization agent and does not mirror the full web feature set.
+- **Explicit opt-in.** Sync is off by default (`SyncSettings.enabled` is false) and
+  the engine never prompts for media permission itself; enabling it is a deliberate
+  user action that also resolves the platform permission view.
+- **New-media by default.** Enabling sync sets a per-account baseline to the moment of
+  enablement, so only media newer than that flows; historical media is a separate
+  explicit `includeExisting` choice.
+- **One-way, owner-private.** Uploads target the owner's library through the
+  authenticated `POST /api/files` path; nothing is written back to the device and no
+  media crosses between accounts.
+- **Durable, per-account state.** A per-account SQLite ledger holds per-asset state;
+  every durable transition commits there first, so crash or process death resumes from
+  persisted truth rather than memory, and completed rows replay through idempotent
+  ingestion.
+- **Operation identity, not content identity.** Each logical sync is assigned a 16-byte
+  CSPRNG id, persisted in the ledger and reused unchanged across every retry/restart/
+  ambiguous response; it is sent as the `Idempotency-Key` and is never a SHA-256. Blob
+  identity and deduplication stay entirely server-side.
+- **Bounded network semantics.** Automatic uploads default to Wi-Fi only; concurrency
+  and per-item retry budgets are bounded, and background work is best-effort at
+  Android's discretion — foreground resume is the only guaranteed recovery path.
 
 The Android native release is produced by a manual, protected-main GitHub
 workflow rather than by an operator workstation. One tracked mobile release

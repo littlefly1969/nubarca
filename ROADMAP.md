@@ -10,7 +10,6 @@ Nothing here is a commitment or a schedule, and nothing here is a defect.
 ## Near-term
 
 - A private, owner-scoped **photo map** view on top of `file_item_locations`.
-- Admin **user-management UI** — today users are managed through the CLI only.
 - **Operationalise blob cleanup** — a safe admin-triggered reclaim, so recovering
   space is an explicit action rather than only background configuration.
 - **Semantic-search calibration.** The result policy's score thresholds are
@@ -21,13 +20,10 @@ Nothing here is a commitment or a schedule, and nothing here is a defect.
 
 ## Later
 
-- A **sync foundation** and eventual desktop/mobile sync clients. The reserved
-  mobile application identity exists; there is no mobile release.
+- A **desktop sync client**, once the local-first core warrants it.
 - **Auth hardening**, e.g. two-factor authentication.
 - Pluggable storage backends (S3/MinIO) and a faster search backend
   (Meilisearch/Typesense), once the local-first core warrants it.
-- A dedicated derived/cache storage tier. Derived artifacts are content-addressed
-  blobs in the same store as originals today, so they are not separately pathable.
 - Optional native/Rust media worker; perceptual (near-duplicate) image
   deduplication.
 
