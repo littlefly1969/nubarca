@@ -8,6 +8,11 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **The full-screen media viewer now owns a real pager viewport.** The pager
+  fills the available height and gives every photo/video cell exactly one device
+  width. Back navigation leaves first and clears the viewer sequence on route
+  unmount, while render-time index clamping prevents stale positions from
+  dereferencing an absent slide.
 - **Authenticated images no longer stop globally after sustained browsing.**
   The six-request image semaphore now transfers an occupied permit directly to
   a queued fetch without incrementing its active count. Diagnostics expose only

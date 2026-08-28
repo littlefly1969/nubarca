@@ -30,6 +30,7 @@ import {
   fileVideoPath,
 } from '../../src/api/filePaths';
 import { authenticatedSource } from '../../src/media/imageSource';
+import { safeViewerIndex } from '../../src/media/viewerRoute';
 import { colors, spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -40,14 +41,18 @@ export default function MediaRoute(): React.JSX.Element {
   const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
   const { width } = useWindowDimensions();
 
-  // ONE exit path for both the hardware back and the chrome button: release
-  // the sequence, then leave — with a SAFE fallback when this route was
-  // entered without usable history (deep link / state restore), where a bare
-  // router.back() would swallow the Android back key forever.
+  // ONE navigation path for both the hardware back and the chrome button. The
+  // route owns cleanup on unmount, so no render can observe a sequence erased
+  // while this screen is still mounted.
   const closeAndLeave = useCallback(() => {
-    closeViewer();
     if (router.canGoBack()) router.back();
     else router.replace('/(tabs)/photos');
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      closeViewer();
+    };
   }, [closeViewer]);
 
   // Slides arrive pre-built through the viewer context. A files-mode entry
@@ -94,17 +99,18 @@ export default function MediaRoute(): React.JSX.Element {
     setIndex(startIndex);
   }, [startIndex]);
 
-  const current = slides[index];
+  const safeIndex = safeViewerIndex(index, slides.length);
+  const current = slides[safeIndex];
 
   const onMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
       const next = Math.round(e.nativeEvent.contentOffset.x / width);
-      if (next !== index && next >= 0 && next < slides.length) {
+      if (next !== safeIndex && next >= 0 && next < slides.length) {
         setIndex(next);
         setViewerIndex(next);
       }
     },
-    [index, slides.length, width, setViewerIndex],
+    [safeIndex, slides.length, width, setViewerIndex],
   );
 
   // Hardware back uses the SAME safe exit path as the chrome button.
@@ -137,18 +143,20 @@ export default function MediaRoute(): React.JSX.Element {
         maxToRenderPerBatch={2}
         windowSize={3}
         onMomentumScrollEnd={onMomentumEnd}
-        renderItem={({ item, index: i }) =>
-          item.kind === 'image' ? (
-            <ImageSlide
-              path={item.imagePath}
-              name={item.displayName}
-              onToggle={() => setChromeVisible((v) => !v)}
-            />
-          ) : (
-            <VideoSlide slide={item} active={i === index} />
-          )
-        }
-        style={{ width }}
+        renderItem={({ item, index: i }) => (
+          <View style={{ width, flex: 1 }}>
+            {item.kind === 'image' ? (
+              <ImageSlide
+                path={item.imagePath}
+                name={item.displayName}
+                onToggle={() => setChromeVisible((v) => !v)}
+              />
+            ) : (
+              <VideoSlide slide={item} active={i === safeIndex} />
+            )}
+          </View>
+        )}
+        style={styles.pager}
       />
 
       {chromeVisible && (
@@ -162,10 +170,14 @@ export default function MediaRoute(): React.JSX.Element {
           >
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
-          <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
-            {current.displayName}
-          </Text>
-          <Text style={styles.counter}>{`${index + 1} / ${slides.length}`}</Text>
+          {current !== undefined && (
+            <>
+              <Text style={styles.title} numberOfLines={1} ellipsizeMode="middle">
+                {current.displayName}
+              </Text>
+              <Text style={styles.counter}>{`${safeIndex + 1} / ${slides.length}`}</Text>
+            </>
+          )}
         </View>
       )}
     </View>
@@ -176,6 +188,9 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.mediaBackground,
+  },
+  pager: {
+    flex: 1,
   },
   chromeTop: {
     position: 'absolute',

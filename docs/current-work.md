@@ -848,6 +848,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   chars, generated once per ledger row and reused across every retry, restart
   and ambiguous response; it is an operation identity, never content identity,
   and carries no account, asset, filename or inventory information.
+- **The mobile media route owns pager geometry and ordinary exit cleanup.**
+  `/media/[id]` gives its horizontal list the available height and gives every
+  photo/video cell exactly the same device width used by `getItemLayout`, scroll
+  offsets and visible-index calculation; the slides fill that viewport and own
+  no screen dimensions. Chrome Back and hardware Back share one navigation-only
+  path, while viewer-sequence cleanup runs on route unmount, so a mounted route
+  never observes its own sequence being erased. Render-time index clamping is
+  defence-in-depth for stale positions. This does not weaken account isolation:
+  identity changes still remount the keyed `ViewerProvider` immediately.
 - **The mobile Android test binary and Play binary are ONE release variant.**
   `Mobile Android release` is manual, protected-main-only and emits a signed APK
   for direct physical-phone testing plus an AAB for Play from the same source,
