@@ -261,6 +261,16 @@ cached bytes without resetting permits held by real fetches: results from the
 previous generation may settle for their original caller, but can never
 repopulate the new session's cache.
 
+The full-screen `/media/[id]` route owns pager geometry: the horizontal list
+fills the available viewer height, and every cell receives the same physical
+device width used by item layout, scroll offsets, and visible-index calculation.
+Photo and video slides fill that assigned viewport and do not calculate screen
+dimensions independently. Ordinary UI or hardware Back navigates first and
+clears the viewer sequence only when the route unmounts; render-time index
+clamping prevents a stale position from addressing a missing slide. Identity
+changes remain a separate, immediate privacy boundary through the keyed
+`ViewerProvider` remount.
+
 The Android native release is produced by a manual, protected-main GitHub
 workflow rather than by an operator workstation. One tracked mobile release
 contract owns applicationId, version/versionCode, SDK floor/target and the
