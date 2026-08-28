@@ -802,7 +802,7 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
             await ModeratePartyMessageAsync(
                 httpContext, messages, audit, albumId, messageId,
-                NubArca.Api.Domain.PartyMessageStatuses.Visible,
+                NubArca.Api.Domain.PartyMessageModeration.Approve,
                 AuditActions.PartyMessageApprove, cancellationToken))
             .WithName("ApprovePartyMessage").RequireAuthorization();
 
@@ -814,7 +814,7 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
             await ModeratePartyMessageAsync(
                 httpContext, messages, audit, albumId, messageId,
-                NubArca.Api.Domain.PartyMessageStatuses.Rejected,
+                NubArca.Api.Domain.PartyMessageModeration.Reject,
                 AuditActions.PartyMessageReject, cancellationToken))
             .WithName("RejectPartyMessage").RequireAuthorization();
 
@@ -826,7 +826,7 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
             await ModeratePartyMessageAsync(
                 httpContext, messages, audit, albumId, messageId,
-                NubArca.Api.Domain.PartyMessageStatuses.Hidden,
+                NubArca.Api.Domain.PartyMessageModeration.Hide,
                 AuditActions.PartyMessageHide, cancellationToken))
             .WithName("HidePartyMessage").RequireAuthorization();
 
@@ -841,7 +841,7 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
             await ModeratePartyMessageAsync(
                 httpContext, messages, audit, albumId, messageId,
-                NubArca.Api.Domain.PartyMessageStatuses.Visible,
+                NubArca.Api.Domain.PartyMessageModeration.Restore,
                 AuditActions.PartyMessageRestore, cancellationToken))
             .WithName("RestorePartyMessage").RequireAuthorization();
 
@@ -962,22 +962,27 @@ public static class PartyEndpoints
     // token, or the participant. A refused transition is a 400; everything else
     // that could have gone wrong (no such album, no such message, no authority,
     // no active party) is the same 404.
+    //
+    // The route carries an ACTION, not a target state. `approve` and `restore`
+    // both end at visible but start from different places, and only the action
+    // distinguishes them — which is what lets the domain refuse the transitions
+    // no route is named after (visible → rejected, pending → hidden).
     private static async Task<IResult> ModeratePartyMessageAsync(
         HttpContext httpContext,
         NubArca.Api.Party.IPartyMessageService messages,
         IAuditLogger audit,
         Guid albumId,
         Guid messageId,
-        string status,
+        NubArca.Api.Domain.PartyMessageModeration action,
         string auditAction,
         CancellationToken cancellationToken)
     {
         var actorUserId = httpContext.GetCurrentUserId()!.Value;
-        var result = await messages.SetStatusAsync(
-            albumId, actorUserId, messageId, status, cancellationToken);
+        var result = await messages.ModerateAsync(
+            albumId, actorUserId, messageId, action, cancellationToken);
         return await CompletePartyMessageMutationAsync(
             httpContext, audit, result, actorUserId, albumId, messageId, auditAction,
-            new { albumId, messageId, status }, cancellationToken);
+            new { albumId, messageId, action = action.ToString() }, cancellationToken);
     }
 
     private static async Task<IResult> SetPartyMessageHeroAsync(
@@ -1014,9 +1019,11 @@ public static class PartyEndpoints
             case NubArca.Api.Party.PartyMessageMutation.NotFound:
                 return Results.NotFound();
             case NubArca.Api.Party.PartyMessageMutation.InvalidTransition:
-                // Only reachable by promoting something that is not visible: the
-                // message is real and the caller may manage it, so hiding that
-                // behind a 404 would just make a legitimate UI state unexplainable.
+                // The message is real and the caller may manage it; the domain
+                // refused the move — promoting something not visible, or a
+                // moderation action the state machine does not allow from where
+                // the message currently is. Hiding that behind a 404 would make
+                // a legitimate UI state unexplainable, so it is a 400.
                 return Results.BadRequest(new { error = "invalid_transition" });
         }
 

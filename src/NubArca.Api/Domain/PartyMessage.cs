@@ -104,6 +104,59 @@ public static class PartyMessageStatuses
     public static bool IsPublicVisible(string status) => status == Visible;
 }
 
+// What a manager can DO to a message. Named for the action rather than for the
+// state it lands on, because two of them land on the same state from different
+// places: approving is a decision about something nobody has read yet, and
+// restoring is a decision to undo one that was already taken.
+public enum PartyMessageModeration
+{
+    Approve,
+    Reject,
+    Hide,
+    Restore,
+}
+
+// The moderation state machine, in one table.
+//
+// This lives here rather than in the service because it is the DOMAIN's answer
+// to "what can happen to a message", and because a matrix is the only shape in
+// which the whole answer can be read at once. Validating the target state alone
+// — which is all a `status` parameter can express — quietly permits
+// `visible → rejected` and `pending → hidden`: states the UI never offers, that
+// no route is named after, and that leave an audit trail describing a decision
+// nobody made.
+//
+// v1 is deliberately STRICT rather than idempotent. `approve` on something
+// already visible is refused instead of silently succeeding, because the two
+// possible meanings — "you are late, somebody else approved it" and "done,
+// nothing happened" — are different things to tell a manager, and a state
+// machine that answers the first is easier to reason about than four routes
+// with four different notions of a no-op.
+public static class PartyMessageTransitions
+{
+    // The state this action moves a message to, or null when the domain refuses
+    // it. Every refusal is the same refusal: there is no partial success and no
+    // silent no-op.
+    public static string? Target(string? currentStatus, PartyMessageModeration action) =>
+        (currentStatus, action) switch
+        {
+            // Nobody has read it yet: it can go live, or it can be declined.
+            (PartyMessageStatuses.Pending, PartyMessageModeration.Approve) => PartyMessageStatuses.Visible,
+            (PartyMessageStatuses.Pending, PartyMessageModeration.Reject) => PartyMessageStatuses.Rejected,
+
+            // It is on the wall: it can come down.
+            (PartyMessageStatuses.Visible, PartyMessageModeration.Hide) => PartyMessageStatuses.Hidden,
+
+            // It was taken down, either before or after going up. Both are
+            // recoverable, and both recover through the same route — the
+            // manager's intent is "put it back", whichever way it left.
+            (PartyMessageStatuses.Hidden, PartyMessageModeration.Restore) => PartyMessageStatuses.Visible,
+            (PartyMessageStatuses.Rejected, PartyMessageModeration.Restore) => PartyMessageStatuses.Visible,
+
+            _ => null,
+        };
+}
+
 // The ONE place the message size limits are stated. The API validator, the
 // owner UI, the guest counter and the tests all quote these numbers.
 public static class PartyMessageLimits
