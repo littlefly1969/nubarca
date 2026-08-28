@@ -37,6 +37,9 @@ const it = {
   'items.empty': 'Questo album non ha ancora foto o video.',
   'items.faceBanner': 'Foto trovate per il volto inviato',
   'items.facePerson': 'Foto con questa persona',
+  // The signature shown for a guest message left unsigned. The ONLY string
+  // the ribbon and the Hero card render that a guest did not type themselves.
+  'partyMessages.anonymous': 'Ospite',
   'items.faceShowAll': 'Mostra tutte le foto',
 
   'mode.title': 'Come vuoi usare NubArca?',
