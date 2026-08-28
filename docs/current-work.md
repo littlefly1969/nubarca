@@ -474,6 +474,41 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   decides what the bytes are, and moderation never refunds — hiding a photo is a
   visibility decision, and giving the slot back would let a guest re-upload the
   thing the owner just hid.
+- **A party MESSAGE is scoped to the Party link, and its authority is a
+  capability rather than a role.** `PartyMessage` is a text-only domain beside
+  the media pipeline — no `FileItem`, no blob, no derivative — so `TvAlbumItem`
+  stays `image | video` and an older TV APK keeps working by never calling the
+  new feed. The row's scope is `PartyAlbumLinkId`, not `AlbumId`: re-enabling
+  party mints a new link, which is what makes last year's greetings stay away
+  from this year's wall without anybody rewriting rows, and what makes a
+  revoked party empty the TV on the next poll. Moderation authority is exactly
+  `owner || activeMembership.CanManagePartyMessages`, resolved once in
+  `IPartyMessageAccessResolver` and re-read per request. The album ROLE is
+  deliberately not in that predicate: an `editor` curates an album, and running
+  the party is not curation, so widening the role would grant every existing
+  editor a capability nobody chose to give them. Two easy mistakes: promoting a
+  Hero does NOT need clearing when the message is hidden (every projection
+  filters on `Visible` first, so a hidden Hero cannot survive a projection that
+  forgot), and the message length limit is counted in **Unicode code points** —
+  the single unit `EnumerateRunes()` and `[...text].length` agree on. UTF-16
+  units would charge two per emoji; grapheme clusters would be friendlier but
+  are defined by an ICU table .NET and the browser upgrade separately, and the
+  day they disagree the guest's counter and the server's validator disagree too.
+  `PartyMessageText.cs` and `frontend/packages/api-client/src/partyMessageText.ts`
+  are mirrors, and their two test files share fixtures on purpose.
+- **A Hero card HOLDS the media rather than moving the index.** Every automatic
+  slideshow transition goes through one `handleMediaBoundary`; when a Hero is
+  due it renders over the current item and returns WITHOUT advancing, and the
+  advance happens when the card's timer ends. That is why "the carousel resumes
+  from exactly the right place" is true by construction — there is no second
+  place that touches the index. It also means nothing needs to interrupt a
+  video: a boundary on a video IS its natural end or the owner's configured cap,
+  so a Hero that fell due mid-clip simply waits for the boundary the clip was
+  going to reach anyway. Manual LEFT/RIGHT never routes through the boundary, so
+  a Hero cannot appear over a viewer somebody is steering by hand, and the
+  eligibility predicate suspends Heroes entirely during a party face filter — a
+  guest asking to see the photographs they are in has asked a question that an
+  editorial card does not answer.
 - **The party video cap is media time, not wall clock.** `PartyMaxVideoSlideSeconds`
   bounds how long one video may HOLD the slideshow, never the stored file, which
   still plays in full everywhere else. A `setTimeout` would keep counting while
