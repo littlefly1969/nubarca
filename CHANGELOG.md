@@ -6,6 +6,46 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Party guest messages
+
+- **Guests can now leave a short written greeting as well as photos and videos.**
+  The public Party upload page presents two explicit contributions — *Foto o
+  video* and *Messaggio* — and a message is at most 120 characters plus an
+  optional 40-character name. Both limits are counted in **Unicode code
+  points**, the one unit .NET and a browser measure identically, so the live
+  counter under the box can never disagree with the validator that decides. The
+  server normalizes before it measures: line endings and whitespace collapse to
+  single spaces, and bidi overrides, zero-width padding and soft hyphens are
+  removed, while the joiners that hold emoji families and Persian/Indic text
+  together are kept. Text stays plain end to end — no HTML, no Markdown, no
+  interpreted links — and message bodies never reach an application or security
+  log.
+- **Approval is optional and set per Party.** With it off a greeting is live
+  immediately; with it on it waits, and the guest is told so. It is independent
+  of the photo/video approval switch, and it governs new submissions only —
+  turning it off does not publish a backlog somebody declined to approve.
+- **An owner can delegate message moderation, and only that.** A new per-member
+  capability, *Può gestire i messaggi Party*, lets one member approve, reject,
+  hide, restore and Hero-promote guest messages. It is not a role: the album's
+  `editor` gains nothing, and the delegate gains no Party governance — no
+  tokens, settings, slideshow timing, pairing, face-search, photo/video
+  moderation or member management. Only the owner may grant it, and clearing it
+  or revoking the membership takes effect on the very next request.
+- **Messages belong to one event.** They are scoped to the Party link rather
+  than the album, so re-enabling Party mode starts a silent wall instead of
+  resurrecting last year's greetings, and revoking a Party empties the feed
+  without rewriting a single row.
+- **Fire TV shows them two ways.** An *Elegant Ribbon* holds one message at a
+  time in a still, high-contrast band across the bottom — never a ticker — and
+  steps aside while the MENU/QR overlay is up. A *Hero* card, promoted only by
+  the owner or their delegate, appears full-screen roughly every ten media
+  transitions in a genuinely autoplaying slideshow: it holds the current item
+  rather than moving the index, waits for the boundary a video was going to
+  reach anyway instead of truncating it, and is suspended entirely while a guest
+  is running a Party face filter. Older TV builds are unaffected —
+  `TvAlbumItem.mediaType` is still `image | video`, and the message feed is a
+  separate endpoint they never call.
+
 ### Mobile Android
 
 - **The full-screen media viewer now owns a real pager viewport.** The pager
