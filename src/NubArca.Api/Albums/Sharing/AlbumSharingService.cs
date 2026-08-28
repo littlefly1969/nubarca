@@ -173,6 +173,15 @@ public sealed class AlbumSharingService : IAlbumSharingService
             existing.Role = role;
             existing.State = AlbumMembershipStates.Pending;
             existing.AllowOriginalDownload = request.AllowOriginalDownload;
+            // A REVOKED DELEGATION MUST NOT RISE AGAIN. Reusing the row is what
+            // keeps the unique index plain, but it also means every per-member
+            // grant on it outlives the membership that carried it unless it is
+            // reset here. `AllowOriginalDownload` is reset because the request
+            // carries it; `CanManagePartyMessages` has no field on an invite at
+            // all, so without this line an owner who revoked somebody's party
+            // moderation and later re-invited them would silently hand it back.
+            // A new invitation lifecycle always requires a new explicit decision.
+            existing.CanManagePartyMessages = false;
             existing.InvitedByUserId = ownerUserId;
             existing.InvitedAt = now;
             existing.AcceptedAt = null;
@@ -308,6 +317,13 @@ public sealed class AlbumSharingService : IAlbumSharingService
             var now = _time.GetUtcNow().UtcDateTime;
             membership.State = AlbumMembershipStates.Revoked;
             membership.RevokedAt = now;
+            // Clear the party-message delegation at the moment it stops being
+            // exercisable, rather than leaving a true flag on a dead row for a
+            // later reinvite to find. This is defence in depth, NOT the
+            // enforcement: PartyMessageAccessResolver requires an accepted,
+            // unrevoked membership AND the flag, so revocation already ends the
+            // delegation on the very next request whatever this column says.
+            membership.CanManagePartyMessages = false;
             membership.UpdatedAt = now;
             await _db.SaveChangesAsync(cancellationToken);
         }
