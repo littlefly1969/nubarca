@@ -108,19 +108,10 @@ public sealed class PartyMessageService : IPartyMessageService
             albumId, true, link.RequireMessageApproval, grant.IsOwner, items);
     }
 
-    public async Task<PartyMessageMutation> SetStatusAsync(
-        Guid albumId, Guid actorUserId, Guid messageId, string status,
+    public async Task<PartyMessageMutation> ModerateAsync(
+        Guid albumId, Guid actorUserId, Guid messageId, PartyMessageModeration action,
         CancellationToken cancellationToken = default)
     {
-        // Pending is a birth state only. Rejecting the target here keeps the
-        // transition table honest at the one place that writes it.
-        if (status is not (PartyMessageStatuses.Visible
-            or PartyMessageStatuses.Hidden
-            or PartyMessageStatuses.Rejected))
-        {
-            return PartyMessageMutation.InvalidTransition;
-        }
-
         var found = await LoadForManagerAsync(albumId, actorUserId, messageId, cancellationToken);
         var message = found?.Message;
         if (message is null)
@@ -128,7 +119,17 @@ public sealed class PartyMessageService : IPartyMessageService
             return PartyMessageMutation.NotFound;
         }
 
-        message.Status = status;
+        // The domain's state machine decides, from the CURRENT state and the
+        // action — not from the target state, which cannot tell approving a
+        // pending message apart from restoring a rejected one, and so cannot
+        // refuse `visible → rejected`.
+        var target = PartyMessageTransitions.Target(message.Status, action);
+        if (target is null)
+        {
+            return PartyMessageMutation.InvalidTransition;
+        }
+
+        message.Status = target;
         message.ModeratedAt = _clock.GetUtcNow().UtcDateTime;
         message.ModeratedByUserId = actorUserId;
         message.UpdatedAt = message.ModeratedAt.Value;

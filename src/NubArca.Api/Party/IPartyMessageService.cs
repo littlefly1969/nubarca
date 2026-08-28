@@ -1,3 +1,5 @@
+using NubArca.Api.Domain;
+
 namespace NubArca.Api.Party;
 
 // Guest party MESSAGES: submission, owner/delegate moderation, and the TV
@@ -30,11 +32,14 @@ public interface IPartyMessageService
     Task<PartyMessageListDto?> ListForManagerAsync(
         Guid albumId, Guid actorUserId, CancellationToken cancellationToken = default);
 
-    // Move one message to visible / hidden / rejected. `pending` is not a
-    // reachable target: it is a birth state, and putting a decided message back
-    // into the queue has no product meaning.
-    Task<PartyMessageMutation> SetStatusAsync(
-        Guid albumId, Guid actorUserId, Guid messageId, string status,
+    // Apply one manager action. The resulting state comes from
+    // PartyMessageTransitions, so the set of things that can happen to a
+    // message is a table in the domain rather than a target status each caller
+    // is trusted to have chosen well. A transition the table refuses is
+    // InvalidTransition, including the idempotent-looking ones: v1 does not
+    // silently succeed at approving something that is already live.
+    Task<PartyMessageMutation> ModerateAsync(
+        Guid albumId, Guid actorUserId, Guid messageId, PartyMessageModeration action,
         CancellationToken cancellationToken = default);
 
     // Promote to (or demote from) Hero. Only a Visible message may be promoted;
