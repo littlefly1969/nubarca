@@ -71,17 +71,22 @@ function acquireSlot(): Promise<void> {
     return Promise.resolve();
   }
   return new Promise((resolve) => {
-    _waiters.push(() => {
-      _active += 1;
-      resolve();
-    });
+    // releaseSlot transfers an already-occupied permit directly to this
+    // waiter. No new fetch becomes active during that handoff, so _active must
+    // stay unchanged.
+    _waiters.push(resolve);
   });
 }
 
 function releaseSlot(): void {
   const next = _waiters.shift();
-  if (next) next();
-  else _active -= 1;
+  if (next) {
+    // Direct permit transfer: one request leaves while the queued request
+    // takes its place, preserving the number of occupied slots.
+    next();
+  } else {
+    _active -= 1;
+  }
 }
 
 // Lightweight, non-sensitive diagnostics (counts only — no paths, no bytes).
@@ -90,6 +95,8 @@ const _stats = { hits: 0, misses: 0, fetches: 0, failures: 0, evictions: 0 };
 export interface ImageStats {
   cached: number;
   inFlight: number;
+  active: number;
+  queued: number;
   hits: number;
   misses: number;
   fetches: number;
@@ -102,6 +109,8 @@ export function getImageStats(): ImageStats {
   return {
     cached: _cache.size,
     inFlight: _inflight.size,
+    active: _active,
+    queued: _waiters.length,
     hits: _stats.hits,
     misses: _stats.misses,
     fetches: _stats.fetches,
