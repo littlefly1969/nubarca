@@ -35,6 +35,27 @@ originating repository and is deliberately not reproduced here.
   than the album, so re-enabling Party mode starts a silent wall instead of
   resurrecting last year's greetings, and revoking a Party empties the feed
   without rewriting a single row.
+- **A revoked delegation cannot come back with a re-invitation.** Membership
+  rows are reused when the same person is invited again, so the capability is
+  now cleared explicitly on both revoke and re-invite: a new invitation
+  lifecycle always needs a new decision by the owner. The runtime check is
+  unchanged and still the enforcement — an accepted, unrevoked membership
+  carrying the flag — so this is defence in depth rather than a new gate.
+- **Moderation is a state machine in the domain.** The five moves the product
+  offers — approve, reject, hide and the two ways back through restore — are the
+  only ones the backend permits; `visible → rejected`, `pending → hidden` and
+  the idempotent-looking no-ops are refused with `400 invalid_transition`. The
+  UI and the API now expose exactly the same set, and an audit line can no
+  longer describe a decision nobody made. Authority is still checked first, so a
+  stranger attempting an impossible move gets a generic not-found rather than a
+  400 confirming the message exists.
+- **Deleting an album that has hosted a Party works again.** Every Party table
+  carries a restricting foreign key to the album and none of them was cleaned
+  up, so deleting such an album failed on the constraint — a defect that
+  predates guest messages and that the new table would have added to. Album
+  deletion now removes its Party state in foreign-key order, exactly as it
+  already removed its shares. Guest photos are untouched and stay in the owner's
+  library.
 - **Fire TV shows them two ways.** An *Elegant Ribbon* holds one message at a
   time in a still, high-contrast band across the bottom — never a ticker — and
   steps aside while the MENU/QR overlay is up. A *Hero* card, promoted only by
@@ -45,6 +66,15 @@ originating repository and is deliberately not reproduced here.
   is running a Party face filter. Older TV builds are unaffected —
   `TvAlbumItem.mediaType` is still `image | video`, and the message feed is a
   separate endpoint they never call.
+- **A Hero card cannot strand the wall or talk over a video.** The advance a
+  card postpones is now an explicit ledger with a single function able to spend
+  it, so a card withdrawn early still hands the wall on — a finished clip can
+  raise no second boundary — and a card timing out as the poll withdraws it
+  advances once rather than twice. A paused wall keeps the owed advance and takes
+  it on resume; a face filter or manual navigation discards it, because the
+  index then belongs to whoever just chose it. A card raised at a video's
+  configured cap also withholds playback for its duration, so the clip no longer
+  keeps running, audio included, behind an opaque card.
 
 ### Mobile Android
 
