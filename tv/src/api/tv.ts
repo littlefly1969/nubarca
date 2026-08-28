@@ -98,6 +98,38 @@ export function listTvAlbumItems(albumId: string): Promise<TvAlbumItems> {
   return tvGet<TvAlbumItems>(`/api/tv/albums/${encodeURIComponent(albumId)}/items`);
 }
 
+// A guest's written greeting, projected to the TV. A SEPARATE feed from the
+// media carousel — TvAlbumItem stays `image | video`, so this type is additive
+// and an older APK that never calls listTvPartyMessages keeps working exactly
+// as it did.
+//
+// `text` is PLAIN TEXT the server has already normalised to one line: no
+// markup, no Markdown, no interpreted URIs, and nothing to render but a string.
+// `displayName` is null when the guest signed nothing. No moderation state
+// reaches here — only messages the party may show are sent at all.
+export interface TvPartyMessage {
+  id: string;
+  displayName: string | null;
+  text: string;
+  createdAt: string;
+  isHero: boolean;
+  heroPromotedAt: string | null;
+}
+
+export interface TvPartyMessages {
+  messages: TvPartyMessage[];
+}
+
+// The live message feed for the paired album's CURRENT party. Recomputed
+// server-side on every call, so hiding a message, revoking the party or turning
+// the album off TV empties or removes it within one poll — there is no local
+// cache that could keep a withdrawn greeting on screen.
+export function listTvPartyMessages(albumId: string): Promise<TvPartyMessages> {
+  return tvGet<TvPartyMessages>(
+    `/api/tv/albums/${encodeURIComponent(albumId)}/party-messages`,
+  );
+}
+
 // Active party face filter for the paired album. A guest's face search reaches
 // the TV only after the guest EXPLICITLY presses "Show these photos on TV" on
 // the public party page; the TV polls this and filters the grid/slideshow to

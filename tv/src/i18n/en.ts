@@ -35,6 +35,9 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'items.empty': 'This album has no photos or videos yet.',
   'items.faceBanner': 'Photos found for the submitted face',
   'items.facePerson': 'Photos with this person',
+  // The signature shown for a guest message left unsigned. The ONLY string
+  // the ribbon and the Hero card render that a guest did not type themselves.
+  'partyMessages.anonymous': 'Guest',
   'items.faceShowAll': 'Show all photos',
 
   'mode.title': 'How do you want to use NubArca?',
