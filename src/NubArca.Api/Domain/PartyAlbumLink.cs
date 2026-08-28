@@ -41,6 +41,14 @@ public class PartyAlbumLink
     // party behavior. Never rotates the view/upload tokens when toggled.
     public bool RequireUploadApproval { get; set; }
 
+    // When true, a new guest MESSAGE lands as pending and is not projected to
+    // the TV until a manager approves it. Deliberately independent of
+    // RequireUploadApproval: a host may well want every photo through instantly
+    // and every written greeting read first, or the reverse. Changing it
+    // governs NEW submissions only — turning approval off does not publish the
+    // backlog somebody already declined to approve.
+    public bool RequireMessageApproval { get; set; }
+
     // --- Slideshow timing (owner-configurable, TV-facing) ---
     // How long a PHOTO holds the party slideshow, in seconds. The TV reads these
     // through its album-items context; changing either takes effect on the TV's

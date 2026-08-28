@@ -90,6 +90,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
                     m.Role,
                     m.State,
                     m.AllowOriginalDownload,
+                    m.CanManagePartyMessages,
                     m.InvitedAt,
                     m.AcceptedAt,
                     m.DeclinedAt,
@@ -102,7 +103,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
         return rows.Select(x => new AlbumMemberDto(
             x.Id, x.DisplayName, RecipientEmailMask.Mask(x.Email),
             x.Role, x.State, x.AllowOriginalDownload,
-            x.InvitedAt, x.AcceptedAt, x.DeclinedAt, x.RevokedAt)).ToList();
+            x.InvitedAt, x.AcceptedAt, x.DeclinedAt, x.RevokedAt,
+            x.CanManagePartyMessages)).ToList();
     }
 
     public async Task<(InviteAlbumMemberResult Result, AlbumMemberDto? Member)> InviteAsync(
@@ -213,6 +215,7 @@ public sealed class AlbumSharingService : IAlbumSharingService
 
     public async Task<(AlbumMemberMutationResult Result, AlbumMemberDto? Member)> UpdateMemberAsync(
         Guid ownerUserId, Guid albumId, Guid membershipId, bool allowOriginalDownload,
+        bool? canManagePartyMessages = null,
         CancellationToken cancellationToken = default)
     {
         var membership = await LoadOwnedMembershipAsync(ownerUserId, albumId, membershipId, cancellationToken);
@@ -222,6 +225,14 @@ public sealed class AlbumSharingService : IAlbumSharingService
         }
 
         membership.AllowOriginalDownload = allowOriginalDownload;
+        // Absent means "leave it alone". Only the OWNER reaches this method
+        // (LoadOwnedMembershipAsync scopes by album ownership), which is what
+        // makes "only the owner may grant or revoke the delegation" true without
+        // a second check: a delegate has no route here at all.
+        if (canManagePartyMessages.HasValue)
+        {
+            membership.CanManagePartyMessages = canManagePartyMessages.Value;
+        }
         membership.UpdatedAt = _time.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -1221,7 +1232,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
     private static AlbumMemberDto ToDto(AlbumMembership m, string displayName, string? email) =>
         new(m.Id, displayName, RecipientEmailMask.Mask(email),
             m.Role, m.State, m.AllowOriginalDownload,
-            m.InvitedAt, m.AcceptedAt, m.DeclinedAt, m.RevokedAt);
+            m.InvitedAt, m.AcceptedAt, m.DeclinedAt, m.RevokedAt,
+            m.CanManagePartyMessages);
 
     // Lower-cased, trimmed, and minimally shape-checked. Not an RFC validator:
     // the only thing that matters is that it either matches a stored address

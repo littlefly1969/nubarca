@@ -42,6 +42,20 @@ public class AlbumMembership
     // original is a separate, explicit decision by the owner.
     public bool AllowOriginalDownload { get; set; }
 
+    // PARTY-GUEST-MESSAGES-01. A NARROW, owner-granted delegation: this member
+    // may moderate the album's party MESSAGES (approve, reject, hide, restore,
+    // promote and demote Hero) and nothing else.
+    //
+    // It is a capability and not a role on purpose. Party/TV governance —
+    // enabling party, minting or revoking tokens, settings, slideshow timing,
+    // pairing, face-search, photo/video moderation, membership — stays with the
+    // Owner, so `editor` must NOT come to mean "and also runs the party". A
+    // member's album role and this flag are independent: an editor without it
+    // is refused, a viewer with it is allowed, and clearing it or revoking the
+    // membership ends the delegation on the very next request, because the
+    // resolver re-reads this row every time.
+    public bool CanManagePartyMessages { get; set; }
+
     // Who created the invitation. Always the album owner in SHARE-ALBUM-01;
     // recorded separately from the album owner because SHARE-ALBUM-03 keeps the
     // distinction between actor and owner meaningful.

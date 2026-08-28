@@ -21,7 +21,10 @@ public sealed record AlbumPartyStatusDto(
     int PhotoSlideSeconds = PartySlideshowDefaults.PhotoSeconds,
     int MaxVideoSlideSeconds = PartySlideshowDefaults.MaxVideoSeconds,
     int MaxPhotoUploadsPerParticipant = 0,
-    int MaxVideoUploadsPerParticipant = 0);
+    int MaxVideoUploadsPerParticipant = 0,
+    // When true, new guest MESSAGES wait for approval before reaching the TV.
+    // Independent of RequireUploadApproval, and owner-only to change.
+    bool RequireMessageApproval = false);
 
 // Derived public URLs for an active party link (relative, e.g. "/party/{token}"
 // and "/party/{token}/upload"). Never a token hash. UploadUrl is null when the
@@ -87,7 +90,11 @@ public sealed record PartyAccess(
     // Per-participant quotas carried straight off the resolved link (0 =
     // unlimited), so the upload path needs no second query to learn them.
     int MaxPhotoUploadsPerParticipant = 0,
-    int MaxVideoUploadsPerParticipant = 0);
+    int MaxVideoUploadsPerParticipant = 0,
+    // The link's message-approval mode, carried for the same reason: the
+    // message submission path must not re-query the link it was just resolved
+    // from to learn whether the greeting starts pending or live.
+    bool RequireMessageApproval = false);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,
@@ -141,3 +148,74 @@ public sealed record PartyUploadListDto(
     Guid AlbumId,
     bool RequireUploadApproval,
     IReadOnlyList<PartyUploadItemDto> Items);
+
+// --- PARTY GUEST MESSAGES ---
+
+// What the guest gets back after writing a greeting. Deliberately three fields:
+// the id so the page can key its own optimistic list, the status so it can say
+// "live" or "waiting to be approved", and the timestamp. NEVER the owner, the
+// moderator, the party link, the participant, or the token.
+public sealed record PartyMessageSubmissionDto(
+    Guid Id,
+    string Status, // "visible" | "pending"
+    DateTime CreatedAt);
+
+// Why a submission was refused. The HTTP layer maps these to a status code and
+// a message; the service never formats copy of its own.
+public enum PartyMessageSubmissionError
+{
+    // Empty, whitespace-only, or longer than the body limit after normalisation.
+    InvalidBody,
+
+    // Present but longer than the name limit after normalisation.
+    InvalidDisplayName,
+}
+
+public sealed record PartyMessageSubmissionResult(
+    PartyMessageSubmissionDto? Message,
+    PartyMessageSubmissionError? Error)
+{
+    public static PartyMessageSubmissionResult Ok(PartyMessageSubmissionDto message) =>
+        new(message, null);
+
+    public static PartyMessageSubmissionResult Fail(PartyMessageSubmissionError error) =>
+        new(null, error);
+}
+
+// Owner/delegate view of ONE message. Carries the text and the moderation
+// state, and no identity beyond the name the guest chose to type: never the
+// owner id, the moderator id, the participant id, or the party link id.
+public sealed record PartyMessageDto(
+    Guid Id,
+    string? DisplayName,
+    string Text,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? ModeratedAt,
+    bool IsHero,
+    DateTime? HeroPromotedAt);
+
+// The manager queue for an album's CURRENT party. `CanManage` is always true
+// here (a caller who cannot manage never receives this object) and exists so
+// the client does not have to infer its own authority; `IsOwner` is what the
+// UI uses to decide whether to render the owner-only approval switch, since a
+// delegate moderates messages but never changes party settings.
+public sealed record PartyMessageListDto(
+    Guid AlbumId,
+    bool PartyActive,
+    bool RequireMessageApproval,
+    bool IsOwner,
+    IReadOnlyList<PartyMessageDto> Items);
+
+// TV projection of the live message feed. One flat list, oldest first, already
+// filtered to the currently active party and to Visible; the TV decides which
+// of them to ribbon and which are Hero from `IsHero` alone.
+public sealed record TvPartyMessageDto(
+    Guid Id,
+    string? DisplayName,
+    string Text,
+    DateTime CreatedAt,
+    bool IsHero,
+    DateTime? HeroPromotedAt);
+
+public sealed record TvPartyMessagesDto(IReadOnlyList<TvPartyMessageDto> Messages);

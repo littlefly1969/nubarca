@@ -43,7 +43,11 @@ public sealed record AlbumMemberDto(
     DateTime InvitedAt,
     DateTime? AcceptedAt,
     DateTime? DeclinedAt,
-    DateTime? RevokedAt);
+    DateTime? RevokedAt,
+    // PARTY-GUEST-MESSAGES-01. A narrow delegation, NOT a role: this member may
+    // moderate the album's party messages and gains no other Party or album
+    // authority. Rendered as a checkbox beside the role, never as a fourth role.
+    bool CanManagePartyMessages = false);
 
 // Step 1 of inviting: the owner types an exact email and gets back the display
 // name to confirm they have the right person. Deliberately NOT a prefix or
@@ -64,8 +68,13 @@ public sealed record InviteAlbumMemberRequest(
     string? Role = null,
     bool AllowOriginalDownload = false);
 
-// Owner changes a member's per-member original-download permission.
-public sealed record UpdateAlbumMemberRequest(bool AllowOriginalDownload);
+// Owner changes a member's per-member permissions. Both fields are per-member
+// grants that the ROLE does not carry, which is why they travel together on one
+// route. `CanManagePartyMessages` is optional so an older client that only knows
+// about downloads cannot clear a delegation it never sent.
+public sealed record UpdateAlbumMemberRequest(
+    bool AllowOriginalDownload,
+    bool? CanManagePartyMessages = null);
 
 // SHARE-ALBUM-02: owner promotes Viewer → Contributor or demotes Contributor →
 // Viewer. Owner-only and audited. Editor is refused here exactly as it is on
