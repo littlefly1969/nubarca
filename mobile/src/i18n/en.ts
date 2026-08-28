@@ -39,6 +39,7 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'player.playbackError': 'Playback failed.',
   'player.loading': 'Preparing video…',
   'player.preparing': 'The video is being prepared. We will retry shortly…',
+  'player.unavailable': 'This video is unavailable for playback.',
   'player.back': 'Close the video',
 
   'albums.empty': 'No albums.',

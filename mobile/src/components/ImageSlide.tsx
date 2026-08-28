@@ -108,6 +108,7 @@ export function ImageSlide({
       <View {...panResponder.panHandlers} style={[styles.zoomArea, styles.full]}>
         <AuthedImage
           path={path}
+          resizeMode="contain"
           style={{
             ...styles.full,
             transform: [

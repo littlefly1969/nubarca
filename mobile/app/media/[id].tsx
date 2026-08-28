@@ -7,7 +7,14 @@
 //
 // Videos play only when their slide is the focused one (active flag).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   BackHandler,
   Pressable,
@@ -30,7 +37,7 @@ import {
   fileVideoPath,
 } from '../../src/api/filePaths';
 import { authenticatedSource } from '../../src/media/imageSource';
-import { safeViewerIndex } from '../../src/media/viewerRoute';
+import { safeViewerIndex, shouldReanchorViewer } from '../../src/media/viewerRoute';
 import { colors, spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -94,6 +101,9 @@ export default function MediaRoute(): React.JSX.Element {
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
+  const pagerRef = useRef<FlatList<ViewerSlide>>(null);
+  const previousWidthRef = useRef(width);
+  const reanchorIndexRef = useRef<number | null>(null);
 
   useEffect(() => {
     setIndex(startIndex);
@@ -102,9 +112,30 @@ export default function MediaRoute(): React.JSX.Element {
   const safeIndex = safeViewerIndex(index, slides.length);
   const current = slides[safeIndex];
 
+  useLayoutEffect(() => {
+    const previousWidth = previousWidthRef.current;
+    previousWidthRef.current = width;
+    if (!shouldReanchorViewer(previousWidth, width)) return;
+
+    const pager = pagerRef.current;
+    if (pager === null || slides.length === 0) return;
+    reanchorIndexRef.current = safeIndex;
+    pager.scrollToIndex({ index: safeIndex, animated: false });
+  }, [safeIndex, slides.length, width]);
+
+  const onScrollBeginDrag = useCallback(() => {
+    // A drag is explicit user ownership. If Android emitted no completion for
+    // the non-animated correction, it must not poison the next real swipe.
+    reanchorIndexRef.current = null;
+  }, []);
+
   const onMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
       const next = Math.round(e.nativeEvent.contentOffset.x / width);
+      if (reanchorIndexRef.current !== null) {
+        if (next === reanchorIndexRef.current) reanchorIndexRef.current = null;
+        return;
+      }
       if (next !== safeIndex && next >= 0 && next < slides.length) {
         setIndex(next);
         setViewerIndex(next);
@@ -129,6 +160,7 @@ export default function MediaRoute(): React.JSX.Element {
   return (
     <View style={styles.root}>
       <FlatList
+        ref={pagerRef}
         data={slides}
         horizontal
         pagingEnabled
@@ -143,6 +175,7 @@ export default function MediaRoute(): React.JSX.Element {
         maxToRenderPerBatch={2}
         windowSize={3}
         onMomentumScrollEnd={onMomentumEnd}
+        onScrollBeginDrag={onScrollBeginDrag}
         renderItem={({ item, index: i }) => (
           <View style={{ width, flex: 1 }}>
             {item.kind === 'image' ? (

@@ -265,11 +265,26 @@ The full-screen `/media/[id]` route owns pager geometry: the horizontal list
 fills the available viewer height, and every cell receives the same physical
 device width used by item layout, scroll offsets, and visible-index calculation.
 Photo and video slides fill that assigned viewport and do not calculate screen
-dimensions independently. Ordinary UI or hardware Back navigates first and
-clears the viewer sequence only when the route unmounts; render-time index
-clamping prevents a stale position from addressing a missing slide. Identity
-changes remain a separate, immediate privacy boundary through the keyed
-`ViewerProvider` remount.
+dimensions independently. Viewer photos and fallback video posters explicitly
+use `contain`, while gallery/album tiles retain their existing crop behavior.
+A viewport-width change re-anchors the mounted list to the current safe logical
+index without animation or remounting; the programmatic correction cannot be
+interpreted as a user swipe, so rotation changes geometry only and preserves
+media identity, counter, zoom and native-player ownership. Ordinary UI or
+hardware Back navigates first and clears the viewer sequence only when the route
+unmounts; render-time index clamping prevents a stale position from addressing a
+missing slide. Identity changes remain a separate, immediate privacy boundary
+through the keyed `ViewerProvider` remount.
+
+Viewer video preflight remains the bounded authenticated Range probe. Once it
+resolves a playable source, native readiness is initialized from the current
+`VideoPlayer.status` snapshot and then maintained by that player's events, so a
+`readyToPlay` transition that precedes listener installation cannot be lost and
+a replacement player cannot inherit stale status or errors. The native
+`VideoView` is mounted only for `readyToPlay`; probing, server preparation,
+native loading, unavailable and error states have explicit non-video surfaces.
+Only the active slide may play, inactive slides pause, and player replacement or
+unmount removes listeners and releases keep-awake/audio ownership.
 
 The Android native release is produced by a manual, protected-main GitHub
 workflow rather than by an operator workstation. One tracked mobile release

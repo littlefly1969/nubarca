@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { safeViewerIndex } from './viewerRoute.ts';
+import { safeViewerIndex, shouldReanchorViewer } from './viewerRoute.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +35,32 @@ test('one width owns the physical cell and all paging calculations', async () =>
   assert.match(source, /length:\s*width/);
   assert.match(source, /offset:\s*width \* i/);
   assert.match(source, /contentOffset\.x \/ width/);
+});
+
+test('only a real viewport-width change requests a semantic re-anchor', () => {
+  assert.equal(shouldReanchorViewer(400, 400), false);
+  assert.equal(shouldReanchorViewer(400, 800), true);
+  assert.equal(shouldReanchorViewer(800, 400), true);
+  assert.equal(safeViewerIndex(8, 20), 8, 'width 800 still targets logical index 8');
+});
+
+test('viewport resize re-anchors the existing safe index without remounting the pager', async () => {
+  const source = await routeSource();
+  assert.match(source, /const pagerRef = useRef<FlatList<ViewerSlide>>\(null\);/);
+  assert.match(source, /ref=\{pagerRef\}/);
+  assert.match(source, /previousWidthRef\.current/);
+  assert.match(
+    source,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?previousWidthRef\.current[\s\S]*?scrollToIndex\(\{\s*index:\s*safeIndex,\s*animated:\s*false,?\s*\}\)[\s\S]*?\}, \[safeIndex, slides\.length, width\]\);/,
+  );
+  assert.doesNotMatch(source, /key=\{width\}/);
+});
+
+test('programmatic geometry correction cannot become a fake user swipe', async () => {
+  const source = await routeSource();
+  assert.match(source, /reanchorIndexRef\.current = safeIndex;/);
+  assert.match(source, /onScrollBeginDrag=\{onScrollBeginDrag\}/);
+  assert.match(source, /if \(reanchorIndexRef\.current !== null\)/);
 });
 
 test('navigation happens before viewer cleanup, which belongs to route unmount', async () => {
