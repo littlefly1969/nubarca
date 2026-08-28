@@ -1,8 +1,10 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using NubArca.Api.Domain;
 using NubArca.Api.Tests.Endpoints;
+using NubArca.Api.Tests.Metadata;
 using NubArca.Api.Tv;
 
 namespace NubArca.Api.Tests.Party;
@@ -503,6 +505,229 @@ public sealed class PartyGuestMessageTests : IDisposable
         (await helper.GetAsync($"/api/albums/{albumId}/party-messages")).EnsureSuccessStatusCode();
     }
 
+    [Fact]
+    public async Task A_Revoked_Delegation_Does_Not_Come_Back_With_A_New_Invitation()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, helper) = await _factory.CreateAuthenticatedClientAsync(DelegateEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId);
+        var messageId = (await SubmitMessageAsync(UploadTokenFromStatus(status), null, "Ciao"))
+            .GetProperty("id").GetGuid();
+
+        var membershipId = await GrantMessageDelegationAsync(owner, helper, albumId, DelegateEmail);
+        (await helper.GetAsync($"/api/albums/{albumId}/party-messages")).EnsureSuccessStatusCode();
+
+        (await owner.DeleteAsync($"/api/albums/{albumId}/members/{membershipId}"))
+            .EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await helper.GetAsync($"/api/albums/{albumId}/party-messages")).StatusCode);
+
+        // The membership ROW is reused when the same person is invited again —
+        // that is what keeps the unique index plain. So a per-member grant left
+        // on it would come back with them.
+        var reinvited = await InviteAndAcceptAsync(owner, helper, albumId, DelegateEmail);
+        Assert.Equal(membershipId, reinvited);
+
+        // Accepted again, and still refused: a new invitation lifecycle requires
+        // a new explicit decision about the delegation.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await helper.GetAsync($"/api/albums/{albumId}/party-messages")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, await PostAsync(helper, albumId, messageId, "hide"));
+
+        // The owner can see that it is off, rather than having to infer it.
+        var members = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/members");
+        Assert.False(members[0].GetProperty("canManagePartyMessages").GetBoolean());
+
+        // And granting it again works normally.
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/members/{membershipId}",
+            new { allowOriginalDownload = false, canManagePartyMessages = true }))
+            .EnsureSuccessStatusCode();
+        (await helper.GetAsync($"/api/albums/{albumId}/party-messages")).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.NoContent, await PostAsync(helper, albumId, messageId, "hide"));
+    }
+
+    [Fact]
+    public async Task Revoking_Clears_The_Delegation_On_The_Row_As_Well_As_In_The_Resolver()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, helper) = await _factory.CreateAuthenticatedClientAsync(DelegateEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        await EnablePartyAsync(owner, albumId);
+        var membershipId = await GrantMessageDelegationAsync(owner, helper, albumId, DelegateEmail);
+
+        (await owner.DeleteAsync($"/api/albums/{albumId}/members/{membershipId}"))
+            .EnsureSuccessStatusCode();
+
+        // Defence in depth, not the enforcement: the resolver already refuses a
+        // revoked membership whatever the column says. Clearing it means a dead
+        // row cannot carry a live-looking grant for a future reader to trust.
+        var members = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/members");
+        Assert.Equal("revoked", members[0].GetProperty("state").GetString());
+        Assert.False(members[0].GetProperty("canManagePartyMessages").GetBoolean());
+    }
+
+    // ── Moderation state machine ────────────────────────────────────────────
+
+    public static TheoryData<string, string> RefusedTransitions() => new()
+    {
+        // A live message is taken down, never "declined" — reject is a decision
+        // about something nobody has read yet.
+        { "visible", "reject" },
+        // A waiting message is rejected, never hidden: hiding is for something
+        // that was on the wall.
+        { "pending", "hide" },
+        // Neither of the two down states converts into the other. There is one
+        // way back, and it is restore.
+        { "hidden", "reject" },
+        { "rejected", "hide" },
+        // v1 is a strict state machine rather than four routes with four
+        // different notions of a no-op.
+        { "visible", "approve" },
+        { "hidden", "hide" },
+        { "rejected", "reject" },
+        { "visible", "restore" },
+        { "pending", "restore" },
+        { "hidden", "approve" },
+        { "rejected", "approve" },
+    };
+
+    [Theory]
+    [MemberData(nameof(RefusedTransitions))]
+    public async Task The_Domain_Refuses_A_Transition_No_Route_Is_Named_After(
+        string from, string action)
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId, requireMessageApproval: true);
+        var messageId = await MessageInStateAsync(owner, albumId, UploadTokenFromStatus(status), from);
+
+        var response = await owner.PostAsync(
+            $"/api/albums/{albumId}/party-messages/{messageId}/{action}", null);
+
+        // 400, not 404: the message is real and the caller may manage it. The
+        // domain refused the move, and hiding that behind a not-found would make
+        // a legitimate state unexplainable.
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_transition",
+            (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        // And nothing moved.
+        Assert.Equal(from, (await ListMessagesAsync(owner, albumId))
+            .GetProperty("items")[0].GetProperty("status").GetString());
+    }
+
+    public static TheoryData<string, string, string> AllowedTransitions() => new()
+    {
+        { "pending", "approve", "visible" },
+        { "pending", "reject", "rejected" },
+        { "visible", "hide", "hidden" },
+        { "hidden", "restore", "visible" },
+        { "rejected", "restore", "visible" },
+    };
+
+    [Theory]
+    [MemberData(nameof(AllowedTransitions))]
+    public async Task The_Five_Transitions_The_Product_Offers_All_Work(
+        string from, string action, string expected)
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId, requireMessageApproval: true);
+        var messageId = await MessageInStateAsync(owner, albumId, UploadTokenFromStatus(status), from);
+
+        Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, action));
+        Assert.Equal(expected, (await ListMessagesAsync(owner, albumId))
+            .GetProperty("items")[0].GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task Authority_Is_Checked_Before_The_Transition_Is()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var (_, other) = await _factory.CreateAuthenticatedClientAsync("other@example.com");
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId);
+        var messageId = (await SubmitMessageAsync(UploadTokenFromStatus(status), null, "Ciao"))
+            .GetProperty("id").GetGuid();
+
+        // A stranger attempting an impossible transition still gets the generic
+        // 404. A 400 here would confirm the message exists.
+        Assert.Equal(HttpStatusCode.NotFound, await PostAsync(other, albumId, messageId, "restore"));
+    }
+
+    [Fact]
+    public async Task Hero_Demotion_Stays_Allowed_Wherever_The_Message_Is()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId);
+        var messageId = (await SubmitMessageAsync(UploadTokenFromStatus(status), null, "Ciao"))
+            .GetProperty("id").GetGuid();
+
+        await PostAsync(owner, albumId, messageId, "promote-hero");
+        await PostAsync(owner, albumId, messageId, "hide");
+
+        // Taking a card off the wall must always work, even for a message that
+        // has since been hidden — the strict status machine does not apply to
+        // Hero, which is a promotion rather than a state.
+        Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "demote-hero"));
+        Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "demote-hero"));
+    }
+
+    // ── Album lifecycle ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task An_Album_Carrying_Party_Messages_Can_Still_Be_Deleted()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId);
+        var uploadToken = UploadTokenFromStatus(status);
+
+        var heroId = (await SubmitMessageAsync(uploadToken, "Ada", "Auguri")).GetProperty("id").GetGuid();
+        await SubmitMessageAsync(uploadToken, null, "Un altro");
+        await PostAsync(owner, albumId, heroId, "promote-hero");
+        await PostAsync(owner, albumId, heroId, "hide");
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.DeleteAsync($"/api/albums/{albumId}")).StatusCode);
+
+        // Gone, and gone for the party surfaces too.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await owner.GetAsync($"/api/albums/{albumId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await SubmitRawAsync(uploadToken, new { text = "Troppo tardi" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task Deleting_A_Party_Album_Keeps_The_Guest_Photos_In_The_Owners_Library()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var albumId = await CreateAlbumAsync(owner, "Festa");
+        var status = await EnablePartyAsync(owner, albumId);
+        var uploadToken = UploadTokenFromStatus(status);
+        await SubmitMessageAsync(uploadToken, "Ada", "Auguri");
+
+        var anon = _factory.CreateClient();
+        var multipart = new MultipartFormDataContent();
+        var part = new ByteArrayContent(ImageFixtures.JpegWithExif());
+        part.Headers.ContentType = new MediaTypeHeaderValue("image/jpeg");
+        multipart.Add(part, "file", "guest.jpg");
+        (await anon.PostAsync($"/api/party/{uploadToken}/upload", multipart)).EnsureSuccessStatusCode();
+        var fileItemId = (await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/party-uploads"))
+            .GetProperty("items")[0].GetProperty("fileItemId").GetGuid();
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await owner.DeleteAsync($"/api/albums/{albumId}")).StatusCode);
+
+        // The album's party state goes with the album; the guest's PHOTO does
+        // not. Deleting an album has never deleted content, and the moderation
+        // row was a visibility control over a surface that no longer exists.
+        (await owner.GetAsync($"/api/files/{fileItemId}/thumbnail?size=small"))
+            .EnsureSuccessStatusCode();
+    }
+
     // ── Validation ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -923,6 +1148,38 @@ public sealed class PartyGuestMessageTests : IDisposable
         var response = await SubmitRawAsync(uploadToken, new { displayName, text });
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    // Drive one message into the requested state through the PUBLIC routes, so
+    // the fixture cannot set up a state the product cannot reach. Requires the
+    // party to have message approval on, which is what makes `pending` real.
+    private async Task<Guid> MessageInStateAsync(
+        HttpClient owner, Guid albumId, string uploadToken, string state)
+    {
+        var messageId = (await SubmitMessageAsync(uploadToken, null, "Ciao"))
+            .GetProperty("id").GetGuid();
+
+        switch (state)
+        {
+            case PartyMessageStatuses.Pending:
+                break;
+            case PartyMessageStatuses.Visible:
+                Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "approve"));
+                break;
+            case PartyMessageStatuses.Rejected:
+                Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "reject"));
+                break;
+            case PartyMessageStatuses.Hidden:
+                Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "approve"));
+                Assert.Equal(HttpStatusCode.NoContent, await PostAsync(owner, albumId, messageId, "hide"));
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(state), state, "unknown message state");
+        }
+
+        Assert.Equal(state, (await ListMessagesAsync(owner, albumId))
+            .GetProperty("items")[0].GetProperty("status").GetString());
+        return messageId;
     }
 
     private static async Task<JsonElement> ListMessagesAsync(HttpClient client, Guid albumId)

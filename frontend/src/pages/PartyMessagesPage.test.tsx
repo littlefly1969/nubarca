@@ -135,6 +135,51 @@ describe('party messages moderation page', () => {
       expect(screen.queryByRole('button', { name: /rimuovi hero/i })).toBeNull());
   });
 
+  it('offers exactly the transitions the backend permits, and no others', async () => {
+    // The server's state machine allows five moves: approve and reject from
+    // waiting, hide from live, and restore from either down state. The UI must
+    // offer that set and nothing more — a button the API answers with
+    // `invalid_transition` is a button that looks broken.
+    const expected: Record<string, string[]> = {
+      pending: ['Approva', 'Rifiuta'],
+      visible: ['Nascondi', 'Promuovi Hero'],
+      hidden: ['Ripristina'],
+      rejected: ['Ripristina'],
+    };
+
+    for (const [status, buttons] of Object.entries(expected)) {
+      installFetchMock({
+        [`GET ${LIST}`]: () => jsonResponse(list({ items: [message({ status })] })),
+      });
+      const { unmount } = renderPage();
+      const row = await screen.findByTestId('party-message-row');
+
+      const offered = Array.from(row.querySelectorAll('button')).map((b) => b.textContent);
+      expect(offered).toEqual(buttons);
+      unmount();
+    }
+  });
+
+  it('stops calling a hidden ex-Hero a Hero, and offers only the way back', async () => {
+    // The server computes `isHero` as visible AND promoted, so a hidden ex-Hero
+    // arrives with isHero false and its promotion timestamp intact — that is
+    // what makes restoring it bring the card back, and what keeps a hidden
+    // message out of the TV's Hero rotation without anything having to clear
+    // the timestamp. The row must therefore not wear a Hero badge while it is
+    // down, and Restore is the only move offered.
+    installFetchMock({
+      [`GET ${LIST}`]: () => jsonResponse(list({
+        items: [message({ status: 'hidden', isHero: false, heroPromotedAt: '2026-01-01T21:00:00Z' })],
+      })),
+    });
+    renderPage();
+    const row = await screen.findByTestId('party-message-row');
+
+    expect(row).not.toHaveTextContent(/hero/i);
+    const offered = Array.from(row.querySelectorAll('button')).map((b) => b.textContent);
+    expect(offered).toEqual(['Ripristina']);
+  });
+
   it('filters by state without a round-trip', async () => {
     const mock = installFetchMock({
       [`GET ${LIST}`]: () => jsonResponse(list({
