@@ -12,7 +12,8 @@ originating repository and is deliberately not reproduced here.
   fills the available height and gives every photo/video cell exactly one device
   width. Back navigation leaves first and clears the viewer sequence on route
   unmount, while render-time index clamping prevents stale positions from
-  dereferencing an absent slide.
+  dereferencing an absent slide. Mobile advances to `0.2.4` (`versionCode` 5)
+  for physical acceptance of the viewer fix.
 - **Authenticated images no longer stop globally after sustained browsing.**
   The six-request image semaphore now transfers an occupied permit directly to
   a queued fetch without incrementing its active count. Diagnostics expose only
