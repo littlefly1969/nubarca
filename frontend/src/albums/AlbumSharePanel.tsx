@@ -7,6 +7,7 @@ import {
   resolveAlbumRecipient,
   revokeAlbumMember,
   setAlbumMemberDownload,
+  setAlbumMemberPartyMessages,
   setAlbumMemberRole,
   type AlbumMember,
   type AssignableAlbumRole,
@@ -200,6 +201,21 @@ export function AlbumSharePanel({ albumId, albumName, onClose, returnFocusRef }:
     setBusyMembership(member.membershipId);
     try {
       await setAlbumMemberDownload(albumId, member.membershipId, next);
+      load();
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth();
+    } finally {
+      setBusyMembership(null);
+    }
+  }
+
+  // A separate handler from toggleDownload so neither switch can move the other
+  // by accident — they are two independent per-member grants.
+  async function togglePartyMessages(member: AlbumMember, next: boolean) {
+    setBusyMembership(member.membershipId);
+    try {
+      await setAlbumMemberPartyMessages(
+        albumId, member.membershipId, next, member.allowOriginalDownload);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) invalidateAuth();
@@ -426,6 +442,23 @@ export function AlbumSharePanel({ albumId, albumName, onClose, returnFocusRef }:
                       />
                       <span>{t('albumShare.allowDownload')}</span>
                     </label>
+                    {/* A LIMITED delegation, not a fourth role: the member's
+                        viewer/contributor/editor role is unchanged and they
+                        gain no other Party or album authority. */}
+                    <label className="album-tv-label">
+                      <input
+                        type="checkbox"
+                        data-testid="album-share-party-messages"
+                        checked={member.canManagePartyMessages}
+                        disabled={busyMembership === member.membershipId}
+                        aria-label={t('albumShare.canManagePartyMessagesAria', { name: memberLabel(member) })}
+                        onChange={(e) => void togglePartyMessages(member, e.target.checked)}
+                      />
+                      <span>{t('albumShare.canManagePartyMessages')}</span>
+                    </label>
+                    <p className="muted album-share-member-hint">
+                      {t('albumShare.canManagePartyMessagesHelp')}
+                    </p>
                     <button
                       type="button"
                       className="btn-danger"

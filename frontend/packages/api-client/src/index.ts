@@ -31,5 +31,6 @@ export * from './people';
 export * from './adminFaceAI';
 export * from './tv';
 export * from './party';
+export * from './partyMessageText';
 export * from './beautyLabUpload';
 export * from './cast';

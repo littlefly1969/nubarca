@@ -110,6 +110,54 @@ function session(over: Record<string, unknown> = {}) {
 }
 
 describe('PartyUploadPage (public anonymous upload)', () => {
+  it('offers photo-or-video and message as two explicit contributions', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/messages': () =>
+        jsonResponse({ id: 'm1', status: 'visible', createdAt: '2026-01-01T20:00:00Z' }),
+    });
+    render(wrapper());
+    const user = userEvent.setup();
+
+    // Media is the default: a party is still mostly photographs.
+    await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    expect(screen.getByRole('tab', { name: /foto o video/i })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByRole('tab', { name: /^messaggio$/i }));
+
+    // The message form replaces the picker rather than sitting beside it, so
+    // the guest is never looking at two "send" buttons.
+    expect(screen.getByLabelText(/il tuo messaggio/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Scegli foto e video da caricare/i)).toBeNull();
+
+    await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Auguri!');
+    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await screen.findByTestId('party-message-sent');
+
+    // And going back to media leaves the upload path exactly as it was.
+    await user.click(screen.getByRole('tab', { name: /foto o video/i }));
+    expect(await screen.findByLabelText(/Scegli foto e video da caricare/i)).toBeInTheDocument();
+  });
+
+  it('locks the contribution choice while media is in flight', async () => {
+    installFetchMock({ 'GET /api/party/uptok-1': () => errorResponse(404) });
+    render(wrapper());
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    await user.upload(input as HTMLInputElement, [jpeg('a.jpg')]);
+    await user.click(screen.getByRole('button', { name: /Carica/i }));
+    await screen.findByTestId('upload-progress');
+
+    // Switching away mid-upload would leave the queue running behind a hidden
+    // progress bar, with nothing on screen saying not to close the tab.
+    expect(screen.getByRole('tab', { name: /^messaggio$/i })).toBeDisabled();
+
+    await act(async () => { MockXHR.last!.finish(); });
+    await screen.findByTestId('upload-result');
+    expect(screen.getByRole('tab', { name: /^messaggio$/i })).toBeEnabled();
+  });
+
   it('shows progress + a do-not-close warning while uploading, then the result', async () => {
     installFetchMock({
       // Upload token cannot read the album header → 404 → generic page.

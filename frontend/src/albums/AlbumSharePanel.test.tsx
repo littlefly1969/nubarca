@@ -20,6 +20,7 @@ function member(over: Partial<Record<string, unknown>> = {}) {
     role: 'viewer',
     state: 'accepted',
     allowOriginalDownload: false,
+    canManagePartyMessages: false,
     invitedAt: '2026-07-01T00:00:00Z',
     acceptedAt: '2026-07-02T00:00:00Z',
     declinedAt: null,
@@ -196,6 +197,47 @@ describe('AlbumSharePanel', () => {
 
     expect(await screen.findByLabelText(/consenti a bruno .*di scaricare/i)).toBeChecked();
     expect(spy.calls.some((c) => c.method === 'PATCH')).toBe(true);
+  });
+
+  it('grants the party-message delegation without changing the role or the download grant', async () => {
+    let delegated = false;
+    const spy = installFetchMock({
+      'GET /api/albums/alb-1/members': () => jsonResponse(
+        [member({ canManagePartyMessages: delegated })],
+      ),
+      'PATCH /api/albums/alb-1/members/mem-1': () => {
+        delegated = true;
+        return jsonResponse(member({ canManagePartyMessages: true }));
+      },
+    });
+    renderPanel();
+
+    const toggle = await screen.findByLabelText(/consenti a bruno .*di gestire i messaggi party/i);
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+
+    expect(await screen.findByLabelText(/di gestire i messaggi party/i)).toBeChecked();
+
+    // It is a CAPABILITY, not a role: the request carries no role at all, and
+    // it resends the member's current download grant so that switch cannot move
+    // as a side effect of this one.
+    const patch = spy.calls.find((c) => c.method === 'PATCH');
+    expect(JSON.parse(patch!.body!)).toEqual({
+      allowOriginalDownload: false,
+      canManagePartyMessages: true,
+    });
+    expect(spy.calls.some((c) => c.url.endsWith('/role'))).toBe(false);
+  });
+
+  it('describes the delegation as limited rather than as a new role', async () => {
+    installFetchMock({ 'GET /api/albums/alb-1/members': () => jsonResponse([member()]) });
+    renderPanel();
+
+    await screen.findByTestId('album-share-party-messages');
+    // The owner must be able to tell, from the panel alone, that this does not
+    // hand over the party.
+    expect(screen.getByText(/delega limitata/i)).toBeInTheDocument();
+    expect(screen.getByText(/non ottiene le altre impostazioni party/i)).toBeInTheDocument();
   });
 
   it('revokes after confirming, warning that downloaded files cannot be recalled', async () => {

@@ -252,6 +252,16 @@ export function AlbumSettingsPanel({
                   {party.requireUploadApproval ? ` (${t('albumDetail.approvalRequired')})` : ''}
                 </Link>
               </p>
+              {/* Messages are a separate channel from photos and videos, so
+                  they get their own queue rather than a tab inside the media
+                  one — and the link is here, under the guest-contribution
+                  block, because writing IS a guest contribution. */}
+              <p className="album-party-manage" data-testid="party-messages-link">
+                <Link to={`/albums/${albumId}/party-messages`}>
+                  {t('partyMessages.title')}
+                  {party.requireMessageApproval ? ` (${t('albumDetail.approvalRequired')})` : ''}
+                </Link>
+              </p>
             </div>
           )}
 

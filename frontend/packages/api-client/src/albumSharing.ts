@@ -33,6 +33,10 @@ export interface AlbumMember {
   role: AlbumRole;
   state: AlbumMembershipState;
   allowOriginalDownload: boolean;
+  // PARTY-GUEST-MESSAGES-01: a narrow, owner-granted delegation to moderate
+  // this album's party MESSAGES. NOT a role and not a party governance grant —
+  // see setAlbumMemberPartyMessages.
+  canManagePartyMessages: boolean;
   invitedAt: string;
   acceptedAt: string | null;
   declinedAt: string | null;
@@ -199,6 +203,29 @@ export async function setAlbumMemberDownload(
   return api<AlbumMember>(`/api/albums/${albumId}/members/${membershipId}`, {
     method: 'PATCH',
     json: { allowOriginalDownload },
+    signal,
+  });
+}
+
+// Grants or revokes the narrow party-message delegation. Owner-only, and
+// deliberately NOT a role change: the member keeps whatever viewer/contributor/
+// editor role they have, and gains only the ability to approve, hide, restore
+// and Hero-promote this album's guest messages. Revoking takes effect on their
+// very next request.
+//
+// `allowOriginalDownload` is resent because the endpoint takes it as a required
+// field; passing the member's current value keeps this call from changing it as
+// a side effect.
+export async function setAlbumMemberPartyMessages(
+  albumId: string,
+  membershipId: string,
+  canManagePartyMessages: boolean,
+  allowOriginalDownload: boolean,
+  signal?: AbortSignal,
+): Promise<AlbumMember> {
+  return api<AlbumMember>(`/api/albums/${albumId}/members/${membershipId}`, {
+    method: 'PATCH',
+    json: { allowOriginalDownload, canManagePartyMessages },
     signal,
   });
 }

@@ -239,6 +239,61 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyUploads.confirmEnableApproval':
     'Require approval for future party uploads?\n\nWhen enabled, new guest uploads wait for your approval before appearing on the TV or the public party page.',
 
+  // --- Public party guest MESSAGES ---
+  'partyMessage.tabMedia': 'Photo or video',
+  'partyMessage.tabMessage': 'Message',
+  'partyMessage.title': 'Leave a message',
+  'partyMessage.intro':
+    'A couple of lines that will appear on the party TV. Plain text only: no links, formatting or attachments.',
+  'partyMessage.nameLabel': 'Your name (optional)',
+  'partyMessage.namePlaceholder': 'Giulia',
+  'partyMessage.textLabel': 'Your message',
+  'partyMessage.textPlaceholder': 'What a night! Congratulations',
+  'partyMessage.remaining': '{count} characters left',
+  'partyMessage.overLimit': 'You are over the {max}-character limit.',
+  'partyMessage.nameOverLimit': 'A name can be at most {max} characters.',
+  'partyMessage.send': 'Send message',
+  'partyMessage.sending': 'Sending…',
+  'partyMessage.sentVisible': 'Message sent. It will appear on the TV shortly.',
+  'partyMessage.sentPending': 'Message sent. Waiting for approval.',
+  'partyMessage.sendAnother': 'Write another message',
+  'partyMessage.failed': 'Could not send the message. Please try again.',
+  'partyMessage.rejected': 'Invalid message: check its length and content.',
+  'partyMessage.tooMany': 'Too many messages too quickly. Wait a moment and try again.',
+
+  // --- Owner/delegate party message moderation ---
+  'partyMessages.title': 'Messages',
+  'partyMessages.intro':
+    'Messages left by guests. Live ones rotate through the ribbon at the bottom of the TV; a message promoted to Hero appears full-screen from time to time.',
+  'partyMessages.requireApproval': 'Guest messages require approval',
+  'partyMessages.requireApprovalHelp':
+    'When on, new messages wait for approval before reaching the TV. Turning it off does not publish messages that are already waiting.',
+  'partyMessages.noParty': 'Party mode is not active on this album.',
+  'partyMessages.empty': 'No messages yet.',
+  'partyMessages.emptyFiltered': 'No messages in this state.',
+  'partyMessages.filterAll': 'All',
+  'partyMessages.filterPending': 'Waiting',
+  'partyMessages.filterVisible': 'Live',
+  'partyMessages.filterHidden': 'Hidden',
+  'partyMessages.filterHero': 'Hero',
+  'partyMessages.anonymous': 'Guest',
+  'partyMessages.heroBadge': 'Hero',
+  'partyMessages.statusPending': 'Waiting',
+  'partyMessages.statusVisible': 'Live',
+  'partyMessages.statusHidden': 'Hidden',
+  'partyMessages.statusRejected': 'Rejected',
+  'partyMessages.approve': 'Approve',
+  'partyMessages.reject': 'Reject',
+  'partyMessages.hide': 'Hide',
+  'partyMessages.restore': 'Restore',
+  'partyMessages.promoteHero': 'Promote to Hero',
+  'partyMessages.demoteHero': 'Remove Hero',
+  'partyMessages.loadError': 'Could not load the messages.',
+  'partyMessages.updateError': 'Could not update the message.',
+  'partyMessages.approvalError': 'Could not update the approval mode.',
+  'partyMessages.delegateNotice':
+    'You can moderate this album\u2019s messages. The other party settings stay with the owner.',
+
   // --- TV pairing / browser fallback (/tv) ---
   'tv.title': 'NubArca TV',
   'tv.preparing': 'Preparing secure pairing…',
@@ -1039,6 +1094,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumShare.inviteError': 'Could not send the invitation. Please try again.',
   'albumShare.loadError': 'Could not load who this album is shared with.',
   'albumShare.allowDownload': 'Allow downloading originals',
+  'albumShare.canManagePartyMessages': 'Can manage Party messages',
+  'albumShare.canManagePartyMessagesAria': 'Let {name} manage Party messages',
+  'albumShare.canManagePartyMessagesHelp':
+    'A limited delegation: they will be able to approve, hide, restore and Hero-promote guest messages. It does not grant the other party settings, the tokens, photo and video moderation, or member management.',
   'albumShare.allowDownloadHelp':
     'Without this they can view the photos and videos but not download the original files. You can change it at any time.',
   'albumShare.membersLegend': 'People with access',
