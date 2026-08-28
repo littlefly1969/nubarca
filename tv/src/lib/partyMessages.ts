@@ -195,6 +195,58 @@ export type BoundaryOutcome =
   // finishes, the screen advances normally.
   | { readonly kind: 'hero'; readonly boundariesSinceHero: number };
 
+// ---------------------------------------------------- the deferred boundary
+
+// A media advance that a Hero postponed, and has not yet been performed.
+//
+// This is a LEDGER, not a rendering detail, and it is deliberately not derived
+// from "is a Hero on screen". A video that has already ended can produce no
+// further boundary: if the card over it is withdrawn early — hidden, demoted,
+// or its party revoked — nothing else would ever advance, and the wall would
+// sit on the last frame of a finished clip. The debt outlives the card so that
+// whatever ends the card can settle it.
+export interface BoundaryDebt {
+  readonly owed: boolean;
+}
+
+export const NO_BOUNDARY_DEBT: BoundaryDebt = { owed: false };
+
+// The boundary chose to show a card instead of advancing.
+export function deferBoundary(): BoundaryDebt {
+  return { owed: true };
+}
+
+// The advance is moot: the viewer is looking at something else now (a face
+// filter narrowed the list and re-picked the index, or somebody navigated by
+// hand). Settling it here would move the wall out from under a choice the
+// person just made.
+export function discardBoundary(): BoundaryDebt {
+  return NO_BOUNDARY_DEBT;
+}
+
+export interface BoundarySettlement {
+  readonly debt: BoundaryDebt;
+  readonly advance: boolean;
+}
+
+// THE ONLY function that can spend a debt, which is what makes "a boundary is
+// consumed at most once" a property of the type rather than of every call
+// site's memory. A card timing out in the same tick the poll withdraws it calls
+// this twice; the second call finds nothing owed.
+//
+// A paused or manual wall KEEPS the debt rather than spending it: nothing
+// should move while nobody is asking for movement, and discarding it instead
+// is what would strand the finished video above.
+export function settleBoundary(
+  debt: BoundaryDebt,
+  input: { heroVisible: boolean; slideshowMode: boolean; playing: boolean },
+): BoundarySettlement {
+  if (!debt.owed) return { debt, advance: false };
+  if (input.heroVisible) return { debt, advance: false };
+  if (!input.slideshowMode || !input.playing) return { debt, advance: false };
+  return { debt: NO_BOUNDARY_DEBT, advance: true };
+}
+
 // Decide what happens at one media boundary.
 //
 // `currentIsVideo` is deliberately NOT consulted here: this function is called

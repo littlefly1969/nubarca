@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { TvPartyMessage } from '../api/tv.ts';
 import {
-  beginHeroRotation, heroCandidates, heroEligible, nextHero, onMediaBoundary,
-  remapRibbonIndex, ribbonRotating, ribbonVisible, sameMessages,
-  HERO_DURATION_MS, HERO_EVERY_N_BOUNDARIES, MESSAGES_POLL_MS, RIBBON_ROTATE_MS,
+  beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
+  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
+  sameMessages, settleBoundary,
+  HERO_DURATION_MS, HERO_EVERY_N_BOUNDARIES, MESSAGES_POLL_MS,
+  NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
+  type BoundaryDebt,
 } from './partyMessages.ts';
 
 function message(over: Partial<TvPartyMessage> = {}): TvPartyMessage {
@@ -265,4 +268,167 @@ test('a promoted message that is later hidden is not a candidate at all', () => 
   // in the feed — and heroCandidates therefore cannot select it.
   assert.deepEqual(heroCandidates([]).map((m) => m.id), []);
   assert.equal(nextHero(beginHeroRotation(), []).message, null);
+});
+
+// ── the deferred boundary ───────────────────────────────────────────────────
+
+// A tiny stand-in for the viewer: the debt, whether a card is on screen, and a
+// count of how many times the wall actually moved. Every scenario below is
+// driven through the SAME functions the screen calls, so a regression in the
+// ledger fails here rather than on a television.
+function wall(initial: { slideshowMode?: boolean; playing?: boolean } = {}) {
+  let debt: BoundaryDebt = NO_BOUNDARY_DEBT;
+  let heroVisible = false;
+  let slideshowMode = initial.slideshowMode ?? true;
+  let playing = initial.playing ?? true;
+  let advances = 0;
+
+  // What the viewer's single consumer effect does, on every render that could
+  // have changed one of its inputs.
+  const settle = () => {
+    const result = settleBoundary(debt, { heroVisible, slideshowMode, playing });
+    debt = result.debt;
+    if (result.advance) advances += 1;
+  };
+
+  return {
+    get advances() { return advances; },
+    get owed() { return debt.owed; },
+    showHero() { debt = deferBoundary(); heroVisible = true; settle(); },
+    heroTimedOut() { heroVisible = false; settle(); },
+    serverWithdrewHero() { heroVisible = false; settle(); },
+    // Pausing takes the card down (the viewer's invalidation effect does this)
+    // but deliberately does NOT discard the debt.
+    pause() { heroVisible = false; playing = false; settle(); },
+    resume() { playing = true; settle(); },
+    activateFaceFilter() { debt = discardBoundary(); heroVisible = false; settle(); },
+    navigateManually() { debt = discardBoundary(); heroVisible = false; advances += 1; settle(); },
+    goManual() { debt = discardBoundary(); heroVisible = false; slideshowMode = false; settle(); },
+    rerender() { settle(); },
+  };
+}
+
+test('a card that runs its course advances the wall exactly once', () => {
+  const w = wall();
+  w.showHero();
+  assert.equal(w.advances, 0, 'the card holds the media it was raised over');
+  assert.equal(w.owed, true);
+
+  w.heroTimedOut();
+  assert.equal(w.advances, 1);
+  assert.equal(w.owed, false);
+
+  // Re-renders after the fact cannot spend a debt that is already settled.
+  w.rerender();
+  w.rerender();
+  assert.equal(w.advances, 1);
+});
+
+test('a card the server withdraws still advances — a finished video cannot wait', () => {
+  // The failure this prevents: a video reaches its natural end, a card goes up,
+  // the host hides it before the timer fires. The clip will never raise another
+  // boundary, so if the withdrawal did not settle the debt the wall would sit
+  // on its last frame for the rest of the party.
+  const w = wall();
+  w.showHero();
+  w.serverWithdrewHero();
+  assert.equal(w.advances, 1);
+  assert.equal(w.owed, false);
+});
+
+test('a timeout racing a withdrawal advances once, not twice', () => {
+  const w = wall();
+  w.showHero();
+  // Both paths fire in the same tick. There is one consumer, so the second
+  // finds nothing owed.
+  w.heroTimedOut();
+  w.serverWithdrewHero();
+  assert.equal(w.advances, 1);
+});
+
+test('a paused wall keeps the debt and settles it on resume', () => {
+  const w = wall();
+  w.showHero();
+  w.pause();
+  // Nothing moves while nobody is asking for movement...
+  assert.equal(w.advances, 0);
+  assert.equal(w.owed, true, 'discarding here would strand a finished video');
+
+  w.resume();
+  assert.equal(w.advances, 1);
+  assert.equal(w.owed, false);
+});
+
+test('a face filter discards the debt rather than moving the wall', () => {
+  // The filter narrows the display list and re-picks the index itself, so
+  // settling an old debt on top of that would skip past what it chose.
+  const w = wall();
+  w.showHero();
+  w.activateFaceFilter();
+  assert.equal(w.advances, 0);
+  assert.equal(w.owed, false);
+  w.rerender();
+  assert.equal(w.advances, 0);
+});
+
+test('leaving the slideshow for a manual view discards the debt', () => {
+  const w = wall();
+  w.showHero();
+  w.goManual();
+  assert.equal(w.advances, 0);
+  assert.equal(w.owed, false);
+});
+
+test('manual navigation moves once — its own step, not the card\'s too', () => {
+  const w = wall();
+  w.showHero();
+  w.navigateManually();
+  // Exactly the one the person asked for.
+  assert.equal(w.advances, 1);
+  assert.equal(w.owed, false);
+  w.rerender();
+  assert.equal(w.advances, 1);
+});
+
+test('a boundary with no card owes nothing, so nothing can be spent later', () => {
+  const w = wall();
+  // An ordinary transition advances at the call site and never touches the
+  // ledger; the consumer must stay inert.
+  w.rerender();
+  assert.equal(w.advances, 0);
+  w.pause();
+  w.resume();
+  assert.equal(w.advances, 0);
+});
+
+test('a photo card behaves exactly like a video one', () => {
+  // The ledger does not know what kind of media it is holding, which is the
+  // point: the photo path must not regress while the video path is fixed.
+  const w = wall();
+  w.showHero();
+  assert.equal(w.advances, 0);
+  w.heroTimedOut();
+  assert.equal(w.advances, 1);
+});
+
+test('settleBoundary is the only way to spend a debt', () => {
+  // deferBoundary and discardBoundary produce ledgers, never advances.
+  assert.equal(deferBoundary().owed, true);
+  assert.equal(discardBoundary().owed, false);
+  assert.equal(NO_BOUNDARY_DEBT.owed, false);
+
+  const owed = deferBoundary();
+  const held = settleBoundary(owed, { heroVisible: true, slideshowMode: true, playing: true });
+  assert.equal(held.advance, false);
+  assert.equal(held.debt.owed, true, 'a card still on screen keeps the debt');
+
+  const spent = settleBoundary(owed, { heroVisible: false, slideshowMode: true, playing: true });
+  assert.equal(spent.advance, true);
+  assert.equal(spent.debt.owed, false);
+
+  // And spending the RESULT again yields nothing.
+  const again = settleBoundary(spent.debt, {
+    heroVisible: false, slideshowMode: true, playing: true,
+  });
+  assert.equal(again.advance, false);
 });

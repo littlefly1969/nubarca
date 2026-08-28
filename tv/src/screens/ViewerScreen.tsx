@@ -41,10 +41,11 @@ import {
   videoPlaybackProps, VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
 } from '../lib/partySlideshow';
 import {
-  beginHeroRotation, heroCandidates, heroEligible, nextHero, onMediaBoundary,
-  remapRibbonIndex, ribbonRotating, ribbonVisible, sameMessages,
-  HERO_DURATION_MS, MESSAGES_POLL_MS, RIBBON_ROTATE_MS,
-  type HeroRotation,
+  beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
+  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
+  sameMessages, settleBoundary,
+  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
+  type BoundaryDebt, type HeroRotation,
 } from '../lib/partyMessages';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
@@ -158,6 +159,10 @@ export function ViewerScreen({
   const [hero, setHero] = useState<TvPartyMessage | null>(null);
   const heroRotationRef = useRef<HeroRotation>(beginHeroRotation());
   const boundariesSinceHeroRef = useRef(0);
+  // The advance a Hero postponed. The ledger and the rule for spending it are
+  // in lib/partyMessages, where the exactly-once property is a pure test rather
+  // than a claim about this component's effects.
+  const boundaryDebtRef = useRef<BoundaryDebt>(NO_BOUNDARY_DEBT);
 
   const {
     visible: overlayVisible,
@@ -259,12 +264,21 @@ export function ViewerScreen({
       const pick = nextHero(heroRotationRef.current, messagesRef.current);
       if (pick.message !== null) {
         heroRotationRef.current = pick.rotation;
+        // The advance is now OWED. Whatever ends the card — its timer, the
+        // server withdrawing it, or the wall resuming after a pause — the debt
+        // is settled by the single consumer below.
+        boundaryDebtRef.current = deferBoundary();
         setHero(pick.message);
         return;
       }
     }
     goNext();
   }, [partyEnabled, goNext]);
+
+  const dismissHeroForManualNavigation = useCallback(() => {
+    boundaryDebtRef.current = discardBoundary();
+    setHero(null);
+  }, []);
 
   // Face-filter transitions preserve the current photo: when the filter
   // activates mid-slideshow and the current photo matches, stay on it (else
@@ -316,8 +330,12 @@ export function ViewerScreen({
       case 'toggle-overlay':
         toggleOverlay();
         return;
-      case 'next': goNext(); break;
-      case 'prev': goPrev(); break;
+      // Manual navigation is the person taking over. Any Hero on screen comes
+      // down with it, and the advance the card was holding is discarded — they
+      // have just chosen where to be, and settling an old debt on top of that
+      // would skip the item they asked for.
+      case 'next': dismissHeroForManualNavigation(); goNext(); break;
+      case 'prev': dismissHeroForManualNavigation(); goPrev(); break;
       case 'toggle-play':
         // In a slideshow there is exactly ONE play state, and it governs the
         // photo countdown and the video player alike. Talking to the player
@@ -347,7 +365,8 @@ export function ViewerScreen({
         break;
     }
     bumpOverlay();
-  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef]);
+  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef,
+    dismissHeroForManualNavigation]);
   useTVEventHandler(onTVEvent);
 
   // BACK while face-filter mode is active: delete THIS search server-side
@@ -478,26 +497,55 @@ export function ViewerScreen({
     return () => clearInterval(timer);
   }, [partyEnabled, albumId, onClose, onSessionInvalid]);
 
-  // A Hero holds the screen for a fixed time and then hands the wall back by
-  // doing the advance the boundary deferred.
+  // A Hero holds the screen for a fixed time, then simply comes down. It does
+  // NOT advance the wall itself — settling the deferred boundary is the single
+  // consumer's job, and two callers of goNext() is exactly the double advance
+  // this structure exists to make unrepresentable.
   useEffect(() => {
     if (hero === null) return;
-    const timer = setTimeout(() => {
-      setHero(null);
-      goNext();
-    }, HERO_DURATION_MS);
+    const timer = setTimeout(() => setHero(null), HERO_DURATION_MS);
     return () => clearTimeout(timer);
-  }, [hero, goNext]);
+  }, [hero]);
 
-  // A Hero that is up when the conditions that allowed it stop holding comes
-  // straight down: a guest activating a face filter, or somebody pausing the
-  // wall, has said something more specific than "keep showing me cards". The
-  // card is dropped WITHOUT advancing — the media underneath is what they were
-  // looking at.
+  // A Hero the viewer no longer has any business showing comes down early.
+  // Which of the two things happens to the DEFERRED ADVANCE depends on why:
+  //
+  //   the viewer changed what it is looking at (a guest activated a face
+  //   filter, or the session stopped being a slideshow) — the deferred advance
+  //   is moot. The face-filter effect re-picks the index from the new display
+  //   list, and a manual session's index belongs to the person driving it, so
+  //   settling an old debt here would move something out from under them.
+  //
+  //   the wall was merely PAUSED — the advance is still owed. Discarding it is
+  //   what would strand a finished video: it can produce no further boundary,
+  //   so the debt is kept and the consumer settles it when playback resumes.
   useEffect(() => {
     if (hero === null) return;
-    if (faceFilter !== null || !playing || !slideshowMode) setHero(null);
+    if (faceFilter !== null || !slideshowMode) {
+      boundaryDebtRef.current = discardBoundary();
+      setHero(null);
+      return;
+    }
+    if (!playing) setHero(null);
   }, [hero, faceFilter, playing, slideshowMode]);
+
+  // THE SINGLE CONSUMER of a deferred boundary.
+  //
+  // Everything that ends a Hero does so by setting it to null; this is the one
+  // place that then performs the advance, and it writes the settled ledger back
+  // BEFORE acting on it. That is what makes "every boundary is consumed at most
+  // once" a property of the structure rather than something each call site has
+  // to remember — a card that times out in the same tick the poll withdraws it
+  // still produces exactly one advance.
+  useEffect(() => {
+    const settled = settleBoundary(boundaryDebtRef.current, {
+      heroVisible: hero !== null,
+      slideshowMode,
+      playing,
+    });
+    boundaryDebtRef.current = settled.debt;
+    if (settled.advance) goNext();
+  }, [hero, slideshowMode, playing, goNext]);
 
   // Live refresh of the guest MESSAGE feed. Faster than the media poll (5s vs
   // 15s) because "I typed it on my phone and it appeared on the television" is
@@ -627,7 +675,17 @@ export function ViewerScreen({
           // while something is rotating, so a video opened from the grid to
           // watch keeps its own controls and plays to its end. Both decisions
           // come from one tested policy rather than from `partyEnabled` alone.
-          {...videoPlaybackProps({ slideshowMode, partyEnabled, playing, timing })}
+          // A Hero is an editorial pause BETWEEN two media, not an overlay over
+          // a running one. A card raised at a video's CAP would otherwise leave
+          // the clip playing — audio and all — behind an opaque scrim, because
+          // the cap is a boundary the slideshow observes rather than something
+          // that stops the player. Withholding the controlled play intent for
+          // the card's duration uses the player's existing authority instead of
+          // introducing a second one; the wall then advances to the NEXT media,
+          // so the paused clip is never resumed.
+          {...videoPlaybackProps({
+            slideshowMode, partyEnabled, playing: playing && hero === null, timing,
+          })}
           onReadyStateChange={setVideoReady}
           // EXTERNAL pause reconciliation, for the CONTROLLED slideshow only.
           // When the output route disappears the player pauses for real; without

@@ -76,12 +76,23 @@ test('every automatic advance goes through the Hero boundary policy', () => {
 
 test('nothing truncates a video to make room for a Hero', () => {
   // A video's only automatic boundaries remain its natural end and the owner's
-  // configured cap. There is no message-driven timer anywhere near the player.
+  // configured cap. No message-driven timer reaches the player: the ONLY thing
+  // a Hero changes about it is the controlled play intent, which is the
+  // player's existing authority rather than a second one.
   const player = viewer.slice(viewer.indexOf('<TvVideoPlayer'), viewer.indexOf('controlsRef='));
   assert.ok(player.length > 0);
-  assert.doesNotMatch(player, /HERO_DURATION_MS|setHero|hero/);
-  // And the Hero timer only ever hands the wall back; it never stops a player.
-  assert.match(viewer, /setTimeout\(\(\) => \{\s*setHero\(null\);\s*goNext\(\);\s*\},\s*HERO_DURATION_MS\)/);
+  assert.doesNotMatch(player, /HERO_DURATION_MS|setHero\(|setTimeout/);
+  assert.doesNotMatch(player, /videoControlsRef/);
+});
+
+test('a video does not keep playing underneath a Hero raised at its cap', () => {
+  // The cap is a boundary the slideshow OBSERVES; it does not stop the player.
+  // Without withholding the play intent, a card raised at the cap would sit
+  // over a clip still running, audio included.
+  assert.match(viewer, /playing: playing && hero === null/);
+  // And the wall then moves to the NEXT media, so the paused clip is never
+  // resumed underneath.
+  assert.match(viewer, /if \(settled\.advance\) goNext\(\);/);
 });
 
 test('a Hero holds the current media rather than moving the index', () => {
@@ -92,11 +103,63 @@ test('a Hero holds the current media rather than moving the index', () => {
   assert.match(viewer, /hero === null;/);
 });
 
+test('a deferred boundary is explicit, and the Hero timer does not settle it', () => {
+  // Tracked as its own flag rather than inferred from `hero !== null`: a video
+  // that has already ended can produce no further boundary, so a card withdrawn
+  // early would otherwise strand the wall on its last frame.
+  assert.match(viewer, /boundaryDebtRef/);
+  assert.match(viewer, /boundaryDebtRef\.current = deferBoundary\(\);\s*setHero\(pick\.message\)/);
+  // The card's own timer only takes the card down.
+  assert.match(viewer, /setTimeout\(\(\) => setHero\(null\),\s*HERO_DURATION_MS\)/);
+});
+
+test('exactly one place settles a deferred boundary', () => {
+  // The whole exactly-once guarantee rests on there being ONE consumer, so a
+  // card timing out in the same tick the poll withdraws it cannot advance
+  // twice. Every other site may only clear the flag, never spend it.
+  const settles = viewer.match(/settleBoundary\(/g) ?? [];
+  assert.equal(settles.length, 1);
+  // It writes the returned ledger back BEFORE acting on it, so the debt is
+  // cleared whether or not the advance happens.
+  assert.match(
+    viewer,
+    /boundaryDebtRef\.current = settled\.debt;\s*if \(settled\.advance\) goNext\(\);/,
+  );
+  // No other site may advance off the ledger; they may only clear it.
+  assert.doesNotMatch(viewer, /discardBoundary\(\);[\s\S]{0,80}goNext\(\)/);
+});
+
 test('the Hero comes down when the conditions that allowed it stop holding', () => {
-  assert.match(viewer, /faceFilter !== null \|\| !playing \|\| !slideshowMode\) setHero\(null\)/);
+  // A viewer looking at something else discards the debt; a merely PAUSED wall
+  // keeps it, because a finished video cannot raise the boundary again.
+  assert.match(
+    viewer,
+    /if \(faceFilter !== null \|\| !slideshowMode\) \{\s*boundaryDebtRef\.current = discardBoundary\(\);\s*setHero\(null\);\s*return;\s*\}\s*if \(!playing\) setHero\(null\);/,
+  );
+  // The consumer refuses to move a paused or manual wall, so the retained debt
+  // is settled only when playback resumes.
+  assert.match(viewer, /heroVisible: hero !== null,\s*slideshowMode,\s*playing,/);
   // A Hero the server stops sending leaves on the next poll rather than
-  // serving out its six seconds.
+  // serving out its six seconds — and that path settles the boundary, because
+  // it is a withdrawal of content, not a change of viewing intent.
   assert.match(viewer, /!feed\.messages\.some\(\(m\) => m\.id === current\.id && m\.isHero\)/);
+  const poll = viewer.slice(
+    viewer.indexOf('listTvPartyMessages('), viewer.indexOf('MESSAGES_POLL_MS)'));
+  assert.doesNotMatch(poll, /discardBoundary/);
+});
+
+test('manual navigation takes over from a Hero rather than queueing behind it', () => {
+  assert.match(viewer, /case 'next': dismissHeroForManualNavigation\(\); goNext\(\); break;/);
+  assert.match(viewer, /case 'prev': dismissHeroForManualNavigation\(\); goPrev\(\); break;/);
+  // It discards the debt: the person has just chosen where to be, and settling
+  // an old one on top of that would skip the item they asked for.
+  const helper = viewer.slice(
+    viewer.indexOf('const dismissHeroForManualNavigation'),
+    viewer.indexOf('const onTVEvent'),
+  );
+  assert.ok(helper.length > 0);
+  assert.match(helper, /discardBoundary\(\)/);
+  assert.doesNotMatch(helper, /goNext\(\)/);
 });
 
 test('the message surfaces add no focusable controls and no new remote handling', () => {
