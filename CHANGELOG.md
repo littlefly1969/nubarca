@@ -84,7 +84,8 @@ originating repository and is deliberately not reproduced here.
   the mounted pager to its current logical index without becoming a fake swipe.
   Video status starts from `player.status`, follows replacement-player events,
   and mounts the native surface only at `readyToPlay`, leaving probe,
-  preparation, loading, unavailable and error states explicit.
+  preparation, loading, unavailable and error states explicit. Mobile advances
+  to `0.2.5` (`versionCode` 6) for physical acceptance of the completed viewer.
 - **The full-screen media viewer now owns a real pager viewport.** The pager
   fills the available height and gives every photo/video cell exactly one device
   width. Back navigation leaves first and clears the viewer sequence on route

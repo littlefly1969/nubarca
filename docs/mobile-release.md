@@ -20,8 +20,8 @@ tracked, non-secret Android release contract. The initial contract is:
 |---|---|
 | application | NubArca |
 | package / applicationId | `it.littlefly.nubarca` |
-| version | `0.2.4` |
-| versionCode | `5` |
+| version | `0.2.5` |
+| versionCode | `6` |
 | minSdk | 24 (Android 7.0) |
 | targetSdk | 36 (Android 16) |
 | upload signer SHA-256 | `1cfe6f9c8a52420717189e0d950196c5810608ac8e720d1d886d3248080fc06a` |
@@ -78,11 +78,11 @@ Equivalent CLI commands are:
 ```bash
 gh workflow run mobile-android-release.yml \
   --ref main \
-  -f confirm_version_code=5
+  -f confirm_version_code=6
 
 gh run list --workflow mobile-android-release.yml --limit 1
 gh run watch <run-id> --exit-status
-gh run download <run-id> --name nubarca-mobile-0.2.4-vc5
+gh run download <run-id> --name nubarca-mobile-0.2.5-vc6
 ```
 
 The workflow fails closed unless all of these are true:
@@ -107,7 +107,7 @@ certificate, `release-metadata.json`, and `SHA256SUMS`.
 ### Directly on the phone
 
 1. Download the Actions artifact ZIP and extract it. If downloading on a PC,
-   copy `nubarca-mobile-v5.apk` to the phone by USB, Nearby Share, or another
+   copy `nubarca-mobile-v6.apk` to the phone by USB, Nearby Share, or another
    channel you trust.
 2. On Android, open the APK from **Files**.
 3. When Android asks, allow **Install unknown apps** for Files (or for the one
@@ -126,7 +126,7 @@ After downloading and extracting the artifact:
 ```bash
 sha256sum --check SHA256SUMS
 adb devices
-adb install -r nubarca-mobile-v5.apk
+adb install -r nubarca-mobile-v6.apk
 ```
 
 `-r` updates an existing GitHub-built NubArca install while preserving its app
