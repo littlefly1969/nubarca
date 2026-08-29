@@ -46,7 +46,7 @@ public static class OwnerDocumentChunker
         if (string.IsNullOrWhiteSpace(text)) return Array.Empty<OwnerDocumentChunkDraft>();
 
         var drafts = MarkdownRagChunker.Chunk(text);
-        var result = new List<OwnerDocumentChunkDraft>(Math.Min(drafts.Count, options.EffectiveMaxChunks));
+        var result = new List<OwnerDocumentChunkDraft>(drafts.Count);
 
         // Offsets are recovered by SEARCHING FORWARD from where the previous
         // chunk ended, never by assuming the chunker concatenates back to the
@@ -57,10 +57,14 @@ public static class OwnerDocumentChunker
         // a wrong offset is worse than an absent one.
         var cursor = 0;
 
+        // THE CHUNK-COUNT BOUND IS NOT ENFORCED HERE ANY MORE. It used to stop
+        // at the ceiling and return what fit, which is a partial document
+        // wearing a complete document's clothes. The ceiling is now decided in
+        // ONE place — OwnerDocumentIndexer.PlanChunks — where exceeding it
+        // refuses the document instead, for native text and structured formats
+        // alike.
         foreach (var draft in drafts)
         {
-            if (result.Count >= options.EffectiveMaxChunks) break;
-
             var body = draft.Text;
             if (body.Length > options.EffectiveMaxChunkCharacters)
             {

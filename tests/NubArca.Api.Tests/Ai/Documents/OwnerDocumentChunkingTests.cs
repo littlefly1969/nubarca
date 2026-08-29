@@ -77,8 +77,13 @@ public sealed class OwnerDocumentChunkingTests
     }
 
     [Fact]
-    public void ChunkCount_IsBounded()
+    public void ChunkCount_IsNotCappedHere_BecauseTheCeilingIsARefusalOneLayerUp()
     {
+        // The chunker used to stop at MaxChunks and return what fit, which is a
+        // partial document that every caller then treated as a whole one. The
+        // ceiling now lives in OwnerDocumentIndexer.PlanChunks, where exceeding
+        // it REFUSES the document — so this function's job is to chunk, and to
+        // report honestly how many chunks the document actually needs.
         var options = new DocumentExtractionOptions { MaxChunks = 2 };
         var many = string.Join("\n\n", Enumerable.Range(1, 40).Select(i =>
             $"## Sezione {i}\n\nUn paragrafo di testo sufficientemente lungo da diventare "
@@ -86,10 +91,13 @@ public sealed class OwnerDocumentChunkingTests
 
         var chunks = OwnerDocumentChunker.Chunk(many, options);
 
-        Assert.Equal(2, chunks.Count);
-        // Still contiguous after the cap: the bound truncates, it does not
-        // renumber what survives.
-        Assert.Equal(new[] { 1, 2 }, chunks.Select(c => c.Ordinal).ToArray());
+        Assert.True(chunks.Count > options.EffectiveMaxChunks,
+            "the chunker must report the real chunk count, not a capped one");
+        // Ordinals stay contiguous from 1, which is what makes the ordinal part
+        // of a chunk's identity stable.
+        Assert.Equal(
+            Enumerable.Range(1, chunks.Count).ToArray(),
+            chunks.Select(c => c.Ordinal).ToArray());
     }
 
     [Fact]

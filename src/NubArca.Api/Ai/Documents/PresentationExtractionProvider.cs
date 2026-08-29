@@ -77,6 +77,7 @@ public sealed class PresentationExtractionProvider : IDocumentExtractionProvider
         var blocks = new List<ExtractedDocumentBlock>();
         var ordinal = 0;
         var number = 0;
+        var characters = 0;
 
         foreach (var slideId in slideIds)
         {
@@ -93,19 +94,38 @@ public sealed class PresentationExtractionProvider : IDocumentExtractionProvider
             if (slidePart.Slide?.Show is { } show && !show.Value) continue;
 
             var title = SlideTitle(slidePart);
-            var body = SlideText(slidePart, options);
-            var notes = NotesText(slidePart, options);
+            var body = SlideText(slidePart, options, out var bodyOverflowed);
+            var notes = NotesText(slidePart, options, out var notesOverflowed);
+
+            // A SLIDE PAST ITS OWN CEILING IS A REFUSAL. Cutting the slide to
+            // the first N characters and publishing the deck as complete hides
+            // the rest of somebody's slide behind an answer that looks whole.
+            if (bodyOverflowed || notesOverflowed)
+            {
+                return DocumentExtractionOutcome.Rejected(
+                    DocumentExtractionReasons.DocumentTooComplex);
+            }
+
+            // AND THE DECK HAS DOCUMENT-WIDE CEILINGS TOO. Per-slide bounds say
+            // nothing about a thousand slides that are each individually small.
+            if (Exceeds(blocks.Count, characters, body.Length + notes.Length, options))
+            {
+                return DocumentExtractionOutcome.Rejected(
+                    DocumentExtractionReasons.DocumentTooComplex);
+            }
 
             var locator = new DocumentLocator(DocumentLocatorKinds.Slide, number, title);
 
             if (body.Length > 0)
             {
+                characters += body.Length;
                 blocks.Add(new ExtractedDocumentBlock(
                     ++ordinal, DocumentBlockKinds.Body, body, title, locator));
             }
 
             if (notes.Length > 0)
             {
+                characters += notes.Length;
                 // A SEPARATE BLOCK, deliberately. Notes and slide body answer
                 // different questions and a citation should be able to say which
                 // one it came from; merging them would make "the presentation
@@ -152,15 +172,24 @@ public sealed class PresentationExtractionProvider : IDocumentExtractionProvider
         return null;
     }
 
-    private static string SlideText(SlidePart slidePart, DocumentExtractionOptions options)
+    private static string SlideText(
+        SlidePart slidePart, DocumentExtractionOptions options, out bool overflowed)
     {
+        overflowed = false;
         var builder = new StringBuilder();
         var tree = slidePart.Slide?.CommonSlideData?.ShapeTree;
         if (tree is null) return string.Empty;
 
         foreach (var element in tree.ChildElements)
         {
-            if (builder.Length >= options.EffectiveMaxSlideTextCharacters) break;
+            // PAST THE BOUND IS AN OVERFLOW, NOT A STOPPING POINT. Reporting it
+            // bounds the memory exactly as the old break did, and lets the
+            // caller refuse instead of silently publishing a shortened slide.
+            if (builder.Length > options.EffectiveMaxSlideTextCharacters)
+            {
+                overflowed = true;
+                return string.Empty;
+            }
 
             switch (element)
             {
@@ -201,13 +230,18 @@ public sealed class PresentationExtractionProvider : IDocumentExtractionProvider
         }
 
         var result = builder.ToString().Trim();
-        return result.Length > options.EffectiveMaxSlideTextCharacters
-            ? result[..options.EffectiveMaxSlideTextCharacters]
-            : result;
+        if (result.Length > options.EffectiveMaxSlideTextCharacters)
+        {
+            overflowed = true;
+            return string.Empty;
+        }
+        return result;
     }
 
-    private static string NotesText(SlidePart slidePart, DocumentExtractionOptions options)
+    private static string NotesText(
+        SlidePart slidePart, DocumentExtractionOptions options, out bool overflowed)
     {
+        overflowed = false;
         var notes = slidePart.NotesSlidePart?.NotesSlide?.CommonSlideData?.ShapeTree;
         if (notes is null) return string.Empty;
 
@@ -226,14 +260,28 @@ public sealed class PresentationExtractionProvider : IDocumentExtractionProvider
             }
 
             Append(builder, ShapeText(shape));
-            if (builder.Length >= options.EffectiveMaxSlideTextCharacters) break;
+            if (builder.Length > options.EffectiveMaxSlideTextCharacters)
+            {
+                overflowed = true;
+                return string.Empty;
+            }
         }
 
         var result = builder.ToString().Trim();
-        return result.Length > options.EffectiveMaxSlideTextCharacters
-            ? result[..options.EffectiveMaxSlideTextCharacters]
-            : result;
+        if (result.Length > options.EffectiveMaxSlideTextCharacters)
+        {
+            overflowed = true;
+            return string.Empty;
+        }
+        return result;
     }
+
+    /// Would one more block of `length` characters carry the COMPLETE deck past
+    /// a document-wide ceiling?
+    private static bool Exceeds(
+        int blockCount, int characters, int length, DocumentExtractionOptions options)
+        => blockCount + 1 > options.EffectiveMaxChunks
+           || (long)characters + length > options.EffectiveMaxCharacters;
 
     /// A shape's paragraphs, one per line, in document order — which is bullet
     /// order, and is the order the author chose.

@@ -70,6 +70,7 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
         var blocks = new List<ExtractedDocumentBlock>();
         var ordinal = 0;
         var totalCells = 0;
+        var characters = 0;
         var visibleIndex = 0;
 
         if (sheets.Count > options.EffectiveMaxWorkbookSheets)
@@ -104,6 +105,7 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
             var rendered = new List<string>();
             string[]? header = null;
             var rowCount = 0;
+            var sheetCharacters = 0;
 
             foreach (var row in rows)
             {
@@ -153,16 +155,44 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
                 if (header is null && rendered.Count == 0 && LooksLikeHeader(cells))
                 {
                     header = cells.Select(c => c.Value).ToArray();
-                    rendered.Add(string.Join(" | ", header));
+                    var headerText = string.Join(" | ", header);
+                    if (Exceeds(blocks.Count, characters, sheetCharacters, headerText.Length, options))
+                    {
+                        return DocumentExtractionOutcome.Rejected(
+                            DocumentExtractionReasons.DocumentTooComplex);
+                    }
+                    sheetCharacters += headerText.Length + 1;
+                    rendered.Add(headerText);
                     continue;
                 }
 
-                rendered.Add(RenderRow(cells, header, row.RowIndex?.Value));
+                var rowText = RenderRow(cells, header, row.RowIndex?.Value);
+
+                // THE CHARACTER CEILING IS ENFORCED AS ROWS ACCUMULATE, not
+                // after the workbook is assembled. The row/sheet/cell bounds
+                // above say nothing about a workbook whose cells are each
+                // enormous, and stopping here rather than trimming later is what
+                // keeps a half-read sheet from being published as the whole of
+                // somebody's spreadsheet.
+                if (Exceeds(blocks.Count, characters, sheetCharacters, rowText.Length, options))
+                {
+                    return DocumentExtractionOutcome.Rejected(
+                        DocumentExtractionReasons.DocumentTooComplex);
+                }
+                sheetCharacters += rowText.Length + 1;
+                rendered.Add(rowText);
             }
 
             if (rendered.Count == 0) continue;
 
             var text = string.Join("\n", rendered);
+            if (blocks.Count + 1 > options.EffectiveMaxChunks
+                || (long)characters + text.Length > options.EffectiveMaxCharacters)
+            {
+                return DocumentExtractionOutcome.Rejected(
+                    DocumentExtractionReasons.DocumentTooComplex);
+            }
+            characters += text.Length;
             blocks.Add(new ExtractedDocumentBlock(
                 ++ordinal,
                 DocumentBlockKinds.Table,
@@ -230,6 +260,13 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
         var formula = cell.CellFormula?.Text;
         if (string.IsNullOrWhiteSpace(formula)) return value;
 
+        // REPRESENTATION POLICY, NOT A COMPLETENESS BOUND — and the difference
+        // is deliberate. A formula is not the cell's VALUE; the value is
+        // extracted separately and in full. What is carried here is a bounded
+        // rendering of how the author expressed it, so a single generated
+        // formula thousands of characters long cannot dominate the sheet's
+        // text. No workbook row, sheet or value is omitted by this bound, which
+        // is why it may stay a bound rather than a refusal.
         var expression = formula.Length > options.EffectiveMaxFormulaCharacters
             ? formula[..options.EffectiveMaxFormulaCharacters]
             : formula;
@@ -291,6 +328,15 @@ public sealed class SpreadsheetExtractionProvider : IDocumentExtractionProvider
     }
 
     /// The column letters from a cell reference like `C12`.
+    /// Would one more row of `length` characters carry the COMPLETE workbook
+    /// past a document-wide ceiling? `characters` is what previous sheets have
+    /// already contributed; `sheetCharacters` is this sheet so far.
+    private static bool Exceeds(
+        int blockCount, int characters, int sheetCharacters, int length,
+        DocumentExtractionOptions options)
+        => blockCount + 1 > options.EffectiveMaxChunks
+           || (long)characters + sheetCharacters + length > options.EffectiveMaxCharacters;
+
     private static string ColumnOf(string? reference)
     {
         if (string.IsNullOrEmpty(reference)) return string.Empty;

@@ -27,13 +27,31 @@ public sealed record RichChunkDraft(
 /// for byte, so `TextHash` only changes when the document does — and the
 /// ordinal-by-ordinal reuse that makes a one-paragraph edit cost one embedding
 /// keeps working.
+/// Chunks, or the sanitized reason there are none.
+///
+/// An OUTCOME rather than a list, because the two answers a partial list
+/// conflates are not interchangeable: "this document chunked into 900 pieces"
+/// and "this document needed more pieces than the bound allows, so here are the
+/// first 4000" look identical to every caller, and the second one silently
+/// indexes part of somebody's document as though it were all of it.
+public sealed record RichChunkOutcome(
+    IReadOnlyList<RichChunkDraft>? Chunks, string? Reason)
+{
+    public static RichChunkOutcome Chunked(IReadOnlyList<RichChunkDraft> chunks)
+        => new(chunks, null);
+
+    public static RichChunkOutcome Rejected(string reason) => new(null, reason);
+
+    public bool Ok => Chunks is not null;
+}
+
 public static class RichDocumentChunker
 {
-    public static IReadOnlyList<RichChunkDraft> Chunk(
+    public static RichChunkOutcome Chunk(
         IReadOnlyList<ExtractedDocumentBlock> blocks, DocumentExtractionOptions options)
     {
         var drafts = new List<RichChunkDraft>();
-        if (blocks.Count == 0) return drafts;
+        if (blocks.Count == 0) return RichChunkOutcome.Chunked(drafts);
 
         var max = options.EffectiveMaxChunkCharacters;
         var limit = options.EffectiveMaxChunks;
@@ -42,8 +60,6 @@ public static class RichDocumentChunker
 
         for (var i = 0; i < blocks.Count; i++)
         {
-            if (drafts.Count >= limit) break;
-
             var block = blocks[i];
             var text = block.Text ?? string.Empty;
 
@@ -58,6 +74,17 @@ public static class RichDocumentChunker
 
             if (text.Length <= max)
             {
+                // PAST THE CHUNK CEILING IS A REFUSAL. Stopping here and
+                // returning what fits would index the first part of the
+                // document and record it Completed — the exact outcome the
+                // per-format bounds above exist to prevent, arriving one layer
+                // later.
+                if (drafts.Count + 1 > limit)
+                {
+                    return RichChunkOutcome.Rejected(
+                        DocumentExtractionReasons.DocumentTooComplex);
+                }
+
                 drafts.Add(new RichChunkDraft(
                     ++ordinal, heading, text, offset, offset + text.Length, block.Locator));
                 offset += text.Length;
@@ -69,7 +96,7 @@ public static class RichDocumentChunker
             // a spreadsheet row and a bullet whole; a single line longer than the
             // budget is cut hard, because the alternative is an unbounded chunk.
             var start = 0;
-            while (start < text.Length && drafts.Count < limit)
+            while (start < text.Length)
             {
                 var length = Math.Min(max, text.Length - start);
                 if (start + length < text.Length)
@@ -82,6 +109,12 @@ public static class RichDocumentChunker
                 var piece = text.Substring(start, length).Trim();
                 if (piece.Length > 0)
                 {
+                    if (drafts.Count + 1 > limit)
+                    {
+                        return RichChunkOutcome.Rejected(
+                            DocumentExtractionReasons.DocumentTooComplex);
+                    }
+
                     drafts.Add(new RichChunkDraft(
                         ++ordinal, heading, piece,
                         offset + start, offset + start + length, block.Locator));
@@ -93,6 +126,6 @@ public static class RichDocumentChunker
             offset += text.Length;
         }
 
-        return drafts;
+        return RichChunkOutcome.Chunked(drafts);
     }
 }
