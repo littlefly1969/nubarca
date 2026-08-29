@@ -78,6 +78,11 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **Physical Android HLS probing no longer discards the response type before
+  classifying it.** The bounded Range probe snapshots status and `Content-Type`
+  before aborting the body transfer. This preserves React Native's native
+  response head and prevents a real HLS `200` from becoming the false “Video
+  non disponibile per la riproduzione” state.
 - **Long viewer sessions no longer drift after mixed portrait/landscape use or
   falsely retire playable videos.** Pager geometry now comes from the list's
   measured layout rather than the window notification that precedes it;

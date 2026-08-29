@@ -283,6 +283,10 @@ through the keyed `ViewerProvider` remount.
 
 Viewer video preflight remains the bounded authenticated Range probe and runs
 only for the active slide; virtualized neighbours do not consume probe budgets.
+The probe snapshots status and `Content-Type` from the response head before it
+aborts the body transfer. That ordering is part of the native boundary: a React
+Native response may release its header accessor on abort, and reading afterwards
+would turn a valid HLS `200` into a false permanent-unavailable verdict.
 Each focus transition preserves the exact authorized media URL while latching
 the current manual owner-session cookie, so a long-lived viewer does not replay
 the cookie captured when its grid first opened, and status rerenders do not

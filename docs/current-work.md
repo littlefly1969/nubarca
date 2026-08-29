@@ -965,7 +965,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   current measured width may change logical media. Viewer photos and fallback posters
   request `contain` without changing tile crop behavior. Only the active video
   runs the bounded probe, and each focus transition latches the current manual
-  session cookie without replacing a player mid-play. Preparation exhaustion,
+  session cookie without replacing a player mid-play. The probe copies status
+  and content type out of the native response head BEFORE aborting its body;
+  aborting first may invalidate React Native's header accessor and must never
+  turn a real HLS 200 into permanent unavailability. Preparation exhaustion,
   429/5xx and transport failure are retryable playback errors, never evidence
   that the media is unavailable; only a deliberate terminal media response uses
   that surface. Native readiness is seeded from the current player snapshot and
