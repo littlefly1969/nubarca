@@ -58,15 +58,38 @@ REASON_TIMEOUT = 4
 REASON_PROCESS_FAILED = 5
 REASON_RENDERER_UNAVAILABLE = 6
 
+# BOTH LAYOUTS ARE FIXED AND EXPLICIT, and the `>` prefix is what makes them so:
+# it selects big-endian AND standard sizes with NO alignment padding, so what
+# Python packs is byte-for-byte what the C# client reads. A native-alignment
+# format would silently insert a pad byte and shift every field after it — a
+# mismatch that looks like "the renderer is unavailable" rather than like a
+# protocol bug.
+#
+#   request  (20): magic[4] version[1] op[1] format[1] reserved[1]
+#                  timeoutSeconds[4] maxOutputBytes[4] payloadLength[4]
+#   response (12): magic[4] version[1] status[1] reason[2] payloadLength[4]
 REQUEST_HEADER = struct.Struct(">4sBBBBIII")
-RESPONSE_HEADER = struct.Struct(">4sBBxHI")
+RESPONSE_HEADER = struct.Struct(">4sBBHI")
 
-# The closed format vocabulary. The value on the wire is an ordinal, so the API
-# cannot name an import filter and this worker cannot be persuaded to pick one.
+assert REQUEST_HEADER.size == 20, REQUEST_HEADER.size
+assert RESPONSE_HEADER.size == 12, RESPONSE_HEADER.size
+
+# The closed format vocabulary: ordinal -> (extension, IMPORT filter, EXPORT
+# filter). The value on the wire is an ordinal, so the API cannot name a filter
+# and this worker cannot be persuaded to pick one.
+#
+# THE IMPORT FILTER IS PINNED, and that is the whole reason this table has three
+# columns instead of two. Left to itself LibreOffice SNIFFS the input: hand it a
+# plain text file called `source.docx` and it cheerfully imports it as a Writer
+# document and produces a perfectly good PDF. That makes the declared format
+# advisory, which is exactly the "untrusted input arriving somewhere written for
+# a different structure" problem the API's own byte-probe exists to prevent —
+# undone at the last step. With the filter pinned, a document that is not what
+# the ordinal says fails to import and is refused.
 FORMATS = {
-    1: ("docx", "writer_pdf_Export"),
-    2: ("xlsx", "calc_pdf_Export"),
-    3: ("pptx", "impress_pdf_Export"),
+    1: ("docx", "MS Word 2007 XML", "writer_pdf_Export"),
+    2: ("xlsx", "Calc MS Excel 2007 XML", "calc_pdf_Export"),
+    3: ("pptx", "Impress MS PowerPoint 2007 XML", "impress_pdf_Export"),
 }
 
 SOCKET_PATH = os.environ.get("NUBARCA_RENDER_SOCKET", "/run/nubarca-render/render.sock")
@@ -105,8 +128,38 @@ def libreoffice_profile(job_dir: str) -> str:
     return "file://" + os.path.join(job_dir, "profile")
 
 
+
+def terminate_group(process: subprocess.Popen) -> None:
+    """Kill the whole process group and WAIT for it to be gone.
+
+    Waiting matters as much as killing: the cleanup that follows removes the job
+    directory, and a still-dying LibreOffice holding a file in it makes that
+    removal fail — quietly, because it is best-effort. SIGTERM first so the
+    engine can close its own files, then SIGKILL for whatever ignored it.
+    """
+    for signum in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(os.getpgid(process.pid), signum)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            process.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+
+    # It did not die even to SIGKILL — a zombie parented elsewhere, most likely.
+    # Reaped or not, the cleanup below is still attempted and reports honestly.
+    log("a render process survived SIGKILL")
+
+
 def convert(
-    job_dir: str, source: str, export_filter: str, timeout: int, max_output: int
+    job_dir: str,
+    source: str,
+    import_filter: str,
+    export_filter: str,
+    timeout: int,
+    max_output: int,
 ) -> tuple[int, int, bytes]:
     out_dir = os.path.join(job_dir, "out")
     os.makedirs(out_dir, mode=0o700, exist_ok=True)
@@ -125,23 +178,30 @@ def convert(
         # where the engine that would run them lives.
         "-env:MacroSecurityLevel=3",
         f"-env:UserInstallation={libreoffice_profile(job_dir)}",
+        # The declared format, made authoritative. Without this the engine
+        # decides what the bytes are, and the ordinal becomes a suggestion.
+        f"--infilter={import_filter}",
         "--convert-to", f"pdf:{export_filter}",
         "--outdir", out_dir,
         source,
     ]
 
+    # Popen AND AN EXPLICIT GROUP KILL, not `subprocess.run(timeout=...)`.
+    #
+    # `run` kills the direct child on timeout and nothing else. LibreOffice's
+    # launcher immediately execs `soffice.bin` and may fork further, so the
+    # grandchildren survive, keep running, and keep the job directory OPEN — and
+    # the recursive cleanup below then fails silently, leaving a copy of
+    # somebody's document behind until the next restart. `start_new_session`
+    # puts the whole tree in its own process group precisely so it can be killed
+    # as one.
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            # A NEW PROCESS GROUP, so a hung conversion can be killed WHOLE.
-            # LibreOffice forks; killing the parent alone leaves the child
-            # holding the job directory open and the next cleanup fails.
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             start_new_session=True,
-            check=False,
             # An empty-ish environment: nothing this container holds is a
             # secret, and passing none is still the right default.
             env={
@@ -152,14 +212,18 @@ def convert(
                 "SAL_USE_VCLPLUGIN": "svp",
             },
         )
-    except subprocess.TimeoutExpired:
-        return STATUS_UNAVAILABLE, REASON_TIMEOUT, b""
     except FileNotFoundError:
         return STATUS_UNAVAILABLE, REASON_RENDERER_UNAVAILABLE, b""
     except OSError:
         return STATUS_UNAVAILABLE, REASON_PROCESS_FAILED, b""
 
-    if completed.returncode != 0:
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        terminate_group(process)
+        return STATUS_UNAVAILABLE, REASON_TIMEOUT, b""
+
+    if returncode != 0:
         # The engine's own message can carry a path; it is never forwarded.
         return STATUS_UNAVAILABLE, REASON_PROCESS_FAILED, b""
 
@@ -248,7 +312,7 @@ def handle(conn: socket.socket) -> None:
     if payload is None:
         return
 
-    extension, export_filter = FORMATS[fmt]
+    extension, import_filter, export_filter = FORMATS[fmt]
     effective_timeout = max(1, min(int(timeout) or 1, MAX_TIMEOUT_SECONDS))
     # THE SMALLER OF THE TWO BOUNDS. The caller states what it is willing to
     # receive and the worker states what it is willing to produce; neither can
@@ -272,17 +336,38 @@ def handle(conn: socket.socket) -> None:
             handle.write(payload)
 
         status, reason, data = convert(
-            job_dir, source, export_filter, effective_timeout, effective_max_output)
+            job_dir, source, import_filter, export_filter,
+            effective_timeout, effective_max_output)
         respond(conn, status, reason, data)
         log(f"render format={extension} status={status} reason={reason} bytes={len(data)}")
     except OSError:
         respond(conn, STATUS_UNAVAILABLE, REASON_PROCESS_FAILED)
     finally:
         _slots.release()
-        # RECURSIVE CLEANUP, always. The profile, the source, the output and
-        # anything LibreOffice scattered go together, and no temporary file
-        # leaves this container's private volume.
+        # RECURSIVE CLEANUP, always, and CHECKED. The profile, the source, the
+        # output and anything LibreOffice scattered go together, and no
+        # temporary file leaves this container's private volume.
+        #
+        # `ignore_errors=True` alone would turn "a copy of somebody's document
+        # is still on disk" into silence. A killed engine can hold a file for a
+        # moment after its group is signalled, so removal is retried briefly and
+        # then REPORTED — the stale-job sweep at startup is the backstop, not the
+        # plan.
+        cleanup(job_dir)
+
+
+def cleanup(job_dir: str) -> None:
+    for attempt in range(5):
         shutil.rmtree(job_dir, ignore_errors=True)
+        if not os.path.exists(job_dir):
+            return
+        time.sleep(0.2 * (attempt + 1))
+
+    try:
+        shutil.rmtree(job_dir)
+    except OSError:
+        # The path is opaque and is never logged; the fact that one survived is.
+        log("a job directory could not be removed and will be swept at restart")
 
 
 def sweep_stale() -> None:

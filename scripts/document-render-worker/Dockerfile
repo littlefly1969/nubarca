@@ -27,7 +27,11 @@ RUN apt-get update \
         libreoffice-impress-nogui \
         fonts-dejavu-core \
         fonts-liberation2 \
-        python3-minimal \
+        # `python3`, not `python3-minimal`: the minimal package omits most of
+        # the standard library, including `shutil` — which is what removes a job
+        # directory recursively when a render ends. A worker that cannot clean
+        # up is a worker that leaves copies of private documents behind.
+        python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root, with a fixed uid/gid so the shared socket directory's group can be

@@ -263,6 +263,21 @@ If a separate derived-media root (`Storage__DerivedRootPath`) is configured, a
 demand after a restore. See [deploy/SMOKE_CHECKLIST.md](../deploy/SMOKE_CHECKLIST.md)
 for the post-restore drill.
 
+AI derivatives — photo/face vectors, document extractions and **document visual
+indexes** — are in the database dump and come back with it. They are also
+REBUILDABLE from the originals, which is what makes a restore onto a host
+without the models a working restore rather than a broken one: text retrieval
+answers as usual, the visual path reports itself unavailable, and
+`documents visual-index --owner <user-id>` rebuilds it once the model directory
+and (for Office documents) the renderer worker are in place. Rebuilding visual
+derivatives never touches text extractions, chunks, text embeddings or source
+files.
+
+Rendered pages are not backed up because they are not stored: a page is drawn,
+embedded and dropped. The `document-renderer-work` volume holds only in-flight
+job directories, is emptied when a job ends and again when the worker starts,
+and must not be included in a backup.
+
 ## Upload limits
 
 Keep the three limits consistent or uploads fail confusingly:
