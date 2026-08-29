@@ -230,6 +230,153 @@ public sealed class OwnerDocumentCompletenessIntegrationTests : IDisposable
             d => d.Status == AiArtifactStatuses.Completed);
     }
 
+    // ---- native chunk-format upgrade ----------------------------------------
+
+    [Fact]
+    public async Task A_Native_Document_Whose_Lossless_Split_Exceeds_MaxChunks_Is_Refused()
+    {
+        // The split is lossless, so a long text document now needs MORE chunks
+        // than the truncating version did. That must refuse the whole document
+        // rather than publish the chunks that fit — PlanChunks is the single
+        // completeness gate, and this is the case it exists for.
+        SeedEmbeddingProfile();
+        await AddNativeFileAsync("manuale.md", LongMarkdown(sections: 30));
+
+        var outcome = await Indexer(
+            new DocumentExtractionOptions { MaxChunks = 4, MaxChunkCharacters = 300 },
+            semantic: true).IndexOwnerAsync(_owner, embed: true);
+
+        Assert.Equal(1, outcome.Skipped);
+        Assert.Equal(1, outcome.SkipReasons[DocumentExtractionReasons.DocumentTooComplex]);
+
+        Assert.DoesNotContain(
+            await _db.DocumentTexts.ToListAsync(),
+            d => d.Status == AiArtifactStatuses.Completed);
+        Assert.Empty(await _db.DocumentChunks.ToListAsync());
+        Assert.Empty(await _db.DocumentChunkEmbeddings.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_Version_1_Document_Is_Re_Chunked_To_Version_2_On_The_Next_Pass()
+    {
+        // The lifecycle this bump relies on, exercised rather than assumed: no
+        // schema migration and no backfill to run by hand, because
+        // ChunkFormatVersion is compared on every pass and a mismatch fails the
+        // idempotent early exit.
+        SeedEmbeddingProfile();
+        await AddNativeFileAsync("manuale.md", LongMarkdown(sections: 4));
+
+        var options = new DocumentExtractionOptions { MaxChunkCharacters = 300 };
+        var first = await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+        Assert.Equal(1, first.Extracted);
+
+        var document = Assert.Single(await _db.DocumentTexts.ToListAsync());
+        Assert.Equal(OwnerDocumentChunkFormat.Current, document.ChunkFormatVersion);
+
+        // Wind the row back to how Slice 3 left it, keeping its chunks and their
+        // embeddings — a real installation upgrading into this build.
+        var staleChunkIds = await _db.DocumentChunks.Select(c => c.Id).ToListAsync();
+        var staleEmbeddingIds = await _db.DocumentChunkEmbeddings.Select(e => e.Id).ToListAsync();
+        Assert.NotEmpty(staleChunkIds);
+        Assert.NotEmpty(staleEmbeddingIds);
+
+        document.ChunkFormatVersion = 1;
+        await _db.SaveChangesAsync();
+        var second = await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+
+        // NOT the unchanged path: same bytes, but the reading is stale.
+        Assert.Equal(0, second.Unchanged);
+        Assert.Equal(1, second.Extracted);
+
+        var upgraded = Assert.Single(await _db.DocumentTexts.ToListAsync());
+        Assert.Equal(OwnerDocumentChunkFormat.Current, upgraded.ChunkFormatVersion);
+        Assert.Equal(2, upgraded.ChunkFormatVersion);
+        Assert.Equal(AiArtifactStatuses.Completed, upgraded.Status);
+        Assert.True(upgraded.IsCurrent);
+    }
+
+    [Fact]
+    public async Task Stale_Version_1_Embeddings_Do_Not_Survive_The_Re_Chunk()
+    {
+        // An embedding describes the text of ONE chunk. When boundaries move,
+        // a surviving vector describes text that no longer exists at that
+        // ordinal — a retrieval hit pointing at a passage nobody can read.
+        //
+        // Simply setting the row's version back to 1 would not exercise this:
+        // the chunks already on disk were produced by THIS build, so re-chunking
+        // reproduces them byte for byte and correctly changes nothing. To test
+        // the lifecycle the stored chunk has to differ from what the current
+        // splitter produces — which is exactly what a v1 row is, a chunk whose
+        // text was cut where v2 splits.
+        SeedEmbeddingProfile();
+        await AddNativeFileAsync("manuale.md", LongMarkdown(sections: 4));
+
+        var options = new DocumentExtractionOptions { MaxChunkCharacters = 300 };
+        await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+
+        var document = Assert.Single(await _db.DocumentTexts.ToListAsync());
+        var victim = await _db.DocumentChunks.OrderBy(c => c.Ordinal).FirstAsync();
+        var freshText = victim.Text;
+        var staleEmbeddingIds = await _db.DocumentChunkEmbeddings
+            .Where(e => e.DocumentChunkId == victim.Id)
+            .Select(e => e.Id)
+            .ToListAsync();
+        Assert.NotEmpty(staleEmbeddingIds);
+
+        // Make it look like Slice 3 left it: the same passage, cut short.
+        victim.Text = freshText[..(freshText.Length / 2)];
+        victim.TextHash = RagHash.Sha256Hex(victim.Text);
+        document.ChunkFormatVersion = 1;
+        await _db.SaveChangesAsync();
+
+        await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+
+        // The chunk's text is restored to what the current splitter produces…
+        var rechunked = await _db.DocumentChunks.AsNoTracking()
+            .OrderBy(c => c.Ordinal).FirstAsync();
+        Assert.Equal(freshText, rechunked.Text);
+        Assert.Equal(RagHash.Sha256Hex(freshText), rechunked.TextHash);
+
+        // …and the vector minted against the truncated text is gone, not left
+        // standing for a passage that no longer says that.
+        var survivingStale = await _db.DocumentChunkEmbeddings
+            .CountAsync(e => staleEmbeddingIds.Contains(e.Id));
+        Assert.Equal(0, survivingStale);
+
+        // Replaced rather than merely deleted: the chunk is embedded again.
+        Assert.True(await _db.DocumentChunkEmbeddings
+            .AnyAsync(e => e.DocumentChunkId == rechunked.Id));
+
+        // And nothing anywhere points at a chunk that does not exist.
+        var chunkIds = await _db.DocumentChunks.Select(c => c.Id).ToListAsync();
+        Assert.All(
+            await _db.DocumentChunkEmbeddings.ToListAsync(),
+            e => Assert.Contains(e.DocumentChunkId, chunkIds));
+    }
+
+    [Fact]
+    public async Task The_Same_Bytes_At_Version_2_Return_To_The_No_Work_Path()
+    {
+        // The bump must cost exactly ONE re-chunk. If the version comparison
+        // were wrong in the other direction, every pass would re-read and
+        // re-embed every native document in every library, forever.
+        SeedEmbeddingProfile();
+        await AddNativeFileAsync("manuale.md", LongMarkdown(sections: 4));
+
+        var options = new DocumentExtractionOptions { MaxChunkCharacters = 300 };
+        Assert.Equal(1, (await Indexer(options, semantic: true)
+            .IndexOwnerAsync(_owner, embed: true)).Extracted);
+
+        var second = await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+        Assert.Equal(0, second.Extracted);
+        Assert.Equal(1, second.Unchanged);
+        Assert.Equal(0, second.EmbeddingsCreated);
+
+        var third = await Indexer(options, semantic: true).IndexOwnerAsync(_owner, embed: true);
+        Assert.Equal(0, third.Extracted);
+        Assert.Equal(1, third.Unchanged);
+    }
+
     // ---- extractor-profile upgrade ------------------------------------------
 
     [Fact]
@@ -399,6 +546,47 @@ public sealed class OwnerDocumentCompletenessIntegrationTests : IDisposable
             Options.Create(extraction),
             TimeProvider.System,
             NullLogger<OwnerDocumentIndexer>.Instance);
+    }
+
+    /// Markdown with real sections and prose-shaped sentences, long enough that
+    /// the chunker has to split rather than merely section.
+    private static string LongMarkdown(int sections)
+        => "# Manuale della caldaia\n\n" + string.Join("\n\n", Enumerable.Range(1, sections)
+            .Select(i =>
+                $"## Sezione {i}\n\n" + string.Join(" ", Enumerable.Range(1, 8).Select(j =>
+                    $"La manutenzione ordinaria numero {i}.{j} prevede il controllo del "
+                    + "circuito idraulico e la verifica della pressione di esercizio."))));
+
+    private async Task<FileItem> AddNativeFileAsync(string name, string content)
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
+        var written = await _storage.WriteAsync(stream);
+
+        var blob = new BlobObject
+        {
+            Id = Guid.NewGuid(),
+            Sha256 = written.Sha256,
+            StorageKey = written.StorageKey,
+            SizeBytes = written.SizeBytes,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _db.BlobObjects.Add(blob);
+
+        var file = new FileItem
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = _owner,
+            BlobObjectId = blob.Id,
+            Name = name,
+            MimeType = "text/markdown",
+            SizeBytes = written.SizeBytes,
+            CreatedAt = DateTime.UtcNow,
+            EffectiveDateTaken = DateTime.UtcNow,
+            EffectiveDateTakenSource = "uploaded",
+        };
+        _db.FileItems.Add(file);
+        await _db.SaveChangesAsync();
+        return file;
     }
 
     private void SeedEmbeddingProfile()

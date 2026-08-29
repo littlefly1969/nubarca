@@ -17,8 +17,19 @@ namespace NubArca.Api.Ai.Documents;
 public static class OwnerDocumentChunkFormat
 {
     /// 1 — Slice 3's chunking: the markdown/prose splitter, section-aware, with
-    /// a heading trail.
-    public const int Current = 1;
+    /// a heading trail. A draft longer than the chunk budget was CUT to the
+    /// budget and its tail discarded.
+    ///
+    /// 2 — the same splitter, with oversized drafts SPLIT rather than cut. The
+    /// tail of a long paragraph is text the owner wrote, and dropping it
+    /// published part of their document as the whole of it — the completeness
+    /// invariant the rest of Slice 4 enforces.
+    ///
+    /// Bumping this needs no schema migration. `ChunkFormatVersion` is compared
+    /// on every indexing pass, and a mismatch fails the idempotent early exit,
+    /// so an existing document is re-chunked and re-embedded by the next
+    /// ordinary pass with nothing to run by hand.
+    public const int Current = 2;
 }
 
 /// One chunk of a private document, before it has an identity.
@@ -65,30 +76,113 @@ public static class OwnerDocumentChunker
         // alike.
         foreach (var draft in drafts)
         {
-            var body = draft.Text;
-            if (body.Length > options.EffectiveMaxChunkCharacters)
+            if (string.IsNullOrWhiteSpace(draft.Text)) continue;
+
+            // AN OVERSIZED DRAFT IS SPLIT, NEVER CUT. It used to be truncated to
+            // the budget and its tail dropped on the floor — the markdown
+            // splitter's own maximum is above the default chunk budget, so this
+            // fired on ordinary prose and quietly removed the end of long
+            // paragraphs from somebody's document.
+            //
+            // Every piece keeps the draft's HEADING, because the heading is what
+            // makes a passage citable and the second half of a paragraph is in
+            // the same section as the first.
+            foreach (var body in SplitToBudget(draft.Text, options.EffectiveMaxChunkCharacters))
             {
-                body = body[..options.EffectiveMaxChunkCharacters];
+                if (string.IsNullOrWhiteSpace(body)) continue;
+
+                var start = text.IndexOf(body, cursor, StringComparison.Ordinal);
+                var end = start >= 0 ? start + body.Length : -1;
+                if (start >= 0) cursor = end;
+
+                // Ordinal is RE-DERIVED from position in this list rather than
+                // copied from the draft. Skipping a blank chunk must not leave a
+                // hole: the ordinal is part of the chunk's identity
+                // (DocumentTextId, ProfileId, Ordinal), so a gap would make the
+                // same document chunk to different keys depending on what was
+                // skipped.
+                result.Add(new OwnerDocumentChunkDraft(
+                    Ordinal: result.Count + 1,
+                    Heading: draft.Heading,
+                    Text: body,
+                    StartOffset: start,
+                    EndOffset: end));
             }
-            if (string.IsNullOrWhiteSpace(body)) continue;
-
-            var start = text.IndexOf(body, cursor, StringComparison.Ordinal);
-            var end = start >= 0 ? start + body.Length : -1;
-            if (start >= 0) cursor = end;
-
-            // Ordinal is RE-DERIVED from position in this list rather than
-            // copied from the draft. Skipping a blank chunk must not leave a
-            // hole: the ordinal is part of the chunk's identity
-            // (DocumentTextId, ProfileId, Ordinal), so a gap would make the same
-            // document chunk to different keys depending on what was skipped.
-            result.Add(new OwnerDocumentChunkDraft(
-                Ordinal: result.Count + 1,
-                Heading: draft.Heading,
-                Text: body,
-                StartOffset: start,
-                EndOffset: end));
         }
 
         return result;
+    }
+
+    /// Cuts one oversized draft into pieces that each fit the budget, LOSING
+    /// NOTHING: concatenating what this yields reproduces the input exactly.
+    ///
+    /// That exactness is the whole point, and it is why nothing here trims. A
+    /// boundary's own newline or space travels with the piece BEFORE it, so the
+    /// next piece starts on real content and the join is still lossless — a
+    /// trim would look tidier and would silently delete characters at every
+    /// boundary, which is a smaller version of the bug being fixed.
+    ///
+    /// The break is chosen from the text rather than imposed on it: a line
+    /// ending first, then a sentence ending, then a word boundary, and only a
+    /// hard cut when a single run offers none of them. Deterministic at every
+    /// step, because the same document must chunk to the same pieces — the
+    /// ordinal-by-ordinal reuse that keeps a one-paragraph edit costing one
+    /// embedding depends on it.
+    private static IEnumerable<string> SplitToBudget(string text, int max)
+    {
+        var start = 0;
+        while (start < text.Length)
+        {
+            var remaining = text.Length - start;
+            if (remaining <= max)
+            {
+                yield return text[start..];
+                yield break;
+            }
+
+            var window = text.AsSpan(start, max);
+            var length = PreferredBreak(window, max);
+            yield return text.Substring(start, length);
+            start += length;
+        }
+    }
+
+    /// How many characters of `window` to take, preferring a boundary a reader
+    /// would recognise.
+    ///
+    /// A candidate is only accepted past a quarter of the budget. Below that the
+    /// "boundary" produces a sliver of a chunk and pushes the real content into
+    /// the next one, which retrieves worse than an honest hard cut.
+    private static int PreferredBreak(ReadOnlySpan<char> window, int max)
+    {
+        var floor = max / 4;
+
+        var newline = window.LastIndexOf('\n');
+        if (newline > floor) return newline + 1;
+
+        var sentence = LastSentenceEnd(window);
+        if (sentence > floor) return sentence;
+
+        var space = window.LastIndexOf(' ');
+        if (space > floor) return space + 1;
+
+        // A single unbroken run — a URL, a base64 blob, a language that does not
+        // space its words. Cut it, because the alternative is an unbounded chunk.
+        return max;
+    }
+
+    /// The end of the last sentence in the window, or -1. Counted as the
+    /// position AFTER the terminator and its following space, so the piece keeps
+    /// its own punctuation.
+    private static int LastSentenceEnd(ReadOnlySpan<char> window)
+    {
+        for (var i = window.Length - 2; i > 0; i--)
+        {
+            if (window[i] is not ('.' or '!' or '?' or ';')) continue;
+            if (!char.IsWhiteSpace(window[i + 1])) continue;
+            return i + 2;
+        }
+
+        return -1;
     }
 }
