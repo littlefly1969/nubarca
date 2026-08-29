@@ -41,6 +41,34 @@ public sealed record RagQuery(
         : this(domain, text, null, maxEvidence, maxCharacters)
     {
     }
+
+    /// A SERVER-ONLY NARROWING of an owner-scoped question to specific files.
+    ///
+    /// It exists for one caller: the visual candidate expansion, which finds
+    /// documents that LOOK like the question and then asks the ordinary private
+    /// text retrieval what those documents actually say. Without it that second
+    /// pass would have to re-rank the owner's whole corpus and hope the right
+    /// file surfaced, which is the thing visual retrieval was supposed to fix.
+    ///
+    /// THIS IS A NARROWING AND NEVER A WIDENING. It intersects with
+    /// `OwnerDocumentEligibility.EligibleChunks`; it does not replace any part
+    /// of it. A file id belonging to another owner, to a deleted file or to a
+    /// vaulted one contributes nothing, because the allowlist is one more `AND`
+    /// on a query that already established the boundary — not a lookup that
+    /// bypasses it.
+    ///
+    /// AND IT IS NOT REACHABLE FROM A REQUEST. There is no `fileIds` field on
+    /// any DTO, no query-string parameter, and no configuration key that reaches
+    /// here. The only value it ever holds is a list the server itself just
+    /// derived from this same owner's eligible visual index. A browser cannot
+    /// name a file to search, which is what stops "narrow to these documents"
+    /// from becoming "read these documents".
+    ///
+    /// Null means unscoped, which is what every other caller wants. An EMPTY
+    /// list means "no files qualify" and is honoured as such — it must not be
+    /// treated as null, or a visual pass that found nothing would silently widen
+    /// back to the whole library.
+    public IReadOnlyCollection<Guid>? AllowedFileItemIds { get; init; }
 }
 
 /// Which retrieval paths actually produced a result.

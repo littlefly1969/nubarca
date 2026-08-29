@@ -147,15 +147,27 @@ public static class OwnerDocumentEligibility
     /// alone is reading a derived row as authority, and it will happily spend
     /// local inference giving fresh vectors to a document its owner deleted last
     /// week — re-arming stale rows instead of leaving them inert.
+    /// `allowedFileItemIds` is an OPTIONAL SERVER-SIDE NARROWING, and it is the
+    /// fifth condition rather than a replacement for any of the four. The visual
+    /// candidate expansion passes a list of this owner's own files so the text
+    /// pass can be scoped to documents that LOOK relevant; every clause below
+    /// still applies to each of them, so a forged id — another owner's file, a
+    /// deleted one, a vaulted one — intersects with nothing and returns zero
+    /// chunks. Null means unscoped; an empty collection means nothing qualifies
+    /// and is honoured literally.
     public static IQueryable<EligibleChunk> EligibleChunks(
         IQueryable<DocumentChunk> chunks,
         IQueryable<DocumentText> documents,
         IQueryable<FileItem> files,
-        Guid ownerUserId)
+        Guid ownerUserId,
+        IReadOnlyCollection<Guid>? allowedFileItemIds = null)
         => from chunk in chunks
            join document in documents on chunk.DocumentTextId equals document.Id
            join file in Eligible(files, ownerUserId) on document.FileItemId equals file.Id
            where chunk.OwnerUserId == ownerUserId
+                 // The narrowing, applied in the DATABASE and before any limit,
+                 // so a scoped question reads only the scoped rows.
+                 && (allowedFileItemIds == null || allowedFileItemIds.Contains(file.Id))
                  && document.OwnerUserId == ownerUserId
                  // THE CURRENT READING, not merely a completed one. A file may
                  // carry several completed extractions — the native-text pass

@@ -25,6 +25,7 @@ public sealed class DeterministicAiBackend
     {
         AiCapabilities.ImageEmbedding,
         AiCapabilities.DocumentEmbedding,
+        AiCapabilities.DocumentVisualEmbedding,
         AiCapabilities.DocumentExtraction,
         AiCapabilities.FaceDetection,
         AiCapabilities.FaceEmbedding,

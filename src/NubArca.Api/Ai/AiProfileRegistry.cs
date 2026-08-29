@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.Backends;
+using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Ai.Onnx;
 using NubArca.Api.Ai.Onnx.Face;
 using NubArca.Api.Ai.TextEmbeddings;
@@ -296,6 +297,89 @@ public sealed class AiProfileRegistry : IAiProfileRegistry
                 });
                 profilesCreated++;
             }
+        }
+
+        if (_db.ChangeTracker.HasChanges())
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        return new AiSeedResult(modelsCreated, profilesCreated);
+    }
+
+    /// The DOCUMENT VISUAL profile: SigLIP2's weights, its own identity.
+    ///
+    /// The checkpoint is shared with the photo library deliberately — it is a
+    /// 1.6 GB asset that is already on disk, already compiled for the configured
+    /// device, and already the multimodal space this installation reasons in.
+    /// Downloading a second copy of the same model to embed pages instead of
+    /// photos would cost gigabytes to change nothing.
+    ///
+    /// What is NOT shared is everything that decides meaning. A separate
+    /// `AiProfile` row means a separate ProfileId on every stored vector, so
+    /// document vectors live in their own table keyed by their own profile and
+    /// cannot be counted, compared or reindexed as photo vectors. It means a
+    /// future document-visual model swap reindexes documents and leaves the
+    /// photo library alone, and the reverse. And it means `ai status` can say
+    /// which of the two is configured, which one shared profile could not.
+    ///
+    /// Never the capability default. Which profile embeds document pages is
+    /// stated explicitly by `Ai:DocumentVisual:DenseProfileKey`, so a newer
+    /// profile appearing in the catalogue can never become the active one by
+    /// existing.
+    public async Task<AiSeedResult> SeedDocumentVisualProfilesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var profilesCreated = 0;
+        var modelsCreated = 0;
+
+        var config = OnnxImageModels.Catalog[OnnxImageModels.SiglipSo400mKey];
+
+        var model = await _db.AiModels
+            .FirstOrDefaultAsync(m => m.Key == config.Key, cancellationToken);
+        if (model is null)
+        {
+            model = new AiModel
+            {
+                Id = Guid.NewGuid(),
+                Key = config.Key,
+                Provider = AiProviders.Onnx,
+                Capability = AiCapabilities.ImageEmbedding,
+                Modality = AiModalities.Multimodal,
+                Version = 1,
+                Dimension = config.Dimension,
+                DistanceMetric = AiDistanceMetrics.Cosine,
+                Enabled = true,
+                CreatedAt = now,
+            };
+            _db.AiModels.Add(model);
+            modelsCreated++;
+        }
+
+        var exists = await _db.AiProfiles.AnyAsync(
+            p => p.Key == DocumentVisualProfiles.DenseSiglip2So400m, cancellationToken);
+        if (!exists)
+        {
+            _db.AiProfiles.Add(new AiProfile
+            {
+                Id = Guid.NewGuid(),
+                Key = DocumentVisualProfiles.DenseSiglip2So400m,
+                AiModelId = model.Id,
+                Capability = AiCapabilities.DocumentVisualEmbedding,
+                Modality = AiModalities.Multimodal,
+                Dimension = DocumentVisualProfiles.DenseDimension,
+                DistanceMetric = AiDistanceMetrics.Cosine,
+                IsDefault = false,
+                Enabled = true,
+                // Links the profile to its code-side preprocessing config — the
+                // same catalog entry the photo profile points at, which is what
+                // makes "same weights, same preprocessing" a fact rather than a
+                // coincidence between two copied constants.
+                ConfigHash = config.Key,
+                CreatedAt = now,
+            });
+            profilesCreated++;
         }
 
         if (_db.ChangeTracker.HasChanges())

@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using NubArca.Api.Ai;
+using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Ai.Documents;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Ai;
@@ -34,12 +37,18 @@ internal static class DocumentsCliCommands
         {
             "index" => IndexAsync(args, sp, stdout, stderr),
             "status" => StatusAsync(args, sp, stdout, stderr),
+            "visual-seed-profiles" => VisualSeedAsync(sp, stdout),
+            "visual-index" => VisualIndexAsync(args, sp, stdout, stderr),
+            "visual-status" => VisualStatusAsync(args, sp, stdout, stderr),
             _ => Usage(stderr),
         };
 
     private static Task<int> Usage(TextWriter stderr)
     {
-        stderr.WriteLine("usage: documents <index|status> --owner <user-id> [--limit N] [--embed]");
+        stderr.WriteLine(
+            "usage: documents <index|status|visual-index|visual-status> --owner <user-id> "
+            + "[--limit N] [--embed]");
+        stderr.WriteLine("       documents visual-seed-profiles");
         return Task.FromResult(2);
     }
 
@@ -158,6 +167,142 @@ internal static class DocumentsCliCommands
         }
 
         return stats.Chunks > 0 ? 0 : 1;
+    }
+
+
+    // ---- documents visual-seed-profiles -------------------------------------
+
+    /// Create the document-visual model/profile rows. Explicit, never on
+    /// startup, and creating them enables nothing: the capability still needs
+    /// `Ai__DocumentVisual__Enabled` and the SigLIP2 files on disk.
+    private static async Task<int> VisualSeedAsync(IServiceProvider sp, TextWriter stdout)
+    {
+        var seeded = await sp.GetRequiredService<IAiProfileRegistry>()
+            .SeedDocumentVisualProfilesAsync();
+
+        stdout.WriteLine($"models_created={seeded.ModelsCreated}");
+        stdout.WriteLine($"profiles_created={seeded.ProfilesCreated}");
+        stdout.WriteLine($"profile={DocumentVisualProfiles.DenseSiglip2So400m}");
+        return 0;
+    }
+
+    // ---- documents visual-index ---------------------------------------------
+
+    private static async Task<int> VisualIndexAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        if (!TryOwner(args, stderr, out var owner)) return 2;
+
+        var limit = TryInt(Arg(args, "--limit"));
+        var outcome = await sp.GetRequiredService<OwnerDocumentVisualIndexer>()
+            .IndexOwnerAsync(owner, limit);
+
+        stdout.WriteLine($"files_seen={outcome.FilesSeen}");
+        stdout.WriteLine($"indexed={outcome.Indexed}");
+        stdout.WriteLine($"unchanged={outcome.Unchanged}");
+        stdout.WriteLine($"units_rendered={outcome.UnitsRendered}");
+        stdout.WriteLine($"units_embedded={outcome.UnitsEmbedded}");
+        stdout.WriteLine($"skipped={outcome.Skipped}");
+        foreach (var (reason, count) in outcome.SkipReasons.OrderBy(r => r.Key, StringComparer.Ordinal))
+        {
+            stdout.WriteLine($"  skipped_{reason}={count}");
+        }
+        stdout.WriteLine($"partial={(outcome.Partial ? "true" : "false")}");
+        stdout.WriteLine($"visual_profile={outcome.ProfileKey ?? "(none)"}");
+        if (outcome.Reason is not null) stdout.WriteLine($"visual_reason={outcome.Reason}");
+
+        // THE ACCELERATOR IS A MIRROR, refreshed after the canonical rows moved.
+        // A gap between the two is invisible at query time — retrieval simply
+        // falls back to the exact scan — so it is closed here rather than
+        // discovered later as "visual search got slow".
+        var resolution = await sp.GetRequiredService<DocumentVisualProfileResolver>().ResolveAsync();
+        if (resolution.IsAvailable)
+        {
+            var synced = await sp.GetRequiredService<DocumentVisualVectorIndexService>()
+                .SyncAsync(resolution.Profile!.Id);
+            stdout.WriteLine($"accelerator_synced={synced}");
+        }
+
+        return outcome.Reason is null ? 0 : 1;
+    }
+
+    // ---- documents visual-status --------------------------------------------
+
+    /// AGGREGATES ONLY, like every other verb here. Counts, reason tokens,
+    /// readiness booleans and profile keys — never a document name, never a
+    /// page, never a socket path.
+    private static async Task<int> VisualStatusAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        if (!TryOwner(args, stderr, out var owner)) return 2;
+
+        var options = sp.GetRequiredService<IOptions<DocumentVisualOptions>>().Value;
+        var resolution = await sp.GetRequiredService<DocumentVisualProfileResolver>().ResolveAsync();
+        var renderers = sp.GetRequiredService<DocumentVisualRenderers>();
+        var db = sp.GetRequiredService<AppDbContext>();
+
+        stdout.WriteLine($"visual_enabled={(options.Enabled ? "true" : "false")}");
+        stdout.WriteLine($"dense_visual_ready={(resolution.IsAvailable ? "true" : "false")}");
+        stdout.WriteLine($"visual_profile={resolution.Profile?.Key ?? options.DenseProfileKey}");
+        if (resolution.Reason is not null) stdout.WriteLine($"visual_reason={resolution.Reason}");
+
+        foreach (var format in Enum.GetValues<DocumentFormatKind>())
+        {
+            var renderer = renderers.For(format);
+            var readiness = renderer?.CheckReadiness();
+            var name = format.ToString().ToLowerInvariant();
+            stdout.WriteLine(
+                $"renderer_{name}={renderer?.RenderProfileKey ?? "(none)"} "
+                + $"ready={(readiness?.Ready == true ? "true" : "false")} "
+                + $"reason={readiness?.Reason ?? "(none)"}");
+        }
+
+        stdout.WriteLine(
+            $"office_renderer_enabled={(options.RenderOfficeEnabled ? "true" : "false")}");
+        stdout.WriteLine(
+            $"late_interaction_ready={(options.LateInteractionEnabled
+                && sp.GetService<IVisualLateInteractionProvider>() is not null ? "true" : "false")}");
+
+        if (resolution.Profile is { } profile)
+        {
+            // COUNTED THROUGH THE LIVE ELIGIBILITY JOIN, so a document deleted
+            // or vaulted since it was indexed stops counting the moment it is —
+            // the same number retrieval would see, not the row count.
+            var eligible = OwnerDocumentVisualEligibility.EligibleUnits(
+                db.DocumentVisualUnits.AsNoTracking(),
+                db.DocumentVisualIndexes.AsNoTracking(),
+                db.FileItems.AsNoTracking(),
+                owner, profile.Id, renderers.ActiveRenderProfileKeys);
+
+            var units = await eligible.CountAsync();
+            var documents = await eligible.Select(r => r.Index.Id).Distinct().CountAsync();
+            stdout.WriteLine($"visual_documents={documents}");
+            stdout.WriteLine($"visual_units={units}");
+
+            var accelerator = sp.GetRequiredService<DocumentVisualVectorIndexService>();
+            stdout.WriteLine(
+                $"accelerator_available="
+                + $"{(await accelerator.IsBackendAvailableAsync(profile.Dimension) ? "true" : "false")}");
+            stdout.WriteLine($"accelerator_vectors={await accelerator.CountIndexedAsync(profile.Id)}");
+
+            // SKIPS BY REASON. What a skipped document is called stays private;
+            // that four of them were too complex does not.
+            var skipped = await db.DocumentVisualIndexes.AsNoTracking()
+                .Where(i => i.OwnerUserId == owner
+                            && i.EmbeddingProfileId == profile.Id
+                            && i.Status == AiArtifactStatuses.Skipped)
+                .GroupBy(i => i.ErrorCode)
+                .Select(g => new { Reason = g.Key, Count = g.Count() })
+                .ToListAsync();
+            foreach (var row in skipped.OrderBy(r => r.Reason, StringComparer.Ordinal))
+            {
+                stdout.WriteLine($"  visual_skipped_{row.Reason ?? "unknown"}={row.Count}");
+            }
+
+            return units > 0 ? 0 : 1;
+        }
+
+        return 1;
     }
 
     // ---- arguments ----------------------------------------------------------

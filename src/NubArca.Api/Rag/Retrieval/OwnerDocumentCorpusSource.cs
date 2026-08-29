@@ -50,13 +50,23 @@ public sealed class OwnerDocumentCorpusSource
     /// one that fits, and the difference decides between an answer and a
     /// refusal. Nothing here truncates to fit — a caller that asked for max + 1
     /// and got max + 1 back is expected to refuse.
+    /// `allowedFileItemIds` is the SERVER-ONLY narrowing described on
+    /// `RagQuery.AllowedFileItemIds`. It is applied inside the eligibility query
+    /// — one more `AND` on a join that has already established the boundary — so
+    /// a forged id for another owner's file matches nothing rather than being
+    /// looked up. An EMPTY collection means "no files qualify" and returns an
+    /// empty corpus; only null means unscoped.
     public async Task<RagCorpus> LoadAsync(
-        Guid ownerUserId, int? limit = null, CancellationToken cancellationToken = default)
+        Guid ownerUserId,
+        int? limit = null,
+        IReadOnlyCollection<Guid>? allowedFileItemIds = null,
+        CancellationToken cancellationToken = default)
     {
         if (ownerUserId == Guid.Empty) return RagCorpus.Empty(RagDomainKey.UserDocuments);
         if (limit is <= 0) return RagCorpus.Empty(RagDomainKey.UserDocuments);
+        if (allowedFileItemIds is { Count: 0 }) return RagCorpus.Empty(RagDomainKey.UserDocuments);
 
-        var query = EligibleChunks(ownerUserId)
+        var query = EligibleChunks(ownerUserId, allowedFileItemIds)
             .OrderBy(r => r.Name).ThenBy(r => r.Ordinal)
             .Select(r => new Row(
                 r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId,
@@ -157,13 +167,15 @@ public sealed class OwnerDocumentCorpusSource
     /// `PrivateVaultId == null`, and nothing in this bounded context says
     /// `IgnoreQueryFilters()`. A vaulted document is invisible to this join by
     /// construction.
-    private IQueryable<EligibleRow> EligibleChunks(Guid ownerUserId)
+    private IQueryable<EligibleRow> EligibleChunks(
+        Guid ownerUserId, IReadOnlyCollection<Guid>? allowedFileItemIds = null)
         => OwnerDocumentEligibility
             .EligibleChunks(
                 _db.DocumentChunks.AsNoTracking(),
                 _db.DocumentTexts.AsNoTracking(),
                 _db.FileItems.AsNoTracking(),
-                ownerUserId)
+                ownerUserId,
+                allowedFileItemIds)
             .Select(r => new EligibleRow
             {
                 ChunkId = r.Chunk.Id,

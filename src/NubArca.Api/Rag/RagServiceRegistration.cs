@@ -112,6 +112,52 @@ public static class RagServiceRegistration
 
         services.AddScoped<Ai.Documents.OwnerDocumentIndexer>();
 
+        // ---- visual document retrieval -----------------------------------
+        //
+        // Registered unconditionally alongside the text pipeline, and INERT
+        // unless `Ai:DocumentVisual:Enabled` is set: the resolver reports the
+        // capability unavailable, the indexer no-ops and the retriever answers
+        // "unavailable" so the Assistant falls back to the text pass it always
+        // used. Registration is not enablement.
+        //
+        // The renderers are singletons because a renderer holds no per-request
+        // state and because the PDF one serialises access to a native library
+        // that is not documented as thread-safe — a per-request instance would
+        // be several gates over one PDFium.
+        services.AddSingleton<Ai.DocumentVisual.PdfVisualRenderer>();
+        services.AddSingleton<Ai.DocumentVisual.IDocumentVisualRenderer>(
+            sp => sp.GetRequiredService<Ai.DocumentVisual.PdfVisualRenderer>());
+        services.AddSingleton<Ai.DocumentVisual.IDocumentVisualRenderer,
+            Ai.DocumentVisual.TextCanvasVisualRenderer>();
+        // The Office renderer is registered even when its worker is not
+        // deployed. `ActiveRenderProfileKeys` must be a stable statement about
+        // what this BUILD renders — a worker restarting is an environment blip
+        // and must not make an owner's already-indexed DOCX pages vanish from
+        // search and come back. Readiness, checked per document, is what
+        // actually gates rendering.
+        services.AddSingleton<Ai.DocumentVisual.IDocumentVisualRenderer,
+            Ai.DocumentVisual.OfficeVisualRenderer>();
+        services.AddSingleton<Ai.DocumentVisual.DocumentVisualRenderers>();
+
+        services.AddScoped<Ai.DocumentVisual.DocumentVisualProfileResolver>();
+        services.AddScoped<Ai.DocumentVisual.DocumentVisualVectorIndexService>();
+        // An EXPLICIT factory, because the late-interaction provider is
+        // genuinely optional and the built-in container has no notion of an
+        // optional constructor parameter — it validates the whole graph at
+        // startup, so a plain `AddScoped<T>()` would stop every installation
+        // that has not promoted a late model from booting. This release ships
+        // with no provider registered, which is the shipped state.
+        services.AddScoped(sp => new Ai.DocumentVisual.VisualLateInteractionReranker(
+            sp.GetRequiredService<Data.AppDbContext>(),
+            sp.GetRequiredService<Ai.IAiProfileRegistry>(),
+            sp.GetRequiredService<Ai.IAiVectorSerializer>(),
+            sp.GetRequiredService<IOptions<Ai.DocumentVisual.DocumentVisualOptions>>(),
+            sp.GetRequiredService<ILogger<Ai.DocumentVisual.VisualLateInteractionReranker>>(),
+            sp.GetService<Ai.DocumentVisual.IVisualLateInteractionProvider>()));
+        services.AddScoped<Ai.DocumentVisual.OwnerDocumentVisualIndexer>();
+        services.AddScoped<Ai.DocumentVisual.IOwnerDocumentVisualRetriever,
+            Ai.DocumentVisual.OwnerDocumentVisualRetriever>();
+
         services.AddScoped<RagDatabaseServices>();
 
         // Local text embedding. Both providers are registered; which one runs is

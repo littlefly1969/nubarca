@@ -2391,6 +2391,11 @@ public static class CliEntryPoint
         services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
             configuration.GetSection(
                 NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
+        // Visual bounds too, for the identical reason: `documents visual-index`
+        // must render under the same ceilings the API would.
+        services.Configure<NubArca.Api.Ai.DocumentVisual.DocumentVisualOptions>(
+            configuration.GetSection(
+                NubArca.Api.Ai.DocumentVisual.DocumentVisualOptions.SectionName));
         services.AddRagSubstrate();
 
         services.AddSingleton<IPasswordHasher<User>, PasswordHasher<User>>();
@@ -4804,6 +4809,9 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll rag validate-model [--profile <key>] [--domain <key>]");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents status --owner <user-id>");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents index  --owner <user-id> [--limit N] [--embed]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-seed-profiles");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-index  --owner <user-id> [--limit N]");
+        stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-status --owner <user-id>");
         stdout.WriteLine();
         stdout.WriteLine("rag");
         stdout.WriteLine("  Diagnostics for the local retrieval substrate. `rag query` shows what");
@@ -4818,6 +4826,12 @@ public static class CliEntryPoint
         stdout.WriteLine("  touched is visible in the command rather than in its arguments.");
         stdout.WriteLine("  Prints counts and reason tokens only — never a document name, a");
         stdout.WriteLine("  heading, an excerpt or a storage key.");
+        stdout.WriteLine();
+        stdout.WriteLine("  The `visual-*` verbs cover the second derivative: rendered pages,");
+        stdout.WriteLine("  embedded locally, used to find WHICH document to look in. Rendered");
+        stdout.WriteLine("  pages are never stored, and a visual hit never becomes evidence —");
+        stdout.WriteLine("  the text pipeline still decides what NubArca may say. Off unless");
+        stdout.WriteLine("  Ai__DocumentVisual__Enabled is set.");
         stdout.WriteLine();
         stdout.WriteLine("users ensure");
         stdout.WriteLine("  Creates the user if missing. With an existing user, leaves the");

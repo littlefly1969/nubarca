@@ -52,6 +52,15 @@ public interface IAiProfileRegistry
     // catalogue can never silently become the active one. Explicit-only
     // (CLI `rag seed-profiles`); never auto-run on startup.
     Task<AiSeedResult> SeedRagTextEmbeddingProfilesAsync(CancellationToken cancellationToken = default);
+
+    // Idempotently seed the DOCUMENT VISUAL model + profile (capability
+    // "document-visual-embedding"). It reuses the SigLIP2 So400m checkpoint the
+    // photo library already has on disk and gets its OWN profile identity, so
+    // document vectors and photo vectors can never be compared, counted or
+    // reindexed as one another. Never made default; inert until the model files
+    // exist AND `Ai:DocumentVisual:Enabled` is set. Explicit-only
+    // (CLI `documents visual-seed-profiles`); never auto-run on startup.
+    Task<AiSeedResult> SeedDocumentVisualProfilesAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed record AiProfileCompatibility(bool IsCompatible, string? Reason)

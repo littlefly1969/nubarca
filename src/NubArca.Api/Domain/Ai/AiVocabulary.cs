@@ -18,6 +18,17 @@ public static class AiCapabilities
     public const string DocumentExtraction = "document-extraction";
     public const string DocumentEmbedding = "document-embedding";
 
+    // The VISUAL reading of a document page — the paired SigLIP2 towers applied
+    // to rendered pixels and to a query, in one shared space.
+    //
+    // Deliberately NOT `image-embedding`, even though the checkpoint is the same
+    // one the photo library uses. A capability is what selects a default profile
+    // and what a status report groups by, and sharing one would mean a document
+    // profile could become the photo library's default by being marked so, and
+    // that `ai status` could not tell an operator which of the two is
+    // configured. The model is shared; the identity is not.
+    public const string DocumentVisualEmbedding = "document-visual-embedding";
+
     // Generic LOCAL text embedding for the RAG substrate. Deliberately not
     // named for any consumer: `product-help` and `nubarca-repository` share one
     // capability, and a future owner-private domain will share it too.
