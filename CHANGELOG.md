@@ -82,7 +82,8 @@ originating repository and is deliberately not reproduced here.
   classifying it.** The bounded Range probe snapshots status and `Content-Type`
   before aborting the body transfer. This preserves React Native's native
   response head and prevents a real HLS `200` from becoming the false “Video
-  non disponibile per la riproduzione” state.
+  non disponibile per la riproduzione” state. Mobile advances to `0.2.7`
+  (`versionCode` 8) for physical playback acceptance.
 - **Long viewer sessions no longer drift after mixed portrait/landscape use or
   falsely retire playable videos.** Pager geometry now comes from the list's
   measured layout rather than the window notification that precedes it;
