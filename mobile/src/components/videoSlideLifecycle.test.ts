@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   playerStatusFor,
+  refreshVideoSourceCookie,
   shouldPlayVideo,
   snapshotPlayerStatus,
   videoPresentation,
@@ -75,6 +76,18 @@ test('a replacement player never inherits the previous native status', () => {
   assert.equal(playerStatusFor(oldSnapshot, nextPlayer), 'loading');
 });
 
+test('reactivating a slide refreshes only its cookie and preserves its authorized URL', () => {
+  const source = {
+    uri: 'https://unit.test/api/shared-albums/a/media/f/video',
+    headers: { cookie: 'NubArca.Auth=old' },
+  };
+  const refreshed = refreshVideoSourceCookie(source, 'NubArca.Auth=new');
+  assert.ok(refreshed !== null);
+  assert.equal(refreshed.uri, source.uri);
+  assert.equal(refreshed.headers.cookie, 'NubArca.Auth=new');
+  assert.equal(refreshVideoSourceCookie(source, null), null);
+});
+
 test('playback requires active ownership, a source, and native readyToPlay', () => {
   assert.equal(shouldPlayVideo(true, true, 'readyToPlay'), true);
   assert.equal(shouldPlayVideo(false, true, 'readyToPlay'), false);
@@ -85,9 +98,11 @@ test('playback requires active ownership, a source, and native readyToPlay', () 
 
 test('VideoView presentation is explicit for every probe and native state', () => {
   assert.equal(videoPresentation(false, 'unavailable', false, 'idle'), 'unavailable');
+  assert.equal(videoPresentation(true, 'idle', false, 'idle'), 'loading');
   assert.equal(videoPresentation(true, 'probing', false, 'idle'), 'probing');
   assert.equal(videoPresentation(true, 'preparing', false, 'idle'), 'preparing');
   assert.equal(videoPresentation(true, 'unavailable', false, 'idle'), 'unavailable');
+  assert.equal(videoPresentation(true, 'error', false, 'idle'), 'error');
   assert.equal(videoPresentation(true, 'ready', true, 'idle'), 'loading');
   assert.equal(videoPresentation(true, 'ready', true, 'loading'), 'loading');
   assert.equal(videoPresentation(true, 'ready', true, 'readyToPlay'), 'ready');
@@ -106,6 +121,13 @@ test('VideoSlide seeds status now, tracks events, pauses inactive, and removes o
     /useEffect\(\(\) => \{([\s\S]*?statusSub\.remove\(\)[\s\S]*?playingSub\.remove\(\)[\s\S]*?)\n  \}, \[player\]\);/,
   );
   assert.ok(statusEffect, 'player-owned listener effect with cleanup not found');
+});
+
+test('inactive virtualized neighbours do not probe and transient failures expose retry', async () => {
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.match(slide, /if \(!active\) return;/);
+  assert.match(slide, /<ErrorState[\s\S]*?onRetry=/);
+  assert.match(slide, /refreshVideoSourceCookie\(/);
 });
 
 test('VideoView is mounted only for the ready presentation', async () => {

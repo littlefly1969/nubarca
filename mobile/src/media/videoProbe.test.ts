@@ -144,9 +144,9 @@ test('the budget-exhausting 202 and terminal outcomes never pass through onPhase
     onPhase: (phase) => seen.push(phase),
   });
   // The two RETRIED 202s were notified; the LAST one resolves straight to
-  // unavailable without a pointless preparing flash right before the end.
+  // retryable error without a pointless preparing flash right before the end.
   assert.deepEqual(seen, ['preparing', 'preparing']);
-  assert.equal(outcome.phase, 'unavailable');
+  assert.equal(outcome.phase, 'error');
 });
 
 test('404 is deliberate unavailability: ONE call, no retries', async () => {
@@ -158,6 +158,41 @@ test('404 is deliberate unavailability: ONE call, no retries', async () => {
   const outcome = await probeVideoSource(SRC, { fetchImpl: fetch });
   assert.equal(outcome.phase, 'unavailable');
   assert.equal(calls, 1);
+});
+
+test('temporary server failures retry and can recover instead of becoming unavailable', async () => {
+  const { fetch, requests } = makeRecorder([
+    { status: 503 },
+    { status: 429 },
+    { status: 206, contentType: 'video/mp4' },
+  ]);
+  const outcome = await probeVideoSource(SRC, {
+    fetchImpl: fetch,
+    retryMs: 1,
+    maxAttempts: 3,
+  });
+  assert.equal(requests.length, 3);
+  assert.deepEqual(outcome, { phase: 'ready', container: 'progressive' });
+});
+
+test('an exhausted transport/preparation budget is retryable error, never false unavailability', async () => {
+  const networkDown: VideoProbeFetch = async () => {
+    throw new Error('network down');
+  };
+  assert.deepEqual(
+    await probeVideoSource(SRC, {
+      fetchImpl: networkDown,
+      retryMs: 1,
+      maxAttempts: 2,
+    }),
+    { phase: 'error' },
+  );
+
+  const { fetch } = makeRecorder([{ status: 202 }]);
+  assert.deepEqual(
+    await probeVideoSource(SRC, { fetchImpl: fetch, retryMs: 1, maxAttempts: 2 }),
+    { phase: 'error' },
+  );
 });
 
 // ── Resolution ───────────────────────────────────────────────────────────────
@@ -207,6 +242,7 @@ test('resolve: shared HLS stays HLS using ONLY the server-provided URL', async (
 test('resolve: non-ready outcomes mount NOTHING', () => {
   assert.equal(resolveExpoVideoSource(SRC, { phase: 'preparing' }), null);
   assert.equal(resolveExpoVideoSource(SRC, { phase: 'unavailable' }), null);
+  assert.equal(resolveExpoVideoSource(SRC, { phase: 'error' }), null);
 });
 
 // ── classify unit corners ────────────────────────────────────────────────────
@@ -214,7 +250,11 @@ test('resolve: non-ready outcomes mount NOTHING', () => {
 test('classify corners', () => {
   assert.deepEqual(classifyVideoProbe(202, null), { phase: 'preparing' });
   assert.deepEqual(classifyVideoProbe(404, null), { phase: 'unavailable' });
-  assert.deepEqual(classifyVideoProbe(403, 'text/html'), { phase: 'unavailable' });
+  assert.deepEqual(classifyVideoProbe(403, 'text/html'), { phase: 'error' });
+  assert.deepEqual(classifyVideoProbe(503, null), {
+    phase: 'error',
+    retryable: true,
+  });
   // A 206 whose content-type is NOT video is not playable through this route.
   assert.deepEqual(classifyVideoProbe(206, 'application/json'), {
     phase: 'unavailable',
@@ -245,7 +285,7 @@ test('hung fetch: EVERY attempt is time-bounded and the retry budget still holds
   });
 
   // Settles at all → the probe cannot hang indefinitely.
-  assert.equal(outcome.phase, 'unavailable');
+  assert.equal(outcome.phase, 'error');
   // A timeout is ONE failed attempt: the configured budget was followed.
   assert.equal(calls, 3);
   for (const signal of attemptSignals) {

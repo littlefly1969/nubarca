@@ -17,6 +17,7 @@ import React, {
 } from 'react';
 import {
   BackHandler,
+  type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   Text,
@@ -37,7 +38,13 @@ import {
   fileVideoPath,
 } from '../../src/api/filePaths';
 import { authenticatedSource } from '../../src/media/imageSource';
-import { safeViewerIndex, shouldReanchorViewer } from '../../src/media/viewerRoute';
+import {
+  safeViewerIndex,
+  shouldReanchorViewer,
+  viewerContentCanReachIndex,
+  viewerIndexFromUserScroll,
+  viewerOffsetForIndex,
+} from '../../src/media/viewerRoute';
 import { colors, spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -46,7 +53,7 @@ export default function MediaRoute(): React.JSX.Element {
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string; kind?: string; name?: string }>();
   const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
-  const { width } = useWindowDimensions();
+  const { width: initialWindowWidth } = useWindowDimensions();
 
   // ONE navigation path for both the hardware back and the chrome button. The
   // route owns cleanup on unmount, so no render can observe a sequence erased
@@ -101,9 +108,14 @@ export default function MediaRoute(): React.JSX.Element {
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
+  // Window dimensions change before Android has necessarily laid the native
+  // list out. The pager's own onLayout measurement is the only width allowed
+  // to drive cell sizes, offsets and swipe interpretation.
+  const [pagerWidth, setPagerWidth] = useState(initialWindowWidth);
   const pagerRef = useRef<FlatList<ViewerSlide>>(null);
-  const previousWidthRef = useRef(width);
-  const reanchorIndexRef = useRef<number | null>(null);
+  const previousWidthRef = useRef(pagerWidth);
+  const activeDragWidthRef = useRef<number | null>(null);
+  const pendingReanchorRef = useRef<{ index: number; width: number } | null>(null);
 
   useEffect(() => {
     setIndex(startIndex);
@@ -114,34 +126,82 @@ export default function MediaRoute(): React.JSX.Element {
 
   useLayoutEffect(() => {
     const previousWidth = previousWidthRef.current;
-    previousWidthRef.current = width;
-    if (!shouldReanchorViewer(previousWidth, width)) return;
+    previousWidthRef.current = pagerWidth;
+    if (!shouldReanchorViewer(previousWidth, pagerWidth)) return;
 
+    // A gesture that began in the old geometry cannot finish into the new one.
+    activeDragWidthRef.current = null;
     const pager = pagerRef.current;
     if (pager === null || slides.length === 0) return;
-    reanchorIndexRef.current = safeIndex;
-    pager.scrollToIndex({ index: safeIndex, animated: false });
-  }, [safeIndex, slides.length, width]);
+    pendingReanchorRef.current = { index: safeIndex, width: pagerWidth };
+    // Direct pixels deliberately bypass FlatList's cached pre-rotation item
+    // frames. The offset and cells are both based on this measured width.
+    pager.scrollToOffset({
+      offset: viewerOffsetForIndex(safeIndex, pagerWidth, slides.length),
+      animated: false,
+    });
+  }, [pagerWidth, safeIndex, slides.length]);
+
+  const onPagerLayout = useCallback((event: LayoutChangeEvent) => {
+    const measuredWidth = event.nativeEvent.layout.width;
+    if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
+      setPagerWidth((current) =>
+        current === measuredWidth ? current : measuredWidth,
+      );
+    }
+  }, []);
+
+  const onPagerContentSizeChange = useCallback(
+    (contentWidth: number) => {
+      const pending = pendingReanchorRef.current;
+      if (pending === null || pending.width !== pagerWidth) return;
+      if (
+        !viewerContentCanReachIndex(
+          contentWidth,
+          pending.index,
+          pending.width,
+          slides.length,
+        )
+      ) {
+        return;
+      }
+      const pager = pagerRef.current;
+      if (pager === null) return;
+      pager.scrollToOffset({
+        offset: viewerOffsetForIndex(
+          pending.index,
+          pending.width,
+          slides.length,
+        ),
+        animated: false,
+      });
+      pendingReanchorRef.current = null;
+    },
+    [pagerWidth, slides.length],
+  );
 
   const onScrollBeginDrag = useCallback(() => {
-    // A drag is explicit user ownership. If Android emitted no completion for
-    // the non-animated correction, it must not poison the next real swipe.
-    reanchorIndexRef.current = null;
-  }, []);
+    pendingReanchorRef.current = null;
+    activeDragWidthRef.current = pagerWidth;
+  }, [pagerWidth]);
 
   const onMomentumEnd = useCallback(
     (e: { nativeEvent: { contentOffset: { x: number } } }) => {
-      const next = Math.round(e.nativeEvent.contentOffset.x / width);
-      if (reanchorIndexRef.current !== null) {
-        if (next === reanchorIndexRef.current) reanchorIndexRef.current = null;
-        return;
-      }
+      const dragWidth = activeDragWidthRef.current;
+      activeDragWidthRef.current = null;
+      const next = viewerIndexFromUserScroll(
+        e.nativeEvent.contentOffset.x,
+        dragWidth,
+        pagerWidth,
+        slides.length,
+      );
+      if (next === null) return;
       if (next !== safeIndex && next >= 0 && next < slides.length) {
         setIndex(next);
         setViewerIndex(next);
       }
     },
-    [safeIndex, slides.length, width, setViewerIndex],
+    [pagerWidth, safeIndex, slides.length, setViewerIndex],
   );
 
   // Hardware back uses the SAME safe exit path as the chrome button.
@@ -161,14 +221,16 @@ export default function MediaRoute(): React.JSX.Element {
     <View style={styles.root}>
       <FlatList
         ref={pagerRef}
+        onLayout={onPagerLayout}
+        onContentSizeChange={onPagerContentSizeChange}
         data={slides}
         horizontal
         pagingEnabled
         keyExtractor={(s) => s.key}
         initialScrollIndex={startIndex}
         getItemLayout={(_data, i) => ({
-          length: width,
-          offset: width * i,
+          length: pagerWidth,
+          offset: pagerWidth * i,
           index: i,
         })}
         initialNumToRender={1}
@@ -177,7 +239,7 @@ export default function MediaRoute(): React.JSX.Element {
         onMomentumScrollEnd={onMomentumEnd}
         onScrollBeginDrag={onScrollBeginDrag}
         renderItem={({ item, index: i }) => (
-          <View style={{ width, flex: 1 }}>
+          <View style={{ width: pagerWidth, flex: 1 }}>
             {item.kind === 'image' ? (
               <ImageSlide
                 path={item.imagePath}
