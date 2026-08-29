@@ -85,8 +85,6 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
         foreach (var element in body.ChildElements)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (blocks.Count >= options.EffectiveMaxChunks) break;
-            if (characters >= options.EffectiveMaxCharacters) break;
 
             switch (element)
             {
@@ -114,6 +112,18 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
                         section++;
                     }
 
+                    // THE BOUND IS CHECKED WHERE CONTENT IS ADDED, not at the
+                    // top of the loop. Breaking out on a full budget publishes
+                    // the paragraphs read so far as the whole document; checking
+                    // here refuses only when this block genuinely pushes the
+                    // COMPLETE document past the ceiling, so a document that
+                    // lands exactly on it still succeeds.
+                    if (Exceeds(blocks.Count, characters, text.Length, options))
+                    {
+                        return DocumentExtractionOutcome.Rejected(
+                            DocumentExtractionReasons.DocumentTooComplex);
+                    }
+
                     var heading = path.Count == 0 ? null : string.Join(" › ", path);
                     characters += text.Length;
                     blocks.Add(new ExtractedDocumentBlock(
@@ -138,6 +148,12 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
                     }
                     if (rendered.Length == 0) continue;
 
+                    if (Exceeds(blocks.Count, characters, rendered.Length, options))
+                    {
+                        return DocumentExtractionOutcome.Rejected(
+                            DocumentExtractionReasons.DocumentTooComplex);
+                    }
+
                     var heading = path.Count == 0 ? null : string.Join(" › ", path);
                     characters += rendered.Length;
                     blocks.Add(new ExtractedDocumentBlock(
@@ -158,7 +174,15 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
         // document says — a contract's exclusions frequently live there — and
         // they are not part of the flow, so appending them keeps the body's
         // reading order honest.
-        AppendNotes(document, blocks, ref ordinal, ref characters, options);
+        if (!AppendNotes(document, blocks, ref ordinal, ref characters, options))
+        {
+            // NOTES THAT DO NOT FIT ARE A REFUSAL, NOT A SILENT OMISSION. A
+            // contract's exclusions frequently live in its footnotes, so
+            // dropping them and publishing the body as complete is the most
+            // misleading outcome available.
+            return DocumentExtractionOutcome.Rejected(
+                DocumentExtractionReasons.DocumentTooComplex);
+        }
 
         if (blocks.Count == 0 || characters < options.EffectiveMinimumCharacters)
         {
@@ -286,7 +310,10 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
         return builder.ToString();
     }
 
-    private static void AppendNotes(
+    /// Appends footnotes and endnotes. Returns false when they would push the
+    /// COMPLETE document past a bound — the caller refuses rather than publish a
+    /// body whose notes quietly went missing.
+    private static bool AppendNotes(
         WordprocessingDocument document, List<ExtractedDocumentBlock> blocks,
         ref int ordinal, ref int characters, DocumentExtractionOptions options)
     {
@@ -315,10 +342,10 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
             }
         }
 
-        if (texts.Count == 0) return;
+        if (texts.Count == 0) return true;
 
         var joined = string.Join("\n", texts);
-        if (characters + joined.Length > options.EffectiveMaxCharacters) return;
+        if (Exceeds(blocks.Count, characters, joined.Length, options)) return false;
 
         characters += joined.Length;
         blocks.Add(new ExtractedDocumentBlock(
@@ -327,7 +354,18 @@ public sealed class WordDocumentExtractionProvider : IDocumentExtractionProvider
             joined,
             "Note",
             new DocumentLocator(DocumentLocatorKinds.Section, null, "Note")));
+        return true;
     }
+
+    /// Would adding one more block of `length` characters carry the COMPLETE
+    /// document past a completeness-critical bound?
+    ///
+    /// One predicate, used at every site that adds content, so the character and
+    /// block ceilings cannot drift apart between paragraphs, tables and notes.
+    private static bool Exceeds(
+        int blockCount, int characters, int length, DocumentExtractionOptions options)
+        => blockCount + 1 > options.EffectiveMaxChunks
+           || (long)characters + length > options.EffectiveMaxCharacters;
 
     // ---- headings -----------------------------------------------------------
 

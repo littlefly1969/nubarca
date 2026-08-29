@@ -78,7 +78,6 @@ public sealed class PdfExtractionProvider : IDocumentExtractionProvider
             for (var number = 1; number <= document.NumberOfPages; number++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (characters >= options.EffectiveMaxCharacters) break;
 
                 string native;
                 try
@@ -125,11 +124,21 @@ public sealed class PdfExtractionProvider : IDocumentExtractionProvider
                 text = text.Trim();
                 if (text.Length == 0) continue;
 
+                // PAST THE CEILING IS A REFUSAL, NOT A CUT.
+                //
+                // Cutting the page to the remaining budget, or breaking out of
+                // the loop, both produce the same thing: a document recorded as
+                // Completed that contains its first N characters. To the person
+                // asking a question of it, that is indistinguishable from the
+                // whole document — they get a confident answer drawn from part
+                // of their contract, with nothing reporting a problem. A refused
+                // document is merely unanswerable, which is visible and
+                // recoverable.
                 if (characters + text.Length > options.EffectiveMaxCharacters)
                 {
-                    text = text[..Math.Max(0, options.EffectiveMaxCharacters - characters)];
+                    return DocumentExtractionOutcome.Rejected(
+                        DocumentExtractionReasons.DocumentTooComplex);
                 }
-                if (text.Length == 0) break;
 
                 characters += text.Length;
                 blocks.Add(new ExtractedDocumentBlock(

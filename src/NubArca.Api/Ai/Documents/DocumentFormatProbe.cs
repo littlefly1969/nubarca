@@ -138,6 +138,68 @@ public static class DocumentFormatProbe
                && RichExtensions.Any(e => fileName.EndsWith(e, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// How many SOURCE BYTES it is worth reading before the bytes are probed.
+    ///
+    /// A RESOURCE BUDGET, and deliberately nothing else. It confers no format
+    /// authority: the bytes still decide what the file is, and the real
+    /// per-format ceiling is re-checked afterwards against
+    /// `DocumentExtractionOptions.SourceBytesFor(actualFormat)`.
+    ///
+    /// It exists because the read has to be bounded BEFORE anything is known
+    /// about the content, and the only bound available at that moment used to be
+    /// the native-text ceiling. Deriving the budget from the candidate makes the
+    /// PDF and Office ceilings reachable at all: with one 4 MiB budget for
+    /// everything, a 10 MiB PDF was refused before it was ever opened, and the
+    /// 64 MiB limits the operator can configure could never be exercised.
+    ///
+    /// A wrong guess is safe in both directions. Too generous, and the bytes
+    /// turn out to be something with a smaller ceiling — the post-probe check
+    /// refuses it. Too small, and the read stops short — which the caller must
+    /// treat as a refusal rather than parse, because a truncated buffer is
+    /// exactly the partial document this whole gate exists to prevent.
+    public static int CandidateSourceBudget(
+        string? mimeType, string? fileName, DocumentExtractionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var mime = Canonical(mimeType);
+
+        if (string.Equals(mime, PdfMimeType, StringComparison.Ordinal))
+        {
+            return options.EffectiveMaxPdfSourceBytes;
+        }
+
+        if (string.Equals(mime, WordMimeType, StringComparison.Ordinal)
+            || string.Equals(mime, SpreadsheetMimeType, StringComparison.Ordinal)
+            || string.Equals(mime, PresentationMimeType, StringComparison.Ordinal))
+        {
+            return options.EffectiveMaxOfficeSourceBytes;
+        }
+
+        // An uninformative declared type buys a look at the bytes only when the
+        // NAME suggests a rich document — the same rule IsCandidate applies, and
+        // for the same reason: plenty of clients upload an OOXML package as
+        // `application/octet-stream`, and the extension buys the read without
+        // ever becoming evidence of what the file is.
+        if (GenericMimeTypes.Contains(mime, StringComparer.Ordinal) && fileName is not null)
+        {
+            if (fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            {
+                return options.EffectiveMaxPdfSourceBytes;
+            }
+
+            if (fileName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+                || fileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)
+                || fileName.EndsWith(".pptx", StringComparison.OrdinalIgnoreCase))
+            {
+                return options.EffectiveMaxOfficeSourceBytes;
+            }
+        }
+
+        // Everything else, native text included, keeps the text ceiling.
+        return options.EffectiveMaxSourceBytes;
+    }
+
     /// What the bytes are.
     ///
     /// `fileName` is passed for one narrow purpose — telling the three OOXML

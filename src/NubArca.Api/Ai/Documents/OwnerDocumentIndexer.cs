@@ -175,7 +175,18 @@ public sealed class OwnerDocumentIndexer
         // SIZE BEFORE BYTES. `FileItem.SizeBytes` is recorded at upload, so an
         // oversized document is refused without opening the blob at all. A limit
         // enforced after reading is a report, not a bound.
-        if (file.SizeBytes > options.EffectiveMaxSourceBytes)
+        //
+        // The budget is derived from what the file CLAIMS to be, because nothing
+        // about the content is known yet and the read has to be bounded anyway.
+        // It is a resource budget and not a format decision — the bytes still
+        // decide, and `SourceBytesFor(actualFormat)` is re-checked below. Using
+        // the native-text ceiling here instead made the PDF and Office limits
+        // unreachable: a 10 MiB PDF was refused before it was opened, so the
+        // 64 MiB ceilings an operator can configure could never be exercised.
+        var candidateBudget = DocumentFormatProbe.CandidateSourceBudget(
+            file.MimeType, file.Name, options);
+
+        if (file.SizeBytes > candidateBudget)
         {
             state.Skip(DocumentExtractionReasons.TooLarge);
             return null;
@@ -197,7 +208,26 @@ public sealed class OwnerDocumentIndexer
             .FirstOrDefaultAsync(
                 d => d.FileItemId == file.Id && d.IsCurrent, cancellationToken);
 
+        // …AND THE ROW MUST BELONG TO THE PARSER THAT OWNS ITS FORMAT TODAY.
+        //
+        // Same bytes and a current chunk format are not enough. A row extracted
+        // by an older Word profile satisfies both while describing a reading
+        // this build has replaced, and exiting here would make the upgrade
+        // unreachable in production: every test that exercised it did so by
+        // creating and promoting the second profile by hand, so nothing noticed
+        // that the indexer itself never re-read the blob.
+        //
+        // Decided by IDENTITY, not by time. A newer profile is not "the one with
+        // a later timestamp" — it is the one the current code resolves for this
+        // format, and comparing ids is exactly that question. A clock would
+        // answer a different question and would be wrong whenever profiles were
+        // seeded, restored or backfilled out of order.
+        var currentIsActiveProfile =
+            existing is null
+            || await IsActiveExtractionProfileAsync(existing, cancellationToken);
+
         if (existing is not null
+            && currentIsActiveProfile
             && existing.SourceBlobObjectId == file.BlobObjectId
             && existing.ChunkFormatVersion == OwnerDocumentChunkFormat.Current
             && existing.Status == AiArtifactStatuses.Completed)
@@ -225,7 +255,7 @@ public sealed class OwnerDocumentIndexer
             await using var stream = await _storage.OpenReadAsync(storageKey, cancellationToken);
             using var buffer = new MemoryStream();
             await CopyBoundedAsync(
-                stream, buffer, options.EffectiveMaxSourceBytes + 1, cancellationToken);
+                stream, buffer, (long)candidateBudget + 1, cancellationToken);
             bytes = buffer.ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -233,6 +263,21 @@ public sealed class OwnerDocumentIndexer
             // A storage error is not a content verdict, and it must not mark the
             // document permanently skipped — the next pass tries again.
             state.Skip("unreadable");
+            return null;
+        }
+
+        // THE RECORDED SIZE CAN LIE, so the BYTES THAT ARRIVED are checked too.
+        //
+        // `CopyBoundedAsync` stops at the budget plus one, so a blob larger than
+        // its recorded size yields a buffer one byte over the budget rather than
+        // an unbounded allocation. Parsing that buffer would be exactly the
+        // failure this gate exists to prevent: the first N bytes of somebody's
+        // document, extracted cleanly, and published as the whole of it.
+        if (bytes.Length > candidateBudget)
+        {
+            state.Skip(DocumentExtractionReasons.TooLarge);
+            await RecordSkipAsync(
+                ownerUserId, file, profile, DocumentExtractionReasons.TooLarge, cancellationToken);
             return null;
         }
 
@@ -259,7 +304,8 @@ public sealed class OwnerDocumentIndexer
         // THE PER-FORMAT SOURCE BOUND, checked now that the format is known.
         // 4 MiB is right for a text file and wrong for an Office package, which
         // carries images that contribute nothing to extraction and still count.
-        if (file.SizeBytes > options.SourceBytesFor(format))
+        if (file.SizeBytes > options.SourceBytesFor(format)
+            || bytes.Length > options.SourceBytesFor(format))
         {
             state.Skip(DocumentExtractionReasons.TooLarge);
             await RecordSkipAsync(
@@ -310,6 +356,22 @@ public sealed class OwnerDocumentIndexer
 
         var artifact = outcome.Artifact!;
         var text = DocumentTextCanonicalizer.Canonicalize(artifact.Blocks);
+
+        // CHUNKING IS DECIDED BEFORE ANYTHING IS PUBLISHED.
+        //
+        // The chunk ceiling is a completeness bound like every other, so a
+        // document that needs more chunks than the bound allows is refused —
+        // and it has to be refused HERE, before the row is marked Completed and
+        // promoted to current. Discovering it afterwards would leave exactly
+        // what the invariant forbids: a Completed document carrying the first N
+        // chunks of itself, with the rest silently absent and nothing saying so.
+        var planned = PlanChunks(artifact.Blocks, options);
+        if (!planned.Ok)
+        {
+            state.Skip(planned.Reason!);
+            await RecordSkipAsync(ownerUserId, file, profile, planned.Reason!, cancellationToken);
+            return null;
+        }
 
         // Re-resolved for the parser's own profile. The early-exit check above
         // used the caller's default; the row that is written belongs to the
@@ -374,11 +436,85 @@ public sealed class OwnerDocumentIndexer
         if (!chunksAreCurrent)
         {
             await ReplaceChunksAsync(
-                existing, artifact.Blocks, profile, options, state, now, cancellationToken);
+                existing, planned.Chunks!, profile, state, now, cancellationToken);
             state.Chunked++;
         }
 
         return existing.Id;
+    }
+
+    /// Does this row belong to the extraction profile the current build would
+    /// select for its format?
+    ///
+    /// True also when the answer cannot be known — a source this build has no
+    /// parser for, or a profile row that has gone missing. In both cases there
+    /// is nothing better to replace the reading with, and re-extracting on a
+    /// guess would take a working document offline to produce the same thing or
+    /// worse.
+    private async Task<bool> IsActiveExtractionProfileAsync(
+        DocumentText row, CancellationToken cancellationToken)
+    {
+        var format = DocumentTextSources.FormatFor(row.Source);
+        if (format is null) return true;
+
+        var provider = _providers.For(format.Value);
+        if (provider is null) return true;
+
+        var activeProfileId = await _db.AiProfiles.AsNoTracking()
+            .Where(p => p.Key == provider.ProfileKey)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // NO PROFILE ROW FOR THE ACTIVE KEY IS AN UPGRADE, NOT AN UNKNOWN.
+        //
+        // The row points at a profile that exists, so if the key this parser
+        // records under has no row at all, the row cannot be under that key —
+        // it is under an older one, and the newer parser has simply never run
+        // here yet. That is precisely the case this check exists to catch, and
+        // treating it as "nothing to compare" is what made the upgrade
+        // unreachable in production while hand-promoted fixtures passed.
+        if (activeProfileId is null) return false;
+
+        return activeProfileId.Value == row.ProfileId;
+    }
+
+    /// Decides how a document would chunk, and whether it may be published.
+    ///
+    /// Called BEFORE the row is marked Completed, because the chunk ceiling is a
+    /// completeness bound: a document needing more chunks than the bound allows
+    /// is refused, never indexed as its first N chunks.
+    ///
+    /// NATIVE TEXT KEEPS ITS OWN SPLITTER. It arrives as one block with no
+    /// interior structure, and the Markdown chunker knows how to find the
+    /// headings inside it — running the structural chunker over it instead would
+    /// produce one enormous chunk and lose every section title.
+    ///
+    /// Everything else is already structured, and the structure is a hard
+    /// boundary: a chunk must never span two slides, two sheets or two PDF
+    /// pages, because a passage that does cites a place that does not exist.
+    private static RichChunkOutcome PlanChunks(
+        IReadOnlyList<ExtractedDocumentBlock> blocks, DocumentExtractionOptions options)
+    {
+        if (blocks.Count == 1 && blocks[0].Locator.Kind == DocumentLocatorKinds.Text)
+        {
+            var native = OwnerDocumentChunker.Chunk(blocks[0].Text, options);
+
+            // ONE CEILING, ONE PLACE. The native chunker no longer caps itself,
+            // so a text document past the bound is refused on exactly the same
+            // terms as a spreadsheet past it.
+            if (native.Count > options.EffectiveMaxChunks)
+            {
+                return RichChunkOutcome.Rejected(DocumentExtractionReasons.DocumentTooComplex);
+            }
+
+            return RichChunkOutcome.Chunked(native
+                .Select(d => new RichChunkDraft(
+                    d.Ordinal, d.Heading, d.Text, d.StartOffset, d.EndOffset,
+                    DocumentLocator.None))
+                .ToList());
+        }
+
+        return RichDocumentChunker.Chunk(blocks, options);
     }
 
     /// Writes a chunk's typed location, and `Page` only where a page exists.
@@ -610,26 +746,10 @@ public sealed class OwnerDocumentIndexer
     /// one describes text that no longer exists, and surplus ordinals are
     /// deleted with their embeddings following by cascade.
     private async Task ReplaceChunksAsync(
-        DocumentText document, IReadOnlyList<ExtractedDocumentBlock> blocks, AiProfile profile,
-        DocumentExtractionOptions options, IndexState state, DateTime now,
+        DocumentText document, IReadOnlyList<RichChunkDraft> drafts, AiProfile profile,
+        IndexState state, DateTime now,
         CancellationToken cancellationToken)
     {
-        // NATIVE TEXT KEEPS ITS OWN SPLITTER. It arrives as one block with no
-        // interior structure, and the Markdown chunker knows how to find the
-        // headings inside it — running the structural chunker over it instead
-        // would produce one enormous chunk and lose every section title.
-        //
-        // Everything else is already structured, and the structure is a hard
-        // boundary: a chunk must never span two slides, two sheets or two PDF
-        // pages, because a passage that does cites a place that does not exist.
-        var drafts = blocks.Count == 1
-                     && blocks[0].Locator.Kind == DocumentLocatorKinds.Text
-            ? OwnerDocumentChunker.Chunk(blocks[0].Text, options)
-                .Select(d => new RichChunkDraft(
-                    d.Ordinal, d.Heading, d.Text, d.StartOffset, d.EndOffset,
-                    DocumentLocator.None))
-                .ToList()
-            : RichDocumentChunker.Chunk(blocks, options);
         var existing = await _db.DocumentChunks
             .Where(c => c.DocumentTextId == document.Id && c.ProfileId == profile.Id)
             .OrderBy(c => c.Ordinal)
@@ -964,4 +1084,22 @@ public static class DocumentTextSources
     public const string Pdf = "pdf";
     public const string PdfModelKey = "pdf-local-ocr-extraction-v1";
     public const string PdfProfileKey = "doc-pdf-local-ocr-v1";
+
+    /// Which FAMILY a recorded reading came from.
+    ///
+    /// The inverse of the parser's own `Format`, and it exists so a stored row
+    /// can be matched back to the parser that owns its format TODAY — which is
+    /// how an extractor upgrade is noticed without consulting a timestamp.
+    /// An unrecognised source yields null: an installation may carry rows from
+    /// a reading this build no longer has a parser for, and that is a row to
+    /// leave alone rather than to re-extract with something else.
+    public static DocumentFormatKind? FormatFor(string? source) => source switch
+    {
+        Native => DocumentFormatKind.NativeText,
+        Word => DocumentFormatKind.WordOpenXml,
+        Spreadsheet => DocumentFormatKind.SpreadsheetOpenXml,
+        Presentation => DocumentFormatKind.PresentationOpenXml,
+        Pdf => DocumentFormatKind.Pdf,
+        _ => null,
+    };
 }
