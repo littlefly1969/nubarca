@@ -78,6 +78,17 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **Long viewer sessions no longer drift after mixed portrait/landscape use or
+  falsely retire playable videos.** Pager geometry now comes from the list's
+  measured layout rather than the window notification that precedes it;
+  rotation re-anchors by direct pixel offset, and a scroll completion is
+  accepted only when it belongs to a user gesture begun at the current width;
+  the correction repeats when native content reaches its new size, so a
+  high-index landscape target cannot be clamped against the old portrait width.
+  Only the focused video probes the server, it refreshes the manual session
+  cookie when focus returns, and exhausted preparation, rate limiting, server
+  faults or transport timeouts surface as retryable playback failures instead
+  of the permanent “video unavailable” verdict.
 - **The media viewer now preserves the selected item through rotation and waits
   for real native video readiness.** Full-screen photos and fallback posters use
   contain without changing thumbnail crop behavior; a width change re-anchors

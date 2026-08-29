@@ -3,7 +3,13 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { safeViewerIndex, shouldReanchorViewer } from './viewerRoute.ts';
+import {
+  safeViewerIndex,
+  shouldReanchorViewer,
+  viewerContentCanReachIndex,
+  viewerIndexFromUserScroll,
+  viewerOffsetForIndex,
+} from './viewerRoute.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -30,11 +36,11 @@ test('one width owns the physical cell and all paging calculations', async () =>
   const source = await routeSource();
   assert.match(
     source,
-    /renderItem=\{\(\{ item, index: i \}\) => \([\s\S]*?<View style=\{\{ width, flex: 1 \}\}>/,
+    /renderItem=\{\(\{ item, index: i \}\) => \([\s\S]*?<View style=\{\{ width: pagerWidth, flex: 1 \}\}>/,
   );
-  assert.match(source, /length:\s*width/);
-  assert.match(source, /offset:\s*width \* i/);
-  assert.match(source, /contentOffset\.x \/ width/);
+  assert.match(source, /length:\s*pagerWidth/);
+  assert.match(source, /offset:\s*pagerWidth \* i/);
+  assert.match(source, /viewerIndexFromUserScroll\(/);
 });
 
 test('only a real viewport-width change requests a semantic re-anchor', () => {
@@ -44,6 +50,37 @@ test('only a real viewport-width change requests a semantic re-anchor', () => {
   assert.equal(safeViewerIndex(8, 20), 8, 'width 800 still targets logical index 8');
 });
 
+test('long mixed-orientation sessions keep one logical index and reject stale scroll completions', () => {
+  let index = 17;
+  let width = 412;
+
+  // A real portrait swipe advances exactly one logical item.
+  index = viewerIndexFromUserScroll(18 * width, width, width, 40) ?? index;
+  assert.equal(index, 18);
+
+  // Rotation re-anchors by the NEW measured viewport, never by cached frames.
+  width = 915;
+  assert.equal(viewerOffsetForIndex(index, width, 40), 18 * 915);
+  assert.equal(
+    viewerContentCanReachIndex(40 * 412, index, width, 40),
+    false,
+    'old portrait content cannot satisfy the new landscape offset',
+  );
+  assert.equal(viewerContentCanReachIndex(40 * 915, index, width, 40), true);
+
+  // A delayed completion from the old portrait gesture has no authority in
+  // the new landscape geometry.
+  assert.equal(viewerIndexFromUserScroll(19 * 412, 412, width, 40), null);
+  assert.equal(index, 18);
+
+  // Repeating the sequence at a high index remains stable in both directions.
+  index = viewerIndexFromUserScroll(19 * width, width, width, 40) ?? index;
+  assert.equal(index, 19);
+  width = 412;
+  assert.equal(viewerOffsetForIndex(index, width, 40), 19 * 412);
+  assert.equal(viewerIndexFromUserScroll(18 * width, width, width, 40), 18);
+});
+
 test('viewport resize re-anchors the existing safe index without remounting the pager', async () => {
   const source = await routeSource();
   assert.match(source, /const pagerRef = useRef<FlatList<ViewerSlide>>\(null\);/);
@@ -51,16 +88,20 @@ test('viewport resize re-anchors the existing safe index without remounting the 
   assert.match(source, /previousWidthRef\.current/);
   assert.match(
     source,
-    /useLayoutEffect\(\(\) => \{[\s\S]*?previousWidthRef\.current[\s\S]*?scrollToIndex\(\{\s*index:\s*safeIndex,\s*animated:\s*false,?\s*\}\)[\s\S]*?\}, \[safeIndex, slides\.length, width\]\);/,
+    /useLayoutEffect\(\(\) => \{[\s\S]*?previousWidthRef\.current[\s\S]*?scrollToOffset\(\{[\s\S]*?viewerOffsetForIndex\(safeIndex, pagerWidth, slides\.length\)[\s\S]*?animated:\s*false[\s\S]*?\}\)[\s\S]*?\}, \[pagerWidth, safeIndex, slides\.length\]\);/,
   );
   assert.doesNotMatch(source, /key=\{width\}/);
 });
 
-test('programmatic geometry correction cannot become a fake user swipe', async () => {
+test('only a gesture begun in the current measured width may change the logical index', async () => {
   const source = await routeSource();
-  assert.match(source, /reanchorIndexRef\.current = safeIndex;/);
+  assert.match(source, /onLayout=\{onPagerLayout\}/);
+  assert.match(source, /onContentSizeChange=\{onPagerContentSizeChange\}/);
+  assert.match(source, /pendingReanchorRef\.current/);
+  assert.match(source, /activeDragWidthRef\.current = pagerWidth;/);
   assert.match(source, /onScrollBeginDrag=\{onScrollBeginDrag\}/);
-  assert.match(source, /if \(reanchorIndexRef\.current !== null\)/);
+  assert.match(source, /viewerIndexFromUserScroll\(/);
+  assert.doesNotMatch(source, /contentOffset\.x \/ width/);
 });
 
 test('navigation happens before viewer cleanup, which belongs to route unmount', async () => {

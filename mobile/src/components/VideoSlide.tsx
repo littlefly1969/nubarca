@@ -20,6 +20,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { AuthedImage } from './AuthedImage';
 import { ErrorState, LoadingState } from '../ui/states';
 import { useI18n } from '../i18n';
+import { sessionCookieSource } from '../api/sessionAccess';
 import {
   VIDEO_PROBE_ATTEMPT_TIMEOUT_MS,
   VIDEO_PROBE_MAX_ATTEMPTS,
@@ -31,6 +32,7 @@ import {
 import type { ViewerSlide } from '../media/viewerSequence';
 import {
   playerStatusFor,
+  refreshVideoSourceCookie,
   shouldPlayVideo,
   snapshotPlayerStatus,
   videoPresentation,
@@ -48,9 +50,18 @@ export function VideoSlide({
   const activeRef = useRef(active);
   activeRef.current = active;
 
-  // The source arrives FULLY BUILT on the slide (uri + cookie snapshot), so a
-  // re-render can never hand useVideoPlayer a new object identity.
-  const source = slide.videoSource;
+  // Preserve the exact authorized URL, but take the owner cookie from the LIVE
+  // manual jar. A viewer can stay open across ASP.NET sliding-cookie renewal;
+  // replaying the grid-time snapshot eventually turns valid media into a false
+  // 401/403. Memoization keeps the player identity stable while the cookie is.
+  const source = useMemo(
+    () => refreshVideoSourceCookie(slide.videoSource, sessionCookieSource().current),
+    // `active` deliberately latches a fresh cookie at each focus transition.
+    // A later status event must not replace a player halfway through playback.
+    // It is an explicit lifecycle signal rather than an accidentally unread
+    // dependency.
+    [active, slide.videoSource],
+  );
 
   // BOUNDED RANGE PROBE (acceptance contract fix — see media/videoProbe.ts):
   // sends Range: bytes=0-0 with the session cookie, aborts each attempt as
@@ -59,16 +70,41 @@ export function VideoSlide({
   // → hls). The outcome resolves BOTH availability and container; the
   // expo-video player mounts only on a confirmed ready.
   const [probeState, setProbeState] = useState<VideoProbeState>(
-    slide.videoSource ? 'probing' : 'unavailable',
+    source ? 'idle' : 'unavailable',
   );
+  const [probeAttempt, setProbeAttempt] = useState(0);
+  const readySourceRef = useRef<{
+    source: NonNullable<typeof source>;
+    container: VideoContainer;
+  } | null>(null);
+
+  // Resolved expo-video source: exists ONLY on a confirmed ready, carrying
+  // contentType:'hls' exactly when the server answered HLS.
+  const [resolvedContainer, setResolvedContainer] = useState<VideoContainer | null>(null);
 
   useEffect(() => {
     if (!source) {
       setProbeState('unavailable');
+      setResolvedContainer(null);
       return;
     }
+
+    // FlatList keeps neighbours mounted. Probing those invisible videos both
+    // wastes connections and can exhaust transient server/network budgets
+    // during a long swipe session. Playback readiness belongs to the focused
+    // slide only.
+    if (!active) return;
+
+    const cached = readySourceRef.current;
+    if (cached !== null && cached.source === source) {
+      setResolvedContainer(cached.container);
+      setProbeState('ready');
+      return;
+    }
+
     let cancelled = false;
     setProbeState('probing');
+    setResolvedContainer(null);
     // ONE MANAGED PROBE per effect instance: its AbortController bounds every
     // attempt in time and lets cleanup KILL the in-flight request and the
     // retry delay outright, instead of only ignoring a late result.
@@ -94,17 +130,17 @@ export function VideoSlide({
       // Cancellation is never surfaced as unavailable/error here.
       if (cancelled) return;
       setProbeState(outcome.phase as VideoProbeState);
-      setResolvedContainer(outcome.container ?? null);
+      const container = outcome.container ?? null;
+      setResolvedContainer(container);
+      if (outcome.phase === 'ready' && container !== null) {
+        readySourceRef.current = { source, container };
+      }
     });
     return () => {
       cancelled = true;
       probe.cancel();
     };
-  }, [source]);
-
-  // Resolved expo-video source: exists ONLY on a confirmed ready, carrying
-  // contentType:'hls' exactly when the server answered HLS.
-  const [resolvedContainer, setResolvedContainer] = useState<VideoContainer | null>(null);
+  }, [active, probeAttempt, source]);
 
   const expoSource = useMemo(() => {
     if (probeState !== 'ready') return null;
@@ -197,7 +233,22 @@ export function VideoSlide({
   if (presentation === 'error') {
     return (
       <View style={styles.centerDark}>
-        <ErrorState title={t('player.playbackError')} />
+        <ErrorState
+          title={t('player.playbackError')}
+          onRetry={() => {
+            if (probeState === 'error') {
+              readySourceRef.current = null;
+              setProbeAttempt((attempt) => attempt + 1);
+              return;
+            }
+            if (expoSource !== null) {
+              setPlayerStatus(snapshotPlayerStatus(player, 'loading'));
+              void player.replaceAsync(expoSource).catch(() => {
+                setPlayerStatus(snapshotPlayerStatus(player, 'error'));
+              });
+            }
+          }}
+        />
       </View>
     );
   }

@@ -919,17 +919,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and ambiguous response; it is an operation identity, never content identity,
   and carries no account, asset, filename or inventory information.
 - **The mobile media route owns pager geometry and ordinary exit cleanup.**
-  `/media/[id]` gives its horizontal list the available height and gives every
-  photo/video cell exactly the same device width used by `getItemLayout`, scroll
-  offsets and visible-index calculation; the slides fill that viewport and own
-  no screen dimensions. Viewer photos and video fallback posters request
-  `contain` explicitly, without changing tile crop behavior. A real width change
-  re-anchors the mounted list to the current safe index without animation or
-  remounting, and its programmatic completion cannot become a fake swipe; normal
-  index changes do not force a re-anchor. Video readiness is seeded from the
-  current native player snapshot before status events maintain it, and
-  `VideoView` exists only at `readyToPlay` — probe, preparation, native loading,
-  unavailable and error states each render an explicit non-video surface.
+  `/media/[id]` gives its horizontal list the available height and uses the
+  list's own `onLayout` width — not the earlier window-dimension notification —
+  for every cell, `getItemLayout`, direct re-anchor offset and visible-index
+  calculation. A rotation invalidates any gesture begun under the old geometry
+  and scrolls directly to `safeIndex * measuredWidth`, bypassing stale
+  FlatList frames. The correction repeats from `onContentSizeChange` once the
+  native content can reach that target, so a high index is never clamped against
+  the old content width; only a completion carrying a drag width equal to the
+  current measured width may change logical media. Viewer photos and fallback posters
+  request `contain` without changing tile crop behavior. Only the active video
+  runs the bounded probe, and each focus transition latches the current manual
+  session cookie without replacing a player mid-play. Preparation exhaustion,
+  429/5xx and transport failure are retryable playback errors, never evidence
+  that the media is unavailable; only a deliberate terminal media response uses
+  that surface. Native readiness is seeded from the current player snapshot and
+  `VideoView` exists only at `readyToPlay`.
   Chrome Back and hardware Back share one navigation-only path, while
   viewer-sequence cleanup runs on route unmount, so a mounted route never
   observes its own sequence being erased. Render-time index clamping is

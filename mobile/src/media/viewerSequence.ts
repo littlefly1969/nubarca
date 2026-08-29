@@ -16,9 +16,11 @@ export interface ViewerSlide {
   displayName: string;
   // Image: authenticated path/URL fetched by the image loader as-is.
   imagePath: string;
-  // Video: FULLY-BUILT source (uri + cookie header snapshot), never rebuilt
-  // by the viewer; null when there is no playable source. The container
-  // (hls vs progressive) is decided by the bounded Range probe, not here.
+  // Video: the exact authorized URI plus the cookie snapshot available when
+  // the sequence opens; null when there is no playable source. VideoSlide
+  // preserves the URI but refreshes that manual cookie at focus boundaries so
+  // a long-lived viewer survives session renewal. The container (HLS vs
+  // progressive) is decided by the bounded Range probe, not here.
   videoSource: { uri: string; headers: { cookie: string } } | null;
   posterUrl: string | null;
 }

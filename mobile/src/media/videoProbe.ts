@@ -22,7 +22,8 @@
 //
 // Classification follows NubArca's real contracts, not URL shapes:
 //   202                                   → preparing (retry)
-//   404 / other deliberate status         → unavailable
+//   404 / invalid media response           → unavailable
+//   401/403 or exhausted transient failure → retryable UI error
 //   206 + Content-Type video/*            → ready PROGRESSIVE (native original)
 //   200 + application/vnd.apple.mpegurl   → ready HLS (parameters after ';'
 //                                           are ignored — see below)
@@ -44,7 +45,7 @@ export const VIDEO_PROBE_ATTEMPT_TIMEOUT_MS = 5000;
 export const NUBARCA_HLS_MIME = 'application/vnd.apple.mpegurl';
 
 export type VideoContainer = 'hls' | 'progressive';
-export type VideoProbePhase = 'ready' | 'preparing' | 'unavailable';
+export type VideoProbePhase = 'ready' | 'preparing' | 'unavailable' | 'error';
 
 export interface VideoProbeSource {
   uri: string;
@@ -54,6 +55,8 @@ export interface VideoProbeSource {
 export interface VideoProbeOutcome {
   phase: VideoProbePhase;
   container?: VideoContainer;
+  /** Internal retry hint. Resolved public outcomes never need to preserve it. */
+  retryable?: boolean;
 }
 
 export interface ExpoVideoSource {
@@ -160,6 +163,14 @@ export function classifyVideoProbe(
 ): VideoProbeOutcome {
   if (status === 202) return { phase: 'preparing' };
 
+  // A temporary server/network boundary is not evidence that the media does
+  // not exist. Keep it retryable inside the bounded probe and surface a retry
+  // action if the budget is exhausted.
+  if (status === 408 || status === 425 || status === 429 || status >= 500) {
+    return { phase: 'error', retryable: true };
+  }
+  if (status === 401 || status === 403) return { phase: 'error' };
+
   if (status === 206) {
     // Partial content of a REAL media stream: native progressive playback.
     const ct = (contentType ?? '').trim();
@@ -231,11 +242,11 @@ export async function probeVideoSource(
       // Head of the response is known: stop the transfer immediately.
       controller.abort();
       const outcome = classifyVideoProbe(res.status, readHeader(res, 'content-type'));
-      if (outcome.phase !== 'preparing') return outcome;
-      if (attempt >= maxAttempts) return { phase: 'unavailable' };
+      if (outcome.phase !== 'preparing' && !outcome.retryable) return outcome;
+      if (attempt >= maxAttempts) return { phase: 'error' };
       // There IS going to be a wait: tell the caller now instead of hiding
       // the preparing state until the loop finally settles.
-      deps.onPhase?.(outcome.phase);
+      if (outcome.phase === 'preparing') deps.onPhase?.(outcome.phase);
     } catch {
       // WHY did this attempt die? Only a CALLER-triggered abort may terminate
       // the whole probe from here:
@@ -243,7 +254,7 @@ export async function probeVideoSource(
       //   * per-attempt timeout  → one FAILED attempt, budget still applies;
       //   * transport failure    → existing retry behaviour.
       if (caller?.aborted) return { phase: 'unavailable' };
-      if (attempt >= maxAttempts) return { phase: 'unavailable' };
+      if (attempt >= maxAttempts) return { phase: 'error' };
     } finally {
       // Timers and listeners are released on EVERY exit path.
       if (timer !== undefined) clearTimeout(timer);
@@ -253,7 +264,7 @@ export async function probeVideoSource(
     // The wait before the next attempt must not outlive its caller either.
     await abortableSleep(retryMs, caller);
   }
-  return { phase: 'unavailable' };
+  return { phase: 'error' };
 }
 
 /**
