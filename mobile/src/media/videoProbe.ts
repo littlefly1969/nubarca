@@ -239,9 +239,17 @@ export async function probeVideoSource(
         headers: { cookie: source.headers.cookie, range: VIDEO_PROBE_RANGE },
         signal: controller.signal,
       });
-      // Head of the response is known: stop the transfer immediately.
+      // Snapshot the response head BEFORE aborting. React Native owns the
+      // concrete Response implementation and may release its native header
+      // accessor as soon as the request is aborted. Aborting first therefore
+      // turned a real `200 application/vnd.apple.mpegurl` into `200` with a
+      // missing MIME, which our strict classifier correctly (but falsely)
+      // rejected as unavailable on physical Android.
+      const status = res.status;
+      const contentType = readHeader(res, 'content-type');
+      // The head is now owned by plain JS values: stop the body transfer.
       controller.abort();
-      const outcome = classifyVideoProbe(res.status, readHeader(res, 'content-type'));
+      const outcome = classifyVideoProbe(status, contentType);
       if (outcome.phase !== 'preparing' && !outcome.retryable) return outcome;
       if (attempt >= maxAttempts) return { phase: 'error' };
       // There IS going to be a wait: tell the caller now instead of hiding

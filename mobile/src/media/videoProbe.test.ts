@@ -73,6 +73,26 @@ test('the probe aborts the transfer as soon as the response head is known', asyn
   assert.equal(requests[0].signal.aborted, true);
 });
 
+test('reads the response head before abort invalidates a native header accessor', async () => {
+  const fetch: VideoProbeFetch = async (_uri, init) => ({
+    status: 200,
+    headers: {
+      // React Native owns the real response object. A native implementation is
+      // allowed to release its header view when the request is aborted; the
+      // probe must snapshot the head before it closes the transfer.
+      get: (name: string) =>
+        !init.signal.aborted && name.toLowerCase() === 'content-type'
+          ? 'application/vnd.apple.mpegurl; charset=utf-8'
+          : null,
+    },
+  });
+
+  assert.deepEqual(await probeVideoSource(SRC, { fetchImpl: fetch }), {
+    phase: 'ready',
+    container: 'hls',
+  });
+});
+
 test('200 + NubArca HLS MIME classifies as HLS', async () => {
   const { fetch } = makeRecorder([
     { status: 200, contentType: 'application/vnd.apple.mpegurl' },
