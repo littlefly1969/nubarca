@@ -62,7 +62,19 @@ RUN apt-get update \
         tesseract-ocr \
         tesseract-ocr-eng \
         tesseract-ocr-ita \
+        fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
+# Slice 5: the font NubArca's own text canvas draws with. NubArca's Skia is the
+# `NoDependencies` build — no fontconfig — so it sees no system fonts and opens
+# this file by name instead. Present in the image for the same reason the OCR
+# language data is: the alternative is a download at render time, from the one
+# component whose entire promise is that it makes none. Without it the native
+# text visual renderer reports `visual-renderer-unavailable` and Markdown and
+# plain-text documents stay text-only; nothing else is affected.
+#
+# Changing this font changes every rendered page and every vector derived from
+# one, which is exactly what `nubarca-text-canvas-v1` exists to record — bump the
+# render profile key if it is ever replaced.
 # Slice 4: local OCR for scanned PDFs. Installed in the IMAGE, with its language
 # data, because the alternative is a download at document-index time — a network
 # call from the one component whose entire promise is that it makes none. English

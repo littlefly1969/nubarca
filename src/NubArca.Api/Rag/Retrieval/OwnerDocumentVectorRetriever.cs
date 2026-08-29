@@ -66,6 +66,10 @@ public sealed class OwnerDocumentVectorRetriever
         Guid ownerUserId,
         string queryText,
         int take,
+        /// The SERVER-ONLY narrowing (see RagQuery.AllowedFileItemIds), applied
+        /// inside the candidate query so a scoped question ranks only scoped
+        /// vectors. It intersects with eligibility and can never widen it.
+        IReadOnlyCollection<Guid>? allowedFileItemIds = null,
         CancellationToken cancellationToken = default)
     {
         // NO OWNER, NO SEARCH. Not "no results" — the caller asked an
@@ -126,7 +130,8 @@ public sealed class OwnerDocumentVectorRetriever
                 _db.DocumentChunks.AsNoTracking(),
                 _db.DocumentTexts.AsNoTracking(),
                 _db.FileItems.AsNoTracking(),
-                ownerUserId)
+                ownerUserId,
+                allowedFileItemIds)
             join embedding in _db.DocumentChunkEmbeddings.AsNoTracking()
                 on row.Chunk.Id equals embedding.DocumentChunkId
             where embedding.ProfileId == profile.Id

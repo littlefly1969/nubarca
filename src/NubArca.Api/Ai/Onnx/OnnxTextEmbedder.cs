@@ -38,7 +38,12 @@ public sealed class OnnxTextEmbedder : ITextEmbedder, IDisposable
 
     public string Provider => AiProviders.Onnx;
 
-    public bool Supports(string capability) => capability == AiCapabilities.ImageEmbedding;
+    // Both the photo tower and the DOCUMENT VISUAL tower, because they are the
+    // same paired SigLIP2 model doing the same arithmetic on different pixels.
+    // The two capabilities exist to keep the PROFILES apart — separate identity,
+    // separate storage, separate status — not because the encoder differs.
+    public bool Supports(string capability) =>
+        capability is AiCapabilities.ImageEmbedding or AiCapabilities.DocumentVisualEmbedding;
 
     public AiBackendReadiness CheckReadiness(AiProfile profile)
     {

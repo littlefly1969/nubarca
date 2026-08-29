@@ -1,3 +1,4 @@
+using NubArca.Api.Ai.DocumentVisual;
 using NubArca.Api.Assistant;
 using NubArca.Api.Rag;
 using NubArca.Api.Rag.Domains;
@@ -34,7 +35,12 @@ public sealed record PrivateDocumentStatus(
     string? EmbeddingProfileKey,
     int Documents,
     int Chunks,
-    string? Reason);
+    string? Reason,
+    /// Whether the VISUAL pass can run. A separate boolean rather than folded
+    /// into `SemanticEnabled` because the two degrade independently and a
+    /// person should be able to see which signal they are getting.
+    bool VisualEnabled = false,
+    string? VisualReason = null);
 
 /// "Answer from MY documents", and the smallest set of things that can do it.
 ///
@@ -84,6 +90,12 @@ public sealed class PrivateDocumentAssistantService
     /// which is exactly how this was caught.
     private readonly Rag.Retrieval.OwnerDocumentCorpusSource? _corpus;
     private readonly IRagSemanticProfileResolver _semantic;
+
+    /// NULL on a host with no database, for the same reason `_corpus` is — and
+    /// null is also the ordinary state of an installation that has not enabled
+    /// visual retrieval. Both produce identical behaviour: the text path answers
+    /// the question exactly as it did before this slice existed.
+    private readonly IOwnerDocumentVisualRetriever? _visual;
     private readonly ILogger<PrivateDocumentAssistantService> _log;
 
     public PrivateDocumentAssistantService(
@@ -92,6 +104,7 @@ public sealed class PrivateDocumentAssistantService
         AssistantModelResolver resolver,
         Rag.Retrieval.OwnerDocumentCorpusSource? corpus,
         IRagSemanticProfileResolver semantic,
+        IOwnerDocumentVisualRetriever? visual,
         ILogger<PrivateDocumentAssistantService> log)
     {
         _model = model;
@@ -99,6 +112,7 @@ public sealed class PrivateDocumentAssistantService
         _resolver = resolver;
         _corpus = corpus;
         _semantic = semantic;
+        _visual = visual;
         _log = log;
     }
 
@@ -110,6 +124,13 @@ public sealed class PrivateDocumentAssistantService
         var stats = _corpus is null
             ? Rag.Retrieval.OwnerDocumentCorpusStats.Empty
             : await _corpus.GetStatsAsync(ownerUserId, cancellationToken);
+
+        // A CHEAP PROBE, not a search: this asks the visual retriever for its
+        // own readiness by running the resolution it would run, and never
+        // embeds a query or touches a vector.
+        var visual = _visual is null
+            ? DocumentVisualReasons.Disabled
+            : await _visual.CheckReadinessAsync(cancellationToken);
 
         return new PrivateDocumentStatus(
             Enabled: resolution.Profile is not null,
@@ -127,7 +148,13 @@ public sealed class PrivateDocumentAssistantService
                 ? resolution.Reason ?? AssistantFailureReasons.NotConfigured
                 : stats.Chunks == 0
                     ? AssistantFailureReasons.PrivateKnowledgeUnavailable
-                    : null);
+                    : null,
+            // REPORTED SEPARATELY, because visual retrieval degrades on its own.
+            // A person whose Office renderer is not deployed still gets full
+            // text answers, and folding the two into one "AI is working" flag
+            // would make that indistinguishable from everything being fine.
+            VisualEnabled: visual is not null,
+            VisualReason: visual);
     }
 
     public async Task<PrivateDocumentAnswer> AskAsync(
@@ -185,15 +212,50 @@ public sealed class PrivateDocumentAssistantService
                 bounds.EffectiveEvidenceCharacters),
             cancellationToken);
 
+        // ---- the visual pass -------------------------------------------------
+        //
+        // WHICH OF MY DOCUMENTS LOOKS LIKE THIS QUESTION, followed by WHAT DOES
+        // THAT DOCUMENT ACTUALLY SAY. The first is a rendered-page similarity
+        // over this owner's eligible visual index; the second is the ordinary
+        // private text retrieval, narrowed to the files the first one named.
+        //
+        // A VISUAL HIT NEVER BECOMES EVIDENCE. It produces a list of file ids
+        // and nothing else — no page, no pixels, no score that survives into a
+        // prompt — and the text pass it scopes goes through the identical
+        // eligibility join and the identical evidence gate as the global one. So
+        // the worst a visual false positive can do is cause a second text
+        // retrieval that finds nothing, which is exactly what should happen.
+        var expanded = await ExpandByVisualCandidatesAsync(
+            ownerUserId, trimmed, bounds, cancellationToken);
+
         // Outcome, mode and COUNT. Never the question, never an excerpt, never a
         // filename, and never the owner id — a log line that named the owner and
         // the document would reconstruct the private part of the request from
         // the logs alone.
         _log.LogInformation(
-            "user-documents: retrieval outcome={Outcome} mode={Mode} evidence={Count}",
-            retrieval.Outcome, retrieval.Mode, retrieval.Evidence.Count);
+            "user-documents: retrieval outcome={Outcome} mode={Mode} evidence={Count} "
+            + "visual={VisualMode} visual_evidence={VisualCount}",
+            retrieval.Outcome, retrieval.Mode, retrieval.Evidence.Count,
+            expanded.Mode, expanded.Evidence.Count);
 
-        if (retrieval.Outcome != RagRetrievalOutcome.Strong || retrieval.Evidence.Count == 0)
+        // FUSED BY RANK, then gated exactly as before.
+        //
+        // Both inputs are already past `HasStrongEvidence`: a pass that produced
+        // nothing strong contributes an empty list, so fusion cannot manufacture
+        // evidence out of two weak results. What it can do is let a document the
+        // global pass ranked poorly — because its words are ordinary and its
+        // LAYOUT is what made it the answer — reach the top.
+        var evidence = PrivateDocumentEvidenceFusion.Fuse(
+            retrieval.Evidence,
+            expanded.Evidence,
+            bounds.EffectiveEvidenceChunks,
+            bounds.EffectiveEvidenceCharacters);
+
+        var strong =
+            (retrieval.Outcome == RagRetrievalOutcome.Strong && retrieval.Evidence.Count > 0)
+            || expanded.Evidence.Count > 0;
+
+        if (!strong || evidence.Count == 0)
         {
             // NO STRONG EVIDENCE, NO MODEL CALL. Asking a model to answer from
             // general knowledge is how "what does MY manual say" gets answered
@@ -212,8 +274,12 @@ public sealed class PrivateDocumentAssistantService
         // or a system domain's — fails the request here rather than reaching a
         // prompt. The owner is passed explicitly: the check is against the
         // authenticated caller, not against whatever the evidence claims.
+        // OVER THE FUSED LIST, which is what the prompt will actually carry.
+        // Checking `retrieval.Evidence` here instead would leave the
+        // visually-expanded half ungated — the one half a new code path
+        // introduced.
         if (AssistantRagPolicy.Refuse(
-                profile.Trust, Domain, retrieval.Evidence, ownerUserId) is { } refusal)
+                profile.Trust, Domain, evidence, ownerUserId) is { } refusal)
         {
             _log.LogWarning(
                 "user-documents: refused, evidence is not permitted reason={Reason}", refusal);
@@ -222,7 +288,7 @@ public sealed class PrivateDocumentAssistantService
 
         var messages = new List<AssistantMessage>
         {
-            new(AssistantRole.System, BuildSystemPrompt(retrieval.Evidence)),
+            new(AssistantRole.System, BuildSystemPrompt(evidence)),
         };
         messages.AddRange(BoundedHistory(history, bounds));
         messages.Add(new AssistantMessage(AssistantRole.User, trimmed));
@@ -240,13 +306,87 @@ public sealed class PrivateDocumentAssistantService
         // no DocumentTextId, no chunk id, no blob hash, no storage key, no
         // score — a citation exists so somebody can open the document, not so a
         // client can address it.
-        var sources = retrieval.Evidence
+        var sources = evidence
             .Select(e => new PrivateDocumentCitation(
                 e.Title, string.IsNullOrWhiteSpace(e.Section) ? null : e.Section))
             .DistinctBy(s => (s.Document, s.Section))
             .ToList();
 
         return new PrivateDocumentAnswer(true, result.Text, null, sources);
+    }
+
+    /// One visually-expanded text retrieval, or an empty result.
+    ///
+    /// The order is the cost order, and it matters: the visual model is only
+    /// asked once the cheap checks have passed, and the scoped TEXT retrieval
+    /// only runs if the visual pass actually named files. An installation with
+    /// visual retrieval switched off does none of this and pays nothing.
+    ///
+    /// EVERY FAILURE HERE IS SILENT AND HARMLESS. No visual retriever, no model,
+    /// no pgvector, a corpus past the exact-search ceiling, zero candidates:
+    /// each returns an empty expansion, and the question is answered from the
+    /// global text pass exactly as it was before this slice.
+    private async Task<VisualExpansion> ExpandByVisualCandidatesAsync(
+        Guid ownerUserId,
+        string question,
+        AssistantHelpOptions bounds,
+        CancellationToken cancellationToken)
+    {
+        if (_visual is null) return VisualExpansion.None;
+
+        var visual = await _visual.RetrieveAsync(
+            new DocumentVisualQuery(
+                ownerUserId,
+                question,
+                // Bounds, not preferences. The retriever clamps both again
+                // against its own configured ceilings.
+                MaxUnits: 60,
+                MaxFiles: 8),
+            cancellationToken);
+
+        if (!visual.IsAvailable || visual.CandidateFileIds.Count == 0)
+        {
+            return new VisualExpansion(
+                Array.Empty<RagEvidence>(), visual.Reason ?? visual.Mode);
+        }
+
+        // THE SAME RETRIEVER, THE SAME DOMAIN, THE SAME OWNER — narrowed.
+        //
+        // Not a second retrieval implementation and not a privileged read: this
+        // is the identical private text path with one extra `AND` in its
+        // eligibility query. The file ids came from this owner's own eligible
+        // visual index moments ago, so the narrowing can only ever be a subset
+        // of what the global pass was already allowed to see.
+        var scoped = await _knowledge.RetrieveAsync(
+            new RagQuery(
+                Domain.DomainKey,
+                question,
+                ownerUserId,
+                bounds.EffectiveEvidenceChunks,
+                bounds.EffectiveEvidenceCharacters)
+            {
+                AllowedFileItemIds = visual.CandidateFileIds,
+            },
+            cancellationToken);
+
+        // A VISUALLY PERFECT PAGE WITH NOTHING USEFUL WRITTEN ON IT STOPS HERE.
+        // The gate inside the retriever refused it, and there is deliberately no
+        // branch that says "but the picture matched" — a right-looking page is
+        // not permission to improvise.
+        if (scoped.Outcome != RagRetrievalOutcome.Strong || scoped.Evidence.Count == 0)
+        {
+            return new VisualExpansion(Array.Empty<RagEvidence>(), visual.Mode);
+        }
+
+        return new VisualExpansion(scoped.Evidence, visual.Mode);
+    }
+
+    /// What the visual pass contributed: bounded TEXT evidence and a mode token.
+    /// Never a page, never a unit id, never a score.
+    private sealed record VisualExpansion(IReadOnlyList<RagEvidence> Evidence, string Mode)
+    {
+        public static readonly VisualExpansion None =
+            new(Array.Empty<RagEvidence>(), DocumentVisualModes.Unavailable);
     }
 
     /// The client's replayed history, bounded twice — by turns and by total

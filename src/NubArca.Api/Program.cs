@@ -986,6 +986,13 @@ builder.Services.Configure<NubArca.Api.Ai.Documents.DocumentExtractionOptions>(
     builder.Configuration.GetSection(
         NubArca.Api.Ai.Documents.DocumentExtractionOptions.SectionName));
 
+// Visual document retrieval. Bounds, profile identity and the two feature
+// switches — all off by default, because enabling this re-renders and re-embeds
+// every document in every library and that is the operator's decision to make.
+builder.Services.Configure<NubArca.Api.Ai.DocumentVisual.DocumentVisualOptions>(
+    builder.Configuration.GetSection(
+        NubArca.Api.Ai.DocumentVisual.DocumentVisualOptions.SectionName));
+
 // An EXPLICIT factory, because the private corpus source exists only when a
 // database does and the built-in container has no notion of an optional
 // constructor parameter — it validates the whole graph at startup, so a plain
@@ -998,6 +1005,10 @@ builder.Services.AddScoped(sp => new NubArca.Api.Ai.Documents.PrivateDocumentAss
     sp.GetRequiredService<NubArca.Api.Assistant.AssistantModelResolver>(),
     sp.GetService<NubArca.Api.Rag.Retrieval.OwnerDocumentCorpusSource>(),
     sp.GetRequiredService<NubArca.Api.Rag.IRagSemanticProfileResolver>(),
+    // Optional for the same reason the corpus source is: no database, no visual
+    // retriever — and an installation that never enables visual retrieval simply
+    // answers from text, which is what it did before this existed.
+    sp.GetService<NubArca.Api.Ai.DocumentVisual.IOwnerDocumentVisualRetriever>(),
     sp.GetRequiredService<ILogger<NubArca.Api.Ai.Documents.PrivateDocumentAssistantService>>()));
 
 // VSEM-01: canonical video temporal substrate (scene segments + sample

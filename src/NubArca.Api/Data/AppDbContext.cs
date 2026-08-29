@@ -102,6 +102,9 @@ public class AppDbContext : DbContext
     public DbSet<DocumentText> DocumentTexts => Set<DocumentText>();
     public DbSet<DocumentChunk> DocumentChunks => Set<DocumentChunk>();
     public DbSet<DocumentChunkEmbedding> DocumentChunkEmbeddings => Set<DocumentChunkEmbedding>();
+    public DbSet<DocumentVisualIndex> DocumentVisualIndexes => Set<DocumentVisualIndex>();
+    public DbSet<DocumentVisualUnit> DocumentVisualUnits => Set<DocumentVisualUnit>();
+    public DbSet<DocumentVisualEmbedding> DocumentVisualEmbeddings => Set<DocumentVisualEmbedding>();
     public DbSet<FaceDetection> FaceDetections => Set<FaceDetection>();
     public DbSet<FaceEmbedding> FaceEmbeddings => Set<FaceEmbedding>();
     public DbSet<PersonGroup> PersonGroups => Set<PersonGroup>();
