@@ -42,20 +42,22 @@ public sealed class PdfVisualRenderer : IDocumentVisualRenderer
 
     public IReadOnlyCollection<DocumentFormatKind> Formats { get; } = new[] { DocumentFormatKind.Pdf };
 
-    public DocumentVisualRendererReadiness CheckReadiness()
-    {
-        // A RUNTIME GUARD RATHER THAN A PLATFORM ANNOTATION, for the reason
-        // PdfPageRenderer states: declaring supported platforms would propagate
-        // the attribute up through the indexer into everything that touches a
-        // document, making a native rendering detail part of half the
-        // codebase's signature.
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
-        {
-            return DocumentVisualRendererReadiness.NotReady(DocumentVisualReasons.RendererUnavailable);
-        }
+    /// A RUNTIME GUARD RATHER THAN A PLATFORM ANNOTATION, for the reason
+    /// PdfPageRenderer states: declaring supported platforms would propagate the
+    /// attribute up through the indexer into everything that touches a document,
+    /// making a native rendering detail part of half the codebase's signature.
+    ///
+    /// Stated as a shared predicate and RE-CHECKED at the call site rather than
+    /// only here, because the platform analyzer reasons one method at a time: a
+    /// guard in this method proves nothing about the one that actually calls
+    /// PDFium, and the Release build says so.
+    private static bool PlatformSupportsRendering
+        => OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
 
-        return DocumentVisualRendererReadiness.Available;
-    }
+    public DocumentVisualRendererReadiness CheckReadiness()
+        => PlatformSupportsRendering
+            ? DocumentVisualRendererReadiness.Available
+            : DocumentVisualRendererReadiness.NotReady(DocumentVisualReasons.RendererUnavailable);
 
     public async Task<DocumentVisualRenderOutcome> RenderAsync(
         DocumentVisualRenderRequest request, CancellationToken cancellationToken = default)
@@ -147,6 +149,11 @@ public sealed class PdfVisualRenderer : IDocumentVisualRenderer
     private async Task<(byte[]? Png, int Width, int Height, string? Reason)> RenderPageAsync(
         byte[] pdfBytes, int pageIndex, DocumentVisualOptions options, CancellationToken cancellationToken)
     {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS())
+        {
+            return (null, 0, 0, DocumentVisualReasons.RendererUnavailable);
+        }
+
         await Native.WaitAsync(cancellationToken);
         try
         {
