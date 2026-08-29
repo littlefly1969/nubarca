@@ -158,6 +158,17 @@ public static class RagServiceRegistration
         services.AddScoped<Ai.DocumentVisual.IOwnerDocumentVisualRetriever,
             Ai.DocumentVisual.OwnerDocumentVisualRetriever>();
 
+        // The retrieval half of "answer from my documents", as ONE object: the
+        // global text pass, the visual pass, the scoped text pass it implies,
+        // and the rank fusion of the two. Shared by the Assistant, the
+        // evaluation harness and the operator CLI — a benchmark that
+        // re-implements the pipeline it benchmarks measures the
+        // re-implementation.
+        services.AddScoped(sp => new Ai.DocumentVisual.OwnerDocumentRetrievalPipeline(
+            sp.GetRequiredService<IRagRetriever>(),
+            sp.GetService<Ai.DocumentVisual.IOwnerDocumentVisualRetriever>()));
+        services.AddScoped<Ai.DocumentVisual.DocumentVisualEvaluator>();
+
         services.AddScoped<RagDatabaseServices>();
 
         // Local text embedding. Both providers are registered; which one runs is

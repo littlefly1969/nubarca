@@ -885,6 +885,50 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and deliberately NOT cached, and private semantic retrieval is exact cosine
   over the owner's eligible vectors — a global ANN index with an owner predicate
   is not an owner-prefiltered search and fails silently.
+- **A visual hit finds where to look; an eligible current text chunk is still
+  what NubArca may say.** Visual document retrieval renders an owner's pages,
+  embeds them locally under a DOCUMENT-specific SigLIP2 profile (shared weights
+  with photos, separate identity and separate storage), and uses the result to
+  scope the ordinary private text retrieval to the files it named. The two
+  ranked lists fuse by RRF and go through the UNCHANGED evidence gate; a
+  `DocumentVisualUnit` never becomes `RagEvidence`, no page image reaches a
+  generative model, and a visually perfect page with weak text ends in no model
+  call. Off by default, because enabling it re-renders and re-embeds every
+  library.
+- **A visual index is published whole or not at all, and stale rows are inert.**
+  Pages render and embed one at a time and reach the database in one write with
+  the `Completed` index — page 13 failing means pages 1–12 are not search
+  results, and the database refuses a completed index with no units. Retrieval
+  adds three conditions to the text ones: the index must be complete, its blob
+  must be the file's CURRENT blob, and both the render and the embedding profile
+  must be active. Rendered pages are never stored: render, embed, discard, plus
+  a pixel hash.
+- **Office documents are laid out in a container with no network and no
+  credentials.** Open XML parsing is not rendering, and a layout engine over
+  hostile input does not belong beside database credentials. The API sends bytes
+  and a format ORDINAL over a Unix socket; the protocol cannot express a path, a
+  filename, a command, an import filter or a URL. A rendered office page ordinal
+  is that engine's pagination and is never a citation — Slice-4 typed text
+  provenance stays the authority. Without the worker, PDFs and text still get
+  visual search.
+- **The visual pgvector accelerator has NO ANN index, deliberately.** An
+  approximate index plus an owner predicate is not an owner-prefiltered search,
+  so the absence is what leaves PostgreSQL one plan: restrict through the
+  eligibility joins, then rank exactly. Without pgvector the same ranking runs
+  in process, and a corpus past the exact-search ceiling reports the visual path
+  UNAVAILABLE rather than ranking an arbitrary prefix of somebody's library.
+- **Narrowing a text pass narrows CANDIDATES, never the index.** BM25 weights a
+  term by how rare it is across the corpus, so an index built from three
+  documents collapses every score under the minimum-score floor and the evidence
+  gate rejects the chunk the visual pass went looking for. And a bare top-K over
+  cosine is a sorted copy of the library, not a set of matches — visual hits
+  need a positive cosine and a RELATIVE floor under the best match, relative
+  because cross-modal cosine is not calibrated across checkpoints.
+- **Late interaction is a seam with no promoted model.** `IVisualLateInteractionProvider`
+  plus an exact MaxSim tested against a hand-computable fixture. Enabling one
+  requires a candidate that cleared a measured quality/resource/licence gate on
+  a real corpus (`documents visual-evaluate`); with none promoted the dense
+  order stands, which is a complete configuration rather than a degraded one.
 - **`Assistant__PrivateKnowledgeModel` must be `LocalTrusted`, with no
   fallback.** Not to Help's model, which is the one place allowed to be
   External, and not to anything else. An External configuration yields ZERO

@@ -608,6 +608,236 @@ quality. A stronger local document model enters through the same interface later
 without touching owner authorization, `DocumentText`, RAG trust or Assistant
 policy.
 
+## Visual document retrieval
+
+A document can now be found by how its PAGES LOOK — layout, tables, forms,
+slides, heading hierarchy, spatial structure — and not only by the words it
+contains. Everything about the boundary is unchanged.
+
+> **A visual embedding is private derived data, not authority.**
+>
+> **A visual hit finds where to look; an eligible current text chunk is still
+> what NubArca is allowed to say.**
+
+The pipeline, in order:
+
+```text
+global owner-private text retrieval
++ dense visual retrieval  ->  candidate FileItems
+                          ->  the SAME text retrieval, scoped to those files
+= two ranked lists, fused by RRF
+-> the existing evidence gate
+-> bounded TEXT RagEvidence
+-> LocalTrusted generation
+```
+
+`DocumentVisualUnit` never becomes `RagEvidence`, no page image reaches a
+generative model, and a visually perfect page whose text says nothing relevant
+ends in **no model call at all**. That last one is the case the architecture
+exists for: visual similarity is not permission to improvise.
+
+### The signal is additive
+
+Text remains better at exact identifiers, filenames, configuration keys and
+ordinary prose. Visual retrieval adds where a text embedding flattens the thing
+that mattered: a table, a form, an invoice, a dashboard, a slide, a multi-column
+layout, a heading hierarchy. The claim is `text + visual > text alone` on a
+deliberately mixed set, and it is measured rather than asserted — see below.
+
+### Same weights, separate identity
+
+The dense baseline reuses the SigLIP2 So400m 384 checkpoint the photo library
+already runs. It is a 1.6 GB asset already on disk, already compiled for the
+configured device, and already the multimodal space this installation reasons
+in; a second copy of the same model to embed pages instead of photos would cost
+gigabytes to change nothing.
+
+What is NOT shared is everything that decides meaning. `document-visual-siglip2-so400m-patch14-384-v1`
+is its own `AiProfile` under its own capability (`document-visual-embedding`),
+so document vectors live in their own table keyed by their own profile and
+cannot be counted, compared or reindexed as photo vectors. A document-visual
+model swap reindexes documents and leaves the photo library alone, and the
+reverse. Never the capability default: which profile embeds pages is stated by
+`Ai__DocumentVisual__DenseProfileKey`, so a newer profile cannot become active
+by existing.
+
+### Rendering, and where it happens
+
+| Family | Renderer | Render identity |
+|---|---|---|
+| PDF | PDFium, in process | `pdfium-page-render-v1` |
+| text / Markdown | NubArca's own deterministic canvas | `nubarca-text-canvas-v1` |
+| DOCX / XLSX / PPTX | LibreOffice headless → PDF → PDFium, in an **isolated worker** | `libreoffice-office-pdf-v1` |
+
+The render identity changes when the engine, the pagination or the bundled fonts
+change — never on a timestamp or a build SHA, either of which would re-render
+every library for a release that touched none of this. A stored index whose
+render identity is not the active one is unreachable, which is what a renderer
+upgrade costs.
+
+**The rendered page is never stored.** Render, embed, discard. Persisting it
+would be a second copy of everybody's paperwork with its own backup, deletion
+and share-boundary problems, in exchange for nothing retrieval needs; a SHA-256
+`PixelHash` is kept so a rebuild can prove determinism without the bytes it
+hashes.
+
+**Office rendering does not run in the API.** Laying out a DOCX means running a
+real office suite over a file somebody uploaded: dozens of legacy parsers,
+document-declared relationships, a macro engine. The api container holds
+database credentials, storage credentials and every owner's identity. So the API
+sends BYTES and a FORMAT ORDINAL over a Unix socket to a container with
+`network_mode: none`, no credentials, no owner identity, a read-only root
+filesystem and `cap_drop: ALL`, and receives a PDF. There is no operation in
+that protocol for a path, a filename, a command, an import filter, a binary or a
+URL — not "those are validated", but *cannot be expressed*. The network sandbox
+is the egress guarantee; LibreOffice's own macro setting is defence in depth.
+
+Without the worker deployed, PDFs and text still get visual search and Office
+documents stay text-only. Nothing is marked permanently unrenderable, so
+deploying it later simply starts rendering them.
+
+### A rendered office page is not a citation
+
+`DocumentChunk.Page` still means a real PDF page and nothing else, and the same
+rule now governs visual units. A PDF page is page N of that PDF under any
+renderer, so the PDF renderer fills in a source page. An office page ordinal is
+LibreOffice's pagination — a different build breaks the same DOCX elsewhere — so
+those are deliberately null, and a text canvas sheet has no counterpart in a
+Markdown file at all.
+
+Final citations therefore remain Slice-4 typed text provenance: heading/section
+for DOCX, sheet/range for XLSX, slide for PPTX, page for PDF.
+
+### Publication is all or nothing
+
+Pages are rendered and embedded one at a time, so memory holds one image; but no
+row reaches the database until every required unit has succeeded, and then all
+of them arrive in one write together with the `Completed` index. A twenty-page
+contract whose page 13 failed contributes **zero** hits from pages 1–12.
+
+There is no code path that writes some units and marks the index done, and the
+database says so too: a `Completed` index with no units is a write that cannot
+commit. The failure it prevents is invisible to the person it misleads — a
+document that reads as whole and is not.
+
+### Derived rows are still not authority
+
+Six conditions, recomputed live on every query, with the derived rows
+deliberately left in place in every test:
+
+- the file is this owner's, not deleted, not vaulted, in the library;
+- the visual index is `Completed`;
+- the index's blob is the file's **current** blob — which is what makes
+  replacing a document's content invalidate its pages instantly, with no
+  sweeper;
+- the render profile is the active one;
+- the embedding profile is the active one;
+- and the owner comes from the live `FileItem`, never the denormalized copy.
+
+### Owner-prefiltered, and the absence that guarantees it
+
+`ORDER BY embedding <=> q LIMIT 10` against a global HNSW with
+`WHERE OwnerUserId = …` is **not** an owner-prefiltered nearest-neighbour
+search: the graph is traversed over everybody's vectors and the predicate
+filters whatever the traversal surfaced, so a person with few documents in a
+large installation silently gets fewer and worse results.
+
+So the pgvector accelerator for document visual embeddings has **no ANN index**,
+and that absence is asserted by a test against a real PostgreSQL 17. With no
+index the planner has one plan available: restrict through the eligibility
+joins, then rank the survivors exactly. What the table still buys is real — the
+cosine is computed in the database instead of shipping every candidate's 4.6 KiB
+of float32 to the application on every question.
+
+Without pgvector the same ranking happens in process over the owner's bounded
+corpus. Past `MaxVisualUnitsPerOwnerExactFallback` visual retrieval reports
+itself **unavailable** and text answers the question; it never ranks an
+arbitrary prefix of a library and presents it as somebody's documents.
+
+### Narrowing a text pass, correctly
+
+The scoped second pass narrows CANDIDATES, not the index — and getting that
+wrong is subtle enough to be worth stating. BM25 weights a term by how rare it
+is across the corpus, so building an index from three documents makes every term
+unremarkable, the scores collapse under the minimum-score floor, and the
+evidence gate rejects the very chunk the visual pass went looking for. The
+allowlist is therefore applied when candidates are selected from the owner's
+full, already-eligible index. It can only ever REMOVE candidates: a forged id —
+another owner's file, a deleted one, a vaulted one — is not in that index at
+all.
+
+There is no `fileIds` on any DTO, no query-string parameter and no configuration
+key that reaches it. The only value it ever holds is a list the server derived
+moments earlier from this same owner's eligible visual index.
+
+### A sorted corpus is not a set of matches
+
+A bare top-K over cosine returns K rows whatever the library contains, so in a
+small one every document comes back and "scope the text pass to what looks
+relevant" becomes "scope it to everything". Hits need a positive cosine and a
+RELATIVE floor under the best match. Relative because cross-modal cosine is not
+calibrated across checkpoints: "within this much of the best thing found"
+survives a model swap, and "0.2 is a match" is a claim about one set of weights.
+
+A file is as relevant as its most relevant page. Summing a document's page
+scores would let a hundred-page report outrank a one-page invoice purely by
+being long — and length is the one property a visual embedding cannot see.
+
+### Late interaction is a seam, not a dependency
+
+The stable concept, and all NubArca depends on:
+
+```text
+query -> sequence of normalized vectors
+page  -> sequence of normalized vectors
+score = Σ_i max_j dot(Q_i, D_j)
+```
+
+`IVisualLateInteractionProvider` states it, `MaxSim` implements it against a
+hand-computable fixture, and a second stage reranks the dense top K by exact
+MaxSim. Because it reorders a list the owner-prefiltered pass already produced,
+it inherits that filtering — which is why a specialised multi-vector ANN engine
+(PLAID, WARP, TACHIOM) stays a replaceable optimisation rather than a component
+that would have to re-establish the boundary inside itself.
+
+**No model is promoted in this release.** A production late-interaction profile
+must materially improve visual retrieval on a measured corpus, with an
+acceptable resource footprint and licence — `documents visual-evaluate` prints
+the numbers that decision is made on. With no promoted profile the dense order
+stands, and that is a complete, working configuration rather than a degraded
+one. Multi-vectors are stored as exact float32; float16 halves the bytes and
+changes the scores, and by how much is precisely the unmeasured quantity.
+
+### Operator commands
+
+```bash
+dotnet NubArca.Api.dll documents visual-seed-profiles
+dotnet NubArca.Api.dll documents visual-index    --owner <user-id> [--limit N]
+dotnet NubArca.Api.dll documents visual-status   --owner <user-id>
+dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries cases.tsv
+```
+
+Readiness is reported in four independent parts, because they degrade
+independently and one "AI is working" flag would hide which:
+`text_private_ready`, `dense_visual_ready`, `office_renderer_ready`,
+`late_interaction_ready`.
+
+### Cost, and backup
+
+Visual metadata and vectors are rebuildable derivatives. After a restore with no
+models or worker present, text RAG works and the visual path is unavailable
+until they are; `documents visual-index` rebuilds it. Rebuilding visual
+derivatives never touches text extraction, text chunks, text embeddings or
+source files.
+
+Per 1,000 visual units, canonical dense storage is
+`1000 × 1152 × 4 B ≈ 4.6 MB`, plus the same again in the pgvector accelerator
+when it is present, plus one small row per unit. Render and embed time depend
+entirely on the model, the device and the page count; `documents visual-index`
+reports the unit counts and `documents visual-evaluate` the query latencies, so
+an operator measures their own rather than trusting a number from somebody
+else's hardware.
+
 ## Bounds and privacy
 
 Every stage is bounded server-side: query characters, lexical candidates, vector
@@ -640,6 +870,11 @@ The owner-private corpus has its OWN verb, and every subcommand requires
 dotnet NubArca.Api.dll documents status --owner <user-id>
 dotnet NubArca.Api.dll documents index  --owner <user-id> --embed
 dotnet NubArca.Api.dll documents index  --owner <user-id> --limit 20
+
+dotnet NubArca.Api.dll documents visual-seed-profiles
+dotnet NubArca.Api.dll documents visual-index    --owner <user-id> [--limit N]
+dotnet NubArca.Api.dll documents visual-status   --owner <user-id>
+dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries cases.tsv
 ```
 
 A separate verb rather than `rag index --domain user-documents --owner …`,
@@ -788,15 +1023,56 @@ measuring it — which is a decision with its own slice, not a knob to turn here
 Lexical remains the better default for that domain today, and semantic
 enablement is now per domain (`Rag__Domains__<key>__SemanticEnabled`).
 
+### The visual set, and what it does not prove
+
+Visual retrieval is measured in the fast suite against a second SYNTHETIC
+library — thirteen cases covering every shape the design calls out: ordinary
+prose, a Markdown heading hierarchy, a PDF table, a PDF form, a scanned page, a
+DOCX with numbered clauses, an XLSX grid, a PPTX slide, a visually similar
+distractor, an exact identifier that TEXT must win, an unanswerable question,
+and an Italian and an English paraphrase.
+
+| mode | Recall@5 | MRR | top-3 | visual nDCG@5 |
+|---|---|---|---|---|
+| text-only | 0.833 | 0.778 | 10/12 | 0.722 |
+| **dense-visual-expanded** | **0.917** | **0.917** | **11/12** | **0.889** |
+
+One query recovered, none regressed. The recovered one is the shape the whole
+capability exists for: a form whose text says "the applicant completes the form
+and signs at the foot of the page", written in words that three other documents
+in the library use more heavily — global text ranks it out of the evidence
+budget, and its LAYOUT brings it back.
+
+**What this does not prove.** The embedding providers in the fast suite are
+DETERMINISTIC: they hash their input into a vector. The page vectors are seeded
+by the fixture, so the harness controls exactly which document "looks like"
+which question, and what is measured is the PLUMBING — that a visually-found
+document reaches the top, that a text-only strength is not displaced by it, and
+that the recovered/regressed accounting is honest. It says nothing about whether
+SigLIP2 agrees, which is a different question with its own lane
+(`DocumentVisualRealOnnxTests`, gated on `Ai__Onnx__ModelDir`) and its own
+operator command (`documents visual-evaluate`, against a real library).
+
+The English paraphrase fails in both modes, and it is left failing. The
+deterministic text provider is not multilingual, so an English question against
+an Italian document has nothing to match lexically; a cross-language answer
+needs the real multilingual model, and papering over it here would hide a real
+limitation of the fast lane behind a fixture.
+
+Two aggregates are deliberately reported separately. `visual nDCG@5` covers only
+the cases the visual signal is SUPPOSED to help with, because one number over a
+mixed set cannot tell "visual retrieval works" from "the text path was already
+good at most of these" — and RECOVERED and REGRESSED are both printed, because a
+change that gains two table questions and loses two identifier lookups scores
+flat and is a bad change.
+
 ## Deliberately not in this platform yet
 
 Owner-private RAG now EXISTS, for native text documents. What is still out:
 
-**Ingestion.** No PDF, no OCR, no DOCX/XLSX/PPTX, no email, no web crawling. The
-failure modes of a document parser are memory and code execution, and the way to
-not have them is to not have a parser — so this slice ships a decoder and a set
-of refusals. Richer ingestion is the next meaningful capability, on top of this
-same boundary rather than beside it.
+**Ingestion.** PDF, local OCR and DOCX/XLSX/PPTX are read, and their pages can
+be rendered and searched visually. Still out: email, web crawling, and any
+hosted document processing whatsoever.
 
 **Other private knowledge.** Media metadata, People and Faces are not
 retrievable knowledge. Neither is Private Vault content — vaulted documents are
@@ -812,13 +1088,20 @@ over an installation is not authority over a person's documents.
 cross-domain retrieval and no model-directed domain hopping. No LLM query
 rewriting or reranking. No server-side chat persistence.
 
-**Everything hosted.** No hosted embeddings, no external private generation, no
+**Everything hosted.** No hosted embeddings, no hosted OCR, no hosted document
+rendering, no hosted visual embeddings, no external private generation, no
 automatic model downloads, no GitHub at query time, no Git writes, no code
 execution.
 
+**Multimodal generation.** No page image reaches a generative model, and there
+is no multimodal prompt, no LocalTrusted VLM and no generic image-understanding
+API. Visual units keep enough identity for a future capability to re-render an
+authorized current page; the image is not stored and not sent today.
+
 **Retrieval sophistication.** No per-owner HNSW index and no partitioning —
 exact cosine over an owner's eligible vectors is correct, and the alternatives
-want a benchmark against a real corpus. No code-aware model for the repository
+want a benchmark against a real corpus. No promoted late-interaction model and
+no multi-vector ANN engine: the seam exists and the measurement decides. No code-aware model for the repository
 domain: the measurement above argues for one, and choosing it means measuring it.
 
 The production image does not ship the repository: repository dogfooding is a

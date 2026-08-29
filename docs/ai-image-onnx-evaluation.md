@@ -79,6 +79,22 @@ Ai__Onnx__ModelDir=/models/ai
 model dir read-only into the api+worker containers and set `Ai__Onnx__ModelDir`
 to the in-container path.
 
+### One checkpoint, two profiles
+
+This same directory serves **visual document retrieval**. Nothing extra is
+downloaded and no second copy is installed: the document profile
+`document-visual-siglip2-so400m-patch14-384-v1` points at the identical catalog
+entry through its `ConfigHash`, which is what makes "same weights, same
+preprocessing" a fact rather than two constants that happen to agree.
+
+What is separate is the IDENTITY. The document profile declares its own
+capability (`document-visual-embedding`), so its vectors live in
+`document_visual_embeddings` keyed by their own `ProfileId`, cannot be counted
+or compared as photo vectors, and a swap on either side reindexes only its own
+side. Seed it once with `documents visual-seed-profiles`; like the photo
+profile, it is never a capability default and is inert until
+`Ai__DocumentVisual__Enabled` is set.
+
 ## License notes (verify before production use)
 - **SigLIP2** (`google/siglip2-*`): Apache-2.0 (confirm on the model card at export time).
 Record the exact license/version you export; do not redistribute weights via this repo.

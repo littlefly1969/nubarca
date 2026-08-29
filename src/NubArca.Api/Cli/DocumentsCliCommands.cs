@@ -40,6 +40,7 @@ internal static class DocumentsCliCommands
             "visual-seed-profiles" => VisualSeedAsync(sp, stdout),
             "visual-index" => VisualIndexAsync(args, sp, stdout, stderr),
             "visual-status" => VisualStatusAsync(args, sp, stdout, stderr),
+            "visual-evaluate" => VisualEvaluateAsync(args, sp, stdout, stderr),
             _ => Usage(stderr),
         };
 
@@ -49,6 +50,8 @@ internal static class DocumentsCliCommands
             "usage: documents <index|status|visual-index|visual-status> --owner <user-id> "
             + "[--limit N] [--embed]");
         stderr.WriteLine("       documents visual-seed-profiles");
+        stderr.WriteLine(
+            "       documents visual-evaluate --owner <user-id> --queries <file> [--expect <file>]");
         return Task.FromResult(2);
     }
 
@@ -303,6 +306,99 @@ internal static class DocumentsCliCommands
         }
 
         return 1;
+    }
+
+
+    // ---- documents visual-evaluate -------------------------------------------
+
+    /// DOES THE VISUAL SIGNAL EARN ITS COST, on THIS installation's documents.
+    ///
+    /// The repository's golden set is synthetic, which is what makes it a
+    /// committable regression gate and also what stops it from answering "is
+    /// this worth enabling for us". This runs the same pipeline over a real
+    /// owner's real library, in both modes, and prints the difference.
+    ///
+    /// THE QUERIES COME FROM A FILE THE OPERATOR WRITES, and the expected
+    /// documents from another. Nothing about somebody's library is invented
+    /// here, and — as everywhere in this command group — the OUTPUT is counts,
+    /// ranks and the document names the operator themselves supplied. A query
+    /// the operator wrote is echoed back; nothing else is.
+    private static async Task<int> VisualEvaluateAsync(
+        string[] args, IServiceProvider sp, TextWriter stdout, TextWriter stderr)
+    {
+        if (!TryOwner(args, stderr, out var owner)) return 2;
+
+        var queriesPath = Arg(args, "--queries");
+        if (string.IsNullOrWhiteSpace(queriesPath) || !File.Exists(queriesPath))
+        {
+            stderr.WriteLine(
+                "documents visual-evaluate: --queries <file> is required. One case per line, "
+                + "as `question<TAB>expected-document[,expected-document]`; an expected list "
+                + "may be empty for a deliberately unanswerable case.");
+            return 2;
+        }
+
+        var cases = new List<DocumentVisualGoldenCase>();
+        foreach (var line in await File.ReadAllLinesAsync(queriesPath))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+
+            var parts = trimmed.Split('\t');
+            var expected = parts.Length > 1
+                ? parts[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                : Array.Empty<string>();
+            // A third column marks the case as one the visual signal is SUPPOSED
+            // to help with, so the report can separate those from the rest
+            // instead of hiding a category behind one aggregate.
+            var visual = parts.Length > 2
+                && string.Equals(parts[2].Trim(), "visual", StringComparison.OrdinalIgnoreCase);
+
+            cases.Add(new DocumentVisualGoldenCase(parts[0].Trim(), expected, visual));
+        }
+
+        if (cases.Count == 0)
+        {
+            stderr.WriteLine("documents visual-evaluate: the query file contained no cases.");
+            return 2;
+        }
+
+        var comparison = await sp.GetRequiredService<DocumentVisualEvaluator>()
+            .CompareAsync(owner, cases);
+
+        Print(stdout, "text_only", comparison.Baseline);
+        Print(stdout, "visual_expanded", comparison.Candidate);
+
+        stdout.WriteLine($"recovered={comparison.Recovered.Count}");
+        foreach (var query in comparison.Recovered) stdout.WriteLine($"  recovered_query={query}");
+        stdout.WriteLine($"regressed={comparison.Regressed.Count}");
+        foreach (var query in comparison.Regressed) stdout.WriteLine($"  regressed_query={query}");
+
+        // THE PROMOTION SIGNAL, printed rather than decided. Whether a
+        // late-interaction profile is worth enabling is an operator's call
+        // against their own corpus, licence and hardware; this command's job is
+        // to make the numbers visible, not to flip a switch.
+        var delta = comparison.Candidate.VisualNdcgAtFive - comparison.Baseline.VisualNdcgAtFive;
+        stdout.WriteLine($"visual_ndcg5_delta={delta:F4}");
+        stdout.WriteLine(
+            $"relative_visual_ndcg5_gain="
+            + $"{(comparison.Baseline.VisualNdcgAtFive > 0
+                ? delta / comparison.Baseline.VisualNdcgAtFive
+                : 0):F4}");
+
+        return 0;
+    }
+
+    private static void Print(TextWriter stdout, string label, DocumentVisualModeReport report)
+    {
+        stdout.WriteLine($"{label}_mode={report.Mode}");
+        stdout.WriteLine($"{label}_queries={report.Queries}");
+        stdout.WriteLine($"{label}_recall5={report.RecallAtFive:F4}");
+        stdout.WriteLine($"{label}_mrr={report.MeanReciprocalRank:F4}");
+        stdout.WriteLine($"{label}_top3={report.TopThreePassed}");
+        stdout.WriteLine($"{label}_visual_ndcg5={report.VisualNdcgAtFive:F4}");
+        stdout.WriteLine($"{label}_latency_p50_ms={report.MedianLatencyMs}");
+        stdout.WriteLine($"{label}_latency_p95_ms={report.P95LatencyMs}");
     }
 
     // ---- arguments ----------------------------------------------------------

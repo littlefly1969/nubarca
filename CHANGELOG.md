@@ -6,6 +6,52 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Find a document by how its pages look
+
+- **Your documents can now be found by their layout, not only by their words.**
+  A table of quarterly costs, a form with fields to sign, a slide, a spreadsheet
+  grid, a heading hierarchy: these are what a document IS, and they are exactly
+  what a text search flattens away. NubArca now renders your documents' pages,
+  looks at them locally with the same image model the photo library already
+  uses, and uses what it sees to decide **which document to read**. What it then
+  says still comes from that document's text, with the same evidence rules as
+  before — so a page that merely looks right, and says nothing useful, produces
+  no answer at all rather than a confident guess.
+- **Nothing leaves, and no page is kept.** Rendering, looking and searching all
+  happen on your own server. A page is drawn, looked at, and dropped — no copy
+  of it is stored anywhere — and no image is ever sent to a language model. The
+  model that writes the answer still receives only bounded text, exactly as it
+  did before.
+- **Word, Excel and PowerPoint are laid out in a sealed container.** Working out
+  where things sit on a page of a `.docx` means running a real office suite over
+  a file somebody uploaded, so NubArca does it somewhere that has no network
+  connection, no database password and no idea whose document it is holding. It
+  is handed bytes and told only what format they are; it can be asked nothing
+  else. Without that container deployed, PDFs and notes still get visual search
+  and Office documents keep working from their text.
+- **A citation still points where the document says, not where the renderer
+  broke the page.** A rendered page number for a Word file is an artefact of the
+  layout engine — a different version puts the table somewhere else — so answers
+  keep citing the section, sheet or slide the document itself declares. A real
+  PDF page stays a real PDF page.
+- **An incomplete reading is never published.** If page 13 of a twenty-page
+  contract cannot be drawn, none of that contract's pages become search results.
+  A document that reads as whole and is not is worse than one that is simply
+  unavailable.
+- **Off until you turn it on.** Enabling it re-draws and re-reads every document
+  in every library, which is real time and real disk, so it is a decision an
+  operator makes rather than one an upgrade makes for them.
+  `documents visual-index`, `visual-status` and `visual-evaluate` do the work
+  and report what it cost. Existing text search is completely unaffected by all
+  of this, before or after.
+- **Measured, and reported honestly.** On a mixed set of thirteen questions the
+  visual pass takes Recall@5 from 0.833 to 0.917 and MRR from 0.778 to 0.917,
+  recovering one question and regressing none. A newer class of "late
+  interaction" model was left as a documented seam with an exact scorer and an
+  evaluation command: none is enabled, because none has been measured on real
+  hardware yet, and shipping one unmeasured would be a guess wearing a version
+  number.
+
 ### Party guest messages
 
 - **Guests can now leave a short written greeting as well as photos and videos.**

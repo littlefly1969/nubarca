@@ -255,6 +255,94 @@ internal static class OfficeDocumentFixtures
         return buffer.ToArray();
     }
 
+    /// The same presentation, built so a LAYOUT ENGINE can paginate it.
+    ///
+    /// `LaunchPlan` above is written for the EXTRACTOR, which reads the slide
+    /// XML and does not care where anything sits — so it omits the slide size,
+    /// the master and the layout, which extraction never consults. LibreOffice
+    /// does: it imports that presentation happily and then fails to write a PDF,
+    /// because there is no page to draw on.
+    ///
+    /// Rather than adding the scaffolding to the extraction fixture and making
+    /// it less obviously about the text, this is a second one that says out loud
+    /// what rendering needs: a slide size, a master, and a layout the slide
+    /// belongs to.
+    internal static byte[] LaunchPlanForRendering()
+    {
+        using var buffer = new MemoryStream();
+        using (var document = PresentationDocument.Create(
+                   buffer, PresentationDocumentType.Presentation, autoSave: true))
+        {
+            var presentationPart = document.AddPresentationPart();
+            presentationPart.Presentation = new Presentation(new SlideIdList());
+
+            AddSlide(presentationPart, 256U,
+                title: "Pilota",
+                body: "Il lancio del pilota è previsto per il 14 marzo.",
+                notes: null,
+                hidden: false);
+
+            var master = presentationPart.AddNewPart<SlideMasterPart>();
+            var layout = master.AddNewPart<SlideLayoutPart>();
+            layout.SlideLayout = new SlideLayout(
+                new CommonSlideData(EmptyShapeTree()), new ColorMapOverride());
+            master.SlideMaster = new SlideMaster(
+                new CommonSlideData(EmptyShapeTree()),
+                DefaultColorMap(),
+                new SlideLayoutIdList(new SlideLayoutId
+                {
+                    Id = 2_147_483_649U,
+                    RelationshipId = master.GetIdOfPart(layout),
+                }));
+
+            // Every slide must name the layout it belongs to, or the engine has
+            // no geometry to place it in.
+            foreach (var slidePart in presentationPart.SlideParts)
+            {
+                slidePart.AddPart(layout);
+            }
+
+            presentationPart.Presentation.InsertBefore(
+                new SlideMasterIdList(new SlideMasterId
+                {
+                    Id = 2_147_483_648U,
+                    RelationshipId = presentationPart.GetIdOfPart(master),
+                }),
+                presentationPart.Presentation.SlideIdList!);
+
+            // 10 × 7.5 inches in EMU — the ordinary 4:3 slide.
+            presentationPart.Presentation.Append(
+                new SlideSize { Cx = 9_144_000, Cy = 6_858_000 },
+                new NotesSize { Cx = 6_858_000, Cy = 9_144_000 });
+        }
+
+        return buffer.ToArray();
+    }
+
+    private static P.ShapeTree EmptyShapeTree()
+        => new(
+            new P.NonVisualGroupShapeProperties(
+                new P.NonVisualDrawingProperties { Id = 1, Name = string.Empty },
+                new P.NonVisualGroupShapeDrawingProperties(),
+                new ApplicationNonVisualDrawingProperties()),
+            new GroupShapeProperties());
+
+    private static ColorMap DefaultColorMap() => new()
+    {
+        Background1 = D.ColorSchemeIndexValues.Light1,
+        Text1 = D.ColorSchemeIndexValues.Dark1,
+        Background2 = D.ColorSchemeIndexValues.Light2,
+        Text2 = D.ColorSchemeIndexValues.Dark2,
+        Hyperlink = D.ColorSchemeIndexValues.Hyperlink,
+        FollowedHyperlink = D.ColorSchemeIndexValues.FollowedHyperlink,
+        Accent1 = D.ColorSchemeIndexValues.Accent1,
+        Accent2 = D.ColorSchemeIndexValues.Accent2,
+        Accent3 = D.ColorSchemeIndexValues.Accent3,
+        Accent4 = D.ColorSchemeIndexValues.Accent4,
+        Accent5 = D.ColorSchemeIndexValues.Accent5,
+        Accent6 = D.ColorSchemeIndexValues.Accent6,
+    };
+
     private static void AddSlide(
         PresentationPart presentationPart, uint id,
         string title, string body, string? notes, bool hidden)

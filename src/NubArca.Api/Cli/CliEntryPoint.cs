@@ -4812,6 +4812,8 @@ public static class CliEntryPoint
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-seed-profiles");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-index  --owner <user-id> [--limit N]");
         stdout.WriteLine("  dotnet NubArca.Api.dll documents visual-status --owner <user-id>");
+        stdout.WriteLine(
+            "  dotnet NubArca.Api.dll documents visual-evaluate --owner <user-id> --queries <file>");
         stdout.WriteLine();
         stdout.WriteLine("rag");
         stdout.WriteLine("  Diagnostics for the local retrieval substrate. `rag query` shows what");
