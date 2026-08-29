@@ -50,23 +50,24 @@ public sealed class OwnerDocumentCorpusSource
     /// one that fits, and the difference decides between an answer and a
     /// refusal. Nothing here truncates to fit — a caller that asked for max + 1
     /// and got max + 1 back is expected to refuse.
-    /// `allowedFileItemIds` is the SERVER-ONLY narrowing described on
-    /// `RagQuery.AllowedFileItemIds`. It is applied inside the eligibility query
-    /// — one more `AND` on a join that has already established the boundary — so
-    /// a forged id for another owner's file matches nothing rather than being
-    /// looked up. An EMPTY collection means "no files qualify" and returns an
-    /// empty corpus; only null means unscoped.
+    /// THE WHOLE OF THIS OWNER'S CORPUS, ALWAYS — never a subset.
+    ///
+    /// The visual candidate expansion wants to ask about a handful of documents,
+    /// and the tempting shortcut is to build the index from just those. It is
+    /// wrong, and quietly: BM25 weights a term by how rare it is ACROSS the
+    /// corpus, so an index of three documents makes every term unremarkable, the
+    /// scores collapse toward the minimum-score floor, and the evidence gate
+    /// rejects the very chunk the visual pass went looking for. The narrowing
+    /// therefore happens at CANDIDATE SELECTION — see
+    /// `RagLexicalIndex.Search` — where it removes documents from the answer
+    /// without changing what the corpus statistics are computed over.
     public async Task<RagCorpus> LoadAsync(
-        Guid ownerUserId,
-        int? limit = null,
-        IReadOnlyCollection<Guid>? allowedFileItemIds = null,
-        CancellationToken cancellationToken = default)
+        Guid ownerUserId, int? limit = null, CancellationToken cancellationToken = default)
     {
         if (ownerUserId == Guid.Empty) return RagCorpus.Empty(RagDomainKey.UserDocuments);
         if (limit is <= 0) return RagCorpus.Empty(RagDomainKey.UserDocuments);
-        if (allowedFileItemIds is { Count: 0 }) return RagCorpus.Empty(RagDomainKey.UserDocuments);
 
-        var query = EligibleChunks(ownerUserId, allowedFileItemIds)
+        var query = EligibleChunks(ownerUserId)
             .OrderBy(r => r.Name).ThenBy(r => r.Ordinal)
             .Select(r => new Row(
                 r.ChunkId, r.Ordinal, r.Heading, r.Text, r.Name, r.DocumentTextId,
@@ -115,7 +116,11 @@ public sealed class OwnerDocumentCorpusSource
                 // caller against, so it has to come from the corpus rather than
                 // from the request, or the check compares the request to
                 // itself.
-                OwnerUserId: row.OwnerUserId));
+                OwnerUserId: row.OwnerUserId,
+                // The file this chunk belongs to, so the visual candidate
+                // expansion can narrow THIS index rather than build a second
+                // one. Internal, like the owner: it never leaves retrieval.
+                FileItemId: row.FileItemId));
         }
 
         return new RagCorpus(RagDomainKey.UserDocuments, PrivateRevision, chunks);
@@ -167,15 +172,13 @@ public sealed class OwnerDocumentCorpusSource
     /// `PrivateVaultId == null`, and nothing in this bounded context says
     /// `IgnoreQueryFilters()`. A vaulted document is invisible to this join by
     /// construction.
-    private IQueryable<EligibleRow> EligibleChunks(
-        Guid ownerUserId, IReadOnlyCollection<Guid>? allowedFileItemIds = null)
+    private IQueryable<EligibleRow> EligibleChunks(Guid ownerUserId)
         => OwnerDocumentEligibility
             .EligibleChunks(
                 _db.DocumentChunks.AsNoTracking(),
                 _db.DocumentTexts.AsNoTracking(),
                 _db.FileItems.AsNoTracking(),
-                ownerUserId,
-                allowedFileItemIds)
+                ownerUserId)
             .Select(r => new EligibleRow
             {
                 ChunkId = r.Chunk.Id,

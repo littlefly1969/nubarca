@@ -200,67 +200,48 @@ public sealed class PrivateDocumentAssistantService
             trimmed = trimmed[..bounds.EffectiveQuestionCharacters];
         }
 
-        var retrieval = await _knowledge.RetrieveAsync(
-            new RagQuery(
-                Domain.DomainKey,
-                trimmed,
+        // RETRIEVAL, BOTH SIGNALS, IN ONE PLACE.
+        //
+        // Global private text retrieval, plus a visual pass that finds which
+        // documents LOOK like the question and re-runs the same text retrieval
+        // scoped to them, fused by rank. Extracted into a pipeline so the
+        // evaluation harness and the operator CLI measure the identical thing —
+        // a benchmark that re-implements what it benchmarks measures the
+        // re-implementation.
+        //
+        // A VISUAL HIT NEVER BECOMES EVIDENCE. It produces file ids and nothing
+        // else; the text it scopes goes through the identical eligibility join
+        // and the identical evidence gate as the global pass.
+        var retrieval = await new OwnerDocumentRetrievalPipeline(_knowledge, _visual)
+            .RetrieveAsync(
                 // THE OWNER, from the authenticated caller. Everything
                 // downstream — the corpus, the vectors, the eligibility join —
                 // is scoped by this one value.
                 ownerUserId,
+                trimmed,
                 bounds.EffectiveEvidenceChunks,
-                bounds.EffectiveEvidenceCharacters),
-            cancellationToken);
+                bounds.EffectiveEvidenceCharacters,
+                cancellationToken: cancellationToken);
 
-        // ---- the visual pass -------------------------------------------------
-        //
-        // WHICH OF MY DOCUMENTS LOOKS LIKE THIS QUESTION, followed by WHAT DOES
-        // THAT DOCUMENT ACTUALLY SAY. The first is a rendered-page similarity
-        // over this owner's eligible visual index; the second is the ordinary
-        // private text retrieval, narrowed to the files the first one named.
-        //
-        // A VISUAL HIT NEVER BECOMES EVIDENCE. It produces a list of file ids
-        // and nothing else — no page, no pixels, no score that survives into a
-        // prompt — and the text pass it scopes goes through the identical
-        // eligibility join and the identical evidence gate as the global one. So
-        // the worst a visual false positive can do is cause a second text
-        // retrieval that finds nothing, which is exactly what should happen.
-        var expanded = await ExpandByVisualCandidatesAsync(
-            ownerUserId, trimmed, bounds, cancellationToken);
+        var evidence = retrieval.Evidence;
 
-        // Outcome, mode and COUNT. Never the question, never an excerpt, never a
-        // filename, and never the owner id — a log line that named the owner and
-        // the document would reconstruct the private part of the request from
-        // the logs alone.
+        // Outcome, modes and COUNTS. Never the question, never an excerpt, never
+        // a filename, and never the owner id — a log line that named the owner
+        // and the document would reconstruct the private part of the request
+        // from the logs alone.
         _log.LogInformation(
             "user-documents: retrieval outcome={Outcome} mode={Mode} evidence={Count} "
             + "visual={VisualMode} visual_evidence={VisualCount}",
-            retrieval.Outcome, retrieval.Mode, retrieval.Evidence.Count,
-            expanded.Mode, expanded.Evidence.Count);
+            retrieval.Outcome, retrieval.TextMode, evidence.Count,
+            retrieval.VisualMode, retrieval.VisualExpandedEvidence);
 
-        // FUSED BY RANK, then gated exactly as before.
-        //
-        // Both inputs are already past `HasStrongEvidence`: a pass that produced
-        // nothing strong contributes an empty list, so fusion cannot manufacture
-        // evidence out of two weak results. What it can do is let a document the
-        // global pass ranked poorly — because its words are ordinary and its
-        // LAYOUT is what made it the answer — reach the top.
-        var evidence = PrivateDocumentEvidenceFusion.Fuse(
-            retrieval.Evidence,
-            expanded.Evidence,
-            bounds.EffectiveEvidenceChunks,
-            bounds.EffectiveEvidenceCharacters);
-
-        var strong =
-            (retrieval.Outcome == RagRetrievalOutcome.Strong && retrieval.Evidence.Count > 0)
-            || expanded.Evidence.Count > 0;
-
-        if (!strong || evidence.Count == 0)
+        if (retrieval.Outcome != RagRetrievalOutcome.Strong || evidence.Count == 0)
         {
             // NO STRONG EVIDENCE, NO MODEL CALL. Asking a model to answer from
             // general knowledge is how "what does MY manual say" gets answered
             // with what boiler manuals usually say — confidently, and about
-            // somebody else's boiler.
+            // somebody else's boiler. A visual hit does not lower this bar: a
+            // right-looking page is not permission to improvise.
             return PrivateDocumentAnswer.Failed(
                 retrieval.Outcome == RagRetrievalOutcome.Unavailable
                     ? AssistantFailureReasons.PrivateKnowledgeUnavailable
@@ -274,10 +255,10 @@ public sealed class PrivateDocumentAssistantService
         // or a system domain's — fails the request here rather than reaching a
         // prompt. The owner is passed explicitly: the check is against the
         // authenticated caller, not against whatever the evidence claims.
-        // OVER THE FUSED LIST, which is what the prompt will actually carry.
-        // Checking `retrieval.Evidence` here instead would leave the
-        // visually-expanded half ungated — the one half a new code path
-        // introduced.
+        //
+        // Over the FUSED list, which is what the prompt will actually carry.
+        // Gating only the global half would leave the visually-expanded half
+        // ungated — the one half this slice introduced.
         if (AssistantRagPolicy.Refuse(
                 profile.Trust, Domain, evidence, ownerUserId) is { } refusal)
         {
@@ -313,80 +294,6 @@ public sealed class PrivateDocumentAssistantService
             .ToList();
 
         return new PrivateDocumentAnswer(true, result.Text, null, sources);
-    }
-
-    /// One visually-expanded text retrieval, or an empty result.
-    ///
-    /// The order is the cost order, and it matters: the visual model is only
-    /// asked once the cheap checks have passed, and the scoped TEXT retrieval
-    /// only runs if the visual pass actually named files. An installation with
-    /// visual retrieval switched off does none of this and pays nothing.
-    ///
-    /// EVERY FAILURE HERE IS SILENT AND HARMLESS. No visual retriever, no model,
-    /// no pgvector, a corpus past the exact-search ceiling, zero candidates:
-    /// each returns an empty expansion, and the question is answered from the
-    /// global text pass exactly as it was before this slice.
-    private async Task<VisualExpansion> ExpandByVisualCandidatesAsync(
-        Guid ownerUserId,
-        string question,
-        AssistantHelpOptions bounds,
-        CancellationToken cancellationToken)
-    {
-        if (_visual is null) return VisualExpansion.None;
-
-        var visual = await _visual.RetrieveAsync(
-            new DocumentVisualQuery(
-                ownerUserId,
-                question,
-                // Bounds, not preferences. The retriever clamps both again
-                // against its own configured ceilings.
-                MaxUnits: 60,
-                MaxFiles: 8),
-            cancellationToken);
-
-        if (!visual.IsAvailable || visual.CandidateFileIds.Count == 0)
-        {
-            return new VisualExpansion(
-                Array.Empty<RagEvidence>(), visual.Reason ?? visual.Mode);
-        }
-
-        // THE SAME RETRIEVER, THE SAME DOMAIN, THE SAME OWNER — narrowed.
-        //
-        // Not a second retrieval implementation and not a privileged read: this
-        // is the identical private text path with one extra `AND` in its
-        // eligibility query. The file ids came from this owner's own eligible
-        // visual index moments ago, so the narrowing can only ever be a subset
-        // of what the global pass was already allowed to see.
-        var scoped = await _knowledge.RetrieveAsync(
-            new RagQuery(
-                Domain.DomainKey,
-                question,
-                ownerUserId,
-                bounds.EffectiveEvidenceChunks,
-                bounds.EffectiveEvidenceCharacters)
-            {
-                AllowedFileItemIds = visual.CandidateFileIds,
-            },
-            cancellationToken);
-
-        // A VISUALLY PERFECT PAGE WITH NOTHING USEFUL WRITTEN ON IT STOPS HERE.
-        // The gate inside the retriever refused it, and there is deliberately no
-        // branch that says "but the picture matched" — a right-looking page is
-        // not permission to improvise.
-        if (scoped.Outcome != RagRetrievalOutcome.Strong || scoped.Evidence.Count == 0)
-        {
-            return new VisualExpansion(Array.Empty<RagEvidence>(), visual.Mode);
-        }
-
-        return new VisualExpansion(scoped.Evidence, visual.Mode);
-    }
-
-    /// What the visual pass contributed: bounded TEXT evidence and a mode token.
-    /// Never a page, never a unit id, never a score.
-    private sealed record VisualExpansion(IReadOnlyList<RagEvidence> Evidence, string Mode)
-    {
-        public static readonly VisualExpansion None =
-            new(Array.Empty<RagEvidence>(), DocumentVisualModes.Unavailable);
     }
 
     /// The client's replayed history, bounded twice — by turns and by total

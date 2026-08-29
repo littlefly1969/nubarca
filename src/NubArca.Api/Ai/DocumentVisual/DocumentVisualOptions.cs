@@ -126,6 +126,29 @@ public sealed class DocumentVisualOptions
     /// text retrieval that follows.
     public int VisualCandidateFiles { get; set; } = 8;
 
+    /// HOW FAR BEHIND THE BEST MATCH a unit may be and still count as a hit.
+    ///
+    /// A bare top-K over cosine is not a set of matches, it is a sorted copy of
+    /// the corpus: in a small library it returns every document the owner has,
+    /// which turns "scope the text pass to what looks relevant" into "scope it
+    /// to everything" and quietly deletes the entire point of the visual pass.
+    ///
+    /// A RELATIVE floor rather than an absolute one, and that is deliberate.
+    /// Cross-modal cosine is not calibrated across checkpoints — SigLIP2's
+    /// image/text similarities live in a narrow band that has nothing to do with
+    /// where another model's do — so "0.2 is a match" is a statement about one
+    /// set of weights, and hard-coding it would be a calibration claim this
+    /// slice has not measured. "Within this much of the best thing found" needs
+    /// no calibration and survives a model swap.
+    ///
+    /// `MinimumVisualScore` is the absolute companion, defaulting to just above
+    /// zero: a NEGATIVE cosine is not a weak match, it is the opposite of one,
+    /// and no floor should ever let one through. An operator who has measured
+    /// their own corpus can raise it.
+    public double VisualRelativeFloor { get; set; } = 0.5;
+
+    public double MinimumVisualScore { get; set; } = 1e-6;
+
     // ---- clamps -------------------------------------------------------------
 
     public int EffectiveMaxVisualUnitsPerDocument => Math.Clamp(MaxVisualUnitsPerDocument, 1, 5_000);
@@ -154,6 +177,8 @@ public sealed class DocumentVisualOptions
         => Math.Clamp(MaxVisualUnitsPerOwnerExactFallback, 1, 1_000_000);
     public int EffectiveVisualUnitCandidates => Math.Clamp(VisualUnitCandidates, 1, 500);
     public int EffectiveVisualCandidateFiles => Math.Clamp(VisualCandidateFiles, 1, 50);
+    public double EffectiveVisualRelativeFloor => Math.Clamp(VisualRelativeFloor, 0.0, 1.0);
+    public double EffectiveMinimumVisualScore => Math.Clamp(MinimumVisualScore, 1e-6, 1.0);
 }
 
 /// The visual profile identities this release knows.
