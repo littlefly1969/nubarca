@@ -43,7 +43,21 @@ public sealed record RagIndexedChunk(
     ///
     /// Internal provenance, like `Revision`: never a response field, a citation,
     /// a log line or anything a prompt sees.
-    Guid? OwnerUserId = null);
+    Guid? OwnerUserId = null,
+
+    /// WHICH FILE this chunk came from, for an owner-scoped domain. Null for
+    /// every system domain, whose chunks come from a repository or a corpus
+    /// file rather than from somebody's library.
+    ///
+    /// It exists for exactly one caller: the visual candidate expansion, which
+    /// needs to ask the SAME index for "the best chunks, but only from these
+    /// documents". Carrying it here rather than re-querying the database is what
+    /// lets that be a filter on an already-built, already-owner-eligible corpus
+    /// instead of a second read with a second copy of the boundary.
+    ///
+    /// Internal, like `OwnerUserId`: never a response field, never a citation,
+    /// never in a prompt.
+    Guid? FileItemId = null);
 
 /// A domain's complete lexical corpus at one revision.
 ///

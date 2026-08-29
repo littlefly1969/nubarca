@@ -50,12 +50,17 @@ public sealed record RagQuery(
     /// pass would have to re-rank the owner's whole corpus and hope the right
     /// file surfaced, which is the thing visual retrieval was supposed to fix.
     ///
-    /// THIS IS A NARROWING AND NEVER A WIDENING. It intersects with
-    /// `OwnerDocumentEligibility.EligibleChunks`; it does not replace any part
-    /// of it. A file id belonging to another owner, to a deleted file or to a
-    /// vaulted one contributes nothing, because the allowlist is one more `AND`
-    /// on a query that already established the boundary — not a lookup that
-    /// bypasses it.
+    /// THIS IS A NARROWING AND NEVER A WIDENING. It is applied to a corpus that
+    /// has ALREADY passed `OwnerDocumentEligibility.EligibleChunks`; it does not
+    /// replace any part of it. A file id belonging to another owner, to a
+    /// deleted file or to a vaulted one is not in that corpus at all, so it
+    /// matches nothing — the allowlist can only remove candidates, never reach
+    /// one.
+    ///
+    /// It narrows CANDIDATES, not the index. Building an index from three
+    /// documents would change what BM25's term rarity is computed over, collapse
+    /// the scores and make the evidence gate reject the very chunk the narrowing
+    /// went looking for. See `RagLexicalIndex.Search`.
     ///
     /// AND IT IS NOT REACHABLE FROM A REQUEST. There is no `fileIds` field on
     /// any DTO, no query-string parameter, and no configuration key that reaches

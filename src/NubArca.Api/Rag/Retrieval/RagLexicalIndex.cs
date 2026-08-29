@@ -78,16 +78,44 @@ public sealed class RagLexicalIndex
     /// `take` bounds the CANDIDATE set, not the evidence: fusion sees more than
     /// it returns, so a chunk that lexical ranked eighth can still become the
     /// answer when the vector path agrees with it.
-    public IReadOnlyList<RagLexicalHit> Search(RagQueryShape shape, int take)
+    ///
+    /// `allowedFileItemIds` is the SERVER-ONLY narrowing described on
+    /// `RagQuery.AllowedFileItemIds`, and it is applied HERE rather than when
+    /// the corpus was loaded. The distinction matters: BM25 weights a term by
+    /// how rare it is across the corpus, so building an index from three
+    /// documents would make every term unremarkable and collapse the scores
+    /// below the minimum-score floor — the evidence gate would then reject the
+    /// very chunk the visual pass went looking for. Filtering candidates instead
+    /// leaves the statistics as the owner's real corpus and changes only which
+    /// documents may be returned.
+    ///
+    /// It can only ever REMOVE candidates from a corpus this owner was already
+    /// entitled to, so a forged id — another owner's file, a deleted one, a
+    /// vaulted one — is not in the index at all and matches nothing. It is
+    /// applied before ranking is cut to `take`, so a narrowed question sees its
+    /// own best results and not the leftovers of somebody else's.
+    public IReadOnlyList<RagLexicalHit> Search(
+        RagQueryShape shape, int take, IReadOnlyCollection<Guid>? allowedFileItemIds = null)
     {
         if (_documents.Count == 0 || take <= 0 || shape.Literal.Count == 0)
         {
             return Array.Empty<RagLexicalHit>();
         }
 
+        // An EMPTY allowlist means "no documents qualify" and is honoured
+        // literally. Treating it as null would silently widen a visual pass that
+        // found nothing back to the whole library.
+        if (allowedFileItemIds is { Count: 0 }) return Array.Empty<RagLexicalHit>();
+
         var scored = new List<(Indexed Doc, double Score, int Any, int Literal, bool High)>();
         foreach (var doc in _documents)
         {
+            if (allowedFileItemIds is not null
+                && (doc.Chunk.FileItemId is not { } fileId || !allowedFileItemIds.Contains(fileId)))
+            {
+                continue;
+            }
+
             var assessment = Score(doc, shape);
             if (assessment.Score <= 0) continue;
             scored.Add((doc, assessment.Score, assessment.MatchedAny,

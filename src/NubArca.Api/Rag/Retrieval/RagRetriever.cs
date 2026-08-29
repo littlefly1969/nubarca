@@ -105,8 +105,7 @@ public sealed class RagRetriever : IRagRetriever
         // being built, which is upstream of the query embedding and far upstream
         // of generation — so an over-limit private library costs zero provider
         // calls, not one embedding call and then a refusal.
-        var built = await BuildIndexAsync(
-            domain, query.OwnerUserId, query.AllowedFileItemIds, cancellationToken);
+        var built = await BuildIndexAsync(domain, query.OwnerUserId, cancellationToken);
         var index = built.Index;
         if (index is null || index.IsEmpty)
         {
@@ -132,7 +131,8 @@ public sealed class RagRetriever : IRagRetriever
 
         var ranking = RagRankingProfiles.For(query.Domain);
         var shape = RagQueryShape.For(text, ranking.ExpandAliases);
-        var lexical = index.Search(shape, options.EffectiveLexicalCandidates);
+        var lexical = index.Search(
+            shape, options.EffectiveLexicalCandidates, query.AllowedFileItemIds);
 
         // PER DOMAIN. The repository stays lexical while Help is hybrid, because
         // that is what the two of them measured — and skipping the vector path
@@ -203,7 +203,7 @@ public sealed class RagRetriever : IRagRetriever
                 RagFailureReasons.OwnerRequired);
         }
 
-        var built = await BuildIndexAsync(definition, ownerUserId, null, cancellationToken);
+        var built = await BuildIndexAsync(definition, ownerUserId, cancellationToken);
         var index = built.Index;
         var revision = index?.Corpus.Revision;
         var mixed = index?.Corpus.IsMixedRevision == true;
@@ -272,10 +272,7 @@ public sealed class RagRetriever : IRagRetriever
     }
 
     private async Task<IndexOutcome> BuildIndexAsync(
-        RagDomainDefinition domain,
-        Guid? ownerUserId,
-        IReadOnlyCollection<Guid>? allowedFileItemIds,
-        CancellationToken cancellationToken)
+        RagDomainDefinition domain, Guid? ownerUserId, CancellationToken cancellationToken)
     {
         var key = domain.DomainKey;
 
@@ -315,8 +312,7 @@ public sealed class RagRetriever : IRagRetriever
             // A refusal is legible; a quiet truncation is a wrong answer with a
             // confident tone.
             var ceiling = _options.Value.EffectiveMaxIndexedChunks;
-            var corpus = await documents.LoadAsync(
-                owner, ceiling + 1, allowedFileItemIds, cancellationToken);
+            var corpus = await documents.LoadAsync(owner, ceiling + 1, cancellationToken);
             if (corpus.Chunks.Count > ceiling)
             {
                 // Count only — never the owner, never a name, never a title.

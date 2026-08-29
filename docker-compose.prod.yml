@@ -267,6 +267,21 @@ services:
       Ai__ImageEmbeddingsEnabled: ${Ai__ImageEmbeddingsEnabled:-false}
       Ai__DocumentExtractionEnabled: ${Ai__DocumentExtractionEnabled:-false}
       Ai__DocumentEmbeddingsEnabled: ${Ai__DocumentEmbeddingsEnabled:-false}
+      # VISUAL document retrieval: find a document by how its pages LOOK, then
+      # answer from its text as before. Off by default — enabling it re-renders
+      # and re-embeds every document in every library, which is real CPU and
+      # real storage, so it is the operator's decision.
+      #
+      # `RenderOfficeEnabled` additionally needs the isolated renderer worker
+      # (docker-compose.document-renderer.yml). Without it, PDFs and text/
+      # Markdown still get visual search and Office documents stay text-only.
+      Ai__DocumentVisual__Enabled: ${Ai__DocumentVisual__Enabled:-false}
+      Ai__DocumentVisual__RenderOfficeEnabled: ${Ai__DocumentVisual__RenderOfficeEnabled:-false}
+      Ai__DocumentVisual__OfficeRendererSocketPath: ${Ai__DocumentVisual__OfficeRendererSocketPath:-}
+      # Late interaction is enabled only if a candidate model cleared the
+      # measured quality/resource/licence gate. No model ships promoted.
+      Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
+      Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}
@@ -523,6 +538,21 @@ services:
       Ai__ImageEmbeddingsEnabled: ${Ai__ImageEmbeddingsEnabled:-false}
       Ai__DocumentExtractionEnabled: ${Ai__DocumentExtractionEnabled:-false}
       Ai__DocumentEmbeddingsEnabled: ${Ai__DocumentEmbeddingsEnabled:-false}
+      # VISUAL document retrieval: find a document by how its pages LOOK, then
+      # answer from its text as before. Off by default — enabling it re-renders
+      # and re-embeds every document in every library, which is real CPU and
+      # real storage, so it is the operator's decision.
+      #
+      # `RenderOfficeEnabled` additionally needs the isolated renderer worker
+      # (docker-compose.document-renderer.yml). Without it, PDFs and text/
+      # Markdown still get visual search and Office documents stay text-only.
+      Ai__DocumentVisual__Enabled: ${Ai__DocumentVisual__Enabled:-false}
+      Ai__DocumentVisual__RenderOfficeEnabled: ${Ai__DocumentVisual__RenderOfficeEnabled:-false}
+      Ai__DocumentVisual__OfficeRendererSocketPath: ${Ai__DocumentVisual__OfficeRendererSocketPath:-}
+      # Late interaction is enabled only if a candidate model cleared the
+      # measured quality/resource/licence gate. No model ships promoted.
+      Ai__DocumentVisual__LateInteractionEnabled: ${Ai__DocumentVisual__LateInteractionEnabled:-false}
+      Ai__DocumentVisual__LateProfileKey: ${Ai__DocumentVisual__LateProfileKey:-}
       Ai__FaceDetectionEnabled: ${Ai__FaceDetectionEnabled:-false}
       Ai__FaceEmbeddingsEnabled: ${Ai__FaceEmbeddingsEnabled:-false}
       Ai__FaceClusteringEnabled: ${Ai__FaceClusteringEnabled:-false}

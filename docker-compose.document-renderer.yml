@@ -1,0 +1,105 @@
+# Optional isolated Office document render worker for visual document retrieval.
+#
+# Compose it ALONGSIDE the prod files (never alone):
+#
+#   docker compose -f docker-compose.prod.yml \
+#                  -f docker-compose.prod.local.yml \
+#                  -f docker-compose.document-renderer.yml \
+#                  --env-file .env up -d document-renderer
+#
+# Then set on api + worker (in .env, NOT sourced — see CLAUDE.md):
+#   Ai__DocumentVisual__Enabled=true
+#   Ai__DocumentVisual__RenderOfficeEnabled=true
+#   Ai__DocumentVisual__OfficeRendererSocketPath=/run/nubarca-render/render.sock
+#
+# WITHOUT this service, visual document retrieval still works for PDFs and for
+# text/Markdown. Office documents are skipped with `visual-format-unsupported`
+# and stay fully answerable from their extracted text; nothing is marked
+# permanently unrenderable, so deploying the worker later simply starts
+# rendering them.
+#
+# WHY IT IS A CONTAINER OF ITS OWN. Laying out a DOCX, XLSX or PPTX means running
+# a real office suite over a file somebody uploaded. LibreOffice is a very large
+# body of native code whose input is, from NubArca's point of view, entirely
+# hostile: dozens of legacy parsers, document-declared relationships, a macro
+# engine. The api container holds database credentials, storage credentials, the
+# Assistant's configuration and every owner's identity. Those two must not share
+# an address space, a filesystem or a network namespace.
+#
+# The API sends BYTES and a FORMAT ORDINAL over a Unix socket and gets a PDF
+# back. There is no operation in that protocol for a path, a filename, a command,
+# an import filter, a binary or a URL.
+services:
+  document-renderer:
+    build:
+      context: ./scripts/document-render-worker
+      dockerfile: Dockerfile
+    image: nubarca-document-renderer:local
+    container_name: nubarca-document-renderer
+    restart: unless-stopped
+
+    # NO NETWORK AT ALL. This is the egress guarantee, and the LibreOffice
+    # settings in server.py are defence in depth rather than the boundary: a
+    # document that asks to fetch an external relationship has no route to try.
+    #
+    # It also means the worker cannot reach PostgreSQL, the API, the object
+    # store or anything else on the internal bridge, even if it wanted to.
+    network_mode: none
+
+    # NO ENVIRONMENT FROM `.env`. Not `env_file`, not a `${...}` interpolation of
+    # a credential, not the connection string. The only variables it gets are the
+    # four bounds below, and none of them is a secret.
+    environment:
+      NUBARCA_RENDER_SOCKET: /run/nubarca-render/render.sock
+      NUBARCA_RENDER_WORK_DIR: /var/tmp/nubarca-render
+      NUBARCA_RENDER_MAX_CONCURRENCY: "1"
+      NUBARCA_RENDER_MAX_TIMEOUT_SECONDS: "900"
+
+    volumes:
+      # The socket, shared with api and worker and nothing else.
+      - document-renderer-socket:/run/nubarca-render
+      # A PRIVATE work volume. Job directories live here and are removed
+      # recursively when a job ends and again when the worker starts, so no
+      # temporary copy of a private document outlives one restart.
+      - document-renderer-work:/var/tmp/nubarca-render
+
+    # Runtime hardening. The network sandbox above is the boundary; these are
+    # the layers behind it.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # NO Docker socket, and nothing that could reach one.
+
+    # Bounded, so one hostile document cannot starve PostgreSQL or model
+    # inference on the shared host. LibreOffice is memory-hungry; measure on the
+    # target host before lowering.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2g
+
+  # The two application services join the socket volume READ-WRITE — a Unix
+  # socket needs write access to connect — and gain nothing else. Neither of
+  # them can see the worker's job directory.
+  api:
+    volumes:
+      - document-renderer-socket:/run/nubarca-render
+    depends_on:
+      document-renderer:
+        condition: service_started
+
+  worker:
+    volumes:
+      - document-renderer-socket:/run/nubarca-render
+    depends_on:
+      document-renderer:
+        condition: service_started
+
+volumes:
+  document-renderer-socket:
+  document-renderer-work:

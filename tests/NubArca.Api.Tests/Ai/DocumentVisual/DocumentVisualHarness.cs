@@ -85,12 +85,16 @@ internal sealed class DocumentVisualHarness : IDisposable
 
     // ---- seeding -------------------------------------------------------------
 
+    /// A document-visual profile. Several may be seeded, sharing the ONE SigLIP2
+    /// model row — which is the production shape: the checkpoint is a shared
+    /// asset and the profile is the identity.
     public AiProfile SeedProfile(string key = DocumentVisualProfiles.DenseSiglip2So400m)
     {
-        var model = new AiModel
+        const string modelKey = "siglip2-so400m-patch14-384";
+        var model = Db.AiModels.FirstOrDefault(m => m.Key == modelKey) ?? new AiModel
         {
             Id = Guid.NewGuid(),
-            Key = "siglip2-so400m-patch14-384",
+            Key = modelKey,
             Provider = AiProviders.Onnx,
             Capability = AiCapabilities.ImageEmbedding,
             Modality = AiModalities.Multimodal,
@@ -111,7 +115,7 @@ internal sealed class DocumentVisualHarness : IDisposable
             Enabled = true,
             CreatedAt = DateTime.UtcNow,
         };
-        Db.AiModels.Add(model);
+        if (Db.Entry(model).State == EntityState.Detached) Db.AiModels.Add(model);
         Db.AiProfiles.Add(profile);
         Db.SaveChanges();
         Profile = profile;

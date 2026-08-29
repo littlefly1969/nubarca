@@ -212,7 +212,22 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
             mode = DocumentVisualModes.LateInteraction;
         }
 
+        // A SORTED CORPUS IS NOT A SET OF MATCHES.
+        //
+        // Top-K over cosine returns K rows whatever the library contains, so in
+        // a small one every document comes back — and "scope the text pass to
+        // what looks relevant" becomes "scope it to everything", which is the
+        // same as not having a visual pass at all. The floor is relative to the
+        // best thing found, because cross-modal cosine is not calibrated across
+        // checkpoints and an absolute threshold would be a claim about one set
+        // of weights. A negative cosine never survives either floor: it is not a
+        // weak match, it is the opposite of one.
+        var best = scored.Count == 0 ? 0 : scored.Max(s => s.Score);
+        var floor = Math.Max(
+            options.EffectiveMinimumVisualScore, best * options.EffectiveVisualRelativeFloor);
+
         var hits = scored
+            .Where(s => s.Score >= floor)
             .Select((s, i) => new DocumentVisualHit(s.FileItemId, s.VisualUnitId, i + 1, s.Score, mode))
             .ToList();
 
