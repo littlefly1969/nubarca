@@ -78,6 +78,13 @@ originating repository and is deliberately not reproduced here.
 
 ### Mobile Android
 
+- **The media viewer now preserves the selected item through rotation and waits
+  for real native video readiness.** Full-screen photos and fallback posters use
+  contain without changing thumbnail crop behavior; a width change re-anchors
+  the mounted pager to its current logical index without becoming a fake swipe.
+  Video status starts from `player.status`, follows replacement-player events,
+  and mounts the native surface only at `readyToPlay`, leaving probe,
+  preparation, loading, unavailable and error states explicit.
 - **The full-screen media viewer now owns a real pager viewport.** The pager
   fills the available height and gives every photo/video cell exactly one device
   width. Back navigation leaves first and clears the viewer sequence on route

@@ -7,7 +7,14 @@
 // guards — see media/imageLoader.ts.
 
 import React, { useEffect, useState } from 'react';
-import { Image, StyleSheet, Text, View, type DimensionValue } from 'react-native';
+import {
+  Image,
+  StyleSheet,
+  Text,
+  View,
+  type DimensionValue,
+  type ImageResizeMode,
+} from 'react-native';
 import { loadImage } from '../media/imageLoader';
 import { colors } from '../ui/tokens';
 
@@ -15,10 +22,12 @@ export function AuthedImage({
   path,
   style,
   accessibilityLabel,
+  resizeMode,
 }: {
   path: string;
   style: { width?: DimensionValue; height?: DimensionValue; [k: string]: unknown };
   accessibilityLabel?: string;
+  resizeMode?: ImageResizeMode;
 }): React.JSX.Element {
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -51,6 +60,7 @@ export function AuthedImage({
     <Image
       source={{ uri }}
       style={style as never}
+      resizeMode={resizeMode}
       accessibilityLabel={accessibilityLabel}
       accessibilityIgnoresInvertColors
     />

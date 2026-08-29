@@ -922,9 +922,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `/media/[id]` gives its horizontal list the available height and gives every
   photo/video cell exactly the same device width used by `getItemLayout`, scroll
   offsets and visible-index calculation; the slides fill that viewport and own
-  no screen dimensions. Chrome Back and hardware Back share one navigation-only
-  path, while viewer-sequence cleanup runs on route unmount, so a mounted route
-  never observes its own sequence being erased. Render-time index clamping is
+  no screen dimensions. Viewer photos and video fallback posters request
+  `contain` explicitly, without changing tile crop behavior. A real width change
+  re-anchors the mounted list to the current safe index without animation or
+  remounting, and its programmatic completion cannot become a fake swipe; normal
+  index changes do not force a re-anchor. Video readiness is seeded from the
+  current native player snapshot before status events maintain it, and
+  `VideoView` exists only at `readyToPlay` — probe, preparation, native loading,
+  unavailable and error states each render an explicit non-video surface.
+  Chrome Back and hardware Back share one navigation-only path, while
+  viewer-sequence cleanup runs on route unmount, so a mounted route never
+  observes its own sequence being erased. Render-time index clamping is
   defence-in-depth for stale positions. This does not weaken account isolation:
   identity changes still remount the keyed `ViewerProvider` immediately.
 - **The mobile Android test binary and Play binary are ONE release variant.**

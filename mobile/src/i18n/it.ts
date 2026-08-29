@@ -57,6 +57,7 @@ const it = {
   'player.playbackError': 'Riproduzione impossibile.',
   'player.loading': 'Preparazione del video…',
   'player.preparing': 'Il video si sta preparando. Riproviamo fra poco…',
+  'player.unavailable': 'Video non disponibile per la riproduzione.',
   'player.back': 'Chiudi il video',
 
   // Albums

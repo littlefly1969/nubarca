@@ -29,8 +29,13 @@ import {
   type VideoProbeFetch,
 } from '../media/videoProbe';
 import type { ViewerSlide } from '../media/viewerSequence';
-
-type ProbeState = 'probing' | 'ready' | 'preparing' | 'unavailable';
+import {
+  playerStatusFor,
+  shouldPlayVideo,
+  snapshotPlayerStatus,
+  videoPresentation,
+  type VideoProbeState,
+} from './videoPlayback';
 
 export function VideoSlide({
   slide,
@@ -40,8 +45,6 @@ export function VideoSlide({
   active: boolean;
 }): React.JSX.Element {
   const { t } = useI18n();
-  const [error, setError] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
   const activeRef = useRef(active);
   activeRef.current = active;
 
@@ -55,7 +58,7 @@ export function VideoSlide({
   // (202 preparing / 404 unavailable / 206+video progressive / 200 HLS MIME
   // → hls). The outcome resolves BOTH availability and container; the
   // expo-video player mounts only on a confirmed ready.
-  const [probeState, setProbeState] = useState<ProbeState>(
+  const [probeState, setProbeState] = useState<VideoProbeState>(
     slide.videoSource ? 'probing' : 'unavailable',
   );
 
@@ -90,7 +93,7 @@ export function VideoSlide({
       // the cancelled-probe settlement itself — must never touch state.
       // Cancellation is never surfaced as unavailable/error here.
       if (cancelled) return;
-      setProbeState(outcome.phase as ProbeState);
+      setProbeState(outcome.phase as VideoProbeState);
       setResolvedContainer(outcome.container ?? null);
     });
     return () => {
@@ -117,18 +120,17 @@ export function VideoSlide({
     // an unfocused neighbor must never start making noise.
     p.loop = false;
   });
+  const [playerStatus, setPlayerStatus] = useState(() => snapshotPlayerStatus(player));
+  const nativeStatus = playerStatusFor(playerStatus, player);
 
   useEffect(() => {
     const statusSub = player.addListener('statusChange', (status) => {
-      if (status.status === 'readyToPlay') setReady(true);
-      if (status.status === 'error') {
-        setError(
-          status.error instanceof Error
-            ? status.error.message
-            : t('player.playbackError'),
-        );
-      }
+      setPlayerStatus(snapshotPlayerStatus(player, status.status));
     });
+    // Subscribe first, then take an authoritative NOW snapshot. This closes the
+    // race where readyToPlay was reached before the listener existed, and also
+    // resets status ownership when useVideoPlayer creates a new instance.
+    setPlayerStatus(snapshotPlayerStatus(player));
 
     const playingSub = player.addListener('playingChange', ({ isPlaying }) => {
       // Keep-awake belongs to the ACTIVE playing video only.
@@ -163,44 +165,56 @@ export function VideoSlide({
       }
       return;
     }
-    if (expoSource !== null && ready && error === null) {
+    if (shouldPlayVideo(active, expoSource !== null, nativeStatus)) {
       void player.play();
     }
-  }, [active, expoSource, ready, error, player]);
+  }, [active, expoSource, nativeStatus, player]);
 
-  const probing = probeState === 'probing';
-  const preparing = probeState === 'preparing';
+  const presentation = videoPresentation(
+    source !== null,
+    probeState,
+    expoSource !== null,
+    nativeStatus,
+  );
 
-  if (source === null || probeState === 'unavailable') {
+  if (presentation === 'unavailable') {
     // HLS off / item gone / no playable source: poster + explicit message.
     return (
       <View style={styles.centerDark}>
         {slide.posterUrl ? (
-          <AuthedImage path={slide.posterUrl} style={styles.poster} accessibilityLabel="" />
+          <AuthedImage
+            path={slide.posterUrl}
+            style={styles.poster}
+            accessibilityLabel=""
+            resizeMode="contain"
+          />
         ) : null}
-        <Text style={styles.errorText}>{t('grid.videoNoPoster')}</Text>
+        <Text style={styles.errorText}>{t('player.unavailable')}</Text>
       </View>
     );
   }
 
-  if (error !== null) {
+  if (presentation === 'error') {
     return (
       <View style={styles.centerDark}>
-        <ErrorState title={t('player.playbackError')} message={error} />
+        <ErrorState title={t('player.playbackError')} />
+      </View>
+    );
+  }
+
+  if (presentation !== 'ready') {
+    return (
+      <View style={styles.centerDark}>
+        <LoadingState />
+        <Text style={styles.loadingText}>
+          {presentation === 'preparing' ? t('player.preparing') : t('player.loading')}
+        </Text>
       </View>
     );
   }
 
   return (
     <View style={[styles.full, styles.dark]}>
-      {(!expoSource || probing || preparing) && (
-        <View style={styles.loadingOverlay}>
-          <LoadingState />
-          <Text style={styles.loadingText}>
-            {preparing ? t('player.preparing') : t('player.loading')}
-          </Text>
-        </View>
-      )}
       <VideoView
         player={player}
         contentFit="contain"
@@ -220,12 +234,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#0A0F1A',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0A0F1A',
   },
   loadingText: { color: '#F5F7FB', marginTop: 12, fontSize: 14 },
   poster: { width: '86%', height: '52%', borderRadius: 12, marginBottom: 16 },
