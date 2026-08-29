@@ -88,7 +88,8 @@ originating repository and is deliberately not reproduced here.
   Only the focused video probes the server, it refreshes the manual session
   cookie when focus returns, and exhausted preparation, rate limiting, server
   faults or transport timeouts surface as retryable playback failures instead
-  of the permanent “video unavailable” verdict.
+  of the permanent “video unavailable” verdict. Mobile advances to `0.2.6`
+  (`versionCode` 7) for sustained physical viewer acceptance.
 - **The media viewer now preserves the selected item through rotation and waits
   for real native video readiness.** Full-screen photos and fallback posters use
   contain without changing thumbnail crop behavior; a width change re-anchors
