@@ -47,6 +47,7 @@ public sealed class PartyLinkService : IPartyLinkService
         Guid ownerUserId, Guid albumId, Guid createdByUserId,
         bool? uploadEnabled = null,
         bool? requireApproval = null,
+        bool? requireMessageApproval = null,
         CancellationToken cancellationToken = default)
     {
         var album = await _db.Albums
@@ -87,6 +88,10 @@ public sealed class PartyLinkService : IPartyLinkService
             {
                 link.RequireUploadApproval = requireApproval.Value;
             }
+            if (requireMessageApproval.HasValue)
+            {
+                link.RequireMessageApproval = requireMessageApproval.Value;
+            }
             // Heal an older link that predates the upload token (defensive).
             link.UploadTokenHash ??= HashToken(DeriveUploadToken(link.Id));
             link.UpdatedAt = now;
@@ -101,6 +106,7 @@ public sealed class PartyLinkService : IPartyLinkService
                 Enabled = true,
                 UploadEnabled = uploadEnabled ?? true,
                 RequireUploadApproval = requireApproval ?? false,
+                RequireMessageApproval = requireMessageApproval ?? false,
                 CreatedAt = now,
                 UpdatedAt = now,
                 RevokedAt = null,
@@ -164,6 +170,7 @@ public sealed class PartyLinkService : IPartyLinkService
             .Select(p => new
             {
                 p.Id, p.UploadEnabled, p.UploadTokenHash, p.RequireUploadApproval,
+                p.RequireMessageApproval,
                 p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
             })
@@ -182,7 +189,10 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.PhotoSlideSeconds ?? PartySlideshowDefaults.PhotoSeconds,
             active?.MaxVideoSlideSeconds ?? PartySlideshowDefaults.MaxVideoSeconds,
             active?.MaxPhotoUploadsPerParticipant ?? 0,
-            active?.MaxVideoUploadsPerParticipant ?? 0);
+            active?.MaxVideoUploadsPerParticipant ?? 0,
+            // Same rule as the upload approval flag: an inert link cannot be
+            // holding a party to an approval mode.
+            partyMode && active!.RequireMessageApproval);
     }
 
     public async Task<bool> UpdateSlideshowSettingsAsync(
@@ -321,6 +331,7 @@ public sealed class PartyLinkService : IPartyLinkService
             {
                 p.Id, p.OwnerUserId, p.AlbumId, p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+                p.RequireMessageApproval,
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
@@ -335,7 +346,8 @@ public sealed class PartyLinkService : IPartyLinkService
         return albumOk
             ? new PartyAccess(
                 link.OwnerUserId, link.AlbumId, link.Id, link.RequireUploadApproval,
-                link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant)
+                link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
+                link.RequireMessageApproval)
             : null;
     }
 

@@ -243,6 +243,61 @@ const it = {
   'partyUploads.confirmEnableApproval':
     'Richiedere l’approvazione per i futuri caricamenti party?\n\nSe attiva, i nuovi caricamenti degli ospiti attenderanno la tua approvazione prima di comparire sulla TV o sulla pagina party pubblica.',
 
+  // --- Public party guest MESSAGES ---
+  'partyMessage.tabMedia': 'Foto o video',
+  'partyMessage.tabMessage': 'Messaggio',
+  'partyMessage.title': 'Lascia un messaggio',
+  'partyMessage.intro':
+    'Due righe che compariranno sulla TV della festa. Solo testo: niente link, formattazione o allegati.',
+  'partyMessage.nameLabel': 'Il tuo nome (facoltativo)',
+  'partyMessage.namePlaceholder': 'Giulia',
+  'partyMessage.textLabel': 'Il tuo messaggio',
+  'partyMessage.textPlaceholder': 'Serata fantastica! Auguri ragazzi',
+  'partyMessage.remaining': '{count} caratteri rimasti',
+  'partyMessage.overLimit': 'Hai superato il limite di {max} caratteri.',
+  'partyMessage.nameOverLimit': 'Il nome può avere al massimo {max} caratteri.',
+  'partyMessage.send': 'Invia messaggio',
+  'partyMessage.sending': 'Invio…',
+  'partyMessage.sentVisible': 'Messaggio inviato. Comparirà a breve sulla TV.',
+  'partyMessage.sentPending': 'Messaggio inviato. In attesa di approvazione.',
+  'partyMessage.sendAnother': 'Scrivi un altro messaggio',
+  'partyMessage.failed': 'Impossibile inviare il messaggio. Riprova.',
+  'partyMessage.rejected': 'Messaggio non valido: controlla lunghezza e contenuto.',
+  'partyMessage.tooMany': 'Troppi messaggi in poco tempo. Aspetta un momento e riprova.',
+
+  // --- Owner/delegate party message moderation ---
+  'partyMessages.title': 'Messaggi',
+  'partyMessages.intro':
+    'Messaggi lasciati dagli ospiti. Quelli live scorrono nella fascia in basso sulla TV; un messaggio promosso a Hero compare ogni tanto a tutto schermo.',
+  'partyMessages.requireApproval': 'I messaggi degli ospiti richiedono approvazione',
+  'partyMessages.requireApprovalHelp':
+    'Se attiva, i nuovi messaggi attenderanno l’approvazione prima di comparire sulla TV. Disattivarla non pubblica i messaggi già in attesa.',
+  'partyMessages.noParty': 'La modalità party non è attiva su questo album.',
+  'partyMessages.empty': 'Ancora nessun messaggio.',
+  'partyMessages.emptyFiltered': 'Nessun messaggio in questo stato.',
+  'partyMessages.filterAll': 'Tutti',
+  'partyMessages.filterPending': 'In attesa',
+  'partyMessages.filterVisible': 'Live',
+  'partyMessages.filterHidden': 'Nascosti',
+  'partyMessages.filterHero': 'Hero',
+  'partyMessages.anonymous': 'Ospite',
+  'partyMessages.heroBadge': 'Hero',
+  'partyMessages.statusPending': 'In attesa',
+  'partyMessages.statusVisible': 'Live',
+  'partyMessages.statusHidden': 'Nascosto',
+  'partyMessages.statusRejected': 'Rifiutato',
+  'partyMessages.approve': 'Approva',
+  'partyMessages.reject': 'Rifiuta',
+  'partyMessages.hide': 'Nascondi',
+  'partyMessages.restore': 'Ripristina',
+  'partyMessages.promoteHero': 'Promuovi Hero',
+  'partyMessages.demoteHero': 'Rimuovi Hero',
+  'partyMessages.loadError': 'Impossibile caricare i messaggi.',
+  'partyMessages.updateError': 'Impossibile aggiornare il messaggio.',
+  'partyMessages.approvalError': 'Impossibile aggiornare la modalità di approvazione.',
+  'partyMessages.delegateNotice':
+    'Puoi moderare i messaggi di questo album. Le altre impostazioni party restano al proprietario.',
+
   // --- TV pairing / browser fallback (/tv) ---
   'tv.title': 'NubArca TV',
   'tv.preparing': 'Preparazione dell’abbinamento sicuro…',
@@ -1047,6 +1102,10 @@ const it = {
   'albumShare.inviteError': 'Impossibile inviare l’invito. Riprova.',
   'albumShare.loadError': 'Impossibile caricare le persone con cui hai condiviso.',
   'albumShare.allowDownload': 'Consenti il download degli originali',
+  'albumShare.canManagePartyMessages': 'Può gestire i messaggi Party',
+  'albumShare.canManagePartyMessagesAria': 'Consenti a {name} di gestire i messaggi Party',
+  'albumShare.canManagePartyMessagesHelp':
+    'Delega limitata: potrà approvare, nascondere, ripristinare e promuovere a Hero i messaggi degli ospiti. Non ottiene le altre impostazioni party, i token, la moderazione di foto e video o la gestione dei membri.',
   'albumShare.allowDownloadHelp':
     'Senza questa opzione la persona può guardare le foto e i video, ma non scaricare i file originali. Puoi cambiarla in qualsiasi momento.',
   'albumShare.membersLegend': 'Persone con accesso',

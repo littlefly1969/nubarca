@@ -39,6 +39,7 @@ import { TvPairApprovalPage } from './pages/TvPairApprovalPage';
 import { PartyPage } from './pages/PartyPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
+import { PartyMessagesPage } from './pages/PartyMessagesPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 
 export function App() {
@@ -82,6 +83,7 @@ export function App() {
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
             <Route path="/albums/:albumId/party-uploads" element={<PartyUploadsPage />} />
+            <Route path="/albums/:albumId/party-messages" element={<PartyMessagesPage />} />
             {/* "Shared with me" is no longer a destination: /albums holds both
                 collections. The old list route keeps working as a redirect, and
                 the per-album route stays exactly where it is — it is the

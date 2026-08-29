@@ -11,6 +11,7 @@ import {
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
+import { PartyGuestMessageForm } from '../components/PartyGuestMessageForm';
 
 // PUBLIC, unauthenticated party UPLOAD landing. Reached by scanning the "Upload
 // photos" QR on a paired TV. The :token here is the SEPARATE upload token. It
@@ -133,6 +134,10 @@ export function PartyUploadPage() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [session, setSession] = useState<PartyUploadSession | null>(null);
+  // Which of the two contributions the guest is making. Media is the default:
+  // a party is still mostly photographs, and the written channel is an addition
+  // to that rather than a competitor for the same screen.
+  const [contribution, setContribution] = useState<'media' | 'message'>('media');
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadWakeLock = useUploadWakeLock();
 
@@ -335,6 +340,37 @@ export function PartyUploadPage() {
           </h1>
           <LanguageSwitcher className="language-switcher language-switcher-public" />
         </div>
+        <div className="party-contribution-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contribution === 'media'}
+            className={contribution === 'media' ? 'active' : undefined}
+            onClick={() => setContribution('media')}
+            disabled={busy}
+          >
+            {t('partyMessage.tabMedia')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contribution === 'message'}
+            className={contribution === 'message' ? 'active' : undefined}
+            onClick={() => setContribution('message')}
+            // Switching away mid-upload would leave the queue running behind a
+            // hidden progress bar, so the choice is locked while media is
+            // in flight.
+            disabled={busy}
+          >
+            {t('partyMessage.tabMessage')}
+          </button>
+        </div>
+
+        {contribution === 'message' && token && (
+          <PartyGuestMessageForm uploadToken={token} />
+        )}
+
+        {contribution === 'media' && (<>
         <p className="muted">{t('partyUpload.intro')}</p>
 
         {session && (
@@ -428,6 +464,7 @@ export function PartyUploadPage() {
           )}
           {uploadError && <p role="alert" className="inline-error">{uploadError}</p>}
         </div>
+        </>)}
       </div>
     </main>
   );

@@ -135,7 +135,8 @@ public static class AlbumSharingEndpoints
             }
 
             var (result, member) = await sharing.UpdateMemberAsync(
-                ownerUserId, id, membershipId, body.AllowOriginalDownload, cancellationToken);
+                ownerUserId, id, membershipId, body.AllowOriginalDownload,
+                body.CanManagePartyMessages, cancellationToken);
             if (result != AlbumMemberMutationResult.Ok)
             {
                 return Results.NotFound();
@@ -143,7 +144,12 @@ public static class AlbumSharingEndpoints
 
             await audit.LogAsync(ownerUserId, AuditActions.AlbumShareUpdate,
                 AuditEntityTypes.Album, id, ip,
-                new { membershipId, allowOriginalDownload = body.AllowOriginalDownload }, cancellationToken);
+                new
+                {
+                    membershipId,
+                    allowOriginalDownload = body.AllowOriginalDownload,
+                    canManagePartyMessages = body.CanManagePartyMessages,
+                }, cancellationToken);
             return Results.Ok(member);
         }).WithName("UpdateAlbumMember").RequireAuthorization();
 

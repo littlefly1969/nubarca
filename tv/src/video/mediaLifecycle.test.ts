@@ -359,8 +359,20 @@ test('only the CONTROLLED slideshow reconciles its intent', () => {
 test('natural end and cap keep their own paths — they are not external pauses', () => {
   // A video ending must ADVANCE an active slideshow, not switch the slideshow
   // off. Routing it through the external-pause callback would do exactly that.
-  assert.match(partyViewer, /onEnded=\{goNext\}/);
-  assert.match(partyViewer, /onCapReached=\{goNext\}/);
+  //
+  // Both now go through handleMediaBoundary, which is the ONE place that
+  // decides whether an automatic transition advances or first shows a party
+  // Hero card (see lib/partyMessages). It is still an advance path: what it
+  // must never do is touch playback.
+  assert.match(partyViewer, /onEnded=\{handleMediaBoundary\}/);
+  assert.match(partyViewer, /onCapReached=\{handleMediaBoundary\}/);
+  const boundaryStart = partyViewer.indexOf('const handleMediaBoundary = useCallback');
+  assert.ok(boundaryStart > 0, 'the boundary handler must exist');
+  const boundary = partyViewer.slice(
+    boundaryStart, partyViewer.indexOf('}, [partyEnabled, goNext]);', boundaryStart));
+  assert.match(boundary, /goNext\(\)/, 'a boundary still advances the slideshow');
+  assert.doesNotMatch(boundary, /setPlaying\(/,
+    'a natural end must not switch the slideshow off');
   const start = player.indexOf('useEffect(() => subscribeOutputLost(');
   const handler = player.slice(start, player.indexOf('}), [player]);', start));
   for (const unrelated of [/onEnded/, /onCapReached/, /playToEnd/]) {

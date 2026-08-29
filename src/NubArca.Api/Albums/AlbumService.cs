@@ -277,6 +277,44 @@ public class AlbumService : IAlbumService
             .Where(m => m.AlbumId == albumId)
             .ExecuteDeleteAsync(cancellationToken);
 
+        // …and the PARTY state, for exactly the same reason and on exactly the
+        // same terms. Every one of these tables carries FK Restrict to the
+        // album, so an album that has ever had Party enabled could not be
+        // deleted at all: the constraint failed instead.
+        //
+        // None of them is the audit trail. A party link is a capability over an
+        // album that is going away; a participant row is a quota counter for an
+        // event that no longer exists; an upload row is a VISIBILITY control on
+        // a party surface that is about to stop existing (the guest's file
+        // itself is untouched and stays in the owner's library). What actually
+        // happened — party enabled, revoked, uploaded, moderated — is in the
+        // audit log, which is where that question belongs, as it already is for
+        // shares.
+        //
+        // Order follows the foreign keys: messages reference the link AND the
+        // participant, upload rows reference the participant, participants
+        // reference the link. Face-search sessions are absent deliberately —
+        // they cascade from the album already, and their results cascade from
+        // the session.
+        await _db.PartyMessages
+            .Where(m => m.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        await _db.PartyUploadItems
+            .Where(u => u.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        await _db.PartyParticipants
+            .Where(p => _db.PartyAlbumLinks
+                .Where(l => l.AlbumId == albumId)
+                .Select(l => l.Id)
+                .Contains(p.PartyAlbumLinkId))
+            .ExecuteDeleteAsync(cancellationToken);
+
+        await _db.PartyAlbumLinks
+            .Where(l => l.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
         _db.Albums.Remove(album);
         await _db.SaveChangesAsync(cancellationToken);
         InvalidateSemanticRankings(ownerUserId);

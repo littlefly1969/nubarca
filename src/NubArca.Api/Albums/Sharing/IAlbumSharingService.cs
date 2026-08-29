@@ -34,10 +34,14 @@ public interface IAlbumSharingService
         Guid ownerUserId, Guid albumId, InviteAlbumMemberRequest request,
         CancellationToken cancellationToken = default);
 
-    // Changes one member's original-download permission. Takes effect on the
-    // member's next request; nothing is cached.
+    // Changes one member's per-member permissions: the original-download
+    // permission and, when supplied, the narrow party-message delegation (null
+    // leaves it as it is). Owner-only, and takes effect on the member's next
+    // request because nothing is cached — which is what makes revoking the
+    // delegation immediate.
     Task<(AlbumMemberMutationResult Result, AlbumMemberDto? Member)> UpdateMemberAsync(
         Guid ownerUserId, Guid albumId, Guid membershipId, bool allowOriginalDownload,
+        bool? canManagePartyMessages = null,
         CancellationToken cancellationToken = default);
 
     // SHARE-ALBUM-02: promotes Viewer → Contributor or demotes Contributor →

@@ -204,6 +204,20 @@ public static class AuditActions
     public const string PartyUploadRestore = "party.upload.restore";
     public const string PartyApprovalModeEnable = "party.upload.approval_mode.enable";
     public const string PartyApprovalModeDisable = "party.upload.approval_mode.disable";
+    // Guest party MESSAGES. The audit trail carries the message id, the action,
+    // the actor and the timestamps — NEVER the body, the guest's typed name, the
+    // party token/hash, or the participant id. "What was said" is not a
+    // security question; "who changed its state, and from what to what" is.
+    public const string PartyMessageSubmit = "party.message.submit";
+    public const string PartyMessageApprove = "party.message.approve";
+    public const string PartyMessageReject = "party.message.reject";
+    public const string PartyMessageHide = "party.message.hide";
+    public const string PartyMessageRestore = "party.message.restore";
+    public const string PartyMessageHeroPromote = "party.message.hero.promote";
+    public const string PartyMessageHeroDemote = "party.message.hero.demote";
+    public const string PartyMessageApprovalModeEnable = "party.message.approval_mode.enable";
+    public const string PartyMessageApprovalModeDisable = "party.message.approval_mode.disable";
+
     // Anonymous party "find your face" search (aggregate: album id + safe status +
     // result count only; never the uploaded selfie, token/hash, query vector,
     // face/person ids, or similarity scores).
@@ -327,6 +341,7 @@ public static class AuditEntityTypes
     public const string TvSession = "tv_session";
     public const string TvPairing = "tv_pairing";
     public const string PartyAlbum = "party_album";
+    public const string PartyMessage = "party_message";
     public const string Plate = "plate";
     public const string AestheticLabItem = "aesthetic_lab_item";
     public const string AestheticRun = "aesthetic_run";

@@ -15,7 +15,9 @@ import {
   clearTvActiveFaceSearch,
   getTvActiveFaceSearch,
   listTvAlbumItems,
+  listTvPartyMessages,
   type TvAlbumItem,
+  type TvPartyMessage,
 } from '../api/tv';
 import { ApiError, loadTvMedia } from '../api/client';
 import { SlideImage } from '../components/SlideImage';
@@ -27,6 +29,8 @@ import { actionableEventType } from '../lib/remoteEvent';
 import { mapViewerRemoteEvent } from '../video/remoteMap';
 import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
+import { PartyMessageRibbon } from '../components/PartyMessageRibbon';
+import { PartyHeroMessage } from '../components/PartyHeroMessage';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../video/wakePolicy';
@@ -36,6 +40,13 @@ import {
   photoSlideMs, resolvePlayPause, shouldArmPreparingGrace,
   videoPlaybackProps, VIDEO_PREPARING_GRACE_MS, type PartySlideshowTiming,
 } from '../lib/partySlideshow';
+import {
+  beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
+  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
+  sameMessages, settleBoundary,
+  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
+  type BoundaryDebt, type HeroRotation,
+} from '../lib/partyMessages';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
 
@@ -137,6 +148,22 @@ export function ViewerScreen({
     faceThumbnailUrl: string | null;
     items: TvAlbumItem[];
   } | null>(null);
+  // The guest MESSAGE feed, polled separately and faster than the media list.
+  // It is its OWN state, never merged into `items`: a message is not a slide,
+  // and TvAlbumItem stays `image | video`.
+  const [messages, setMessages] = useState<TvPartyMessage[]>([]);
+  const [ribbonIndex, setRibbonIndex] = useState(0);
+  // The Hero currently holding the screen, or null. While it is non-null the
+  // media index is FROZEN — see the boundary handler for why that is what makes
+  // the carousel resume with nothing lost and nothing repeated.
+  const [hero, setHero] = useState<TvPartyMessage | null>(null);
+  const heroRotationRef = useRef<HeroRotation>(beginHeroRotation());
+  const boundariesSinceHeroRef = useRef(0);
+  // The advance a Hero postponed. The ledger and the rule for spending it are
+  // in lib/partyMessages, where the exactly-once property is a pure test rather
+  // than a claim about this component's effects.
+  const boundaryDebtRef = useRef<BoundaryDebt>(NO_BOUNDARY_DEBT);
+
   const {
     visible: overlayVisible,
     visibleRef: overlayVisibleRef,
@@ -192,6 +219,10 @@ export function ViewerScreen({
   isVideoRef.current = item?.mediaType === 'video';
   const slideshowModeRef = useRef(slideshowMode);
   slideshowModeRef.current = slideshowMode;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  const playingRef = useRef(playing);
+  playingRef.current = playing;
   const videoControlsRef = useRef<TvVideoControls | null>(null);
 
   const goNext = useCallback(() => {
@@ -205,6 +236,49 @@ export function ViewerScreen({
   }, []);
 
   const togglePlay = useCallback(() => setPlaying((p) => !p), []);
+
+  // EVERY point at which the slideshow would advance on its own goes through
+  // here: a photo's dwell elapsing, a video ending, a video reaching its cap.
+  // Manual LEFT/RIGHT deliberately does NOT — a Hero belongs to the autoplay
+  // wall, and somebody pressing a direction key is steering it themselves.
+  //
+  // When a Hero is due the index is NOT advanced: the card is laid over the
+  // media that is already there, and the advance happens when the card
+  // finishes. That is what makes "the carousel resumes from exactly the right
+  // place" true by construction rather than by arithmetic — there is no second
+  // place that moves the index.
+  const handleMediaBoundary = useCallback(() => {
+    const outcome = onMediaBoundary({
+      boundariesSinceHero: boundariesSinceHeroRef.current,
+      eligible: heroEligible({
+        partyEnabled,
+        slideshowMode: slideshowModeRef.current,
+        playing: playingRef.current,
+        faceFilterActive: faceFilterRef.current !== null,
+        candidateCount: heroCandidates(messagesRef.current).length,
+      }),
+    });
+    boundariesSinceHeroRef.current = outcome.boundariesSinceHero;
+
+    if (outcome.kind === 'hero') {
+      const pick = nextHero(heroRotationRef.current, messagesRef.current);
+      if (pick.message !== null) {
+        heroRotationRef.current = pick.rotation;
+        // The advance is now OWED. Whatever ends the card — its timer, the
+        // server withdrawing it, or the wall resuming after a pause — the debt
+        // is settled by the single consumer below.
+        boundaryDebtRef.current = deferBoundary();
+        setHero(pick.message);
+        return;
+      }
+    }
+    goNext();
+  }, [partyEnabled, goNext]);
+
+  const dismissHeroForManualNavigation = useCallback(() => {
+    boundaryDebtRef.current = discardBoundary();
+    setHero(null);
+  }, []);
 
   // Face-filter transitions preserve the current photo: when the filter
   // activates mid-slideshow and the current photo matches, stay on it (else
@@ -256,8 +330,12 @@ export function ViewerScreen({
       case 'toggle-overlay':
         toggleOverlay();
         return;
-      case 'next': goNext(); break;
-      case 'prev': goPrev(); break;
+      // Manual navigation is the person taking over. Any Hero on screen comes
+      // down with it, and the advance the card was holding is discarded — they
+      // have just chosen where to be, and settling an old debt on top of that
+      // would skip the item they asked for.
+      case 'next': dismissHeroForManualNavigation(); goNext(); break;
+      case 'prev': dismissHeroForManualNavigation(); goPrev(); break;
       case 'toggle-play':
         // In a slideshow there is exactly ONE play state, and it governs the
         // photo countdown and the video player alike. Talking to the player
@@ -287,7 +365,8 @@ export function ViewerScreen({
         break;
     }
     bumpOverlay();
-  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef]);
+  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef,
+    dismissHeroForManualNavigation]);
   useTVEventHandler(onTVEvent);
 
   // BACK while face-filter mode is active: delete THIS search server-side
@@ -332,17 +411,17 @@ export function ViewerScreen({
   // called photoRotationActive({ slideshowMode, playing }), which knows nothing
   // about the foreground, so photographs kept advancing behind HOME while the
   // wake lock (correctly) let go. Two lifecycle authorities for one behaviour.
-  const rotating = shouldRotateSlideshow(wakeInputs) && !currentIsVideo;
+  // `hero === null` is part of the condition, so a Hero HOLDS the wall rather
+  // than racing the dwell timer: the photo underneath does not advance out from
+  // behind the card.
+  const rotating = shouldRotateSlideshow(wakeInputs) && !currentIsVideo && hero === null;
   useEffect(() => {
     if (!rotating || displayItems.length === 0 || currentIsVideo) return;
-    const timer = setTimeout(() => {
-      const len = displayItemsRef.current.length;
-      setIndex((i) => (len === 0 ? 0 : (i + 1) % len));
-    }, photoMs);
+    const timer = setTimeout(handleMediaBoundary, photoMs);
     return () => clearTimeout(timer);
     // `photoMs` is a dependency, so a timing change re-arms the CURRENT photo's
     // timer in place rather than moving to another item.
-  }, [rotating, index, displayItems.length, currentIsVideo, photoMs]);
+  }, [rotating, index, displayItems.length, currentIsVideo, photoMs, handleMediaBoundary]);
 
   // A video that cannot become playable must not freeze an autoplaying party
   // wall. The grace window is armed only while the slideshow is actually
@@ -418,6 +497,124 @@ export function ViewerScreen({
     return () => clearInterval(timer);
   }, [partyEnabled, albumId, onClose, onSessionInvalid]);
 
+  // A Hero holds the screen for a fixed time, then simply comes down. It does
+  // NOT advance the wall itself — settling the deferred boundary is the single
+  // consumer's job, and two callers of goNext() is exactly the double advance
+  // this structure exists to make unrepresentable.
+  useEffect(() => {
+    if (hero === null) return;
+    const timer = setTimeout(() => setHero(null), HERO_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [hero]);
+
+  // A Hero the viewer no longer has any business showing comes down early.
+  // Which of the two things happens to the DEFERRED ADVANCE depends on why:
+  //
+  //   the viewer changed what it is looking at (a guest activated a face
+  //   filter, or the session stopped being a slideshow) — the deferred advance
+  //   is moot. The face-filter effect re-picks the index from the new display
+  //   list, and a manual session's index belongs to the person driving it, so
+  //   settling an old debt here would move something out from under them.
+  //
+  //   the wall was merely PAUSED — the advance is still owed. Discarding it is
+  //   what would strand a finished video: it can produce no further boundary,
+  //   so the debt is kept and the consumer settles it when playback resumes.
+  useEffect(() => {
+    if (hero === null) return;
+    if (faceFilter !== null || !slideshowMode) {
+      boundaryDebtRef.current = discardBoundary();
+      setHero(null);
+      return;
+    }
+    if (!playing) setHero(null);
+  }, [hero, faceFilter, playing, slideshowMode]);
+
+  // THE SINGLE CONSUMER of a deferred boundary.
+  //
+  // Everything that ends a Hero does so by setting it to null; this is the one
+  // place that then performs the advance, and it writes the settled ledger back
+  // BEFORE acting on it. That is what makes "every boundary is consumed at most
+  // once" a property of the structure rather than something each call site has
+  // to remember — a card that times out in the same tick the poll withdraws it
+  // still produces exactly one advance.
+  useEffect(() => {
+    const settled = settleBoundary(boundaryDebtRef.current, {
+      heroVisible: hero !== null,
+      slideshowMode,
+      playing,
+    });
+    boundaryDebtRef.current = settled.debt;
+    if (settled.advance) goNext();
+  }, [hero, slideshowMode, playing, goNext]);
+
+  // Live refresh of the guest MESSAGE feed. Faster than the media poll (5s vs
+  // 15s) because "I typed it on my phone and it appeared on the television" is
+  // the experience this feature exists to deliver, and the payload is a few
+  // hundred bytes.
+  //
+  // Deliberately its OWN effect and its own timer: a message arriving must not
+  // disturb the media slideshow, and a media refresh must not reset the ribbon.
+  useEffect(() => {
+    if (!partyEnabled || !albumId) {
+      setMessages([]);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      listTvPartyMessages(albumId)
+        .then((feed) => {
+          if (cancelled) return;
+          setMessages((prev) => (sameMessages(prev, feed.messages) ? prev : feed.messages));
+          // A Hero the server has stopped sending — hidden, rejected, or its
+          // party revoked — leaves the screen on this poll rather than serving
+          // out its six seconds.
+          setHero((current) => (current !== null
+            && !feed.messages.some((m) => m.id === current.id && m.isHero)
+            ? null
+            : current));
+        })
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) { onSessionInvalid?.(); }
+          // 404 (album gone / not on TV) and transient failures both keep the
+          // current feed; the media poll owns closing the viewer.
+        });
+    };
+    poll();
+    const timer = setInterval(poll, MESSAGES_POLL_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [partyEnabled, albumId, onSessionInvalid]);
+
+  // Keep the ribbon on the SAME message across a refresh, by id. Without this
+  // the band would jump back to the first message every time anybody wrote
+  // anything, which at a party is every few seconds.
+  const ribbonMessageIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    setRibbonIndex((previous) =>
+      remapRibbonIndex(messages, ribbonMessageIdRef.current, previous));
+  }, [messages]);
+
+  const ribbonShown = ribbonVisible({
+    partyEnabled,
+    messageCount: messages.length,
+    overlayVisible,
+    heroVisible: hero !== null,
+  });
+  const ribbonMessage = messages.length > 0
+    ? messages[Math.min(ribbonIndex, messages.length - 1)]
+    : null;
+  ribbonMessageIdRef.current = ribbonMessage?.id;
+
+  // Rotate the band. A single message simply stays put — crossfading a message
+  // into itself is a flicker carrying no information.
+  const rotateRibbon = ribbonRotating({ visible: ribbonShown, messageCount: messages.length });
+  useEffect(() => {
+    if (!rotateRibbon) return;
+    const timer = setInterval(() => {
+      setRibbonIndex((i) => (i + 1) % Math.max(1, messagesRef.current.length));
+    }, RIBBON_ROTATE_MS);
+    return () => clearInterval(timer);
+  }, [rotateRibbon]);
+
   // Poll the album's active party face filter (same contract as the grid): only
   // an EXPLICITLY activated search arrives; a newer server-accepted activation
   // replaces the previous one; cleared/expired/deleted → full album restored.
@@ -468,13 +665,27 @@ export function ViewerScreen({
           key={item.id}
           videoPath={item.videoUrl}
           posterPath={item.posterUrl ?? null}
-          onEnded={goNext}
-          onCapReached={goNext}
+          // A video reaches a boundary at its natural end (or the owner's
+          // configured cap), never early: nothing here shortens a clip to make
+          // room for a message. A Hero that fell due mid-video simply waits for
+          // the boundary the video was going to reach anyway.
+          onEnded={handleMediaBoundary}
+          onCapReached={handleMediaBoundary}
           // The cap bounds ROTATION and the controlled play state exists only
           // while something is rotating, so a video opened from the grid to
           // watch keeps its own controls and plays to its end. Both decisions
           // come from one tested policy rather than from `partyEnabled` alone.
-          {...videoPlaybackProps({ slideshowMode, partyEnabled, playing, timing })}
+          // A Hero is an editorial pause BETWEEN two media, not an overlay over
+          // a running one. A card raised at a video's CAP would otherwise leave
+          // the clip playing — audio and all — behind an opaque scrim, because
+          // the cap is a boundary the slideshow observes rather than something
+          // that stops the player. Withholding the controlled play intent for
+          // the card's duration uses the player's existing authority instead of
+          // introducing a second one; the wall then advances to the NEXT media,
+          // so the paused clip is never resumed.
+          {...videoPlaybackProps({
+            slideshowMode, partyEnabled, playing: playing && hero === null, timing,
+          })}
           onReadyStateChange={setVideoReady}
           // EXTERNAL pause reconciliation, for the CONTROLLED slideshow only.
           // When the output route disappears the player pauses for real; without
@@ -504,6 +715,13 @@ export function ViewerScreen({
         onPress={() => { /* handled by the global TV event mapping */ }}
         style={styles.capture}
       />
+
+      {/* The Elegant Ribbon. Below the photograph, above nothing focusable, and
+          absent entirely while the MENU overlay owns the lower corners. */}
+      {ribbonShown && <PartyMessageRibbon message={ribbonMessage} />}
+
+      {/* The Hero card, over everything except the MENU overlay. */}
+      <PartyHeroMessage message={hero} />
 
       {/* Everything below only renders while the MENU overlay is visible. */}
       {overlayVisible && (

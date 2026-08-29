@@ -474,6 +474,76 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   decides what the bytes are, and moderation never refunds — hiding a photo is a
   visibility decision, and giving the slot back would let a guest re-upload the
   thing the owner just hid.
+- **A party MESSAGE is scoped to the Party link, and its authority is a
+  capability rather than a role.** `PartyMessage` is a text-only domain beside
+  the media pipeline — no `FileItem`, no blob, no derivative — so `TvAlbumItem`
+  stays `image | video` and an older TV APK keeps working by never calling the
+  new feed. The row's scope is `PartyAlbumLinkId`, not `AlbumId`: re-enabling
+  party mints a new link, which is what makes last year's greetings stay away
+  from this year's wall without anybody rewriting rows, and what makes a
+  revoked party empty the TV on the next poll. Moderation authority is exactly
+  `owner || activeMembership.CanManagePartyMessages`, resolved once in
+  `IPartyMessageAccessResolver` and re-read per request. The album ROLE is
+  deliberately not in that predicate: an `editor` curates an album, and running
+  the party is not curation, so widening the role would grant every existing
+  editor a capability nobody chose to give them. Two easy mistakes: promoting a
+  Hero does NOT need clearing when the message is hidden (every projection
+  filters on `Visible` first, so a hidden Hero cannot survive a projection that
+  forgot), and the message length limit is counted in **Unicode code points** —
+  the single unit `EnumerateRunes()` and `[...text].length` agree on. UTF-16
+  units would charge two per emoji; grapheme clusters would be friendlier but
+  are defined by an ICU table .NET and the browser upgrade separately, and the
+  day they disagree the guest's counter and the server's validator disagree too.
+  `PartyMessageText.cs` and `frontend/packages/api-client/src/partyMessageText.ts`
+  are mirrors, and their two test files share fixtures on purpose. The third
+  easy mistake is the capability's lifetime: an `AlbumMembership` row is REUSED
+  when the same person is invited again, so `CanManagePartyMessages` is cleared
+  on revoke AND on re-invite — otherwise a delegation the owner took away comes
+  back with the next invitation, which nobody would see in a diff.
+- **What a manager may do to a message is a TABLE, not a target state.**
+  `PartyMessageTransitions.Target(current, action)` is the whole answer: five
+  permitted moves, everything else null. Routes therefore carry an ACTION —
+  `approve` and `restore` both end at `visible` but start from different places,
+  and only the action can tell them apart, which is what lets the domain refuse
+  `visible → rejected` and `pending → hidden`. A `status` parameter cannot
+  express that and silently permitted both. v1 is deliberately STRICT rather
+  than idempotent: approving something already live is `invalid_transition`,
+  because "you are late, somebody else approved it" and "done, nothing happened"
+  are different things to tell a manager. Authorization is resolved BEFORE the
+  transition, so a stranger gets the generic 404 and never a 400 that would
+  confirm the message exists. Hero is not in the table — promote requires
+  `visible`, demote always works.
+- **Deleting an album deletes its Party state, and that was already broken.**
+  Every Party table has a restricting FK to the album and `AlbumService.
+  DeleteAsync` cleaned up none of them, so deleting an album that had ever had
+  Party enabled failed on the constraint — before guest messages existed. The
+  delete now removes messages, upload rows, participants and links in FK order,
+  on the same terms as the shares immediately above it: none of those tables is
+  the audit trail, and the guest's stored PHOTO is untouched (an upload row is a
+  visibility control over a surface that is going away). Face-search sessions
+  are deliberately absent — they already cascade from the album.
+- **A Hero card HOLDS the media, and the postponed advance is a LEDGER.** Every
+  automatic slideshow transition goes through one `handleMediaBoundary`; when a
+  Hero is due it renders over the current item and returns WITHOUT advancing.
+  That the advance is owed is tracked explicitly (`BoundaryDebt`,
+  `settleBoundary` in `tv/src/lib/partyMessages.ts`) rather than inferred from
+  `hero !== null`, and the difference is a stuck wall: a video that has already
+  ended can raise no second boundary, so a card withdrawn early — hidden,
+  demoted, party revoked — would otherwise leave the slideshow on its last frame
+  for the rest of the evening. `settleBoundary` is the ONLY function that can
+  spend a debt, which is what makes "consumed at most once" a property of the
+  type rather than of every call site's memory: a card timing out in the same
+  tick the poll withdraws it advances once. A merely PAUSED wall keeps the debt
+  and settles it on resume; a change of viewing INTENT (face filter, manual
+  navigation, leaving the slideshow) discards it, because the index then belongs
+  to whoever just chose it. Nothing interrupts a video — a boundary on a video
+  IS its natural end or the owner's configured cap — but a card raised at the
+  CAP must also withhold the controlled play intent, because the cap is a
+  boundary the slideshow observes and not something that stops the player: the
+  clip would otherwise keep running, audio and all, behind an opaque card.
+  Heroes are suspended entirely during a party face filter, because a guest
+  asking to see the photographs they are in has asked a question an editorial
+  card does not answer.
 - **The party video cap is media time, not wall clock.** `PartyMaxVideoSlideSeconds`
   bounds how long one video may HOLD the slideshow, never the stored file, which
   still plays in full everywhere else. A `setTimeout` would keep counting while

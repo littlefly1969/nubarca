@@ -14,6 +14,7 @@ const album = {
 const party = {
   albumId: 'a1', showOnTv: false, partyMode: false, partyUrl: null,
   uploadEnabled: false, uploadUrl: null, requireUploadApproval: false,
+  requireMessageApproval: false,
   photoSlideSeconds: 9, maxVideoSlideSeconds: 60,
   maxPhotoUploadsPerParticipant: 0, maxVideoUploadsPerParticipant: 0,
 };

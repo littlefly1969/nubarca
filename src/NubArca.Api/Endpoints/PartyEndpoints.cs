@@ -39,6 +39,7 @@ public static class PartyEndpoints
     private const string PartyPublicMediaRateLimitPolicy = "party-public-media";
     private const string PartyUploadRateLimitPolicy = "party-upload";
     private const string PartyFaceSearchRateLimitPolicy = "party-face-search";
+    private const string PartyMessageRateLimitPolicy = "party-message";
 
     public static IEndpointRouteBuilder MapPartyEndpoints(this IEndpointRouteBuilder app)
     {
@@ -544,7 +545,8 @@ public static class PartyEndpoints
                 // Capture the prior approval-mode so a change can be audited distinctly.
                 var before = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
                 var enabled = await party.EnableAsync(
-                    ownerUserId, id, ownerUserId, body.UploadEnabled, body.RequireUploadApproval, cancellationToken);
+                    ownerUserId, id, ownerUserId, body.UploadEnabled, body.RequireUploadApproval,
+                    body.RequireMessageApproval, cancellationToken);
                 if (enabled is null)
                     return Results.NotFound();
                 await audit.LogAsync(ownerUserId, AuditActions.PartyEnable, AuditEntityTypes.PartyAlbum,
@@ -556,6 +558,20 @@ public static class PartyEndpoints
                     await audit.LogAsync(
                         ownerUserId,
                         wantApproval ? AuditActions.PartyApprovalModeEnable : AuditActions.PartyApprovalModeDisable,
+                        AuditEntityTypes.PartyAlbum, enabled.LinkId, ip, new { albumId = id }, cancellationToken);
+                }
+                // The MESSAGE approval mode is a separate decision from the upload
+                // one and gets its own audit line, so "the host started reading
+                // greetings first" is answerable without inferring it from a
+                // photo-moderation event.
+                if (body.RequireMessageApproval is bool wantMessageApproval
+                    && (before is null || before.RequireMessageApproval != wantMessageApproval))
+                {
+                    await audit.LogAsync(
+                        ownerUserId,
+                        wantMessageApproval
+                            ? AuditActions.PartyMessageApprovalModeEnable
+                            : AuditActions.PartyMessageApprovalModeDisable,
                         AuditEntityTypes.PartyAlbum, enabled.LinkId, ip, new { albumId = id }, cancellationToken);
                 }
             }
@@ -682,6 +698,175 @@ public static class PartyEndpoints
                 NubArca.Api.Domain.PartyUploadStatuses.Approved, AuditActions.PartyUploadRestore, cancellationToken))
             .WithName("RestorePartyUpload").RequireAuthorization();
 
+        // --- PUBLIC party MESSAGES (anonymous, upload-token scoped) ---
+        //
+        // A guest writes a short greeting instead of (or as well as) a photo. The
+        // UPLOAD token authorizes it, not the view token: the message form lives on
+        // the upload page, which is the only public surface that holds an upload
+        // token, and turning off "guests may contribute" should stop written
+        // contributions for the same reason it stops photographic ones. Every
+        // request re-validates the link (enabled + upload on + not revoked/expired
+        // + album still owner-owned and ShowOnTv), so revoking a party silences new
+        // messages immediately.
+        //
+        // The response carries the id, the resulting status and the timestamp and
+        // nothing else — never the owner, the party link, the participant, or the
+        // token. The audit line carries the message id and the status; the BODY is
+        // never logged anywhere.
+        app.MapPost("/api/party/{token}/messages", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
+            [FromServices] IAuditLogger audit,
+            [FromBody] PartyMessageSubmitRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolveUploadAsync(token, cancellationToken);
+            if (access is null)
+            {
+                return Results.NotFound();
+            }
+
+            if (body is null)
+            {
+                return Results.BadRequest(new { error = "Missing request body." });
+            }
+
+            // Provenance for an abuse investigation, never for display. A guest who
+            // has not uploaded yet gets their participant session minted here.
+            var participantId = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+
+            var result = await messages.SubmitAsync(
+                access, body.DisplayName, body.Text, participantId, cancellationToken);
+
+            if (result.Error is NubArca.Api.Party.PartyMessageSubmissionError error)
+            {
+                // Safe, machine-readable codes. The client already enforces the same
+                // limits from the same contract, so this is the backstop, not the
+                // copy the guest normally reads.
+                return Results.BadRequest(new
+                {
+                    error = error == NubArca.Api.Party.PartyMessageSubmissionError.InvalidDisplayName
+                        ? "invalid_display_name"
+                        : "invalid_text",
+                    maxDisplayNameLength = PartyMessageLimits.MaxDisplayNameLength,
+                    maxTextLength = PartyMessageLimits.MaxBodyLength,
+                });
+            }
+
+            var message = result.Message!;
+            await audit.LogAsync(
+                userId: null,
+                action: AuditActions.PartyMessageSubmit,
+                entityType: AuditEntityTypes.PartyMessage,
+                entityId: message.Id,
+                ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
+                metadata: new { albumId = access.AlbumId, status = message.Status },
+                cancellationToken: cancellationToken);
+
+            return Results.Ok(message);
+        }).WithName("SubmitPartyMessage").RequireRateLimiting(PartyMessageRateLimitPolicy);
+
+        // --- OWNER / DELEGATE party message moderation ---
+        //
+        // Authorization is `owner || activeMembership.CanManagePartyMessages`,
+        // resolved in ONE place (IPartyMessageAccessResolver) and re-read on every
+        // request. An album role never grants it: an `editor` without the
+        // capability is refused here exactly like a stranger, and both get the same
+        // generic 404 so neither can tell an album they may not manage from one
+        // that does not exist.
+        //
+        // Every route is scoped to the album's CURRENTLY ACTIVE party, so a message
+        // id from another album — or from the same album's previous party — is
+        // simply not found rather than a probe.
+        app.MapGet("/api/albums/{albumId:guid}/party-messages", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            CancellationToken cancellationToken) =>
+        {
+            var actorUserId = httpContext.GetCurrentUserId()!.Value;
+            var list = await messages.ListForManagerAsync(albumId, actorUserId, cancellationToken);
+            return list is null ? Results.NotFound() : Results.Ok(list);
+        }).WithName("ListPartyMessages").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/approve", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await ModeratePartyMessageAsync(
+                httpContext, messages, audit, albumId, messageId,
+                NubArca.Api.Domain.PartyMessageModeration.Approve,
+                AuditActions.PartyMessageApprove, cancellationToken))
+            .WithName("ApprovePartyMessage").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/reject", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await ModeratePartyMessageAsync(
+                httpContext, messages, audit, albumId, messageId,
+                NubArca.Api.Domain.PartyMessageModeration.Reject,
+                AuditActions.PartyMessageReject, cancellationToken))
+            .WithName("RejectPartyMessage").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/hide", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await ModeratePartyMessageAsync(
+                httpContext, messages, audit, albumId, messageId,
+                NubArca.Api.Domain.PartyMessageModeration.Hide,
+                AuditActions.PartyMessageHide, cancellationToken))
+            .WithName("HidePartyMessage").RequireAuthorization();
+
+        // Restore lands on the same state as approve and is a SEPARATE route only
+        // so the audit trail distinguishes "the host read it and let it through"
+        // from "the host put back something they had taken down".
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/restore", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await ModeratePartyMessageAsync(
+                httpContext, messages, audit, albumId, messageId,
+                NubArca.Api.Domain.PartyMessageModeration.Restore,
+                AuditActions.PartyMessageRestore, cancellationToken))
+            .WithName("RestorePartyMessage").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/promote-hero", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await SetPartyMessageHeroAsync(
+                httpContext, messages, audit, albumId, messageId, true,
+                AuditActions.PartyMessageHeroPromote, cancellationToken))
+            .WithName("PromotePartyMessageHero").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/demote-hero", async (
+            Guid albumId, Guid messageId,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+            await SetPartyMessageHeroAsync(
+                httpContext, messages, audit, albumId, messageId, false,
+                AuditActions.PartyMessageHeroDemote, cancellationToken))
+            .WithName("DemotePartyMessageHero").RequireAuthorization();
+
         return app;
     }
 
@@ -770,6 +955,82 @@ public static class PartyEndpoints
             $"/api/party/{enc}/media/{id}/thumbnail",
             $"/api/party/{enc}/media/{id}/preview",
             $"/api/party/{enc}/media/{id}/download")).ToList();
+    }
+
+    // Shared manager action for a party MESSAGE: apply a transition, then audit
+    // the message id and the album — never the body, the guest's name, the party
+    // token, or the participant. A refused transition is a 400; everything else
+    // that could have gone wrong (no such album, no such message, no authority,
+    // no active party) is the same 404.
+    //
+    // The route carries an ACTION, not a target state. `approve` and `restore`
+    // both end at visible but start from different places, and only the action
+    // distinguishes them — which is what lets the domain refuse the transitions
+    // no route is named after (visible → rejected, pending → hidden).
+    private static async Task<IResult> ModeratePartyMessageAsync(
+        HttpContext httpContext,
+        NubArca.Api.Party.IPartyMessageService messages,
+        IAuditLogger audit,
+        Guid albumId,
+        Guid messageId,
+        NubArca.Api.Domain.PartyMessageModeration action,
+        string auditAction,
+        CancellationToken cancellationToken)
+    {
+        var actorUserId = httpContext.GetCurrentUserId()!.Value;
+        var result = await messages.ModerateAsync(
+            albumId, actorUserId, messageId, action, cancellationToken);
+        return await CompletePartyMessageMutationAsync(
+            httpContext, audit, result, actorUserId, albumId, messageId, auditAction,
+            new { albumId, messageId, action = action.ToString() }, cancellationToken);
+    }
+
+    private static async Task<IResult> SetPartyMessageHeroAsync(
+        HttpContext httpContext,
+        NubArca.Api.Party.IPartyMessageService messages,
+        IAuditLogger audit,
+        Guid albumId,
+        Guid messageId,
+        bool hero,
+        string auditAction,
+        CancellationToken cancellationToken)
+    {
+        var actorUserId = httpContext.GetCurrentUserId()!.Value;
+        var result = await messages.SetHeroAsync(
+            albumId, actorUserId, messageId, hero, cancellationToken);
+        return await CompletePartyMessageMutationAsync(
+            httpContext, audit, result, actorUserId, albumId, messageId, auditAction,
+            new { albumId, messageId, hero }, cancellationToken);
+    }
+
+    private static async Task<IResult> CompletePartyMessageMutationAsync(
+        HttpContext httpContext,
+        IAuditLogger audit,
+        NubArca.Api.Party.PartyMessageMutation result,
+        Guid actorUserId,
+        Guid albumId,
+        Guid messageId,
+        string auditAction,
+        object metadata,
+        CancellationToken cancellationToken)
+    {
+        switch (result)
+        {
+            case NubArca.Api.Party.PartyMessageMutation.NotFound:
+                return Results.NotFound();
+            case NubArca.Api.Party.PartyMessageMutation.InvalidTransition:
+                // The message is real and the caller may manage it; the domain
+                // refused the move — promoting something not visible, or a
+                // moderation action the state machine does not allow from where
+                // the message currently is. Hiding that behind a 404 would make
+                // a legitimate UI state unexplainable, so it is a 400.
+                return Results.BadRequest(new { error = "invalid_transition" });
+        }
+
+        await audit.LogAsync(
+            actorUserId, auditAction, AuditEntityTypes.PartyMessage, messageId,
+            httpContext.Connection.RemoteIpAddress?.ToString(), metadata, cancellationToken);
+        return Results.NoContent();
     }
 
     // Shared owner-moderation action: set a guest upload's status + audit it (album
@@ -865,7 +1126,17 @@ public static class PartyEndpoints
 
 // Party request bodies. Moved from Program.cs's top-level records — used
 // exclusively by the SetAlbumPartyMode endpoint above.
-public sealed record SetAlbumPartyModeRequest(bool Enabled, bool? UploadEnabled = null, bool? RequireUploadApproval = null);
+public sealed record SetAlbumPartyModeRequest(
+    bool Enabled,
+    bool? UploadEnabled = null,
+    bool? RequireUploadApproval = null,
+    // Owner-only, and deliberately on THIS route rather than a message route: a
+    // delegate moderates messages but never changes what the party requires.
+    bool? RequireMessageApproval = null);
+
+// A guest's greeting. Plain text only — the server normalises and measures it
+// (PartyMessageText) and is the authority on both limits.
+public sealed record PartyMessageSubmitRequest(string? DisplayName = null, string? Text = null);
 
 // Owner-side slideshow timing + per-participant quotas. Every field is optional
 // so the panel can save just what changed, and NONE of them touches the party

@@ -1627,6 +1627,41 @@ public static class TvEndpoints
             return items is null ? Results.NotFound() : Results.Ok(items);
         }).WithName("ListTvAlbumItems");
 
+        // TV party MESSAGES. A SEPARATE feed from the media carousel, on purpose:
+        // TvAlbumItem stays `image | video`, so an older TV APK simply never calls
+        // this route and keeps showing photos and videos exactly as before.
+        //
+        // Returns only the currently active party's VISIBLE messages — never
+        // pending, hidden or rejected, never a moderator or owner id, never the
+        // participant who wrote it. The projection is recomputed on every poll from
+        // the link's current state, so hiding a message, revoking the party, or
+        // turning the album off TV removes it within one refresh with no stale
+        // resurrection. `isHero` is the promotion the owner or their delegate made;
+        // the TV decides how to present it.
+        //
+        // A TV-visible album with no party running yields an EMPTY list rather than
+        // a 404, which is what lets the TV tell "nothing to say" (no ribbon) apart
+        // from "this album is gone" (stop polling) without a second call.
+        app.MapGet("/api/tv/albums/{albumId:guid}/party-messages", async (
+            Guid albumId,
+            HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyMessageService messages,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (ownerUserId is null)
+            {
+                return Results.Unauthorized();
+            }
+
+            var projection = await messages.GetTvProjectionAsync(
+                ownerUserId.Value, albumId, cancellationToken);
+            return projection is null ? Results.NotFound() : Results.Ok(projection);
+        }).WithName("ListTvPartyMessages");
+
         // TV active face filter: a guest's face search reaches the TV ONLY after an
         // explicit "show these photos on TV" activation on the public party page (the
         // backend bridges the activation — the party client never calls /api/tv). The TV
