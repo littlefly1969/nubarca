@@ -31,6 +31,7 @@ namespace NubArca.Api.Tests.Integration;
 // refuses and which would make this silently skip or silently fail depending on
 // whose machine it ran on. Unset means SKIPPED, and a completion report has to
 // say so rather than claim a lane it did not run.
+[Collection(RealModelCollection.Name)]
 [Trait("Category", "External")]
 public sealed class DocumentVisualRealOnnxTests
 {
