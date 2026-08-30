@@ -274,6 +274,7 @@ internal static class DocumentsCliCommands
             var eligible = OwnerDocumentVisualEligibility.EligibleUnits(
                 db.DocumentVisualUnits.AsNoTracking(),
                 db.DocumentVisualIndexes.AsNoTracking(),
+                db.DocumentTexts.AsNoTracking(),
                 db.FileItems.AsNoTracking(),
                 owner, profile.Id, renderers.ActiveRenderProfileKeys);
 

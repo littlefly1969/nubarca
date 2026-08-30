@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Ai.DocumentVisual;
+using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using Xunit;
 
@@ -19,8 +20,27 @@ namespace NubArca.Api.Tests.Ai.DocumentVisual;
 public sealed class DocumentVisualRetrievalTests : IDisposable
 {
     private readonly DocumentVisualHarness _harness = new();
+    private readonly AiProfile _extraction;
 
-    public DocumentVisualRetrievalTests() => _harness.SeedProfile();
+    public DocumentVisualRetrievalTests()
+    {
+        _harness.SeedProfile();
+        _extraction = _harness.SeedExtractionProfile();
+    }
+
+    /// A file with a CURRENT, COMPLETED extraction of its current bytes.
+    ///
+    /// Visual retrieval requires one — a visual index derives from a document
+    /// whose authority is its text — so every fixture here starts answerable,
+    /// including the ones that must not be reachable, and each test isolates
+    /// the single condition it is named for.
+    private FileItem Answerable(
+        Guid owner, string name, Guid? vaultId = null, bool deleted = false)
+    {
+        var file = _harness.SeedFile(owner, name, vaultId, deleted);
+        _harness.SeedExtraction(file, _extraction);
+        return file;
+    }
 
     public void Dispose() => _harness.Dispose();
 
@@ -38,10 +58,10 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
         // vector; owner A holds one page that merely resembles it. A `LIMIT 5`
         // over an unfiltered ranking returns five of B's — and after a
         // post-filter, nothing.
-        var mine = _harness.SeedFile(_harness.OwnerA, "mine.pdf");
+        var mine = Answerable(_harness.OwnerA, "mine.pdf");
         _harness.SeedVisualIndex(mine, new[] { DocumentVisualHarness.Vector(7, 0.9f) });
 
-        var theirs = _harness.SeedFile(_harness.OwnerB, "theirs.pdf");
+        var theirs = Answerable(_harness.OwnerB, "theirs.pdf");
         _harness.SeedVisualIndex(
             theirs, Enumerable.Repeat(DocumentVisualHarness.Vector(7), 30).ToArray());
 
@@ -56,9 +76,9 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     public async Task Vaulted_And_Deleted_Pages_Are_Not_Candidates()
     {
         var vault = _harness.SeedVault(_harness.OwnerA);
-        var ok = _harness.SeedFile(_harness.OwnerA, "ok.pdf");
-        var vaulted = _harness.SeedFile(_harness.OwnerA, "vaulted.pdf", vaultId: vault.Id);
-        var deleted = _harness.SeedFile(_harness.OwnerA, "deleted.pdf", deleted: true);
+        var ok = Answerable(_harness.OwnerA, "ok.pdf");
+        var vaulted = Answerable(_harness.OwnerA, "vaulted.pdf", vaultId: vault.Id);
+        var deleted = Answerable(_harness.OwnerA, "deleted.pdf", deleted: true);
 
         // The two that must not appear are the two that match the query PERFECTLY.
         _harness.SeedVisualIndex(ok, new[] { DocumentVisualHarness.Vector(7, 0.7f) });
@@ -80,11 +100,11 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
         // is the answer — length is the one property a visual embedding cannot
         // see, and summing page scores would make it the strongest signal there
         // is.
-        var report = _harness.SeedFile(_harness.OwnerA, "long-report.pdf");
+        var report = Answerable(_harness.OwnerA, "long-report.pdf");
         _harness.SeedVisualIndex(
             report, Enumerable.Repeat(DocumentVisualHarness.Vector(7, 0.55f), 100).ToArray());
 
-        var invoice = _harness.SeedFile(_harness.OwnerA, "invoice.pdf");
+        var invoice = Answerable(_harness.OwnerA, "invoice.pdf");
         _harness.SeedVisualIndex(invoice, new[] { DocumentVisualHarness.Vector(7) });
 
         var result = await SearchAsync(_harness.OwnerA, units: 200, files: 5);
@@ -97,7 +117,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     {
         for (var i = 0; i < 20; i++)
         {
-            var file = _harness.SeedFile(_harness.OwnerA, $"doc-{i}.pdf");
+            var file = Answerable(_harness.OwnerA, $"doc-{i}.pdf");
             _harness.SeedVisualIndex(file, new[] { DocumentVisualHarness.Vector(7, 0.5f + (i * 0.02f)) });
         }
 
@@ -113,7 +133,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
         // presenting the result as their documents is a wrong answer with a
         // confident tone; reporting the visual path unavailable is legible, and
         // the text pass answers the question regardless.
-        var file = _harness.SeedFile(_harness.OwnerA, "many-pages.pdf");
+        var file = Answerable(_harness.OwnerA, "many-pages.pdf");
         _harness.SeedVisualIndex(
             file, Enumerable.Repeat(DocumentVisualHarness.Vector(7), 6).ToArray());
 
@@ -133,7 +153,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     [Fact]
     public async Task Exactly_At_The_Ceiling_Still_Answers()
     {
-        var file = _harness.SeedFile(_harness.OwnerA, "many-pages.pdf");
+        var file = Answerable(_harness.OwnerA, "many-pages.pdf");
         _harness.SeedVisualIndex(
             file, Enumerable.Repeat(DocumentVisualHarness.Vector(7), 5).ToArray());
 
@@ -149,7 +169,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     [Fact]
     public async Task Disabled_Reports_Unavailable_And_Reads_Nothing()
     {
-        var file = _harness.SeedFile(_harness.OwnerA, "doc.pdf");
+        var file = Answerable(_harness.OwnerA, "doc.pdf");
         _harness.SeedVisualIndex(file, new[] { DocumentVisualHarness.Vector(7) });
 
         var result = await SearchAsync(
@@ -171,10 +191,10 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     [Fact]
     public async Task A_Malformed_Embedding_Row_Is_Skipped_Not_Guessed_At()
     {
-        var good = _harness.SeedFile(_harness.OwnerA, "good.pdf");
+        var good = Answerable(_harness.OwnerA, "good.pdf");
         _harness.SeedVisualIndex(good, new[] { DocumentVisualHarness.Vector(7, 0.8f) });
 
-        var broken = _harness.SeedFile(_harness.OwnerA, "broken.pdf");
+        var broken = Answerable(_harness.OwnerA, "broken.pdf");
         _harness.SeedVisualIndex(broken, new[] { DocumentVisualHarness.Vector(7) });
 
         // Corrupt the strongest match's bytes. A corruption is repaired by
@@ -200,7 +220,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     {
         for (var i = 0; i < 6; i++)
         {
-            var file = _harness.SeedFile(_harness.OwnerA, $"doc-{i}.pdf");
+            var file = Answerable(_harness.OwnerA, $"doc-{i}.pdf");
             // Deliberate TIES: RRF and the evidence gate above this are unstable
             // if equal scores come back in a different order each run.
             _harness.SeedVisualIndex(file, new[] { DocumentVisualHarness.Vector(7, 0.6f) });
@@ -217,7 +237,7 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
     [Fact]
     public async Task A_Hit_Carries_No_Pixels_And_No_Vector()
     {
-        var file = _harness.SeedFile(_harness.OwnerA, "doc.pdf");
+        var file = Answerable(_harness.OwnerA, "doc.pdf");
         _harness.SeedVisualIndex(file, new[] { DocumentVisualHarness.Vector(7) });
 
         var result = await SearchAsync(_harness.OwnerA);
@@ -239,8 +259,8 @@ public sealed class DocumentVisualRetrievalTests : IDisposable
         // The shipped state of this release: a seam and a harness, no production
         // late-interaction model. It must be indistinguishable from "no late
         // interaction exists" as far as results are concerned.
-        var a = _harness.SeedFile(_harness.OwnerA, "a.pdf");
-        var b = _harness.SeedFile(_harness.OwnerA, "b.pdf");
+        var a = Answerable(_harness.OwnerA, "a.pdf");
+        var b = Answerable(_harness.OwnerA, "b.pdf");
         _harness.SeedVisualIndex(a, new[] { DocumentVisualHarness.Vector(7) });
         _harness.SeedVisualIndex(b, new[] { DocumentVisualHarness.Vector(7, 0.5f) });
 
