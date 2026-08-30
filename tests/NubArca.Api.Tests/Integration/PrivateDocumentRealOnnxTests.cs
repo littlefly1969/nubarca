@@ -40,6 +40,7 @@ namespace NubArca.Api.Tests.Integration;
 // refuses and which would make this test silently skip or silently fail
 // depending on whose machine it ran on. Unset means skipped, and the completion
 // report has to say so rather than claim a lane it did not run.
+[Collection(RealModelCollection.Name)]
 [Trait("Category", "External")]
 public sealed class PrivateDocumentRealOnnxTests : IDisposable
 {

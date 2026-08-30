@@ -35,6 +35,7 @@ namespace NubArca.Api.Tests.Integration;
 //
 // Step 3 is what makes this a measurement of NubArca rather than of a notebook.
 // A benchmark that reimplements the pipeline measures the reimplementation.
+[Collection(RealModelCollection.Name)]
 [Trait("Category", "External")]
 public sealed class DocumentVisualPhaseZeroTests : IDisposable
 {
