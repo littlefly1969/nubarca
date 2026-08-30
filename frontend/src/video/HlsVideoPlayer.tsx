@@ -2,7 +2,15 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { useI18n } from '../i18n';
 import { readDisplayContext, selectInitialLevel } from './hlsLevelSelection';
 import { EMPTY_BUDGET, classifyFatalError, planRecovery } from './hlsRecovery';
-import { nextPreparationDelayMs } from './preparationPolling';
+import {
+  INITIAL_POLL_STATE,
+  classifyVideoDelivery,
+  planNextProbe,
+  transportFailureVerdict,
+  type VideoDeliveryPollState,
+  type VideoDeliveryVerdict,
+} from './videoDelivery';
+import { videoPlaybackModeFor, type VideoPlaybackMode } from './webPlaybackMode';
 
 // Video-hls slice 3: playback element for GET /api/files/{id}/video, which now
 // speaks TWO contracts depending on the server's Media:VideoHlsProvider flag:
@@ -14,10 +22,15 @@ import { nextPreparationDelayMs } from './preparationPolling';
 // A cheap probe (GET with `Range: bytes=0-0`) classifies the mode: the legacy
 // stream answers 206 with one byte, the master answers 200 with a tiny text
 // body, "preparing" answers 202. While preparing we show the poster with a
-// status overlay and re-probe on a bounded ramp that honours the server's
-// Retry-After — the server enqueues the generation job on the first request,
-// so polling is passive (each poll is also the idempotent re-enqueue that
-// self-heals a dead job).
+// status overlay and re-probe on a ramp that honours the server's Retry-After
+// — the server enqueues the generation job on the first request, so polling is
+// passive (each poll is also the idempotent re-enqueue that self-heals a dead
+// job).
+//
+// The classification and the retry policy are NOT web-specific and do not live
+// here: they are the canonical /video contract in videoDelivery.ts, shared
+// byte-for-byte with the mobile and TV clients (VIDEO-DELIVERY-PARITY-01).
+// What is web-specific is browser/session auth, hls.js and the error UI.
 //
 // HLS attachment: Safari plays HLS natively (canPlayType), everyone else gets
 // hls.js over MSE. hls.js is imported DYNAMICALLY so the ~200 KB library is
@@ -29,7 +42,7 @@ import { nextPreparationDelayMs } from './preparationPolling';
 // display and the connection (hlsLevelSelection.ts), not at whatever the
 // playlist happened to list first. ABR owns every switch after that.
 
-export type VideoPlaybackMode = 'preparing' | 'hls' | 'direct' | 'error';
+export type { VideoPlaybackMode };
 
 // Pure resolution of a semantic-handoff timestamp against the real duration.
 // Exported for tests. Returns the seconds to seek to, or null when there is
@@ -55,34 +68,27 @@ export function resolveInitialSeekSeconds(
   return Math.min(seconds, maxSeconds);
 }
 
-/** Classification plus, for a 202, whatever the server said about waiting. */
-export interface VideoProbeResult {
-  mode: VideoPlaybackMode;
-  retryAfter: string | null;
-}
-
-// Exported for tests. Same-origin cookies flow automatically.
+/**
+ * Probe once and return the CANONICAL verdict; the caller owns the retry loop.
+ * Exported for tests. Same-origin cookies flow automatically.
+ */
 export async function probeVideoPlayback(
   url: string,
   signal?: AbortSignal,
-): Promise<VideoProbeResult> {
+): Promise<VideoDeliveryVerdict> {
   let res: Response;
   try {
     res = await fetch(url, { headers: { Range: 'bytes=0-0' }, signal });
   } catch {
-    return { mode: 'error', retryAfter: null };
+    // No response head at all — including an aborted request, which the effect
+    // below discards before this verdict can be acted on.
+    return transportFailureVerdict();
   }
-  if (res.status === 202) {
-    return { mode: 'preparing', retryAfter: res.headers.get('retry-after') };
-  }
-  if (res.status !== 200 && res.status !== 206) {
-    return { mode: 'error', retryAfter: null };
-  }
-  const type = res.headers.get('content-type') ?? '';
-  return {
-    mode: type.toLowerCase().includes('mpegurl') ? 'hls' : 'direct',
-    retryAfter: null,
-  };
+  return classifyVideoDelivery(
+    res.status,
+    res.headers.get('content-type'),
+    res.headers.get('retry-after'),
+  );
 }
 
 /**
@@ -219,26 +225,34 @@ export function HlsVideoPlayer({
     }
   }, []);
 
-  // Probe on mount / file change; while preparing, re-probe on the bounded
-  // ramp. Every timer and the in-flight request are torn down on unmount or
-  // file change, so nothing from a closed video can land on a new one.
+  // Probe on mount / file change; the SHARED policy (videoDelivery.ts) decides
+  // what happens next, so this loop is the same one mobile and TV run: a 202
+  // re-probes on the 1.5/2.5/5 s ramp with Retry-After as a floor and never
+  // expires (a long transcode is not an error), a transient boundary is
+  // retried a bounded number of times WITHOUT flashing an error the retry is
+  // about to clear, and every other verdict settles at once. Every timer and
+  // the in-flight request are torn down on unmount or file change, so nothing
+  // from a closed video can land on a new one.
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
+    let poll: VideoDeliveryPollState = INITIAL_POLL_STATE;
     setMode('probing');
     setRenditionHeight(null);
     setHasFrame(false);
     seekAppliedRef.current = false;
 
     const probe = async () => {
-      const result = await probeVideoPlayback(videoUrl, controller.signal);
+      const verdict = await probeVideoPlayback(videoUrl, controller.signal);
       if (controller.signal.aborted) return;
-      setMode(result.mode);
-      if (result.mode !== 'preparing') return;
-      const delay = nextPreparationDelayMs(attempt, result.retryAfter);
-      attempt += 1;
-      timer = setTimeout(() => { void probe(); }, delay);
+      const plan = planNextProbe(verdict, poll);
+      if (plan.action === 'settle') {
+        setMode(videoPlaybackModeFor(plan.verdict));
+        return;
+      }
+      if (plan.surface === 'preparing') setMode('preparing');
+      poll = plan.state;
+      timer = setTimeout(() => { void probe(); }, plan.delayMs);
     };
     void probe();
 

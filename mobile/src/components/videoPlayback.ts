@@ -1,4 +1,5 @@
 import type { VideoPlayerStatus } from 'expo-video';
+import type { VideoProbeOutcome } from '../media/videoProbe.ts';
 
 export type VideoProbeState =
   | 'idle'
@@ -22,6 +23,38 @@ export interface PlayerStatusSource {
 export interface PlayerStatusSnapshot {
   player: PlayerStatusSource;
   status: VideoPlayerStatus;
+}
+
+/**
+ * The MOBILE presentation of a canonical delivery verdict.
+ *
+ * The transport verdicts stay distinct (VIDEO-DELIVERY-PARITY-01); what this
+ * mapping decides is only how each one is DRAWN, and that is allowed to differ
+ * per consumer:
+ *   not-found / protocol-error → "unavailable": nothing to retry, so the slide
+ *     shows the poster and says so rather than offering a pointless button.
+ *   auth-error → "error": retrying is genuinely useful here, because the retry
+ *     path re-reads the LIVE cookie jar (refreshVideoSourceCookie), so a
+ *     session renewed mid-viewer recovers on one tap.
+ *   transient-error → "error": the shared bounded retry is already exhausted
+ *     by the time this arrives, so the user gets the retry action.
+ *   cancelled → null: an unmount is not a verdict. It must never reach state.
+ */
+export function probeStateForOutcome(outcome: VideoProbeOutcome): VideoProbeState | null {
+  switch (outcome.kind) {
+    case 'ready':
+      return 'ready';
+    case 'preparing':
+      return 'preparing';
+    case 'not-found':
+    case 'protocol-error':
+      return 'unavailable';
+    case 'auth-error':
+    case 'transient-error':
+      return 'error';
+    case 'cancelled':
+      return null;
+  }
 }
 
 export interface AuthenticatedVideoSource {

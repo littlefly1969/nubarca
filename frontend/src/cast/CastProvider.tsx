@@ -7,7 +7,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { currentUser, hasPermission } from '../auth/permissions';
-import { nextPreparationDelayMs } from '../video/preparationPolling';
+import { nextPreparationDelayMs } from '../video/videoDelivery';
 import {
   browserSupportsCastSender,
   isReceiverReachableOrigin,

@@ -6,6 +6,32 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Videos play the same way everywhere
+
+- **Videos play on Android again.** The phone app used to decide for itself
+  whether a video was playable by looking at the content type the server
+  happened to label the stream with — and a stream labelled anything other than
+  `video/...`, or not labelled at all, was written off as unavailable even
+  though the server had already authorised it and was serving it. That check is
+  gone. If the server says here is your video, it is your video.
+- **One contract, three players.** The web viewer, the phone and the television
+  now read the `/video` answer with the same rules, from the same file: the same
+  test matrix runs in all three and fails in all three if any one of them starts
+  to disagree. Before this, each had grown its own slightly different idea of
+  what the same response meant, which is why a video could play on a television
+  and refuse on a phone.
+- **A slow conversion is no longer mistaken for a broken one.** When a video is
+  still being prepared for adaptive playback, every client now waits the same
+  way — quickly at first, then backing off, and never longer than the server
+  asks for. The phone used to give up after ten tries and show an error for a
+  video that was simply taking a while; it now waits for as long as the work
+  actually takes, and stops the moment you leave the screen.
+- **A momentary network hiccup no longer looks like a missing file.** A dropped
+  connection or a busy server is retried quietly a few times before anything is
+  said, instead of replacing your video with an error the next attempt would
+  have cleared. A file that really is gone, a session that has expired and a
+  server that is briefly unhappy stay three different things.
+
 ### Find a document by how its pages look
 
 - **Your documents can now be found by their layout, not only by their words.**

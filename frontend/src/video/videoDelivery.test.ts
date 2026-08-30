@@ -5,7 +5,7 @@ import {
   backoffStepMs,
   nextPreparationDelayMs,
   parseRetryAfterMs,
-} from './preparationPolling';
+} from './videoDelivery';
 
 describe('parseRetryAfterMs', () => {
   it('reads delta-seconds', () => {

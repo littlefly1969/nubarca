@@ -1,0 +1,61 @@
+{
+  "$comment": [
+    "NubArca cross-consumer /video parity matrix (VIDEO-DELIVERY-PARITY-01).",
+    "SINGLE SOURCE OF TRUTH for what a probed response means. frontend, mobile",
+    "and tv each read THIS file and push every row through their own public",
+    "classifier AND their own runtime adapter, so a consumer can no longer",
+    "diverge silently: a changed rule fails in all three suites at once.",
+    "Adding a row here is adding it to all three."
+  ],
+  "classification": [
+    { "status": 202, "contentType": null, "kind": "preparing" },
+    { "status": 202, "contentType": "text/plain", "kind": "preparing" },
+
+    { "status": 200, "contentType": "application/vnd.apple.mpegurl", "kind": "ready", "mode": "hls" },
+    { "status": 200, "contentType": "application/vnd.apple.mpegurl; charset=utf-8", "kind": "ready", "mode": "hls" },
+    { "status": 200, "contentType": "APPLICATION/VND.APPLE.MPEGURL", "kind": "ready", "mode": "hls" },
+    { "status": 200, "contentType": "Application/VND.Apple.MPEGURL; CHARSET=UTF-8", "kind": "ready", "mode": "hls" },
+    { "status": 206, "contentType": "application/vnd.apple.mpegurl", "kind": "ready", "mode": "hls" },
+
+    { "status": 200, "contentType": "video/mp4", "kind": "ready", "mode": "progressive" },
+    { "status": 200, "contentType": "video/quicktime", "kind": "ready", "mode": "progressive" },
+    { "status": 200, "contentType": "application/octet-stream", "kind": "ready", "mode": "progressive" },
+    { "status": 200, "contentType": null, "kind": "ready", "mode": "progressive" },
+    { "status": 206, "contentType": "video/mp4", "kind": "ready", "mode": "progressive" },
+    { "status": 206, "contentType": "video/quicktime", "kind": "ready", "mode": "progressive" },
+    { "status": 206, "contentType": "application/octet-stream", "kind": "ready", "mode": "progressive" },
+    { "status": 206, "contentType": null, "kind": "ready", "mode": "progressive" },
+
+    { "status": 401, "contentType": null, "kind": "auth-error" },
+    { "status": 403, "contentType": "text/html", "kind": "auth-error" },
+
+    { "status": 404, "contentType": "application/json", "kind": "not-found" },
+
+    { "status": 408, "contentType": null, "kind": "transient-error" },
+    { "status": 425, "contentType": null, "kind": "transient-error" },
+    { "status": 429, "contentType": null, "kind": "transient-error" },
+    { "status": 500, "contentType": null, "kind": "transient-error" },
+    { "status": 502, "contentType": null, "kind": "transient-error" },
+    { "status": 503, "contentType": null, "kind": "transient-error" },
+
+    { "status": 302, "contentType": null, "kind": "protocol-error" },
+    { "status": 400, "contentType": null, "kind": "protocol-error" },
+    { "status": 418, "contentType": null, "kind": "protocol-error" },
+    { "status": 0, "contentType": null, "kind": "protocol-error" }
+  ],
+  "retryAfter": [
+    { "$case": "the header is a FLOOR: it wins when it exceeds the ramp step", "attempt": 0, "header": "2", "delayMs": 2000 },
+    { "$case": "the ramp overtakes a small constant hint", "attempt": 1, "header": "2", "delayMs": 2500 },
+    { "$case": "and keeps the 5s cap", "attempt": 9, "header": "2", "delayMs": 5000 },
+    { "$case": "no header: the pure local ramp", "attempt": 0, "header": null, "delayMs": 1500 },
+    { "$case": "no header, second step", "attempt": 1, "header": null, "delayMs": 2500 },
+    { "$case": "no header, capped step", "attempt": 2, "header": null, "delayMs": 5000 },
+    { "$case": "no header, still capped", "attempt": 40, "header": null, "delayMs": 5000 },
+    { "$case": "junk header falls back to the ramp", "attempt": 0, "header": "soon", "delayMs": 1500 },
+    { "$case": "empty header falls back to the ramp", "attempt": 1, "header": "   ", "delayMs": 2500 },
+    { "$case": "HTTP-date form is not honoured, ramp only", "attempt": 0, "header": "Wed, 21 Oct 2026 07:28:00 GMT", "delayMs": 1500 },
+    { "$case": "negative header falls back to the ramp", "attempt": 0, "header": "-5", "delayMs": 1500 },
+    { "$case": "an absurd header is clamped, not obeyed", "attempt": 0, "header": "86400", "delayMs": 30000 },
+    { "$case": "a long but legal wait is honoured", "attempt": 0, "header": "12", "delayMs": 12000 }
+  ]
+}
