@@ -28,24 +28,26 @@ import argparse
 import json
 import os
 import resource
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
+from huggingface_hub import snapshot_download
 
-def weight_bytes(*repos: str) -> int:
+
+def weight_bytes(*repos: tuple[str, str]) -> int:
     """Bytes actually on disk for the adapter and its backbone.
 
     Both, because an adapter's own size is a misleading number: 72 MB of LoRA is
     only runnable on top of the backbone it was trained against, and what an
     operator has to host is the sum.
     """
-    from huggingface_hub import snapshot_download
-
     total = 0
-    for repo in repos:
+    for repo, revision in repos:
         if not repo:
             continue
-        root = snapshot_download(repo)
+        root = snapshot_download(repo, revision=revision or None)
         for base, _, files in os.walk(root):
             for name in files:
                 path = os.path.join(base, name)
@@ -66,6 +68,7 @@ def main() -> int:
     parser.add_argument("--revision", required=True)
     parser.add_argument("--license", required=True)
     parser.add_argument("--base-model", default="")
+    parser.add_argument("--base-revision", default="")
     parser.add_argument("--batch", type=int, default=1)
     args = parser.parse_args()
 
@@ -78,11 +81,35 @@ def main() -> int:
     manifest = json.loads((work / "pages.json").read_text())
     queries = [q for q in (work / "queries.txt").read_text().splitlines() if q.strip()]
 
-    print(f"loading {args.model}@{args.revision[:12]} on CPU", flush=True)
+    # BOTH REVISIONS PINNED, SEPARATELY.
+    #
+    # The candidate is a LoRA adapter over a different repository, and PEFT
+    # resolves the backbone by the name in `adapter_config.json` while
+    # forwarding the ADAPTER's revision to it — a revision that does not exist
+    # over there, so the load fails looking for weights at the wrong commit.
+    # Materialising a local adapter copy that points at the already-pinned local
+    # backbone keeps both commits explicit instead of letting one of them float.
+    adapter_dir = snapshot_download(args.model, revision=args.revision)
+    base_dir = snapshot_download(args.base_model, revision=args.base_revision) \
+        if args.base_model else None
+
+    local_adapter = Path(tempfile.mkdtemp(prefix="nubarca-candidate-")) / "adapter"
+    shutil.copytree(adapter_dir, local_adapter, symlinks=False)
+    if base_dir:
+        config_path = local_adapter / "adapter_config.json"
+        config = json.loads(config_path.read_text())
+        config["base_model_name_or_path"] = base_dir
+        config_path.write_text(json.dumps(config))
+
+    print(
+        f"loading {args.model}@{args.revision[:12]} "
+        f"over {args.base_model}@{args.base_revision[:12]} on CPU",
+        flush=True,
+    )
     model = ColIdefics3.from_pretrained(
-        args.model, revision=args.revision, torch_dtype=torch.float32, device_map="cpu"
+        str(local_adapter), dtype=torch.float32, device_map="cpu"
     ).eval()
-    processor = ColIdefics3Processor.from_pretrained(args.model, revision=args.revision)
+    processor = ColIdefics3Processor.from_pretrained(str(local_adapter))
 
     parameters = sum(p.numel() for p in model.parameters())
     print(f"parameters {parameters:,}", flush=True)
@@ -132,7 +159,8 @@ def main() -> int:
         "revision": args.revision,
         "license": args.license,
         "parameters": parameters,
-        "weightBytes": weight_bytes(args.model, args.base_model),
+        "weightBytes": weight_bytes(
+            (args.model, args.revision), (args.base_model, args.base_revision)),
         "dimension": dimension,
         "meanVectorsPerPage": mean_vectors,
         # float32 is what NubArca stores. The float16 question is deliberately
