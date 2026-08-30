@@ -183,8 +183,16 @@ public sealed class DocumentVisualPhaseZeroTests : IDisposable
         CandidateReport? report = null;
         if (haveCandidate)
         {
+            // Case-INSENSITIVE on purpose: the report is written by a Python
+            // script in camelCase, and the default matcher is case-sensitive —
+            // which does not fail, it silently deserializes every field to its
+            // default and produces a candidate with dimension zero.
             report = JsonSerializer.Deserialize<CandidateReport>(
-                await File.ReadAllTextAsync(vectorsPath))!;
+                await File.ReadAllTextAsync(vectorsPath),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            Assert.True(report.Dimension > 0, "the candidate report did not deserialize");
+            Assert.NotEmpty(report.Pages);
+            Assert.NotEmpty(report.Queries);
             late = SeedLateProfile(report.Dimension);
             LoadMultiVectors(report, late, files);
 
@@ -205,6 +213,16 @@ public sealed class DocumentVisualPhaseZeroTests : IDisposable
         var dense = await EvaluateAsync(models!, ai, siglip, lateProfile: null);
         Report("dense-visual (SigLIP2)", dense);
 
+        // DOES THE CORPUS CARRY A VISUAL SIGNAL AT ALL?
+        //
+        // A benchmark that cannot detect a difference is not evidence that there
+        // is none, so before comparing two models the lane reports what the
+        // dense pass actually discriminates: the candidate documents each
+        // question produced. If every query returns the same set, the pages do
+        // not differ enough for any visual model to separate them, and a "no
+        // gain" result says more about the corpus than about the candidate.
+        await ReportVisualDiscriminationAsync(models!, ai, siglip);
+
         if (late is null)
         {
             _output.WriteLine(
@@ -223,6 +241,12 @@ public sealed class DocumentVisualPhaseZeroTests : IDisposable
 
         var reranked = await EvaluateAsync(models!, ai, siglip, late, provider);
         Report("dense + late-interaction", reranked);
+
+        // THE RERANKER ACTUALLY ENGAGED. Identical rankings are a perfectly
+        // possible result — and they are also what a silently-skipped second
+        // stage looks like. Without this the report could not tell "measured, no
+        // difference" from "never ran", and only one of those is a measurement.
+        Assert.Equal(DocumentVisualModes.LateInteraction, reranked.Mode);
 
         // ---- MaxSim cost, measured on the real stored vectors -----------------
         var maxSimMs = await MeasureMaxSimAsync(report!, late);
@@ -318,6 +342,36 @@ public sealed class DocumentVisualPhaseZeroTests : IDisposable
         stopwatch.Stop();
 
         return (double)stopwatch.ElapsedMilliseconds / runs;
+    }
+
+    private async Task ReportVisualDiscriminationAsync(
+        string modelDir, IOptions<AiOptions> ai, AiProfile siglip)
+    {
+        var visual = Options.Create(new DocumentVisualOptions
+        {
+            Enabled = true,
+            DenseProfileKey = siglip.Key,
+        });
+
+        var retriever = DocumentVisualPhaseZeroRetriever.Build(_harness, ai, visual, modelDir);
+        var names = _harness.Db.FileItems.ToDictionary(f => f.Id, f => f.Name);
+        var sets = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var golden in DocumentVisualGoldenCorpus.Cases)
+        {
+            var result = await retriever.RetrieveAsync(
+                new DocumentVisualQuery(_harness.OwnerA, golden.Query, 60, 8));
+            var documents = result.CandidateFileIds
+                .Select(id => names.TryGetValue(id, out var n) ? n : "?")
+                .ToList();
+            sets.Add(string.Join("|", documents));
+            _output.WriteLine(
+                $"  visual candidates for \"{golden.Query}\" [{result.Mode}]: "
+                + $"[{string.Join(", ", documents.Take(4))}]");
+        }
+
+        _output.WriteLine(
+            $"visual_candidate_sets_distinct={sets.Count}/{DocumentVisualGoldenCorpus.Cases.Count}");
     }
 
     private void Report(string label, DocumentVisualModeReport report)

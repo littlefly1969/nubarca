@@ -143,3 +143,42 @@ internal sealed class PrecomputedLateInteractionProvider : IVisualLateInteractio
             new MultiVectorEmbeddingResult(vectors, _dimension, profile.Key));
     }
 }
+
+/// The dense visual retriever alone, for reporting what a corpus discriminates.
+internal static class DocumentVisualPhaseZeroRetriever
+{
+    internal static IOwnerDocumentVisualRetriever Build(
+        DocumentVisualHarness harness,
+        IOptions<AiOptions> ai,
+        IOptions<DocumentVisualOptions> visual,
+        string modelDir)
+    {
+        var serializer = new AiVectorSerializer();
+        var factory = new OnnxInferenceSessionFactory(
+            ai, NullLogger<OnnxInferenceSessionFactory>.Instance);
+        var images = new OnnxImageEmbedder(
+            ai, new OnnxImagePreprocessor(), NullLogger<OnnxImageEmbedder>.Instance, factory);
+        var queries = new OnnxTextEmbedder(ai, factory);
+
+        var backends = new AiBackendResolver(
+            ai,
+            new AiProfileRegistry(harness.Db, TimeProvider.System),
+            new IAiBackend[] { images, queries });
+
+        return new OwnerDocumentVisualRetriever(
+            harness.Db,
+            new DocumentVisualProfileResolver(
+                backends, new AiProfileRegistry(harness.Db, TimeProvider.System), visual),
+            harness.Renderers,
+            new DocumentVisualVectorIndexService(harness.Db, serializer),
+            serializer,
+            visual,
+            new VisualLateInteractionReranker(
+                harness.Db,
+                new AiProfileRegistry(harness.Db, TimeProvider.System),
+                serializer,
+                visual,
+                NullLogger<VisualLateInteractionReranker>.Instance),
+            NullLogger<OwnerDocumentVisualRetriever>.Instance);
+    }
+}
