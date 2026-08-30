@@ -1,68 +1,85 @@
-// Video preflight probe (acceptance contract fix).
+// Mobile video preflight probe — the React Native adapter over NubArca's
+// canonical /video delivery contract (media/videoDelivery.ts).
 //
-// WHY NOT AN ORDINARY GET: with Media__VideoHlsProvider disabled the owned
-// /api/files/{id}/video route IS the Range-enabled ORIGINAL — a plain GET
-// would start streaming the entire file into the probe. With the provider on,
-// the SAME extensionless route becomes an HLS master playlist that answers
-// 202 while the ladder prepares; shared /video is HLS-only by contract.
-// The probe therefore:
-//   * sends `Range: bytes=0-0` next to the exact session Cookie — a compliant
-//     server answers 206 with ONE byte; a non-compliant one answers 200, and
-//     the request is ABORTED the moment status + Content-Type are known, so a
-//     body is never buffered either way;
-//   * uses a FRESH AbortController per attempt and never touches res.body;
-//   * bounds EVERY attempt with attemptTimeoutMs — a fetch whose head never
-//     arrives cannot hold the probe forever (the timeout counts as ONE failed
-//     attempt inside the existing budget, it does not end the probe);
-//   * observes an optional caller signal: aborting it kills the active request
-//     AND the retry delay immediately, with NO further attempts;
-//   * retries only the "ladder still preparing" verdict (202), under a bounded
-//     attempt/retry budget, reporting each such verdict through onPhase so the
-//     caller can surface "preparing" while the loop is still running;
+// WHAT IS SHARED AND WHAT IS NOT (VIDEO-DELIVERY-PARITY-01): the status
+// classification, the HLS-vs-progressive discrimination, the Retry-After
+// parsing and the retry policy all live in videoDelivery.ts and are
+// byte-identical to the copies web and TV use. This file owns only what is
+// genuinely React-Native-specific:
+//   * the session Cookie header (RN has no shared cookie jar for fetch);
+//   * a FRESH AbortController per attempt, aborted the moment the response
+//     head is known, so a Range-enabled ORIGINAL is never streamed into the
+//     probe (with Media__VideoHlsProvider off, /video IS the original);
+//   * reading status + Content-Type into plain JS values BEFORE that abort —
+//     RN owns the Response implementation and may release its native header
+//     accessor once the request is aborted, which used to turn a real
+//     `200 application/vnd.apple.mpegurl` into `200` with no MIME;
+//   * a per-attempt wall-clock bound, so a black-holed connection cannot hold
+//     one attempt (and therefore the probe) forever;
+//   * caller cancellation: aborting the caller signal kills the active request
+//     AND collapses the pending retry delay, with no further attempts.
 //
-// Classification follows NubArca's real contracts, not URL shapes:
-//   202                                   → preparing (retry)
-//   404 / invalid media response           → unavailable
-//   401/403 or exhausted transient failure → retryable UI error
-//   206 + Content-Type video/*            → ready PROGRESSIVE (native original)
-//   200 + application/vnd.apple.mpegurl   → ready HLS (parameters after ';'
-//                                           are ignored — see below)
+// WHAT THIS FILE DELIBERATELY NO LONGER DOES:
+//   * it does not gate playability on the MIME. 200/206 is playable; the MIME
+//     only says HLS or progressive. `206 + application/octet-stream` and a 206
+//     with no Content-Type at all are progressive video, not "unavailable" —
+//     the old mobile-only rule made real videos permanently unplayable on
+//     device whenever the head arrived without the type.
+//   * it does not cap "preparing" at ten attempts. A long but healthy
+//     transcode is not an error; the loop ends on ready, on a terminal
+//     verdict, or when the caller cancels.
 //
 // The caller resolves the expo-video source FROM THE OUTCOME: shared media
-// keeps its server-provided album-scoped URL unchanged; owned media gains
-// contentType:'hls' only when the server said HLS. A different media URL is
-// never synthesized.
+// keeps its server-provided album-scoped URL unchanged; the probed URL is the
+// played URL. A different media URL is never synthesized.
+
+import {
+  INITIAL_POLL_STATE,
+  classifyVideoDelivery,
+  planNextProbe,
+  transportFailureVerdict,
+  type VideoDeliveryMode,
+  type VideoDeliveryPollState,
+  type VideoDeliveryVerdict,
+} from './videoDelivery.ts';
+
+export type {
+  VideoDeliveryMode,
+  VideoDeliveryVerdict,
+} from './videoDelivery.ts';
 
 export const VIDEO_PROBE_RANGE = 'bytes=0-0';
-export const VIDEO_PROBE_RETRY_MS = 3000;
-export const VIDEO_PROBE_MAX_ATTEMPTS = 10;
 // Wall-clock bound for ONE network attempt. Generous — real servers answer
 // heads in well under a second — but finite, so a black-holed connection can
-// never hold an attempt (and therefore the probe) indefinitely.
+// never hold an attempt indefinitely. This is a REQUEST timeout, not a loop
+// budget: a timed-out attempt is a transient failure and follows the shared
+// transient retry policy like any other.
 export const VIDEO_PROBE_ATTEMPT_TIMEOUT_MS = 5000;
 
-/** The exact HLS MIME NubArca's VideoHlsServingService declares. */
-export const NUBARCA_HLS_MIME = 'application/vnd.apple.mpegurl';
-
-export type VideoContainer = 'hls' | 'progressive';
-export type VideoProbePhase = 'ready' | 'preparing' | 'unavailable' | 'error';
+/** The container the player must be told about. */
+export type VideoContainer = VideoDeliveryMode;
 
 export interface VideoProbeSource {
   uri: string;
   headers: { cookie: string };
 }
 
-export interface VideoProbeOutcome {
-  phase: VideoProbePhase;
-  container?: VideoContainer;
-  /** Internal retry hint. Resolved public outcomes never need to preserve it. */
-  retryable?: boolean;
-}
+/**
+ * The settled probe result: a canonical delivery verdict, or `cancelled`.
+ *
+ * Cancellation is its OWN outcome. Folding it into "unavailable" made an
+ * unmount indistinguishable from a missing file, and a caller that raced the
+ * teardown could paint an error for a video that was perfectly fine.
+ */
+export type VideoProbeOutcome = VideoDeliveryVerdict | { kind: 'cancelled' };
 
 export interface ExpoVideoSource {
   uri: string;
   headers: { cookie: string };
-  contentType?: 'hls';
+  // ALWAYS declared, for progressive as much as for HLS: ExoPlayer cannot
+  // infer a container from an extension-less /video URL, and omitting the hint
+  // left it guessing on exactly the sources this probe had already identified.
+  contentType: VideoDeliveryMode;
 }
 
 export interface ProbeResponseLike {
@@ -79,31 +96,28 @@ export type VideoProbeFetch = (
 
 export interface VideoProbeDeps {
   fetchImpl?: VideoProbeFetch;
-  retryMs?: number;
-  maxAttempts?: number;
   /**
-   * Observes the transient "still preparing" verdict AS IT HAPPENS. The
-   * promise settles only on the terminal outcome, so without this callback a
-   * 202 stays invisible behind the internal retry loop and the caller cannot
-   * show its preparing state at all. Fired at most once per retried 202 (the
-   * budget-exhausting one resolves straight to unavailable); terminal phases
-   * are delivered through the promise instead.
+   * Observes the "still preparing" verdict AS IT HAPPENS. The promise settles
+   * only on the terminal outcome, so without this callback a 202 stays
+   * invisible behind the retry loop and the caller cannot show its preparing
+   * state at all. Fired before every preparing wait.
    */
-  onPhase?: (phase: VideoProbePhase) => void;
+  onPreparing?: () => void;
   /**
-   * CALLER cancellation (MOBILE-VIDEO-PROBE-LIFECYCLE-01): aborting this
-   * signal terminates the WHOLE probe immediately — the active attempt is
-   * aborted through its own controller and the pending retry delay collapses.
-   * Deliberately distinct from attemptTimeoutMs, which only fails one attempt.
+   * CALLER cancellation: aborting this signal terminates the WHOLE probe
+   * immediately — the active attempt is aborted through its own controller and
+   * the pending retry delay collapses. Deliberately distinct from
+   * attemptTimeoutMs, which only fails one attempt.
    */
   signal?: AbortSignal;
-  /**
-   * Per-attempt wall-clock bound: an attempt whose HEAD has not arrived within
-   * this budget gets its signal aborted and counts as ONE failed attempt (the
-   * normal retry budget still applies). Defaults to
-   * VIDEO_PROBE_ATTEMPT_TIMEOUT_MS, so no network attempt waits indefinitely.
-   */
+  /** Per-attempt wall-clock bound. Defaults to VIDEO_PROBE_ATTEMPT_TIMEOUT_MS. */
   attemptTimeoutMs?: number;
+  /**
+   * The retry wait. Injected ONLY so tests can assert the canonical backoff
+   * schedule without sleeping through it; production always uses the real
+   * abortable sleep, and the delays themselves come from the shared policy.
+   */
+  sleepImpl?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }
 
 function linkCallerAbort(
@@ -122,7 +136,7 @@ function linkCallerAbort(
 
 /** Retry delay that collapses IMMEDIATELY when the caller cancels — a plain
  * `setTimeout` sleep would keep waiting through unmount/logout. */
-function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve();
@@ -156,56 +170,10 @@ function readHeader(res: ProbeResponseLike, name: string): string | null {
   return null;
 }
 
-/** Pure verdict for one probed response. */
-export function classifyVideoProbe(
-  status: number,
-  contentType: string | null,
-): VideoProbeOutcome {
-  if (status === 202) return { phase: 'preparing' };
-
-  // A temporary server/network boundary is not evidence that the media does
-  // not exist. Keep it retryable inside the bounded probe and surface a retry
-  // action if the budget is exhausted.
-  if (status === 408 || status === 425 || status === 429 || status >= 500) {
-    return { phase: 'error', retryable: true };
-  }
-  if (status === 401 || status === 403) return { phase: 'error' };
-
-  if (status === 206) {
-    // Partial content of a REAL media stream: native progressive playback.
-    const ct = (contentType ?? '').trim();
-    if (/^video\//i.test(ct)) return { phase: 'ready', container: 'progressive' };
-    return { phase: 'unavailable' }; // ranged something that is not video
-  }
-
-  if (status === 200) {
-    // Compare ONLY the bare MIME type: ASP.NET Core materializes Results.Text
-    // responses as UTF-8 text, so the declared master type can arrive as
-    // "application/vnd.apple.mpegurl; charset=utf-8". RFC 9110 media types
-    // carry parameters after ';', and an exact match would downgrade a READY
-    // ladder to unavailable on a real server.
-    const mime = (contentType ?? '')
-      .split(';', 1)[0]
-      .trim()
-      .toLowerCase();
-    if (mime === NUBARCA_HLS_MIME) return { phase: 'ready', container: 'hls' };
-    const ctRaw = (contentType ?? '').trim();
-    if (/^video\//i.test(ctRaw)) {
-      // A 200 that ignored our single-byte range but IS native video: usable
-      // progressively — and the request was already aborted at header time,
-      // so the full body was never pulled into the client.
-      return { phase: 'ready', container: 'progressive' };
-    }
-  }
-
-  // 404 / 403 / anything else deliberate: no playback through this route.
-  return { phase: 'unavailable' };
-}
-
 /**
- * Run the bounded preflight against ONE source. Fresh AbortController per
- * attempt; each attempt is aborted right after the response head is known.
- * Only 202 keeps the loop alive (bounded by maxAttempts).
+ * Run the preflight against ONE source. Fresh AbortController per attempt;
+ * each attempt is aborted right after the response head is known; the shared
+ * policy (planNextProbe) decides what happens next.
  */
 export async function probeVideoSource(
   source: VideoProbeSource,
@@ -214,20 +182,24 @@ export async function probeVideoSource(
   const doFetch: VideoProbeFetch =
     deps.fetchImpl ??
     ((uri, init) => fetch(uri, init as RequestInit) as unknown as Promise<ProbeResponseLike>);
-  const retryMs = deps.retryMs ?? VIDEO_PROBE_RETRY_MS;
-  const maxAttempts = deps.maxAttempts ?? VIDEO_PROBE_MAX_ATTEMPTS;
+  const sleep = deps.sleepImpl ?? abortableSleep;
   const attemptTimeoutMs =
     deps.attemptTimeoutMs ?? VIDEO_PROBE_ATTEMPT_TIMEOUT_MS;
   const caller = deps.signal;
+  let poll: VideoDeliveryPollState = INITIAL_POLL_STATE;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  // Unbounded on purpose: only a terminal verdict or the CALLER ends this loop
+  // (see planNextProbe). Preparing has no attempt ceiling; every other verdict
+  // settles within the shared transient budget.
+  for (;;) {
     // Caller already gone (e.g. cancelled during the retry delay): nothing
     // further may start.
-    if (caller?.aborted) return { phase: 'unavailable' };
+    if (caller?.aborted) return { kind: 'cancelled' };
 
     const controller = new AbortController();
     let unlinkCaller: () => void = () => {};
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let verdict: VideoDeliveryVerdict;
 
     try {
       // Caller cancellation aborts THIS ATTEMPT'S controller — the fetch
@@ -239,47 +211,44 @@ export async function probeVideoSource(
         headers: { cookie: source.headers.cookie, range: VIDEO_PROBE_RANGE },
         signal: controller.signal,
       });
-      // Snapshot the response head BEFORE aborting. React Native owns the
-      // concrete Response implementation and may release its native header
-      // accessor as soon as the request is aborted. Aborting first therefore
-      // turned a real `200 application/vnd.apple.mpegurl` into `200` with a
-      // missing MIME, which our strict classifier correctly (but falsely)
-      // rejected as unavailable on physical Android.
+      // Snapshot the response head BEFORE aborting (see the file header).
       const status = res.status;
       const contentType = readHeader(res, 'content-type');
+      const retryAfter = readHeader(res, 'retry-after');
       // The head is now owned by plain JS values: stop the body transfer.
       controller.abort();
-      const outcome = classifyVideoProbe(status, contentType);
-      if (outcome.phase !== 'preparing' && !outcome.retryable) return outcome;
-      if (attempt >= maxAttempts) return { phase: 'error' };
-      // There IS going to be a wait: tell the caller now instead of hiding
-      // the preparing state until the loop finally settles.
-      if (outcome.phase === 'preparing') deps.onPhase?.(outcome.phase);
+      verdict = classifyVideoDelivery(status, contentType, retryAfter);
     } catch {
-      // WHY did this attempt die? Only a CALLER-triggered abort may terminate
-      // the whole probe from here:
-      //   * caller abort         → stop NOW: no retry, no delay;
-      //   * per-attempt timeout  → one FAILED attempt, budget still applies;
-      //   * transport failure    → existing retry behaviour.
-      if (caller?.aborted) return { phase: 'unavailable' };
-      if (attempt >= maxAttempts) return { phase: 'error' };
+      // Only a CALLER-triggered abort may terminate the whole probe from here.
+      // A per-attempt timeout or a transport failure is a transient boundary
+      // and gets the shared bounded retry, never a false "not found".
+      if (caller?.aborted) return { kind: 'cancelled' };
+      verdict = transportFailureVerdict();
     } finally {
       // Timers and listeners are released on EVERY exit path.
       if (timer !== undefined) clearTimeout(timer);
       unlinkCaller();
     }
 
+    const plan = planNextProbe(verdict, poll);
+    if (plan.action === 'settle') return plan.verdict;
+    // There IS going to be a wait: tell the caller now instead of hiding the
+    // preparing state until the loop finally settles. A silently retried
+    // transient blip leaves the current presentation alone.
+    if (plan.surface === 'preparing') deps.onPreparing?.();
+    poll = plan.state;
+
     // The wait before the next attempt must not outlive its caller either.
-    await abortableSleep(retryMs, caller);
+    await sleep(plan.delayMs, caller);
+    if (caller?.aborted) return { kind: 'cancelled' };
   }
-  return { phase: 'error' };
 }
 
 /**
  * Probe under a manager-owned AbortController — exactly the handle a screen
  * effect needs: `cancel()` (cleanup/unmount) kills the in-flight attempt and
  * any pending retry delay at once, and the settled outcome is safe to ignore
- * because a cancelled probe resolves to a non-mountable verdict anyway.
+ * because a cancelled probe resolves to `cancelled`, which mounts nothing.
  */
 export function createManagedProbe(
   source: VideoProbeSource,
@@ -291,17 +260,15 @@ export function createManagedProbe(
 }
 
 /**
- * Resolve the expo-video source FROM the probe outcome: null unless ready;
- * HLS gets the explicit container declaration, progressive stays native.
- * The media URL is always exactly the probed one — never synthesized.
+ * Resolve the expo-video source FROM the probe outcome: null unless ready.
+ * BOTH containers declare contentType, and the media URL is always exactly the
+ * probed one — never synthesized. Shared-album playback therefore keeps its
+ * server-provided album-scoped URL and never falls back to an owner route.
  */
 export function resolveExpoVideoSource(
   base: VideoProbeSource,
   outcome: VideoProbeOutcome,
 ): ExpoVideoSource | null {
-  if (outcome.phase !== 'ready' || outcome.container === undefined) return null;
-  if (outcome.container === 'hls') {
-    return { uri: base.uri, headers: base.headers, contentType: 'hls' as const };
-  }
-  return { uri: base.uri, headers: base.headers };
+  if (outcome.kind !== 'ready') return null;
+  return { uri: base.uri, headers: base.headers, contentType: outcome.mode };
 }

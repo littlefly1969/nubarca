@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { AppState, StyleSheet, Text, View, type AppStateStatus } from 'react-native';
 import { VideoView, useVideoPlayer, type VideoSource } from 'expo-video';
 import { getTvMediaHeaders, resolveTvMediaUrl } from '../api/client';
-import { probeTvVideo, type TvVideoMode } from '../video/probe';
+import { probeTvVideoDelivery, tvVideoModeFor, type TvVideoMode } from '../video/probe';
+import {
+  INITIAL_POLL_STATE,
+  planNextProbe,
+  type VideoDeliveryPollState,
+} from '../video/videoDelivery';
 import { beginVideoRotation, onVideoEnded, onVideoProgress } from '../lib/partySlideshow';
 import { VIDEO_SEEK_SECONDS } from '../video/remoteMap';
 import { SlideImage } from './SlideImage';
@@ -24,8 +29,10 @@ import {
 //
 // The /video endpoint speaks two contracts (see src/video/probe.ts); a 1-byte
 // probe decides how this component behaves:
-//   preparing → poster + status pill, re-probing every 5 s (each probe is also
-//               the server's idempotent lazy re-enqueue of the transcode job)
+//   preparing → poster + status pill, re-probing on the CANONICAL backoff
+//               (1.5s / 2.5s / 5s, with Retry-After as a floor) for as long as
+//               the transcode takes — each probe is also the server's
+//               idempotent lazy re-enqueue of the transcode job
 //   hls/direct → expo-video (ExoPlayer) with the explicit contentType hint —
 //               ExoPlayer cannot infer HLS from an extension-less /video URL
 //   error     → poster + error pill (the item is still navigable)
@@ -76,8 +83,6 @@ export interface TvVideoControls {
   // because the component that owns the position is the one being torn down.
   snapshot(): PlaybackSnapshot | null;
 }
-
-const PREPARING_POLL_MS = 5000;
 
 // Buffer budget for a 1080p Fire TV target. Chosen deliberately, not copied:
 //
@@ -182,20 +187,31 @@ export function TvVideoPlayer({
     );
   }, [mode, onReadyStateChange]);
 
-  // Probe on mount / item change; keep polling while the ladder is prepared.
+  // Probe on mount / item change; the SHARED policy (video/videoDelivery.ts)
+  // decides what happens next, so this loop is the same one web and mobile
+  // run: a 202 re-probes on the 1.5/2.5/5 s ramp with Retry-After as a floor
+  // and never expires, a transient boundary is retried a bounded number of
+  // times WITHOUT flashing an error the retry is about to clear, and every
+  // other verdict settles at once. Cleanup ends both the loop and the pending
+  // wait, so nothing from a closed item lands on the next one.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let poll: VideoDeliveryPollState = INITIAL_POLL_STATE;
     setMode('probing');
 
     const probe = async () => {
-      const result = await probeTvVideo(videoPath, personal);
+      const verdict = await probeTvVideoDelivery(videoPath, personal);
       if (cancelled) return;
-      tvDebug('video', 'probe', result);
-      setMode(result);
-      if (result === 'preparing') {
-        timer = setTimeout(() => { void probe(); }, PREPARING_POLL_MS);
+      tvDebug('video', 'probe', verdict.kind);
+      const plan = planNextProbe(verdict, poll);
+      if (plan.action === 'settle') {
+        setMode(tvVideoModeFor(plan.verdict));
+        return;
       }
+      if (plan.surface === 'preparing') setMode('preparing');
+      poll = plan.state;
+      timer = setTimeout(() => { void probe(); }, plan.delayMs);
     };
     void probe();
 

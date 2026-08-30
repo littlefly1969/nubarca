@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { HlsVideoPlayer, probeVideoPlayback, type VideoPlayerHandle } from './HlsVideoPlayer';
+import { videoPlaybackModeFor } from './webPlaybackMode';
 import { AuthedWrapper } from '../test-utils';
 
 // Scope note: hls.js is loaded through a dynamic import, and under this jsdom
@@ -41,48 +42,54 @@ async function renderPlayer(fileId = 'x') {
   return { view, video };
 }
 
-// Video-hls slice 3 — the /video contract probe: the endpoint speaks either
-// the adaptive contract (200 master playlist | 202 preparing) or the legacy
-// Range-enabled byte stream (206 for the 1-byte probe), and the player picks
-// its rendering mode from the answer.
+// The /video contract probe: the endpoint speaks either the adaptive contract
+// (200 master playlist | 202 preparing) or the legacy Range-enabled byte
+// stream (206 for the 1-byte probe). The probe returns the CANONICAL verdict
+// (videoDelivery.ts) and the player renders it through videoPlaybackModeFor —
+// the classification itself is proven row for row, against the same fixture
+// mobile and TV use, in videoDeliveryParity.test.ts.
 describe('probeVideoPlayback', () => {
-  it('classifies a 202 as preparing', async () => {
-    mockFetchResponse(202);
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('preparing');
-  });
-
-  it('carries the 202 Retry-After through to the caller', async () => {
+  it('classifies a 202 as preparing and parses its Retry-After', async () => {
     mockFetchResponse(202, { 'retry-after': '2' });
     expect(await probeVideoPlayback('/api/files/x/video'))
-      .toEqual({ mode: 'preparing', retryAfter: '2' });
+      .toEqual({ kind: 'preparing', retryAfterMs: 2000 });
   });
 
   it('reports a missing Retry-After as absent rather than inventing one', async () => {
     mockFetchResponse(202);
-    expect((await probeVideoPlayback('/api/files/x/video')).retryAfter).toBeNull();
+    expect(await probeVideoPlayback('/api/files/x/video'))
+      .toEqual({ kind: 'preparing', retryAfterMs: null });
   });
 
   it('classifies a 200 mpegurl master as hls', async () => {
     mockFetchResponse(200, { 'content-type': 'application/vnd.apple.mpegurl' });
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('hls');
+    expect(await probeVideoPlayback('/api/files/x/video'))
+      .toEqual({ kind: 'ready', mode: 'hls' });
   });
 
-  it('classifies a 206 byte-range answer as the legacy direct stream', async () => {
+  it('classifies a 206 byte-range answer as progressive', async () => {
     mockFetchResponse(206, { 'content-type': 'video/mp4' });
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('direct');
+    expect(await probeVideoPlayback('/api/files/x/video'))
+      .toEqual({ kind: 'ready', mode: 'progressive' });
   });
 
-  it('classifies a 200 video answer as the legacy direct stream', async () => {
+  it('classifies a 200 video answer as progressive', async () => {
     mockFetchResponse(200, { 'content-type': 'video/quicktime' });
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('direct');
+    expect(await probeVideoPlayback('/api/files/x/video'))
+      .toEqual({ kind: 'ready', mode: 'progressive' });
   });
 
-  it('classifies 404 and network failures as error', async () => {
+  it('keeps 404 and a network failure as DISTINCT verdicts', async () => {
+    // Both render as the viewer's one error state, but a missing file and a
+    // dropped connection are not the same thing: only the second is retried.
     mockFetchResponse(404);
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('error');
+    expect(await probeVideoPlayback('/api/files/x/video')).toEqual({ kind: 'not-found' });
+    expect(videoPlaybackModeFor({ kind: 'not-found' })).toBe('error');
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('net')));
-    expect((await probeVideoPlayback('/api/files/x/video')).mode).toBe('error');
+    expect(await probeVideoPlayback('/api/files/x/video'))
+      .toEqual({ kind: 'transient-error' });
+    expect(videoPlaybackModeFor({ kind: 'transient-error' })).toBe('error');
   });
 
   it('sends the 1-byte range header so a legacy probe never downloads the file', async () => {
@@ -160,6 +167,71 @@ describe('HlsVideoPlayer preparation state', () => {
       // Ready now: no further probes, however long we wait.
       await advance(60_000);
       expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rides out a transient 5xx without flashing an error, then settles', async () => {
+    // The shared policy (videoDelivery.ts): a temporary boundary is retried on
+    // the same ramp WITHOUT changing what is on screen, so a single flaky
+    // request never replaces the poster with an error the next probe clears.
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ status: 503, headers: new Headers() })
+        .mockResolvedValue({
+          status: 206,
+          headers: new Headers({ 'content-type': 'video/mp4' }),
+        });
+      vi.stubGlobal('fetch', fetchMock);
+      render(<AuthedWrapper><HlsVideoPlayer fileId="x" /></AuthedWrapper>);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+      // Still the poster, no error: the retry has not even run yet.
+      expect(screen.queryByRole('alert')).toBeNull();
+      await advance(1600);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(document.querySelector('video')).not.toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up on a persistent transient failure instead of retrying forever', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetchResponse(503);
+      render(<AuthedWrapper><HlsVideoPlayer fileId="x" /></AuthedWrapper>);
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+      // Three bounded retries on the shared ramp: 1.5s, 2.5s, 5s.
+      await advance(1600);
+      await advance(2600);
+      await advance(5100);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      await vi.waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+
+      // And then it stops — unlike a 202, which has no attempt ceiling.
+      await advance(60_000);
+      expect(fetch).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never gives up on a 202, however long the transcode takes', async () => {
+    vi.useFakeTimers();
+    try {
+      mockFetchResponse(202);
+      render(<AuthedWrapper><HlsVideoPlayer fileId="x" /></AuthedWrapper>);
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+      // Well past any attempt count a consumer might have invented.
+      for (let i = 0; i < 30; i += 1) await advance(5100);
+      expect(vi.mocked(fetch).mock.calls.length).toBeGreaterThan(20);
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByRole('status')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

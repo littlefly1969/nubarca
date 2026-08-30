@@ -283,6 +283,11 @@ through the keyed `ViewerProvider` remount.
 
 Viewer video preflight remains the bounded authenticated Range probe and runs
 only for the active slide; virtualized neighbours do not consume probe budgets.
+What that probe MEANS is not a per-client decision. The `/video` delivery
+contract — the `Range: bytes=0-0` probe, the status classification, the
+HLS-vs-progressive discrimination, `Retry-After` parsing and the retry policy —
+is defined once in `shared/video-delivery/videoDelivery.ts` and vendored
+byte-identically into the web, mobile and TV clients (see §12.5).
 The probe snapshots status and `Content-Type` from the response head before it
 aborts the body transfer. That ordering is part of the native boundary: a React
 Native response may release its header accessor on abort, and reading afterwards
@@ -297,9 +302,11 @@ resolves a playable source, native readiness is initialized from the current
 a replacement player cannot inherit stale status or errors. The native
 `VideoView` is mounted only for `readyToPlay`; probing, server preparation,
 native loading, unavailable and error states have explicit non-video surfaces.
-Only deliberate terminal media responses are unavailable. Exhausted 202
-preparation, 429/5xx responses and transport/timeouts are bounded, retryable
-errors with an explicit retry action.
+Only deliberate terminal media responses are unavailable. 429/5xx responses and
+transport/timeouts are bounded, retryable errors with an explicit retry action.
+A 202 has no attempt ceiling at all: a long but healthy transcode is not a
+failure, so preparation continues until the ladder is ready, a terminal verdict
+arrives, or the caller cancels.
 Only the active slide may play, inactive slides pause, and player replacement or
 unmount removes listeners and releases keep-awake/audio ownership.
 
@@ -843,6 +850,43 @@ HLS is a real optional 0.3.0 subsystem. With `Media:VideoHlsProvider=ffmpeg`:
 - `media.video.hls.backfill` prewarms eligible videos cooperatively.
 
 With provider `none`, NubArca does not generate HLS and clients use the direct stream contract. NubArca does not currently generate DASH.
+
+### 12.5 The client delivery contract
+
+`/video` answers one protocol, and it has one meaning. Web (`hls.js` /
+`HTMLVideoElement`), mobile (`expo-video`) and TV (`expo-video`) each preflight
+the authenticated URL with `Range: bytes=0-0` and turn the response head into a
+single canonical verdict:
+
+- `202` is *preparing*, and `Retry-After` is a **floor**, never an appointment:
+  the next probe waits `max(local ramp step, Retry-After)`, ramping 1.5 s /
+  2.5 s / 5 s and capping there. Preparation has **no attempt ceiling**.
+- `200` and `206` are always *ready*. The `Content-Type` is a **discriminator,
+  never a playability gate**: `application/vnd.apple.mpegurl` (case-insensitive,
+  parameters after `;` ignored) means HLS, and everything else — including a
+  head with no `Content-Type` at all — means progressive.
+- `404` is *not-found*, `401`/`403` is *auth-error*, `408`/`425`/`429`/`5xx` and
+  a failed transport are *transient-error* (bounded silent retry on the same
+  ramp, then surfaced), and any other status is *protocol-error*.
+
+The classifier, the `Retry-After` parser and the retry policy live in
+`shared/video-delivery/videoDelivery.ts` and are copied verbatim into
+`frontend/src/video/`, `mobile/src/media/` and `tv/src/video/` by
+`scripts/sync-video-delivery.sh`. The three projects are independent npm
+packages with independent toolchains and no workspace root, so the contract is
+vendored rather than resolved through a package — and each project's
+`videoDeliveryParity` test asserts both that its copy is byte-identical to the
+canonical file and that every row of `shared/video-delivery/parity-matrix.json`
+classifies identically there. `node scripts/video-parity-table.mjs` prints the
+resulting cross-consumer table.
+
+What may still differ per client is authentication (browser session,
+`NubArca.Auth`, `NubArca.TvSession`), the concrete `fetch` and cancellation
+wiring, the player runtime, and how each verdict is *drawn*. Both native
+clients pass an explicit `contentType` for **both** containers, because
+ExoPlayer cannot infer one from an extension-less `/video` URL. The probed URL
+is always the played URL: a shared-album source keeps its server-provided
+album-scoped route and is never rewritten to an owner route.
 
 ## 13. Media library and unified workspace
 
