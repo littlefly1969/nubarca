@@ -116,6 +116,19 @@ WHERE v.""ProfileId"" = @profileId
   AND f.""DeletedAt"" IS NULL
   AND f.""PrivateVaultId"" IS NULL
   AND f.""MediaLibraryState"" = {MediaLibraryScopePolicy.ActiveDbValue}
+  -- THE FILE STILL HAS AN AUTHORITATIVE READING. A visual index is a derivative
+  -- of a document whose authority is its TEXT, so when the current extraction is
+  -- superseded, failed or describes different bytes, the pixels stop being able
+  -- to introduce the file. Enforced HERE, above the LIMIT, and not left to the
+  -- scoped text pass afterwards: by then the candidate has already displaced
+  -- another document from a bounded list.
+  AND EXISTS (
+      SELECT 1 FROM document_texts t
+      WHERE t.""FileItemId"" = f.""Id""
+        AND t.""OwnerUserId"" = @ownerId
+        AND t.""IsCurrent""
+        AND t.""Status"" = 'completed'
+        AND t.""SourceBlobObjectId"" = f.""BlobObjectId"")
 ORDER BY score DESC, u.""Id""
 LIMIT @take;";
 

@@ -63,7 +63,13 @@ public sealed class DocumentVisualRealOnnxTests
         Enabled = true,
         Provider = AiProviders.Onnx,
         MaxConcurrency = 1,
-        TimeoutSeconds = 120,
+        // GENEROUS ON PURPOSE. The FP32 text tower is ~2.8 GB of external data,
+        // and ONNX Runtime's FIRST call pays session construction and graph
+        // optimization on top of the inference itself — minutes on a cold CPU.
+        // Production bounds this with `Ai__TimeoutSeconds` against a warm,
+        // preloaded session; a measurement lane that inherited that bound would
+        // be timing the loader and calling it a model failure.
+        TimeoutSeconds = 900,
         Onnx = new AiOnnxOptions { ModelDir = modelDir },
     };
 
@@ -151,15 +157,28 @@ public sealed class DocumentVisualRealOnnxTests
             museum near the river opens at ten.
             """);
 
+        // COLD AND WARM, REPORTED SEPARATELY, because the first call is almost
+        // entirely ONNX Runtime building a session over gigabytes of external
+        // data — minutes for the FP32 text tower — and quoting that as "query
+        // embedding latency" would tell an operator their search takes two
+        // minutes when production preloads the session at startup and answers in
+        // milliseconds. Both numbers are real; only one of them is a latency.
         var stopwatch = Stopwatch.StartNew();
         var tableVector = (await images.EmbedImageAsync(table, profile)).Vector;
-        var imageMs = stopwatch.ElapsedMilliseconds;
+        var imageColdMs = stopwatch.ElapsedMilliseconds;
+
+        stopwatch.Restart();
         var proseVector = (await images.EmbedImageAsync(prose, profile)).Vector;
+        var imageWarmMs = stopwatch.ElapsedMilliseconds;
 
         stopwatch.Restart();
         var question = (await text.EmbedTextAsync(
             "a table of quarterly revenue and costs", profile)).Vector;
-        var queryMs = stopwatch.ElapsedMilliseconds;
+        var queryColdMs = stopwatch.ElapsedMilliseconds;
+
+        stopwatch.Restart();
+        _ = await text.EmbedTextAsync("a page of ordinary prose", profile);
+        var queryWarmMs = stopwatch.ElapsedMilliseconds;
 
         // The contract, asserted rather than assumed.
         Assert.Equal(DocumentVisualProfiles.DenseDimension, tableVector.Length);
@@ -172,7 +191,9 @@ public sealed class DocumentVisualRealOnnxTests
         var toTable = Cosine(question, tableVector);
         var toProse = Cosine(question, proseVector);
 
-        _output.WriteLine($"image_embed_ms={imageMs} query_embed_ms={queryMs}");
+        _output.WriteLine(
+            $"image_embed_cold_ms={imageColdMs} image_embed_warm_ms={imageWarmMs} "
+            + $"query_embed_cold_ms={queryColdMs} query_embed_warm_ms={queryWarmMs}");
         _output.WriteLine($"cosine_to_table={toTable:F4} cosine_to_prose={toProse:F4}");
 
         // THE ACTUAL CLAIM OF THIS SLICE, measured: a question about a table is

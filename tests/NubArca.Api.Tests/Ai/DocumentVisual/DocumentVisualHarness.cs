@@ -122,12 +122,12 @@ internal sealed class DocumentVisualHarness : IDisposable
         return profile;
     }
 
-    public AiProfile SeedExtractionProfile()
+    public AiProfile SeedExtractionProfile(string key = DocumentTextSources.NativeProfileKey)
     {
         var model = new AiModel
         {
             Id = Guid.NewGuid(),
-            Key = DocumentTextSources.NativeModelKey,
+            Key = DocumentTextSources.NativeModelKey + "-" + key,
             Provider = AiProviders.None,
             Capability = AiCapabilities.DocumentExtraction,
             Modality = AiModalities.Document,
@@ -137,7 +137,7 @@ internal sealed class DocumentVisualHarness : IDisposable
         var profile = new AiProfile
         {
             Id = Guid.NewGuid(),
-            Key = DocumentTextSources.NativeProfileKey,
+            Key = key,
             AiModelId = model.Id,
             Capability = AiCapabilities.DocumentExtraction,
             Modality = AiModalities.Document,
@@ -197,6 +197,43 @@ internal sealed class DocumentVisualHarness : IDisposable
         Db.FileItems.Add(file);
         Db.SaveChanges();
         return file;
+    }
+
+    /// A CURRENT, COMPLETED extraction of the file's current bytes.
+    ///
+    /// The visual boundary requires one: a visual index is a derivative of a
+    /// document whose authority is its text, so a file with no authoritative
+    /// reading contributes no visual hit however complete its pixels are. Every
+    /// fixture that expects a visual hit therefore has to seed this too, which
+    /// is the point — the requirement is visible in the setup rather than
+    /// implied.
+    public DocumentText SeedExtraction(
+        FileItem file,
+        AiProfile extractionProfile,
+        bool isCurrent = true,
+        string status = AiArtifactStatuses.Completed,
+        Guid? ownerOverride = null,
+        Guid? fileOverride = null,
+        Guid? blobOverride = null)
+    {
+        var document = new DocumentText
+        {
+            Id = Guid.NewGuid(),
+            FileItemId = fileOverride ?? file.Id,
+            OwnerUserId = ownerOverride ?? file.OwnerUserId,
+            ProfileId = extractionProfile.Id,
+            SourceBlobObjectId = blobOverride ?? file.BlobObjectId,
+            Source = DocumentTextSources.Pdf,
+            Status = status,
+            IsCurrent = isCurrent,
+            ChunkFormatVersion = OwnerDocumentChunkFormat.Current,
+            Text = "estratto di prova",
+            CharCount = 17,
+            CreatedAt = DateTime.UtcNow,
+        };
+        Db.DocumentTexts.Add(document);
+        Db.SaveChanges();
+        return document;
     }
 
     /// A visual index and its units. `status` and `blobOverride` exist so a test

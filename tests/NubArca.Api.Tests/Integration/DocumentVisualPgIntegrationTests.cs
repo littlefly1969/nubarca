@@ -158,6 +158,74 @@ public sealed class DocumentVisualPgIntegrationTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task A_Withdrawn_Text_Authority_Is_Enforced_In_SQL_Before_The_Limit()
+    {
+        Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
+
+        // The accelerator restates the eligibility rule in SQL because it does
+        // not go through EF, so the newest clause has to be there too — and
+        // ABOVE the LIMIT. The fixture's `superseded-*.pdf` is a PERFECT visual
+        // match with a withdrawn extraction; if the clause were missing, or
+        // applied to whatever the ranking surfaced, it would come back first.
+        await using var factory = Factory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var seeded = await SeedAsync(scope.ServiceProvider);
+
+        var accelerator = scope.ServiceProvider
+            .GetRequiredService<DocumentVisualVectorIndexService>();
+        await accelerator.SyncAsync(seeded.ProfileId);
+
+        var renderKeys = scope.ServiceProvider
+            .GetRequiredService<DocumentVisualRenderers>().ActiveRenderProfileKeys;
+
+        var hits = await accelerator.SearchAsync(
+            seeded.ProfileId, seeded.OwnerA, Unit(0), renderKeys, take: 50);
+
+        Assert.NotNull(hits);
+        var reachable = hits!.Select(h => h.FileItemId).Distinct().ToList();
+        Assert.Equal(new[] { seeded.TargetFileId }, reachable);
+
+        // And its rows are all still present — a live join, not a sweeper.
+        Assert.True(await db.DocumentVisualUnits.CountAsync() > 1);
+    }
+
+    [SkippableFact]
+    public async Task Withdrawing_Text_Authority_Takes_Effect_On_The_Next_Question()
+    {
+        Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
+
+        await using var factory = Factory();
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var seeded = await SeedAsync(scope.ServiceProvider);
+
+        var accelerator = scope.ServiceProvider
+            .GetRequiredService<DocumentVisualVectorIndexService>();
+        await accelerator.SyncAsync(seeded.ProfileId);
+
+        var renderKeys = scope.ServiceProvider
+            .GetRequiredService<DocumentVisualRenderers>().ActiveRenderProfileKeys;
+
+        Assert.NotEmpty((await accelerator.SearchAsync(
+            seeded.ProfileId, seeded.OwnerA, Unit(0), renderKeys, take: 5))!);
+
+        // Supersede the target's reading NOW, leaving every visual and
+        // accelerator row in place.
+        var extraction = await db.DocumentTexts
+            .SingleAsync(d => d.FileItemId == seeded.TargetFileId && d.IsCurrent);
+        extraction.IsCurrent = false;
+        await db.SaveChangesAsync();
+
+        var after = await accelerator.SearchAsync(
+            seeded.ProfileId, seeded.OwnerA, Unit(0), renderKeys, take: 5);
+
+        Assert.NotNull(after);
+        Assert.Empty(after!);
+        Assert.True(await accelerator.CountIndexedAsync(seeded.ProfileId) > 0);
+    }
+
+    [SkippableFact]
     public async Task Stale_Rows_Are_Unreachable_Through_The_Accelerator_Too()
     {
         Skip.IfNot(_fixture.Available, "Docker / pgvector image not available.");
@@ -241,6 +309,7 @@ public sealed class DocumentVisualPgIntegrationTests : IAsyncLifetime
         var exact = await OwnerDocumentVisualEligibility.EligibleUnits(
                 db.DocumentVisualUnits.AsNoTracking(),
                 db.DocumentVisualIndexes.AsNoTracking(),
+                db.DocumentTexts.AsNoTracking(),
                 db.FileItems.AsNoTracking(),
                 seeded.OwnerA, seeded.ProfileId, renderKeys)
             .Select(r => r.Unit.Id)
@@ -402,22 +471,37 @@ public sealed class DocumentVisualPgIntegrationTests : IAsyncLifetime
                 var other = AddUser(db, $"b{i}-{suffix}");
                 await db.SaveChangesAsync();
                 var (file, blob) = AddFile(db, other, $"theirs-{i}-{suffix}.pdf");
+                AddText(db, extractionProfile.Id, other, file, blob);
                 AddVisual(db, serializer, visualProfile.Id, other, file, blob, Unit(0));
             }
 
             // Owner A's own vaulted and deleted documents, also perfect matches.
             var (vaulted, vaultedBlob) = AddFile(db, ownerA, $"vault-{suffix}.pdf", vaultId: vault.Id);
+            AddText(db, extractionProfile.Id, ownerA, vaulted, vaultedBlob);
             AddVisual(db, serializer, visualProfile.Id, ownerA, vaulted, vaultedBlob, Unit(0));
 
             var (deleted, deletedBlob) = AddFile(db, ownerA, $"deleted-{suffix}.pdf", deleted: true);
+            AddText(db, extractionProfile.Id, ownerA, deleted, deletedBlob);
             AddVisual(db, serializer, visualProfile.Id, ownerA, deleted, deletedBlob, Unit(0));
 
             // And one of owner A's own whose SOURCE BLOB no longer matches the
             // file — the replaced-content case, a perfect match, unreachable.
             var (stale, staleBlob) = AddFile(db, ownerA, $"stale-{suffix}.pdf");
+            AddText(db, extractionProfile.Id, ownerA, stale, staleBlob);
             AddVisual(
                 db, serializer, visualProfile.Id, ownerA, stale, Guid.NewGuid(), Unit(0),
                 blobIsCurrent: false);
+
+            // AND ONE WHOSE TEXT AUTHORITY HAS BEEN WITHDRAWN. Perfect visual
+            // rows, current blob, active profiles — and a superseded extraction,
+            // which is the condition this slice's review added. In SQL, above
+            // the LIMIT, or a document with no authoritative reading keeps
+            // introducing itself.
+            var (superseded, supersededBlob) = AddFile(db, ownerA, $"superseded-{suffix}.pdf");
+            var withdrawn = AddText(db, extractionProfile.Id, ownerA, superseded, supersededBlob);
+            withdrawn.IsCurrent = false;
+            AddVisual(
+                db, serializer, visualProfile.Id, ownerA, superseded, supersededBlob, Unit(0));
         }
 
         await db.SaveChangesAsync();
@@ -471,7 +555,7 @@ public sealed class DocumentVisualPgIntegrationTests : IAsyncLifetime
         return (file.Id, blob.Id);
     }
 
-    private static void AddText(
+    private static DocumentText AddText(
         AppDbContext db, Guid profileId, Guid owner, Guid fileId, Guid blobId)
     {
         var document = new DocumentText
@@ -501,6 +585,8 @@ public sealed class DocumentVisualPgIntegrationTests : IAsyncLifetime
             Text = "il filtro va pulito ogni sei mesi",
             CreatedAt = DateTime.UtcNow,
         });
+
+        return document;
     }
 
     private static void AddVisual(

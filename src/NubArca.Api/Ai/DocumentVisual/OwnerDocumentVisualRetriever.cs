@@ -277,6 +277,7 @@ public sealed class OwnerDocumentVisualRetriever : IOwnerDocumentVisualRetriever
             from row in OwnerDocumentVisualEligibility.EligibleUnits(
                 _db.DocumentVisualUnits.AsNoTracking(),
                 _db.DocumentVisualIndexes.AsNoTracking(),
+                _db.DocumentTexts.AsNoTracking(),
                 _db.FileItems.AsNoTracking(),
                 ownerUserId, profileId, renderKeys)
             join embedding in _db.DocumentVisualEmbeddings.AsNoTracking()
