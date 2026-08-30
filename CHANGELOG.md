@@ -46,11 +46,17 @@ originating repository and is deliberately not reproduced here.
   of this, before or after.
 - **Measured, and reported honestly.** On a mixed set of thirteen questions the
   visual pass takes Recall@5 from 0.833 to 0.917 and MRR from 0.778 to 0.917,
-  recovering one question and regressing none. A newer class of "late
-  interaction" model was left as a documented seam with an exact scorer and an
-  evaluation command: none is enabled, because none has been measured on real
-  hardware yet, and shipping one unmeasured would be a guess wearing a version
-  number.
+  recovering one question and regressing none. With the real image model in
+  place it identifies the right document first for eleven of those thirteen
+  questions.
+- **A newer class of "late interaction" model was tried, and turned down.**
+  `colSmol-500M` was run against the same questions on the same pages: it
+  changed the results by nothing at all, while needing 97× the storage per page,
+  four times as long to index, three gigabytes of memory and an extra
+  eighth of a second per question. So it is not enabled. The measurement, the
+  numbers and the tooling to repeat it with a different model all ship —
+  turning a switch on without having looked would have been a guess wearing a
+  version number.
 
 ### Party guest messages
 

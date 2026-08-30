@@ -924,11 +924,19 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   cosine is a sorted copy of the library, not a set of matches — visual hits
   need a positive cosine and a RELATIVE floor under the best match, relative
   because cross-modal cosine is not calibrated across checkpoints.
-- **Late interaction is a seam with no promoted model.** `IVisualLateInteractionProvider`
-  plus an exact MaxSim tested against a hand-computable fixture. Enabling one
-  requires a candidate that cleared a measured quality/resource/licence gate on
-  a real corpus (`documents visual-evaluate`); with none promoted the dense
-  order stands, which is a complete configuration rather than a degraded one.
+- **Late interaction is a seam, and its first candidate was measured and turned
+  down.** `IVisualLateInteractionProvider` plus an exact MaxSim tested against a
+  hand-computable fixture. `vidore/colSmol-500M` (MIT, adapter `0aaa9726…` over
+  backbone `650243e9…`) was run through the real pipeline against the real
+  SigLIP2 dense baseline on the shared golden set: **0.0% relative nDCG@5
+  change, nothing recovered, nothing regressed**, for 97× the storage per page
+  (448 KB vs 4.6 KB), 4× the indexing time, 2.9 GB peak RSS and 152 ms per
+  question. `evaluated, not promoted`; the switch stays false and no model
+  worker ships. Re-run it with `DocumentVisualPhaseZeroTests` plus
+  `scripts/measure-colvision-candidate.py`. The lane reports its own
+  discriminating power (13/13 distinct candidate sets) and asserts the reranker
+  engaged, because a benchmark that cannot detect a difference is not evidence
+  that there is none.
 - **`Assistant__PrivateKnowledgeModel` must be `LocalTrusted`, with no
   fallback.** Not to Help's model, which is the one place allowed to be
   External, and not to anything else. An External configuration yields ZERO

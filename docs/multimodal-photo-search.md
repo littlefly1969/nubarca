@@ -56,6 +56,17 @@ Expected layout:
 └── tokenizer.json             # fixed 64-token policy embedded
 ```
 
+The same export serves **visual document retrieval**: nothing extra is fetched
+and no second copy is installed, because the document profile points at the same
+catalog entry through its `ConfigHash`. See
+[rag-platform.md](rag-platform.md#visual-document-retrieval).
+
+Measured on a CPU-only host from this exact export: page embedding 4.5–5.6 s
+warm and 9.1 s cold, query embedding 0.57 s warm and 79 s cold. The cold numbers
+are ONNX Runtime building a session over gigabytes of external data, not
+inference — production preloads the session, and quoting the cold figure as a
+latency would misdescribe both.
+
 Mount the directory read-only at the existing `Ai__Onnx__ModelDir` in both API
 and worker containers. `model.onnx` is used by the worker backfill;
 `text_model.onnx` and `tokenizer.json` are used lazily by the API.

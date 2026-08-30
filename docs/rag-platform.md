@@ -783,6 +783,69 @@ A file is as relevant as its most relevant page. Summing a document's page
 scores would let a hundred-page report outrank a one-page invoice purely by
 being long — and length is the one property a visual embedding cannot see.
 
+### Phase 0, measured
+
+Both models were run for real, on this corpus, and the numbers decide.
+
+**Dense — SigLIP2 So400m 384**, exported from the pinned revision
+`c65677ac77ca25276518923f7c58cbf5d81ea602` by
+`scripts/export-siglip2-so400m-onnx.py`:
+
+| | |
+|---|---|
+| dimension | 1152 |
+| page embed | 4.5–5.6 s warm, 9.1 s cold (CPU) |
+| query embed | 0.57 s warm, 79 s cold — cold is session construction over 2.8 GB of external data, not inference |
+| storage | 4.6 KB per page |
+| table page vs prose page, for "a table of quarterly revenue and costs" | **0.1582 vs 0.0145** |
+
+**Late-interaction candidate — `vidore/colSmol-500M`** (adapter revision
+`0aaa9726104ce485884c7b8faa8a58a72d5fdbe7`, MIT) over
+`vidore/ColSmolVLM-Instruct-500M-base` (revision `650243e9…`, MIT):
+
+| | |
+|---|---|
+| parameters | 477,663,552 |
+| weights on disk | 1.00 GB (adapter + backbone) |
+| peak RSS | 2.9 GB |
+| vectors per page | 875 × 128 |
+| storage | **448 KB per page — 97× the dense baseline** |
+| page embed | 22.3 s (CPU) — 4× the dense baseline |
+| query embed | 0.19 s |
+| MaxSim rerank | 152 ms per question, on top |
+
+Run through NubArca's own pipeline — real dense pass, real MaxSim, real
+evidence gate — over the shared golden set:
+
+| mode | Recall@5 | MRR | top-3 | visual nDCG@5 |
+|---|---|---|---|---|
+| dense (SigLIP2) | 0.833 | 0.778 | 10/12 | 0.722 |
+| dense + colSmol late interaction | 0.833 | 0.778 | 10/12 | 0.722 |
+
+**Relative nDCG@5 change: 0.0%. Nothing recovered, nothing regressed.**
+
+> **`vidore/colSmol-500M`: evaluated, not promoted.**
+
+It clears neither half of the gate — no 10% relative nDCG@5 improvement and no
+two additional visual queries recovered — while costing 97× the storage, 4× the
+indexing time, 2.9 GB of resident memory and 152 ms per question.
+`Ai__DocumentVisual__LateInteractionEnabled` stays false, and no production
+model worker ships.
+
+**Why this is a result and not an absence.** A benchmark that cannot detect a
+difference is not evidence that there is none, so the lane reports its own
+discriminating power alongside the comparison: all 13 questions produce
+DISTINCT visual candidate sets, and real SigLIP2 puts the expected document
+first for 11 of them. The corpus separates these pages; the candidate simply had
+nothing to add to that separation. The reranker's engagement is asserted too —
+identical rankings and a silently-skipped second stage look the same in a report
+otherwise.
+
+A larger quality-ceiling candidate (ColQwen-class, ~4.5 B parameters) was NOT
+measured. At 22 s per page for a 500 M model on this CPU-only host, a
+nine-times-larger one is not something this hardware can evaluate in a
+reasonable time, and guessing at its numbers would be worse than saying so.
+
 ### Late interaction is a seam, not a dependency
 
 The stable concept, and all NubArca depends on:
@@ -800,10 +863,8 @@ it inherits that filtering — which is why a specialised multi-vector ANN engin
 (PLAID, WARP, TACHIOM) stays a replaceable optimisation rather than a component
 that would have to re-establish the boundary inside itself.
 
-**No model is promoted in this release.** A production late-interaction profile
-must materially improve visual retrieval on a measured corpus, with an
-acceptable resource footprint and licence — `documents visual-evaluate` prints
-the numbers that decision is made on. With no promoted profile the dense order
+**No model is promoted in this release**, and that is a measured decision rather
+than an omission — see Phase 0 above. With no promoted profile the dense order
 stands, and that is a complete, working configuration rather than a degraded
 one. Multi-vectors are stored as exact float32; float16 halves the bytes and
 changes the scores, and by how much is precisely the unmeasured quantity.
