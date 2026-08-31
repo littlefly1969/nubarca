@@ -53,7 +53,11 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 - **A production migration is automated only by an explicit compatibility
   contract.** `deploy/migration-policy.json` does not guess from generated SQL:
   each migration must be newly added, explicitly approved, and state that the
-  previous application remains compatible with the upgraded schema. The guided
+  previous application remains compatible with the upgraded schema. From its
+  `classificationRequiredFrom` boundary onward, the TV operational tests require
+  every migration to carry an explicit policy entry, even when that entry says
+  automation is forbidden; a missing classification therefore fails CI instead
+  of first surprising an operator during production `check`. The guided
   updater verifies backup capacity during `check`; `apply --confirm-migrations`
   pulls and verifies the candidate image, creates and
   validates a PostgreSQL dump, applies with that image, verifies migration

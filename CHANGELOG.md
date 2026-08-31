@@ -17,6 +17,12 @@ originating repository and is deliberately not reproduced here.
   the compatibility declaration or introducing a schema that the previous
   application cannot use leaves production untouched and requires a separately
   reviewed manual plan.
+- **Migration classification is now complete before release.** From the tracked
+  policy boundary onward, CI requires every migration to be classified, even
+  when automation is explicitly refused. The first production jump governed by
+  this policy now includes the additive document-derivation, visual-retrieval
+  and Party challenge migrations instead of discovering the two document
+  entries only when the server checks the release.
 - **Rollback has an argument, not a hope.** An old application image is restored
   after a failed smoke test only for migrations reviewed as compatible with it;
   the verified pre-migration backup and its checksum remain available throughout.
