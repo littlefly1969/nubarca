@@ -6,6 +6,21 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Safer production updates with database changes
+
+- **One reviewed command path now covers additive database migrations.** The
+  production updater validates an explicit migration compatibility policy,
+  checks backup capacity, creates and verifies a PostgreSQL dump, applies the
+  schema with the immutable candidate API image and verifies migration history
+  before changing any application pin.
+- **Unsafe migration shapes still stop.** Rewriting migration history, omitting
+  the compatibility declaration or introducing a schema that the previous
+  application cannot use leaves production untouched and requires a separately
+  reviewed manual plan.
+- **Rollback has an argument, not a hope.** An old application image is restored
+  after a failed smoke test only for migrations reviewed as compatible with it;
+  the verified pre-migration backup and its checksum remain available throughout.
+
 ### Videos play the same way everywhere
 
 - **Videos play on Android again.** The phone app used to decide for itself

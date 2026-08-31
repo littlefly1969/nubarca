@@ -71,12 +71,12 @@ may legitimately be managed by separate Compose invocations.
 
 ## Guided two-command path
 
-For an ordinary release with CI images and **no database migration**, the server
-provides a review/apply pair:
+For an ordinary release with CI images, including an approved additive database
+migration, the server provides a review/apply pair:
 
 ```bash
 ./deploy/update-production.sh check --env-file .env
-./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha>
+./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha> [--confirm-migrations]
 ```
 
 `check` fetches `origin/main` and reports, without changing the checkout,
@@ -84,20 +84,30 @@ release pins or containers, which backend/frontend/TV components changed and
 whether the corresponding immutable GHCR artifacts exist. A TV change requires
 either a native APK bundle or a signed OTA bundle for the exact SHA; an absent
 TV artifact is never silently skipped. It prints the exact
-`apply` command. Read that report before continuing.
+`apply` command. For an approved migration it also verifies the configured
+backup target and database-size capacity, lists the exact migration ids and adds
+`--confirm-migrations` to that command. Read the report before continuing; copy
+the command it prints rather than reconstructing it.
 
 `apply` requires the same full SHA, refuses if `origin/main` moved, refuses a
 dirty/non-`main` checkout, applies the root-capacity gate, pulls images by
-digest, runs the image verifiers and the effective-Compose gate, then
-fast-forwards and recreates only affected application services with
-`--no-build`. It restores the previous pin if smoke checks fail. A TV bundle is
-activated locally only when CI published one for that exact source SHA.
+digest after fast-forwarding to the confirmed commit, runs the image verifiers
+and the effective-Compose gate, then recreates only affected application services with
+`--no-build`. For an approved migration, it pulls and verifies the candidate API
+image first, creates and validates a pre-migration PostgreSQL dump on the
+dedicated backup mount, applies the migration with that candidate image, and
+verifies every expected id in `__EFMigrationsHistory` before changing a release
+pin. It restores the previous pin if smoke checks fail; this rollback is allowed
+only because the tracked migration policy has declared the old application
+compatible with the new schema. A TV bundle is activated locally only when CI
+published one for that exact source SHA.
 
-The simple path deliberately refuses every release containing an EF migration;
-perform sections 4–6 manually for those releases. It also never cleans Docker
-or storage. The first installation of this helper necessarily needs one manual
-`git pull --ff-only origin main`; subsequent runs fetch and fast-forward
-themselves.
+The guided path deliberately refuses a rewritten, destructive, unclassified or
+previous-application-incompatible migration. Those are exceptional releases and
+use the manual review path in §4.3. The script also never cleans Docker or
+storage. Installing this helper—or upgrading an older helper that still refuses
+all migrations—necessarily needs one manual `git pull --ff-only origin main`;
+subsequent runs fetch and fast-forward themselves.
 
 ## 1. Establish the exact release
 
@@ -320,7 +330,61 @@ untouched.
 
 ## 4. Database migration, when present
 
-If and only if the diff contains a new EF migration:
+### 4.1 Automation policy
+
+`deploy/migration-policy.json` is the reviewed production contract. An EF
+migration may use the guided path only when all of these are true:
+
+- the diff adds a new migration implementation and its Designer file, and
+  modifies the model snapshot;
+- no existing migration is modified, renamed or deleted;
+- the migration id is declared `automated: true`;
+- `previousApplicationCompatible: true` states that the previously pinned
+  application can still run against the upgraded schema;
+- the policy carries a non-empty compatibility reason.
+
+`deploy/production-migration-plan.py` validates those facts from Git objects at
+the confirmed candidate SHA. The policy is read from the candidate commit, not
+from an uncommitted working tree. A missing or false declaration stops `check`;
+the script never tries to infer from SQL whether a migration is safe.
+
+The previous-application compatibility declaration is what permits the normal
+smoke-failure rollback to restore the old image pins after the schema changed.
+Without it, an image rollback could be more destructive than the failed deploy.
+
+### 4.2 Guided backup and migration
+
+If `check` reports approved migration ids, its generated command includes
+`--confirm-migrations`. `apply` then performs this order:
+
+1. take the deployment lock and re-confirm the immutable source SHA;
+2. fast-forward the clean checkout to that confirmed commit;
+3. pull and verify the candidate API/frontend images;
+4. verify the candidate effective Compose model without changing pins;
+5. create a PostgreSQL dump below the absolute `BACKUP_DIR` from `.env`;
+6. verify gzip integrity, the dump completion marker, the presence of
+   `__EFMigrationsHistory`, and record a SHA-256 sidecar;
+7. run `db migrate` with the candidate API image on PostgreSQL's real Compose
+   network, passing only the `db migrate` arguments to its existing entrypoint;
+8. verify every planned id in `__EFMigrationsHistory`;
+9. record the backup and migration ids in the ignored, server-local
+   `deploy-history/`, then update pins and containers.
+
+The backup filesystem must already exist and be writable. The capacity gate is
+conservative: free space must cover 120% of the uncompressed database size plus
+1 GiB. Nothing sources `.env`, no database password is printed, and neither a
+failed dump nor a failed migration changes release pins or recreates a service.
+The verified backup remains in place on every later failure.
+
+Do not pass `--confirm-migrations` to a no-migration release. Both omitting it
+when required and supplying it when not required fail closed and direct the
+operator back to `check`.
+
+### 4.3 Manual exception path
+
+Use this only when `check` refuses the migration policy and the migration has
+received a separate, explicit restore/compatibility review. Do not weaken the
+policy merely to make the automatic command proceed. The manual sequence is:
 
 1. create and verify the normal production backup;
 2. run `db migrate` with the newly built API image and the complete four-file
@@ -329,7 +393,7 @@ If and only if the diff contains a new EF migration:
 
 Do not run a migration for releases without migration files.
 
-### 4.1 Where backups go
+#### 4.3.1 Where backups go
 
 **Backups do not live on the root filesystem.** `BACKUP_DIR` in the production
 `.env` points at a dedicated large data mount, and the checkout's `backups/`
@@ -361,7 +425,7 @@ schema, which is what a rollback needs. Name it after the slice it precedes
 (`pre-<slice>-<UTC stamp>.sql.gz`), matching the existing files in that
 directory.
 
-### 4.2 Running `db migrate` off the newly built image
+#### 4.3.2 Running `db migrate` off the newly built image
 
 The migration must run on the image being released, not on the currently pinned
 one, and the pins are not updated until §5. Run the new image directly on the
@@ -599,5 +663,11 @@ from remains addressable by its digest, so the rollback is reversible in both
 directions and neither leg depends on a build succeeding under pressure. That
 property is a large part of why the backend stopped being built here.
 
-A release containing a database migration requires the migration-specific
-restore plan; never assume an image-only rollback is schema-safe.
+For a guided migration release, the tracked policy has explicitly established
+that the previous application is compatible with the upgraded schema; the
+script may therefore restore the previous image pins after a failed smoke check
+while retaining and reporting the verified backup. It does not reverse the
+migration automatically.
+
+For any migration outside that policy, use its separately reviewed restore plan
+and never assume an image-only rollback is schema-safe.

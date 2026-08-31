@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Check for, or apply, one CI-built NubArca production release from the server.
-# This script never builds and never prunes. Database migrations remain an
-# explicit FAST_DEPLOY.md operation and make `apply` stop before any change.
+# This script never builds and never prunes. Reviewed additive migrations may
+# run only after an explicit confirmation and a verified pre-migration backup.
 
 set -Eeuo pipefail
 
@@ -12,7 +12,7 @@ usage() {
     cat >&2 <<'EOF'
 usage:
   ./deploy/update-production.sh check --env-file <production.env>
-  ./deploy/update-production.sh apply --env-file <production.env> --confirm <full-main-sha>
+  ./deploy/update-production.sh apply --env-file <production.env> --confirm <full-main-sha> [--confirm-migrations]
 EOF
     exit 2
 }
@@ -23,25 +23,32 @@ shift
 [[ "$MODE" == "check" || "$MODE" == "apply" ]] || usage
 ENV_FILE=""
 CONFIRM_SHA=""
+CONFIRM_MIGRATIONS=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --env-file) [[ $# -ge 2 ]] || usage; ENV_FILE="$2"; shift 2 ;;
         --confirm) [[ $# -ge 2 ]] || usage; CONFIRM_SHA="$2"; shift 2 ;;
+        --confirm-migrations) CONFIRM_MIGRATIONS=true; shift ;;
         *) usage ;;
     esac
 done
 [[ -n "$ENV_FILE" ]] || fail "--env-file is required"
-[[ "$MODE" == "check" && -z "$CONFIRM_SHA" ]] || \
+[[ "$MODE" == "check" && -z "$CONFIRM_SHA" && "$CONFIRM_MIGRATIONS" == false ]] || \
     [[ "$MODE" == "apply" && "$CONFIRM_SHA" =~ ^[0-9a-f]{40}$ ]] || usage
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 [[ -f "$ENV_FILE" ]] || fail "environment file not found: $ENV_FILE"
-for command in git docker python3 curl; do
+for command in git docker python3 curl gzip sha256sum flock; do
     command -v "$command" >/dev/null || fail "$command is required"
 done
 [[ "$(git branch --show-current)" == "main" ]] || fail "production checkout must be on main"
 [[ -z "$(git status --porcelain)" ]] || fail "production checkout is dirty"
+
+if [[ "$MODE" == "apply" ]]; then
+    exec 9>/tmp/nubarca-production-update.lock
+    flock -n 9 || fail "another production update is already running"
+fi
 
 remote="$(git remote get-url origin)"
 if [[ "$remote" =~ github\.com[:/]([^/]+)/[^/]+(\.git)?$ ]]; then
@@ -69,6 +76,111 @@ for file in docker-compose.prod.yml docker-compose.prod.local.yml \
     docker-compose.facedirect-api.yml docker-compose.release.local.yml; do
     [[ -f "$file" ]] || fail "required production file is missing: $file"
 done
+
+read_env_value() {
+    local key="$1" value
+    value="$(sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?${key}=//p" "$ENV_FILE" | tail -n 1)"
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    printf '%s' "$value"
+}
+
+POSTGRES_USER=""
+POSTGRES_DB=""
+BACKUP_ROOT=""
+DATABASE_SIZE_BYTES=""
+BACKUP_AVAILABLE_KB=""
+MIGRATION_BACKUP=""
+MIGRATION_BACKUP_SHA=""
+
+postgres_psql() {
+    "${COMPOSE_BASE[@]}" exec -T postgres sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -v ON_ERROR_STOP=1 -U "$1" -d "$2" -At' \
+        sh "$POSTGRES_USER" "$POSTGRES_DB"
+}
+
+load_migration_backup_preflight() {
+    mapfile -t postgres_identity < <(
+        "${COMPOSE_BASE[@]}" config --format json |
+            python3 -c 'import json,sys
+p=json.load(sys.stdin)["services"]["postgres"]["environment"]
+print(p.get("POSTGRES_USER", "")); print(p.get("POSTGRES_DB", ""))'
+    )
+    [[ ${#postgres_identity[@]} -eq 2 ]] || fail "cannot resolve PostgreSQL identity"
+    POSTGRES_USER="${postgres_identity[0]}"
+    POSTGRES_DB="${postgres_identity[1]}"
+    [[ "$POSTGRES_USER" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "invalid POSTGRES_USER in effective Compose model"
+    [[ "$POSTGRES_DB" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "invalid POSTGRES_DB in effective Compose model"
+
+    BACKUP_ROOT="$(read_env_value BACKUP_DIR)"
+    [[ "$BACKUP_ROOT" == /* && "$BACKUP_ROOT" != "/" ]] || \
+        fail "BACKUP_DIR must be an absolute non-root path for automated migrations"
+    [[ -d "$BACKUP_ROOT" && -w "$BACKUP_ROOT" ]] || \
+        fail "BACKUP_DIR must already exist and be writable: $BACKUP_ROOT"
+
+    DATABASE_SIZE_BYTES="$(postgres_psql <<'SQL'
+SELECT pg_database_size(current_database());
+SQL
+)"
+    [[ "$DATABASE_SIZE_BYTES" =~ ^[0-9]+$ ]] || fail "cannot resolve production database size"
+    BACKUP_AVAILABLE_KB="$(df -Pk "$BACKUP_ROOT" | awk 'NR==2 {print $4}')"
+    [[ "$BACKUP_AVAILABLE_KB" =~ ^[0-9]+$ ]] || fail "cannot resolve BACKUP_DIR free space"
+    required_backup_kb=$(( (DATABASE_SIZE_BYTES * 12 / 10 + 1023) / 1024 + 1048576 ))
+    [[ "$BACKUP_AVAILABLE_KB" -ge "$required_backup_kb" ]] || \
+        fail "BACKUP_DIR lacks conservative pre-migration capacity (database bytes=$DATABASE_SIZE_BYTES)"
+}
+
+create_migration_backup() {
+    local stamp short_sha final partial checksum_partial
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    short_sha="${CANDIDATE_SHA:0:12}"
+    final="$BACKUP_ROOT/pre-update-${short_sha}-${stamp}.sql.gz"
+    partial="$final.partial"
+    checksum_partial="$final.sha256.partial"
+    [[ ! -e "$final" && ! -e "$partial" && ! -e "$checksum_partial" ]] || \
+        fail "pre-migration backup target already exists: $final"
+    umask 077
+
+    log "creating pre-migration PostgreSQL backup: $final"
+    if ! "${COMPOSE_BASE[@]}" exec -T postgres sh -c \
+        'PGPASSWORD="$POSTGRES_PASSWORD" exec pg_dump -U "$1" -d "$2" --format=plain --no-owner --no-privileges' \
+        sh "$POSTGRES_USER" "$POSTGRES_DB" | gzip -c > "$partial"; then
+        rm -f -- "$partial" "$checksum_partial"
+        fail "pre-migration pg_dump failed; release pins and containers are unchanged"
+    fi
+    [[ -s "$partial" ]] || { rm -f -- "$partial"; fail "pre-migration backup is empty"; }
+    gzip -t "$partial" || { rm -f -- "$partial"; fail "pre-migration backup failed gzip verification"; }
+    if ! python3 deploy/verify-production-db-backup.py "$partial"; then
+        rm -f -- "$partial" "$checksum_partial"
+        fail "pre-migration backup failed content verification"
+    fi
+    MIGRATION_BACKUP_SHA="$(sha256sum "$partial" | awk '{print $1}')"
+    mv -- "$partial" "$final"
+    printf '%s  %s\n' "$MIGRATION_BACKUP_SHA" "$(basename "$final")" > "$checksum_partial"
+    mv -- "$checksum_partial" "$final.sha256"
+    MIGRATION_BACKUP="$final"
+    log "verified pre-migration backup sha256=$MIGRATION_BACKUP_SHA"
+}
+
+run_candidate_migrations() {
+    local network applied migration_id
+    network="$(docker inspect nubarca-postgres \
+        --format '{{range $key,$value := .NetworkSettings.Networks}}{{println $key}}{{end}}' |
+        awk 'NF {print; exit}')"
+    [[ -n "$network" ]] || fail "cannot resolve the running PostgreSQL container network"
+    log "applying ${#MIGRATION_IDS[@]} approved migration(s) with the verified candidate image"
+    docker run --rm --network "$network" --env-file "$ENV_FILE" "$NEW_API_IMAGE" db migrate
+
+    applied="$(postgres_psql <<'SQL'
+SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";
+SQL
+)"
+    for migration_id in "${MIGRATION_IDS[@]}"; do
+        grep -Fxq "$migration_id" <<< "$applied" || \
+            fail "migration command returned successfully but history lacks $migration_id"
+    done
+    log "migration history verified: ${MIGRATION_IDS[*]}"
+}
 
 mapfile -t CURRENT_IMAGES < <(
     "${COMPOSE_BASE[@]}" --profile worker config --format json |
@@ -163,8 +275,16 @@ else
     TV_CHANGED=true
 fi
 
-MIGRATIONS="$(git diff --name-only "$CURRENT_API_SHA..$CANDIDATE_SHA" -- \
-    src/NubArca.Api/Data/Migrations || true)"
+MIGRATION_PLAN=""
+if ! MIGRATION_PLAN="$(python3 deploy/production-migration-plan.py \
+    "$CURRENT_API_SHA" "$CANDIDATE_SHA")"; then
+    fail "candidate migration set is not approved for automatic deployment; follow deploy/FAST_DEPLOY.md"
+fi
+MIGRATION_IDS=()
+if [[ -n "$MIGRATION_PLAN" ]]; then
+    mapfile -t MIGRATION_IDS <<< "$MIGRATION_PLAN"
+    load_migration_backup_preflight
+fi
 
 manifest_digest() {
     local tag="$1" manifest
@@ -198,7 +318,10 @@ log "backend:   changed=$BACKEND_CHANGED artifact=$([[ -n "$API_DIGEST" ]] && ec
 log "frontend:  changed=$FRONTEND_CHANGED artifact=$([[ -n "$FRONTEND_DIGEST" ]] && echo ready || echo absent)"
 log "TV native: changed=$TV_CHANGED artifact=$([[ -n "$TV_DIGEST" ]] && echo ready || echo absent)"
 log "TV OTA:    changed=$TV_CHANGED artifact=$([[ -n "$TV_OTA_DIGEST" ]] && echo ready || echo absent)"
-log "migration: $([[ -n "$MIGRATIONS" ]] && echo present || echo none)"
+log "migration: $([[ ${#MIGRATION_IDS[@]} -gt 0 ]] && echo "approved (${MIGRATION_IDS[*]})" || echo none)"
+if [[ ${#MIGRATION_IDS[@]} -gt 0 ]]; then
+    log "backup:    ready root=$BACKUP_ROOT database-bytes=$DATABASE_SIZE_BYTES available-kb=$BACKUP_AVAILABLE_KB"
+fi
 
 if [[ "$MODE" == "check" ]]; then
     if [[ "$BACKEND_CHANGED" == true && -z "$API_DIGEST" ]] || \
@@ -210,18 +333,20 @@ if [[ "$MODE" == "check" ]]; then
         log "not deployable yet: no CI-built TV native or OTA artifact exists for the candidate"
         exit 3
     fi
-    if [[ -n "$MIGRATIONS" ]]; then
-        log "manual migration release: apply will refuse; follow deploy/FAST_DEPLOY.md"
-        printf '%s\n' "$MIGRATIONS"
-        exit 4
-    fi
     log "ready. After reviewing the SHA, run:"
-    printf './deploy/update-production.sh apply --env-file %q --confirm %s\n' \
+    printf './deploy/update-production.sh apply --env-file %q --confirm %s' \
         "$ENV_FILE" "$CANDIDATE_SHA"
+    if [[ ${#MIGRATION_IDS[@]} -gt 0 ]]; then
+        printf ' --confirm-migrations'
+    fi
+    printf '\n'
     exit 0
 fi
 
-[[ -z "$MIGRATIONS" ]] || fail "candidate contains database migrations; use deploy/FAST_DEPLOY.md manually"
+[[ ${#MIGRATION_IDS[@]} -eq 0 || "$CONFIRM_MIGRATIONS" == true ]] || \
+    fail "candidate contains approved migrations; run check and repeat its --confirm-migrations command"
+[[ ${#MIGRATION_IDS[@]} -gt 0 || "$CONFIRM_MIGRATIONS" == false ]] || \
+    fail "--confirm-migrations was supplied but the candidate contains no migrations; run check again"
 [[ "$BACKEND_CHANGED" != true || -n "$API_DIGEST" ]] || fail "required backend image is not published"
 [[ "$FRONTEND_CHANGED" != true || -n "$FRONTEND_DIGEST" ]] || fail "required frontend image is not published"
 [[ "$TV_CHANGED" != true || -n "$TV_DIGEST" || -n "$TV_OTA_DIGEST" ]] || \
@@ -281,11 +406,22 @@ for name in ("api","worker"):
     assert s[name].get("group_add")
 ' "$NEW_API_IMAGE" "$NEW_FRONTEND_IMAGE"
 
+if [[ ${#MIGRATION_IDS[@]} -gt 0 ]]; then
+    create_migration_backup
+    run_candidate_migrations
+fi
+
 if [[ ${#AFFECTED[@]} -gt 0 ]]; then
     history_dir="$REPO_ROOT/deploy-history"
     install -d -m 0700 "$history_dir"
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
     install -m 0600 docker-compose.release.local.yml "$history_dir/release-pin-before-$stamp.yml"
+    if [[ -n "$MIGRATION_BACKUP" ]]; then
+        printf 'source_sha=%s\nbackup=%s\nbackup_sha256=%s\nmigrations=%s\n' \
+            "$CANDIDATE_SHA" "$MIGRATION_BACKUP" "$MIGRATION_BACKUP_SHA" "${MIGRATION_IDS[*]}" \
+            > "$history_dir/migration-$stamp.txt"
+        chmod 0600 "$history_dir/migration-$stamp.txt"
+    fi
     install -m 0644 "$pin_tmp" docker-compose.release.local.yml.tmp
     mv -f docker-compose.release.local.yml.tmp docker-compose.release.local.yml
 
@@ -293,6 +429,10 @@ if [[ ${#AFFECTED[@]} -gt 0 ]]; then
     rollback() {
         if [[ "$rollback_needed" == true ]]; then
             log "smoke check failed; restoring the previous image pins"
+            if [[ -n "$MIGRATION_BACKUP" ]]; then
+                log "approved migrations remain applied and are compatible with the previous application image"
+                log "verified pre-migration backup remains at $MIGRATION_BACKUP"
+            fi
             install -m 0644 "$pin_previous" docker-compose.release.local.yml
             "${COMPOSE_BASE[@]}" up -d --no-build --no-deps "${AFFECTED[@]}" || true
         fi

@@ -19,8 +19,8 @@ is built is described by `ARCHITECTURE.md`.
   separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and
   publishes a signed immutable GHCR bundle without contacting production.
   Production pulls verified application/APK/OTA artifacts by digest; the guided
-  `deploy/update-production.sh check|apply` path refuses migrations and never
-  builds on the server
+  `deploy/update-production.sh check|apply` path can back up and apply explicitly
+  confirmed, policy-approved additive migrations and never builds on the server
 - Storage: local content-addressed blobs with database-owned logical paths
 - Installation locations are operator configuration, never source constants:
   `NUBARCA_PRODUCTION_SSH`, `NUBARCA_PRODUCTION_CHECKOUT`,
@@ -49,6 +49,18 @@ is built is described by `ARCHITECTURE.md`.
 ## Standing decisions worth knowing
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
+
+- **A production migration is automated only by an explicit compatibility
+  contract.** `deploy/migration-policy.json` does not guess from generated SQL:
+  each migration must be newly added, explicitly approved, and state that the
+  previous application remains compatible with the upgraded schema. The guided
+  updater verifies backup capacity during `check`; `apply --confirm-migrations`
+  pulls and verifies the candidate image, creates and
+  validates a PostgreSQL dump, applies with that image, verifies migration
+  history, and only then changes pins. Existing migration rewrites and missing
+  or incompatible policies fail before production mutation. The old image may
+  be restored after a smoke failure only because that compatibility was
+  reviewed; the script never automatically reverses schema.
 
 - **Authorization is permissions; a user holds exactly one role and the role owns
   its permissions.** An endpoint names a permission
