@@ -220,3 +220,15 @@ export function semanticMediaQueryToParams(query: SearchSemanticMediaQuery): Que
 }
 
 export const MEDIA_SEMANTIC_PATH = '/api/media/semantic';
+
+// ── File lifecycle (§21) ───────────────────────────────────────────────────
+// Moving to Trash is a SOFT delete: the FileItem leaves the library listings
+// and can be restored. It is not the same verb as removing an item from an
+// album, which only changes membership (see album.ts).
+
+export function fileItemPath(fileItemId: string): string {
+  return `/api/files/${fileItemId}`;
+}
+export function fileRestorePath(fileItemId: string): string {
+  return `/api/files/${fileItemId}/restore`;
+}

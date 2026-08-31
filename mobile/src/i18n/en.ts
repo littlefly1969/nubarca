@@ -226,6 +226,19 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'chips.audio': 'With audio',
   'chips.noAudio': 'Without audio',
 
+  // Selection actions (MOBILE-FIRST-CLASS-PARITY-01).
+  'selection.actions': 'Actions',
+  'selection.trash': 'Move to Trash',
+  'selection.restore': 'Restore',
+  'selection.removeFromAlbum': 'Remove from album',
+  'selection.trashConfirmTitle': 'Move to Trash?',
+  'selection.trashConfirmBody': '{n} items will go to the Trash. You can restore them.',
+  'selection.removeFromAlbumConfirmTitle': 'Remove from album?',
+  'selection.removeFromAlbumConfirmBody': '{n} items will be removed from this album. The files stay in your library.',
+  'selection.partial': '{ok} of {n} completed.',
+  'selection.failed': 'The action failed.',
+  'albums.showOnTv': 'Show on TV',
+
 };
 
 export default en;

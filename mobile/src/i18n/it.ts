@@ -234,6 +234,19 @@ const it = {
   'chips.audio': 'Con audio',
   'chips.noAudio': 'Senza audio',
 
+  // Selection actions (MOBILE-FIRST-CLASS-PARITY-01).
+  'selection.actions': 'Azioni',
+  'selection.trash': 'Sposta nel cestino',
+  'selection.restore': 'Ripristina',
+  'selection.removeFromAlbum': 'Togli dall\u2019album',
+  'selection.trashConfirmTitle': 'Spostare nel cestino?',
+  'selection.trashConfirmBody': '{n} elementi finiranno nel cestino. Potrai ripristinarli.',
+  'selection.removeFromAlbumConfirmTitle': 'Togliere dall\u2019album?',
+  'selection.removeFromAlbumConfirmBody': '{n} elementi verranno tolti da questo album. I file restano nella tua libreria.',
+  'selection.partial': '{ok} di {n} completati.',
+  'selection.failed': 'Operazione non riuscita.',
+  'albums.showOnTv': 'Mostra sulla TV',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

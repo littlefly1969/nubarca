@@ -96,6 +96,14 @@ export interface UpdateAlbumPayload {
   showOnTv?: boolean;
 }
 
+/** Album TV visibility is its own route, not part of the general update. */
+export function albumTvSettingsPath(albumId: string): string {
+  return `${albumPath(albumId)}/tv-settings`;
+}
+export interface AlbumTvVisibilityPayload {
+  showOnTv: boolean;
+}
+
 export interface AlbumItemsPayload {
   fileItemIds: string[];
 }

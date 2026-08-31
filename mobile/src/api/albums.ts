@@ -15,6 +15,7 @@ import type {
   AlbumSummary,
   BulkAlbumItemsResult,
 } from '@nubarca/contracts';
+import { albumTvSettingsPath } from '@nubarca/contracts';
 
 export type {
   AlbumCoverItem,
@@ -51,6 +52,15 @@ export function updateAlbum(
     { name, description },
     { signal },
   );
+}
+
+// TV visibility has its own route, so a rename cannot flip it by accident.
+export function setAlbumTvVisibility(
+  albumId: string,
+  showOnTv: boolean,
+  signal?: AbortSignal,
+): Promise<AlbumDetail> {
+  return apiPatch<AlbumDetail>(albumTvSettingsPath(albumId), { showOnTv }, { signal });
 }
 
 // Deletes the ALBUM. The underlying media is untouched.

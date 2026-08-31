@@ -1,16 +1,11 @@
 // Photos tab: the whole owner photo library, newest first, cursor-paginated.
 // Opens the shared viewer; long-press starts multi-select for bulk add-to-album.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, View } from 'react-native';
+import { Alert, Pressable, StyleSheet } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
-import {
-  EmptyState,
-  ErrorState,
-  LoadingState,
-  PrimaryButton,
-} from '../../src/ui/states';
+import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
 import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
 import { ownedSlides } from '../../src/media/viewerEntries';
@@ -22,6 +17,9 @@ import type { MediaItem } from '../../src/api/media.ts';
 import { useMediaFilters } from '../../src/media/useMediaFilters';
 import { MediaFilterChips } from '../../src/components/MediaFilterChips';
 import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
+import { MediaSelectionBar } from '../../src/components/MediaSelectionBar';
+import { getMediaSelectionCapabilities } from '@nubarca/contracts';
+import { applyToSelection, moveToTrash, restoreFromTrash } from '../../src/api/mediaLifecycle';
 import { colors } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -63,6 +61,31 @@ export default function Photos(): React.JSX.Element {
   if (session.status !== 'authed') {
     return <Redirect href="/login" />;
   }
+
+  // §38: what the selection may do is a DOMAIN answer, asked of the shared
+  // capability matrix — the same one the browser asks — not a device check.
+  const selectedItems = snapshot.items.filter((i) => selectionState.ids.has(i.id));
+  const capabilities = getMediaSelectionCapabilities({
+    items: selectedItems,
+    source: 'library',
+    scope: filters.identity.libraryScope,
+  });
+
+  const runLifecycle = async (
+    action: (id: string, signal?: AbortSignal) => Promise<void>,
+  ): Promise<void> => {
+    const ids = [...selectionState.ids];
+    const result = await applyToSelection(ids, action);
+    // Report what actually happened: a partial result must not read as success.
+    if (result.failed > 0) {
+      Alert.alert(
+        t('selection.failed'),
+        t('selection.partial', { ok: String(result.succeeded), n: String(result.requested) }),
+      );
+    }
+    selectionState.cancel();
+    void refresh();
+  };
 
   const openViewer = (item: MediaItem): void => {
     viewer.open(ownedSlides(snapshot.items), item.id);
@@ -187,12 +210,14 @@ export default function Photos(): React.JSX.Element {
             }}
           />
           {selectionState.selecting && (
-            <View style={styles.actionBar}>
-              <PrimaryButton
-                label={`${t('selection.addToAlbum')} (${selectionState.count})`}
-                onPress={() => setSheetVisible(true)}
-              />
-            </View>
+            <MediaSelectionBar
+              count={selectionState.count}
+              capabilities={capabilities}
+              onAddToAlbum={() => setSheetVisible(true)}
+              onTrash={() => { void runLifecycle(moveToTrash); }}
+              onRestore={() => { void runLifecycle(restoreFromTrash); }}
+              onCancel={selectionState.cancel}
+            />
           )}
         </>
       )}
@@ -228,10 +253,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   pressed: { opacity: 0.7 },
-  actionBar: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 16,
-  },
 });
