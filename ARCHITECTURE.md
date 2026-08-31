@@ -1347,7 +1347,19 @@ Every optional feature should have a safe disabled/default state. Operator docum
 
 ### 22.2 Database migrations
 
-Startup migrations are disabled by default. The recommended production sequence applies EF migrations explicitly with the CLI before starting the updated application. `Database:MigrateOnStartup=true` is available for controlled deployments and fails startup if migration cannot complete.
+Startup migrations are disabled by default. The recommended production sequence
+is the guided `deploy/update-production.sh check|apply` release-control path.
+For a newly added migration, `deploy/migration-policy.json` must explicitly
+approve automation and state that the previous application remains compatible
+with the upgraded schema. The updater verifies the candidate image and Compose
+model, creates and validates a pre-migration PostgreSQL dump on the dedicated
+backup filesystem, executes the explicit `db migrate` CLI with the candidate
+image, verifies the expected migration ids, and changes release pins only
+afterwards. Rewritten, undeclared or previous-application-incompatible
+migrations fail closed and require a separate restore/compatibility plan.
+`Database:MigrateOnStartup=true` remains available for controlled deployments
+and fails startup if migration cannot complete; it is not the guided production
+path.
 
 Migrations are additive wherever practical, preserve existing content, and include PostgreSQL-specific indexes/extensions behind provider-aware code. A deployment must never run a newer API against an unreviewed older schema merely because health liveness passes.
 

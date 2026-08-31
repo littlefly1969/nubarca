@@ -100,6 +100,10 @@ Owner-private APIs may expose rich derived data to the owner. Privacy boundary:
   production command. It is the source of truth for the current four-file
   Compose stack, immutable image builds, OpenVINO target, smoke checks and
   rollback. Do not deploy from remembered chat commands.
+- The guided `deploy/update-production.sh check|apply` path is also the normal
+  migration path when `check` approves the tracked migration policy and prints
+  `--confirm-migrations`. Never add that flag by hand, bypass a refused policy,
+  or run migration and container deployment as two improvised procedures.
 - **TV releases:** [`docs/tv-release.md`](docs/tv-release.md) is the only
   authorized APK/OTA runbook. Ordinary OTA publication is not a container
   deploy and never rebuilds the APK. It is Git-first: GitHub is the only ordinary

@@ -11,8 +11,10 @@ const script = readFileSync(
 test('production update has a read-only review command and SHA-confirmed apply', () => {
   assert.match(script, /update-production\.sh check --env-file/);
   assert.match(script, /update-production\.sh apply --env-file.*--confirm/);
+  assert.match(script, /--confirm-migrations/);
   assert.match(script, /CONFIRM_SHA.*CANDIDATE_SHA/);
   assert.match(script, /origin\/main moved/);
+  assert.match(script, /another production update is already running/);
 });
 
 test('production update consumes only immutable CI images and never builds or prunes', () => {
@@ -32,19 +34,30 @@ test('TV changes require a CI-built native or OTA artifact', () => {
   assert.match(script, /\.nubarca-tv-ota\.source/);
 });
 
-test('gates images and Compose before replacing release pins', () => {
+test('gates images, Compose, backup, and migrations before replacing release pins', () => {
   const backendVerify = script.indexOf('scripts/verify-production-image.sh');
   const frontendVerify = script.indexOf('scripts/verify-production-frontend-image.sh');
   const composeGate = script.indexOf('COMPOSE_CANDIDATE');
+  const backup = script.lastIndexOf('    create_migration_backup');
+  const migration = script.lastIndexOf('    run_candidate_migrations');
   const pinReplace = script.indexOf('mv -f docker-compose.release.local.yml.tmp');
   assert.ok(backendVerify >= 0 && backendVerify < composeGate);
   assert.ok(frontendVerify >= 0 && frontendVerify < composeGate);
-  assert.ok(composeGate < pinReplace);
+  assert.ok(composeGate < backup);
+  assert.ok(backup < migration);
+  assert.ok(migration < pinReplace);
   assert.match(script, /restoring the previous image pins/);
 });
 
-test('migrations stop the simple path before production changes', () => {
-  assert.match(script, /src\/NubArca\.Api\/Data\/Migrations/);
-  assert.match(script, /candidate contains database migrations; use deploy\/FAST_DEPLOY\.md manually/);
-  assert.doesNotMatch(script, /\bdb migrate\b/);
+test('approved migrations require explicit confirmation and a verified backup', () => {
+  assert.match(script, /production-migration-plan\.py/);
+  assert.match(script, /BACKUP_DIR must be an absolute non-root path/);
+  assert.match(script, /pg_dump/);
+  assert.match(script, /gzip -t/);
+  assert.match(script, /verify-production-db-backup\.py/);
+  assert.match(script, /__EFMigrationsHistory/);
+  assert.match(script, /sha256sum/);
+  assert.match(script, /"\$NEW_API_IMAGE" db migrate/);
+  assert.match(script, /run check and repeat its --confirm-migrations command/);
+  assert.doesNotMatch(script, /(?:^|[;&|]\s*|\s)source\s+["']?\$ENV_FILE/m);
 });

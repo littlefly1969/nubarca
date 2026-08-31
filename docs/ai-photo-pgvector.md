@@ -83,7 +83,8 @@ deploy runbook).
 
 ```bash
 # 0) Deploy the pgvector image + apply migrations (creates the vector table).
-#    (Back up the DB first; migrations are additive and manual.)
+#    Use deploy/update-production.sh check and the exact confirmed apply command;
+#    the guided path owns the verified pre-migration backup.
 
 # 1) Index an existing profile's embeddings into pgvector (idempotent, 768-dim):
 ai photos embeddings vector-sync --profile photo-siglip2-base-patch16-384-v1 --dry-run
