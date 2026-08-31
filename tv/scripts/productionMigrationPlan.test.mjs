@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -11,6 +17,14 @@ const planner = resolve(
 );
 const migrationRoot = 'src/NubArca.Api/Data/Migrations';
 const migrationId = '20260102030405_AddSafeThing';
+const repositoryPolicy = resolve(
+  import.meta.dirname,
+  '../../deploy/migration-policy.json',
+);
+const repositoryMigrations = resolve(
+  import.meta.dirname,
+  '../../src/NubArca.Api/Data/Migrations',
+);
 
 function git(cwd, ...args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
@@ -83,4 +97,37 @@ test('rejects rewritten migration history even beside an approved additive migra
   const result = plan(fixture({ mutateOld: true }));
   assert.equal(result.status, 2);
   assert.match(result.stderr, /only additive migration files are automatic/);
+});
+
+test('repository policy explicitly classifies every governed migration', () => {
+  const policy = JSON.parse(readFileSync(repositoryPolicy, 'utf8'));
+  assert.match(
+    policy.classificationRequiredFrom,
+    /^\d{14}_[A-Za-z0-9_]+$/,
+  );
+
+  const governed = readdirSync(repositoryMigrations)
+    .map((name) => /^(\d{14}_[A-Za-z0-9_]+)\.cs$/.exec(name)?.[1])
+    .filter((id) => id && id >= policy.classificationRequiredFrom)
+    .sort();
+  const classified = Object.keys(policy.migrations)
+    .filter((id) => id >= policy.classificationRequiredFrom)
+    .sort();
+
+  assert.deepEqual(classified, governed);
+  for (const id of governed) {
+    const rule = policy.migrations[id];
+    assert.equal(typeof rule.automated, 'boolean', `${id} automated`);
+    assert.equal(
+      typeof rule.previousApplicationCompatible,
+      'boolean',
+      `${id} previousApplicationCompatible`,
+    );
+    assert.equal(
+      typeof rule.reason,
+      'string',
+      `${id} compatibility reason`,
+    );
+    assert.ok(rule.reason.trim(), `${id} compatibility reason`);
+  }
 });

@@ -1351,7 +1351,10 @@ Startup migrations are disabled by default. The recommended production sequence
 is the guided `deploy/update-production.sh check|apply` release-control path.
 For a newly added migration, `deploy/migration-policy.json` must explicitly
 approve automation and state that the previous application remains compatible
-with the upgraded schema. The updater verifies the candidate image and Compose
+with the upgraded schema. From the policy's `classificationRequiredFrom`
+boundary onward, CI requires every migration to be classified explicitly,
+including a deliberate `automated: false`; omission cannot wait until a server
+deployment to be discovered. The updater verifies the candidate image and Compose
 model, creates and validates a pre-migration PostgreSQL dump on the dedicated
 backup filesystem, executes the explicit `db migrate` CLI with the candidate
 image, verifies the expected migration ids, and changes release pins only

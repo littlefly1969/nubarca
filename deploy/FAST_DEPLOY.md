@@ -343,6 +343,13 @@ migration may use the guided path only when all of these are true:
   application can still run against the upgraded schema;
 - the policy carries a non-empty compatibility reason.
 
+From `classificationRequiredFrom` onward, every migration must have an explicit
+policy entry, including migrations deliberately marked `automated: false`.
+The repository test enforces that coverage before merge, so an omitted
+classification is caught in CI rather than first discovered by a production
+`check`. Classification is still not approval: the updater accepts only rules
+whose `automated` and `previousApplicationCompatible` values are both true.
+
 `deploy/production-migration-plan.py` validates those facts from Git objects at
 the confirmed candidate SHA. The policy is read from the candidate commit, not
 from an uncommitted working tree. A missing or false declaration stops `check`;

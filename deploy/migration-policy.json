@@ -1,6 +1,22 @@
 {
   "schemaVersion": 1,
+  "classificationRequiredFrom": "20260827213657_AddCurrentDerivationAndChunkLocators",
   "migrations": {
+    "20260827213657_AddCurrentDerivationAndChunkLocators": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds defaulted or nullable document derivation and locator columns, backfills only unambiguous current rows, and adds constraints respected by the previous indexer, which writes null pages and does not read the new columns."
+    },
+    "20260828161744_AddPartyGuestMessages": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds two default-false Party settings and a new guest-message table; the previous application ignores the new table and continues to read and write existing rows through compatible defaults."
+    },
+    "20260829173856_AddDocumentVisualRetrieval": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only new visual-retrieval tables, indexes, constraints, and an optional pgvector accelerator; the previous application neither reads nor writes them."
+    },
     "20260830221014_AddPartyGuestHubChallenges": {
       "automated": true,
       "previousApplicationCompatible": true,
