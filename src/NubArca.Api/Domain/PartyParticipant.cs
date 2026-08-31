@@ -43,6 +43,9 @@ public class PartyParticipant
     // they could use to upload the same thing again.
     public int AcceptedPhotoCount { get; set; }
     public int AcceptedVideoCount { get; set; }
+    // Current votes in this event. Kept on the participant so the total budget
+    // is claimed with one conditional UPDATE under concurrency.
+    public int ChallengeVoteCount { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime LastSeenAt { get; set; }

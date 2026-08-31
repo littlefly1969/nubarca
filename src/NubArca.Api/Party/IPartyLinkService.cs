@@ -61,6 +61,12 @@ public interface IPartyLinkService
         int? maxVideoUploadsPerParticipant,
         CancellationToken cancellationToken = default);
 
+    Task<bool> UpdateGameSettingsAsync(
+        Guid ownerUserId, Guid albumId, bool gameEnabled,
+        int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
+        int votesPerGuest, int? maxChallengesPerSession,
+        CancellationToken cancellationToken = default);
+
     Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default);
 

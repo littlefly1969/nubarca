@@ -100,7 +100,7 @@ test('a Hero holds the current media rather than moving the index', () => {
   assert.match(viewer, /setHero\(pick\.message\);\s*return;/);
   // ...and the photo dwell timer is suspended underneath it, so the media does
   // not advance out from behind the card.
-  assert.match(viewer, /hero === null;/);
+  assert.match(viewer, /hero === null && !challengeHeld;/);
 });
 
 test('a deferred boundary is explicit, and the Hero timer does not settle it', () => {
@@ -149,8 +149,8 @@ test('the Hero comes down when the conditions that allowed it stop holding', () 
 });
 
 test('manual navigation takes over from a Hero rather than queueing behind it', () => {
-  assert.match(viewer, /case 'next': dismissHeroForManualNavigation\(\); goNext\(\); break;/);
-  assert.match(viewer, /case 'prev': dismissHeroForManualNavigation\(\); goPrev\(\); break;/);
+  assert.match(viewer, /case 'next':[\s\S]{0,500}dismissHeroForManualNavigation\(\); goNext\(\); break;/);
+  assert.match(viewer, /case 'prev':[\s\S]{0,100}dismissHeroForManualNavigation\(\); goPrev\(\); break;/);
   // It discards the debt: the person has just chosen where to be, and settling
   // an old one on top of that would skip the item they asked for.
   const helper = viewer.slice(

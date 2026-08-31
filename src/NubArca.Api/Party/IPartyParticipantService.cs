@@ -43,4 +43,10 @@ public interface IPartyParticipantService
     // (membership, moderation row) rolls the counter back with it.
     Task<bool> TryClaimSlotAsync(
         Guid participantId, bool isVideo, int max, CancellationToken cancellationToken = default);
+
+    Task<bool> TryClaimChallengeVoteAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default);
+
+    Task ReleaseChallengeVoteAsync(
+        Guid participantId, CancellationToken cancellationToken = default);
 }

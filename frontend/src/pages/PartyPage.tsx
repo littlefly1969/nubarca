@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router';
+import { Link, useParams } from 'react-router';
 import {
   ApiError,
   getPartyAlbum,
@@ -19,7 +19,8 @@ import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSe
 // disabled/revoked the API returns 404 and we show a friendly "unavailable".
 type State =
   | { kind: 'loading' }
-  | { kind: 'ready'; albumName: string; items: PartyItem[] }
+  | { kind: 'ready'; albumName: string; items: PartyItem[]; coverUrl: string | null;
+      contributionUrl: string | null; gameEnabled: boolean }
   | { kind: 'unavailable' }
   | { kind: 'error' };
 
@@ -55,7 +56,11 @@ export function PartyPage() {
     setState({ kind: 'loading' });
     Promise.all([getPartyAlbum(token, signal), getPartyItems(token, signal)])
       .then(([album, items]) => {
-        setState({ kind: 'ready', albumName: album.albumName, items: items.items });
+        setState({
+          kind: 'ready', albumName: album.albumName, items: items.items,
+          coverUrl: album.coverUrl, contributionUrl: album.contributionUrl,
+          gameEnabled: album.gameEnabled,
+        });
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -84,7 +89,7 @@ export function PartyPage() {
       getPartyItems(token)
         .then((fresh) => {
           setState((cur) => (cur.kind === 'ready' && !sameItemIds(cur.items, fresh.items)
-            ? { kind: 'ready', albumName: fresh.albumName, items: fresh.items }
+            ? { ...cur, albumName: fresh.albumName, items: fresh.items }
             : cur));
           setLightbox((lb) => (lb && !fresh.items.some((it) => it.id === lb.id) ? null : lb));
         })
@@ -104,7 +109,13 @@ export function PartyPage() {
   }, [lightbox]);
 
   if (state.kind === 'loading') {
-    return <main className="party-page"><p className="party-status">{t('common.loading')}</p></main>;
+    return <main className="party-page" aria-busy="true">
+      <span className="visually-hidden">{t('common.loading')}</span>
+      <div className="party-skeleton party-skeleton-hero" />
+      <div className="party-skeleton-actions">
+        <div className="party-skeleton" /><div className="party-skeleton" /><div className="party-skeleton" />
+      </div>
+    </main>;
   }
   if (state.kind === 'unavailable') {
     return (
@@ -128,7 +139,7 @@ export function PartyPage() {
     );
   }
 
-  const { albumName, items } = state;
+  const { albumName, items, coverUrl, contributionUrl, gameEnabled } = state;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
   // to items still visible in the live album (a match hidden since the search
   // simply drops out on the next poll).
@@ -139,7 +150,8 @@ export function PartyPage() {
     : items;
   return (
     <main className="party-page">
-      <header className="party-header">
+      <header className="party-hub-hero" style={coverUrl ? { backgroundImage: `url("${coverUrl}")` } : undefined}>
+        <div className="party-hub-hero-shade">
         <div className="party-header-top">
           <h1>{albumName}</h1>
           <LanguageSwitcher className="language-switcher language-switcher-public" />
@@ -147,10 +159,34 @@ export function PartyPage() {
         <p className="party-subtitle">
           {tn(items.length, 'party.itemCount')} · {t('party.subtitleSuffix')}
         </p>
+        <p className="party-hub-brand">NubArca Party</p>
+        </div>
       </header>
 
-      {token && <PartyFaceSearch token={token} onFilterChange={setFaceFilter} />}
+      <nav className="party-hub-actions" aria-label={t('partyHub.actions')}>
+        <a className="party-hub-action" href="#party-photos">
+          <strong>{t('partyHub.photos')}</strong><span>{t('partyHub.photosHelp')}</span>
+        </a>
+        {contributionUrl && (
+          <a className="party-hub-action" href={contributionUrl}>
+            <strong>{t('partyHub.contribute')}</strong><span>{t('partyHub.contributeHelp')}</span>
+          </a>
+        )}
+        <a className="party-hub-action" href="#party-face">
+          <strong>{t('partyHub.face')}</strong><span>{t('partyHub.faceHelp')}</span>
+        </a>
+        {gameEnabled && token && (
+          <Link className="party-hub-action party-hub-action-game" to={`/party/${token}/challenges`}>
+            <strong>{t('partyHub.vote')}</strong><span>{t('partyHub.voteHelp')}</span>
+          </Link>
+        )}
+      </nav>
 
+      <section id="party-face">
+        {token && <PartyFaceSearch token={token} onFilterChange={setFaceFilter} />}
+      </section>
+
+      <section id="party-photos">
       {visibleItems.length === 0 ? (
         <p className="party-status" data-testid="party-empty">
           {faceFilter ? t('partyFace.noMatches') : t('party.empty')}
@@ -173,6 +209,7 @@ export function PartyPage() {
           ))}
         </div>
       )}
+      </section>
 
       {lightbox && (
         <div

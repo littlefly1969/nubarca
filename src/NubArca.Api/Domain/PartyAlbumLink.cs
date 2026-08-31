@@ -70,6 +70,12 @@ public class PartyAlbumLink
     public int MaxPhotoUploadsPerParticipant { get; set; }
     public int MaxVideoUploadsPerParticipant { get; set; }
 
+    public bool GameEnabled { get; set; }
+    public int MinChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MinIntervalSeconds;
+    public int MaxChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MaxIntervalSeconds;
+    public int VotesPerGuest { get; set; } = PartyChallengeDefaults.VotesPerGuest;
+    public int? MaxChallengesPerSession { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 
@@ -82,6 +88,23 @@ public class PartyAlbumLink
 
     // Who enabled it (owner or, in future, a delegated user). Owner-scoped.
     public Guid? CreatedByUserId { get; set; }
+}
+
+public static class PartyChallengeDefaults
+{
+    public const int MinIntervalSeconds = 300;
+    public const int MaxIntervalSeconds = 540;
+    public const int VotesPerGuest = 3;
+    public const int MinAllowedIntervalSeconds = 30;
+    public const int MaxAllowedIntervalSeconds = 86_400;
+    public const int MinVotesPerGuest = 1;
+    public const int MaxVotesPerGuest = 20;
+    public const int MaxMaxChallengesPerSession = 100;
+
+    public static bool IsValid(int min, int max, int votes, int? sessionMax) =>
+        min >= MinAllowedIntervalSeconds && max <= MaxAllowedIntervalSeconds
+        && max >= min && votes is >= MinVotesPerGuest and <= MaxVotesPerGuest
+        && (sessionMax is null || sessionMax is >= 1 and <= MaxMaxChallengesPerSession);
 }
 
 // Defaults and validated ranges for the owner-configurable party slideshow and

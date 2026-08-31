@@ -130,6 +130,26 @@ export function listTvPartyMessages(albumId: string): Promise<TvPartyMessages> {
   );
 }
 
+export interface TvPartyChallenge {
+  id: string; title: string; body: string; kind: 'dare' | 'penalty' | 'guess' | 'custom';
+  mediaUrl: string | null;
+}
+export interface TvPartyPlayback {
+  mode: 'media' | 'challenge_hold';
+  activeChallenge: TvPartyChallenge | null;
+  nextChallengeAt: string | null;
+  completedCount: number;
+}
+export function getTvPartyPlayback(albumId: string): Promise<TvPartyPlayback> {
+  return tvGet<TvPartyPlayback>(`/api/tv/albums/${encodeURIComponent(albumId)}/party-playback`);
+}
+export function advanceTvPartyBoundary(albumId: string): Promise<TvPartyPlayback> {
+  return tvPost<TvPartyPlayback>(`/api/tv/albums/${encodeURIComponent(albumId)}/party-playback/boundary`);
+}
+export function completeTvPartyChallenge(albumId: string): Promise<TvPartyPlayback> {
+  return tvPost<TvPartyPlayback>(`/api/tv/albums/${encodeURIComponent(albumId)}/party-playback/next`);
+}
+
 // Active party face filter for the paired album. A guest's face search reaches
 // the TV only after the guest EXPLICITLY presses "Show these photos on TV" on
 // the public party page; the TV polls this and filters the grid/slideshow to

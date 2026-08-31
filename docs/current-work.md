@@ -496,6 +496,25 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   decides what the bytes are, and moderation never refunds — hiding a photo is a
   visibility decision, and giving the slot back would let a guest re-upload the
   thing the owner just hid.
+- **Party publishes one Guest Hub QR; the old capabilities remain capabilities.**
+  The view token's `/party/{token}` route is the canonical mobile Hub and the
+  only link rendered as a QR. Browse/download, face search, contribution and
+  challenge voting are entries in that Hub. The distinct upload token and
+  `/party/{uploadToken}/upload` route are deliberately still valid for already
+  printed codes; hiding the second QR is a presentation change, not a token
+  migration or redirect that could weaken its upload-only authority.
+- **A Party challenge is revealed on a boundary and completed by the existing
+  NEXT, with database state as the authority.** Album-scoped challenge content
+  survives link rotation; votes, completion history and the one playback
+  session are link-scoped. A conditional participant update owns the total vote
+  budget and a unique `(link, participant, challenge)` index owns one-vote
+  idempotency. `PartyChallengeSession` freezes `ChallengeHold`, active challenge
+  and next deadline across TV reconnects. Deadline expiry never interrupts a
+  medium: the next natural boundary selects `MostVotedRemaining`; no timeout can
+  leave Hold, and the existing remote NEXT performs one version-guarded
+  completion before normal playback resumes. Existing links default the game
+  OFF, so clients that never call the additive endpoints retain the previous
+  Party behaviour.
 - **A party MESSAGE is scoped to the Party link, and its authority is a
   capability rather than a role.** `PartyMessage` is a text-only domain beside
   the media pipeline — no `FileItem`, no blob, no derivative — so `TvAlbumItem`

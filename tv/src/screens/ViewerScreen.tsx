@@ -16,8 +16,12 @@ import {
   getTvActiveFaceSearch,
   listTvAlbumItems,
   listTvPartyMessages,
+  getTvPartyPlayback,
+  advanceTvPartyBoundary,
+  completeTvPartyChallenge,
   type TvAlbumItem,
   type TvPartyMessage,
+  type TvPartyPlayback,
 } from '../api/tv';
 import { ApiError, loadTvMedia } from '../api/client';
 import { SlideImage } from '../components/SlideImage';
@@ -31,6 +35,7 @@ import { FaceFilterIndicator } from '../components/FaceFilterIndicator';
 import { OverlayQrCorners } from '../components/OverlayQrCorners';
 import { PartyMessageRibbon } from '../components/PartyMessageRibbon';
 import { PartyHeroMessage } from '../components/PartyHeroMessage';
+import { PartyChallengeHold } from '../components/PartyChallengeHold';
 import { useMenuOverlay } from '../lib/useMenuOverlay';
 import { useScreenAwake } from '../lib/useScreenAwake';
 import { shouldKeepPhotoSlideshowAwake, shouldRotateSlideshow } from '../video/wakePolicy';
@@ -55,6 +60,7 @@ const PARTY_ITEMS_POLL_MS = 15_000;
 
 // Poll interval for the album's active party face filter (matches the grid).
 const FACE_SEARCH_POLL_MS = 6_000;
+const PARTY_PLAYBACK_POLL_MS = 5_000;
 
 interface Props {
   items: TvAlbumItem[];
@@ -157,6 +163,9 @@ export function ViewerScreen({
   // media index is FROZEN — see the boundary handler for why that is what makes
   // the carousel resume with nothing lost and nothing repeated.
   const [hero, setHero] = useState<TvPartyMessage | null>(null);
+  const [partyPlayback, setPartyPlayback] = useState<TvPartyPlayback | null>(null);
+  const partyPlaybackRef = useRef<TvPartyPlayback | null>(null);
+  partyPlaybackRef.current = partyPlayback;
   const heroRotationRef = useRef<HeroRotation>(beginHeroRotation());
   const boundariesSinceHeroRef = useRef(0);
   // The advance a Hero postponed. The ledger and the rule for spending it are
@@ -247,7 +256,7 @@ export function ViewerScreen({
   // finishes. That is what makes "the carousel resumes from exactly the right
   // place" true by construction rather than by arithmetic — there is no second
   // place that moves the index.
-  const handleMediaBoundary = useCallback(() => {
+  const ordinaryMediaBoundary = useCallback(() => {
     const outcome = onMediaBoundary({
       boundariesSinceHero: boundariesSinceHeroRef.current,
       eligible: heroEligible({
@@ -274,6 +283,16 @@ export function ViewerScreen({
     }
     goNext();
   }, [partyEnabled, goNext]);
+
+  const handleMediaBoundary = useCallback(() => {
+    if (!partyEnabled || !albumId) { ordinaryMediaBoundary(); return; }
+    void advanceTvPartyBoundary(albumId)
+      .then((snapshot) => {
+        setPartyPlayback(snapshot);
+        if (snapshot.mode !== 'challenge_hold') ordinaryMediaBoundary();
+      })
+      .catch(() => ordinaryMediaBoundary());
+  }, [partyEnabled, albumId, ordinaryMediaBoundary]);
 
   const dismissHeroForManualNavigation = useCallback(() => {
     boundaryDebtRef.current = discardBoundary();
@@ -324,7 +343,8 @@ export function ViewerScreen({
     const eventType = actionableEventType(evt);
     if (eventType === null) return; // one action per physical press
     const type = evt.eventType;
-    const isVideo = isVideoRef.current;
+    const challengeHeld = partyPlaybackRef.current?.mode === 'challenge_hold';
+    const isVideo = challengeHeld ? false : isVideoRef.current;
     tvDebug('remote', type, 'video', isVideo, 'overlay', overlayVisibleRef.current);
     switch (mapViewerRemoteEvent(type, isVideo)) {
       case 'toggle-overlay':
@@ -334,9 +354,20 @@ export function ViewerScreen({
       // down with it, and the advance the card was holding is discarded — they
       // have just chosen where to be, and settling an old debt on top of that
       // would skip the item they asked for.
-      case 'next': dismissHeroForManualNavigation(); goNext(); break;
-      case 'prev': dismissHeroForManualNavigation(); goPrev(); break;
+      case 'next':
+        if (challengeHeld && albumId) {
+          void completeTvPartyChallenge(albumId).then((snapshot) => {
+            setPartyPlayback(snapshot);
+            if (snapshot.mode === 'media') goNext();
+          }).catch(() => { /* persisted hold remains authoritative */ });
+          return;
+        }
+        dismissHeroForManualNavigation(); goNext(); break;
+      case 'prev':
+        if (challengeHeld) return;
+        dismissHeroForManualNavigation(); goPrev(); break;
       case 'toggle-play':
+        if (challengeHeld) return;
         // In a slideshow there is exactly ONE play state, and it governs the
         // photo countdown and the video player alike. Talking to the player
         // directly here is what previously let a video sit paused under a pill
@@ -365,7 +396,7 @@ export function ViewerScreen({
         break;
     }
     bumpOverlay();
-  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef,
+  }, [goNext, goPrev, togglePlay, toggleOverlay, bumpOverlay, overlayVisibleRef, albumId,
     dismissHeroForManualNavigation]);
   useTVEventHandler(onTVEvent);
 
@@ -414,7 +445,8 @@ export function ViewerScreen({
   // `hero === null` is part of the condition, so a Hero HOLDS the wall rather
   // than racing the dwell timer: the photo underneath does not advance out from
   // behind the card.
-  const rotating = shouldRotateSlideshow(wakeInputs) && !currentIsVideo && hero === null;
+  const challengeHeld = partyPlayback?.mode === 'challenge_hold';
+  const rotating = shouldRotateSlideshow(wakeInputs) && !currentIsVideo && hero === null && !challengeHeld;
   useEffect(() => {
     if (!rotating || displayItems.length === 0 || currentIsVideo) return;
     const timer = setTimeout(handleMediaBoundary, photoMs);
@@ -615,6 +647,24 @@ export function ViewerScreen({
     return () => clearInterval(timer);
   }, [rotateRibbon]);
 
+  // Reconnect-safe authoritative challenge state. The TV never invents a
+  // challenge locally: refresh/restart asks the current Party link and restores
+  // the same active card.
+  useEffect(() => {
+    if (!partyEnabled || !albumId) { setPartyPlayback(null); return; }
+    let cancelled = false;
+    const poll = () => {
+      getTvPartyPlayback(albumId).then((snapshot) => {
+        if (!cancelled) setPartyPlayback(snapshot);
+      }).catch((err) => {
+        if (err instanceof ApiError && err.status === 401) onSessionInvalid?.();
+      });
+    };
+    poll();
+    const timer = setInterval(poll, PARTY_PLAYBACK_POLL_MS);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [partyEnabled, albumId, onSessionInvalid]);
+
   // Poll the album's active party face filter (same contract as the grid): only
   // an EXPLICITLY activated search arrives; a newer server-accepted activation
   // replaces the previous one; cleared/expired/deleted → full album restored.
@@ -684,7 +734,7 @@ export function ViewerScreen({
           // introducing a second one; the wall then advances to the NEXT media,
           // so the paused clip is never resumed.
           {...videoPlaybackProps({
-            slideshowMode, partyEnabled, playing: playing && hero === null, timing,
+            slideshowMode, partyEnabled, playing: playing && hero === null && !challengeHeld, timing,
           })}
           onReadyStateChange={setVideoReady}
           // EXTERNAL pause reconciliation, for the CONTROLLED slideshow only.
@@ -722,6 +772,7 @@ export function ViewerScreen({
 
       {/* The Hero card, over everything except the MENU overlay. */}
       <PartyHeroMessage message={hero} />
+      <PartyChallengeHold challenge={partyPlayback?.activeChallenge ?? null} />
 
       {/* Everything below only renders while the MENU overlay is visible. */}
       {overlayVisible && (
