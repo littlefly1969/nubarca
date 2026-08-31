@@ -108,6 +108,11 @@ export default function MediaRoute(): React.JSX.Element {
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
+  // GESTURE OWNERSHIP (§4). The active photo slide reports whether it is at
+  // rest; while it is zoomed the pager stops scrolling so a pan cannot page to
+  // the neighbouring item, and the instant zoom returns to 1 paging is live
+  // again. Derived from zoom state, never from a timeout.
+  const [pagerOwnsHorizontal, setPagerOwnsHorizontal] = useState(true);
   // Window dimensions change before Android has necessarily laid the native
   // list out. The pager's own onLayout measurement is the only width allowed
   // to drive cell sizes, offsets and swipe interpretation.
@@ -120,6 +125,12 @@ export default function MediaRoute(): React.JSX.Element {
   useEffect(() => {
     setIndex(startIndex);
   }, [startIndex]);
+
+  // A new item is always at rest: the outgoing slide's zoom must never leave
+  // the pager locked on the incoming one.
+  useEffect(() => {
+    setPagerOwnsHorizontal(true);
+  }, [index]);
 
   const safeIndex = safeViewerIndex(index, slides.length);
   const current = slides[safeIndex];
@@ -226,6 +237,7 @@ export default function MediaRoute(): React.JSX.Element {
         data={slides}
         horizontal
         pagingEnabled
+        scrollEnabled={pagerOwnsHorizontal}
         keyExtractor={(s) => s.key}
         initialScrollIndex={startIndex}
         getItemLayout={(_data, i) => ({
@@ -244,7 +256,11 @@ export default function MediaRoute(): React.JSX.Element {
               <ImageSlide
                 path={item.imagePath}
                 name={item.displayName}
+                active={i === safeIndex}
                 onToggle={() => setChromeVisible((v) => !v)}
+                onZoomOwnershipChange={
+                  i === safeIndex ? setPagerOwnsHorizontal : undefined
+                }
               />
             ) : (
               <VideoSlide slide={item} active={i === safeIndex} />

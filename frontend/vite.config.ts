@@ -15,6 +15,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@nubarca/api-client': resolve(__dirname, './packages/api-client/src/index.ts'),
+      '@nubarca/contracts': resolve(__dirname, '../packages/contracts/src/index.ts'),
     },
   },
   server: {

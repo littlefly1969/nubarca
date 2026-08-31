@@ -12,7 +12,12 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "skipLibCheck": true,
-    "allowImportingTsExtensions": false,
+    // The shared @nubarca/contracts package spells its internal imports with
+    // explicit .ts extensions, because the mobile and TV test runners load it
+    // through Node's type stripping, which requires them. Permitting the form
+    // here costs nothing (this project already emits nothing) and is what lets
+    // one package serve a bundler and two Metro apps without a build step.
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
@@ -20,8 +25,9 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@nubarca/api-client": ["./packages/api-client/src/index.ts"]
+      "@nubarca/api-client": ["./packages/api-client/src/index.ts"],
+      "@nubarca/contracts": ["../packages/contracts/src/index.ts"]
     }
   },
-  "include": ["src", "packages/api-client/src"]
+  "include": ["src", "packages/api-client/src", "../packages/contracts/src"]
 }

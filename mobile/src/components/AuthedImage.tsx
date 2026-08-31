@@ -13,7 +13,9 @@ import {
   Text,
   View,
   type DimensionValue,
+  type ImageLoadEventData,
   type ImageResizeMode,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import { loadImage } from '../media/imageLoader';
 import { colors } from '../ui/tokens';
@@ -23,11 +25,17 @@ export function AuthedImage({
   style,
   accessibilityLabel,
   resizeMode,
+  onNaturalSize,
 }: {
   path: string;
   style: { width?: DimensionValue; height?: DimensionValue; [k: string]: unknown };
   accessibilityLabel?: string;
   resizeMode?: ImageResizeMode;
+  // The decoded source dimensions, reported once the bitmap is available.
+  // The zooming viewer needs them: under `contain` the pan bounds are the
+  // overflow of the ASPECT-FITTED box, which cannot be derived from the
+  // viewport alone. Absent for every call site that only displays an image.
+  onNaturalSize?: (size: { width: number; height: number }) => void;
 }): React.JSX.Element {
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -63,6 +71,14 @@ export function AuthedImage({
       resizeMode={resizeMode}
       accessibilityLabel={accessibilityLabel}
       accessibilityIgnoresInvertColors
+      onLoad={
+        onNaturalSize === undefined
+          ? undefined
+          : (event: NativeSyntheticEvent<ImageLoadEventData>) => {
+              const { width, height } = event.nativeEvent.source;
+              if (width > 0 && height > 0) onNaturalSize({ width, height });
+            }
+      }
     />
   );
 }

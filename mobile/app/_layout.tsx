@@ -11,6 +11,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Stack, Redirect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { I18nProvider, useI18n } from '../src/i18n';
 import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
@@ -104,21 +105,28 @@ function Splash(): React.JSX.Element {
 }
 
 export default function RootLayout(): React.JSX.Element {
+  // GestureHandlerRootView must be the OUTERMOST view: react-native-gesture-
+  // handler resolves every gesture against the nearest root, and without one
+  // the viewer's pinch/pan simply never fire on Android — silently, with no
+  // error to point at.
   return (
-    <SafeAreaProvider>
-      <I18nProvider>
-        <SessionProvider>
-          <IdentityKeyedViewerProvider>
-            <StatusBar style="dark" />
-            <RootGate />
-          </IdentityKeyedViewerProvider>
-        </SessionProvider>
-      </I18nProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaProvider>
+        <I18nProvider>
+          <SessionProvider>
+            <IdentityKeyedViewerProvider>
+              <StatusBar style="dark" />
+              <RootGate />
+            </IdentityKeyedViewerProvider>
+          </SessionProvider>
+        </I18nProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: { flex: 1 },
   splash: {
     flex: 1,
     alignItems: 'center',

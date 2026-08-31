@@ -1,3 +1,9 @@
+import type {
+  AlbumMembership,
+  MediaGalleryScope,
+  MediaSortDirection,
+  MediaSortField,
+} from '@nubarca/contracts';
 import { api } from './client';
 
 // Mirrors NubArca.Api.Files.ImageItem on the backend. `thumbnailUrl` points
@@ -71,12 +77,16 @@ export interface ImageListResponse {
   total?: number | null;
 }
 
-export type ImageSortField = 'created' | 'name' | 'size' | 'datetaken';
-export type ImageSortDirection = 'asc' | 'desc';
+// These are the CANONICAL media vocabulary, defined once in
+// @nubarca/contracts and re-exported here under their historical names so the
+// existing web call sites keep compiling. The definition lives in one place;
+// only the alias is local.
+export type ImageSortField = MediaSortField;
+export type ImageSortDirection = MediaSortDirection;
 
 // Shared by the photo and video galleries — one backend concept, one wire
 // vocabulary. Mirrors NubArca.Api.Files.AlbumMembershipFilter.
-export type AlbumMembership = 'any' | 'assigned' | 'unassigned';
+export type { AlbumMembership };
 
 export interface ListImagesQuery {
   q?: string;
@@ -126,7 +136,7 @@ export interface ListImagesQuery {
 
 // Slice 3: the two media-library scopes an ordinary gallery view can request.
 // 'all' is an internal backend scope never exposed to the frontend.
-export type MediaGalleryScope = 'active' | 'excluded';
+export type { MediaGalleryScope };
 
 export function listImages(
   query: ListImagesQuery = {},
