@@ -23,15 +23,15 @@ import { useI18n } from '../i18n';
 import { sessionCookieSource } from '../api/sessionAccess';
 import {
   VIDEO_PROBE_ATTEMPT_TIMEOUT_MS,
-  VIDEO_PROBE_MAX_ATTEMPTS,
-  VIDEO_PROBE_RETRY_MS,
   createManagedProbe,
+  resolveExpoVideoSource,
   type VideoContainer,
   type VideoProbeFetch,
 } from '../media/videoProbe';
 import type { ViewerSlide } from '../media/viewerSequence';
 import {
   playerStatusFor,
+  probeStateForOutcome,
   refreshVideoSourceCookie,
   shouldPlayVideo,
   snapshotPlayerStatus,
@@ -63,12 +63,15 @@ export function VideoSlide({
     [active, slide.videoSource],
   );
 
-  // BOUNDED RANGE PROBE (acceptance contract fix — see media/videoProbe.ts):
-  // sends Range: bytes=0-0 with the session cookie, aborts each attempt as
-  // soon as the response head is known, and classifies per NubArca contracts
-  // (202 preparing / 404 unavailable / 206+video progressive / 200 HLS MIME
-  // → hls). The outcome resolves BOTH availability and container; the
-  // expo-video player mounts only on a confirmed ready.
+  // RANGE PROBE over the CANONICAL delivery contract (media/videoDelivery.ts,
+  // byte-identical to the copies web and TV use): sends Range: bytes=0-0 with
+  // the session cookie, aborts each attempt as soon as the response head is
+  // known, and classifies exactly as the other two consumers do — 200/206 is
+  // always playable and the MIME only says hls vs progressive, 202 keeps
+  // preparing on the shared backoff for as long as the transcode takes, and
+  // 404 / auth / transient / protocol stay distinct verdicts. The outcome
+  // resolves BOTH availability and container; the expo-video player mounts
+  // only on a confirmed ready.
   const [probeState, setProbeState] = useState<VideoProbeState>(
     source ? 'idle' : 'unavailable',
   );
@@ -109,15 +112,14 @@ export function VideoSlide({
     // attempt in time and lets cleanup KILL the in-flight request and the
     // retry delay outright, instead of only ignoring a late result.
     const probe = createManagedProbe(source, {
-      retryMs: VIDEO_PROBE_RETRY_MS,
-      maxAttempts: VIDEO_PROBE_MAX_ATTEMPTS,
       attemptTimeoutMs: VIDEO_PROBE_ATTEMPT_TIMEOUT_MS,
       // The promise settles only on the TERMINAL verdict; without this the
       // transient 202 never reaches the UI and the slide reads
       // "Caricamento..." for the whole ladder-preparation wait instead of
-      // switching to its dedicated "preparing" branch.
-      onPhase: (phase) => {
-        if (!cancelled && phase === 'preparing') setProbeState('preparing');
+      // switching to its dedicated "preparing" branch. There is no attempt
+      // ceiling: a long transcode stays "preparing" until it is ready.
+      onPreparing: () => {
+        if (!cancelled) setProbeState('preparing');
       },
       fetchImpl: ((
         uri: string,
@@ -127,12 +129,15 @@ export function VideoSlide({
     void probe.outcome.then((outcome) => {
       // Defence-in-depth: a verdict landing in the same tick as unmount — or
       // the cancelled-probe settlement itself — must never touch state.
-      // Cancellation is never surfaced as unavailable/error here.
+      // Cancellation is its own outcome and maps to null, so it is never
+      // surfaced as unavailable/error here.
       if (cancelled) return;
-      setProbeState(outcome.phase as VideoProbeState);
-      const container = outcome.container ?? null;
+      const next = probeStateForOutcome(outcome);
+      if (next === null) return;
+      setProbeState(next);
+      const container = outcome.kind === 'ready' ? outcome.mode : null;
       setResolvedContainer(container);
-      if (outcome.phase === 'ready' && container !== null) {
+      if (container !== null) {
         readySourceRef.current = { source, container };
       }
     });
@@ -142,13 +147,14 @@ export function VideoSlide({
     };
   }, [active, probeAttempt, source]);
 
+  // ONE builder for both containers (media/videoProbe.ts): the probed URL is
+  // the played URL — a shared album keeps its server-provided album-scoped
+  // route — and contentType is ALWAYS declared, progressive included, because
+  // ExoPlayer cannot infer a container from an extension-less /video URL.
   const expoSource = useMemo(() => {
     if (probeState !== 'ready') return null;
     if (!source || resolvedContainer === null) return null;
-    const base = { uri: source.uri, headers: source.headers };
-    return resolvedContainer === 'hls'
-      ? { ...base, contentType: 'hls' as const }
-      : base;
+    return resolveExpoVideoSource(source, { kind: 'ready', mode: resolvedContainer });
   }, [source, probeState, resolvedContainer]);
 
   const player: VideoPlayer = useVideoPlayer(expoSource, (p) => {

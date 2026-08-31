@@ -51,7 +51,7 @@ both public token contracts/routes remain available.
   concurrency tests for the conditional vote claim and versioned completion.
 - Frontend production build and typecheck passed; the complete frontend suite
   passed 1571/1571 after updating the intentional one-QR contracts.
-- Native TV typecheck passed and its complete test command passed 38/38.
+- Native TV typecheck passed and its complete test command passed 39/39.
 - `GameEnabled=false` is both the migration default and covered by an integration
   test that proves the legacy Party endpoints continue to work while the challenge
   endpoint stays unavailable.

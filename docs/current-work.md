@@ -440,6 +440,28 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the viewer exactly one `VideoPlayer` exists at a time (keyed by source), with
   an explicit Android buffer budget — the platform default byte budget is
   UNLIMITED, which on a constrained Fire Stick is a memory climb with no ceiling.
+- **The `/video` delivery contract is ONE file, vendored three times.**
+  `shared/video-delivery/videoDelivery.ts` owns the probe classification, the
+  HLS-vs-progressive discrimination, `Retry-After` parsing and the retry policy;
+  `scripts/sync-video-delivery.sh` copies it byte-for-byte into
+  `frontend/src/video/`, `mobile/src/media/` and `tv/src/video/`, and each
+  project's `videoDeliveryParity` test fails if its copy drifts or if a row of
+  `shared/video-delivery/parity-matrix.json` classifies differently there. It is
+  vendored rather than packaged because the three are independent npm projects
+  with independent toolchains and no workspace root — wiring Metro watchFolders
+  and a second tsconfig project into two Expo apps costs far more than the
+  hundred lines it would share. The rules that used to drift, and must not
+  again: **`200`/`206` are ALWAYS playable** (the MIME only says HLS vs
+  progressive, so a typeless `206` is progressive, not "unavailable" — that
+  mobile-only gate is what made real videos unplayable on Android); **a `202`
+  has no attempt ceiling** (a long transcode is not a failure); `Retry-After` is
+  a floor over the local ramp, never a replacement for it; and not-found, auth,
+  transient and protocol stay four distinct verdicts even where one screen draws
+  them the same. Both native clients pass `contentType` for BOTH containers —
+  ExoPlayer cannot infer one from an extension-less `/video` URL — and the
+  probed URL is always the played URL, so a shared album is never rewritten to
+  an owner route. `node scripts/video-parity-table.mjs` prints the derived
+  cross-consumer table.
 - **The TV filter panel renders from a CATALOG, not from hand-written rows.**
   `tv/src/personal/tvFilterCatalog.ts` decides which filters apply to the
   current tab and source, how the remote edits each one, and whether each is

@@ -50,16 +50,37 @@ test('the managed controller signal rides EVERY attempt in videoProbe', async ()
   assert.match(probe, /signal:\s*controller\.signal/);
 });
 
-test('stale verdicts never reach state: the cancelled guard precedes setProbeState(outcome)', async () => {
+test('stale verdicts never reach state: the cancelled guard precedes setProbeState', async () => {
   const slide = await sourceOf('VideoSlide.tsx');
   const guard = slide.indexOf('if (cancelled) return;');
-  const applyOutcome = slide.indexOf('setProbeState(outcome.phase');
+  const applyOutcome = slide.indexOf('setProbeState(next)');
   assert.ok(guard !== -1, 'defence-in-depth cancelled guard missing');
   assert.ok(applyOutcome !== -1, 'outcome application missing');
   assert.ok(
     guard < applyOutcome,
     'outcome may only be applied AFTER the cancelled guard',
   );
+  // A cancelled probe maps to null and is dropped before it can paint an
+  // error over a video that was never actually unavailable.
+  assert.match(slide, /const next = probeStateForOutcome\(outcome\);\s*\n\s*if \(next === null\) return;/);
+});
+
+test('the slide carries NO probe policy of its own: no attempt ceiling, no local backoff', async () => {
+  // VIDEO-DELIVERY-PARITY-01: the retry policy is the shared one
+  // (media/videoDelivery.ts). A mobile-only ceiling here is what turned a long
+  // but healthy transcode into an error after ten attempts.
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.doesNotMatch(slide, /maxAttempts/);
+  assert.doesNotMatch(slide, /retryMs/);
+  assert.doesNotMatch(slide, /VIDEO_PROBE_MAX_ATTEMPTS/);
+});
+
+test('the expo-video source is built by the shared resolver, contentType included', async () => {
+  // Both containers declare contentType, and the played URL is the probed one
+  // — a shared album must never be rewritten to an owner route.
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.match(slide, /resolveExpoVideoSource\(source, \{ kind: 'ready', mode: resolvedContainer \}\)/);
+  assert.doesNotMatch(slide, /contentType: 'hls' as const/);
 });
 
 test('an already-ready player snapshot is authoritative before any event arrives', () => {
