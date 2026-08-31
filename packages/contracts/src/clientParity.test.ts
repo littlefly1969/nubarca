@@ -111,6 +111,33 @@ test('mobile no longer declares fields the server does not send', () => {
   assert.doesNotMatch(source, /audioCodec|frameRate/);
 });
 
+test('the mobile People transport is read-only: no management verb exists', () => {
+  // §15/§16: face management is a separate future slice. The filter's
+  // transport must not be able to create, rename, delete, merge, split or
+  // assign — not "must not call", must not HAVE the function.
+  const source = code('mobile/src/api/people.ts');
+  for (const verb of [
+    'createPerson', 'renamePerson', 'deletePerson', 'mergePeople', 'splitPerson',
+    'assignFace', 'removeFace', 'moveFace', 'acceptSuggestion', 'rejectSuggestion',
+    'startFaceSession',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(`\\b${verb}\\b`), `people.ts exposes ${verb}`);
+  }
+  assert.match(source, /toPersonSummary/);
+});
+
+test('the workspace filter model is not redefined by any client', () => {
+  const web = code('frontend/src/media/workspace/mediaWorkspaceQuery.ts');
+  assert.match(web, /export \* from '@nubarca\/contracts'/);
+  for (const name of ['MediaWorkspaceFilters', 'CommonMediaFilters', 'PhotoMediaFilters',
+    'VideoMediaFilters', 'MediaWorkspaceIdentity']) {
+    assert.doesNotMatch(web, new RegExp(`export interface ${name}\\b`), `web redefines ${name}`);
+  }
+  assert.doesNotMatch(web, /export function queryToWire/);
+  assert.doesNotMatch(web, /export function queryFingerprint/);
+  assert.match(web, /URLSearchParams/);
+});
+
 test('the album membership rule is stated where the contract lives', () => {
   // §24: removing an item from an album is not deleting it from the library.
   const contract = readFileSync(resolve(ROOT, 'packages/contracts/src/album.ts'), 'utf8');
