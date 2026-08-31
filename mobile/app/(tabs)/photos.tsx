@@ -1,6 +1,6 @@
 // Photos tab: the whole owner photo library, newest first, cursor-paginated.
 // Opens the shared viewer; long-press starts multi-select for bulk add-to-album.
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,8 +18,10 @@ import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { useSelectionState } from '../../src/lib/useSelectionState';
-import { listMedia } from '../../src/api/media.ts';
 import type { MediaItem } from '../../src/api/media.ts';
+import { useMediaFilters } from '../../src/media/useMediaFilters';
+import { MediaFilterChips } from '../../src/components/MediaFilterChips';
+import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
 import { colors } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
 
@@ -31,24 +33,11 @@ export default function Photos(): React.JSX.Element {
   const viewer = useViewer();
   const selectionState = useSelectionState();
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const fetcher = useCallback(
-    async (cursor: string | null, signal: AbortSignal) => {
-      return await listMedia(
-        {
-          kind: 'image',
-          sort: 'datetaken',
-          direction: 'desc',
-          limit: PAGE_SIZE,
-          cursor,
-        },
-        signal,
-      );
-    },
-    [],
-  );
-
-  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
+  const filters = useMediaFilters('image', PAGE_SIZE);
+  const { snapshot, refresh, loadMore, retryFailed } =
+    usePagedList<MediaItem>((i) => i.id, filters.fetchPage);
 
   // Refresh on each focus so changes made elsewhere are reflected; the
   // PagedList token makes this race-safe against in-flight loads.
@@ -56,8 +45,20 @@ export default function Photos(): React.JSX.Element {
     useCallback(() => {
       if (session.status === 'authed') void refresh();
       return undefined;
-    }, [refresh, fetcher, session.status]),
+    }, [refresh, session.status]),
   );
+
+  // §19: a committed filter change is a NEW query generation — the cursor is
+  // dropped, the accumulator cleared, the in-flight request abandoned, and any
+  // selection released because the selected items may no longer be results.
+  const generation = filters.generation;
+  const firstGeneration = useRef(generation);
+  useEffect(() => {
+    if (generation === firstGeneration.current) return;
+    firstGeneration.current = generation;
+    selectionState.cancel();
+    void refresh();
+  }, [generation, refresh, selectionState]);
 
   if (session.status !== 'authed') {
     return <Redirect href="/login" />;
@@ -83,6 +84,19 @@ export default function Photos(): React.JSX.Element {
             </>
           ) : (
             <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('filters.open')}
+                onPress={() => setFiltersOpen(true)}
+                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+                hitSlop={4}
+              >
+                <Ionicons
+                  name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
+                  size={20}
+                  color={colors.accent}
+                />
+              </Pressable>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={t('selection.select')}
@@ -117,6 +131,13 @@ export default function Photos(): React.JSX.Element {
             </>
           )
         }
+      />
+
+      <MediaFilterChips
+        chips={filters.chips}
+        people={filters.people}
+        onRemove={filters.removeChip}
+        onClearAll={filters.clearAll}
       />
 
       {snapshot.phase === 'loading' ? (
@@ -175,6 +196,16 @@ export default function Photos(): React.JSX.Element {
           )}
         </>
       )}
+
+      <MediaFilterSheet
+        visible={filtersOpen}
+        identity={filters.identity}
+        onApply={(next, sort, direction) => {
+          filters.apply(next, sort, direction);
+          setFiltersOpen(false);
+        }}
+        onClose={() => setFiltersOpen(false)}
+      />
 
       <AddToAlbumSheet
         visible={sheetVisible}
