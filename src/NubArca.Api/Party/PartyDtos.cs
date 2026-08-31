@@ -24,7 +24,12 @@ public sealed record AlbumPartyStatusDto(
     int MaxVideoUploadsPerParticipant = 0,
     // When true, new guest MESSAGES wait for approval before reaching the TV.
     // Independent of RequireUploadApproval, and owner-only to change.
-    bool RequireMessageApproval = false);
+    bool RequireMessageApproval = false,
+    bool GameEnabled = false,
+    int MinChallengeIntervalSeconds = PartyChallengeDefaults.MinIntervalSeconds,
+    int MaxChallengeIntervalSeconds = PartyChallengeDefaults.MaxIntervalSeconds,
+    int VotesPerGuest = PartyChallengeDefaults.VotesPerGuest,
+    int? MaxChallengesPerSession = null);
 
 // Derived public URLs for an active party link (relative, e.g. "/party/{token}"
 // and "/party/{token}/upload"). Never a token hash. UploadUrl is null when the
@@ -102,7 +107,12 @@ public sealed record PartyAccess(
 // similarity scores, or token/hash. Item ids are logical FileItem ids used only
 // to address token-scoped derived media; media is always metadata-stripped and
 // downscaled (never originals).
-public sealed record PartyAlbumDto(string AlbumName, int ItemCount);
+public sealed record PartyAlbumDto(
+    string AlbumName,
+    int ItemCount,
+    string? CoverUrl = null,
+    string? ContributionUrl = null,
+    bool GameEnabled = false);
 
 public sealed record PartyItemDto(
     Guid Id,
@@ -219,3 +229,37 @@ public sealed record TvPartyMessageDto(
     DateTime? HeroPromotedAt);
 
 public sealed record TvPartyMessagesDto(IReadOnlyList<TvPartyMessageDto> Messages);
+
+// --- PARTY CHALLENGES ---
+public sealed record PartyChallengeDto(
+    Guid Id, string Title, string Body, string Kind, Guid? MediaFileItemId,
+    string? MediaUrl, bool IsEnabled, int SortOrder, int VoteCount,
+    DateTime CreatedAt, DateTime UpdatedAt);
+
+public sealed record PartyChallengeListDto(Guid AlbumId, IReadOnlyList<PartyChallengeDto> Items);
+
+public sealed record PartyChallengeWriteRequest(
+    string? Title, string? Body, string? Kind, Guid? MediaFileItemId,
+    bool IsEnabled = true);
+
+public sealed record PartyChallengeReorderRequest(IReadOnlyList<Guid>? ChallengeIds);
+
+public sealed record PartyGameSettingsRequest(
+    bool GameEnabled, int MinChallengeIntervalSeconds, int MaxChallengeIntervalSeconds,
+    int VotesPerGuest, int? MaxChallengesPerSession);
+
+public sealed record PartyGuestChallengeDto(
+    Guid Id, string Title, string Body, string Kind, string? MediaUrl, bool Voted);
+
+public sealed record PartyGuestChallengesDto(
+    string AlbumName, int VotesPerGuest, int VotesUsed, int VotesRemaining,
+    IReadOnlyList<PartyGuestChallengeDto> Items);
+
+public sealed record PartyVoteResultDto(bool Voted, int VotesUsed, int VotesRemaining);
+
+public sealed record PartyChallengePresentationDto(
+    Guid Id, string Title, string Body, string Kind, string? MediaUrl);
+
+public sealed record PartyPlaybackSnapshotDto(
+    string Mode, PartyChallengePresentationDto? ActiveChallenge,
+    DateTime? NextChallengeAt, int CompletedCount);

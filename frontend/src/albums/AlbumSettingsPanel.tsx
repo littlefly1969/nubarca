@@ -7,6 +7,8 @@ import {
   setAlbumPartyMode,
   setPartySlideshowSettings,
   PARTY_SLIDESHOW_RANGES,
+  PARTY_GAME_RANGES,
+  setPartyGameSettings,
   setAlbumTvVisibility,
   updateAlbum,
   type AlbumDetail,
@@ -14,6 +16,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
+import { PartyChallengeManager } from './PartyChallengeManager';
 
 // Slice 5: the album's rename / description / Show-on-TV / Party (view link,
 // guest upload, upload-management) / delete controls, moved out of the content
@@ -52,6 +55,11 @@ export function AlbumSettingsPanel({
     maxPhotoUploadsPerParticipant: '', maxVideoUploadsPerParticipant: '',
   });
   const [slideshowStatus, setSlideshowStatus] = useState<'idle' | 'saved' | 'invalid' | 'failed'>('idle');
+  const [gameDraft, setGameDraft] = useState({
+    gameEnabled: false, minChallengeIntervalSeconds: '300',
+    maxChallengeIntervalSeconds: '540', votesPerGuest: '3', maxChallengesPerSession: '',
+  });
+  const [gameStatus, setGameStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
 
   // Seed the draft from the server whenever the panel learns the current values.
   useEffect(() => {
@@ -65,6 +73,18 @@ export function AlbumSettingsPanel({
   }, [party?.albumId, party?.photoSlideSeconds, party?.maxVideoSlideSeconds,
     party?.maxPhotoUploadsPerParticipant, party?.maxVideoUploadsPerParticipant]);
 
+  useEffect(() => {
+    if (!party) return;
+    setGameDraft({
+      gameEnabled: party.gameEnabled ?? false,
+      minChallengeIntervalSeconds: String(party.minChallengeIntervalSeconds ?? 300),
+      maxChallengeIntervalSeconds: String(party.maxChallengeIntervalSeconds ?? 540),
+      votesPerGuest: String(party.votesPerGuest ?? 3),
+      maxChallengesPerSession: party.maxChallengesPerSession == null ? '' : String(party.maxChallengesPerSession),
+    });
+  }, [party?.albumId, party?.gameEnabled, party?.minChallengeIntervalSeconds,
+    party?.maxChallengeIntervalSeconds, party?.votesPerGuest, party?.maxChallengesPerSession]);
+
   const inRange = (raw: string, range: { min: number; max: number }) => {
     const value = Number(raw);
     return Number.isInteger(value) && value >= range.min && value <= range.max;
@@ -75,6 +95,17 @@ export function AlbumSettingsPanel({
     && inRange(slideshowDraft.maxVideoSlideSeconds, PARTY_SLIDESHOW_RANGES.maxVideoSeconds)
     && inRange(slideshowDraft.maxPhotoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
     && inRange(slideshowDraft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
+
+  const gameMin = Number(gameDraft.minChallengeIntervalSeconds);
+  const gameMax = Number(gameDraft.maxChallengeIntervalSeconds);
+  const gameSessionMax = gameDraft.maxChallengesPerSession === '' ? null : Number(gameDraft.maxChallengesPerSession);
+  const gameValid = inRange(gameDraft.minChallengeIntervalSeconds, PARTY_GAME_RANGES.intervalSeconds)
+    && inRange(gameDraft.maxChallengeIntervalSeconds, PARTY_GAME_RANGES.intervalSeconds)
+    && gameMax >= gameMin
+    && inRange(gameDraft.votesPerGuest, PARTY_GAME_RANGES.votes)
+    && (gameSessionMax === null || (Number.isInteger(gameSessionMax)
+      && gameSessionMax >= PARTY_GAME_RANGES.maxPerSession.min
+      && gameSessionMax <= PARTY_GAME_RANGES.maxPerSession.max));
 
   async function saveSlideshowSettings() {
     if (!slideshowValid) { setSlideshowStatus('invalid'); return; }
@@ -91,6 +122,20 @@ export function AlbumSettingsPanel({
     } catch {
       setSlideshowStatus('failed');
     } finally { setPartySaving(false); }
+  }
+  async function saveGameSettings() {
+    if (!gameValid) return;
+    setPartySaving(true); setGameStatus('idle');
+    try {
+      onPartyUpdated(await setPartyGameSettings(albumId, {
+        gameEnabled: gameDraft.gameEnabled,
+        minChallengeIntervalSeconds: gameMin,
+        maxChallengeIntervalSeconds: gameMax,
+        votesPerGuest: Number(gameDraft.votesPerGuest),
+        maxChallengesPerSession: gameSessionMax,
+      }));
+      setGameStatus('saved');
+    } catch { setGameStatus('failed'); } finally { setPartySaving(false); }
   }
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -240,12 +285,8 @@ export function AlbumSettingsPanel({
                 <span>{t('albumDetail.allowGuestUploads')}</span>
               </label>
               <p className="muted">{t('albumDetail.guestUploadsHelp')}</p>
-              {party.uploadEnabled && party.uploadUrl && (
-                <p className="album-party-url" data-testid="party-upload-url">
-                  {t('albumDetail.uploadLink')}{' '}
-                  <a href={party.uploadUrl} target="_blank" rel="noopener noreferrer">{window.location.origin}{party.uploadUrl}</a>
-                </p>
-              )}
+              {/* The upload deep link remains valid, but the owner publishes
+                  only the canonical Guest Hub link above. */}
               <p className="album-party-manage" data-testid="party-uploads-link">
                 <Link to={`/albums/${albumId}/party-uploads`}>
                   {t('albumDetail.manageGuestUploads')}
@@ -340,6 +381,37 @@ export function AlbumSettingsPanel({
               {slideshowStatus === 'saved' && <p className="muted" role="status">{t('party.settingsSaved')}</p>}
               {slideshowStatus === 'invalid' && <p className="inline-error" role="alert">{t('party.settingsInvalid')}</p>}
               {slideshowStatus === 'failed' && <p className="inline-error" role="alert">{t('party.settingsFailed')}</p>}
+            </div>
+          )}
+
+          {party?.partyMode && (
+            <div className="album-party-game" data-testid="party-game-settings">
+              <h4>{t('partyGame.title')}</h4>
+              <p className="muted">{t('partyGame.help')}</p>
+              <label className="album-tv-label"><input type="checkbox" checked={gameDraft.gameEnabled}
+                onChange={(e) => setGameDraft((d) => ({ ...d, gameEnabled: e.target.checked }))} />
+                <span>{t('partyGame.enable')}</span></label>
+              <div className="party-game-settings-grid">
+                <label>{t('partyGame.minInterval')}<input type="number" min="30" max="86400"
+                  value={gameDraft.minChallengeIntervalSeconds}
+                  onChange={(e) => setGameDraft((d) => ({ ...d, minChallengeIntervalSeconds: e.target.value }))} /></label>
+                <label>{t('partyGame.maxInterval')}<input type="number" min="30" max="86400"
+                  value={gameDraft.maxChallengeIntervalSeconds}
+                  onChange={(e) => setGameDraft((d) => ({ ...d, maxChallengeIntervalSeconds: e.target.value }))} /></label>
+                <label>{t('partyGame.votesPerGuest')}<input type="number" min="1" max="20"
+                  value={gameDraft.votesPerGuest}
+                  onChange={(e) => setGameDraft((d) => ({ ...d, votesPerGuest: e.target.value }))} /></label>
+                <label>{t('partyGame.maxPerSession')}<input type="number" min="1" max="100"
+                  placeholder={t('partyGame.unlimited')} value={gameDraft.maxChallengesPerSession}
+                  onChange={(e) => setGameDraft((d) => ({ ...d, maxChallengesPerSession: e.target.value }))} /></label>
+              </div>
+              {!gameValid && <p className="inline-error">{t('partyGame.invalid')}</p>}
+              <button type="button" disabled={partySaving || !gameValid} onClick={() => void saveGameSettings()}>
+                {t('partyGame.save')}
+              </button>
+              {gameStatus === 'saved' && <p role="status" className="muted">{t('partyGame.saved')}</p>}
+              {gameStatus === 'failed' && <p role="alert" className="inline-error">{t('partyGame.error')}</p>}
+              {gameDraft.gameEnabled && <PartyChallengeManager albumId={albumId} />}
             </div>
           )}
         </fieldset>

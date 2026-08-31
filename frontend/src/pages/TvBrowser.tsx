@@ -86,7 +86,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
   const gridRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
   const [partyQr, setPartyQr] = useState<string | null>(null);
-  const [uploadQr, setUploadQr] = useState<string | null>(null);
   const [focusedVideoId, setFocusedVideoId] = useState<string | null>(null);
   // Real measured width of the item grid; null until the ResizeObserver reports
   // it, so justified rows are never laid out against an invented width (no
@@ -378,15 +377,12 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
   }, [albumOpen, view.kind]);
   const chromeClass = `tv-chrome ${chromeVisible ? '' : 'tv-chrome-hidden'}`.trim();
 
-  // Render the public party QRs when browsing or presenting a party-enabled
-  // album: one to view/download the album, and (when guest upload is on) a
-  // second to upload photos.
-  // Both point to absolute URLs (origin + relative path). If party (or upload)
-  // was turned off, a refresh drops the flag/URL and the QR disappears.
+  // Render the one canonical Guest Hub QR. The legacy upload URL remains in
+  // the API so already printed codes keep working, but is no longer published
+  // as a second on-screen QR.
   useEffect(() => {
     const album = view.kind !== 'albums' ? view.album : null;
     const viewUrl = album?.partyEnabled ? album.partyUrl : null;
-    const uploadUrl = album?.partyEnabled ? album.partyUploadUrl : null;
     let cancelled = false;
 
     const render = (url: string | null, set: (svg: string | null) => void) => {
@@ -396,7 +392,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
         .catch(() => { if (!cancelled) set(null); });
     };
     render(viewUrl, setPartyQr);
-    render(uploadUrl, setUploadQr);
     return () => { cancelled = true; };
   }, [view]);
 
@@ -552,7 +547,7 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
             <img className="tv-viewer-media" src={item?.previewUrl} alt={item?.name ?? ''} />
           )}
         </div>
-        <PartyQrOverlay partyQr={partyQr} uploadQr={uploadQr} hidden={!chromeVisible} />
+        <PartyQrOverlay partyQr={partyQr} hidden={!chromeVisible} />
         <div className={`tv-viewer-bar ${chromeClass}`}>
           <button type="button" onClick={viewerBack}>
             {t('tv.viewerBack')}
@@ -615,7 +610,7 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
             onShowAll={exitFaceSearch}
           />
         )}
-        <PartyQrOverlay partyQr={partyQr} uploadQr={uploadQr} hidden={!chromeVisible} />
+        <PartyQrOverlay partyQr={partyQr} hidden={!chromeVisible} />
         {displayItems.length === 0 ? (
           <p className="tv-empty">{t('tv.emptyAlbum')}</p>
         ) : (
@@ -745,42 +740,26 @@ function TvFaceIndicator({
   );
 }
 
-// The two party QRs sit in the BOTTOM corners (view/download left, upload
-// right) and fade with the rest of the chrome after an idle period.
+// One canonical Guest Hub QR sits in the bottom-left and fades with the rest
+// of the chrome after an idle period.
 function PartyQrOverlay({
   partyQr,
-  uploadQr,
   hidden,
 }: {
   partyQr: string | null;
-  uploadQr: string | null;
   hidden: boolean;
 }) {
   const { t } = useI18n();
-  if (!partyQr && !uploadQr) return null;
+  if (!partyQr) return null;
   const cls = `tv-party-corner tv-chrome ${hidden ? 'tv-chrome-hidden' : ''}`.trim();
   return (
-    <>
-      {partyQr && (
-        <div className={`${cls} tv-party-corner-left`} data-testid="tv-party-qr">
-          <div
-            className="tv-party-qr"
-            aria-label={t('tv.viewPartyAlbumQr')}
-            dangerouslySetInnerHTML={{ __html: partyQr }}
-          />
-          <p className="tv-party-caption">{t('tv.viewPartyAlbum')}</p>
-        </div>
-      )}
-      {uploadQr && (
-        <div className={`${cls} tv-party-corner-right`} data-testid="tv-party-upload-qr">
-          <div
-            className="tv-party-qr"
-            aria-label={t('tv.uploadPhotosQr')}
-            dangerouslySetInnerHTML={{ __html: uploadQr }}
-          />
-          <p className="tv-party-caption">{t('tv.uploadPhotos')}</p>
-        </div>
-      )}
-    </>
+    <div className={`${cls} tv-party-corner-left`} data-testid="tv-party-qr">
+      <div
+        className="tv-party-qr"
+        aria-label={t('tv.partyGuestHubQr')}
+        dangerouslySetInnerHTML={{ __html: partyQr }}
+      />
+      <p className="tv-party-caption">{t('tv.partyGuestHub')}</p>
+    </div>
   );
 }

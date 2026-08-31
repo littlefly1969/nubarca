@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Audit;
+using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
@@ -83,8 +85,98 @@ public static class PartyEndpoints
                 metadata: null,
                 cancellationToken: cancellationToken);
 
-            return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(header.Name, header.ItemCount));
+            var links = await party.GetActivePartyUrlsAsync(
+                access.OwnerUserId, [access.AlbumId], cancellationToken);
+            links.TryGetValue(access.AlbumId, out var urls);
+            var enc = Uri.EscapeDataString(token);
+            var coverUrl = header.CoverFileItemId is Guid cover
+                ? $"/api/party/{enc}/media/{cover}/preview" : null;
+            var gameEnabled = await httpContext.RequestServices.GetRequiredService<AppDbContext>()
+                .PartyAlbumLinks.AsNoTracking()
+                .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.GameEnabled, cancellationToken);
+            return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(
+                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled));
         }).WithName("GetPartyAlbum").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        app.MapGet("/api/party/{token}/challenges", async (
+            string token, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var participantId = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            if (participantId is null) return Results.NotFound();
+            var result = await challenges.ListGuestAsync(access, participantId.Value, cancellationToken);
+            if (result is null) return Results.NotFound();
+            var enc = Uri.EscapeDataString(token);
+            return Results.Ok(result with
+            {
+                Items = result.Items.Select(x => x with
+                {
+                    MediaUrl = x.MediaUrl is null ? null
+                        : $"/api/party/{enc}/challenges/{x.Id}/media",
+                }).ToList(),
+            });
+        }).WithName("ListPartyGuestChallenges").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        app.MapPut("/api/party/{token}/challenges/{challengeId:guid}/vote", async (
+            string token, Guid challengeId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var participantId = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            if (participantId is null) return Results.NotFound();
+            var result = await challenges.VoteAsync(access, participantId.Value, challengeId, true, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("VotePartyChallenge").RequireRateLimiting(PartyMessageRateLimitPolicy);
+
+        app.MapDelete("/api/party/{token}/challenges/{challengeId:guid}/vote", async (
+            string token, Guid challengeId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var participantId = await ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            if (participantId is null) return Results.NotFound();
+            var result = await challenges.VoteAsync(access, participantId.Value, challengeId, false, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("UnvotePartyChallenge").RequireRateLimiting(PartyMessageRateLimitPolicy);
+
+        app.MapGet("/api/party/{token}/challenges/{challengeId:guid}/media", async (
+            string token, Guid challengeId, HttpContext httpContext,
+            [FromServices] AppDbContext db,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var fileId = await db.PartyChallenges.AsNoTracking()
+                .Where(x => x.Id == challengeId && x.AlbumId == access.AlbumId && x.IsEnabled)
+                .Select(x => x.MediaFileItemId).FirstOrDefaultAsync(cancellationToken);
+            return fileId is Guid id
+                ? await ServePartyMediaAsync(token, id, "preview", httpContext, party, partyMedia,
+                    thumbnails, stripper, cancellationToken)
+                : Results.NotFound();
+        }).WithName("GetPartyChallengeMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/items", async (
             string token,
@@ -507,6 +599,65 @@ public static class PartyEndpoints
             return Results.NoContent();
         }).WithName("DeletePartyFaceSearch").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
+        // Owner challenge deck. All operations are owner/album scoped; a media
+        // reference is accepted only when it is a current member of this album.
+        app.MapGet("/api/albums/{albumId:guid}/party-challenges", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            var result = await challenges.ListOwnerAsync(ownerId, albumId, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("ListOwnerPartyChallenges").RequireAuthorization();
+
+        app.MapPost("/api/albums/{albumId:guid}/party-challenges", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            [FromBody] NubArca.Api.Party.PartyChallengeWriteRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null) return Results.BadRequest();
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            var result = await challenges.CreateAsync(ownerId, albumId, body, cancellationToken);
+            return result is null ? Results.BadRequest() : Results.Created(
+                $"/api/albums/{albumId}/party-challenges/{result.Id}", result);
+        }).WithName("CreatePartyChallenge").RequireAuthorization();
+
+        app.MapPut("/api/albums/{albumId:guid}/party-challenges/{challengeId:guid}", async (
+            Guid albumId, Guid challengeId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            [FromBody] NubArca.Api.Party.PartyChallengeWriteRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null) return Results.BadRequest();
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            var result = await challenges.UpdateAsync(ownerId, albumId, challengeId, body, cancellationToken);
+            return result is null ? Results.BadRequest() : Results.Ok(result);
+        }).WithName("UpdatePartyChallenge").RequireAuthorization();
+
+        app.MapDelete("/api/albums/{albumId:guid}/party-challenges/{challengeId:guid}", async (
+            Guid albumId, Guid challengeId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            return await challenges.DeleteAsync(ownerId, albumId, challengeId, cancellationToken)
+                ? Results.NoContent() : Results.NotFound();
+        }).WithName("DeletePartyChallenge").RequireAuthorization();
+
+        app.MapPut("/api/albums/{albumId:guid}/party-challenges/order", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            [FromBody] NubArca.Api.Party.PartyChallengeReorderRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body?.ChallengeIds is null) return Results.BadRequest();
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            return await challenges.ReorderAsync(ownerId, albumId, body.ChallengeIds, cancellationToken)
+                ? Results.NoContent() : Results.BadRequest();
+        }).WithName("ReorderPartyChallenges").RequireAuthorization();
+
         // Owner-only party-mode status for an album. Normal user cookie (never the TV
         // session). Foreign/missing → generic 404. PartyUrl (derived, relative) is
         // present only while an active link exists; never a token hash.
@@ -637,6 +788,24 @@ public static class PartyEndpoints
             var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
         }).WithName("SetPartySlideshowSettings").RequireAuthorization();
+
+        app.MapMethods("/api/albums/{id:guid}/party-game-settings", ["PATCH"], async (
+            Guid id, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromBody] NubArca.Api.Party.PartyGameSettingsRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null || !PartyChallengeDefaults.IsValid(
+                body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
+                body.VotesPerGuest, body.MaxChallengesPerSession))
+                return Results.BadRequest(new { error = "invalid_party_game_settings" });
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            if (!await party.UpdateGameSettingsAsync(ownerId, id, body.GameEnabled,
+                body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
+                body.VotesPerGuest, body.MaxChallengesPerSession, cancellationToken))
+                return Results.NotFound();
+            return Results.Ok(await party.GetOwnerStatusAsync(ownerId, id, cancellationToken));
+        }).WithName("SetPartyGameSettings").RequireAuthorization();
 
         // Owner-side moderation of anonymous party uploads. Owner-authenticated (normal
         // user session). Lets the owner see guest-uploaded items and their moderation

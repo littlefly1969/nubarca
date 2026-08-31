@@ -25,7 +25,7 @@ public interface IPartyMediaService
         CancellationToken cancellationToken = default);
 }
 
-public sealed record PartyAlbumHeader(string Name, int ItemCount);
+public sealed record PartyAlbumHeader(string Name, int ItemCount, Guid? CoverFileItemId = null);
 
 public enum PartyMediaKind { Image, Video }
 

@@ -1662,6 +1662,51 @@ public static class TvEndpoints
             return projection is null ? Results.NotFound() : Results.Ok(projection);
         }).WithName("ListTvPartyMessages");
 
+        // Persisted Party challenge state, carried over the same paired-TV
+        // session and polling model as media/messages. Boundary never interrupts
+        // a media item; NEXT is the existing remote action translated locally.
+        app.MapGet("/api/tv/albums/{albumId:guid}/party-playback", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerId = await tv.ResolveOwnerUserIdAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (ownerId is null) return Results.Unauthorized();
+            var result = await challenges.GetSnapshotAsync(ownerId.Value, albumId, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("GetTvPartyPlayback");
+
+        app.MapPost("/api/tv/albums/{albumId:guid}/party-playback/boundary", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerId = await tv.ResolveOwnerUserIdAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (ownerId is null) return Results.Unauthorized();
+            var result = await challenges.OnMediaBoundaryAsync(ownerId.Value, albumId, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("AdvanceTvPartyBoundary");
+
+        app.MapPost("/api/tv/albums/{albumId:guid}/party-playback/next", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerId = await tv.ResolveOwnerUserIdAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (ownerId is null) return Results.Unauthorized();
+            var result = await challenges.CompleteActiveAsync(ownerId.Value, albumId, cancellationToken);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        }).WithName("CompleteTvPartyChallenge");
+
         // TV active face filter: a guest's face search reaches the TV ONLY after an
         // explicit "show these photos on TV" activation on the public party page (the
         // backend bridges the activation — the party client never calls /api/tv). The TV

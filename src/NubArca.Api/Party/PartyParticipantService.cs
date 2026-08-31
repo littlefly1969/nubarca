@@ -52,6 +52,7 @@ public sealed class PartyParticipantService : IPartyParticipantService
             TokenHash = PartyLinkService.HashToken(newToken),
             AcceptedPhotoCount = 0,
             AcceptedVideoCount = 0,
+            ChallengeVoteCount = 0,
             CreatedAt = now,
             LastSeenAt = now,
         };
@@ -59,6 +60,25 @@ public sealed class PartyParticipantService : IPartyParticipantService
         await _db.SaveChangesAsync(cancellationToken);
         return new PartyParticipantResolution(participant.Id, newToken);
     }
+
+    public async Task<bool> TryClaimChallengeVoteAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default)
+    {
+        var affected = await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants "
+            + "SET \"ChallengeVoteCount\" = \"ChallengeVoteCount\" + 1, \"LastSeenAt\" = {1} "
+            + "WHERE \"Id\" = {0} AND \"ChallengeVoteCount\" < {2}",
+            [participantId, _clock.GetUtcNow().UtcDateTime, max], cancellationToken);
+        return affected == 1;
+    }
+
+    public Task ReleaseChallengeVoteAsync(
+        Guid participantId, CancellationToken cancellationToken = default) =>
+        _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET \"ChallengeVoteCount\" = "
+            + "CASE WHEN \"ChallengeVoteCount\" > 0 THEN \"ChallengeVoteCount\" - 1 ELSE 0 END, "
+            + "\"LastSeenAt\" = {1} WHERE \"Id\" = {0}",
+            [participantId, _clock.GetUtcNow().UtcDateTime], cancellationToken);
 
     public async Task<PartyQuotaSnapshot> GetQuotaAsync(
         Guid partyAlbumLinkId, Guid participantId, CancellationToken cancellationToken = default)

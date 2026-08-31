@@ -38,6 +38,7 @@ import { TvPage } from './pages/TvPage';
 import { TvPairApprovalPage } from './pages/TvPairApprovalPage';
 import { PartyPage } from './pages/PartyPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
+import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
 import { PartyMessagesPage } from './pages/PartyMessagesPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
@@ -61,6 +62,7 @@ export function App() {
           <Route path="/party/:token" element={<PartyPage />} />
           {/* PUBLIC, unauthenticated party UPLOAD landing (separate upload QR). */}
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
+          <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />
           {/* PUBLIC, unauthenticated TV Beauty Lab mobile UPLOAD landing (QR target). */}
           <Route path="/beauty-lab-upload/:token" element={<BeautyLabUploadPage />} />
           <Route

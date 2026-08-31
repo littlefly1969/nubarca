@@ -4,10 +4,9 @@ import { getBaseUrl } from '../api/client';
 import { QrCode } from './QrCode';
 import { useI18n } from '../i18n';
 
-// Party QR corner cards for the MENU overlay (grid + slideshow): the first
-// available QR goes BOTTOM-LEFT, the second BOTTOM-RIGHT. With only one QR it
-// stays consistently bottom-left. Cards sit inside the overscan insets, are
-// sized responsively by the caller, never take focus
+// The canonical Party Guest Hub QR for the MENU overlay (grid + slideshow)
+// stays consistently bottom-left. The card sits inside the overscan insets,
+// is sized responsively by the caller, never takes focus
 // (plain <Image>-based QR + pointerEvents none), and never resize the photo or
 // grid underneath (absolute positioning).
 interface Props {
@@ -20,12 +19,13 @@ interface Props {
 
 export function OverlayQrCorners({ partyUrl, partyUploadUrl, insetX, insetY, qrSize }: Props) {
   const { t } = useI18n();
+  // One visible QR: the canonical Guest Hub exposes browse, face search,
+  // contribution and voting. partyUploadUrl remains in the API solely so old
+  // printed upload QR codes keep working.
+  void partyUploadUrl;
   const cards = [
     partyUrl
-      ? { url: partyUrl, caption: t('items.downloadPhotos'), a11y: t('items.downloadPhotosQr') }
-      : null,
-    partyUploadUrl
-      ? { url: partyUploadUrl, caption: t('items.uploadPhotos'), a11y: t('items.uploadPhotosQr') }
+      ? { url: partyUrl, caption: t('items.partyGuestHub'), a11y: t('items.partyGuestHubQr') }
       : null,
   ].filter((c): c is NonNullable<typeof c> => c !== null);
   if (cards.length === 0) return null;

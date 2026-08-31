@@ -147,13 +147,12 @@ describe('TvBrowser party chrome (QR corners + idle auto-hide)', () => {
     });
   }
 
-  it('pins the view QR left and the upload QR right', async () => {
+  it('publishes only the canonical Guest Hub QR', async () => {
     mockPartyTv();
     await openAlbum();
     const view = await screen.findByTestId('tv-party-qr');
-    const upload = await screen.findByTestId('tv-party-upload-qr');
     expect(view).toHaveClass('tv-party-corner-left');
-    expect(upload).toHaveClass('tv-party-corner-right');
+    expect(screen.queryByTestId('tv-party-upload-qr')).not.toBeInTheDocument();
   });
 
   it('fades the chrome (QR + header) after the idle period and restores it on activity', async () => {

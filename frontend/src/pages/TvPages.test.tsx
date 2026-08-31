@@ -100,7 +100,7 @@ describe('TV pairing pages', () => {
     expect(screen.getByRole('button', { name: 'beach.jpg' })).toBeInTheDocument();
   });
 
-  it('shows view + upload QRs for a party album and hides them when disabled', async () => {
+  it('shows one Guest Hub QR for a party album and hides it when disabled', async () => {
     let party = true;
     let upload = true;
     const albumJson = () => ({
@@ -132,13 +132,12 @@ describe('TV pairing pages', () => {
     await userEvent.setup().click(await screen.findByTestId('tv-mode-party'));
     await userEvent.setup().click(await screen.findByRole('button', { name: /Party 2025/i }));
 
-    // Party + upload enabled → BOTH QR panels render (generated client-side).
+    // Party + upload enabled → only the canonical Guest Hub QR is published.
     expect((await screen.findByTestId('tv-party-qr')).querySelector('svg')).not.toBeNull();
-    expect((await screen.findByTestId('tv-party-upload-qr')).querySelector('svg')).not.toBeNull();
-    expect(screen.getByText('Scarica foto')).toBeInTheDocument();
-    expect(screen.getByText('Carica foto')).toBeInTheDocument();
+    expect(screen.queryByTestId('tv-party-upload-qr')).not.toBeInTheDocument();
+    expect(screen.getByText('Scansiona per partecipare')).toBeInTheDocument();
 
-    // Upload off but party on → only the view QR remains.
+    // Upload off but party on → the same Hub QR remains.
     upload = false;
     cleanup();
     render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
@@ -221,7 +220,7 @@ describe('TV pairing pages', () => {
     expect(screen.getByRole('button', { name: 'Riproduci' })).toBeInTheDocument();
   });
 
-  it('keeps party QR panels visible during slideshow and localizes labels', async () => {
+  it('keeps the Guest Hub QR visible during slideshow and localizes its label', async () => {
     const user = userEvent.setup();
     let upload = true;
     installFetchMock({
@@ -255,9 +254,8 @@ describe('TV pairing pages', () => {
 
     expect(await screen.findByAltText('one.jpg')).toBeInTheDocument();
     expect((await screen.findByTestId('tv-party-qr')).querySelector('svg')).not.toBeNull();
-    expect((await screen.findByTestId('tv-party-upload-qr')).querySelector('svg')).not.toBeNull();
-    expect(screen.getByText('Scarica foto')).toBeInTheDocument();
-    expect(screen.getByText('Carica foto')).toBeInTheDocument();
+    expect(screen.queryByTestId('tv-party-upload-qr')).not.toBeInTheDocument();
+    expect(screen.getByText('Scansiona per partecipare')).toBeInTheDocument();
 
     upload = false;
     cleanup();

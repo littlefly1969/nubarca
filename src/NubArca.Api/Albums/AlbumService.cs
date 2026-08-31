@@ -300,6 +300,17 @@ public class AlbumService : IAlbumService
             .Where(m => m.AlbumId == albumId)
             .ExecuteDeleteAsync(cancellationToken);
 
+        var partyLinkIds = _db.PartyAlbumLinks.Where(l => l.AlbumId == albumId).Select(l => l.Id);
+        await _db.PartyChallengeVotes
+            .Where(v => partyLinkIds.Contains(v.PartyAlbumLinkId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyChallengeCompletions
+            .Where(c => partyLinkIds.Contains(c.PartyAlbumLinkId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyChallengeSessions
+            .Where(s => partyLinkIds.Contains(s.PartyAlbumLinkId))
+            .ExecuteDeleteAsync(cancellationToken);
+
         await _db.PartyUploadItems
             .Where(u => u.AlbumId == albumId)
             .ExecuteDeleteAsync(cancellationToken);
@@ -313,6 +324,10 @@ public class AlbumService : IAlbumService
 
         await _db.PartyAlbumLinks
             .Where(l => l.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        await _db.PartyChallenges
+            .Where(c => c.AlbumId == albumId)
             .ExecuteDeleteAsync(cancellationToken);
 
         _db.Albums.Remove(album);

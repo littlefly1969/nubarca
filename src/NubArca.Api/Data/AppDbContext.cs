@@ -87,6 +87,10 @@ public class AppDbContext : DbContext
     public DbSet<PartyUploadItem> PartyUploadItems => Set<PartyUploadItem>();
     public DbSet<PartyParticipant> PartyParticipants => Set<PartyParticipant>();
     public DbSet<PartyMessage> PartyMessages => Set<PartyMessage>();
+    public DbSet<PartyChallenge> PartyChallenges => Set<PartyChallenge>();
+    public DbSet<PartyChallengeVote> PartyChallengeVotes => Set<PartyChallengeVote>();
+    public DbSet<PartyChallengeSession> PartyChallengeSessions => Set<PartyChallengeSession>();
+    public DbSet<PartyChallengeCompletion> PartyChallengeCompletions => Set<PartyChallengeCompletion>();
 
     // Short-lived anonymous "find your face" searches within a party album, and
     // their ranked (visibility-re-derived) matches. No selfie/query vector stored.

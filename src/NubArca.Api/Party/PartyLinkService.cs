@@ -173,6 +173,9 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.RequireMessageApproval,
                 p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+                p.GameEnabled, p.MinChallengeIntervalSeconds,
+                p.MaxChallengeIntervalSeconds, p.VotesPerGuest,
+                p.MaxChallengesPerSession,
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -192,7 +195,12 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.MaxVideoUploadsPerParticipant ?? 0,
             // Same rule as the upload approval flag: an inert link cannot be
             // holding a party to an approval mode.
-            partyMode && active!.RequireMessageApproval);
+            partyMode && active!.RequireMessageApproval,
+            partyMode && active!.GameEnabled,
+            active?.MinChallengeIntervalSeconds ?? PartyChallengeDefaults.MinIntervalSeconds,
+            active?.MaxChallengeIntervalSeconds ?? PartyChallengeDefaults.MaxIntervalSeconds,
+            active?.VotesPerGuest ?? PartyChallengeDefaults.VotesPerGuest,
+            active?.MaxChallengesPerSession);
     }
 
     public async Task<bool> UpdateSlideshowSettingsAsync(
@@ -229,6 +237,45 @@ public sealed class PartyLinkService : IPartyLinkService
         if (maxVideoUploadsPerParticipant is int maxVideos) link.MaxVideoUploadsPerParticipant = maxVideos;
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> UpdateGameSettingsAsync(
+        Guid ownerUserId, Guid albumId, bool gameEnabled,
+        int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
+        int votesPerGuest, int? maxChallengesPerSession,
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var link = await _db.PartyAlbumLinks
+            .Where(p => p.AlbumId == albumId && p.OwnerUserId == ownerUserId
+                && p.Enabled && p.RevokedAt == null
+                && (p.ExpiresAt == null || p.ExpiresAt > now))
+            .OrderByDescending(p => p.CreatedAt).FirstOrDefaultAsync(cancellationToken);
+        if (link is null) return false;
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        link.GameEnabled = gameEnabled;
+        link.MinChallengeIntervalSeconds = minChallengeIntervalSeconds;
+        link.MaxChallengeIntervalSeconds = maxChallengeIntervalSeconds;
+        link.VotesPerGuest = votesPerGuest;
+        link.MaxChallengesPerSession = maxChallengesPerSession;
+        link.UpdatedAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+        if (!gameEnabled)
+        {
+            // Disabling is an immediate return to the legacy slideshow. Do not
+            // retain a hidden hold that could reappear if the game is enabled
+            // again later; the challenge remains eligible for a future session.
+            await _db.PartyChallengeSessions
+                .Where(s => s.PartyAlbumLinkId == link.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(s => s.Mode, PartyPlaybackModes.Media)
+                    .SetProperty(s => s.ActiveChallengeId, (Guid?)null)
+                    .SetProperty(s => s.NextChallengeAt, (DateTime?)null)
+                    .SetProperty(s => s.Version, s => s.Version + 1)
+                    .SetProperty(s => s.UpdatedAt, now), cancellationToken);
+        }
+        await tx.CommitAsync(cancellationToken);
         return true;
     }
 
@@ -291,7 +338,7 @@ public sealed class PartyLinkService : IPartyLinkService
             .Where(p => p.TokenHash == hash
                 && p.Enabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
-            .Select(p => new { p.OwnerUserId, p.AlbumId })
+            .Select(p => new { p.Id, p.OwnerUserId, p.AlbumId })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
         {
@@ -305,7 +352,7 @@ public sealed class PartyLinkService : IPartyLinkService
             .AsNoTracking()
             .AnyAsync(a => a.Id == link.AlbumId && a.OwnerUserId == link.OwnerUserId && a.ShowOnTv,
                 cancellationToken);
-        return albumOk ? new PartyAccess(link.OwnerUserId, link.AlbumId) : null;
+        return albumOk ? new PartyAccess(link.OwnerUserId, link.AlbumId, link.Id) : null;
     }
 
     public async Task<PartyAccess?> ResolveUploadAsync(

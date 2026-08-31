@@ -26,6 +26,12 @@ export interface AlbumPartyStatus {
   maxVideoSlideSeconds: number;
   maxPhotoUploadsPerParticipant: number;
   maxVideoUploadsPerParticipant: number;
+  // Optional for rolling compatibility with a pre-game backend response.
+  gameEnabled?: boolean;
+  minChallengeIntervalSeconds?: number;
+  maxChallengeIntervalSeconds?: number;
+  votesPerGuest?: number;
+  maxChallengesPerSession?: number | null;
 }
 
 // Ranges the server validates. Duplicated here so the panel can refuse a bad
@@ -35,6 +41,26 @@ export const PARTY_SLIDESHOW_RANGES = {
   maxVideoSeconds: { min: 5, max: 600 },
   quota: { min: 0, max: 10000 },
 } as const;
+
+export const PARTY_GAME_RANGES = {
+  intervalSeconds: { min: 30, max: 86400 },
+  votes: { min: 1, max: 20 },
+  maxPerSession: { min: 1, max: 100 },
+} as const;
+
+export function setPartyGameSettings(
+  albumId: string,
+  settings: {
+    gameEnabled: boolean; minChallengeIntervalSeconds: number;
+    maxChallengeIntervalSeconds: number; votesPerGuest: number;
+    maxChallengesPerSession: number | null;
+  },
+  signal?: AbortSignal,
+): Promise<AlbumPartyStatus> {
+  return api<AlbumPartyStatus>(`/api/albums/${albumId}/party-game-settings`, {
+    method: 'PATCH', json: settings, signal,
+  });
+}
 
 // Saves ONLY the four numeric settings. Deliberately a different endpoint from
 // setAlbumPartyMode so saving them cannot rotate a token, toggle party/upload,
@@ -130,6 +156,9 @@ export function moderatePartyUpload(
 export interface PartyAlbum {
   albumName: string;
   itemCount: number;
+  coverUrl: string | null;
+  contributionUrl: string | null;
+  gameEnabled: boolean;
 }
 
 export interface PartyItem {
@@ -152,6 +181,62 @@ export function getPartyAlbum(token: string, signal?: AbortSignal): Promise<Part
 
 export function getPartyItems(token: string, signal?: AbortSignal): Promise<PartyItems> {
   return api<PartyItems>(`/api/party/${encodeURIComponent(token)}/items`, { signal });
+}
+
+export type PartyChallengeKind = 'dare' | 'penalty' | 'guess' | 'custom';
+export interface PartyChallenge {
+  id: string;
+  title: string;
+  body: string;
+  kind: PartyChallengeKind;
+  mediaFileItemId: string | null;
+  mediaUrl: string | null;
+  isEnabled: boolean;
+  sortOrder: number;
+  voteCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface PartyChallengeList { albumId: string; items: PartyChallenge[]; }
+export interface PartyChallengeWrite {
+  title: string; body: string; kind: PartyChallengeKind;
+  mediaFileItemId: string | null; isEnabled: boolean;
+}
+export function listPartyChallenges(albumId: string, signal?: AbortSignal): Promise<PartyChallengeList> {
+  return api<PartyChallengeList>(`/api/albums/${albumId}/party-challenges`, { signal });
+}
+export function createPartyChallenge(albumId: string, value: PartyChallengeWrite): Promise<PartyChallenge> {
+  return api<PartyChallenge>(`/api/albums/${albumId}/party-challenges`, { method: 'POST', json: value });
+}
+export function updatePartyChallenge(albumId: string, id: string, value: PartyChallengeWrite): Promise<PartyChallenge> {
+  return api<PartyChallenge>(`/api/albums/${albumId}/party-challenges/${id}`, { method: 'PUT', json: value });
+}
+export function deletePartyChallenge(albumId: string, id: string): Promise<void> {
+  return api<void>(`/api/albums/${albumId}/party-challenges/${id}`, { method: 'DELETE' });
+}
+export function reorderPartyChallenges(albumId: string, challengeIds: string[]): Promise<void> {
+  return api<void>(`/api/albums/${albumId}/party-challenges/order`, {
+    method: 'PUT', json: { challengeIds },
+  });
+}
+
+export interface PartyGuestChallenge {
+  id: string; title: string; body: string; kind: PartyChallengeKind;
+  mediaUrl: string | null; voted: boolean;
+}
+export interface PartyGuestChallenges {
+  albumName: string; votesPerGuest: number; votesUsed: number; votesRemaining: number;
+  items: PartyGuestChallenge[];
+}
+export interface PartyVoteResult { voted: boolean; votesUsed: number; votesRemaining: number; }
+export function listPartyGuestChallenges(token: string, signal?: AbortSignal): Promise<PartyGuestChallenges> {
+  return api<PartyGuestChallenges>(`/api/party/${encodeURIComponent(token)}/challenges`, { signal });
+}
+export function setPartyChallengeVote(token: string, id: string, voted: boolean): Promise<PartyVoteResult> {
+  return api<PartyVoteResult>(
+    `/api/party/${encodeURIComponent(token)}/challenges/${encodeURIComponent(id)}/vote`,
+    { method: voted ? 'PUT' : 'DELETE' },
+  );
 }
 
 // --- Public party UPLOAD (anonymous, upload-token scoped) ---

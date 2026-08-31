@@ -18,6 +18,10 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.Property(p => p.Enabled).HasDefaultValue(false);
         builder.Property(p => p.UploadEnabled).HasDefaultValue(false);
         builder.Property(p => p.RequireUploadApproval).HasDefaultValue(false);
+        builder.Property(p => p.GameEnabled).HasDefaultValue(false);
+        builder.Property(p => p.MinChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MinIntervalSeconds);
+        builder.Property(p => p.MaxChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MaxIntervalSeconds);
+        builder.Property(p => p.VotesPerGuest).HasDefaultValue(PartyChallengeDefaults.VotesPerGuest);
         builder.Property(p => p.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.UpdatedAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.RevokedAt).HasColumnType("timestamp with time zone");

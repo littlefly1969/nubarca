@@ -762,6 +762,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // its own narrow owner-or-delegate authorization gate.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are

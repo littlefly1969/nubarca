@@ -16,15 +16,20 @@ public sealed class PartyMediaService : IPartyMediaService
         var album = await _db.Albums
             .AsNoTracking()
             .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv)
-            .Select(a => new { a.Name })
+            .Select(a => new { a.Name, a.CoverFileItemId })
             .FirstOrDefaultAsync(cancellationToken);
         if (album is null)
         {
             return null;
         }
 
-        var count = await DisplayableMembers(ownerUserId, albumId).CountAsync(cancellationToken);
-        return new PartyAlbumHeader(album.Name, count);
+        var members = DisplayableMembers(ownerUserId, albumId);
+        var count = await members.CountAsync(cancellationToken);
+        var configured = album.CoverFileItemId is Guid cover
+            && await members.AnyAsync(x => x.Id == cover, cancellationToken) ? cover : (Guid?)null;
+        var fallback = configured ?? await members.OrderBy(x => x.AddedAt).ThenBy(x => x.Id)
+            .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
+        return new PartyAlbumHeader(album.Name, count, fallback);
     }
 
     public async Task<IReadOnlyList<PartyMediaItem>?> ListItemsAsync(

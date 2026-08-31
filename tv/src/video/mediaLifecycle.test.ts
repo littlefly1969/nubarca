@@ -366,12 +366,18 @@ test('natural end and cap keep their own paths — they are not external pauses'
   // must never do is touch playback.
   assert.match(partyViewer, /onEnded=\{handleMediaBoundary\}/);
   assert.match(partyViewer, /onCapReached=\{handleMediaBoundary\}/);
+  const ordinaryStart = partyViewer.indexOf('const ordinaryMediaBoundary = useCallback');
   const boundaryStart = partyViewer.indexOf('const handleMediaBoundary = useCallback');
-  assert.ok(boundaryStart > 0, 'the boundary handler must exist');
+  assert.ok(ordinaryStart > 0 && boundaryStart > ordinaryStart, 'both boundary handlers must exist');
+  const ordinary = partyViewer.slice(
+    ordinaryStart, partyViewer.indexOf('}, [partyEnabled, goNext]);', ordinaryStart));
   const boundary = partyViewer.slice(
-    boundaryStart, partyViewer.indexOf('}, [partyEnabled, goNext]);', boundaryStart));
-  assert.match(boundary, /goNext\(\)/, 'a boundary still advances the slideshow');
-  assert.doesNotMatch(boundary, /setPlaying\(/,
+    boundaryStart,
+    partyViewer.indexOf('}, [partyEnabled, albumId, ordinaryMediaBoundary]);', boundaryStart));
+  assert.match(ordinary, /goNext\(\)/, 'a normal boundary still advances the slideshow');
+  assert.match(boundary, /ordinaryMediaBoundary\(\)/,
+    'the challenge-aware boundary delegates the normal advance path');
+  assert.doesNotMatch(`${ordinary}\n${boundary}`, /setPlaying\(/,
     'a natural end must not switch the slideshow off');
   const start = player.indexOf('useEffect(() => subscribeOutputLost(');
   const handler = player.slice(start, player.indexOf('}), [player]);', start));

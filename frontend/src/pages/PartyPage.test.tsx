@@ -36,6 +36,26 @@ const items = {
 };
 
 describe('PartyPage (public party landing)', () => {
+  it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({
+        albumName: 'Beach Party', itemCount: 1,
+        coverUrl: '/api/party/tok-1/media/f1/preview',
+        contributionUrl: '/party/upload-token/upload', gameEnabled: true,
+      }),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(wrapper());
+    expect(await screen.findByRole('link', { name: /Contribuisci alla festa/i }))
+      .toHaveAttribute('href', '/party/upload-token/upload');
+    expect(screen.getByRole('link', { name: /Vota le sfide/i }))
+      .toHaveAttribute('href', '/party/tok-1/challenges');
+    expect(document.querySelector('.party-hub-hero')).toHaveStyle({
+      backgroundImage: 'url("/api/party/tok-1/media/f1/preview")',
+    });
+    expect(screen.getByTestId('party-face-open')).toBeInTheDocument();
+    expect(screen.getByTestId('party-grid')).toBeInTheDocument();
+  });
   it('renders the album and opens a photo with a download link', async () => {
     installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 1 }),
