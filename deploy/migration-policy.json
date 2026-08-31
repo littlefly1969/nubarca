@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "migrations": {
+    "20260830221014_AddPartyGuestHubChallenges": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Additive Party challenge tables, indexes, and settings with disabled/default-compatible values."
+    }
+  }
+}

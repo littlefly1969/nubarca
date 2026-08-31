@@ -38,11 +38,20 @@ Admin changes take effect on the user's next request (no re-login needed).
 ## Database migrations
 
 Migrations are additive and **do not** auto-apply at startup by default. Apply
-them before bringing a new build up:
+production updates through the guided runbook:
 
 ```bash
-$DC run --rm api db migrate
+./deploy/update-production.sh check --env-file .env
+# Review and run the exact apply command printed by check. It includes
+# --confirm-migrations only for a policy-approved migration release.
 ```
+
+That path validates backup capacity, creates and verifies the PostgreSQL dump,
+runs `db migrate` with the immutable candidate API image, verifies migration
+history and only then changes application pins. A refused migration policy is a
+manual-review stop condition, not permission to run the currently pinned image
+with an ad-hoc migration command. First installation remains governed by
+`deploy/FIRST_DEPLOY.md`.
 
 ## Cleanup (opt-in)
 

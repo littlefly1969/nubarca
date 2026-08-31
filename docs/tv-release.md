@@ -201,7 +201,8 @@ artifact for the exact candidate SHA:
 
 ```bash
 ./deploy/update-production.sh check --env-file .env
-./deploy/update-production.sh apply --env-file .env --confirm <full-main-sha>
+# Run the exact apply command printed by check; a combined backend migration
+# release also includes --confirm-migrations.
 ```
 
 For an OTA-only recovery where the checkout is already at that exact `main`, the
@@ -337,7 +338,10 @@ The server verifies the OCI provenance against its exact Git HEAD, extracts the
 bundle, revalidates contract/hash/size, installs the immutable and canonical APK
 files atomically, and replaces `nubarca-tv.release.json` last. The general
 `deploy/update-production.sh check|apply` pair performs the same operation when
-an APK bundle exists for the confirmed application release SHA.
+an APK bundle exists for the confirmed application release SHA. When the same
+SHA also carries a policy-approved backend migration, the guided updater backs
+up and deploys the backend first and activates the TV artifact only after the
+application smoke checks pass.
 
 Successful server publication still leaves physical Fire Stick acceptance
 **pending**, as required by section 13.
