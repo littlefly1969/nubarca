@@ -1,52 +1,28 @@
-// Albums: owner album CRUD, membership and bulk membership. Mirrors
-// frontend/packages/api-client/src/albums.ts exactly — same routes, same DTO
-// shapes, same safe counts-only bulk result.
+// Mobile TRANSPORT for owner album CRUD, membership and bulk membership.
 //
-// THE membership rule this module encodes: album item removal is ALBUM
+// The DTOs, the routes and the mutation payloads come from
+// @nubarca/contracts — one definition for web, phone and television. What
+// stays here is the authenticated mobile transport.
+//
+// THE membership rule this surface encodes: album item removal is ALBUM
 // MEMBERSHIP ONLY. DELETE on /api/albums/{id}/items(/bulk) never deletes the
 // underlying FileItem or blob; DELETE /api/albums/{id} deletes the album, not
 // its media. The album contract test pins these method/path pairs.
 
 import { apiDelete, apiGet, apiPatch, apiPost } from './client.ts';
+import type {
+  AlbumDetail,
+  AlbumSummary,
+  BulkAlbumItemsResult,
+} from '@nubarca/contracts';
 
-// One tile of an album card's cover mosaic. thumbnailUrl is the small
-// thumbnail for images and the poster for videos.
-export interface AlbumCoverItem {
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-}
-
-export interface AlbumSummary {
-  id: string;
-  name: string;
-  description: string | null;
-  itemCount: number;
-  showOnTv: boolean;
-  createdAt: string;
-  updatedAt: string;
-  photoCount: number;
-  videoCount: number;
-  excludedCount: number;
-  coverItems: AlbumCoverItem[];
-}
-
-export interface AlbumDetail {
-  id: string;
-  name: string;
-  description: string | null;
-  showOnTv: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Safe counts-only summary of a bulk add/remove. Never reveals which specific
-// ids were foreign/missing (that would leak another owner's file existence).
-export interface BulkAlbumItemsResult {
-  requested: number;
-  succeeded: number;
-  skipped: number;
-}
+export type {
+  AlbumCoverItem,
+  AlbumDetail,
+  AlbumItemSummary,
+  AlbumSummary,
+  BulkAlbumItemsResult,
+} from '@nubarca/contracts';
 
 export function listAlbums(signal?: AbortSignal): Promise<AlbumSummary[]> {
   return apiGet<AlbumSummary[]>('/api/albums', signal);

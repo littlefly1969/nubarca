@@ -1,0 +1,12 @@
+{
+  "name": "@nubarca/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Platform-neutral NubArca domain contracts shared by the web, mobile and TV clients.",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test src/*.test.ts"
+  }
+}

@@ -1,47 +1,28 @@
+import type {
+  AlbumDetail,
+  AlbumItemSummary,
+  AlbumSummary,
+  BulkAlbumItemsResult,
+} from '@nubarca/contracts';
 import { api } from './client';
 
-// One tile of an album card's cover mosaic. Mirrors
-// NubArca.Api.Albums.AlbumCoverItem. `thumbnailUrl` is the small thumbnail for
-// images and the poster for videos.
-export interface AlbumCoverItem {
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-}
+// Web TRANSPORT for owner album CRUD and membership.
+//
+// The DTOs come from @nubarca/contracts — one definition for web, phone and
+// television — and are re-exported here under their existing names so every
+// web call site keeps importing from '@nubarca/api-client' unchanged.
+//
+// THE membership rule (§24): removing an item from an album changes ALBUM
+// MEMBERSHIP only; it never deletes the FileItem or its blob. Deleting an
+// album deletes the album, not its media.
 
-export interface AlbumSummary {
-  id: string;
-  name: string;
-  description: string | null;
-  // Raw membership count (backward compatible).
-  itemCount: number;
-  showOnTv: boolean;
-  createdAt: string;
-  updatedAt: string;
-  // Slice 5: per-kind active counts + excluded members + cover mosaic (≤4).
-  photoCount: number;
-  videoCount: number;
-  excludedCount: number;
-  coverItems: AlbumCoverItem[];
-}
-
-export interface AlbumDetail {
-  id: string;
-  name: string;
-  description: string | null;
-  showOnTv: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface AlbumItemSummary {
-  fileItemId: string;
-  name: string;
-  mimeType: string;
-  sizeBytes: number;
-  addedAt: string;
-  thumbnailUrl: string | null;
-}
+export type {
+  AlbumCoverItem,
+  AlbumDetail,
+  AlbumItemSummary,
+  AlbumSummary,
+  BulkAlbumItemsResult,
+} from '@nubarca/contracts';
 
 export async function listAlbums(signal?: AbortSignal): Promise<AlbumSummary[]> {
   return api<AlbumSummary[]>('/api/albums', { signal });
@@ -119,13 +100,6 @@ export async function removeAlbumItem(
   });
 }
 
-// Safe counts-only summary of a bulk add/remove. Never reveals which specific
-// ids were foreign/missing (that would leak existence of another owner's files).
-export interface BulkAlbumItemsResult {
-  requested: number;
-  succeeded: number;
-  skipped: number;
-}
 
 // Bulk add many gallery-selected files to an album. Idempotent: files already
 // present (or duplicated in the request) count as skipped, not errors.
