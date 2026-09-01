@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
+  PARTY_GAME_DEFAULTS,
+  gameSettingsFromStatus,
+  partySettingsPatch,
+  slideshowSettingsFromStatus,
+  type AlbumPartyStatus,
   PARTY_GAME_RANGES,
   PARTY_SLIDESHOW_RANGES,
   albumPartyMessageActionPath,
@@ -172,4 +177,141 @@ test('a message action route names the action the contract produced', () => {
     albumPartyMessageActionPath('a1', 'm1', 'promote-hero'),
     '/api/albums/a1/party-messages/m1/promote-hero',
   );
+});
+
+// ── the settings PATCH payload ──────────────────────────────────────────────
+//
+// The bug these exist to prevent: the server's body has a NON-NULLABLE
+// `enabled`, so a patch that omits it deserialises to false and DISABLES the
+// party, revoking every public link. A sub-switch must never be able to do
+// that.
+
+const status = (over: Partial<AlbumPartyStatus> = {}): AlbumPartyStatus => ({
+  albumId: 'a1',
+  showOnTv: true,
+  partyMode: true,
+  partyUrl: '/party/abc',
+  uploadEnabled: false,
+  uploadUrl: null,
+  requireUploadApproval: false,
+  requireMessageApproval: false,
+  photoSlideSeconds: 6,
+  maxVideoSlideSeconds: 30,
+  maxPhotoUploadsPerParticipant: 0,
+  maxVideoUploadsPerParticipant: 0,
+  ...over,
+});
+
+test('turning the party ON sends enabled:true', () => {
+  assert.deepEqual(
+    partySettingsPatch(status({ partyMode: false }), { enabled: true }),
+    { enabled: true },
+  );
+});
+
+test('turning the party OFF sends enabled:false', () => {
+  assert.deepEqual(
+    partySettingsPatch(status({ partyMode: true }), { enabled: false }),
+    { enabled: false },
+  );
+});
+
+test('a sub-switch CARRIES the current party mode, and never changes it', () => {
+  // Each of these would have turned the party off before the builder existed.
+  assert.deepEqual(
+    partySettingsPatch(status(), { uploadEnabled: true }),
+    { enabled: true, uploadEnabled: true },
+  );
+  assert.deepEqual(
+    partySettingsPatch(status(), { uploadEnabled: false }),
+    { enabled: true, uploadEnabled: false },
+  );
+  assert.deepEqual(
+    partySettingsPatch(status(), { requireUploadApproval: true }),
+    { enabled: true, requireUploadApproval: true },
+  );
+  assert.deepEqual(
+    partySettingsPatch(status(), { requireMessageApproval: true }),
+    { enabled: true, requireMessageApproval: true },
+  );
+});
+
+test('enabled is NEVER inferred from a sub-switch', () => {
+  // Uploads on while the party is off stays off: the master switch is the
+  // master switch, and guessing it from a sub-switch is the whole defect.
+  assert.equal(
+    partySettingsPatch(status({ partyMode: false }), { uploadEnabled: true }).enabled,
+    false,
+  );
+  assert.equal(
+    partySettingsPatch(status({ partyMode: true }), { uploadEnabled: false }).enabled,
+    true,
+  );
+});
+
+test('only the field being changed is sent', () => {
+  // Sending every flag on every toggle would overwrite a value another client
+  // changed between the read and the write.
+  const patch = partySettingsPatch(status(), { requireUploadApproval: true });
+  assert.deepEqual(Object.keys(patch).sort(), ['enabled', 'requireUploadApproval']);
+  assert.deepEqual(Object.keys(partySettingsPatch(status())), ['enabled']);
+});
+
+test('false is carried, not dropped as absent', () => {
+  const patch = partySettingsPatch(status(), { requireMessageApproval: false });
+  assert.equal('requireMessageApproval' in patch, true);
+  assert.equal(patch.requireMessageApproval, false);
+});
+
+// ── game defaults ───────────────────────────────────────────────────────────
+
+test('the game defaults are the SERVER values, frozen here', () => {
+  assert.deepEqual(PARTY_GAME_DEFAULTS, {
+    minChallengeIntervalSeconds: 300,
+    maxChallengeIntervalSeconds: 540,
+    votesPerGuest: 3,
+    maxChallengesPerSession: null,
+  });
+  // And they are inside the ranges the same contract validates against.
+  assert.equal(invalidGameFields({ gameEnabled: true, ...PARTY_GAME_DEFAULTS }).length, 0);
+});
+
+test('an unconfigured game falls back to the server defaults, not to invented numbers', () => {
+  assert.deepEqual(gameSettingsFromStatus(status()), {
+    gameEnabled: false,
+    ...PARTY_GAME_DEFAULTS,
+  });
+});
+
+test('a configured game is read through unchanged', () => {
+  const configured = status({
+    gameEnabled: true,
+    minChallengeIntervalSeconds: 60,
+    maxChallengeIntervalSeconds: 120,
+    votesPerGuest: 5,
+    maxChallengesPerSession: 10,
+  });
+  assert.deepEqual(gameSettingsFromStatus(configured), {
+    gameEnabled: true,
+    minChallengeIntervalSeconds: 60,
+    maxChallengeIntervalSeconds: 120,
+    votesPerGuest: 5,
+    maxChallengesPerSession: 10,
+  });
+});
+
+test('a null session cap survives the fallback as null, not as a number', () => {
+  assert.equal(
+    gameSettingsFromStatus(status({ maxChallengesPerSession: null })).maxChallengesPerSession,
+    null,
+  );
+});
+
+test('slideshow settings are always present, so nothing is defaulted', () => {
+  assert.deepEqual(slideshowSettingsFromStatus(status()), {
+    photoSlideSeconds: 6,
+    maxVideoSlideSeconds: 30,
+    maxPhotoUploadsPerParticipant: 0,
+    maxVideoUploadsPerParticipant: 0,
+  });
 });

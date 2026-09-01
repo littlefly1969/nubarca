@@ -134,6 +134,97 @@ export function invalidGameFields(s: PartyGameSettings): string[] {
   return bad;
 }
 
+// ── The settings PATCH payload ─────────────────────────────────────────────
+
+/**
+ * THE wire body for PATCH /api/albums/{id}/party-settings.
+ *
+ * `enabled` is the MASTER SWITCH and is REQUIRED. On the server it is a
+ * non-nullable bool, so a body that omits it deserialises to `false` and
+ * DISABLES the party — revoking every public link. A sub-toggle that forgot to
+ * carry it would therefore turn the party off while claiming to change guest
+ * uploads, which is why this type has no optional `enabled`.
+ */
+export interface PartySettingsPatch {
+  enabled: boolean;
+  uploadEnabled?: boolean;
+  requireUploadApproval?: boolean;
+  requireMessageApproval?: boolean;
+}
+
+/**
+ * Build a settings patch from the CURRENT status plus the one thing being
+ * changed.
+ *
+ * `enabled` always comes from `current.partyMode` unless the caller is
+ * explicitly changing it. It is never derived from `uploadEnabled` or from an
+ * approval flag: those are sub-switches of a running party, and inferring the
+ * master switch from one of them is exactly the mistake this builder exists to
+ * make impossible.
+ */
+export function partySettingsPatch(
+  current: Pick<AlbumPartyStatus, 'partyMode'>,
+  changes: Partial<{
+    enabled: boolean;
+    uploadEnabled: boolean;
+    requireUploadApproval: boolean;
+    requireMessageApproval: boolean;
+  }> = {},
+): PartySettingsPatch {
+  const patch: PartySettingsPatch = {
+    enabled: changes.enabled ?? current.partyMode,
+  };
+  if (changes.uploadEnabled !== undefined) patch.uploadEnabled = changes.uploadEnabled;
+  if (changes.requireUploadApproval !== undefined) {
+    patch.requireUploadApproval = changes.requireUploadApproval;
+  }
+  if (changes.requireMessageApproval !== undefined) {
+    patch.requireMessageApproval = changes.requireMessageApproval;
+  }
+  return patch;
+}
+
+// ── Game defaults ──────────────────────────────────────────────────────────
+
+/**
+ * The server's own defaults, so a client filling a form for an album whose
+ * game has never been configured offers what the server would have used.
+ * Inventing softer numbers locally is how two clients come to disagree about
+ * an unset value.
+ */
+export const PARTY_GAME_DEFAULTS = {
+  minChallengeIntervalSeconds: 300,
+  maxChallengeIntervalSeconds: 540,
+  votesPerGuest: 3,
+  maxChallengesPerSession: null,
+} as const;
+
+/** Read the game settings out of a status, filling unset fields with the
+ * SERVER defaults rather than with numbers a client made up. */
+export function gameSettingsFromStatus(status: AlbumPartyStatus): PartyGameSettings {
+  return {
+    gameEnabled: status.gameEnabled ?? false,
+    minChallengeIntervalSeconds:
+      status.minChallengeIntervalSeconds ?? PARTY_GAME_DEFAULTS.minChallengeIntervalSeconds,
+    maxChallengeIntervalSeconds:
+      status.maxChallengeIntervalSeconds ?? PARTY_GAME_DEFAULTS.maxChallengeIntervalSeconds,
+    votesPerGuest: status.votesPerGuest ?? PARTY_GAME_DEFAULTS.votesPerGuest,
+    maxChallengesPerSession:
+      status.maxChallengesPerSession ?? PARTY_GAME_DEFAULTS.maxChallengesPerSession,
+  };
+}
+
+/** The slideshow settings a status carries. Always present on the wire, so
+ * there are no defaults to invent here. */
+export function slideshowSettingsFromStatus(status: AlbumPartyStatus): PartySlideshowSettings {
+  return {
+    photoSlideSeconds: status.photoSlideSeconds,
+    maxVideoSlideSeconds: status.maxVideoSlideSeconds,
+    maxPhotoUploadsPerParticipant: status.maxPhotoUploadsPerParticipant,
+    maxVideoUploadsPerParticipant: status.maxVideoUploadsPerParticipant,
+  };
+}
+
 // ── Guest MEDIA moderation (§35) ───────────────────────────────────────────
 // A separate domain from messages. Same album, different state machine.
 

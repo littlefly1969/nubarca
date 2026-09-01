@@ -13,6 +13,7 @@
 import { apiGet, apiPatch, apiPost } from './client.ts';
 import type {
   AlbumPartyStatus,
+  PartySettingsPatch,
   PartyGameSettings,
   PartyMessageAction,
   PartyMessageList,
@@ -31,6 +32,7 @@ import {
 
 export type {
   AlbumPartyStatus,
+  PartySettingsPatch,
   PartyGameSettings,
   PartyMessage,
   PartyMessageAction,
@@ -44,6 +46,10 @@ export type {
 } from '@nubarca/contracts';
 export {
   DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
+  PARTY_GAME_DEFAULTS,
+  gameSettingsFromStatus,
+  partySettingsPatch,
+  slideshowSettingsFromStatus,
   PARTY_GAME_RANGES,
   PARTY_SLIDESHOW_RANGES,
   clampToRange,
@@ -63,40 +69,25 @@ export function getPartyStatus(
   return apiGet<AlbumPartyStatus>(albumPartyStatusPath(albumId), signal);
 }
 
-export function setPartyMode(
+/**
+ * ONE mutation for every party setting, taking the canonical wire body.
+ *
+ * There used to be four wrappers here — setPartyMode, setPartyUploads and the
+ * two approval switches — each sending only its own field. That was a contract
+ * bug with teeth: the server's body has a NON-NULLABLE `enabled`, so a patch
+ * that omitted it deserialised to `false` and DISABLED the party. Toggling
+ * guest uploads would have revoked every public link.
+ *
+ * Callers build the body with `partySettingsPatch(status, { ... })`, which
+ * always carries `enabled` from the current status unless it is the thing
+ * being changed.
+ */
+export function updatePartySettings(
   albumId: string,
-  partyMode: boolean,
+  patch: PartySettingsPatch,
   signal?: AbortSignal,
 ): Promise<AlbumPartyStatus> {
-  return apiPatch<AlbumPartyStatus>(albumPartyStatusPath(albumId), { partyMode }, { signal });
-}
-
-export function setPartyUploads(
-  albumId: string,
-  uploadEnabled: boolean,
-  signal?: AbortSignal,
-): Promise<AlbumPartyStatus> {
-  return apiPatch<AlbumPartyStatus>(albumPartyStatusPath(albumId), { uploadEnabled }, { signal });
-}
-
-export function setRequireUploadApproval(
-  albumId: string,
-  requireUploadApproval: boolean,
-  signal?: AbortSignal,
-): Promise<AlbumPartyStatus> {
-  return apiPatch<AlbumPartyStatus>(
-    albumPartyStatusPath(albumId), { requireUploadApproval }, { signal },
-  );
-}
-
-export function setRequireMessageApproval(
-  albumId: string,
-  requireMessageApproval: boolean,
-  signal?: AbortSignal,
-): Promise<AlbumPartyStatus> {
-  return apiPatch<AlbumPartyStatus>(
-    albumPartyStatusPath(albumId), { requireMessageApproval }, { signal },
-  );
+  return apiPatch<AlbumPartyStatus>(albumPartyStatusPath(albumId), patch, { signal });
 }
 
 // ── Slideshow and game settings (§33, §34) ─────────────────────────────────

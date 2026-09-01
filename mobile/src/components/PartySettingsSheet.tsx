@@ -44,8 +44,11 @@ import {
   PARTY_SLIDESHOW_RANGES,
   invalidGameFields,
   invalidSlideshowFields,
+  gameSettingsFromStatus,
   partyGuestUrl,
   partyMessageActions,
+  partySettingsPatch,
+  slideshowSettingsFromStatus,
 } from '@nubarca/contracts';
 import {
   getPartyStatus,
@@ -54,11 +57,8 @@ import {
   moderatePartyMessage,
   moderatePartyUpload,
   setPartyGameSettings,
-  setPartyMode,
   setPartySlideshowSettings,
-  setPartyUploads,
-  setRequireMessageApproval,
-  setRequireUploadApproval,
+  updatePartySettings,
 } from '../api/party';
 import { getBaseUrl } from '../api/client';
 import { AuthedImage } from './AuthedImage';
@@ -134,19 +134,10 @@ export function PartySettingsSheet({
     try {
       const next = await getPartyStatus(albumId, signal);
       setStatus(next);
-      setSlideshow({
-        photoSlideSeconds: next.photoSlideSeconds,
-        maxVideoSlideSeconds: next.maxVideoSlideSeconds,
-        maxPhotoUploadsPerParticipant: next.maxPhotoUploadsPerParticipant,
-        maxVideoUploadsPerParticipant: next.maxVideoUploadsPerParticipant,
-      });
-      setGame({
-        gameEnabled: next.gameEnabled ?? false,
-        minChallengeIntervalSeconds: next.minChallengeIntervalSeconds ?? 60,
-        maxChallengeIntervalSeconds: next.maxChallengeIntervalSeconds ?? 300,
-        votesPerGuest: next.votesPerGuest ?? 3,
-        maxChallengesPerSession: next.maxChallengesPerSession ?? null,
-      });
+      // Both mappings live in the contract: an unset game field falls back to
+      // the SERVER's default, not to a number this screen made up.
+      setSlideshow(slideshowSettingsFromStatus(next));
+      setGame(gameSettingsFromStatus(next));
       // Moderation queues are only meaningful while a party is running.
       if (next.partyMode) {
         const [uploadList, messageList] = await Promise.all([
@@ -223,12 +214,16 @@ export function PartySettingsSheet({
                       {
                         text: t('party.mode'),
                         style: 'destructive',
-                        onPress: () => { void run(() => setPartyMode(albumId, false)); },
+                        onPress: () => {
+                          void run(() => updatePartySettings(
+                            albumId, partySettingsPatch(status, { enabled: false })));
+                        },
                       },
                     ]);
                     return;
                   }
-                  void run(() => setPartyMode(albumId, true));
+                  void run(() => updatePartySettings(
+                    albumId, partySettingsPatch(status, { enabled: true })));
                 }}
               />
             </View>
@@ -257,7 +252,12 @@ export function PartySettingsSheet({
                   <Switch
                     value={status.uploadEnabled}
                     disabled={busy}
-                    onValueChange={(next) => { void run(() => setPartyUploads(albumId, next)); }}
+                    onValueChange={(next) => {
+                      // The patch carries `enabled` from the current status, so
+                      // changing a sub-switch cannot turn the party off.
+                      void run(() => updatePartySettings(
+                        albumId, partySettingsPatch(status, { uploadEnabled: next })));
+                    }}
                   />
                 </View>
                 <View style={styles.switchRow}>
@@ -266,7 +266,8 @@ export function PartySettingsSheet({
                     value={status.requireUploadApproval}
                     disabled={busy}
                     onValueChange={(next) => {
-                      void run(() => setRequireUploadApproval(albumId, next));
+                      void run(() => updatePartySettings(
+                        albumId, partySettingsPatch(status, { requireUploadApproval: next })));
                     }}
                   />
                 </View>
@@ -276,7 +277,8 @@ export function PartySettingsSheet({
                     value={status.requireMessageApproval}
                     disabled={busy}
                     onValueChange={(next) => {
-                      void run(() => setRequireMessageApproval(albumId, next));
+                      void run(() => updatePartySettings(
+                        albumId, partySettingsPatch(status, { requireMessageApproval: next })));
                     }}
                   />
                 </View>

@@ -16,6 +16,26 @@ const read = async (p: string) => code(await readFile(join(here, p), 'utf8'));
 
 // ── Party ───────────────────────────────────────────────────────────────────
 
+test('every settings toggle goes through the canonical patch builder', async () => {
+  // A toggle that built its own body is how the party got disabled by a
+  // sub-switch. The BEHAVIOUR is proven in api/partyTransport.test.ts; this
+  // only checks the screen still routes through the builder.
+  const sheet = await read('PartySettingsSheet.tsx');
+  assert.match(sheet, /updatePartySettings\(/);
+  assert.doesNotMatch(sheet, /setPartyMode\(|setPartyUploads\(|setRequireUploadApproval\(/);
+  for (const change of ['enabled: false', 'enabled: true', 'uploadEnabled: next',
+    'requireUploadApproval: next', 'requireMessageApproval: next']) {
+    assert.ok(sheet.includes(`partySettingsPatch(status, { ${change} })`), change);
+  }
+});
+
+test('the game fallback comes from the contract, not from local numbers', async () => {
+  const sheet = await read('PartySettingsSheet.tsx');
+  assert.match(sheet, /gameSettingsFromStatus\(next\)/);
+  assert.match(sheet, /slideshowSettingsFromStatus\(next\)/);
+  assert.doesNotMatch(sheet, /\?\? 60|\?\? 300|\?\? 3;/);
+});
+
 test('the ranges come from the contract; the screen defines none (§33, §34)', async () => {
   const sheet = await read('PartySettingsSheet.tsx');
   assert.match(sheet, /PARTY_SLIDESHOW_RANGES/);
@@ -72,7 +92,7 @@ test('the guest link is the server URL plus this origin, never minted (§32)', a
 test('turning Party off is confirmed, because it kills the guest link', async () => {
   const sheet = await read('PartySettingsSheet.tsx');
   assert.match(sheet, /party\.modeOffTitle/);
-  assert.match(sheet, /setPartyMode\(albumId, false\)/);
+  assert.match(sheet, /partySettingsPatch\(status, \{ enabled: false \}\)/);
 });
 
 test('a guest message is rendered as TEXT', async () => {

@@ -271,9 +271,10 @@ export function isHistoricalMembership(state: AlbumMembershipState): boolean {
 export interface SharedAlbumCapabilities {
   canView: boolean;
   canContribute: boolean;
-  canWithdrawOwnContribution: boolean;
   canEditCollaboratively: boolean;
   canDownloadOriginal: boolean;
+  // NOTE: there is deliberately no `canWithdrawOwnContribution` here.
+  // Withdrawal is decided PER ITEM, not per role — see canWithdrawItem below.
 }
 
 export function sharedAlbumCapabilities(input: {
@@ -285,10 +286,25 @@ export function sharedAlbumCapabilities(input: {
   return {
     canView: true,
     canContribute: contributes,
-    canWithdrawOwnContribution: contributes,
     // `canEdit` is the SERVER's answer, echoed. A role alone does not decide
     // it, which is why it is not computed from the role here.
     canEditCollaboratively: input.canEdit,
     canDownloadOriginal: input.allowOriginalDownload,
   };
+}
+
+/**
+ * May THIS item be withdrawn?
+ *
+ * The answer is on the item, never on the role. `canWithdraw` is the server's
+ * own conclusion — the caller owns the file and added it — and it survives a
+ * role change: somebody downgraded from contributor to viewer can still take
+ * back what they already contributed. Deriving it from the CURRENT role would
+ * strand their own media in an album they can no longer contribute to.
+ *
+ * It is a capability, not an identity: the viewer never learns who contributed
+ * the other items.
+ */
+export function canWithdrawItem(item: Pick<SharedAlbumItem, 'canWithdraw'>): boolean {
+  return item.canWithdraw;
 }

@@ -31,12 +31,8 @@ import {
   type FilterChipDescriptor,
   type FilterChipKind,
 } from './mediaFilterState.ts';
-import {
-  listMedia,
-  listAlbumMedia,
-  searchSemanticMedia,
-  type MediaListResponse,
-} from '../api/media.ts';
+import { listMedia, listAlbumMedia, searchSemanticMedia } from '../api/media.ts';
+import { pageFromListing, pageFromSemantic, type MediaPage } from './mediaPage.ts';
 import { listPeopleForFilter, type PersonSummary } from '../api/people.ts';
 
 export interface MediaFiltersBinding {
@@ -46,7 +42,7 @@ export interface MediaFiltersBinding {
   chips: FilterChipDescriptor[];
   /** personId -> summary, for resolving chip labels. */
   people: ReadonlyMap<string, PersonSummary>;
-  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<MediaListResponse>;
+  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<MediaPage>;
   apply: (
     filters: MediaWorkspaceFilters,
     sort: MediaSortField,
@@ -72,7 +68,7 @@ export function useMediaFilters(
   identityRef.current = identity;
 
   const fetchPage = useCallback(
-    async (cursor: string | null, signal: AbortSignal): Promise<MediaListResponse> => {
+    async (cursor: string | null, signal: AbortSignal): Promise<MediaPage> => {
       const current = identityRef.current;
 
       // SEMANTIC (§10) is a different backend operation, not a filter on the
@@ -101,25 +97,18 @@ export function useMediaFilters(
           // album's — not the library's, filtered afterwards.
           albumId: albumId ?? undefined,
         }, signal);
-        // The grid renders media; the temporal evidence a video result carries
-        // is not something this list surface shows, so it is dropped here
-        // rather than smuggled through in a widened item type.
-        return {
-          items: page.items.map((result) => result.media),
-          limit: pageSize,
-          count: page.items.length,
-          nextCursor: page.nextCursor,
-          hasMore: page.hasMore,
-          total: page.total,
-          photoCount: 0,
-          videoCount: 0,
-        };
+        // No per-kind counts: this route does not produce them, and inventing
+        // zeroes would claim there were none rather than admit they are
+        // unknown. See media/mediaPage.ts.
+        return pageFromSemantic(page);
       }
 
       const query = pageQuery(current, cursor, pageSize);
-      return albumId === null
-        ? listMedia(query, signal)
-        : listAlbumMedia(albumId, query, signal);
+      return pageFromListing(
+        albumId === null
+          ? await listMedia(query, signal)
+          : await listAlbumMedia(albumId, query, signal),
+      );
     },
     // `generation` is the real dependency: a new query needs a new fetcher.
     // eslint-disable-next-line react-hooks/exhaustive-deps
