@@ -114,10 +114,16 @@ test('navigation happens before viewer cleanup, which belongs to route unmount',
   assert.match(closeAndLeave[1], /router\.canGoBack\(\)/);
   assert.match(closeAndLeave[1], /router\.(?:back|replace)\(/);
 
-  assert.match(
-    source,
-    /useEffect\(\(\) => \{\s*return \(\) => \{\s*closeViewer\(\);\s*\};\s*\}, \[closeViewer\]\);/,
+  // The teardown effect owns the cleanup. Its body may grow — remembered video
+  // positions are cleared here too — so the assertion is about WHERE
+  // closeViewer lives, not about the effect being a single statement.
+  const teardown = source.match(
+    /useEffect\(\(\) => \{\s*return \(\) => \{([\s\S]*?)\};\s*\}, \[closeViewer\]\);/,
   );
+  assert.ok(teardown, 'the route-unmount teardown effect was not found');
+  assert.match(teardown[1], /closeViewer\(\);/);
+  // Leaving the viewer must not leave a previous session's positions behind.
+  assert.match(teardown[1], /forgetAllPositions\(\);/);
 });
 
 test('chrome rendering clamps the index and guards an empty sequence', async () => {
