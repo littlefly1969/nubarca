@@ -18,7 +18,7 @@ import type {
   MediaWorkspaceIdentity,
   MediaWorkspaceSource,
 } from '@nubarca/contracts';
-import { isSemanticActive } from '@nubarca/contracts';
+import { inertUnderSemantic, isSemanticActive } from '@nubarca/contracts';
 import {
   chipsFor,
   generationOf,
@@ -40,6 +40,8 @@ export interface MediaFiltersBinding {
   /** Changes exactly when the result set would change. */
   generation: string;
   chips: FilterChipDescriptor[];
+  /** Chips the running visual search does not apply. */
+  inert: FilterChipKind[];
   /** personId -> summary, for resolving chip labels. */
   people: ReadonlyMap<string, PersonSummary>;
   fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<MediaPage>;
@@ -116,6 +118,7 @@ export function useMediaFilters(
   );
 
   const chips = useMemo(() => chipsFor(identity), [identity]);
+  const inert = useMemo(() => inertUnderSemantic(identity), [identity]);
 
   // Person labels for the chips. Loaded only once somebody is actually
   // filtered by — an unfiltered library must not pull the People catalogue.
@@ -138,6 +141,7 @@ export function useMediaFilters(
     identity,
     generation,
     chips,
+    inert,
     people,
     fetchPage,
     apply: useCallback((filters, sort, direction) => {

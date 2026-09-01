@@ -168,6 +168,7 @@ export default function Photos(): React.JSX.Element {
       <MediaFilterChips
         chips={filters.chips}
         people={filters.people}
+        inert={filters.inert}
         onRemove={filters.removeChip}
         onClearAll={filters.clearAll}
       />
@@ -192,10 +193,9 @@ export default function Photos(): React.JSX.Element {
             selectedIds={selectionState.ids}
             onPressItem={openViewer}
             onToggleSelect={selectionState.toggle}
-            onLongPressItem={(item) => {
-              selectionState.begin();
-              selectionState.toggle(item.id);
-            }}
+            // ONE transition: enter the mode and keep the item. Doing it in
+            // two steps is what made the first long-pressed photo not stick.
+            onLongPressItem={(item) => selectionState.beginWith(item.id)}
             refreshing={snapshot.phase === 'refreshing'}
             onRefresh={() => {
               void refresh();
@@ -220,6 +220,7 @@ export default function Photos(): React.JSX.Element {
           />
           {selectionState.selecting && (
             <MediaSelectionBar
+              selecting={selectionState.selecting}
               count={selectionState.count}
               capabilities={capabilities}
               onAddToAlbum={() => setSheetVisible(true)}

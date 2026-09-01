@@ -30,9 +30,10 @@ test('a semantic page carries NO counts, because the route produces none', () =>
     ],
     nextCursor: null, hasMore: false, semanticStatus: 'ok', total: 2,
   });
-  assert.deepEqual(page, {
-    items: [photo, video], nextCursor: null, hasMore: false, total: 2,
-  });
+  assert.deepEqual(page.items, [photo, video]);
+  assert.equal(page.nextCursor, null);
+  assert.equal(page.hasMore, false);
+  assert.equal(page.total, 2);
   assert.equal('photoCount' in page, false);
   assert.equal('videoCount' in page, false);
 });
@@ -48,20 +49,28 @@ test('items, cursor, hasMore and total all survive the semantic projection', () 
   assert.equal(page.total, 41);
 });
 
-test('the temporal evidence is dropped, not smuggled into the item', () => {
+test('the temporal evidence travels BESIDE the item, not inside it', () => {
+  // A visual search that finds a video and cannot say which moment matched has
+  // answered half the question. The item stays exactly the server's MediaItem.
+  const bestMatch = {
+    evidenceType: 'visual',
+    startMilliseconds: 0, endMilliseconds: 8000, representativeMilliseconds: 4000,
+  };
   const page = pageFromSemantic({
-    items: [{
-      media: video,
-      bestMatch: {
-        evidenceType: 'visual',
-        startMilliseconds: 0, endMilliseconds: 8000, representativeMilliseconds: 4000,
-      },
-      additionalMatches: [],
-    }],
+    items: [{ media: video, bestMatch, additionalMatches: [] }],
     nextCursor: null, hasMore: false, semanticStatus: 'ok', total: 1,
   });
   assert.deepEqual(page.items[0], video);
   assert.equal('bestMatch' in (page.items[0] as object), false);
+  assert.deepEqual(page.evidence?.get('v1'), bestMatch);
+});
+
+test('a listing page carries no evidence, because ranking produced none', () => {
+  const page = pageFromListing({
+    items: [photo], limit: 60, count: 1, nextCursor: null, hasMore: false,
+    total: 1, photoCount: 1, videoCount: 0,
+  });
+  assert.equal(page.evidence, undefined);
 });
 
 test('an empty result is empty, not a zero-count claim', () => {

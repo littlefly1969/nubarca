@@ -327,6 +327,14 @@ const it = {
   'sharing.loadFailed': 'Impossibile caricare i membri.',
   'sharing.actionFailed': 'Operazione non riuscita.',
 
+  'menu.more': 'Altro',
+  'menu.close': 'Chiudi',
+
+  'selection.hint': 'Tocca gli elementi da selezionare',
+
+  'chips.inert': 'non applicato alla ricerca visiva',
+  'filters.semanticNotice': 'La ricerca visiva ordina per contenuto: alcuni filtri non si applicano.',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

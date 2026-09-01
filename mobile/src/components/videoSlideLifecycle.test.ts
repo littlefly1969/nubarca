@@ -186,10 +186,21 @@ test('the restore waits for readiness, and is NOT in the creation callback', asy
   assert.match(slide, /if \(uri === null \|\| nativeStatus !== 'readyToPlay'\) return;/);
 });
 
-test('the restore is one shot per source, so it cannot yank the playhead back', async () => {
+test('the restore is one shot per PLAYER and source, not per source alone', async () => {
+  // A guard keyed on the uri alone refuses to restore in the very case that
+  // needs it: expo-video replacing the source builds a player back at zero for
+  // the SAME uri, and the old guard had already marked that uri done.
   const slide = await sourceOf('VideoSlide.tsx');
-  assert.match(slide, /if \(restoredForRef\.current === uri\) return;/);
-  assert.match(slide, /restoredForRef\.current = uri;/);
+  assert.match(slide, /done\.player === player && done\.uri === uri/);
+  assert.match(slide, /restoredForRef\.current = \{ player, uri \};/);
+});
+
+test('the video source is keyed on the MEDIA, never on focus', async () => {
+  // Depending on `active` is what made a rotation restart the video: the pager
+  // re-anchors, focus flickers, a new source object replaces the player's.
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.match(slide, /\[slide\.videoSource, cookie\]/);
+  assert.doesNotMatch(slide, /\[active, slide\.videoSource\]/);
 });
 
 test('the position is recorded BEFORE the player is paused or released', async () => {

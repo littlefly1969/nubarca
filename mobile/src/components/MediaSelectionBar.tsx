@@ -29,6 +29,7 @@ export interface SelectionAction {
 }
 
 export function MediaSelectionBar({
+  selecting,
   count,
   capabilities,
   onAddToAlbum,
@@ -37,6 +38,11 @@ export function MediaSelectionBar({
   onRemoveFromAlbum,
   onCancel,
 }: {
+  /** Whether the mode is OPEN, which is not the same as having picked
+   * something. A bar that appeared only once an item was selected made the
+   * header's select button look broken: it turned the mode on and nothing
+   * visible happened. */
+  selecting: boolean;
   count: number;
   capabilities: MediaSelectionCapabilities;
   onAddToAlbum: () => void;
@@ -46,7 +52,7 @@ export function MediaSelectionBar({
   onCancel: () => void;
 }): React.JSX.Element | null {
   const { t } = useI18n();
-  if (count === 0) return null;
+  if (!selecting) return null;
 
   const actions: SelectionAction[] = [];
   if (capabilities.canAddToAlbum) {
@@ -107,7 +113,10 @@ export function MediaSelectionBar({
   return (
     <View style={styles.bar}>
       <View style={styles.countRow}>
-        <Text style={styles.count}>{count}</Text>
+        {/* With nothing picked yet, say what to do rather than show a bare 0. */}
+        <Text style={count === 0 ? styles.hint : styles.count}>
+          {count === 0 ? t('selection.hint') : String(count)}
+        </Text>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t('albumDetail.cancelSelection')}
@@ -155,6 +164,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingBottom: 6,
   },
   count: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  hint: { fontSize: 14, color: colors.textTertiary, flexShrink: 1 },
   actions: { paddingHorizontal: 12, gap: 8 },
   action: {
     flexDirection: 'row', alignItems: 'center', gap: 8,

@@ -91,6 +91,7 @@ export default function Videos(): React.JSX.Element {
       <MediaFilterChips
         chips={filters.chips}
         people={filters.people}
+        inert={filters.inert}
         onRemove={filters.removeChip}
         onClearAll={filters.clearAll}
       />

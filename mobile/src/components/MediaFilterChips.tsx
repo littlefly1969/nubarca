@@ -35,11 +35,16 @@ function personLabel(
 export function MediaFilterChips({
   chips,
   people,
+  inert,
   onRemove,
   onClearAll,
 }: {
   chips: FilterChipDescriptor[];
   people: ReadonlyMap<string, PersonSummary>;
+  /** Chips a running visual search does NOT apply. They are drawn dimmed and
+   * announced as inert: a filter that is set, shown, and silently ignored
+   * makes the results look filtered when they are not. */
+  inert?: readonly FilterChipKind[];
   onRemove: (kind: FilterChipKind) => void;
   onClearAll: () => void;
 }): React.JSX.Element | null {
@@ -103,18 +108,43 @@ export function MediaFilterChips({
       style={styles.strip}
       contentContainerStyle={styles.stripContent}
     >
-      {chips.map((chip) => (
-        <Pressable
-          key={chip.key}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('chips.remove')}: ${label(chip)}`}
-          onPress={() => onRemove(chip.kind)}
-          style={({ pressed }) => [styles.chip, pressed && styles.pressed]}
-        >
-          <Text style={styles.chipText} numberOfLines={1}>{label(chip)}</Text>
-          <Ionicons name="close" size={14} color={colors.accent} style={styles.chipIcon} />
-        </Pressable>
-      ))}
+      {chips.map((chip) => {
+        const isInert = inert !== undefined && inert.includes(chip.kind);
+        return (
+          <Pressable
+            key={chip.key}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isInert
+                ? `${label(chip)} — ${t('chips.inert')}`
+                : `${t('chips.remove')}: ${label(chip)}`
+            }
+            onPress={() => onRemove(chip.kind)}
+            style={({ pressed }) => [styles.chip, isInert && styles.inert, pressed && styles.pressed]}
+          >
+            {isInert && (
+              <Ionicons
+                name="alert-circle-outline"
+                size={13}
+                color={colors.textTertiary}
+                style={styles.chipIcon}
+              />
+            )}
+            <Text
+              style={[styles.chipText, isInert && styles.inertText]}
+              numberOfLines={1}
+            >
+              {label(chip)}
+            </Text>
+            <Ionicons
+              name="close"
+              size={14}
+              color={isInert ? colors.textTertiary : colors.accent}
+              style={styles.chipIcon}
+            />
+          </Pressable>
+        );
+      })}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={t('filters.clearAll')}
@@ -141,6 +171,8 @@ const styles = StyleSheet.create({
     maxWidth: 240,
   },
   chipText: { color: colors.accent, fontSize: 13, flexShrink: 1 },
+  inert: { backgroundColor: '#EEF0F4' },
+  inertText: { color: colors.textTertiary, textDecorationLine: 'line-through' },
   chipIcon: { marginLeft: 4 },
   clearAll: { paddingHorizontal: 10, paddingVertical: 6 },
   clearAllText: { color: colors.textTertiary, fontSize: 13, textDecorationLine: 'underline' },

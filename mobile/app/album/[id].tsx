@@ -5,6 +5,7 @@ import React, { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
+import { OverflowMenu } from '../../src/components/OverflowMenu';
 import { PartySettingsSheet } from '../../src/components/PartySettingsSheet';
 import { AlbumSharingSheet } from '../../src/components/AlbumSharingSheet';
 import {
@@ -148,29 +149,60 @@ export default function AlbumDetail(): React.JSX.Element {
               />
             </>
           ) : (
+            /* TWO primary actions, everything else in the overflow. Six text
+               buttons ran off the edge of a phone, which is how the Party
+               screen — and the whole message-moderation surface behind it —
+               became unreachable while being fully implemented. */
             <>
-              <HeaderButton label={t('sharing.open')} onPress={() => setSharingOpen(true)} />
-              <HeaderButton label={t('party.open')} onPress={() => setPartyOpen(true)} />
-              <HeaderButton
-                label={t('albums.showOnTv')}
-                onPress={() => {
-                  // TV visibility has its OWN route, so toggling it can never
-                  // carry an unintended rename along with it.
-                  void (async () => {
-                    if (detail === null) return;
-                    try {
-                      setDetail(await setAlbumTvVisibility(albumId, !detail.showOnTv));
-                    } catch {
-                      /* the header keeps showing the last known state */
-                    }
-                  })();
-                }}
-              />
-              <HeaderButton label={t('albums.edit')} onPress={() => setRenaming(true)} />
-              <HeaderButton label={t('albums.delete')} destructive onPress={confirmDelete} />
               <HeaderButton
                 label={t('albumDetail.addMedia')}
                 onPress={() => router.push(`/album/${albumId}/add`)}
+              />
+              <OverflowMenu
+                actions={[
+                  {
+                    id: 'party',
+                    label: t('party.open'),
+                    icon: 'sparkles-outline',
+                    onPress: () => setPartyOpen(true),
+                  },
+                  {
+                    id: 'sharing',
+                    label: t('sharing.open'),
+                    icon: 'person-add-outline',
+                    onPress: () => setSharingOpen(true),
+                  },
+                  {
+                    id: 'tv',
+                    label: t('albums.showOnTv'),
+                    icon: 'tv-outline',
+                    onPress: () => {
+                      // TV visibility has its OWN route, so toggling it can
+                      // never carry an unintended rename along with it.
+                      void (async () => {
+                        if (detail === null) return;
+                        try {
+                          setDetail(await setAlbumTvVisibility(albumId, !detail.showOnTv));
+                        } catch {
+                          /* the header keeps showing the last known state */
+                        }
+                      })();
+                    },
+                  },
+                  {
+                    id: 'edit',
+                    label: t('albums.edit'),
+                    icon: 'create-outline',
+                    onPress: () => setRenaming(true),
+                  },
+                  {
+                    id: 'delete',
+                    label: t('albums.delete'),
+                    icon: 'trash-outline',
+                    destructive: true,
+                    onPress: confirmDelete,
+                  },
+                ]}
               />
             </>
           )
@@ -203,10 +235,7 @@ export default function AlbumDetail(): React.JSX.Element {
             router.push(`/media/${item.id}`);
           }}
           onToggleSelect={selectionState.toggle}
-          onLongPressItem={(item) => {
-            selectionState.begin();
-            selectionState.toggle(item.id);
-          }}
+          onLongPressItem={(item) => selectionState.beginWith(item.id)}
           refreshing={snapshot.phase === 'refreshing'}
           onRefresh={() => {
             void refresh();

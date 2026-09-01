@@ -17,7 +17,7 @@ import {
   queryToWire,
   type MediaWorkspaceIdentity,
 } from './mediaWorkspace.ts';
-import { isSemanticActive } from './mediaWorkspace.ts';
+import { SEMANTIC_SUPPORTED_FILTERS, inertUnderSemantic, isSemanticActive } from './mediaWorkspace.ts';
 import { mediaQueryToParams } from './media.ts';
 import { toQueryString } from './query.ts';
 
@@ -353,4 +353,67 @@ test('a visual query shows its chip everywhere it is running', () => {
     inside.filters.photo.visualQuery = 'mare';
     assert.ok(kinds(inside).includes('visual'), `album/${kind}`);
   }
+});
+
+// ── what a visual search does NOT apply ─────────────────────────────────────
+
+test('nothing is inert when no visual search is running', () => {
+  const i = identity((x) => {
+    x.mediaKind = 'image';
+    x.filters.photo.hasGps = true;
+    x.filters.common.favorite = true;
+  });
+  assert.deepEqual(inertUnderSemantic(i), []);
+});
+
+test('a running visual search reports the filters it ignores', () => {
+  // THE defect this exists for: these are set, drawn as chips, and have no
+  // effect on the ranked results. Silence there means results that look
+  // filtered and are not.
+  const i = identity((x) => {
+    x.mediaKind = 'image';
+    x.filters.photo.visualQuery = 'mare';
+    x.filters.photo.hasGps = true;
+    x.filters.photo.collapseDuplicates = true;
+    x.filters.photo.includePeople = ['p1'];
+  });
+  assert.deepEqual(inertUnderSemantic(i).sort(), ['collapse', 'gps', 'people-include']);
+});
+
+test('the supported filters are NOT reported as inert', () => {
+  const i = identity((x) => {
+    x.filters.photo.visualQuery = 'mare';
+    x.filters.common.favorite = true;
+    x.filters.common.minRating = 4;
+    x.filters.common.dateTakenFrom = '2026-01-01T00:00:00.000Z';
+    x.filters.common.albumMembership = 'assigned';
+  });
+  assert.deepEqual(inertUnderSemantic(i), []);
+  assert.deepEqual([...SEMANTIC_SUPPORTED_FILTERS].sort(),
+    ['album-membership', 'date', 'favorite', 'min-rating']);
+});
+
+test('the metadata search is inert too, and says so', () => {
+  // Easy to assume it still works, because it looks like the visual field's
+  // sibling. It is applied by the LISTING route, not by ranking.
+  const i = identity((x) => {
+    x.filters.photo.visualQuery = 'mare';
+    x.filters.common.metadataQuery = 'vacanza';
+  });
+  assert.deepEqual(inertUnderSemantic(i), ['metadata']);
+});
+
+test('video filters are inert under a visual search as well', () => {
+  const i = identity((x) => {
+    x.mediaKind = 'video';
+    x.filters.photo.visualQuery = 'mare';
+    x.filters.video.hasAudio = true;
+    x.filters.video.minHeight = 1080;
+  });
+  assert.deepEqual(inertUnderSemantic(i).sort(), ['has-audio', 'min-height']);
+});
+
+test('the visual chip itself is never reported as inert', () => {
+  const i = identity((x) => { x.filters.photo.visualQuery = 'mare'; });
+  assert.ok(!inertUnderSemantic(i).includes('visual'));
 });
