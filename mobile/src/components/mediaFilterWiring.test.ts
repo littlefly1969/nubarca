@@ -133,3 +133,32 @@ test('the People catalogue is not fetched for an unfiltered library', async () =
   const hook = await sourceOf('../media/useMediaFilters.ts');
   assert.match(hook, /if \(referenced\.length === 0\) return undefined;/);
 });
+
+test('visual search routes to the SEMANTIC endpoint, not the listing (§10)', async () => {
+  // Two different backend operations. Flattening them would mean either losing
+  // relevance ranking or sending a term the listing ignores.
+  const hook = await sourceOf('../media/useMediaFilters.ts');
+  assert.match(hook, /if \(isSemanticActive\(current\)\) \{/);
+  assert.match(hook, /searchSemanticMedia\(\{/);
+  assert.match(hook, /const query = pageQuery\(current, cursor, pageSize\);/);
+});
+
+test('visual search is offered for VIDEOS too, not just photos', async () => {
+  // The field sits outside the kind === 'image' branch: the semantic route
+  // ranks videos as well, and hiding it there would drop a real capability.
+  const sheet = await sourceOf('MediaFilterSheet.tsx');
+  const visual = sheet.indexOf("t('filters.visual')");
+  const photoOnly = sheet.indexOf("kind === 'image' && (");
+  assert.ok(visual !== -1 && photoOnly !== -1);
+  assert.ok(visual < photoOnly, 'visual search must not be inside the photo-only branch');
+});
+
+test('an album search is CONFINED to the album, never answered from the library', async () => {
+  // The whole point of the server gaining an albumId: the alternative was
+  // either hiding the control in an album or returning library-wide results
+  // that read as if they were the album's.
+  const hook = await sourceOf('../media/useMediaFilters.ts');
+  assert.match(hook, /albumId: albumId \?\? undefined,/);
+  const semanticCall = hook.slice(hook.indexOf('searchSemanticMedia({'));
+  assert.match(semanticCall.slice(0, 700), /albumId/);
+});

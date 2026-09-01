@@ -165,30 +165,43 @@ export function VideoSlide({
   const player: VideoPlayer = useVideoPlayer(expoSource, (p) => {
     // Mount ≠ autoplay. Playback is owned exclusively by the `active` effect:
     // an unfocused neighbor must never start making noise.
+    //
+    // The remembered position is NOT restored here. This callback runs when the
+    // player is CREATED, and at that moment the probe has not finished, so the
+    // source is still null; when it arrives, expo-video replaces the source on
+    // the existing player and never calls this again. A restore written here
+    // can therefore never fire — which is exactly why rotating still restarted
+    // the video. It lives in the readiness effect below instead.
     p.loop = false;
-    // Rotating the phone makes the pager re-measure and remount its cells, so
-    // this is a NEW player with no idea where the old one was — which is why
-    // a rotation used to restart the video from zero. The position is recalled
-    // from a store that outlives the slide, and `restorablePosition` refuses
-    // one belonging to a different video, so changing item can never seek the
-    // new video to the old one's timestamp.
-    if (expoSource !== null) {
-      const resume = restorablePosition(
-        recallPosition(expoSource.uri),
-        expoSource.uri,
-        // The duration is not on the slide; the player learns it when it
-        // loads. Passing null means the end-of-video guard is skipped here —
-        // and it is not needed on this path anyway, because a position is only
-        // ever recorded from a player that was actually playing.
-        null,
-      );
-      if (resume !== null) p.currentTime = resume;
-    }
   });
   const [playerStatus, setPlayerStatus] = useState(() => snapshotPlayerStatus(player));
   const nativeStatus = playerStatusFor(playerStatus, player);
 
   const uri = expoSource?.uri ?? null;
+
+  // RESTORE (device-reported: rotating restarted the video). The pager
+  // re-measures on a rotation and remounts its cells, so this is a new player
+  // that knows nothing. It can only be seeked once the media is actually
+  // loaded — a seek before readiness is discarded, which is the same reason
+  // the web player waits for loadedmetadata.
+  //
+  // One shot per source: after the restore, or after a source that had nothing
+  // to restore, the playhead belongs to the user and must not be yanked back
+  // by a later readiness event.
+  const restoredForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (uri === null || nativeStatus !== 'readyToPlay') return;
+    if (restoredForRef.current === uri) return;
+    restoredForRef.current = uri;
+    const resume = restorablePosition(recallPosition(uri), uri, player.duration ?? null);
+    if (resume === null) return;
+    try {
+      player.currentTime = resume;
+    } catch {
+      /* a player released between the check and the seek just starts over */
+    }
+  }, [player, uri, nativeStatus]);
+
   useEffect(() => {
     const statusSub = player.addListener('statusChange', (status) => {
       setPlayerStatus(snapshotPlayerStatus(player, status.status));

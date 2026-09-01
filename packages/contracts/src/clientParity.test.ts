@@ -159,6 +159,37 @@ test('mobile no longer declares a hasMore the shared listing never sends', () =>
   assert.doesNotMatch(source, /hasMore/);
 });
 
+test('neither client redefines the Party vocabulary or its ranges', () => {
+  // §33/§34 name this explicitly: the numeric ranges must not be duplicated in
+  // a UI file, or two clients refuse different values for the same setting.
+  for (const path of ['frontend/packages/api-client/src/party.ts', 'mobile/src/api/party.ts']) {
+    const source = code(path);
+    assert.match(source, /from '@nubarca\/contracts'/, path);
+    for (const name of ['AlbumPartyStatus', 'PartyMessageStatus', 'PartyMessageAction',
+      'PartyMessage', 'PartyMessageList', 'PartyUploadStatus', 'PartyUploadItem',
+      'PartyUploadList']) {
+      assert.doesNotMatch(source, new RegExp(`export (interface|type) ${name}\\b`),
+        `${path} redefines ${name}`);
+    }
+    assert.doesNotMatch(source, /PARTY_SLIDESHOW_RANGES = \{|PARTY_GAME_RANGES = \{/,
+      `${path} keeps its own copy of the ranges`);
+  }
+});
+
+test('the message transition rules are not rebuilt inside a UI', () => {
+  // §36. They used to be a set of conditions inlined in the web's JSX — the one
+  // place a second client cannot read them from.
+  const page = code('frontend/src/pages/PartyMessagesPage.tsx');
+  assert.match(page, /partyMessageActions\(message\)\.map\(/);
+  for (const rule of [
+    /message\.status === 'pending' &&/,
+    /message\.status === 'visible' && !message\.isHero/,
+    /message\.status === 'hidden' \|\| message\.status === 'rejected'/,
+  ]) {
+    assert.doesNotMatch(page, rule, 'a transition rule is still written in the markup');
+  }
+});
+
 test('the album membership rule is stated where the contract lives', () => {
   // §24: removing an item from an album is not deleting it from the library.
   const contract = readFileSync(resolve(ROOT, 'packages/contracts/src/album.ts'), 'utf8');

@@ -17,6 +17,7 @@ import {
   queryToWire,
   type MediaWorkspaceIdentity,
 } from './mediaWorkspace.ts';
+import { isSemanticActive } from './mediaWorkspace.ts';
 import { mediaQueryToParams } from './media.ts';
 import { toQueryString } from './query.ts';
 
@@ -290,4 +291,66 @@ test('a retained filter for another kind does not change this kind identity', ()
     i.filters.photo.hasGps = true;
   });
   assert.equal(queryFingerprint(bare), queryFingerprint(withRetainedPhoto));
+});
+
+// ── semantic search (§10) ───────────────────────────────────────────────────
+
+const inAlbum = (kind: 'all' | 'image' | 'video') => {
+  const i = emptyIdentity(ALBUM);
+  i.mediaKind = kind;
+  return i;
+};
+
+test('visual search works on VIDEOS, not only photos', () => {
+  // /api/media/semantic takes kind = all | image | video. Treating visual
+  // search as a photo-only feature would remove a capability the server has.
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const active = identity((i) => {
+      i.mediaKind = kind;
+      i.filters.photo.visualQuery = 'mare';
+    });
+    assert.equal(isSemanticActive(active), true, `library/${kind}`);
+  }
+});
+
+test('visual search is CONFINED to an album, not hidden there', () => {
+  // The semantic route takes an optional albumId, so an album search is
+  // answered from that album — photos and videos alike. The alternatives it
+  // replaces were both bad: hide the control, or answer from the whole library
+  // and let the results read as if they were the album's.
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const inside = inAlbum(kind);
+    inside.filters.photo.visualQuery = 'mare';
+    assert.equal(isSemanticActive(inside), true, `album/${kind}`);
+  }
+});
+
+test('an empty query is not a search, anywhere', () => {
+  assert.equal(isSemanticActive(identity()), false);
+  assert.equal(isSemanticActive(inAlbum('image')), false);
+  assert.equal(isSemanticActive(identity((i) => { i.filters.photo.visualQuery = 'mare'; })), true);
+});
+
+test('whitespace is not a visual query', () => {
+  assert.equal(isSemanticActive(identity((i) => { i.filters.photo.visualQuery = '   '; })), false);
+});
+
+test('a visual query never rides the PHYSICAL listing', () => {
+  // The unified endpoint carries no semantic term: relevance ranking has its
+  // own cursor and its own route. Emitting it here would be a filter the
+  // server silently ignores.
+  const q = wire(identity((i) => { i.filters.photo.visualQuery = 'mare'; }));
+  assert.ok(!q.includes('mare'));
+  assert.ok(!q.includes('semantic'));
+});
+
+test('a visual query shows its chip everywhere it is running', () => {
+  const kinds = (i: MediaWorkspaceIdentity) => buildFilterChips(i).map((c) => c.kind);
+  assert.ok(kinds(identity((i) => { i.filters.photo.visualQuery = 'mare'; })).includes('visual'));
+
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const inside = inAlbum(kind);
+    inside.filters.photo.visualQuery = 'mare';
+    assert.ok(kinds(inside).includes('visual'), `album/${kind}`);
+  }
 });

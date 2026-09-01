@@ -5,6 +5,8 @@ import React, { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
+import { PartySettingsSheet } from '../../src/components/PartySettingsSheet';
+import { AlbumSharingSheet } from '../../src/components/AlbumSharingSheet';
 import {
   EmptyState,
   ErrorState,
@@ -41,6 +43,8 @@ export default function AlbumDetail(): React.JSX.Element {
   const [detail, setDetail] = useState<AlbumDetail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [partyOpen, setPartyOpen] = useState(false);
+  const [sharingOpen, setSharingOpen] = useState(false);
 
   const fetcher = useCallback(
     async (cursor: string | null, signal: AbortSignal) => {
@@ -145,6 +149,8 @@ export default function AlbumDetail(): React.JSX.Element {
             </>
           ) : (
             <>
+              <HeaderButton label={t('sharing.open')} onPress={() => setSharingOpen(true)} />
+              <HeaderButton label={t('party.open')} onPress={() => setPartyOpen(true)} />
               <HeaderButton
                 label={t('albums.showOnTv')}
                 onPress={() => {
@@ -224,6 +230,18 @@ export default function AlbumDetail(): React.JSX.Element {
           }}
         />
       )}
+
+      <AlbumSharingSheet
+        albumId={albumId}
+        visible={sharingOpen}
+        onClose={() => setSharingOpen(false)}
+      />
+
+      <PartySettingsSheet
+        albumId={albumId}
+        visible={partyOpen}
+        onClose={() => setPartyOpen(false)}
+      />
 
       <NamePromptModal
         visible={renaming}

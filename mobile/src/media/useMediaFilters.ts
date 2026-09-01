@@ -18,6 +18,7 @@ import type {
   MediaWorkspaceIdentity,
   MediaWorkspaceSource,
 } from '@nubarca/contracts';
+import { isSemanticActive } from '@nubarca/contracts';
 import {
   chipsFor,
   generationOf,
@@ -30,7 +31,8 @@ import {
   type FilterChipDescriptor,
   type FilterChipKind,
 } from './mediaFilterState.ts';
-import { listMedia, listAlbumMedia, type MediaListResponse } from '../api/media.ts';
+import { listMedia, listAlbumMedia, searchSemanticMedia } from '../api/media.ts';
+import { pageFromListing, pageFromSemantic, type MediaPage } from './mediaPage.ts';
 import { listPeopleForFilter, type PersonSummary } from '../api/people.ts';
 
 export interface MediaFiltersBinding {
@@ -40,7 +42,7 @@ export interface MediaFiltersBinding {
   chips: FilterChipDescriptor[];
   /** personId -> summary, for resolving chip labels. */
   people: ReadonlyMap<string, PersonSummary>;
-  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<MediaListResponse>;
+  fetchPage: (cursor: string | null, signal: AbortSignal) => Promise<MediaPage>;
   apply: (
     filters: MediaWorkspaceFilters,
     sort: MediaSortField,
@@ -66,11 +68,47 @@ export function useMediaFilters(
   identityRef.current = identity;
 
   const fetchPage = useCallback(
-    (cursor: string | null, signal: AbortSignal) => {
-      const query = pageQuery(identityRef.current, cursor, pageSize);
-      return albumId === null
-        ? listMedia(query, signal)
-        : listAlbumMedia(albumId, query, signal);
+    async (cursor: string | null, signal: AbortSignal): Promise<MediaPage> => {
+      const current = identityRef.current;
+
+      // SEMANTIC (§10) is a different backend operation, not a filter on the
+      // same one: relevance ranking carries its own cursor, so the unified
+      // listing cannot simply take a visual term. The separation the backend
+      // makes is preserved rather than flattened.
+      //
+      // `isSemanticActive` is the single place that knows WHERE a visual query
+      // applies — the semantic route is library-scoped, so inside an album it
+      // applies to the photo tab only. Asking it here means the sheet, the
+      // chips and this fetch can never disagree about whether it is on.
+      if (isSemanticActive(current)) {
+        const page = await searchSemanticMedia({
+          q: current.filters.photo.visualQuery.trim(),
+          kind: current.mediaKind,
+          limit: pageSize,
+          cursor,
+          favorite: current.filters.common.favorite ?? undefined,
+          minRating: current.filters.common.minRating ?? undefined,
+          dateTakenFrom: current.filters.common.dateTakenFrom || undefined,
+          dateTakenTo: current.filters.common.dateTakenTo || undefined,
+          albumMembership:
+            current.source.kind === 'library' ? current.filters.common.albumMembership : undefined,
+          // Confine the search to the album being browsed. The server applies
+          // it to the candidate scope before ranking, so the results are the
+          // album's — not the library's, filtered afterwards.
+          albumId: albumId ?? undefined,
+        }, signal);
+        // No per-kind counts: this route does not produce them, and inventing
+        // zeroes would claim there were none rather than admit they are
+        // unknown. See media/mediaPage.ts.
+        return pageFromSemantic(page);
+      }
+
+      const query = pageQuery(current, cursor, pageSize);
+      return pageFromListing(
+        albumId === null
+          ? await listMedia(query, signal)
+          : await listAlbumMedia(albumId, query, signal),
+      );
     },
     // `generation` is the real dependency: a new query needs a new fetcher.
     // eslint-disable-next-line react-hooks/exhaustive-deps

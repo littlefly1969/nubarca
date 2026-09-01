@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   ALBUM_INVITATIONS_PATH,
+  canWithdrawItem,
   albumInvitationPath,
   albumMemberDownloadPath,
   albumMemberPartyMessagesPath,
@@ -52,18 +53,52 @@ test('a viewer views and nothing more', () => {
   assert.deepEqual(c, {
     canView: true,
     canContribute: false,
-    canWithdrawOwnContribution: false,
     canEditCollaboratively: false,
     canDownloadOriginal: false,
   });
 });
 
-test('contributors and editors may contribute and withdraw their own', () => {
+test('contributors and editors may contribute', () => {
   for (const role of ['contributor', 'editor'] as AlbumRole[]) {
     const c = sharedAlbumCapabilities({ role, allowOriginalDownload: false, canEdit: false });
     assert.equal(c.canContribute, true, role);
-    assert.equal(c.canWithdrawOwnContribution, true, role);
   }
+});
+
+// ── withdrawal is decided per ITEM, never per role ──────────────────────────
+
+test('any role may withdraw an item the SERVER says is theirs', () => {
+  // Including a viewer: somebody downgraded from contributor keeps the right
+  // to take back what they already contributed. Deriving this from the current
+  // role would strand their own media in an album they cannot edit.
+  for (const role of ['viewer', 'contributor', 'editor'] as AlbumRole[]) {
+    const capabilities = sharedAlbumCapabilities({
+      role, allowOriginalDownload: false, canEdit: false,
+    });
+    assert.equal(canWithdrawItem({ canWithdraw: true }), true, role);
+    // And the role capability set has no opinion about it at all.
+    assert.equal('canWithdrawOwnContribution' in capabilities, false, role);
+  }
+});
+
+test('no role may withdraw an item the server did not mark', () => {
+  for (const role of ['viewer', 'contributor', 'editor'] as AlbumRole[]) {
+    void role;
+    assert.equal(canWithdrawItem({ canWithdraw: false }), false);
+  }
+});
+
+test('a downgrade to viewer does not revoke withdrawal of an existing item', () => {
+  // The scenario the old role-derived capability got wrong.
+  const asContributor = sharedAlbumCapabilities({
+    role: 'contributor', allowOriginalDownload: false, canEdit: false,
+  });
+  const asViewer = sharedAlbumCapabilities({
+    role: 'viewer', allowOriginalDownload: false, canEdit: false,
+  });
+  assert.notEqual(asContributor.canContribute, asViewer.canContribute);
+  // The item's answer is unchanged by the downgrade.
+  assert.equal(canWithdrawItem({ canWithdraw: true }), true);
 });
 
 test('collaborative editing follows the SERVER answer, not the role label', () => {

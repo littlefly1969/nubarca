@@ -157,6 +157,27 @@ export function MediaFilterSheet({
             />
           </View>
 
+          {/* VISUAL search (§10) is a different backend operation from the
+              metadata search above: it ranks by what a photo or video SHOWS,
+              and its relevance cursor is its own. It works on BOTH kinds.
+
+              It applies everywhere, so there is no condition here at all: the
+              semantic route takes an optional albumId, and inside an album the
+              search is CONFINED to it rather than hidden or answered from the
+              whole library. The predicate that used to guard this disappeared
+              with the limitation it described. */}
+          <View style={styles.group}>
+            <Text style={styles.groupLabel}>{t('filters.visual')}</Text>
+            <TextInput
+              style={styles.textInput}
+              value={filters.photo.visualQuery}
+              onChangeText={(text) => setPhoto({ visualQuery: text })}
+              autoCorrect={false}
+              accessibilityLabel={t('filters.visual')}
+            />
+            <Text style={styles.hint}>{t('filters.visualHint')}</Text>
+          </View>
+
           <Choice
             label={t('filters.favorite')}
             value={filters.common.favorite === null ? null : filters.common.favorite ? 'yes' : 'no'}
@@ -342,6 +363,7 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingBottom: 24, gap: 18 },
   group: { gap: 8 },
   groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
+  hint: { fontSize: 12, color: colors.textTertiary },
   optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: '#F1F4F9' },
   optionOn: { backgroundColor: colors.accent },

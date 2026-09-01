@@ -6,10 +6,14 @@ using NubArca.Api.Ai.Backends;
 using NubArca.Api.Ai.Photos;
 using NubArca.Api.Ai.Resolution;
 using NubArca.Api.Ai.Video;
+using Microsoft.EntityFrameworkCore;
+using NubArca.Api.Albums;
 using NubArca.Api.Data;
+using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Files;
 using NubArca.Api.Media.Semantic;
+using NubArca.Api.Tests.Endpoints;
 using Xunit;
 using static NubArca.Api.Tests.Media.MediaSemanticTestHarness;
 
@@ -557,5 +561,112 @@ public sealed class MediaSemanticSearchTests
         public Task<AiResolution> GetCapabilityAvailabilityAsync(
             string capability, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
+    }
+
+    // ---- album confinement ---------------------------------------------------
+    //
+    // MOBILE-FIRST-CLASS-PARITY-01: a visual search inside an album must be
+    // answered FROM that album. The dangerous failure is not an error — it is a
+    // library-wide result that reads as if it were the album's. So the media
+    // outside the album is seeded with a HIGHER similarity than the one inside:
+    // if the filter were absent it would rank first, and its absence therefore
+    // proves the filter and not the dataset.
+
+    [Fact]
+    public async Task Album_Confinement_Excludes_Media_Outside_The_Album()
+    {
+        using var factory = Factory();
+        var profile = await SeedProfileAsync(factory);
+        var (owner, _) = await factory.CreateAuthenticatedClientAsync();
+        var q = QueryVector(profile);
+
+        var (insideId, insideBlob) = await UploadPhotoAsync(factory, owner, 40, "inside.jpg");
+        await SeedPhotoEmbeddingAsync(factory, profile, insideBlob, WithSimilarity(q, 0.6));
+
+        // Deliberately the BETTER match, and deliberately outside.
+        var (outsideId, outsideBlob) = await UploadPhotoAsync(factory, owner, 80, "outside.jpg");
+        await SeedPhotoEmbeddingAsync(factory, profile, outsideBlob, WithSimilarity(q, 0.95));
+
+        var albumId = await CreateAlbumAsync(factory, owner, "Confined");
+        await AddToAlbumAsync(factory, albumId, insideId);
+
+        // Without the filter BOTH are found, and the outside one ranks first —
+        // so the assertion below cannot pass by accident.
+        var everywhere = await SearchAsync(factory, owner);
+        Assert.Contains(everywhere.Items, i => i.Media.Id == insideId);
+        Assert.Contains(everywhere.Items, i => i.Media.Id == outsideId);
+        Assert.Equal(outsideId, everywhere.Items[0].Media.Id);
+
+        var confined = await SearchAsync(
+            factory, owner, filters: new ImageFilters { AlbumId = albumId });
+
+        var item = Assert.Single(confined.Items);
+        Assert.Equal(insideId, item.Media.Id);
+        Assert.DoesNotContain(confined.Items, i => i.Media.Id == outsideId);
+        Assert.Equal(1, confined.Total);
+    }
+
+    [Fact]
+    public async Task Album_Confinement_Applies_To_Videos_Too()
+    {
+        // The album filter reaches BOTH candidate paths, which is the whole
+        // reason this route was chosen over a photos-only one.
+        using var factory = Factory();
+        var profile = await SeedProfileAsync(factory);
+        var (owner, _) = await factory.CreateAuthenticatedClientAsync();
+        var q = QueryVector(profile);
+
+        var (insideId, insideBlob) = await UploadVideoAsync(factory, owner);
+        await SeedVideoManifestAsync(factory, profile, insideBlob, q,
+            [new SeedSample(0, 8000, 4000, 0.6)]);
+
+        var (outsideId, outsideBlob) = await UploadVideoAsync(factory, owner);
+        await SeedVideoManifestAsync(factory, profile, outsideBlob, q,
+            [new SeedSample(0, 8000, 4000, 0.95)]);
+
+        var albumId = await CreateAlbumAsync(factory, owner, "Videos");
+        await AddToAlbumAsync(factory, albumId, insideId);
+
+        var everywhere = await SearchAsync(factory, owner, kind: MediaKindScope.Video);
+        Assert.Contains(everywhere.Items, i => i.Media.Id == outsideId);
+
+        var confined = await SearchAsync(
+            factory, owner, kind: MediaKindScope.Video,
+            filters: new ImageFilters { AlbumId = albumId });
+
+        var item = Assert.Single(confined.Items);
+        Assert.Equal(insideId, item.Media.Id);
+    }
+
+    private static async Task<Guid> CreateAlbumAsync(
+        SqliteWebApplicationFactory factory, Guid ownerId, string name)
+    {
+        using var scope = factory.Services.CreateScope();
+        var albums = scope.ServiceProvider.GetRequiredService<IAlbumService>();
+        var album = await albums.CreateAsync(ownerId, name, null);
+        return album.Id;
+    }
+
+    private static async Task AddToAlbumAsync(
+        SqliteWebApplicationFactory factory, Guid albumId, params Guid[] fileIds)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var addedBy = await db.Albums
+            .Where(a => a.Id == albumId)
+            .Select(a => a.OwnerUserId)
+            .FirstAsync();
+        foreach (var fileId in fileIds)
+        {
+            db.AlbumItems.Add(new AlbumItem
+            {
+                Id = Guid.NewGuid(),
+                AlbumId = albumId,
+                FileItemId = fileId,
+                AddedAt = DateTime.UtcNow,
+                AddedByUserId = addedBy,
+            });
+        }
+        await db.SaveChangesAsync();
     }
 }

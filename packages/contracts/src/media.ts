@@ -201,6 +201,15 @@ export interface SearchSemanticMediaQuery {
   /** A PHYSICAL filter: applied to the candidate scope before ranking, and it
    * binds the cursor and the ranking cache. */
   albumMembership?: AlbumMembership;
+  /**
+   * Confine the search to ONE album — photos and videos alike.
+   *
+   * Also physical: it shrinks the candidate set before ranking, so it binds the
+   * cursor too. Without it a client browsing an album had either to offer no
+   * visual search or to answer from the whole library, which is a wrong result
+   * presented as a right one.
+   */
+  albumId?: string;
 }
 
 export function semanticMediaQueryToParams(query: SearchSemanticMediaQuery): QueryParams {
@@ -216,6 +225,7 @@ export function semanticMediaQueryToParams(query: SearchSemanticMediaQuery): Que
   if (query.albumMembership !== undefined && query.albumMembership !== 'any') {
     b.set('albumMembership', query.albumMembership);
   }
+  b.setOptional('albumId', query.albumId);
   return b.build();
 }
 

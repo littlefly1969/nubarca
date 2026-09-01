@@ -171,9 +171,7 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
 // knows it, so the sheet never offers it, the chips never claim it and the
 // fingerprint never keys on it there. `queryToWire` never emits it.
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
-  if (identity.filters.photo.visualQuery.trim().length === 0) return false;
-  if (identity.mediaKind === 'image') return true;
-  return identity.source.kind === 'library';
+  return identity.filters.photo.visualQuery.trim().length > 0;
 }
 
 // Build the unified wire query for a given accumulator cursor (null = first
