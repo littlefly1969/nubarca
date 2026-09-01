@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { radii, spacing, touch } from '../ui/tokens';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export interface NamePromptModalProps {
   visible: boolean;

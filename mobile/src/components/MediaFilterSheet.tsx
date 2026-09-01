@@ -32,7 +32,7 @@ import type {
 import { draftFrom, referencedPersonIds } from '../media/mediaFilterState';
 import { PeopleFilterSheet } from './PeopleFilterSheet';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 /** A row of mutually exclusive choices; the selected one can be tapped off. */
 function Choice<T extends string>({

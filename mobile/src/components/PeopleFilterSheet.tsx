@@ -31,7 +31,7 @@ import { listPeopleForFilter, type PersonSummary } from '../api/people';
 import { AuthedImage } from './AuthedImage';
 import { personAvatarPath } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export function PeopleFilterSheet({
   visible,

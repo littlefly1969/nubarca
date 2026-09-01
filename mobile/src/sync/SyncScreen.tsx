@@ -14,7 +14,7 @@ import { AppHeader, Screen, SectionTitle } from '../ui/components';
 import { deriveUiStatus, type SyncUiStatus } from './syncPolicy.ts';
 import { useSync } from './SyncProvider';
 import { mediaLibraryPort } from './mediaLibraryAdapter';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 function statusKey(status: SyncUiStatus): MobileMessageKey {
   switch (status) {

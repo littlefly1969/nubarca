@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { code } from '../testing/sourceText.ts';
@@ -73,4 +73,19 @@ test('every stylesheet that uses the palette is built per theme', () => {
     if (sheet && /\bcolors\./.test(sheet[0])) offenders.push(file.slice(ROOT.length + 1));
   }
   assert.deepEqual(offenders, [], `unthemed stylesheets: ${offenders.join(', ')}`);
+});
+
+test('every explicit-extension import points at a file that exists', () => {
+  // Metro resolves what is written; TypeScript is more forgiving and will
+  // accept `./theme.ts` for a file called `theme.tsx`. The typecheck therefore
+  // passes and the app dies at the first bundle — which is how the dark theme
+  // shipped a red box to the emulator smoke test rather than a screen.
+  const offenders: string[] = [];
+  for (const file of [...sources(join(ROOT, 'src')), ...sources(join(ROOT, 'app'))]) {
+    const text = readFileSync(file, 'utf8');
+    for (const m of text.matchAll(/from '(\.[^']*\.tsx?)'/g)) {
+      if (!existsSync(resolve(dirname(file), m[1]))) offenders.push(`${file.slice(ROOT.length + 1)} -> ${m[1]}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `unresolvable imports:\n${offenders.join('\n')}`);
 });

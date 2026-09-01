@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { radii, spacing, touch, type } from './tokens';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export function EmptyState({
   icon,

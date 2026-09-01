@@ -13,7 +13,7 @@ import { Screen, AppHeader, HeaderButton, SectionTitle } from '../src/ui/compone
 import { useSession } from '../src/session/SessionProvider';
 import { useI18n } from '../src/i18n';
 import { radii, spacing, touch, type } from '../src/ui/tokens';
-import { themed, useColors, useTheme } from '../src/ui/theme.ts';
+import { themed, useColors, useTheme } from '../src/ui/theme';
 import { THEME_PREFERENCES, type ThemePreference } from '../src/ui/themePreference.ts';
 
 const THEME_LABELS: Record<ThemePreference, 'settings.theme.dark' | 'settings.theme.light' | 'settings.theme.system'> = {

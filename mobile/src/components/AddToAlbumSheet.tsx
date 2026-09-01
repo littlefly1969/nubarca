@@ -18,7 +18,7 @@ import { listAlbums, createAlbum, bulkAddAlbumItems } from '../api/albums.ts';
 import type { AlbumSummary, BulkAlbumItemsResult } from '../api/albums.ts';
 import { radii, spacing, touch, type as typeRoles } from '../ui/tokens';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export interface AddToAlbumSheetProps {
   visible: boolean;

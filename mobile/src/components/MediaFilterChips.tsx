@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { FilterChipDescriptor, FilterChipKind } from '../media/mediaFilterState';
 import type { PersonSummary } from '../api/people';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 function personLabel(
   ids: string[] | undefined,

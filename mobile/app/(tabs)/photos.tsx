@@ -22,7 +22,7 @@ import { MediaSelectionBar } from '../../src/components/MediaSelectionBar';
 import { getMediaSelectionCapabilities } from '@nubarca/contracts';
 import { applyToSelection, moveToTrash, restoreFromTrash } from '../../src/api/mediaLifecycle';
 import { useI18n } from '../../src/i18n';
-import { themed, useColors } from '../../src/ui/theme.ts';
+import { themed, useColors } from '../../src/ui/theme';
 
 const PAGE_SIZE = 60;
 

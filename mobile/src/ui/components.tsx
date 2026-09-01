@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { radii, spacing, touch, type } from './tokens';
-import { themed } from '../ui/theme.ts';
+import { themed } from '../ui/theme';
 
 // ---------------------------------------------------------------------------
 // Screen: the standard page surface with safe-area padding.

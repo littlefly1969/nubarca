@@ -4,7 +4,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../src/i18n';
 import { iconSizes } from '../../src/ui/tokens';
-import { useColors } from '../../src/ui/theme.ts';
+import { useColors } from '../../src/ui/theme';
 
 export default function TabsLayout(): React.JSX.Element {
   const colors = useColors();

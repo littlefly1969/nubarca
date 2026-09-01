@@ -18,7 +18,7 @@ import { MediaFilterChips } from '../../src/components/MediaFilterChips';
 import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
 import { router } from 'expo-router';
 import { useI18n } from '../../src/i18n';
-import { useColors } from '../../src/ui/theme.ts';
+import { useColors } from '../../src/ui/theme';
 
 const PAGE_SIZE = 60;
 

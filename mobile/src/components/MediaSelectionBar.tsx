@@ -16,7 +16,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import type { MediaSelectionCapabilities } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export interface SelectionAction {
   id: 'add-to-album' | 'trash' | 'restore' | 'remove-from-album';

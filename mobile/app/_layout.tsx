@@ -17,7 +17,7 @@ import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
 import { viewerIdentityKey } from '../src/media/viewerIdentity';
 import { SyncProvider } from '../src/sync/SyncProvider';
-import { ThemeProvider, themed, useColors, useTheme } from '../src/ui/theme.ts';
+import { ThemeProvider, themed, useColors, useTheme } from '../src/ui/theme';
 
 function IdentityKeyedViewerProvider({
   children,

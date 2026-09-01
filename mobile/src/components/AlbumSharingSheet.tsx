@@ -46,7 +46,7 @@ import {
   setAlbumMemberRole,
 } from '../api/sharedAlbums';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 const ROLE_LABELS: Record<AlbumRole, string> = {
   viewer: 'sharing.roleViewer',

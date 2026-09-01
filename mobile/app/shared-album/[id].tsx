@@ -49,7 +49,7 @@ import {
 } from '../../src/media/sharedDownload.ts';
 import { radii, spacing, touch } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
-import { themed, useColors } from '../../src/ui/theme.ts';
+import { themed, useColors } from '../../src/ui/theme';
 import { media } from '../../src/ui/palette.ts';
 
 const PAGE_SIZE = 60;

@@ -18,7 +18,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { loadImage } from '../media/imageLoader';
-import { themed } from '../ui/theme.ts';
+import { themed } from '../ui/theme';
 
 export function AuthedImage({
   path,

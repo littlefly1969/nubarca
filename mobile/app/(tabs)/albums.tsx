@@ -46,7 +46,7 @@ import {
 import { albumColumnsForWidth, radii, spacing, touch } from '../../src/ui/tokens';
 import { useWindowDimensions } from 'react-native';
 import { useI18n } from '../../src/i18n';
-import { themed, useColors } from '../../src/ui/theme.ts';
+import { themed, useColors } from '../../src/ui/theme';
 
 function roleLabel(role: AlbumRole, t: TFn): string {
   if (role === 'viewer') return t('shared.roleViewer');

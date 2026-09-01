@@ -22,7 +22,7 @@ import { getStoredBaseUrl } from '../src/api/session';
 import { configureBaseUrl, ApiError } from '../src/api/client';
 import { useI18n } from '../src/i18n';
 import { radii, spacing, touch } from '../src/ui/tokens';
-import { themed, useColors } from '../src/ui/theme.ts';
+import { themed, useColors } from '../src/ui/theme';
 
 // Android emulator reaches the host at 10.0.2.2; iOS simulator uses localhost.
 const configuredUrl = (

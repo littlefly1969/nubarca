@@ -63,7 +63,7 @@ import {
 import { getBaseUrl } from '../api/client';
 import { AuthedImage } from './AuthedImage';
 import { useI18n } from '../i18n';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 const MESSAGE_ACTION_LABELS: Record<PartyMessageAction, string> = {
   approve: 'party.approve',

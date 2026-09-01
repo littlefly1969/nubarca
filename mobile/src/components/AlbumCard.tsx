@@ -8,7 +8,7 @@ import { AuthedImage } from './AuthedImage';
 import { radii, spacing, type } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import type { AlbumSummary } from '../api/albums';
-import { themed } from '../ui/theme.ts';
+import { themed } from '../ui/theme';
 
 export function AlbumCard({
   album,

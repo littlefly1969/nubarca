@@ -11,7 +11,7 @@ import { AuthedImage } from './AuthedImage';
 import { radii, spacing, touch } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import type { MediaItem } from '../api/media';
-import { themed } from '../ui/theme.ts';
+import { themed } from '../ui/theme';
 import { media } from '../ui/palette.ts';
 
 export interface MediaTileProps {

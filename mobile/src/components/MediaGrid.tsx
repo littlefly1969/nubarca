@@ -10,7 +10,7 @@ import { columnsForWidth, spacing } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import { useWindowDimensions } from 'react-native';
 import type { MediaItem } from '../api/media';
-import { themed, useColors } from '../ui/theme.ts';
+import { themed, useColors } from '../ui/theme';
 
 export interface MediaGridProps {
   items: MediaItem[];
