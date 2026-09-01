@@ -143,10 +143,22 @@ test('visual search routes to the SEMANTIC endpoint, not the listing (§10)', as
   assert.match(hook, /const query = pageQuery\(current, cursor, pageSize\);/);
 });
 
-test('the sheet offers visual search exactly where it applies', async () => {
-  // Asked of the shared rule, not restated: a control whose value the fetch
-  // would ignore must not be offered.
+test('visual search is offered for VIDEOS too, not just photos', async () => {
+  // The field sits outside the kind === 'image' branch: the semantic route
+  // ranks videos as well, and hiding it there would drop a real capability.
   const sheet = await sourceOf('MediaFilterSheet.tsx');
-  assert.match(sheet, /\{semanticApplies\(draft\) && \(/);
-  assert.doesNotMatch(sheet, /source\.kind === 'library' \|\| kind === 'image'/);
+  const visual = sheet.indexOf("t('filters.visual')");
+  const photoOnly = sheet.indexOf("kind === 'image' && (");
+  assert.ok(visual !== -1 && photoOnly !== -1);
+  assert.ok(visual < photoOnly, 'visual search must not be inside the photo-only branch');
+});
+
+test('an album search is CONFINED to the album, never answered from the library', async () => {
+  // The whole point of the server gaining an albumId: the alternative was
+  // either hiding the control in an album or returning library-wide results
+  // that read as if they were the album's.
+  const hook = await sourceOf('../media/useMediaFilters.ts');
+  assert.match(hook, /albumId: albumId \?\? undefined,/);
+  const semanticCall = hook.slice(hook.indexOf('searchSemanticMedia({'));
+  assert.match(semanticCall.slice(0, 700), /albumId/);
 });

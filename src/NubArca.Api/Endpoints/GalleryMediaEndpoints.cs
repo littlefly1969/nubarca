@@ -573,10 +573,11 @@ public static class GalleryMediaEndpoints
         // /api/images/semantic (unchanged): ONE query embedding ranks photos
         // and VSEM-02 video samples in the same paired-SigLIP2 profile space,
         // owner-visible candidates FIRST, bounded temporal evidence per video.
-        // Supported filters in this slice: favorite, minRating, dateTakenFrom/
-        // dateTakenTo. Folder/album/people/GPS/codec/duration/scope filters are
-        // NOT semantic-aware here (documented; the parameters do not exist on
-        // this route, so they cannot be silently ignored).
+        // Supported filters: favorite, minRating, dateTakenFrom/dateTakenTo,
+        // album membership and — since MOBILE-FIRST-CLASS-PARITY-01 — a single
+        // ALBUM to confine the search to. Folder/people/GPS/codec/duration/
+        // scope filters are NOT semantic-aware here (documented; the parameters
+        // do not exist on this route, so they cannot be silently ignored).
         app.MapGet("/api/media/semantic", async (
             [FromQuery] string? q,
             [FromQuery] string? kind,
@@ -593,8 +594,17 @@ public static class GalleryMediaEndpoints
             // the ranking-cache key automatically: a ranking built with the
             // filter off can never be served with it on.
             [FromQuery] string? albumMembership,
+            // Confine the search to ONE album, for photos and videos alike.
+            // Like albumMembership it is a PHYSICAL filter: it reaches the
+            // candidate scope through ImageFilters.AlbumId and shrinks the set
+            // BEFORE ranking, so it also binds the cursor and the ranking-cache
+            // key. Answering an album search from the whole library — which is
+            // what a client had to do without this — is a wrong result
+            // presented as a right one.
+            [FromQuery] Guid? albumId,
             HttpContext httpContext,
             [FromServices] NubArca.Api.Media.Semantic.MediaSemanticSearchService semantic,
+            [FromServices] IAlbumService albums,
             CancellationToken cancellationToken) =>
         {
             var query = q?.Trim() ?? string.Empty;
@@ -635,6 +645,19 @@ public static class GalleryMediaEndpoints
                 return Results.BadRequest(new { error = semanticMembershipError });
             }
 
+            // OWNERSHIP FIRST. An unowned or missing album is a plain
+            // not-found, indistinguishable from either — a search that answered
+            // "no results" for somebody else's album would confirm it exists.
+            if (albumId is Guid confinedAlbumId)
+            {
+                var album = await albums.GetByIdAsync(
+                    confinedAlbumId, ownerUserId, cancellationToken);
+                if (album is null)
+                {
+                    return Results.NotFound();
+                }
+            }
+
             var filters = new ImageFilters
             {
                 Favorite = favorite,
@@ -642,6 +665,7 @@ public static class GalleryMediaEndpoints
                 DateTakenFrom = dateTakenFrom,
                 DateTakenTo = dateTakenTo,
                 AlbumMembership = semanticMembership,
+                AlbumId = albumId,
             };
 
             NubArca.Api.Media.Semantic.SemanticMediaPage page;

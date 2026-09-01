@@ -17,7 +17,7 @@ import {
   queryToWire,
   type MediaWorkspaceIdentity,
 } from './mediaWorkspace.ts';
-import { isSemanticActive, semanticApplies } from './mediaWorkspace.ts';
+import { isSemanticActive } from './mediaWorkspace.ts';
 import { mediaQueryToParams } from './media.ts';
 import { toQueryString } from './query.ts';
 
@@ -295,39 +295,40 @@ test('a retained filter for another kind does not change this kind identity', ()
 
 // ── semantic search (§10) ───────────────────────────────────────────────────
 
-test('a visual query applies everywhere in the library, photos-only in an album', () => {
-  // The semantic route is library-scoped and takes no album parameter, so a
-  // visual query cannot reach a non-photo tab inside an album.
+const inAlbum = (kind: 'all' | 'image' | 'video') => {
+  const i = emptyIdentity(ALBUM);
+  i.mediaKind = kind;
+  return i;
+};
+
+test('visual search works on VIDEOS, not only photos', () => {
+  // /api/media/semantic takes kind = all | image | video. Treating visual
+  // search as a photo-only feature would remove a capability the server has.
   for (const kind of ['all', 'image', 'video'] as const) {
-    assert.equal(semanticApplies(identity((i) => { i.mediaKind = kind; })), true, `library/${kind}`);
+    const active = identity((i) => {
+      i.mediaKind = kind;
+      i.filters.photo.visualQuery = 'mare';
+    });
+    assert.equal(isSemanticActive(active), true, `library/${kind}`);
   }
-  const inAlbum = (kind: 'all' | 'image' | 'video') => {
-    const i = emptyIdentity(ALBUM);
-    i.mediaKind = kind;
-    return i;
-  };
-  assert.equal(semanticApplies(inAlbum('image')), true);
-  assert.equal(semanticApplies(inAlbum('all')), false);
-  assert.equal(semanticApplies(inAlbum('video')), false);
 });
 
-test('"applies" and "is active" are one rule asked two ways', () => {
-  // A UI needs both: whether to OFFER the field (before anything is typed) and
-  // whether a search is RUNNING. Stating the rule twice is how a sheet offers a
-  // control whose value the fetch then ignores.
-  const empty = identity();
-  assert.equal(semanticApplies(empty), true);
-  assert.equal(isSemanticActive(empty), false);
+test('visual search is CONFINED to an album, not hidden there', () => {
+  // The semantic route takes an optional albumId, so an album search is
+  // answered from that album — photos and videos alike. The alternatives it
+  // replaces were both bad: hide the control, or answer from the whole library
+  // and let the results read as if they were the album's.
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const inside = inAlbum(kind);
+    inside.filters.photo.visualQuery = 'mare';
+    assert.equal(isSemanticActive(inside), true, `album/${kind}`);
+  }
+});
 
-  const typed = identity((i) => { i.filters.photo.visualQuery = 'mare'; });
-  assert.equal(isSemanticActive(typed), true);
-
-  // Where it does not apply, typing changes nothing.
-  const albumVideo = emptyIdentity(ALBUM);
-  albumVideo.mediaKind = 'video';
-  albumVideo.filters.photo.visualQuery = 'mare';
-  assert.equal(semanticApplies(albumVideo), false);
-  assert.equal(isSemanticActive(albumVideo), false);
+test('an empty query is not a search, anywhere', () => {
+  assert.equal(isSemanticActive(identity()), false);
+  assert.equal(isSemanticActive(inAlbum('image')), false);
+  assert.equal(isSemanticActive(identity((i) => { i.filters.photo.visualQuery = 'mare'; })), true);
 });
 
 test('whitespace is not a visual query', () => {
@@ -343,12 +344,13 @@ test('a visual query never rides the PHYSICAL listing', () => {
   assert.ok(!q.includes('semantic'));
 });
 
-test('a visual query shows a chip wherever it applies, and only there', () => {
+test('a visual query shows its chip everywhere it is running', () => {
   const kinds = (i: MediaWorkspaceIdentity) => buildFilterChips(i).map((c) => c.kind);
   assert.ok(kinds(identity((i) => { i.filters.photo.visualQuery = 'mare'; })).includes('visual'));
 
-  const albumVideo = emptyIdentity(ALBUM);
-  albumVideo.mediaKind = 'video';
-  albumVideo.filters.photo.visualQuery = 'mare';
-  assert.ok(!kinds(albumVideo).includes('visual'));
+  for (const kind of ['all', 'image', 'video'] as const) {
+    const inside = inAlbum(kind);
+    inside.filters.photo.visualQuery = 'mare';
+    assert.ok(kinds(inside).includes('visual'), `album/${kind}`);
+  }
 });

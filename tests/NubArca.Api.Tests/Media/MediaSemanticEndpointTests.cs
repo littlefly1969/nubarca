@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Xunit;
 using static NubArca.Api.Tests.Media.MediaSemanticTestHarness;
@@ -172,5 +173,61 @@ public sealed class MediaSemanticEndpointTests
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using var json = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         Assert.Equal("indexing", json.RootElement.GetProperty("semanticStatus").GetString());
+    }
+
+    // MOBILE-FIRST-CLASS-PARITY-01: the search can be CONFINED to one album,
+    // for photos and videos alike. Before this parameter a client browsing an
+    // album had to either hide visual search or answer it from the whole
+    // library — results that look right and are not.
+    [Fact]
+    public async Task An_Album_Confined_Search_Is_Accepted()
+    {
+        using var factory = Factory();
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(client, "Confined");
+
+        var resp = await client.GetAsync($"/api/media/semantic?q=cat&albumId={albumId}");
+
+        // Not a 400: the parameter exists and is understood. Whether ranking is
+        // available depends on the AI profile, which this harness leaves off.
+        Assert.NotEqual(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.NotEqual(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_Missing_Album_Is_NotFound_Rather_Than_An_Empty_Result()
+    {
+        // An empty result would confirm the album does not exist to somebody
+        // probing ids; a not-found says nothing either way.
+        using var factory = Factory();
+        var (_, client) = await factory.CreateAuthenticatedClientAsync();
+
+        var resp = await client.GetAsync(
+            $"/api/media/semantic?q=cat&albumId={Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Another_Owners_Album_Is_Indistinguishable_From_A_Missing_One()
+    {
+        // The same answer for "not yours" and "does not exist": a different
+        // status would turn this route into an album-existence oracle.
+        using var factory = Factory();
+        var (_, owner) = await factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner, "Private");
+
+        var (_, stranger) = await factory.CreateAuthenticatedClientAsync("stranger@example.com");
+        var resp = await stranger.GetAsync($"/api/media/semantic?q=cat&albumId={albumId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    private static async Task<Guid> CreateAlbumAsync(HttpClient client, string name)
+    {
+        var created = await client.PostAsJsonAsync("/api/albums", new { name });
+        created.EnsureSuccessStatusCode();
+        using var json = JsonDocument.Parse(await created.Content.ReadAsStringAsync());
+        return json.RootElement.GetProperty("id").GetGuid();
     }
 }

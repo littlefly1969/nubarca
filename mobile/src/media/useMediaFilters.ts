@@ -96,6 +96,10 @@ export function useMediaFilters(
           dateTakenTo: current.filters.common.dateTakenTo || undefined,
           albumMembership:
             current.source.kind === 'library' ? current.filters.common.albumMembership : undefined,
+          // Confine the search to the album being browsed. The server applies
+          // it to the candidate scope before ranking, so the results are the
+          // album's — not the library's, filtered afterwards.
+          albumId: albumId ?? undefined,
         }, signal);
         // The grid renders media; the temporal evidence a video result carries
         // is not something this list surface shows, so it is dropped here

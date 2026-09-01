@@ -170,26 +170,8 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
 // to a non-photo tab inside an album — this predicate is the SINGLE place that
 // knows it, so the sheet never offers it, the chips never claim it and the
 // fingerprint never keys on it there. `queryToWire` never emits it.
-/**
- * Does a visual query APPLY on this tab and source at all?
- *
- * Separate from `isSemanticActive` because a UI has to answer two different
- * questions from one rule: whether to OFFER the control (here — the field must
- * appear before anything is typed) and whether a visual search is currently
- * RUNNING (below). Stating the rule twice is how a sheet ends up offering a
- * control whose value the fetch then ignores.
- *
- * The semantic route is library-scoped and takes no album parameter, so inside
- * an album a visual query reaches the photo tab only.
- */
-export function semanticApplies(identity: MediaWorkspaceIdentity): boolean {
-  if (identity.mediaKind === 'image') return true;
-  return identity.source.kind === 'library';
-}
-
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
-  if (identity.filters.photo.visualQuery.trim().length === 0) return false;
-  return semanticApplies(identity);
+  return identity.filters.photo.visualQuery.trim().length > 0;
 }
 
 // Build the unified wire query for a given accumulator cursor (null = first

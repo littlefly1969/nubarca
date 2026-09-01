@@ -164,10 +164,14 @@ function usesLegacyPhotoPath(identity: MediaWorkspaceIdentity): boolean {
     && (isSemanticActive(identity) || identity.filters.photo.similarTo.length > 0);
 }
 
-// VSEM-03: mixed photo+video semantic search. `isSemanticActive` already
-// encodes that the unified endpoint is library-scoped (it is false for a
-// non-photo tab inside an album), so an album never silently searches the
-// whole library.
+// VSEM-03: mixed photo+video semantic search.
+//
+// The unified endpoint now takes an optional albumId, so this path serves an
+// album too — confined to it. Before that it was library-scoped, which meant a
+// visual query on the "Tutti" or "Video" tab inside an album did nothing at
+// all: the capability was simply missing there. The album is passed below; it
+// is a PHYSICAL filter the server applies before ranking, so it also binds the
+// cursor.
 function usesUnifiedSemanticPath(identity: MediaWorkspaceIdentity): boolean {
   return identity.mediaKind !== 'image' && isSemanticActive(identity);
 }
@@ -227,6 +231,10 @@ async function fetchPage(
         albumMembership: source.kind === 'library' && common.albumMembership !== 'any'
           ? common.albumMembership
           : undefined,
+        // Confine the search to the album being browsed. Without it this path
+        // would answer an album's visual search from the whole library — worse
+        // than the absence it replaces, because the results would look right.
+        albumId: source.kind === 'album' ? source.albumId : undefined,
       }, signal);
     } catch (err) {
       // The AI profile / text tower is unavailable: an expected operational

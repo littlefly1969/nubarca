@@ -100,9 +100,8 @@ describe('queryToWire — kind gating', () => {
   });
 
   // VSEM-03 extended visual search to every tab: "Tutti" and "Video" route to
-  // the unified /api/media/semantic. The unified endpoint is library-scoped,
-  // so inside an album those tabs stay non-semantic (the control is not even
-  // offered there) rather than silently searching the whole library.
+  // the unified /api/media/semantic, which now takes an optional albumId — so
+  // those tabs are semantic inside an album too, CONFINED to it.
   it('a visual query is semantic-active on the "all"/"video" tabs of the library', () => {
     for (const kind of ['all', 'video'] as const) {
       const id = base(library);
@@ -114,12 +113,20 @@ describe('queryToWire — kind gating', () => {
     }
   });
 
-  it('a visual query on the "all"/"video" tabs of an ALBUM is not semantic-active', () => {
-    for (const kind of ['all', 'video'] as const) {
+  it('a visual query is semantic-active inside an ALBUM as well, on every tab', () => {
+    // This used to be false: the unified endpoint had no album parameter, so
+    // the capability was simply missing on the "Tutti" and "Video" tabs of an
+    // album. The server now confines the search, and the caller passes the
+    // album id (see useMediaWorkspace) — the results are the album's, not the
+    // library's filtered afterwards.
+    for (const kind of ['all', 'image', 'video'] as const) {
       const id = base(album);
       id.mediaKind = kind;
       id.filters.photo.visualQuery = 'red car';
-      expect(isSemanticActive(id)).toBe(false);
+      expect(isSemanticActive(id)).toBe(true);
+      // And still never on the unified LISTING wire: semantic keeps its own
+      // route and its own relevance cursor.
+      expect('semanticQuery' in queryToWire(id, null)).toBe(false);
     }
   });
 });

@@ -29,7 +29,6 @@ import type {
   MediaWorkspaceFilters,
   MediaWorkspaceIdentity,
 } from '@nubarca/contracts';
-import { semanticApplies } from '@nubarca/contracts';
 import { draftFrom, referencedPersonIds } from '../media/mediaFilterState';
 import { PeopleFilterSheet } from './PeopleFilterSheet';
 import { useI18n } from '../i18n';
@@ -159,25 +158,25 @@ export function MediaFilterSheet({
           </View>
 
           {/* VISUAL search (§10) is a different backend operation from the
-              metadata search above: it ranks by what a photo SHOWS, and its
-              relevance cursor is its own. It is offered only where it actually
-              applies — the semantic route is library-scoped, so inside an album
-              it reaches the photo tab only. `isSemanticActive` is the single
-              place that knows that rule, and the sheet, the chips and the fetch
-              all ask it, so they cannot disagree. */}
-          {semanticApplies(draft) && (
-            <View style={styles.group}>
-              <Text style={styles.groupLabel}>{t('filters.visual')}</Text>
-              <TextInput
-                style={styles.textInput}
-                value={filters.photo.visualQuery}
-                onChangeText={(text) => setPhoto({ visualQuery: text })}
-                autoCorrect={false}
-                accessibilityLabel={t('filters.visual')}
-              />
-              <Text style={styles.hint}>{t('filters.visualHint')}</Text>
-            </View>
-          )}
+              metadata search above: it ranks by what a photo or video SHOWS,
+              and its relevance cursor is its own. It works on BOTH kinds.
+
+              It applies everywhere, so there is no condition here at all: the
+              semantic route takes an optional albumId, and inside an album the
+              search is CONFINED to it rather than hidden or answered from the
+              whole library. The predicate that used to guard this disappeared
+              with the limitation it described. */}
+          <View style={styles.group}>
+            <Text style={styles.groupLabel}>{t('filters.visual')}</Text>
+            <TextInput
+              style={styles.textInput}
+              value={filters.photo.visualQuery}
+              onChangeText={(text) => setPhoto({ visualQuery: text })}
+              autoCorrect={false}
+              accessibilityLabel={t('filters.visual')}
+            />
+            <Text style={styles.hint}>{t('filters.visualHint')}</Text>
+          </View>
 
           <Choice
             label={t('filters.favorite')}
