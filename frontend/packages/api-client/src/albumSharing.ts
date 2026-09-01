@@ -1,155 +1,51 @@
 import { api, ApiError } from './client';
-import type { BulkAlbumItemsResult } from './albums';
+import type {
+  AlbumContentResponse,
+  AlbumInvitation,
+  AlbumMember,
+  AlbumRole,
+  BulkAlbumItemsResult,
+  ResolvedAlbumRecipient,
+  SharedAlbumDetail,
+  SharedAlbumItemsPage,
+  SharedAlbumItemsQuery,
+  SharedAlbumSummary,
+} from '@nubarca/contracts';
 
-// SHARE-ALBUM-01: live album sharing between authenticated NubArca users.
-//
-// Two families, mirroring the backend:
-//   * /api/albums/{id}/members...  the OWNER managing who the album is shared
-//     with.
-//   * /api/shared-albums/...       the RECIPIENT's view of albums shared with
-//     them, and their invitations.
-//
-// The recipient's media URLs are album-scoped and arrive ready-built from the
-// server (`thumbnailUrl`, `previewUrl`, …). They carry no token and no
-// signature: they are routes that are re-authorized on every request, so they
-// are safe in an <img src> and useless to anybody without their own accepted
-// membership. Never construct one by hand from a file id.
+// Web TRANSPORT for album sharing. The DTOs, roles, membership states, routes
+// and payloads are canonical in @nubarca/contracts, shared with the phone, and
+// re-exported here under their existing names so every web call site is
+// unchanged.
 
-export type AlbumRole = 'viewer' | 'contributor' | 'editor';
-
-export type AlbumMembershipState = 'pending' | 'accepted' | 'declined' | 'revoked';
-
-// One row of the owner's member list. Identifies the person by DISPLAY NAME
-// only — the API never returns another user's email address or user id, and
-// `membershipId` is what addresses the row.
-export interface AlbumMember {
-  membershipId: string;
-  displayName: string;
-  // Masked account address ("m•••i@nubarca.local"), owner-only. Display names
-  // are NOT unique, so without this an owner with two members called the same
-  // thing cannot tell which one to revoke. Empty string when the stored address
-  // is unusable. Never present in any recipient-facing shape.
-  maskedEmail: string;
-  role: AlbumRole;
-  state: AlbumMembershipState;
-  allowOriginalDownload: boolean;
-  // PARTY-GUEST-MESSAGES-01: a narrow, owner-granted delegation to moderate
-  // this album's party MESSAGES. NOT a role and not a party governance grant —
-  // see setAlbumMemberPartyMessages.
-  canManagePartyMessages: boolean;
-  invitedAt: string;
-  acceptedAt: string | null;
-  declinedAt: string | null;
-  revokedAt: string | null;
-}
-
-export interface ResolvedAlbumRecipient {
-  displayName: string;
-}
-
-export interface SharedAlbumCoverItem {
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-}
-
-export interface SharedAlbumSummary {
-  albumId: string;
-  name: string;
-  description: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  sharedAt: string;
-  coverItems: SharedAlbumCoverItem[];
-}
-
-export interface SharedAlbumDetail {
-  albumId: string;
-  name: string;
-  description: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  // SHARE-ALBUM-03: the optimistic-concurrency token to echo on any editorial
-  // mutation, and whether this caller may curate at all. The server enforces
-  // both regardless — `canEdit` only decides whether to render the controls.
-  version: number;
-  canEdit: boolean;
-}
-
-// One item of an album as its OWNER sees it for moderation. Additive surface:
-// contributions never appear in the owner's library, gallery or album
-// workspace. `contributorDisplayName` / `contributorMaskedEmail` are null for
-// the owner's own items and use the same privacy-safe disambiguation as the
-// member list when present.
-export interface AlbumContentItem {
-  // The MEMBERSHIP row's stable id — what a reorder names, never the file.
-  albumItemId: string;
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-  origin: 'owner' | 'contribution';
-  contributorDisplayName: string | null;
-  contributorMaskedEmail: string | null;
-  // 'unavailable' when the source was deleted, excluded, vaulted, or its
-  // contributor's membership ended — the row is listed so the owner can clear
-  // it, but nobody can open it.
-  sourceState: 'available' | 'unavailable';
-  addedAt: string;
-  // True when this item is the album's CHOSEN cover. False for every item when
-  // the album falls back to a derived one.
-  isCover: boolean;
-}
-
-// The curator's moderation view, wrapped so the concurrency token travels with
-// the items the caller is about to reorder or remove.
-export interface AlbumContentResponse {
-  version: number;
-  coverFileItemId: string | null;
-  canEdit: boolean;
-  items: AlbumContentItem[];
-}
-
-// One media item of a shared album. Deliberately carries NO file name: a
-// filename is owner-authored free text that can hold a person's name, and the
-// viewer does not need it. `downloadUrl` is null unless the membership permits
-// originals — and the endpoint enforces the same rule, so hiding the control is
-// a courtesy, not the control.
-export interface SharedAlbumItem {
-  // The membership row's stable id, so a client holding this list can express a
-  // reorder without conflating files and memberships.
-  albumItemId: string;
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-  previewUrl: string;
-  posterUrl: string | null;
-  videoUrl: string | null;
-  downloadUrl: string | null;
-  width: number | null;
-  height: number | null;
-  addedAt: string;
-  // True only for the caller's OWN contribution (they own the file and they
-  // added it) — the same pair the server checks before accepting a withdrawal.
-  // A capability, not an identity: the shared viewer never learns who
-  // contributed the other items.
-  canWithdraw: boolean;
-}
-
-export interface AlbumInvitation {
-  membershipId: string;
-  albumId: string;
-  albumName: string;
-  albumDescription: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  invitedAt: string;
-}
+export type {
+  AlbumContentItem,
+  AlbumContentResponse,
+  AlbumInvitation,
+  AlbumMember,
+  AlbumMembershipState,
+  AlbumRole,
+  ResolvedAlbumRecipient,
+  SharedAlbumCapabilities,
+  SharedAlbumCoverItem,
+  SharedAlbumDetail,
+  SharedAlbumItem,
+  SharedAlbumItemKind,
+  SharedAlbumItemsPage,
+  SharedAlbumItemsQuery,
+  SharedAlbumSummary,
+} from '@nubarca/contracts';
+import {
+  ALBUM_INVITATIONS_PATH,
+  albumInvitationPath,
+  sharedAlbumItemsPath,
+  sharedAlbumItemsQueryToParams,
+  withQuery,
+} from '@nubarca/contracts';
+export {
+  isActiveMembership,
+  isHistoricalMembership,
+  sharedAlbumCapabilities,
+} from '@nubarca/contracts';
 
 // ── Owner side ──────────────────────────────────────────────────────────────
 
@@ -257,28 +153,6 @@ export async function getSharedAlbum(
   return api<SharedAlbumDetail>(`/api/shared-albums/${albumId}`, { signal });
 }
 
-// The only dimension a shared album can be sliced on. It is answered from the
-// media kind the item shape already carries — a filter that needed owner-private
-// metadata would BE that metadata, leaked one question at a time.
-export type SharedAlbumItemKind = 'all' | 'image' | 'video';
-
-export interface SharedAlbumItemsPage {
-  items: SharedAlbumItem[];
-  // Null means "that was the last page", never "ask again".
-  nextCursor: string | null;
-  // The WHOLE album, whatever kind is being browsed, so a tab label does not
-  // change meaning with the tab that is open.
-  total: number;
-  photoCount: number;
-  videoCount: number;
-}
-
-export interface SharedAlbumItemsQuery {
-  kind?: SharedAlbumItemKind;
-  cursor?: string | null;
-  limit?: number;
-}
-
 // One page of a shared album in its curated order. The cursor is opaque and is
 // bound server-side to the kind it was issued for: pass back exactly what the
 // previous page returned, never a hand-built one.
@@ -287,26 +161,21 @@ export async function listSharedAlbumItems(
   query: SharedAlbumItemsQuery = {},
   signal?: AbortSignal,
 ): Promise<SharedAlbumItemsPage> {
-  const params = new URLSearchParams();
-  if (query.kind && query.kind !== 'all') params.set('kind', query.kind);
-  if (query.cursor) params.set('cursor', query.cursor);
-  if (query.limit !== undefined) params.set('limit', String(query.limit));
-  const suffix = params.toString();
   return api<SharedAlbumItemsPage>(
-    `/api/shared-albums/${albumId}/items${suffix ? `?${suffix}` : ''}`,
+    withQuery(sharedAlbumItemsPath(albumId), sharedAlbumItemsQueryToParams(query)),
     { signal },
   );
 }
 
 export async function listAlbumInvitations(signal?: AbortSignal): Promise<AlbumInvitation[]> {
-  return api<AlbumInvitation[]>('/api/shared-albums/invitations', { signal });
+  return api<AlbumInvitation[]>(ALBUM_INVITATIONS_PATH, { signal });
 }
 
 export async function acceptAlbumInvitation(
   membershipId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await api<void>(`/api/shared-albums/invitations/${membershipId}/accept`, {
+  await api<void>(albumInvitationPath(membershipId, 'accept'), {
     method: 'POST',
     signal,
   });
@@ -316,7 +185,7 @@ export async function declineAlbumInvitation(
   membershipId: string,
   signal?: AbortSignal,
 ): Promise<void> {
-  await api<void>(`/api/shared-albums/invitations/${membershipId}/decline`, {
+  await api<void>(albumInvitationPath(membershipId, 'decline'), {
     method: 'POST',
     signal,
   });

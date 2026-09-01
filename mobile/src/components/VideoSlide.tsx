@@ -30,6 +30,11 @@ import {
 } from '../media/videoProbe';
 import type { ViewerSlide } from '../media/viewerSequence';
 import {
+  recallPosition,
+  rememberPosition,
+  restorablePosition,
+} from '../media/videoPosition';
+import {
   playerStatusFor,
   probeStateForOutcome,
   refreshVideoSourceCookie,
@@ -161,10 +166,29 @@ export function VideoSlide({
     // Mount ≠ autoplay. Playback is owned exclusively by the `active` effect:
     // an unfocused neighbor must never start making noise.
     p.loop = false;
+    // Rotating the phone makes the pager re-measure and remount its cells, so
+    // this is a NEW player with no idea where the old one was — which is why
+    // a rotation used to restart the video from zero. The position is recalled
+    // from a store that outlives the slide, and `restorablePosition` refuses
+    // one belonging to a different video, so changing item can never seek the
+    // new video to the old one's timestamp.
+    if (expoSource !== null) {
+      const resume = restorablePosition(
+        recallPosition(expoSource.uri),
+        expoSource.uri,
+        // The duration is not on the slide; the player learns it when it
+        // loads. Passing null means the end-of-video guard is skipped here —
+        // and it is not needed on this path anyway, because a position is only
+        // ever recorded from a player that was actually playing.
+        null,
+      );
+      if (resume !== null) p.currentTime = resume;
+    }
   });
   const [playerStatus, setPlayerStatus] = useState(() => snapshotPlayerStatus(player));
   const nativeStatus = playerStatusFor(playerStatus, player);
 
+  const uri = expoSource?.uri ?? null;
   useEffect(() => {
     const statusSub = player.addListener('statusChange', (status) => {
       setPlayerStatus(snapshotPlayerStatus(player, status.status));
@@ -187,6 +211,14 @@ export function VideoSlide({
       statusSub.remove();
       playingSub.remove();
       deactivateKeepAwake();
+      // Record where this player was BEFORE it goes away — a remount (rotation,
+      // recycling) creates a new one, and the old position is unreachable
+      // afterwards. Reading a released player throws, hence the guard.
+      try {
+        if (uri !== null) rememberPosition(uri, player.currentTime);
+      } catch {
+        /* released before we could read it; the next mount just starts over */
+      }
       // Unmount always stops the audio, even during the teardown window.
       try {
         player.pause();
@@ -194,7 +226,7 @@ export function VideoSlide({
         /* already released */
       }
     };
-  }, [player]);
+  }, [player, uri]);
 
   // Focus drives playback. Pausing on !active is what makes simultaneous
   // playback impossible while the pager keeps neighbors mounted.

@@ -28,6 +28,7 @@ import { Redirect, router, useLocalSearchParams } from 'expo-router';
 import { FlatList } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageSlide } from '../../src/components/ImageSlide';
+import { forgetAllPositions } from '../../src/media/videoPosition';
 import { VideoSlide } from '../../src/components/VideoSlide';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
@@ -66,6 +67,10 @@ export default function MediaRoute(): React.JSX.Element {
   useEffect(() => {
     return () => {
       closeViewer();
+      // Leaving the viewer ends the reason to remember where a video was. The
+      // store is module-owned so it can outlive a slide remount; it must not
+      // outlive the viewer itself.
+      forgetAllPositions();
     };
   }, [closeViewer]);
 

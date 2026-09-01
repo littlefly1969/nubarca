@@ -20,6 +20,7 @@ import { useSelectionState } from '../../src/lib/useSelectionState';
 import {
   getAlbum,
   updateAlbum,
+  setAlbumTvVisibility,
   deleteAlbum,
   bulkRemoveAlbumItems,
 } from '../../src/api/albums.ts';
@@ -144,6 +145,21 @@ export default function AlbumDetail(): React.JSX.Element {
             </>
           ) : (
             <>
+              <HeaderButton
+                label={t('albums.showOnTv')}
+                onPress={() => {
+                  // TV visibility has its OWN route, so toggling it can never
+                  // carry an unintended rename along with it.
+                  void (async () => {
+                    if (detail === null) return;
+                    try {
+                      setDetail(await setAlbumTvVisibility(albumId, !detail.showOnTv));
+                    } catch {
+                      /* the header keeps showing the last known state */
+                    }
+                  })();
+                }}
+              />
               <HeaderButton label={t('albums.edit')} onPress={() => setRenaming(true)} />
               <HeaderButton label={t('albums.delete')} destructive onPress={confirmDelete} />
               <HeaderButton

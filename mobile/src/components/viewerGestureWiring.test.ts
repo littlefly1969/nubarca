@@ -76,6 +76,32 @@ test('changing item releases the pager, so zoom cannot strand the swipe', async 
   assert.match(viewer, /setPagerOwnsHorizontal\(true\);\s*\n\s*\}, \[index\]\);/);
 });
 
+test('the pan gesture is DISABLED at rest, not merely inert', async () => {
+  // The regression this pins, found on a physical device: photos could not be
+  // swiped at all. A gesture-handler Pan that bails out inside onUpdate has
+  // still CLAIMED the touch, so the pager never sees the drag — being inert is
+  // not the same as being disabled, and only the second gives the gesture back.
+  const slide = await sourceOf('ImageSlide.tsx');
+  assert.match(slide, /Gesture\.Pan\(\)\s*\n\s*\.enabled\(zoomed\)/);
+  // And the bail-out that used to stand in for it must not come back.
+  const panBlock = slide.slice(slide.indexOf('Gesture.Pan()'), slide.indexOf('Gesture.Tap()'));
+  assert.doesNotMatch(panBlock, /if \(scale\.value <= 1\.05\) return;/);
+});
+
+test('one place decides both pager ownership and whether the pan is armed', async () => {
+  // Two separate sources of truth for "am I zoomed" is how they drift apart.
+  const slide = await sourceOf('ImageSlide.tsx');
+  assert.match(slide, /setZoomed\(!pagerOwns\);\s*\n\s*onZoomOwnershipChange\?\.\(pagerOwns\);/);
+});
+
+test('crossing the zoom threshold arms the pan mid-pinch', async () => {
+  // Without this the user has to lift their fingers and touch again before a
+  // freshly zoomed photo can be dragged.
+  const slide = await sourceOf('ImageSlide.tsx');
+  assert.match(slide, /const crossed = \(next > 1\.05\) !== \(scale\.value > 1\.05\);/);
+  assert.match(slide, /if \(crossed\) runOnJS\(reportOwnership\)\(next <= 1\.05\);/);
+});
+
 test('no timeout arbitrates pager vs zoom', async () => {
   // §4 forbids solving this with delays. Double-tap detection is gesture-
   // handler's own arbitration (numberOfTaps + requireExternalGestureToFail),

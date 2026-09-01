@@ -10,3 +10,5 @@ export * from './media.ts';
 export * from './album.ts';
 export * from './people.ts';
 export * from './mediaWorkspace.ts';
+export * from './mediaSelection.ts';
+export * from './sharing.ts';

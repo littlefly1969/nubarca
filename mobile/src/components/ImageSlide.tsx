@@ -70,6 +70,12 @@ export function ImageSlide({
   const startX = useSharedValue(0);
   const startY = useSharedValue(0);
 
+  // Mirrors the zoom on the JS thread. It exists ONLY to enable/disable the
+  // pan gesture: a gesture-handler Pan that is merely inert still CLAIMS the
+  // touch, so the pager never sees a horizontal drag. Bailing out inside
+  // onUpdate looks like it disables panning and does not — that is exactly the
+  // bug this replaces, and photos could not be swiped at all.
+  const [zoomed, setZoomed] = useState(false);
   const [viewport, setViewport] = useState<Size>(NO_SIZE);
   const [source, setSource] = useState<Size>(NO_SIZE);
   const previousViewport = useRef<Size>(NO_SIZE);
@@ -82,7 +88,12 @@ export function ImageSlide({
   };
 
   const reportOwnership = useCallback(
-    (pagerOwns: boolean) => onZoomOwnershipChange?.(pagerOwns),
+    (pagerOwns: boolean) => {
+      // One place decides both: what the pager may do, and whether the pan
+      // gesture is armed. They can never disagree.
+      setZoomed(!pagerOwns);
+      onZoomOwnershipChange?.(pagerOwns);
+    },
     [onZoomOwnershipChange],
   );
 
@@ -138,8 +149,13 @@ export function ImageSlide({
       startScale.value = scale.value;
     })
     .onUpdate((e) => {
-      scale.value = Math.min(MAX_SCALE, Math.max(MIN_SCALE, startScale.value * e.scale));
+      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, startScale.value * e.scale));
+      const crossed = (next > 1.05) !== (scale.value > 1.05);
+      scale.value = next;
       clampToBounds();
+      // Arm the pan the moment the pinch crosses the threshold, so the user
+      // can drag without lifting their fingers first.
+      if (crossed) runOnJS(reportOwnership)(next <= 1.05);
     })
     .onEnd(() => {
       if (scale.value <= 1.05) {
@@ -152,15 +168,16 @@ export function ImageSlide({
       }
     });
 
-  // minPointers(1) but only enabled while zoomed: at rest the pager must get
-  // the horizontal drag, which is exactly what §4 requires.
+  // ENABLED, not just inert (§4). At rest the pan gesture must not exist as
+  // far as the touch system is concerned, so the horizontal drag reaches the
+  // pager and paging works the instant zoom returns to 1.
   const pan = Gesture.Pan()
+    .enabled(zoomed)
     .onStart(() => {
       startX.value = tx.value;
       startY.value = ty.value;
     })
     .onUpdate((e) => {
-      if (scale.value <= 1.05) return;
       tx.value = startX.value + e.translationX;
       ty.value = startY.value + e.translationY;
       clampToBounds();

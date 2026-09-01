@@ -138,8 +138,10 @@ test('VideoSlide seeds status now, tracks events, pauses inactive, and removes o
   assert.match(slide, /if \(!active\)[\s\S]*?player\.pause\(\)/);
   assert.match(slide, /shouldPlayVideo\(active, expoSource !== null, nativeStatus\)/);
 
+  // Keyed on the player AND its uri: the uri is what the cleanup records the
+  // position under, so it must not be captured stale.
   const statusEffect = slide.match(
-    /useEffect\(\(\) => \{([\s\S]*?statusSub\.remove\(\)[\s\S]*?playingSub\.remove\(\)[\s\S]*?)\n  \}, \[player\]\);/,
+    /useEffect\(\(\) => \{([\s\S]*?statusSub\.remove\(\)[\s\S]*?playingSub\.remove\(\)[\s\S]*?)\n  \}, \[player, uri\]\);/,
   );
   assert.ok(statusEffect, 'player-owned listener effect with cleanup not found');
 });
@@ -158,4 +160,22 @@ test('VideoView is mounted only for the ready presentation', async () => {
   assert.ok(loadingGuard !== -1, 'non-ready presentation guard missing');
   assert.ok(videoView !== -1, 'VideoView missing');
   assert.ok(loadingGuard < videoView, 'VideoView may only occur after the non-ready guard');
+});
+
+test('a remount resumes where it was, and never onto another video', async () => {
+  // Device-reported: rotating the phone restarted the video from zero. The
+  // pager re-measures and remounts its cells, so the new player knows nothing
+  // — the position has to be kept somewhere that outlives the slide.
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.match(slide, /rememberPosition\(uri, player\.currentTime\)/);
+  assert.match(slide, /restorablePosition\(/);
+  assert.match(slide, /recallPosition\(expoSource\.uri\)/);
+});
+
+test('the position is recorded BEFORE the player is paused or released', async () => {
+  const slide = await sourceOf('VideoSlide.tsx');
+  const remember = slide.indexOf('rememberPosition(uri, player.currentTime)');
+  const pause = slide.indexOf('player.pause();', remember);
+  assert.ok(remember !== -1 && pause !== -1);
+  assert.ok(remember < pause, 'the position must be read before teardown');
 });

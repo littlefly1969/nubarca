@@ -1,97 +1,145 @@
-// Shared albums: the RECIPIENT's view of albums shared with them, plus their
-// pending invitations. Mobile mirror of frontend/packages/api-client/src/
-// albumSharing.ts (SHARE-ALBUM-01/02 subset for mobile v1).
+// Mobile TRANSPORT for album sharing — both sides of it.
 //
-// THE authority rule this module encodes: every media URL below arrives
-// READY-BUILT from the server and is album-scoped
-// (/api/shared-albums/{albumId}/media/{fileItemId}/...). They are re-
-// authorized on every request against the caller's grant. A client must never
-// construct /api/files/{fileId}/... for shared media — that family is owner-
-// only by design, and hand-building one would be a privacy hole, not a
-// convenience.
+// The DTOs, roles, membership states, routes and payloads come from
+// @nubarca/contracts: one definition for web, phone and television. What stays
+// here is the authenticated mobile transport.
+//
+// PRIVACY (§26) is carried by the shared types rather than by care taken here:
+// there is no email field on a member (only a masked address, owner-only), no
+// user id anywhere, and a membership is addressed by membershipId. Media URLs
+// for a recipient arrive ready-built and album-scoped (§28) — this module
+// never constructs one from a file id, and never rewrites a shared URL into an
+// owner route.
 
-import { apiDelete, apiGet, apiPost } from './client.ts';
-import type { BulkAlbumItemsResult } from './albums.ts';
+import { apiDelete, apiGet, apiPatch, apiPost } from './client.ts';
+import type {
+  AlbumInvitation,
+  AlbumMember,
+  AlbumRole,
+  BulkAlbumItemsResult,
+  ResolvedAlbumRecipient,
+  SharedAlbumDetail,
+  SharedAlbumItemsPage,
+  SharedAlbumItemsQuery,
+  SharedAlbumSummary,
+} from '@nubarca/contracts';
+import {
+  ALBUM_INVITATIONS_PATH,
+  albumInvitationPath,
+  albumMemberDownloadPath,
+  albumMemberPartyMessagesPath,
+  albumMemberPath,
+  albumMemberRolePath,
+  albumMembersPath,
+  albumRecipientResolvePath,
+  sharedAlbumItemsPath,
+  sharedAlbumItemsQueryToParams,
+  withQuery,
+} from '@nubarca/contracts';
 
-export type AlbumRole = 'viewer' | 'contributor' | 'editor';
+export type {
+  AlbumInvitation,
+  AlbumMember,
+  AlbumMembershipState,
+  AlbumRole,
+  ResolvedAlbumRecipient,
+  SharedAlbumCapabilities,
+  SharedAlbumCoverItem,
+  SharedAlbumDetail,
+  SharedAlbumItem,
+  SharedAlbumItemKind,
+  SharedAlbumItemsPage,
+  SharedAlbumItemsQuery,
+  SharedAlbumSummary,
+} from '@nubarca/contracts';
+export { sharedAlbumCapabilities, isActiveMembership, isHistoricalMembership } from '@nubarca/contracts';
 
-export interface SharedAlbumCoverItem {
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
+// ── Owner side (§25) ───────────────────────────────────────────────────────
+
+/** Every membership row, live and historical. The owner sees both. */
+export function listAlbumMembers(albumId: string, signal?: AbortSignal): Promise<AlbumMember[]> {
+  return apiGet<AlbumMember[]>(albumMembersPath(albumId), signal);
 }
 
-export interface SharedAlbumSummary {
-  albumId: string;
-  name: string;
-  description: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  sharedAt: string;
-  coverItems: SharedAlbumCoverItem[];
+/**
+ * Resolve an EXACT address to a display name, for confirmation before
+ * inviting. There is no directory and no autocomplete: a lookup that accepted
+ * prefixes would let anyone enumerate accounts. The server answers the same
+ * way for "no such account" as for anything else it will not disclose, and the
+ * caller must not try to tell those apart.
+ */
+export function resolveAlbumRecipient(
+  albumId: string,
+  email: string,
+  signal?: AbortSignal,
+): Promise<ResolvedAlbumRecipient> {
+  return apiPost<ResolvedAlbumRecipient>(albumRecipientResolvePath(albumId), { email }, { signal });
 }
 
-export interface SharedAlbumDetail {
-  albumId: string;
-  name: string;
-  description: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  version: number;
-  canEdit: boolean;
+export function inviteAlbumMember(
+  albumId: string,
+  email: string,
+  role: AlbumRole,
+  allowOriginalDownload: boolean,
+  signal?: AbortSignal,
+): Promise<AlbumMember> {
+  return apiPost<AlbumMember>(
+    albumMembersPath(albumId),
+    { email, role, allowOriginalDownload },
+    { signal },
+  );
 }
 
-// One media item of a shared album. NO display name by contract (owner free
-// text can carry personal data the recipient does not need). Every *Url is
-// server-provided and album-scoped; downloadUrl is null unless the membership
-// permits originals. canWithdraw marks the caller's OWN contribution.
-export interface SharedAlbumItem {
-  albumItemId: string;
-  fileItemId: string;
-  kind: 'image' | 'video';
-  thumbnailUrl: string;
-  previewUrl: string;
-  posterUrl: string | null;
-  videoUrl: string | null;
-  downloadUrl: string | null;
-  width: number | null;
-  height: number | null;
-  addedAt: string;
-  canWithdraw: boolean;
+export function setAlbumMemberRole(
+  albumId: string,
+  membershipId: string,
+  role: AlbumRole,
+  signal?: AbortSignal,
+): Promise<AlbumMember> {
+  return apiPatch<AlbumMember>(albumMemberRolePath(albumId, membershipId), { role }, { signal });
 }
 
-export interface AlbumInvitation {
-  membershipId: string;
-  albumId: string;
-  albumName: string;
-  albumDescription: string | null;
-  ownerDisplayName: string;
-  role: AlbumRole;
-  allowOriginalDownload: boolean;
-  itemCount: number;
-  invitedAt: string;
+export function setAlbumMemberDownload(
+  albumId: string,
+  membershipId: string,
+  allowOriginalDownload: boolean,
+  signal?: AbortSignal,
+): Promise<AlbumMember> {
+  return apiPatch<AlbumMember>(
+    albumMemberDownloadPath(albumId, membershipId),
+    { allowOriginalDownload },
+    { signal },
+  );
 }
 
-export type SharedAlbumItemKind = 'all' | 'image' | 'video';
-
-export interface SharedAlbumItemsPage {
-  items: SharedAlbumItem[];
-  // Null means "that was the last page", never "ask again".
-  nextCursor: string | null;
-  total: number;
-  photoCount: number;
-  videoCount: number;
+/**
+ * Grant or revoke the narrow party-MESSAGE moderation delegation (§37).
+ * Not a role, not party administration, not general moderation — and only
+ * meaningful while the membership is accepted and not revoked.
+ */
+export function setAlbumMemberPartyMessages(
+  albumId: string,
+  membershipId: string,
+  canManagePartyMessages: boolean,
+  signal?: AbortSignal,
+): Promise<AlbumMember> {
+  return apiPatch<AlbumMember>(
+    albumMemberPartyMessagesPath(albumId, membershipId),
+    { canManagePartyMessages },
+    { signal },
+  );
 }
 
-export interface SharedAlbumItemsQuery {
-  kind?: SharedAlbumItemKind;
-  cursor?: string | null;
-  limit?: number;
+/** Revoke a pending invitation or an accepted membership. Same route. */
+export function revokeAlbumMember(
+  albumId: string,
+  membershipId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  return apiDelete<void>(albumMemberPath(albumId, membershipId), undefined, { signal });
 }
+
+// ── Recipient side (§27) ───────────────────────────────────────────────────
 
 export function listSharedAlbums(signal?: AbortSignal): Promise<SharedAlbumSummary[]> {
   return apiGet<SharedAlbumSummary[]>('/api/shared-albums', signal);
@@ -106,29 +154,24 @@ export function listSharedAlbumItems(
   query: SharedAlbumItemsQuery = {},
   signal?: AbortSignal,
 ): Promise<SharedAlbumItemsPage> {
-  const params = new URLSearchParams();
-  if (query.kind && query.kind !== 'all') params.set('kind', query.kind);
-  if (query.cursor) params.set('cursor', query.cursor);
-  if (query.limit !== undefined) params.set('limit', String(query.limit));
-  const qs = params.toString();
   return apiGet<SharedAlbumItemsPage>(
-    `/api/shared-albums/${albumId}/items${qs ? `?${qs}` : ''}`,
+    withQuery(sharedAlbumItemsPath(albumId), sharedAlbumItemsQueryToParams(query)),
     signal,
   );
 }
 
 export function listAlbumInvitations(signal?: AbortSignal): Promise<AlbumInvitation[]> {
-  return apiGet<AlbumInvitation[]>('/api/shared-albums/invitations', signal);
+  return apiGet<AlbumInvitation[]>(ALBUM_INVITATIONS_PATH, signal);
 }
 
 export function acceptAlbumInvitation(membershipId: string, signal?: AbortSignal): Promise<void> {
-  return apiPost<void>(`/api/shared-albums/invitations/${membershipId}/accept`, undefined, {
+  return apiPost<void>(albumInvitationPath(membershipId, 'accept'), undefined, {
     signal,
   });
 }
 
 export function declineAlbumInvitation(membershipId: string, signal?: AbortSignal): Promise<void> {
-  return apiPost<void>(`/api/shared-albums/invitations/${membershipId}/decline`, undefined, {
+  return apiPost<void>(albumInvitationPath(membershipId, 'decline'), undefined, {
     signal,
   });
 }

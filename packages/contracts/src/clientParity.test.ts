@@ -138,6 +138,27 @@ test('the workspace filter model is not redefined by any client', () => {
   assert.match(web, /URLSearchParams/);
 });
 
+test('neither client redefines the sharing vocabulary', () => {
+  for (const path of ['frontend/packages/api-client/src/albumSharing.ts',
+    'mobile/src/api/sharedAlbums.ts']) {
+    const source = code(path);
+    assert.match(source, /from '@nubarca\/contracts'/, path);
+    for (const name of ['AlbumRole', 'AlbumMembershipState', 'AlbumMember',
+      'SharedAlbumSummary', 'SharedAlbumDetail', 'SharedAlbumItem',
+      'SharedAlbumItemsPage', 'SharedAlbumItemsQuery', 'AlbumInvitation']) {
+      assert.doesNotMatch(source, new RegExp(`export (interface|type) ${name}\\b`),
+        `${path} redefines ${name}`);
+    }
+    // And no client builds the shared listing's parameters by hand.
+    assert.doesNotMatch(source, /new URLSearchParams/, path);
+  }
+});
+
+test('mobile no longer declares a hasMore the shared listing never sends', () => {
+  const source = code('mobile/src/api/sharedAlbums.ts');
+  assert.doesNotMatch(source, /hasMore/);
+});
+
 test('the album membership rule is stated where the contract lives', () => {
   // §24: removing an item from an album is not deleting it from the library.
   const contract = readFileSync(resolve(ROOT, 'packages/contracts/src/album.ts'), 'utf8');

@@ -11,6 +11,7 @@
 // There is deliberately no "last sequence kept for the animation": that ref
 // was what once let state survive an account switch.
 
+import { forgetAllPositions } from './videoPosition';
 import React, {
   createContext,
   useCallback,
@@ -34,6 +35,16 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
   // NOTE: deliberately NOT reading the session here — identity scoping happens
   // by REMOUNTING this component (see the key in app/_layout.tsx), so no code
   // path can render a snapshot that belongs to a previous identity.
+  // Remembered video positions live outside React so they can survive a slide
+  // REMOUNT (see media/videoPosition.ts). That means they must be cleared on
+  // the same boundary this provider already enforces: it is remounted whenever
+  // the signed-in identity changes, so clearing on mount guarantees nothing a
+  // previous account watched can be seen by the next one.
+  const clearedRef = useRef(false);
+  if (!clearedRef.current) {
+    clearedRef.current = true;
+    forgetAllPositions();
+  }
   const modelRef = useRef<ViewerSequenceModel>(new ViewerSequenceModel());
   const [snapshot, setSnapshotState] = useState<ViewerSequenceSnapshot | null>(
     () => modelRef.current.snapshot(),
