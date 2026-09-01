@@ -12,6 +12,7 @@ import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { usePagedList } from '../../src/lib/usePagedList';
+import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useSelectionState } from '../../src/lib/useSelectionState';
 import type { MediaItem } from '../../src/api/media.ts';
 import { useMediaFilters } from '../../src/media/useMediaFilters';
@@ -39,9 +40,17 @@ export default function Photos(): React.JSX.Element {
 
   // Refresh on each focus so changes made elsewhere are reflected; the
   // PagedList token makes this race-safe against in-flight loads.
+  // Refresh on focus only when there is nothing to lose: a refresh replaces
+  // the accumulator with page one, so doing it on every return from the viewer
+  // discarded every page the reader had scrolled through. See lib/focusRefresh.
+  const itemCountRef = useRef(0);
+  itemCountRef.current = snapshot.items.length;
   useFocusEffect(
     useCallback(() => {
-      if (session.status === 'authed') void refresh();
+      if (session.status !== 'authed') return undefined;
+      if (shouldRefreshOnFocus({ itemCount: itemCountRef.current, stale: false })) {
+        void refresh();
+      }
       return undefined;
     }, [refresh, session.status]),
   );
