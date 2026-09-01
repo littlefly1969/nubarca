@@ -1,52 +1,45 @@
 import { api, ApiError } from './client';
+import type {
+  AlbumPartyStatus,
+  PartyMessageAction,
+  PartyMessageList,
+  PartyUploadList,
+} from '@nubarca/contracts';
+
+// Web TRANSPORT for Party. The DTOs, the validation RANGES and the message
+// transition matrix are canonical in @nubarca/contracts, shared with the phone
+// (§33, §34, §36) — the transition rules in particular used to live inlined in
+// this app's JSX, which is not somewhere a second client can read them.
+// Everything is re-exported under its existing name, so every web call site is
+// unchanged.
+
+export type {
+  AlbumPartyStatus,
+  PartyGameSettings,
+  PartyMessage,
+  PartyMessageAction,
+  PartyMessageList,
+  PartyMessageModeration,
+  PartyMessageStatus,
+  PartySlideshowSettings,
+  PartyUploadItem,
+  PartyUploadList,
+  PartyUploadStatus,
+} from '@nubarca/contracts';
+export {
+  DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
+  PARTY_GAME_RANGES,
+  PARTY_SLIDESHOW_RANGES,
+  clampToRange,
+  invalidGameFields,
+  invalidSlideshowFields,
+  isPartyMessageActionAllowed,
+  partyGuestUrl,
+  partyMessageActions,
+} from '@nubarca/contracts';
+
 
 // --- Owner-side party settings (normal user auth) ---
-
-export interface AlbumPartyStatus {
-  albumId: string;
-  showOnTv: boolean;
-  partyMode: boolean;
-  // Relative public landing URL ("/party/{token}") while party mode is active,
-  // else null. Never a token hash. The frontend prepends its own origin for QR.
-  partyUrl: string | null;
-  // Whether anonymous guest UPLOAD is currently allowed, and the relative public
-  // upload landing URL ("/party/{uploadToken}/upload") when it is (separate
-  // token from partyUrl). Both null/false when party or upload is off.
-  uploadEnabled: boolean;
-  uploadUrl: string | null;
-  // When true, new guest uploads wait for owner approval before appearing on the
-  // public party page / TV. Default false (immediate visibility).
-  requireUploadApproval: boolean;
-  // When true, new guest MESSAGES wait for approval before reaching the TV.
-  // Independent of requireUploadApproval, and owner-only to change.
-  requireMessageApproval: boolean;
-  // Slideshow timing (seconds) and per-participant quotas (0 = unlimited)
-  // for the ACTIVE link. Present on every status response.
-  photoSlideSeconds: number;
-  maxVideoSlideSeconds: number;
-  maxPhotoUploadsPerParticipant: number;
-  maxVideoUploadsPerParticipant: number;
-  // Optional for rolling compatibility with a pre-game backend response.
-  gameEnabled?: boolean;
-  minChallengeIntervalSeconds?: number;
-  maxChallengeIntervalSeconds?: number;
-  votesPerGuest?: number;
-  maxChallengesPerSession?: number | null;
-}
-
-// Ranges the server validates. Duplicated here so the panel can refuse a bad
-// value before a round-trip; the SERVER remains the validator.
-export const PARTY_SLIDESHOW_RANGES = {
-  photoSeconds: { min: 3, max: 60 },
-  maxVideoSeconds: { min: 5, max: 600 },
-  quota: { min: 0, max: 10000 },
-} as const;
-
-export const PARTY_GAME_RANGES = {
-  intervalSeconds: { min: 30, max: 86400 },
-  votes: { min: 1, max: 20 },
-  maxPerSession: { min: 1, max: 100 },
-} as const;
 
 export function setPartyGameSettings(
   albumId: string,
@@ -109,25 +102,6 @@ export function setAlbumPartyMode(
 }
 
 // --- Owner-side party upload moderation (normal user auth) ---
-
-export type PartyUploadStatus = 'approved' | 'pending' | 'hidden' | 'rejected' | 'removed_from_album';
-
-export interface PartyUploadItem {
-  fileItemId: string;
-  name: string;
-  mediaType: 'image' | 'video';
-  status: PartyUploadStatus;
-  // Owner-auth thumbnail path ("/api/files/{id}/thumbnail"). Never a storage key.
-  thumbnailUrl: string;
-  uploadedAt: string;
-  moderatedAt: string | null;
-}
-
-export interface PartyUploadList {
-  albumId: string;
-  requireUploadApproval: boolean;
-  items: PartyUploadItem[];
-}
 
 export function listPartyUploads(
   albumId: string,
@@ -465,49 +439,12 @@ export function getPartyFaceSearch(
 // A text-only channel beside the photo/video stream. Nothing here touches the
 // media contract: a message is never a PartyItem and never a TV album item.
 
-export type PartyMessageStatus = 'pending' | 'visible' | 'hidden' | 'rejected';
-
-export interface PartyMessage {
-  id: string;
-  // The name the guest chose to type, or null when they signed nothing. Never
-  // an empty string, so the UI has one case to handle.
-  displayName: string | null;
-  // PLAIN TEXT. Render it as text — never through dangerouslySetInnerHTML, a
-  // Markdown renderer, or any URI interpretation.
-  text: string;
-  status: PartyMessageStatus;
-  createdAt: string;
-  moderatedAt: string | null;
-  isHero: boolean;
-  heroPromotedAt: string | null;
-}
-
-export interface PartyMessageList {
-  albumId: string;
-  // False when no party is currently running on this album: the queue is empty
-  // because there is no event, not because nobody has written anything.
-  partyActive: boolean;
-  requireMessageApproval: boolean;
-  // False for a delegate. The delegate moderates messages and never sees the
-  // owner-only party settings — though the SERVER, not this flag, enforces it.
-  isOwner: boolean;
-  items: PartyMessage[];
-}
-
 export function listPartyMessages(
   albumId: string,
   signal?: AbortSignal,
 ): Promise<PartyMessageList> {
   return api<PartyMessageList>(`/api/albums/${albumId}/party-messages`, { signal });
 }
-
-export type PartyMessageAction =
-  | 'approve'
-  | 'reject'
-  | 'hide'
-  | 'restore'
-  | 'promote-hero'
-  | 'demote-hero';
 
 // Owner or delegate. 204 No Content; the caller refreshes the list. Promoting
 // a message that is not currently visible is a 400 — the UI only offers Hero on

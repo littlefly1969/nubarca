@@ -4,6 +4,8 @@ import {
   ApiError,
   listPartyMessages,
   moderatePartyMessage,
+  partyMessageActions,
+  DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
   setAlbumPartyMode,
   type PartyMessage,
   type PartyMessageAction,
@@ -205,6 +207,17 @@ export function PartyMessagesPage() {
   );
 }
 
+// One label per action, so the rendered set follows the shared matrix rather
+// than a second list of conditions kept in step by hand.
+const PARTY_MESSAGE_ACTION_LABELS = {
+  approve: 'partyMessages.approve',
+  reject: 'partyMessages.reject',
+  hide: 'partyMessages.hide',
+  restore: 'partyMessages.restore',
+  'promote-hero': 'partyMessages.promoteHero',
+  'demote-hero': 'partyMessages.demoteHero',
+} as const;
+
 function PartyMessageRow({
   message,
   busy,
@@ -231,38 +244,23 @@ function PartyMessageRow({
       )}
       <span className="party-mod-meta">{formatDate(message.createdAt)}</span>
       <span className="party-mod-actions">
-        {message.status === 'pending' && (
-          <button type="button" disabled={busy} onClick={() => onAct('approve')}>
-            {t('partyMessages.approve')}
+        {/* WHICH actions this message admits comes from the shared transition
+            matrix (@nubarca/contracts), not from conditions written here. The
+            rules used to live in this markup, where a second client could not
+            read them — and the phone now offers exactly the same set. */}
+        {partyMessageActions(message).map((action) => (
+          <button
+            key={action}
+            type="button"
+            className={
+              DESTRUCTIVE_PARTY_MESSAGE_ACTIONS.includes(action) ? 'btn-danger' : undefined
+            }
+            disabled={busy}
+            onClick={() => onAct(action)}
+          >
+            {t(PARTY_MESSAGE_ACTION_LABELS[action])}
           </button>
-        )}
-        {message.status === 'pending' && (
-          <button type="button" className="btn-danger" disabled={busy} onClick={() => onAct('reject')}>
-            {t('partyMessages.reject')}
-          </button>
-        )}
-        {message.status === 'visible' && (
-          <button type="button" className="btn-danger" disabled={busy} onClick={() => onAct('hide')}>
-            {t('partyMessages.hide')}
-          </button>
-        )}
-        {(message.status === 'hidden' || message.status === 'rejected') && (
-          <button type="button" disabled={busy} onClick={() => onAct('restore')}>
-            {t('partyMessages.restore')}
-          </button>
-        )}
-        {/* Hero is offered only on a LIVE message, matching the server, which
-            refuses to promote anything that is not currently visible. */}
-        {message.status === 'visible' && !message.isHero && (
-          <button type="button" disabled={busy} onClick={() => onAct('promote-hero')}>
-            {t('partyMessages.promoteHero')}
-          </button>
-        )}
-        {message.isHero && (
-          <button type="button" disabled={busy} onClick={() => onAct('demote-hero')}>
-            {t('partyMessages.demoteHero')}
-          </button>
-        )}
+        ))}
       </span>
     </li>
   );
