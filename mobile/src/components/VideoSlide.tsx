@@ -43,6 +43,7 @@ import {
   videoPresentation,
   type VideoProbeState,
 } from './videoPlayback';
+import { media } from '../ui/palette.ts';
 
 export function VideoSlide({
   slide,
@@ -342,14 +343,14 @@ export function VideoSlide({
 
 const styles = StyleSheet.create({
   full: { width: '100%', height: '100%' },
-  dark: { backgroundColor: '#0A0F1A' },
+  dark: { backgroundColor: media.background },
   centerDark: {
     flex: 1,
-    backgroundColor: '#0A0F1A',
+    backgroundColor: media.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loadingText: { color: '#F5F7FB', marginTop: 12, fontSize: 14 },
+  loadingText: { color: media.text, marginTop: 12, fontSize: 14 },
   poster: { width: '86%', height: '52%', borderRadius: 12, marginBottom: 16 },
-  errorText: { color: '#F5F7FB', padding: 24, textAlign: 'center' },
+  errorText: { color: media.text, padding: 24, textAlign: 'center' },
 });

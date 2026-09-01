@@ -335,6 +335,16 @@ const it = {
   'chips.inert': 'non applicato alla ricerca visiva',
   'filters.semanticNotice': 'La ricerca visiva ordina per contenuto: alcuni filtri non si applicano.',
 
+  'settings.title': 'Impostazioni',
+  'settings.open': 'Impostazioni',
+  'settings.appearance': 'Aspetto',
+  'settings.theme': 'Tema',
+  'settings.theme.dark': 'Scuro',
+  'settings.theme.light': 'Chiaro',
+  'settings.theme.system': 'Sistema',
+  'settings.themeSystemHint': 'Segue il tema del telefono.',
+  'settings.account': 'Account',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

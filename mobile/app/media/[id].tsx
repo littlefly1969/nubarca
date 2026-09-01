@@ -47,8 +47,9 @@ import {
   viewerIndexFromUserScroll,
   viewerOffsetForIndex,
 } from '../../src/media/viewerRoute';
-import { colors, spacing } from '../../src/ui/tokens';
+import { spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { media } from '../../src/ui/palette.ts';
 
 export default function MediaRoute(): React.JSX.Element {
   const session = useSession();
@@ -306,7 +307,7 @@ export default function MediaRoute(): React.JSX.Element {
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
             hitSlop={8}
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={media.text} />
           </Pressable>
           {current !== undefined && (
             <>
@@ -322,10 +323,11 @@ export default function MediaRoute(): React.JSX.Element {
   );
 }
 
+// NOT themed: the viewer is dark in both themes (see palette.ts).
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.mediaBackground,
+    backgroundColor: media.background,
   },
   pager: {
     flex: 1,
@@ -341,24 +343,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.m,
     paddingTop: spacing.xl + spacing.l,
     paddingBottom: spacing.s,
-    backgroundColor: 'rgba(10,15,26,0.45)',
+    backgroundColor: media.chrome,
   },
   backBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: media.chromeButton,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
     flex: 1,
-    color: '#FFFFFF',
+    color: media.text,
     fontSize: 14,
     fontWeight: '600',
   },
   counter: {
-    color: 'rgba(255,255,255,0.75)',
+    color: media.textSecondary,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },

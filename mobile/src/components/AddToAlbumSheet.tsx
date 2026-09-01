@@ -16,8 +16,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { listAlbums, createAlbum, bulkAddAlbumItems } from '../api/albums.ts';
 import type { AlbumSummary, BulkAlbumItemsResult } from '../api/albums.ts';
-import { colors, radii, spacing, touch, type as typeRoles } from '../ui/tokens';
+import { radii, spacing, touch, type as typeRoles } from '../ui/tokens';
 import { useI18n } from '../i18n';
+import { themed, useColors } from '../ui/theme.ts';
 
 export interface AddToAlbumSheetProps {
   visible: boolean;
@@ -33,6 +34,8 @@ export function AddToAlbumSheet({
   onCompleted,
   fileItemIds,
 }: AddToAlbumSheetProps): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [albums, setAlbums] = useState<AlbumSummary[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -181,9 +184,9 @@ export function AddToAlbumSheet({
                 ]}
               >
                 {busyId === '__create__' ? (
-                  <ActivityIndicator color="#fff" />
+                  <ActivityIndicator color={colors.textOnAccent} />
                 ) : (
-                  <Ionicons name="checkmark" size={20} color="#fff" />
+                  <Ionicons name="checkmark" size={20} color={colors.textOnAccent} />
                 )}
               </Pressable>
             </>
@@ -204,71 +207,73 @@ export function AddToAlbumSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  sheet: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    paddingTop: spacing.l,
-    paddingHorizontal: spacing.l,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: touch.minSize - 6,
-  },
-  title: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
-  count: { ...typeRoles.secondary, marginTop: spacing.s },
-  loading: { flex: 1 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.m,
-    paddingVertical: spacing.m,
-    minHeight: touch.minSize - 4,
-  },
-  rowName: {
-    flex: 1,
-    fontSize: 15,
-    color: colors.textPrimary,
-  },
-  empty: {
-    fontSize: 13,
-    color: colors.textTertiary,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
-  createArea: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.separator,
-    paddingTop: spacing.s,
-    paddingBottom: spacing.xl,
-  },
-  newRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.m,
-    minHeight: touch.minSize,
-  },
-  newRowText: { color: colors.accent, fontWeight: '600', fontSize: 15 },
-  input: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: colors.separator,
-    borderRadius: radii.m,
-    paddingHorizontal: spacing.m,
-    minHeight: touch.minSize - 6,
-    backgroundColor: colors.canvas,
-    color: colors.textPrimary,
-  },
-  createBtn: {
-    width: touch.minSize - 4,
-    height: touch.minSize - 4,
-    borderRadius: radii.round,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disabledBtn: { backgroundColor: colors.accentDisabled },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    sheet: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      paddingTop: spacing.l,
+      paddingHorizontal: spacing.l,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      minHeight: touch.minSize - 6,
+    },
+    title: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+    count: { ...typeRoles.secondary, color: colors.textSecondary, marginTop: spacing.s },
+    loading: { flex: 1 },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.m,
+      paddingVertical: spacing.m,
+      minHeight: touch.minSize - 4,
+    },
+    rowName: {
+      flex: 1,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    empty: {
+      fontSize: 13,
+      color: colors.textTertiary,
+      textAlign: 'center',
+      marginTop: spacing.xl,
+    },
+    createArea: {
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+      paddingTop: spacing.s,
+      paddingBottom: spacing.xl,
+    },
+    newRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.m,
+      minHeight: touch.minSize,
+    },
+    newRowText: { color: colors.accent, fontWeight: '600', fontSize: 15 },
+    input: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.separator,
+      borderRadius: radii.m,
+      paddingHorizontal: spacing.m,
+      minHeight: touch.minSize - 6,
+      backgroundColor: colors.canvas,
+      color: colors.textPrimary,
+    },
+    createBtn: {
+      width: touch.minSize - 4,
+      height: touch.minSize - 4,
+      borderRadius: radii.round,
+      backgroundColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    disabledBtn: { backgroundColor: colors.accentDisabled },
+    pressed: { opacity: 0.7 },
+  }),
+);

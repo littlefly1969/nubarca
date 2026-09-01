@@ -327,6 +327,16 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'chips.inert': 'not applied to the visual search',
   'filters.semanticNotice': 'Visual search ranks by content: some filters do not apply.',
 
+  'settings.title': 'Settings',
+  'settings.open': 'Settings',
+  'settings.appearance': 'Appearance',
+  'settings.theme': 'Theme',
+  'settings.theme.dark': 'Dark',
+  'settings.theme.light': 'Light',
+  'settings.theme.system': 'System',
+  'settings.themeSystemHint': 'Follows the phone’s theme.',
+  'settings.account': 'Account',
+
 };
 
 export default en;

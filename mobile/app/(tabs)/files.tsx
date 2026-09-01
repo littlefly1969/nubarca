@@ -14,8 +14,10 @@ import {
   type FolderSummary,
 } from '../../src/api/folders.ts';
 import { smallThumbnailPath, posterPath } from '../../src/api/videos.ts';
-import { colors, radii, spacing, touch } from '../../src/ui/tokens';
+import { radii, spacing, touch } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { themed, useColors } from '../../src/ui/theme.ts';
+import { media } from '../../src/ui/palette.ts';
 
 interface Crumb {
   id: string | null;
@@ -29,6 +31,8 @@ function isVideoFile(file: FileSummary): boolean {
 }
 
 export default function Files(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
 
@@ -217,6 +221,7 @@ function FileRow({
   file: FileSummary;
   onPress: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   const video = isVideoFile(file);
   return (
     <Pressable
@@ -233,7 +238,7 @@ function FileRow({
         />
         {video && (
           <View style={styles.playBadge}>
-            <Ionicons name="play" size={12} color="#fff" />
+            <Ionicons name="play" size={12} color={media.text} />
           </View>
         )}
       </View>
@@ -244,66 +249,68 @@ function FileRow({
   );
 }
 
-const styles = StyleSheet.create({
-  breadcrumbBar: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
-    backgroundColor: colors.surface,
-  },
-  breadcrumbContent: {
-    paddingHorizontal: spacing.l,
-    paddingBottom: spacing.s,
-    alignItems: 'center',
-  },
-  crumbWrap: { flexDirection: 'row', alignItems: 'center' },
-  crumbSep: { color: colors.textTertiary, marginHorizontal: 6 },
-  crumb: { color: colors.accent, fontSize: 13, maxWidth: 160 },
-  crumbCurrent: {
-    color: colors.textPrimary,
-    fontWeight: '700',
-    fontSize: 13,
-    maxWidth: 180,
-  },
-  listContent: { paddingBottom: spacing.xl },
-  loadingMore: {
-    textAlign: 'center',
-    paddingVertical: spacing.m,
-    color: colors.textTertiary,
-  },
-  folderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.m,
-    paddingVertical: spacing.m,
-    paddingHorizontal: spacing.l,
-    minHeight: touch.minSize,
-  },
-  folderName: { flex: 1, fontSize: 15, color: colors.textPrimary },
-  fileRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.m,
-    paddingVertical: spacing.s,
-    paddingHorizontal: spacing.l,
-    minHeight: touch.minSize,
-  },
-  rowThumb: {
-    width: 52,
-    height: 40,
-    borderRadius: radii.s,
-    backgroundColor: colors.tilePlaceholder,
-  },
-  playBadge: {
-    position: 'absolute',
-    right: 2,
-    bottom: 2,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: 'rgba(10,15,26,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fileName: { flex: 1, fontSize: 14, color: colors.textPrimary },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    breadcrumbBar: {
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+      backgroundColor: colors.surface,
+    },
+    breadcrumbContent: {
+      paddingHorizontal: spacing.l,
+      paddingBottom: spacing.s,
+      alignItems: 'center',
+    },
+    crumbWrap: { flexDirection: 'row', alignItems: 'center' },
+    crumbSep: { color: colors.textTertiary, marginHorizontal: 6 },
+    crumb: { color: colors.accent, fontSize: 13, maxWidth: 160 },
+    crumbCurrent: {
+      color: colors.textPrimary,
+      fontWeight: '700',
+      fontSize: 13,
+      maxWidth: 180,
+    },
+    listContent: { paddingBottom: spacing.xl },
+    loadingMore: {
+      textAlign: 'center',
+      paddingVertical: spacing.m,
+      color: colors.textTertiary,
+    },
+    folderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.m,
+      paddingVertical: spacing.m,
+      paddingHorizontal: spacing.l,
+      minHeight: touch.minSize,
+    },
+    folderName: { flex: 1, fontSize: 15, color: colors.textPrimary },
+    fileRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.m,
+      paddingVertical: spacing.s,
+      paddingHorizontal: spacing.l,
+      minHeight: touch.minSize,
+    },
+    rowThumb: {
+      width: 52,
+      height: 40,
+      borderRadius: radii.s,
+      backgroundColor: colors.tilePlaceholder,
+    },
+    playBadge: {
+      position: 'absolute',
+      right: 2,
+      bottom: 2,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: media.scrim,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    fileName: { flex: 1, fontSize: 14, color: colors.textPrimary },
+    pressed: { opacity: 0.7 },
+  }),
+);

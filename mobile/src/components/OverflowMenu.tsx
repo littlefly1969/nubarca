@@ -15,7 +15,7 @@ import React, { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme.ts';
 
 export interface OverflowAction {
   id: string;
@@ -26,6 +26,8 @@ export interface OverflowAction {
 }
 
 export function OverflowMenu({ actions }: { actions: OverflowAction[] }): React.JSX.Element | null {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   if (actions.length === 0) return null;
@@ -72,7 +74,7 @@ export function OverflowMenu({ actions }: { actions: OverflowAction[] }): React.
                   <Ionicons
                     name={action.icon}
                     size={20}
-                    color={action.destructive === true ? '#B4344B' : colors.textSecondary}
+                    color={action.destructive === true ? colors.danger : colors.textSecondary}
                   />
                 )}
                 <Text
@@ -90,19 +92,21 @@ export function OverflowMenu({ actions }: { actions: OverflowAction[] }): React.
   );
 }
 
-const styles = StyleSheet.create({
-  trigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(10,15,26,0.35)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    paddingVertical: 8,
-    paddingBottom: 28,
-  },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 22, paddingVertical: 15 },
-  rowPressed: { backgroundColor: '#F1F4F9' },
-  rowText: { fontSize: 16, color: colors.textPrimary, flexShrink: 1 },
-  destructive: { color: '#B4344B' },
-  pressed: { opacity: 0.6 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    trigger: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+    backdrop: { flex: 1, backgroundColor: colors.scrim, justifyContent: 'flex-end' },
+    sheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 18,
+      borderTopRightRadius: 18,
+      paddingVertical: 8,
+      paddingBottom: 28,
+    },
+    row: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 22, paddingVertical: 15 },
+    rowPressed: { backgroundColor: colors.surfaceMuted },
+    rowText: { fontSize: 16, color: colors.textPrimary, flexShrink: 1 },
+    destructive: { color: colors.danger },
+    pressed: { opacity: 0.6 },
+  }),
+);

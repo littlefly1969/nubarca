@@ -1,58 +1,12 @@
-// Mobile design tokens — one small source of visual truth.
+// Mobile design tokens — the parts of the visual language that do NOT depend
+// on the theme: rhythm, shape, type roles, touch targets, grid math.
 //
-// The six base colors are the approved NubArca brand palette (docs/brand.md),
-// verbatim. Everything else is a semantic role mapped onto them, mirroring how
-// the web frontend maps --brand-* onto semantic tokens. Screens consume ONLY
-// the semantic layer.
+// COLOUR LIVES IN palette.ts AND IS REACHED THROUGH useColors()/themed().
+// It is deliberately not re-exported here: a module-level `colors` constant
+// cannot follow a theme switch, and having one available made it the path of
+// least resistance. Screens consume ONLY the semantic layer, never a hex.
 
 import { Platform } from 'react-native';
-
-// Brand palette — never referenced directly by screens.
-const brand = {
-  midnightNavy: '#0A0F1A',
-  deepBlue: '#0F1E3A',
-  electricBlue: '#1565FF',
-  cyanGlow: '#00D4FF',
-  softViolet: '#9A6CFF',
-  cloudWhite: '#F5F7FB',
-} as const;
-
-// Semantic tokens (light chrome; the media viewer uses its own dark surface).
-export const colors = {
-  // Surfaces
-  canvas: brand.cloudWhite,
-  surface: '#FFFFFF',
-  surfaceMuted: '#EEF1F6',
-  separator: '#E2E6EE',
-
-  // Text
-  textPrimary: brand.midnightNavy,
-  textSecondary: '#5A6472',
-  textTertiary: '#9AA3B2',
-  textOnAccent: '#FFFFFF',
-
-  // Actions & accents
-  accent: brand.electricBlue,
-  accentPressed: '#0F51CC',
-  accentDisabled: '#B9CBF5',
-  focusRing: brand.cyanGlow,
-
-  // Feedback
-  danger: '#C63838',
-  dangerPressed: '#A32B2B',
-  dangerSurface: '#FBEBEB',
-  warningSurface: '#FFF6E0',
-  warningText: '#7A5B00',
-
-  // Media surfaces (viewer / player are always dark)
-  mediaBackground: brand.midnightNavy,
-  mediaChrome: 'rgba(10, 15, 26, 0.72)',
-  mediaText: brand.cloudWhite,
-
-  // Tile overlays
-  overlayScrim: 'rgba(10, 15, 26, 0.55)',
-  tilePlaceholder: '#E4E8EF',
-} as const;
 
 export const spacing = {
   xs: 4,
@@ -70,13 +24,16 @@ export const radii = {
   round: 999,
 } as const;
 
-// Type roles, not font sizes per screen. `allowFontScaling` stays default
-// (true) everywhere — text scaling is an accessibility requirement.
+// Type roles: a SIZE and a WEIGHT, never a colour. A role that carried its own
+// colour could not be reused across a light sheet and a dark viewer, and each
+// caller would have had to override it — which is how a role stops being one.
+// `allowFontScaling` stays default (true) everywhere: text scaling is an
+// accessibility requirement.
 export const type = {
-  title: { fontSize: 22, fontWeight: '700' as const, color: colors.textPrimary },
-  sectionTitle: { fontSize: 15, fontWeight: '700' as const, color: colors.textPrimary },
-  body: { fontSize: 15, fontWeight: '400' as const, color: colors.textPrimary },
-  secondary: { fontSize: 13, fontWeight: '400' as const, color: colors.textSecondary },
+  title: { fontSize: 22, fontWeight: '700' as const },
+  sectionTitle: { fontSize: 15, fontWeight: '700' as const },
+  body: { fontSize: 15, fontWeight: '400' as const },
+  secondary: { fontSize: 13, fontWeight: '400' as const },
   badge: { fontSize: 11, fontWeight: '600' as const },
 };
 

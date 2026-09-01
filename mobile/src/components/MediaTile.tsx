@@ -8,9 +8,11 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthedImage } from './AuthedImage';
-import { colors, radii, spacing, touch } from '../ui/tokens';
+import { radii, spacing, touch } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import type { MediaItem } from '../api/media';
+import { themed } from '../ui/theme.ts';
+import { media } from '../ui/palette.ts';
 
 export interface MediaTileProps {
   item: MediaItem;
@@ -36,6 +38,7 @@ export function MediaTile({
   onPress,
   onLongPress,
 }: MediaTileProps): React.JSX.Element {
+  const styles = useStyles();
   const { t } = useI18n();
   const isVideo = item.kind === 'video';
   const syntheticPoster =
@@ -95,86 +98,88 @@ export function MediaTile({
   );
 }
 
-const styles = StyleSheet.create({
-  tile: {
-    borderRadius: radii.s,
-    overflow: 'hidden',
-    backgroundColor: colors.tilePlaceholder,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  pressed: { opacity: 0.8 },
-  image: { width: '100%', height: '100%' },
-  playBadge: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(10, 15, 26, 0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  playGlyph: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    marginLeft: 2,
-  },
-  chip: {
-    position: 'absolute',
-    borderRadius: radii.s,
-    paddingHorizontal: spacing.s,
-    paddingVertical: 2,
-  },
-  durationChip: {
-    bottom: spacing.s,
-    right: spacing.s,
-    backgroundColor: 'rgba(10, 15, 26, 0.72)',
-  },
-  durationText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  syntheticChip: {
-    bottom: spacing.s,
-    left: spacing.s,
-    backgroundColor: 'rgba(10, 15, 26, 0.55)',
-    maxWidth: '86%',
-  },
-  syntheticText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-  },
-  dupChip: {
-    top: spacing.s,
-    left: spacing.s,
-    backgroundColor: 'rgba(154, 108, 255, 0.9)',
-  },
-  dupText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  checkRing: {
-    position: 'absolute',
-    top: spacing.s,
-    right: spacing.s,
-    width: touch.minSize - 12,
-    height: touch.minSize - 12,
-    borderRadius: 18,
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
-    backgroundColor: 'rgba(10, 15, 26, 0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkRingOn: {
-    backgroundColor: colors.accent,
-    borderColor: colors.accent,
-  },
-  checkMark: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 16,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    tile: {
+      borderRadius: radii.s,
+      overflow: 'hidden',
+      backgroundColor: colors.tilePlaceholder,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    pressed: { opacity: 0.8 },
+    image: { width: '100%', height: '100%' },
+    playBadge: {
+      position: 'absolute',
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: media.scrim,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    playGlyph: {
+      color: media.text,
+      fontSize: 16,
+      marginLeft: 2,
+    },
+    chip: {
+      position: 'absolute',
+      borderRadius: radii.s,
+      paddingHorizontal: spacing.s,
+      paddingVertical: 2,
+    },
+    durationChip: {
+      bottom: spacing.s,
+      right: spacing.s,
+      backgroundColor: media.chrome,
+    },
+    durationText: {
+      color: media.text,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    syntheticChip: {
+      bottom: spacing.s,
+      left: spacing.s,
+      backgroundColor: media.scrim,
+      maxWidth: '86%',
+    },
+    syntheticText: {
+      color: media.text,
+      fontSize: 10,
+    },
+    dupChip: {
+      top: spacing.s,
+      left: spacing.s,
+      backgroundColor: media.highlight,
+    },
+    dupText: {
+      color: media.text,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    checkRing: {
+      position: 'absolute',
+      top: spacing.s,
+      right: spacing.s,
+      width: touch.minSize - 12,
+      height: touch.minSize - 12,
+      borderRadius: 18,
+      borderWidth: 2,
+      borderColor: media.text,
+      backgroundColor: media.scrimSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    checkRingOn: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    checkMark: {
+      color: media.text,
+      fontWeight: '700',
+      fontSize: 16,
+    },
+  }),
+);

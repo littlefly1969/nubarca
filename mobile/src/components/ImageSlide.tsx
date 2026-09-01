@@ -44,6 +44,7 @@ import {
   maxTranslation,
   type Size,
 } from '../media/zoomTransform';
+import { media } from '../ui/palette.ts';
 
 const NO_SIZE: Size = { width: 0, height: 0 };
 
@@ -245,6 +246,6 @@ export { fittedSize, maxTranslation };
 
 const styles = StyleSheet.create({
   full: { width: '100%', height: '100%' },
-  slide: { flex: 1, backgroundColor: '#0A0F1A' },
+  slide: { flex: 1, backgroundColor: media.background },
   zoomArea: { alignItems: 'center', justifyContent: 'center' },
 });

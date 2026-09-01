@@ -12,8 +12,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { colors, radii, spacing, touch } from '../ui/tokens';
+import { radii, spacing, touch } from '../ui/tokens';
 import { useI18n } from '../i18n';
+import { themed, useColors } from '../ui/theme.ts';
 
 export interface NamePromptModalProps {
   visible: boolean;
@@ -37,6 +38,8 @@ export function NamePromptModal({
   onCancel,
   onSubmit,
 }: NamePromptModalProps): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? '');
@@ -144,64 +147,66 @@ export function NamePromptModal({
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(10, 15, 26, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.xl,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: colors.surface,
-    borderRadius: radii.l,
-    padding: spacing.xl,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: colors.textPrimary,
-    marginBottom: spacing.l,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.separator,
-    borderRadius: radii.m,
-    paddingHorizontal: spacing.m,
-    minHeight: touch.minSize - 6,
-    backgroundColor: colors.canvas,
-    color: colors.textPrimary,
-    marginBottom: spacing.m,
-  },
-  description: {
-    minHeight: touch.minSize + 12,
-    textAlignVertical: 'top',
-    paddingTop: spacing.m,
-  },
-  actions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing.s,
-    marginTop: spacing.s,
-  },
-  errorText: {
-    color: colors.danger,
-    fontSize: 12,
-    marginTop: spacing.s,
-  },
-  btn: {
-    minWidth: 88,
-    minHeight: touch.minSize - 8,
-    borderRadius: radii.m,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.l,
-  },
-  primaryBtn: { backgroundColor: colors.accent },
-  disabled: { backgroundColor: colors.accentDisabled },
-  cancelText: { color: colors.textSecondary, fontWeight: '600' },
-  saveText: { color: colors.textOnAccent, fontWeight: '600' },
-  pressed: { opacity: 0.75 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: colors.scrim,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: spacing.xl,
+    },
+    card: {
+      width: '100%',
+      maxWidth: 420,
+      backgroundColor: colors.surface,
+      borderRadius: radii.l,
+      padding: spacing.xl,
+    },
+    title: {
+      fontSize: 17,
+      fontWeight: '700',
+      color: colors.textPrimary,
+      marginBottom: spacing.l,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.separator,
+      borderRadius: radii.m,
+      paddingHorizontal: spacing.m,
+      minHeight: touch.minSize - 6,
+      backgroundColor: colors.canvas,
+      color: colors.textPrimary,
+      marginBottom: spacing.m,
+    },
+    description: {
+      minHeight: touch.minSize + 12,
+      textAlignVertical: 'top',
+      paddingTop: spacing.m,
+    },
+    actions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: spacing.s,
+      marginTop: spacing.s,
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 12,
+      marginTop: spacing.s,
+    },
+    btn: {
+      minWidth: 88,
+      minHeight: touch.minSize - 8,
+      borderRadius: radii.m,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.l,
+    },
+    primaryBtn: { backgroundColor: colors.accent },
+    disabled: { backgroundColor: colors.accentDisabled },
+    cancelText: { color: colors.textSecondary, fontWeight: '600' },
+    saveText: { color: colors.textOnAccent, fontWeight: '600' },
+    pressed: { opacity: 0.75 },
+  }),
+);

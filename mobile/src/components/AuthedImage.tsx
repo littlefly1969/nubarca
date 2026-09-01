@@ -18,7 +18,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { loadImage } from '../media/imageLoader';
-import { colors } from '../ui/tokens';
+import { themed } from '../ui/theme.ts';
 
 export function AuthedImage({
   path,
@@ -37,6 +37,7 @@ export function AuthedImage({
   // viewport alone. Absent for every call site that only displays an image.
   onNaturalSize?: (size: { width: number; height: number }) => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   const [uri, setUri] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -83,14 +84,16 @@ export function AuthedImage({
   );
 }
 
-const styles = StyleSheet.create({
-  placeholder: {
-    backgroundColor: colors.tilePlaceholder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderGlyph: {
-    fontSize: 22,
-    color: colors.textTertiary,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    placeholder: {
+      backgroundColor: colors.tilePlaceholder,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    placeholderGlyph: {
+      fontSize: 22,
+      color: colors.textTertiary,
+    },
+  }),
+);

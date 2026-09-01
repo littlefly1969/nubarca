@@ -48,6 +48,11 @@ module.exports = {
     slug: 'nubarca-mobile',
     version: release.version,
     orientation: 'default',
+    // The app has its OWN theme (src/ui/theme.tsx) and offers `system` as one
+    // of the three choices. Without 'automatic', Expo pins the native shell to
+    // light and useColorScheme() answers 'light' forever — the `system` option
+    // would silently be a second light option.
+    userInterfaceStyle: 'automatic',
     platforms: ['ios', 'android'],
     scheme: 'nubarca',
     icon: './assets/brand/nubarca-expo-app-icon-1024.png',

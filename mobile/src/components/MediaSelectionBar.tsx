@@ -16,7 +16,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import type { MediaSelectionCapabilities } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme.ts';
 
 export interface SelectionAction {
   id: 'add-to-album' | 'trash' | 'restore' | 'remove-from-album';
@@ -51,6 +51,8 @@ export function MediaSelectionBar({
   onRemoveFromAlbum?: () => void;
   onCancel: () => void;
 }): React.JSX.Element | null {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   if (!selecting) return null;
 
@@ -138,7 +140,7 @@ export function MediaSelectionBar({
             <Ionicons
               name={action.icon}
               size={20}
-              color={action.destructive === true ? '#B4344B' : colors.accent}
+              color={action.destructive === true ? colors.danger : colors.accent}
             />
             <Text
               style={[styles.actionLabel, action.destructive === true && styles.destructive]}
@@ -153,25 +155,27 @@ export function MediaSelectionBar({
   );
 }
 
-const styles = StyleSheet.create({
-  bar: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
-    backgroundColor: '#fff', paddingBottom: 20, paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E2E7EF',
-  },
-  countRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 6,
-  },
-  count: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-  hint: { fontSize: 14, color: colors.textTertiary, flexShrink: 1 },
-  actions: { paddingHorizontal: 12, gap: 8 },
-  action: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 14, paddingVertical: 10,
-    borderRadius: 12, backgroundColor: '#F1F4F9',
-  },
-  actionLabel: { fontSize: 14, color: colors.accent },
-  destructive: { color: '#B4344B' },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    bar: {
+      position: 'absolute', left: 0, right: 0, bottom: 0,
+      backgroundColor: colors.surface, paddingBottom: 20, paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator,
+    },
+    countRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16, paddingBottom: 6,
+    },
+    count: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+    hint: { fontSize: 14, color: colors.textTertiary, flexShrink: 1 },
+    actions: { paddingHorizontal: 12, gap: 8 },
+    action: {
+      flexDirection: 'row', alignItems: 'center', gap: 8,
+      paddingHorizontal: 14, paddingVertical: 10,
+      borderRadius: 12, backgroundColor: colors.surfaceMuted,
+    },
+    actionLabel: { fontSize: 14, color: colors.accent },
+    destructive: { color: colors.danger },
+    pressed: { opacity: 0.7 },
+  }),
+);

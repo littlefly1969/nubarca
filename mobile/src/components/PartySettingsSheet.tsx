@@ -63,7 +63,7 @@ import {
 import { getBaseUrl } from '../api/client';
 import { AuthedImage } from './AuthedImage';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme.ts';
 
 const MESSAGE_ACTION_LABELS: Record<PartyMessageAction, string> = {
   approve: 'party.approve',
@@ -87,6 +87,7 @@ function NumberRow({
   invalid: boolean;
   onChange: (next: number | null) => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <View style={styles.numberRow}>
       <View style={styles.numberText}>
@@ -120,6 +121,8 @@ export function PartySettingsSheet({
   visible: boolean;
   onClose: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [status, setStatus] = useState<AlbumPartyStatus | null>(null);
   const [failed, setFailed] = useState(false);
@@ -239,7 +242,7 @@ export function PartySettingsSheet({
                   onPress={() => { void Share.share({ message: guestUrl }); }}
                   style={({ pressed }) => [styles.shareBtn, pressed && styles.pressed]}
                 >
-                  <Ionicons name="share-outline" size={18} color="#fff" />
+                  <Ionicons name="share-outline" size={18} color={colors.textOnAccent} />
                   <Text style={styles.shareText}>{t('party.share')}</Text>
                 </Pressable>
               </View>
@@ -416,7 +419,7 @@ export function PartySettingsSheet({
                           }}
                           style={styles.iconAction}
                         >
-                          <Ionicons name="close" size={20} color="#B4344B" />
+                          <Ionicons name="close" size={20} color={colors.danger} />
                         </Pressable>
                       </>
                     )}
@@ -478,66 +481,69 @@ export function PartySettingsSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff', paddingTop: 48 },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 8,
-  },
-  title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
-  body: { paddingHorizontal: 16, paddingBottom: 32, gap: 12 },
-  section: {
-    fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase',
-    marginTop: 20, marginBottom: 4,
-  },
-  group: { gap: 8 },
-  groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
-  switchRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: 6,
-  },
-  rowLabel: { fontSize: 15, color: colors.textPrimary },
-  rowHint: { fontSize: 12, color: colors.textTertiary },
-  numberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
-  numberText: { flex: 1 },
-  numberInput: {
-    width: 92, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
-    backgroundColor: '#F1F4F9', fontSize: 15, textAlign: 'right',
-  },
-  invalid: { backgroundColor: '#FBE9EC', color: '#B4344B' },
-  url: { fontSize: 13, color: colors.textSecondary },
-  shareBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
-  },
-  shareText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  save: {
-    backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
-    alignItems: 'center', marginTop: 8,
-  },
-  saveText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  uploadRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
-  uploadThumb: { width: 48, height: 48, borderRadius: 8 },
-  uploadName: { flex: 1, fontSize: 14, color: colors.textPrimary },
-  iconAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  messageRow: {
-    backgroundColor: '#F7F9FC', borderRadius: 12, padding: 12, gap: 8, marginBottom: 4,
-  },
-  messageHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  messageAuthor: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
-  heroTag: {
-    fontSize: 11, color: '#fff', backgroundColor: colors.accent,
-    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, overflow: 'hidden',
-  },
-  messageText: { fontSize: 15, color: colors.textPrimary },
-  messageActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  messageAction: {
-    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#E8EEFB',
-  },
-  messageActionText: { fontSize: 13, color: colors.accent },
-  destructive: { backgroundColor: '#FBE9EC' },
-  destructiveText: { color: '#B4344B' },
-  empty: { textAlign: 'center', color: colors.textTertiary, paddingVertical: 16 },
-  loading: { marginTop: 32 },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surface, paddingTop: 48 },
+    header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16, paddingBottom: 8,
+    },
+    title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
+    body: { paddingHorizontal: 16, paddingBottom: 32, gap: 12 },
+    section: {
+      fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase',
+      marginTop: 20, marginBottom: 4,
+    },
+    group: { gap: 8 },
+    groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
+    switchRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingVertical: 6,
+    },
+    rowLabel: { fontSize: 15, color: colors.textPrimary },
+    rowHint: { fontSize: 12, color: colors.textTertiary },
+    numberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+    numberText: { flex: 1 },
+    numberInput: {
+      width: 92, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10,
+      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
+      textAlign: 'right',
+    },
+    invalid: { backgroundColor: colors.dangerSurface, color: colors.danger },
+    url: { fontSize: 13, color: colors.textSecondary },
+    shareBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+      backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
+    },
+    shareText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
+    save: {
+      backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
+      alignItems: 'center', marginTop: 8,
+    },
+    saveText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
+    uploadRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+    uploadThumb: { width: 48, height: 48, borderRadius: 8 },
+    uploadName: { flex: 1, fontSize: 14, color: colors.textPrimary },
+    iconAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+    messageRow: {
+      backgroundColor: colors.surfaceMuted, borderRadius: 12, padding: 12, gap: 8, marginBottom: 4,
+    },
+    messageHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    messageAuthor: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
+    heroTag: {
+      fontSize: 11, color: colors.textOnAccent, backgroundColor: colors.accent,
+      paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, overflow: 'hidden',
+    },
+    messageText: { fontSize: 15, color: colors.textPrimary },
+    messageActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    messageAction: {
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.accentSubtle,
+    },
+    messageActionText: { fontSize: 13, color: colors.accent },
+    destructive: { backgroundColor: colors.dangerSurface },
+    destructiveText: { color: colors.danger },
+    empty: { textAlign: 'center', color: colors.textTertiary, paddingVertical: 16 },
+    loading: { marginTop: 32 },
+    pressed: { opacity: 0.7 },
+  }),
+);

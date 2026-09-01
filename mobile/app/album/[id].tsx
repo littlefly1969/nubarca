@@ -4,7 +4,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../src/ui/tokens';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
 import { OverflowMenu } from '../../src/components/OverflowMenu';
@@ -36,10 +35,12 @@ import { MediaFilterChips } from '../../src/components/MediaFilterChips';
 import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
 import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useI18n } from '../../src/i18n';
+import { useColors } from '../../src/ui/theme.ts';
 
 const PAGE_SIZE = 60;
 
 export default function AlbumDetail(): React.JSX.Element {
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();

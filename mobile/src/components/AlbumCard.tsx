@@ -5,9 +5,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthedImage } from './AuthedImage';
-import { colors, radii, spacing, type } from '../ui/tokens';
+import { radii, spacing, type } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import type { AlbumSummary } from '../api/albums';
+import { themed } from '../ui/theme.ts';
 
 export function AlbumCard({
   album,
@@ -20,6 +21,7 @@ export function AlbumCard({
   onPress: () => void;
   onLongPress?: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   const { t } = useI18n();
   const covers = album.coverItems.slice(0, 4);
   const photoLabel = t('albums.photoCount', { count: album.photoCount });
@@ -64,40 +66,44 @@ export function AlbumCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    marginBottom: spacing.l,
-    marginHorizontal: spacing.xs,
-  },
-  pressed: { opacity: 0.8 },
-  mosaic: {
-    borderRadius: radii.l,
-    overflow: 'hidden',
-    backgroundColor: colors.tilePlaceholder,
-  },
-  mosaicPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderGlyph: {
-    fontSize: 34,
-    color: colors.textTertiary,
-  },
-  cellFull: { width: '100%', height: '100%' },
-  grid2x2: {
-    flex: 1,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  cell: { width: '50%', height: '50%' },
-  name: {
-    ...type.body,
-    fontWeight: '600',
-    marginTop: spacing.s,
-  },
-  counts: {
-    ...type.secondary,
-    marginTop: 2,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    card: {
+      marginBottom: spacing.l,
+      marginHorizontal: spacing.xs,
+    },
+    pressed: { opacity: 0.8 },
+    mosaic: {
+      borderRadius: radii.l,
+      overflow: 'hidden',
+      backgroundColor: colors.tilePlaceholder,
+    },
+    mosaicPlaceholder: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    placeholderGlyph: {
+      fontSize: 34,
+      color: colors.textTertiary,
+    },
+    cellFull: { width: '100%', height: '100%' },
+    grid2x2: {
+      flex: 1,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    },
+    cell: { width: '50%', height: '50%' },
+    name: {
+      ...type.body,
+      color: colors.textPrimary,
+      fontWeight: '600',
+      marginTop: spacing.s,
+    },
+    counts: {
+      ...type.secondary,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+  }),
+);

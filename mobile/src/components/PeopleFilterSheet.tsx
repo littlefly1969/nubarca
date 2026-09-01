@@ -31,7 +31,7 @@ import { listPeopleForFilter, type PersonSummary } from '../api/people';
 import { AuthedImage } from './AuthedImage';
 import { personAvatarPath } from '@nubarca/contracts';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme.ts';
 
 export function PeopleFilterSheet({
   visible,
@@ -44,6 +44,8 @@ export function PeopleFilterSheet({
   onChange: (next: MediaWorkspaceFilters) => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [people, setPeople] = useState<PersonSummary[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -88,6 +90,7 @@ export function PeopleFilterSheet({
 
         <TextInput
           style={styles.search}
+          placeholderTextColor={colors.textTertiary}
           placeholder={t('filters.peopleSearch')}
           value={query}
           onChangeText={setQuery}
@@ -174,7 +177,7 @@ export function PeopleFilterSheet({
                       <Ionicons
                         name={target === 'include' ? 'add' : 'remove'}
                         size={18}
-                        color={side === target ? '#fff' : colors.textTertiary}
+                        color={side === target ? colors.textOnAccent : colors.textTertiary}
                       />
                     </Pressable>
                   ))}
@@ -188,44 +191,47 @@ export function PeopleFilterSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff', paddingTop: 48 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-  },
-  title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
-  search: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 10,
-    backgroundColor: '#F1F4F9',
-    fontSize: 15,
-  },
-  modeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
-  modeLabel: { color: colors.textTertiary, fontSize: 13, marginRight: 4 },
-  modeChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#F1F4F9' },
-  modeChipOn: { backgroundColor: colors.accent },
-  modeChipText: { fontSize: 13, color: colors.textSecondary },
-  modeChipTextOn: { color: '#fff' },
-  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 12 },
-  avatar: { width: 44, height: 44, borderRadius: 22 },
-  avatarEmpty: { backgroundColor: '#F1F4F9', alignItems: 'center', justifyContent: 'center' },
-  rowText: { flex: 1 },
-  name: { fontSize: 15, color: colors.textPrimary },
-  count: { fontSize: 12, color: colors.textTertiary },
-  sideBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center', backgroundColor: '#F1F4F9',
-  },
-  includeOn: { backgroundColor: colors.accent },
-  excludeOn: { backgroundColor: '#B4344B' },
-  loading: { marginTop: 32 },
-  empty: { textAlign: 'center', marginTop: 32, color: colors.textTertiary },
-  pressed: { opacity: 0.6 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surface, paddingTop: 48 },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+    },
+    title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
+    search: {
+      color: colors.textPrimary,
+      marginHorizontal: 16,
+      marginBottom: 12,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 10,
+      backgroundColor: colors.surfaceMuted,
+      fontSize: 15,
+    },
+    modeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 12 },
+    modeLabel: { color: colors.textTertiary, fontSize: 13, marginRight: 4 },
+    modeChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.surfaceMuted },
+    modeChipOn: { backgroundColor: colors.accent },
+    modeChipText: { fontSize: 13, color: colors.textSecondary },
+    modeChipTextOn: { color: colors.textOnAccent },
+    row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, gap: 12 },
+    avatar: { width: 44, height: 44, borderRadius: 22 },
+    avatarEmpty: { backgroundColor: colors.surfaceMuted, alignItems: 'center', justifyContent: 'center' },
+    rowText: { flex: 1 },
+    name: { fontSize: 15, color: colors.textPrimary },
+    count: { fontSize: 12, color: colors.textTertiary },
+    sideBtn: {
+      width: 36, height: 36, borderRadius: 18,
+      alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surfaceMuted,
+    },
+    includeOn: { backgroundColor: colors.accent },
+    excludeOn: { backgroundColor: colors.danger },
+    loading: { marginTop: 32 },
+    empty: { textAlign: 'center', marginTop: 32, color: colors.textTertiary },
+    pressed: { opacity: 0.6 },
+  }),
+);

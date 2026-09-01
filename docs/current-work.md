@@ -1062,6 +1062,22 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   chars, generated once per ledger row and reused across every retry, restart
   and ambiguous response; it is an operation identity, never content identity,
   and carries no account, asset, filename or inventory information.
+- **Mobile colour is a palette reached through a hook, never a module constant.**
+  `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
+  exports NO `colors`, so a stylesheet cannot capture one at import time and
+  then keep it through a theme switch. Screens write
+  `const useStyles = themed((colors) => StyleSheet.create({...}))` and call it
+  as a hook; a sheet is built at most once per palette. Viewer, player and
+  thumbnail-overlay colours are the exception and are static (`media` in the
+  same file): the viewer is dark in both themes because it frames the content,
+  not the app. `resolveTheme` in `themePreference.ts` is the same rule the web
+  uses — dark is the product default, an explicit choice always beats the OS,
+  and an unknown OS answer resolves to the default rather than to light.
+  `palette.test.ts` reads `docs/brand.md` and fails if the palette stops
+  agreeing with it, and asserts no source file outside `palette.ts` states a
+  colour of its own. `expo-system-ui` is a dependency because without it
+  Android ignores `userInterfaceStyle: 'automatic'` and the `system` option
+  would silently be a second light option.
 - **The mobile media route owns pager geometry and ordinary exit cleanup.**
   `/media/[id]` gives its horizontal list the available height and uses the
   list's own `onLayout` width — not the earlier window-dimension notification —

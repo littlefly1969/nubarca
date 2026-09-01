@@ -21,12 +21,14 @@ import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
 import { MediaSelectionBar } from '../../src/components/MediaSelectionBar';
 import { getMediaSelectionCapabilities } from '@nubarca/contracts';
 import { applyToSelection, moveToTrash, restoreFromTrash } from '../../src/api/mediaLifecycle';
-import { colors } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { themed, useColors } from '../../src/ui/theme.ts';
 
 const PAGE_SIZE = 60;
 
 export default function Photos(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
@@ -140,25 +142,12 @@ export default function Photos(): React.JSX.Element {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={t('common.signOut')}
-                onPress={() => {
-                  Alert.alert(
-                    t('common.signOut'),
-                    t('common.signOutConfirmBody'),
-                    [
-                      { text: t('albums.cancel'), style: 'cancel' },
-                      {
-                        text: t('common.signOut'),
-                        style: 'destructive',
-                        onPress: () => void session.logout(),
-                      },
-                    ],
-                  );
-                }}
+                accessibilityLabel={t('settings.open')}
+                onPress={() => router.push('/settings')}
                 style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                 hitSlop={4}
               >
-                <Ionicons name="log-out-outline" size={22} color={colors.accent} />
+                <Ionicons name="settings-outline" size={22} color={colors.accent} />
               </Pressable>
             </>
           )
@@ -254,13 +243,15 @@ export default function Photos(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { backgroundColor: '#F5F7FB' },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    screen: { backgroundColor: colors.canvas },
+    iconBtn: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pressed: { opacity: 0.7 },
+  }),
+);

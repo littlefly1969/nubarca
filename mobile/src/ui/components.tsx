@@ -12,7 +12,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radii, spacing, touch, type } from './tokens';
+import { radii, spacing, touch, type } from './tokens';
+import { themed } from '../ui/theme.ts';
 
 // ---------------------------------------------------------------------------
 // Screen: the standard page surface with safe-area padding.
@@ -23,6 +24,7 @@ export function Screen({
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }): React.JSX.Element {
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   return (
     <View
@@ -50,6 +52,7 @@ export function AppHeader({
   title: string;
   actions?: React.ReactNode;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <View style={styles.header}>
       <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
@@ -71,6 +74,7 @@ export function HeaderButton({
   disabled?: boolean;
   destructive?: boolean;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <Pressable
       accessibilityRole="button"
@@ -98,55 +102,60 @@ export function HeaderButton({
 
 // SectionTitle for grouped content.
 export function SectionTitle({ text }: { text: string }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <Text style={[type.sectionTitle, styles.sectionTitle]}>{text}</Text>
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: colors.canvas,
-  },
-  header: {
-    minHeight: touch.minSize,
-    paddingHorizontal: spacing.l,
-    paddingVertical: spacing.s + spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: colors.canvas,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.separator,
-  },
-  headerTitle: {
-    ...type.title,
-    flexShrink: 1,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.s,
-    marginLeft: spacing.m,
-  },
-  headerBtn: {
-    minHeight: touch.minSize - 8,
-    paddingHorizontal: spacing.m,
-    borderRadius: radii.m,
-    justifyContent: 'center',
-    backgroundColor: colors.surfaceMuted,
-  },
-  headerBtnPressed: { opacity: 0.7 },
-  headerBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.accent,
-  },
-  headerBtnDestructive: { color: colors.danger },
-  headerBtnDisabled: { color: colors.textTertiary },
-  sectionTitle: {
-    paddingHorizontal: spacing.l,
-    marginTop: spacing.l,
-    marginBottom: spacing.s,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.canvas,
+    },
+    header: {
+      minHeight: touch.minSize,
+      paddingHorizontal: spacing.l,
+      paddingVertical: spacing.s + spacing.xs,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.canvas,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.separator,
+    },
+    headerTitle: {
+      ...type.title,
+      color: colors.textPrimary,
+      flexShrink: 1,
+    },
+    headerActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s,
+      marginLeft: spacing.m,
+    },
+    headerBtn: {
+      minHeight: touch.minSize - 8,
+      paddingHorizontal: spacing.m,
+      borderRadius: radii.m,
+      justifyContent: 'center',
+      backgroundColor: colors.surfaceMuted,
+    },
+    headerBtnPressed: { opacity: 0.7 },
+    headerBtnText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.accent,
+    },
+    headerBtnDestructive: { color: colors.danger },
+    headerBtnDisabled: { color: colors.textTertiary },
+    sectionTitle: {
+      color: colors.textPrimary,
+      paddingHorizontal: spacing.l,
+      marginTop: spacing.l,
+      marginBottom: spacing.s,
+    },
+  }),
+);

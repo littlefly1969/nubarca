@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { FilterChipDescriptor, FilterChipKind } from '../media/mediaFilterState';
 import type { PersonSummary } from '../api/people';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme.ts';
 
 function personLabel(
   ids: string[] | undefined,
@@ -48,6 +48,8 @@ export function MediaFilterChips({
   onRemove: (kind: FilterChipKind) => void;
   onClearAll: () => void;
 }): React.JSX.Element | null {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   if (chips.length === 0) return null;
 
@@ -157,24 +159,26 @@ export function MediaFilterChips({
   );
 }
 
-const styles = StyleSheet.create({
-  strip: { flexGrow: 0, maxHeight: 46 },
-  stripContent: { paddingHorizontal: 12, paddingVertical: 6, gap: 8, alignItems: 'center' },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E8EEFB',
-    borderRadius: 16,
-    paddingLeft: 12,
-    paddingRight: 8,
-    paddingVertical: 6,
-    maxWidth: 240,
-  },
-  chipText: { color: colors.accent, fontSize: 13, flexShrink: 1 },
-  inert: { backgroundColor: '#EEF0F4' },
-  inertText: { color: colors.textTertiary, textDecorationLine: 'line-through' },
-  chipIcon: { marginLeft: 4 },
-  clearAll: { paddingHorizontal: 10, paddingVertical: 6 },
-  clearAllText: { color: colors.textTertiary, fontSize: 13, textDecorationLine: 'underline' },
-  pressed: { opacity: 0.6 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    strip: { flexGrow: 0, maxHeight: 46 },
+    stripContent: { paddingHorizontal: 12, paddingVertical: 6, gap: 8, alignItems: 'center' },
+    chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.accentSubtle,
+      borderRadius: 16,
+      paddingLeft: 12,
+      paddingRight: 8,
+      paddingVertical: 6,
+      maxWidth: 240,
+    },
+    chipText: { color: colors.accent, fontSize: 13, flexShrink: 1 },
+    inert: { backgroundColor: colors.surfaceMuted },
+    inertText: { color: colors.textTertiary, textDecorationLine: 'line-through' },
+    chipIcon: { marginLeft: 4 },
+    clearAll: { paddingHorizontal: 10, paddingVertical: 6 },
+    clearAllText: { color: colors.textTertiary, fontSize: 13, textDecorationLine: 'underline' },
+    pressed: { opacity: 0.6 },
+  }),
+);
