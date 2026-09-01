@@ -1,8 +1,10 @@
 // Album detail: one coherent mixed photo/video surface.
 // Membership removal NEVER deletes files — bulk DELETE hits
 // /api/albums/{id}/items/bulk only, and the success notice says the files stay.
-import React, { useCallback, useState } from 'react';
-import { Alert } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Pressable, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../../src/ui/tokens';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
 import { OverflowMenu } from '../../src/components/OverflowMenu';
@@ -28,8 +30,11 @@ import {
   bulkRemoveAlbumItems,
 } from '../../src/api/albums.ts';
 import type { AlbumDetail } from '../../src/api/albums.ts';
-import { listAlbumMedia } from '../../src/api/media.ts';
 import type { MediaItem } from '../../src/api/media.ts';
+import { useMediaFilters } from '../../src/media/useMediaFilters';
+import { MediaFilterChips } from '../../src/components/MediaFilterChips';
+import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
+import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useI18n } from '../../src/i18n';
 
 const PAGE_SIZE = 60;
@@ -46,25 +51,27 @@ export default function AlbumDetail(): React.JSX.Element {
   const [renaming, setRenaming] = useState(false);
   const [partyOpen, setPartyOpen] = useState(false);
   const [sharingOpen, setSharingOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const fetcher = useCallback(
-    async (cursor: string | null, signal: AbortSignal) => {
-      return await listAlbumMedia(
-        albumId,
-        { kind: 'all', sort: 'datetaken', direction: 'desc', limit: PAGE_SIZE, cursor },
-        signal,
-      );
-    },
-    [albumId],
-  );
+  // The SAME filter model the library tabs use, told it is browsing an album.
+  // The shared model already knows what that means: album membership stops
+  // being offered (every item is a member) and a visual search is confined to
+  // this album rather than answered from the whole library.
+  const filters = useMediaFilters('all', PAGE_SIZE, { kind: 'album', albumId });
+  const { snapshot, refresh, loadMore, retryFailed } =
+    usePagedList<MediaItem>((i) => i.id, filters.fetchPage);
 
-  const { snapshot, refresh, loadMore, retryFailed } = usePagedList<MediaItem>((i) => i.id, fetcher);
-
+  const itemCountRef = useRef(0);
+  itemCountRef.current = snapshot.items.length;
   useFocusEffect(
     useCallback(() => {
       if (session.status !== 'authed') return;
       let cancelled = false;
-      void refresh();
+      // Same rule as the library tabs: a refresh replaces the accumulator with
+      // page one, so it is for a list that has nothing to lose.
+      if (shouldRefreshOnFocus({ itemCount: itemCountRef.current, stale: false })) {
+        void refresh();
+      }
       void getAlbum(albumId).then(
         (d) => {
           if (!cancelled) setDetail(d);
@@ -76,8 +83,19 @@ export default function AlbumDetail(): React.JSX.Element {
       return () => {
         cancelled = true;
       };
-    }, [session.status, albumId, refresh, fetcher]),
+    }, [session.status, albumId, refresh]),
   );
+
+  // A committed filter change is a new query generation: cursor dropped,
+  // accumulator cleared, selection released because its items may be gone.
+  const generation = filters.generation;
+  const firstGeneration = useRef(generation);
+  useEffect(() => {
+    if (generation === firstGeneration.current) return;
+    firstGeneration.current = generation;
+    selectionState.cancel();
+    void refresh();
+  }, [generation, refresh, selectionState]);
 
   if (session.status !== 'authed') {
     return <Redirect href="/login" />;
@@ -154,6 +172,19 @@ export default function AlbumDetail(): React.JSX.Element {
                screen — and the whole message-moderation surface behind it —
                became unreachable while being fully implemented. */
             <>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t('filters.open')}
+                onPress={() => setFiltersOpen(true)}
+                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
+                hitSlop={4}
+              >
+                <Ionicons
+                  name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
+                  size={20}
+                  color={colors.accent}
+                />
+              </Pressable>
               <HeaderButton
                 label={t('albumDetail.addMedia')}
                 onPress={() => router.push(`/album/${albumId}/add`)}
@@ -207,6 +238,14 @@ export default function AlbumDetail(): React.JSX.Element {
             </>
           )
         }
+      />
+
+      <MediaFilterChips
+        chips={filters.chips}
+        people={filters.people}
+        inert={filters.inert}
+        onRemove={filters.removeChip}
+        onClearAll={filters.clearAll}
       />
 
       {snapshot.phase === 'loading' && detail === null ? (
@@ -272,6 +311,16 @@ export default function AlbumDetail(): React.JSX.Element {
         onClose={() => setPartyOpen(false)}
       />
 
+      <MediaFilterSheet
+        visible={filtersOpen}
+        identity={filters.identity}
+        onApply={(next, sort, direction) => {
+          filters.apply(next, sort, direction);
+          setFiltersOpen(false);
+        }}
+        onClose={() => setFiltersOpen(false)}
+      />
+
       <NamePromptModal
         visible={renaming}
         title={t('albums.rename')}
@@ -290,3 +339,8 @@ export default function AlbumDetail(): React.JSX.Element {
   );
 }
 
+
+const styles = StyleSheet.create({
+  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  pressed: { opacity: 0.7 },
+});

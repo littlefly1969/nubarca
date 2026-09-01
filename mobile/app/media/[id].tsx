@@ -25,10 +25,11 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
-import { FlatList } from 'react-native';
+import { FlatList, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageSlide } from '../../src/components/ImageSlide';
 import { forgetAllPositions } from '../../src/media/videoPosition';
+import { applySystemBars, systemBarsFor } from '../../src/media/immersiveViewer';
 import { VideoSlide } from '../../src/components/VideoSlide';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
@@ -113,6 +114,27 @@ export default function MediaRoute(): React.JSX.Element {
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
+
+  // FULL SCREEN while the chrome is hidden, and the system bars back the
+  // moment it returns — hiding both at once would leave no visible way out.
+  // Android only; the module no-ops elsewhere.
+  useEffect(() => {
+    let controller: Parameters<typeof applySystemBars>[0] = null;
+    if (Platform.OS === 'android') {
+      // Imported lazily so a platform without the module never loads it.
+      controller = require('expo-navigation-bar') as NonNullable<typeof controller>;
+    }
+    void applySystemBars(
+      controller,
+      systemBarsFor({ viewerOpen: true, chromeVisible }),
+    );
+    // ALWAYS restored on the way out, including after an error: a viewer that
+    // left the phone immersive would have broken the rest of the app.
+    return () => {
+      void applySystemBars(controller, 'visible');
+    };
+  }, [chromeVisible]);
+
   // GESTURE OWNERSHIP (§4). The active photo slide reports whether it is at
   // rest; while it is zoomed the pager stops scrolling so a pan cannot page to
   // the neighbouring item, and the instant zoom returns to 1 paging is live
