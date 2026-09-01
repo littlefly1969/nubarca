@@ -247,6 +247,9 @@ const it = {
   'selection.failed': 'Operazione non riuscita.',
   'albums.showOnTv': 'Mostra sulla TV',
 
+  'filters.visual': 'Ricerca visiva',
+  'filters.visualHint': 'Cerca per contenuto della foto, non per nome file.',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

@@ -168,8 +168,28 @@ test('a remount resumes where it was, and never onto another video', async () =>
   // — the position has to be kept somewhere that outlives the slide.
   const slide = await sourceOf('VideoSlide.tsx');
   assert.match(slide, /rememberPosition\(uri, player\.currentTime\)/);
-  assert.match(slide, /restorablePosition\(/);
-  assert.match(slide, /recallPosition\(expoSource\.uri\)/);
+  assert.match(slide, /restorablePosition\(recallPosition\(uri\), uri, player\.duration/);
+});
+
+test('the restore waits for readiness, and is NOT in the creation callback', async () => {
+  // The first attempt at this fix put the restore in useVideoPlayer's setup
+  // callback. That runs when the player is CREATED — before the probe has
+  // resolved a source — and never again once expo-video replaces the source on
+  // the existing player. A restore written there can never fire, which is why
+  // rotating still restarted the video.
+  const slide = await sourceOf('VideoSlide.tsx');
+  const setup = slide.slice(
+    slide.indexOf('useVideoPlayer(expoSource'),
+    slide.indexOf('const [playerStatus'),
+  );
+  assert.doesNotMatch(setup, /restorablePosition|recallPosition|currentTime/);
+  assert.match(slide, /if \(uri === null \|\| nativeStatus !== 'readyToPlay'\) return;/);
+});
+
+test('the restore is one shot per source, so it cannot yank the playhead back', async () => {
+  const slide = await sourceOf('VideoSlide.tsx');
+  assert.match(slide, /if \(restoredForRef\.current === uri\) return;/);
+  assert.match(slide, /restoredForRef\.current = uri;/);
 });
 
 test('the position is recorded BEFORE the player is paused or released', async () => {

@@ -18,6 +18,7 @@ import type {
   MediaWorkspaceIdentity,
   MediaWorkspaceSource,
 } from '@nubarca/contracts';
+import { isSemanticActive } from '@nubarca/contracts';
 import {
   chipsFor,
   generationOf,
@@ -30,7 +31,12 @@ import {
   type FilterChipDescriptor,
   type FilterChipKind,
 } from './mediaFilterState.ts';
-import { listMedia, listAlbumMedia, type MediaListResponse } from '../api/media.ts';
+import {
+  listMedia,
+  listAlbumMedia,
+  searchSemanticMedia,
+  type MediaListResponse,
+} from '../api/media.ts';
 import { listPeopleForFilter, type PersonSummary } from '../api/people.ts';
 
 export interface MediaFiltersBinding {
@@ -66,8 +72,47 @@ export function useMediaFilters(
   identityRef.current = identity;
 
   const fetchPage = useCallback(
-    (cursor: string | null, signal: AbortSignal) => {
-      const query = pageQuery(identityRef.current, cursor, pageSize);
+    async (cursor: string | null, signal: AbortSignal): Promise<MediaListResponse> => {
+      const current = identityRef.current;
+
+      // SEMANTIC (§10) is a different backend operation, not a filter on the
+      // same one: relevance ranking carries its own cursor, so the unified
+      // listing cannot simply take a visual term. The separation the backend
+      // makes is preserved rather than flattened.
+      //
+      // `isSemanticActive` is the single place that knows WHERE a visual query
+      // applies — the semantic route is library-scoped, so inside an album it
+      // applies to the photo tab only. Asking it here means the sheet, the
+      // chips and this fetch can never disagree about whether it is on.
+      if (isSemanticActive(current)) {
+        const page = await searchSemanticMedia({
+          q: current.filters.photo.visualQuery.trim(),
+          kind: current.mediaKind,
+          limit: pageSize,
+          cursor,
+          favorite: current.filters.common.favorite ?? undefined,
+          minRating: current.filters.common.minRating ?? undefined,
+          dateTakenFrom: current.filters.common.dateTakenFrom || undefined,
+          dateTakenTo: current.filters.common.dateTakenTo || undefined,
+          albumMembership:
+            current.source.kind === 'library' ? current.filters.common.albumMembership : undefined,
+        }, signal);
+        // The grid renders media; the temporal evidence a video result carries
+        // is not something this list surface shows, so it is dropped here
+        // rather than smuggled through in a widened item type.
+        return {
+          items: page.items.map((result) => result.media),
+          limit: pageSize,
+          count: page.items.length,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+          total: page.total,
+          photoCount: 0,
+          videoCount: 0,
+        };
+      }
+
+      const query = pageQuery(current, cursor, pageSize);
       return albumId === null
         ? listMedia(query, signal)
         : listAlbumMedia(albumId, query, signal);

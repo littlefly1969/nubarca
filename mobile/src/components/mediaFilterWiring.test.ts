@@ -133,3 +133,20 @@ test('the People catalogue is not fetched for an unfiltered library', async () =
   const hook = await sourceOf('../media/useMediaFilters.ts');
   assert.match(hook, /if \(referenced\.length === 0\) return undefined;/);
 });
+
+test('visual search routes to the SEMANTIC endpoint, not the listing (§10)', async () => {
+  // Two different backend operations. Flattening them would mean either losing
+  // relevance ranking or sending a term the listing ignores.
+  const hook = await sourceOf('../media/useMediaFilters.ts');
+  assert.match(hook, /if \(isSemanticActive\(current\)\) \{/);
+  assert.match(hook, /searchSemanticMedia\(\{/);
+  assert.match(hook, /const query = pageQuery\(current, cursor, pageSize\);/);
+});
+
+test('the sheet offers visual search exactly where it applies', async () => {
+  // Asked of the shared rule, not restated: a control whose value the fetch
+  // would ignore must not be offered.
+  const sheet = await sourceOf('MediaFilterSheet.tsx');
+  assert.match(sheet, /\{semanticApplies\(draft\) && \(/);
+  assert.doesNotMatch(sheet, /source\.kind === 'library' \|\| kind === 'image'/);
+});

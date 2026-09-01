@@ -13,16 +13,26 @@
 // VideoItem (/api/videos) and are never sent on this surface.
 
 import { apiGet } from './client.ts';
-import type { ListMediaQuery, MediaListResponse } from '@nubarca/contracts';
+import type {
+  ListMediaQuery,
+  MediaListResponse,
+  SearchSemanticMediaQuery,
+  SemanticMediaSearchResponse,
+} from '@nubarca/contracts';
 import {
   MEDIA_LIST_PATH,
+  MEDIA_SEMANTIC_PATH,
   albumMediaPath,
   mediaQueryToParams,
+  semanticMediaQueryToParams,
   withQuery,
 } from '@nubarca/contracts';
 
 export type {
   ImageMediaItem,
+  SearchSemanticMediaQuery,
+  SemanticMediaResultItem,
+  SemanticMediaSearchResponse,
   ListMediaQuery,
   MediaItem,
   MediaKind,
@@ -51,6 +61,24 @@ export function listAlbumMedia(
 ): Promise<MediaListResponse> {
   return apiGet<MediaListResponse>(
     withQuery(albumMediaPath(albumId), mediaQueryToParams(query)),
+    signal,
+  );
+}
+
+/**
+ * Visual/semantic search (§10).
+ *
+ * A conceptually DIFFERENT backend operation from physical filtering, and it
+ * keeps its own route and its own query — one definition per operation, not one
+ * endpoint for everything. Relevance ranking has its own cursor, which is why
+ * the unified listing cannot simply carry a semantic term.
+ */
+export function searchSemanticMedia(
+  query: SearchSemanticMediaQuery,
+  signal?: AbortSignal,
+): Promise<SemanticMediaSearchResponse> {
+  return apiGet<SemanticMediaSearchResponse>(
+    withQuery(MEDIA_SEMANTIC_PATH, semanticMediaQueryToParams(query)),
     signal,
   );
 }

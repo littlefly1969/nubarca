@@ -239,6 +239,9 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'selection.failed': 'The action failed.',
   'albums.showOnTv': 'Show on TV',
 
+  'filters.visual': 'Visual search',
+  'filters.visualHint': 'Search by what the photo shows, not by file name.',
+
 };
 
 export default en;
