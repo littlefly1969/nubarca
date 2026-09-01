@@ -269,7 +269,7 @@ const useStyles = themed((colors) =>
       width: touch.minSize - 4,
       height: touch.minSize - 4,
       borderRadius: radii.round,
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       alignItems: 'center',
       justifyContent: 'center',
     },

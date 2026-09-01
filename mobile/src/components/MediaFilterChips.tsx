@@ -167,6 +167,8 @@ const useStyles = themed((colors) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.accentSubtle,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.accent,
       borderRadius: 16,
       paddingLeft: 12,
       paddingRight: 8,

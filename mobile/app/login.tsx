@@ -206,7 +206,7 @@ const useStyles = themed((colors) =>
     },
     button: {
       marginTop: spacing.xl,
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       borderRadius: radii.m,
       minHeight: touch.minSize,
       alignItems: 'center',

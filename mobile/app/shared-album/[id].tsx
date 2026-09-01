@@ -383,7 +383,7 @@ const useStyles = themed((colors) =>
       justifyContent: 'center',
       backgroundColor: colors.surface,
     },
-    chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+    chipOn: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
     chipText: { fontSize: 13, color: colors.textSecondary },
     chipTextOn: { color: colors.textOnAccent, fontWeight: '600' },
     listContent: {
@@ -423,7 +423,7 @@ const useStyles = themed((colors) =>
       width: 18,
       height: 18,
       borderRadius: 9,
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       alignItems: 'center',
       justifyContent: 'center',
     },

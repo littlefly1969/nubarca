@@ -100,3 +100,58 @@ test('no screen or component states a colour of its own', () => {
   }
   assert.deepEqual(offenders, [], `colour literals outside palette.ts:\n${offenders.join('\n')}`);
 });
+
+// WCAG relative luminance, so the palette's own promises are checked rather
+// than asserted. The brand document is explicit about contrast; a palette that
+// only claims to respect it is a palette nobody has measured.
+function contrast(a: string, b: string): number {
+  const channel = (hex: string, i: number): number => {
+    const v = parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = (hex: string): number =>
+    0.2126 * channel(hex, 0) + 0.7152 * channel(hex, 1) + 0.0722 * channel(hex, 2);
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+test('every text role clears WCAG AA on the surface it is read against', () => {
+  const AA = 4.5;
+  for (const theme of ['dark', 'light'] as const) {
+    const p = palettes[theme];
+    const pairs: [string, string, string][] = [
+      ['textPrimary on canvas', p.textPrimary, p.canvas],
+      ['textPrimary on surface', p.textPrimary, p.surface],
+      ['textSecondary on canvas', p.textSecondary, p.canvas],
+      ['textTertiary on canvas', p.textTertiary, p.canvas],
+      ['textTertiary on surfaceMuted', p.textTertiary, p.surfaceMuted],
+      ['accent on canvas', p.accent, p.canvas],
+      ['accent on surface', p.accent, p.surface],
+      // The chip case: an accent label on its own accent wash.
+      ['accent on accentSubtle', p.accent, p.accentSubtle],
+      // The fill case, and the reason accentStrong exists at all: white on the
+      // lighter accent TINT is 3.6:1, which docs/brand.md warns about by name.
+      ['textOnAccent on accentStrong', p.textOnAccent, p.accentStrong],
+      ['danger on canvas', p.danger, p.canvas],
+      ['danger on dangerSurface', p.danger, p.dangerSurface],
+      ['warningText on warningSurface', p.warningText, p.warningSurface],
+    ];
+    for (const [what, fg, bg] of pairs) {
+      const ratio = contrast(fg, bg);
+      assert.ok(ratio >= AA, `${theme}: ${what} is ${ratio.toFixed(2)}:1, below AA`);
+    }
+  }
+});
+
+test('accent fills use accentStrong, never the text tint', () => {
+  // Enforced on the SOURCE because the palette cannot see how it is used: the
+  // mistake is invisible until somebody measures white on a button.
+  const offenders: string[] = [];
+  for (const file of [...sources(join(MOBILE_ROOT, 'src')), ...sources(join(MOBILE_ROOT, 'app'))]) {
+    const text = code(readFileSync(file, 'utf8'));
+    if (/backgroundColor: colors\.accent\b(?!S)/.test(text)) {
+      offenders.push(file.slice(MOBILE_ROOT.length + 1));
+    }
+  }
+  assert.deepEqual(offenders, [], `accent used as a fill in: ${offenders.join(', ')}`);
+});

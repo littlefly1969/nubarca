@@ -513,11 +513,11 @@ const useStyles = themed((colors) =>
     url: { fontSize: 13, color: colors.textSecondary },
     shareBtn: {
       flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-      backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
+      backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 12,
     },
     shareText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
     save: {
-      backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12,
+      backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 12,
       alignItems: 'center', marginTop: 8,
     },
     saveText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
@@ -531,13 +531,15 @@ const useStyles = themed((colors) =>
     messageHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     messageAuthor: { fontSize: 13, fontWeight: '600', color: colors.textSecondary },
     heroTag: {
-      fontSize: 11, color: colors.textOnAccent, backgroundColor: colors.accent,
+      fontSize: 11, color: colors.textOnAccent, backgroundColor: colors.accentStrong,
       paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, overflow: 'hidden',
     },
     messageText: { fontSize: 15, color: colors.textPrimary },
     messageActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     messageAction: {
-      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: colors.accentSubtle,
+      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14,
+      backgroundColor: colors.accentSubtle,
+      borderWidth: StyleSheet.hairlineWidth, borderColor: colors.accent,
     },
     messageActionText: { fontSize: 13, color: colors.accent },
     destructive: { backgroundColor: colors.dangerSurface },

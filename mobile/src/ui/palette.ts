@@ -42,7 +42,14 @@ export interface Palette {
   textOnAccent: string;
 
   // Actions.
+  /**
+   * Accent TEXT and borders. A legibility tint, not the brand hex — see
+   * docs/brand.md. Never use it as a FILL: white on the dark tint is only
+   * 3.6:1, which is the exact regression the document was written to prevent.
+   */
   accent: string;
+  /** Accent FILLS, with `textOnAccent` on top. Electric Blue itself in dark. */
+  accentStrong: string;
   /** A wash of the accent: selected chips, highlighted rows. */
   accentSubtle: string;
   accentDisabled: string;
@@ -75,6 +82,7 @@ export const lightPalette: Palette = {
   textOnAccent: '#FFFFFF',
 
   accent: '#0B4FD6',
+  accentStrong: '#0B4FD6',
   accentSubtle: '#DCE6FA',
   accentDisabled: '#B9CBF5',
 
@@ -102,7 +110,14 @@ export const darkPalette: Palette = {
   textOnAccent: '#FFFFFF',
 
   accent: '#3D82FF',
-  accentSubtle: '#1B2F55',
+  // Electric Blue itself, verbatim: white clears AA on it, and it is the fill
+  // the brand document reserves for exactly this.
+  accentStrong: '#1565FF',
+  // An 18% wash of Electric Blue over the canvas: dark enough that accent TEXT
+  // on it clears AA (4.55:1). A lighter, more obviously tinted wash reads
+  // better as a shape and worse as a label — the chips carry a hairline accent
+  // border so the shape does not have to come from the fill.
+  accentSubtle: '#0C1E43',
   accentDisabled: '#2A4172',
 
   // Destructive stays warm-red rather than becoming another shade of the brand

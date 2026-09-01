@@ -129,7 +129,7 @@ const useStyles = themed((colors) =>
     },
     retryBtn: {
       marginTop: spacing.l,
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       borderRadius: radii.m,
       minHeight: touch.minSize - 4,
       justifyContent: 'center',
@@ -142,7 +142,7 @@ const useStyles = themed((colors) =>
     },
     pressed: { opacity: 0.75 },
     primaryBtn: {
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       borderRadius: radii.m,
       minHeight: touch.minSize,
       justifyContent: 'center',

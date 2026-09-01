@@ -203,7 +203,7 @@ const useStyles = themed((colors) =>
       justifyContent: 'center',
       paddingHorizontal: spacing.l,
     },
-    primaryBtn: { backgroundColor: colors.accent },
+    primaryBtn: { backgroundColor: colors.accentStrong },
     disabled: { backgroundColor: colors.accentDisabled },
     cancelText: { color: colors.textSecondary, fontWeight: '600' },
     saveText: { color: colors.textOnAccent, fontWeight: '600' },

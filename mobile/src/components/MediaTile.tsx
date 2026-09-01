@@ -173,7 +173,7 @@ const useStyles = themed((colors) =>
       justifyContent: 'center',
     },
     checkRingOn: {
-      backgroundColor: colors.accent,
+      backgroundColor: colors.accentStrong,
       borderColor: colors.accent,
     },
     checkMark: {

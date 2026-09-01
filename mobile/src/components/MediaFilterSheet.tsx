@@ -373,7 +373,7 @@ const useStyles = themed((colors) =>
     hint: { fontSize: 12, color: colors.textTertiary },
     optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.surfaceMuted },
-    optionOn: { backgroundColor: colors.accent },
+    optionOn: { backgroundColor: colors.accentStrong },
     optionText: { fontSize: 14, color: colors.textSecondary },
     optionTextOn: { color: colors.textOnAccent },
     textInput: {
@@ -394,11 +394,11 @@ const useStyles = themed((colors) =>
     },
     peopleBtnText: { flex: 1, fontSize: 15, color: colors.textPrimary },
     peopleCount: {
-      minWidth: 22, textAlign: 'center', color: colors.textOnAccent, backgroundColor: colors.accent,
+      minWidth: 22, textAlign: 'center', color: colors.textOnAccent, backgroundColor: colors.accentStrong,
       borderRadius: 11, paddingVertical: 2, fontSize: 12, overflow: 'hidden',
     },
     footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
-    apply: { backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+    apply: { backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
     applyText: { color: colors.textOnAccent, fontSize: 16, fontWeight: '600' },
     pressed: { opacity: 0.7 },
   }),

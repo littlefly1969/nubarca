@@ -356,7 +356,7 @@ const useStyles = themed((colors) =>
     hint: { fontSize: 12, color: colors.textTertiary },
     roleRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
     roleChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: colors.surfaceMuted },
-    roleChipOn: { backgroundColor: colors.accent },
+    roleChipOn: { backgroundColor: colors.accentStrong },
     roleText: { fontSize: 13, color: colors.textSecondary },
     roleTextOn: { color: colors.textOnAccent },
     switchRow: {
@@ -364,7 +364,7 @@ const useStyles = themed((colors) =>
     },
     switchLabel: { fontSize: 14, color: colors.textPrimary },
     primary: {
-      backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+      backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 12, alignItems: 'center',
     },
     primaryText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
     disabled: { opacity: 0.5 },

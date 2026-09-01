@@ -360,7 +360,7 @@ const useStyles = themed((colors) =>
       justifyContent: 'center',
       backgroundColor: colors.surface,
     },
-    chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+    chipOn: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
     chipText: { fontSize: 13, color: colors.textSecondary },
     chipTextOn: { color: colors.textOnAccent, fontWeight: '600' },
     invitesBlock: {
@@ -401,7 +401,7 @@ const useStyles = themed((colors) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    inviteAccept: { backgroundColor: colors.accent, borderColor: colors.accent },
+    inviteAccept: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
     inviteAcceptText: { color: colors.textOnAccent, fontSize: 13, fontWeight: '600' },
     inviteDeclineText: { color: colors.textSecondary, fontSize: 13 },
     listContent: {
