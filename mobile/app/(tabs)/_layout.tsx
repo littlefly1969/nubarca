@@ -10,10 +10,17 @@ export default function TabsLayout(): React.JSX.Element {
   const { t } = useI18n();
   return (
     // The bar is ours (BRAND-APP-02 §D); the ROUTING stays React Navigation's.
-    // The five destinations, their order and their names are unchanged.
+    //
+    // `tabBarStyle.position: 'absolute'` is what stops the navigator reserving
+    // a strip below the scene: without it the bar would float AND the scene
+    // would still be shortened by its height, leaving a dead band under the
+    // gallery (NUBARCA-UX-01 §5).
     <Tabs
       tabBar={(props) => <BrandTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: { position: 'absolute' },
+      }}
     >
       <Tabs.Screen
         name="photos"

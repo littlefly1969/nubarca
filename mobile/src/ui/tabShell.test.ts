@@ -48,10 +48,21 @@ test('the selected state is an edge and an accent, never a capsule or a glow', (
   assert.doesNotMatch(BAR, /BlurView|blurRadius/);
 });
 
-test('the bar separates by surface and a hairline', () => {
-  assert.match(BAR, /backgroundColor: colors\.surface/);
+test('the bar floats over the gallery instead of sitting below it', () => {
+  // NUBARCA-UX-01 §5: an opaque bar appended under the content reads as a
+  // block bolted to the app; this one overlays, and the media stays
+  // perceptible through it.
+  assert.match(BAR, /backgroundColor: colors\.surfaceFloating/);
+  assert.match(BAR, /position: 'absolute'/);
   assert.match(BAR, /borderTopWidth: StyleSheet\.hairlineWidth/);
   assert.match(BAR, /insets\.bottom/);
+  // Without this the navigator still shortens the scene by the bar's height
+  // and the gallery ends in a dead band.
+  assert.match(LAYOUT, /tabBarStyle: \{ position: 'absolute' \}/);
+});
+
+test('the bar publishes the room a gallery must leave for it', () => {
+  assert.match(BAR, /export const TAB_BAR_CONTENT_HEIGHT/);
 });
 
 test('type and icon sizing come from the contract', () => {

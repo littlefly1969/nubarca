@@ -85,6 +85,17 @@ export interface Palette {
 
   /** Backdrop behind a modal or a bottom sheet. */
   scrim: string;
+
+  /**
+   * A raised surface that FLOATS over content — the gallery's bottom
+   * navigation. Semi-transparent so the media stays perceptible underneath,
+   * which is the point: an opaque bar reads as a block bolted below the
+   * gallery rather than as chrome over it.
+   *
+   * It is the `surface` colour with alpha, not a new hue: translucency here is
+   * functional, not decoration.
+   */
+  surfaceFloating: string;
 }
 
 // Light: Cloud White canvas, Midnight Navy text, and the deepened Electric Blue
@@ -120,6 +131,7 @@ export const lightPalette: Palette = {
   tilePlaceholder: '#E4E8EF',
 
   scrim: 'rgba(10, 15, 26, 0.45)',
+  surfaceFloating: 'rgba(255, 255, 255, 0.88)',
 };
 
 // Dark: Midnight Navy canvas, Deep Blue raised surfaces, and Electric Blue
@@ -164,6 +176,7 @@ export const darkPalette: Palette = {
   // Darker than the light one: a dim room needs less of a veil to separate a
   // sheet from what is behind it.
   scrim: 'rgba(2, 6, 16, 0.6)',
+  surfaceFloating: 'rgba(15, 30, 58, 0.88)',
 };
 
 export const palettes: Record<'dark' | 'light', Palette> = {
