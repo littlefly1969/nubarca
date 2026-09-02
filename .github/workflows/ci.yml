@@ -33,6 +33,18 @@ jobs:
       - name: Verify NubArca identity contract
         run: scripts/check-nubarca-identity.sh
 
+      # BRAND-APP-01 §G. The brand contract is machine-checkable, so it is
+      # checked: primitives against the canonical manifest, and the mobile
+      # client strictly — splash configuration, token values, product spelling
+      # and colour literals.
+      - name: Verify NubArca brand invariants
+        run: python3 scripts/check-brand-invariants.py
+
+      # Consumer copies of brand artwork must stay byte-identical to the
+      # approved package; a re-exported or hand-edited asset fails here.
+      - name: Verify brand asset consumer copies
+        run: python3 scripts/sync-brand-assets.py --check
+
   backend:
     name: Backend build and fast tests
     runs-on: ubuntu-24.04
