@@ -132,6 +132,11 @@ test('every text role clears WCAG AA on the surface it is read against', () => {
       // The fill case, and the reason accentStrong exists at all: white on the
       // lighter accent TINT is 3.6:1, which docs/brand.md warns about by name.
       ['textOnAccent on accentStrong', p.textOnAccent, p.accentStrong],
+      // The three status signals carry meaning, so they must be READABLE, not
+      // merely present (BRAND-COLOR-SEMANTICS-01).
+      ['signalConnected on canvas', p.signalConnected, p.canvas],
+      ['signalIntelligence on canvas', p.signalIntelligence, p.canvas],
+      ['signalSuccess on canvas', p.signalSuccess, p.canvas],
       ['danger on canvas', p.danger, p.canvas],
       ['danger on dangerSurface', p.danger, p.dangerSurface],
       ['warningText on warningSurface', p.warningText, p.warningSurface],
