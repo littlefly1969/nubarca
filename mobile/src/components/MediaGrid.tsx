@@ -1,8 +1,15 @@
 // MediaGrid: the one virtualized grid every media surface uses (Photos,
 // Videos, album detail, album add-picker). FlatList-based — virtualization is
 // never traded for ScrollView + map.
+//
+// POSITION IS AN ITEM, NOT AN OFFSET. Rotating the phone changes the column
+// count, and React Native requires a remount to change `numColumns` — which
+// resets the list to the top. The grid therefore remembers the first visible
+// media ID, outside the list that remounts, and puts that item back afterwards.
+// An offset could not survive the change even in principle: the same pixel
+// height is a different row under a different geometry.
 
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -11,6 +18,7 @@ import {
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaTile } from './MediaTile';
@@ -19,6 +27,7 @@ import { Button } from '../ui/components';
 import { useI18n } from '../i18n';
 import { useWindowDimensions } from 'react-native';
 import type { MediaItem } from '../api/media';
+import { anchorFromVisible, anchorIndexOf } from '../media/galleryAnchor.ts';
 import { themed, useColors } from '../ui/theme';
 
 export interface MediaGridProps {
@@ -46,6 +55,14 @@ export interface MediaGridProps {
    */
   onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
   scrollEventThrottle?: number;
+  /**
+   * Bring this item into view once. Used by a gallery returning from the
+   * viewer: the user swiped to something else in there, and the grid should be
+   * looking at what they were last looking at.
+   */
+  anchorItemId?: string | null;
+  /** Called once the anchor has been honoured, so it is not applied twice. */
+  onAnchorConsumed?: () => void;
   contentPaddingTop?: number;
   contentPaddingBottom?: number;
 }
@@ -67,6 +84,8 @@ export function MediaGrid({
   scrollEventThrottle,
   contentPaddingTop,
   contentPaddingBottom,
+  anchorItemId = null,
+  onAnchorConsumed,
 }: MediaGridProps): React.JSX.Element {
   const styles = useStyles();
   const colors = useColors();
@@ -105,6 +124,48 @@ export function MediaGrid({
   // Selection state changes must not reshuffle the whole grid.
   const keyExtractor = useCallback((item: MediaItem) => item.id, []);
 
+  // --- position, held OUTSIDE the list that remounts ------------------------
+  const listRef = useRef<FlatList<MediaItem> | null>(null);
+  const visibleAnchor = useRef<string | null>(null);
+  const pendingAnchor = useRef<string | null>(null);
+
+  // Identity must be stable: React Native throws if this callback changes
+  // between renders.
+  const onViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      visibleAnchor.current = anchorFromVisible(
+        viewableItems.map((token) => (token.item as MediaItem).id),
+      );
+    },
+  ).current;
+
+  // A column change remounts the FlatList. Capture what we were looking at so
+  // the new one can be pointed back at it.
+  const previousColumns = useRef(columns);
+  useEffect(() => {
+    if (previousColumns.current === columns) return;
+    previousColumns.current = columns;
+    pendingAnchor.current = visibleAnchor.current;
+  }, [columns]);
+
+  // A gallery returning from the viewer overrides the browse anchor: the item
+  // the user was last looking at wins over the one they opened.
+  useEffect(() => {
+    if (anchorItemId !== null) pendingAnchor.current = anchorItemId;
+  }, [anchorItemId]);
+
+  const restoreAnchor = useCallback(() => {
+    const id = pendingAnchor.current;
+    if (id === null) return;
+    const index = anchorIndexOf(items, id);
+    pendingAnchor.current = null;
+    onAnchorConsumed?.();
+    // A missing anchor is an ordinary answer: the item was deleted, or a filter
+    // removed it. Stay where we are rather than jumping to the top.
+    if (index === null) return;
+    listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+  }, [items, onAnchorConsumed]);
+
   const contentInset = useMemo(
     () => ({ bottom: insets.bottom }),
     [insets.bottom],
@@ -136,6 +197,7 @@ export function MediaGrid({
   return (
     <FlatList
       testID="media-grid"
+      ref={listRef}
       data={items}
       key={columns}
       numColumns={columns}
@@ -152,6 +214,13 @@ export function MediaGrid({
       ListFooterComponent={footer}
       onScroll={onScroll}
       scrollEventThrottle={scrollEventThrottle}
+      onViewableItemsChanged={onViewableItemsChanged}
+      onContentSizeChange={restoreAnchor}
+      // The row may not be measured yet on a fresh mount; ask again once the
+      // list has laid out rather than throwing.
+      onScrollToIndexFailed={(info) => {
+        pendingAnchor.current = items[info.index]?.id ?? null;
+      }}
       contentContainerStyle={[
         styles.content,
         { paddingHorizontal: insets.left + gap },
