@@ -6,6 +6,7 @@ import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, HeaderButton, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
@@ -150,12 +151,7 @@ export default function Photos(): React.JSX.Element {
                   already is. */}
               {/* A person, not a cog. What sits behind a gallery is who you
                   are signed in as; the settings follow from that. */}
-              <IconButton
-                accessibilityLabel={t('account.open')}
-                onPress={() => router.push('/account')}
-              >
-                <Ionicons name="person-circle-outline" size={iconSizes.l} color={colors.accent} />
-              </IconButton>
+              <AccountButton />
             </>
           )
             }

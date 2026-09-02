@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { AppHeader, HeaderButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { OverflowMenu } from '../../src/components/OverflowMenu';
 import { PartySettingsSheet } from '../../src/components/PartySettingsSheet';
 import { AlbumSharingSheet } from '../../src/components/AlbumSharingSheet';
@@ -246,6 +247,7 @@ export default function AlbumDetail(): React.JSX.Element {
                       },
                     ]}
                   />
+                  <AccountButton />
                 </>
               )
             }

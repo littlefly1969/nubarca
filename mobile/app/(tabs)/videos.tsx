@@ -5,6 +5,7 @@ import { Redirect, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { iconSizes } from '../../src/ui/tokens';
 import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
@@ -82,17 +83,20 @@ export default function Videos(): React.JSX.Element {
           <AppHeader
             title={t('tabs.videos')}
             actions={
-              <IconButton
-                accessibilityLabel={t('filters.open')}
-                onPress={() => setFiltersOpen(true)}
-                selected={filters.chips.length > 0}
-              >
-                <Ionicons
-                  name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
-                  size={iconSizes.m}
-                  color={colors.accent}
-                />
-              </IconButton>
+              <>
+                <IconButton
+                  accessibilityLabel={t('filters.open')}
+                  onPress={() => setFiltersOpen(true)}
+                  selected={filters.chips.length > 0}
+                >
+                  <Ionicons
+                    name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
+                    size={iconSizes.m}
+                    color={colors.accent}
+                  />
+                </IconButton>
+                <AccountButton />
+              </>
             }
           />
           <MediaFilterChips

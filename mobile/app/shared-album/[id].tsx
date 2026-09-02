@@ -29,6 +29,7 @@ import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { iconSizes } from '../../src/ui/tokens';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { AuthedImage } from '../../src/components/AuthedImage';
@@ -280,14 +281,17 @@ export default function SharedAlbum(): React.JSX.Element {
           <AppHeader
             title={detail?.name ?? ''}
             actions={
-              capabilities.contribute ? (
-                <IconButton
-                  accessibilityLabel={t('shared.contribute')}
-                  onPress={() => router.push(`/shared-album/${albumId}/add`)}
-                >
-                  <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
-                </IconButton>
-              ) : undefined
+              <>
+                {capabilities.contribute && (
+                  <IconButton
+                    accessibilityLabel={t('shared.contribute')}
+                    onPress={() => router.push(`/shared-album/${albumId}/add`)}
+                  >
+                    <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
+                  </IconButton>
+                )}
+                <AccountButton />
+              </>
             }
           />
 

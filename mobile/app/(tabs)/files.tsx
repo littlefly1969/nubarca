@@ -5,6 +5,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Screen, AppHeader } from '../../src/ui/components';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { AuthedImage } from '../../src/components/AuthedImage';
 import { useSession } from '../../src/session/SessionProvider';
@@ -132,7 +133,7 @@ export default function Files(): React.JSX.Element {
 
   return (
     <Screen>
-      <AppHeader title={t('tabs.files')} />
+      <AppHeader title={t('tabs.files')} actions={<AccountButton />} />
 
       <View style={styles.breadcrumbBar}>
         <FlatList

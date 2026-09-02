@@ -22,6 +22,7 @@ import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { iconSizes } from '../../src/ui/tokens';
 import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
@@ -225,12 +226,15 @@ export default function Albums(): React.JSX.Element {
           <AppHeader
             title={t('tabs.albums')}
             actions={
-              <IconButton
-                accessibilityLabel={t('albums.create')}
-                onPress={() => setCreating(true)}
-              >
-                <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
-              </IconButton>
+              <>
+                <IconButton
+                  accessibilityLabel={t('albums.create')}
+                  onPress={() => setCreating(true)}
+                >
+                  <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
+                </IconButton>
+                <AccountButton />
+              </>
             }
           />
 
