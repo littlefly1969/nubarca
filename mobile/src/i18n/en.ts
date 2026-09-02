@@ -337,6 +337,9 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'settings.themeSystemHint': 'Follows the phone’s theme.',
   'settings.account': 'Account',
 
+  'login.title': 'Sign in',
+  'login.subtitle': 'Your library, on your own server.',
+
 };
 
 export default en;

@@ -1,28 +1,25 @@
-// Login screen. Adapts the proven skeleton form: editable server URL
-// (prefilled with the last server), email, password, one accent action.
-// A wrong password is a 401 handled HERE — it must not tear down any session.
+// Login screen. The one full-bleed moment the app has before the library, and
+// the first place the product should be recognisable.
+//
+// BEHAVIOUR IS UNCHANGED by the BRAND-APP-02 redesign: the server URL is still
+// editable and still prefilled from the last server used, the same two calls
+// run in the same order, a 401 is still classified here as bad credentials and
+// everything else as a network problem, and an already-authenticated visitor
+// is still redirected to Photos. A wrong password must not tear down a session.
 
 import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Redirect } from 'expo-router';
 import Constants from 'expo-constants';
-import { Screen } from '../src/ui/components';
+import { Button, Screen } from '../src/ui/components';
+import { BrandLockup } from '../src/ui/BrandLockup';
+import { InlineNotice, TextField } from '../src/ui/fields';
 import { useSession } from '../src/session/SessionProvider';
 import { getStoredBaseUrl } from '../src/api/session';
 import { configureBaseUrl, ApiError } from '../src/api/client';
 import { useI18n } from '../src/i18n';
-import { radii, spacing, touch } from '../src/ui/tokens';
-import { themed, useColors } from '../src/ui/theme';
+import { spacing, typography } from '../src/ui/tokens';
+import { themed } from '../src/ui/theme';
 
 // Android emulator reaches the host at 10.0.2.2; iOS simulator uses localhost.
 const configuredUrl = (
@@ -32,9 +29,12 @@ const defaultBaseUrl =
   configuredUrl ??
   (Platform.OS === 'android' ? 'http://10.0.2.2:5177' : 'http://localhost:5177');
 
+const releaseVersion = (
+  Constants.expoConfig?.extra as { releaseVersion?: string } | undefined
+)?.releaseVersion;
+
 export default function Login(): React.JSX.Element {
   const styles = useStyles();
-  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
@@ -84,74 +84,67 @@ export default function Login(): React.JSX.Element {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.title}>NubArca</Text>
+          {/* The approved artwork, in the variant made for the active surface —
+              never the product name typed in the heading face. */}
+          <BrandLockup visibleWidth={200} style={styles.lockup} />
+
+          <Text style={styles.title}>{t('login.title')}</Text>
+          <Text style={styles.subtitle}>{t('login.subtitle')}</Text>
 
           {session.expired && (
             <View style={styles.notice}>
-              <Text style={styles.noticeText}>{t('login.sessionExpired')}</Text>
+              <InlineNotice tone="warning" text={t('login.sessionExpired')} />
             </View>
           )}
 
-          <Text style={styles.label}>{t('login.apiBaseUrl')}</Text>
-          <TextInput
-            style={styles.input}
-            value={baseUrl}
-            onChangeText={setBaseUrl}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            editable={!busy}
-            accessibilityLabel={t('login.apiBaseUrl')}
-          />
-          <Text style={styles.hint}>{t('login.serverHint')}</Text>
+          <View style={styles.fields}>
+            <TextField
+              label={t('login.apiBaseUrl')}
+              hint={t('login.serverHint')}
+              value={baseUrl}
+              onChangeText={setBaseUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              editable={!busy}
+            />
+            <TextField
+              label={t('login.email')}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              textContentType="emailAddress"
+              editable={!busy}
+            />
+            <TextField
+              label={t('login.password')}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              textContentType="password"
+              editable={!busy}
+            />
+          </View>
 
-          <Text style={styles.label}>{t('login.email')}</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            textContentType="emailAddress"
-            editable={!busy}
-            accessibilityLabel={t('login.email')}
-          />
-
-          <Text style={styles.label}>{t('login.password')}</Text>
-          <TextInput
-            style={styles.input}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            textContentType="password"
-            editable={!busy}
-            accessibilityLabel={t('login.password')}
-          />
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('login.signIn')}
-            style={({ pressed }) => [
-              styles.button,
-              pressed && styles.pressed,
-              busy && styles.buttonDisabled,
-            ]}
-            onPress={() => {
-              void submit();
-            }}
-            disabled={busy}
-          >
-            {busy ? (
-              <ActivityIndicator color={colors.textOnAccent} />
-            ) : (
-              <Text style={styles.buttonText}>{t('login.signIn')}</Text>
-            )}
-          </Pressable>
+          <View style={styles.action}>
+            <Button
+              label={t('login.signIn')}
+              loading={busy}
+              onPress={() => {
+                void submit();
+              }}
+            />
+          </View>
 
           {error !== null && (
-            <View style={styles.errorCard}>
-              <Text style={styles.errorText}>{error}</Text>
+            <View style={styles.notice}>
+              <InlineNotice tone="danger" text={error} />
             </View>
+          )}
+
+          {releaseVersion !== undefined && (
+            <Text style={styles.version}>{`v${releaseVersion}`}</Text>
           )}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -167,61 +160,21 @@ const useStyles = themed((colors) =>
       padding: spacing.xl,
       paddingTop: spacing.xxl + spacing.l,
     },
-    title: {
-      fontSize: 26,
-      fontWeight: '700',
-      marginBottom: spacing.xl,
-      color: colors.textPrimary,
-    },
-    notice: {
-      padding: spacing.m,
-      backgroundColor: colors.warningSurface,
-      borderRadius: radii.m,
-      marginBottom: spacing.m,
-    },
-    noticeText: { color: colors.warningText, fontSize: 13 },
-    label: {
-      fontSize: 12,
-      fontWeight: '600',
+    lockup: { alignItems: 'flex-start', marginBottom: spacing.xl },
+    title: { ...typography.pageTitle, color: colors.textPrimary },
+    subtitle: {
+      ...typography.secondary,
       color: colors.textSecondary,
-      marginTop: spacing.m,
-      marginBottom: spacing.xs,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    hint: {
-      fontSize: 12,
-      color: colors.textTertiary,
       marginTop: spacing.xs,
     },
-    input: {
-      borderWidth: 1,
-      borderColor: colors.separator,
-      borderRadius: radii.m,
-      paddingHorizontal: spacing.m,
-      paddingVertical: spacing.m - 2,
-      backgroundColor: colors.surface,
-      fontSize: 15,
-      color: colors.textPrimary,
-    },
-    button: {
+    fields: { marginTop: spacing.xl, gap: spacing.l },
+    notice: { marginTop: spacing.l },
+    action: { marginTop: spacing.xl },
+    version: {
+      ...typography.badge,
+      color: colors.textTertiary,
       marginTop: spacing.xl,
-      backgroundColor: colors.accentStrong,
-      borderRadius: radii.m,
-      minHeight: touch.minSize,
-      alignItems: 'center',
-      justifyContent: 'center',
+      textAlign: 'center',
     },
-    buttonDisabled: { backgroundColor: colors.accentDisabled },
-    pressed: { opacity: 0.8 },
-    buttonText: { color: colors.textOnAccent, fontWeight: '600', fontSize: 15 },
-    errorCard: {
-      marginTop: spacing.l,
-      padding: spacing.m,
-      backgroundColor: colors.dangerSurface,
-      borderRadius: radii.m,
-    },
-    errorText: { color: colors.danger, fontSize: 13 },
   }),
 );
-
