@@ -26,7 +26,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, AppHeader } from '../../src/ui/components';
+import { AppHeader, IconButton } from '../../src/ui/components';
+import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { iconSizes } from '../../src/ui/tokens';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { AuthedImage } from '../../src/components/AuthedImage';
 import { useSession } from '../../src/session/SessionProvider';
@@ -238,30 +240,30 @@ export default function SharedAlbum(): React.JSX.Element {
     : '';
 
   return (
-    <Screen>
-      <AppHeader
-        title={detail?.name ?? ''}
-        actions={
-          capabilities.contribute ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t('shared.contribute')}
-              onPress={() => router.push(`/shared-album/${albumId}/add`)}
-              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-              hitSlop={4}
-            >
-              <Ionicons name="add-circle-outline" size={24} color={colors.accent} />
-            </Pressable>
-          ) : undefined
-        }
-      />
+    <ImmersiveGalleryShell
+      topChrome={
+        <>
+          <AppHeader
+            title={detail?.name ?? ''}
+            actions={
+              capabilities.contribute ? (
+                <IconButton
+                  accessibilityLabel={t('shared.contribute')}
+                  onPress={() => router.push(`/shared-album/${albumId}/add`)}
+                >
+                  <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
+                </IconButton>
+              ) : undefined
+            }
+          />
 
-      <Text style={styles.infoLine} numberOfLines={1}>
-        {infoLine}
-      </Text>
+          <Text style={styles.infoLine} numberOfLines={1}>
+            {infoLine}
+          </Text>
 
-      {/* Tutto / Foto / Video */}
-      <View style={styles.filters}>
+          {/* Tutto / Foto / Video — collapsible chrome, like every other
+              gallery's filter row. */}
+          <View style={styles.filters}>
         {(['all', 'image', 'video'] as const).map((k) => (
           <Pressable
             key={k}
@@ -279,76 +281,87 @@ export default function SharedAlbum(): React.JSX.Element {
             </Text>
           </Pressable>
         ))}
-      </View>
-
-      {snapshot.phase === 'loading' && detail === null ? (
-        <LoadingState />
-      ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
-        <ErrorState
-          title={t('grid.errorTitle')}
-          message={detailFailed ? t('gallery.loadErrorNetwork', { what: t('tabs.albums') }) : undefined}
-          onRetry={() => {
-            void retryFailed();
-          }}
-        />
-      ) : snapshot.items.length === 0 ? (
-        <EmptyState icon="🖼" title={t('albumDetail.empty')} hint={t('albumDetail.emptyHint')} />
-      ) : (
-        <FlatList
-          data={snapshot.items}
-          keyExtractor={(i) => i.albumItemId}
-          numColumns={columns}
-          key={columns}
-          contentContainerStyle={styles.listContent}
-          onEndReached={
-            snapshot.hasMore
-              ? () => {
-                  void loadMore();
-                }
-              : undefined
-          }
-          onEndReachedThreshold={0.5}
-          ListFooterComponent={
-            snapshot.phase === 'loadingMore' ? (
-              <ActivityIndicator color={colors.accent} style={styles.footerSpinner} />
-            ) : null
-          }
-          renderItem={({ item }) => {
-            const busy = busyItem === item.albumItemId;
-            return (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={item.kind === 'video' ? t('tabs.videos') : t('gallery.photos')}
-                onPress={() => openItem(item)}
-                onLongPress={() => itemActions(item)}
-                style={({ pressed }) => [styles.tile, { width: tile }, pressed && styles.pressed]}
-              >
-                <AuthedImage
-                  path={item.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}
-                  style={styles.tileImg}
-                  accessibilityLabel=""
-                />
-                {item.kind === 'video' && (
-                  <View style={styles.playBadge} pointerEvents="none">
-                    <Ionicons name="play" size={14} color={media.text} />
-                  </View>
-                )}
-                {busy && (
-                  <View style={styles.busyOverlay} pointerEvents="none">
-                    <ActivityIndicator color={media.text} />
-                  </View>
-                )}
-                {item.canWithdraw && !busy && (
-                  <View style={styles.withdrawDot} pointerEvents="none">
-                    <Text style={styles.withdrawDotText}>✎</Text>
-                  </View>
-                )}
-              </Pressable>
-            );
-          }}
-        />
+          </View>
+        </>
+      }
+    >
+      {(scroll) => (
+        <>
+        {snapshot.phase === 'loading' && detail === null ? (
+          <LoadingState />
+        ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
+          <ErrorState
+            title={t('grid.errorTitle')}
+            message={detailFailed ? t('gallery.loadErrorNetwork', { what: t('tabs.albums') }) : undefined}
+            onRetry={() => {
+              void retryFailed();
+            }}
+          />
+        ) : snapshot.items.length === 0 ? (
+          <EmptyState icon="🖼" title={t('albumDetail.empty')} hint={t('albumDetail.emptyHint')} />
+        ) : (
+          <FlatList
+            data={snapshot.items}
+            keyExtractor={(i) => i.albumItemId}
+            numColumns={columns}
+            key={columns}
+            onScroll={scroll.onScroll}
+            scrollEventThrottle={scroll.scrollEventThrottle}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingTop: scroll.contentPaddingTop, paddingBottom: scroll.contentPaddingBottom },
+            ]}
+            onEndReached={
+              snapshot.hasMore
+                ? () => {
+                    void loadMore();
+                  }
+                : undefined
+            }
+            onEndReachedThreshold={0.5}
+            ListFooterComponent={
+              snapshot.phase === 'loadingMore' ? (
+                <ActivityIndicator color={colors.accent} style={styles.footerSpinner} />
+              ) : null
+            }
+            renderItem={({ item }) => {
+              const busy = busyItem === item.albumItemId;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={item.kind === 'video' ? t('tabs.videos') : t('gallery.photos')}
+                  onPress={() => openItem(item)}
+                  onLongPress={() => itemActions(item)}
+                  style={({ pressed }) => [styles.tile, { width: tile }, pressed && styles.pressed]}
+                >
+                  <AuthedImage
+                    path={item.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}
+                    style={styles.tileImg}
+                    accessibilityLabel=""
+                  />
+                  {item.kind === 'video' && (
+                    <View style={styles.playBadge} pointerEvents="none">
+                      <Ionicons name="play" size={14} color={media.text} />
+                    </View>
+                  )}
+                  {busy && (
+                    <View style={styles.busyOverlay} pointerEvents="none">
+                      <ActivityIndicator color={media.text} />
+                    </View>
+                  )}
+                  {item.canWithdraw && !busy && (
+                    <View style={styles.withdrawDot} pointerEvents="none">
+                      <Text style={styles.withdrawDotText}>✎</Text>
+                    </View>
+                  )}
+                </Pressable>
+              );
+            }}
+          />
+        )}
+        </>
       )}
-    </Screen>
+    </ImmersiveGalleryShell>
   );
 }
 

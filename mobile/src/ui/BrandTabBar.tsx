@@ -1,5 +1,10 @@
 // The bottom navigation, in NubArca's own language (BRAND-APP-02 §D).
 //
+// It FLOATS over the gallery (NUBARCA-UX-01 §5): the media stays perceptible
+// underneath, and the last row of a gallery clears it through the scroll
+// content's own padding rather than through an opaque strip carved out beside
+// it. `TAB_BAR_CONTENT_HEIGHT` is what a gallery adds to that padding.
+//
 // A custom bar rather than a pile of styling exceptions on the default one:
 // the selected state this brand wants — a thin luminous edge, an accent label,
 // a quiet surface — is not reachable by overriding tint colours, and every
@@ -18,6 +23,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { iconSizes, spacing, touch, typography } from './tokens';
 import { themed, useColors } from './theme';
+
+/**
+ * The bar's own height, excluding the bottom safe area. Galleries add this to
+ * their content padding so the final row scrolls clear of the overlay.
+ */
+export const TAB_BAR_CONTENT_HEIGHT = touch.minSize + spacing.s * 2;
 
 export function BrandTabBar({
   state,
@@ -86,8 +97,12 @@ export function BrandTabBar({
 const useTabStyles = themed((colors) =>
   StyleSheet.create({
     bar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
       flexDirection: 'row',
-      backgroundColor: colors.surface,
+      backgroundColor: colors.surfaceFloating,
       // Separated from the content by surface hierarchy and one hairline, not
       // by a shadow: the brand does not use heavy dashboard elevation.
       borderTopWidth: StyleSheet.hairlineWidth,

@@ -3,7 +3,15 @@
 // never traded for ScrollView + map.
 
 import React, { useCallback, useMemo } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaTile } from './MediaTile';
 import { columnsForWidth, grid, spacing, typography } from '../ui/tokens';
@@ -31,6 +39,15 @@ export interface MediaGridProps {
    */
   onLongPressItem?: (item: MediaItem) => void;
   ListHeaderComponent?: React.ComponentType<unknown> | React.ReactElement | null;
+  /**
+   * Scroll plumbing supplied by the immersive shell. The grid reports its
+   * offset and leaves room for the chrome floating over it; it does not know
+   * what the chrome is or when it hides.
+   */
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  scrollEventThrottle?: number;
+  contentPaddingTop?: number;
+  contentPaddingBottom?: number;
 }
 
 export function MediaGrid({
@@ -46,6 +63,10 @@ export function MediaGrid({
   onToggleSelect,
   onLongPressItem,
   ListHeaderComponent,
+  onScroll,
+  scrollEventThrottle,
+  contentPaddingTop,
+  contentPaddingBottom,
 }: MediaGridProps): React.JSX.Element {
   const styles = useStyles();
   const colors = useColors();
@@ -129,9 +150,13 @@ export function MediaGrid({
       }
       ListHeaderComponent={ListHeaderComponent ?? null}
       ListFooterComponent={footer}
+      onScroll={onScroll}
+      scrollEventThrottle={scrollEventThrottle}
       contentContainerStyle={[
         styles.content,
         { paddingHorizontal: insets.left + gap },
+        contentPaddingTop !== undefined && { paddingTop: contentPaddingTop },
+        contentPaddingBottom !== undefined && { paddingBottom: contentPaddingBottom },
       ]}
       contentInset={contentInset}
       removeClippedSubviews

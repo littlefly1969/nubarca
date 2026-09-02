@@ -20,7 +20,10 @@ import {
 } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, AppHeader } from '../../src/ui/components';
+import { AppHeader, IconButton } from '../../src/ui/components';
+import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { iconSizes } from '../../src/ui/tokens';
+import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { AuthedImage } from '../../src/components/AuthedImage';
 import { AlbumCard } from '../../src/components/AlbumCard';
@@ -163,25 +166,78 @@ export default function Albums(): React.JSX.Element {
     else router.push(`/shared-album/${card.albumId}`);
   }
 
-  return (
-    <Screen>
-      <AppHeader
-        title={t('tabs.albums')}
-        actions={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('albums.create')}
-            onPress={() => setCreating(true)}
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-            hitSlop={4}
-          >
-            <Ionicons name="add-circle-outline" size={24} color={colors.accent} />
-          </Pressable>
-        }
-      />
+  // Pending invitations are CONTENT, not chrome: they belong to the Albums
+  // list and scroll with it (NUBARCA-UX-01 §8). Pinned above the gallery they
+  // were a banner that never went away.
+  const invitesHeader =
+    pendingInvites.length > 0 ? (
+      <View style={styles.invitesBlock}>
+        <Text style={styles.invitesTitle}>{t('shared.pendingInvitations')}</Text>
+        {pendingInvites.map((invite) => (
+          <View key={invite.membershipId} style={styles.inviteRow}>
+            <View style={styles.inviteInfo}>
+              <Text style={styles.inviteName} numberOfLines={1}>
+                {invite.albumName}
+              </Text>
+              <Text style={styles.inviteMeta} numberOfLines={1}>
+                {t('shared.sharedBy', { name: invite.ownerDisplayName })} ·{' '}
+                {roleLabel(invite.role, t)} ·{' '}
+                {t('shared.itemsCount', { count: invite.itemCount })}
+              </Text>
+            </View>
+            {busyMembership === invite.membershipId ? (
+              <ActivityIndicator color={colors.accent} />
+            ) : (
+              <View style={styles.inviteActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('shared.inviteAccept')}
+                  onPress={() => respond(invite, true)}
+                  style={({ pressed }) => [
+                    styles.inviteBtn,
+                    styles.inviteAccept,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.inviteAcceptText}>{t('shared.inviteAccept')}</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={t('shared.inviteDecline')}
+                  onPress={() => respond(invite, false)}
+                  style={({ pressed }) => [styles.inviteBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.inviteDeclineText}>{t('shared.inviteDecline')}</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null;
 
-      {/* Filter chips: Tutti / Miei / Condivisi */}
-      <View style={styles.filters}>
+  return (
+    // Albums is a gallery surface too, and gets the same shell.
+    <ImmersiveGalleryShell
+      bottomOverlayHeight={TAB_BAR_CONTENT_HEIGHT}
+      topChrome={
+        <>
+          <AppHeader
+            title={t('tabs.albums')}
+            actions={
+              <IconButton
+                accessibilityLabel={t('albums.create')}
+                onPress={() => setCreating(true)}
+              >
+                <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
+              </IconButton>
+            }
+          />
+
+          {/* Filter chips: Tutti / Miei / Condivisi — part of the collapsible
+              region, so they leave with the header instead of standing over
+              the gallery permanently. */}
+          <View style={styles.filters}>
         {(['all', 'mine', 'shared'] as const).map((f) => (
           <Pressable
             key={f}
@@ -203,135 +259,101 @@ export default function Albums(): React.JSX.Element {
             </Text>
           </Pressable>
         ))}
-      </View>
-
-      {pendingInvites.length > 0 && (
-        <View style={styles.invitesBlock}>
-          <Text style={styles.invitesTitle}>{t('shared.pendingInvitations')}</Text>
-          {pendingInvites.map((invite) => (
-            <View key={invite.membershipId} style={styles.inviteRow}>
-              <View style={styles.inviteInfo}>
-                <Text style={styles.inviteName} numberOfLines={1}>
-                  {invite.albumName}
-                </Text>
-                <Text style={styles.inviteMeta} numberOfLines={1}>
-                  {t('shared.sharedBy', { name: invite.ownerDisplayName })} ·{' '}
-                  {roleLabel(invite.role, t)} ·{' '}
-                  {t('shared.itemsCount', { count: invite.itemCount })}
-                </Text>
-              </View>
-              {busyMembership === invite.membershipId ? (
-                <ActivityIndicator color={colors.accent} />
+          </View>
+        </>
+      }
+    >
+      {(scroll) => (
+        <>
+        {failed && (owned === null || shared === null || invitations === null) ? (
+          <ErrorState
+            title={t('grid.errorTitle')}
+            message={t('gallery.loadErrorNetwork', { what: t('tabs.albums') })}
+            onRetry={() => {
+              void load();
+            }}
+          />
+        ) : owned === null && shared === null && !refreshing ? (
+          <LoadingState />
+        ) : visibleCards.length === 0 ? (
+          <EmptyState icon="🖼" title={t('albums.empty')} hint={t('albums.emptyHint')} />
+        ) : (
+          <FlatList
+            data={visibleCards}
+            keyExtractor={(c) => c.key}
+            numColumns={columns}
+            key={columns}
+            ListHeaderComponent={invitesHeader}
+            onScroll={scroll.onScroll}
+            scrollEventThrottle={scroll.scrollEventThrottle}
+            contentContainerStyle={[
+              styles.listContent,
+              { paddingTop: scroll.contentPaddingTop, paddingBottom: scroll.contentPaddingBottom },
+            ]}
+            renderItem={({ item }) =>
+              item.origin === 'owned' ? (
+                <AlbumCard
+                  album={ownedMap.get(item.albumId)!}
+                  tile={tile}
+                  onPress={() => openCard(item)}
+                  onLongPress={() => confirmDelete(item.albumId, item.name)}
+                />
               ) : (
-                <View style={styles.inviteActions}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('shared.inviteAccept')}
-                    onPress={() => respond(invite, true)}
-                    style={({ pressed }) => [
-                      styles.inviteBtn,
-                      styles.inviteAccept,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text style={styles.inviteAcceptText}>{t('shared.inviteAccept')}</Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={t('shared.inviteDecline')}
-                    onPress={() => respond(invite, false)}
-                    style={({ pressed }) => [styles.inviteBtn, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.inviteDeclineText}>{t('shared.inviteDecline')}</Text>
-                  </Pressable>
-                </View>
-              )}
-            </View>
-          ))}
-        </View>
-      )}
+                (() => {
+                  const sharedAlbum = sharedMap.get(item.albumId);
+                  return (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`${item.name} — ${t('shared.badgeShared')} ${item.ownerDisplayName}`}
+                      onPress={() => openCard(item)}
+                      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+                    >
+                      <View style={[styles.coverRow, { height: tile * 0.62 }]}>
+                        {(sharedAlbum?.coverItems ?? []).slice(0, 3).map((cover) => (
+                          <AuthedImage
+                            key={cover.fileItemId}
+                            path={cover.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}
+                            style={styles.coverImg}
+                            accessibilityLabel=""
+                          />
+                        ))}
+                        {(sharedAlbum?.coverItems.length ?? 0) === 0 && (
+                          <View style={[styles.coverImg, styles.coverEmpty]} />
+                        )}
+                      </View>
+                      <Text style={styles.cardName} numberOfLines={1} ellipsizeMode="middle">
+                        {item.name}
+                      </Text>
+                      <Text style={styles.cardMeta} numberOfLines={1}>
+                        {t('shared.badgeShared')} {item.ownerDisplayName} ·{' '}
+                        {roleLabel(item.role as AlbumRole, t)} ·{' '}
+                        {t('shared.itemsCount', { count: item.itemCount })}
+                      </Text>
+                    </Pressable>
+                  );
+                })()
+              )
+            }
+            onRefresh={() => {
+              void load();
+            }}
+            refreshing={refreshing}
+          />
+        )}
 
-      {failed && (owned === null || shared === null || invitations === null) ? (
-        <ErrorState
-          title={t('grid.errorTitle')}
-          message={t('gallery.loadErrorNetwork', { what: t('tabs.albums') })}
-          onRetry={() => {
-            void load();
+        <NamePromptModal
+          visible={creating}
+          title={t('albums.createTitle')}
+          onCancel={() => setCreating(false)}
+          onSubmit={async (name) => {
+            await createAlbum(name);
+            setCreating(false);
+            await load();
           }}
         />
-      ) : owned === null && shared === null && !refreshing ? (
-        <LoadingState />
-      ) : visibleCards.length === 0 ? (
-        <EmptyState icon="🖼" title={t('albums.empty')} hint={t('albums.emptyHint')} />
-      ) : (
-        <FlatList
-          data={visibleCards}
-          keyExtractor={(c) => c.key}
-          numColumns={columns}
-          key={columns}
-          contentContainerStyle={styles.listContent}
-          renderItem={({ item }) =>
-            item.origin === 'owned' ? (
-              <AlbumCard
-                album={ownedMap.get(item.albumId)!}
-                tile={tile}
-                onPress={() => openCard(item)}
-                onLongPress={() => confirmDelete(item.albumId, item.name)}
-              />
-            ) : (
-              (() => {
-                const sharedAlbum = sharedMap.get(item.albumId);
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`${item.name} — ${t('shared.badgeShared')} ${item.ownerDisplayName}`}
-                    onPress={() => openCard(item)}
-                    style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-                  >
-                    <View style={[styles.coverRow, { height: tile * 0.62 }]}>
-                      {(sharedAlbum?.coverItems ?? []).slice(0, 3).map((cover) => (
-                        <AuthedImage
-                          key={cover.fileItemId}
-                          path={cover.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}
-                          style={styles.coverImg}
-                          accessibilityLabel=""
-                        />
-                      ))}
-                      {(sharedAlbum?.coverItems.length ?? 0) === 0 && (
-                        <View style={[styles.coverImg, styles.coverEmpty]} />
-                      )}
-                    </View>
-                    <Text style={styles.cardName} numberOfLines={1} ellipsizeMode="middle">
-                      {item.name}
-                    </Text>
-                    <Text style={styles.cardMeta} numberOfLines={1}>
-                      {t('shared.badgeShared')} {item.ownerDisplayName} ·{' '}
-                      {roleLabel(item.role as AlbumRole, t)} ·{' '}
-                      {t('shared.itemsCount', { count: item.itemCount })}
-                    </Text>
-                  </Pressable>
-                );
-              })()
-            )
-          }
-          onRefresh={() => {
-            void load();
-          }}
-          refreshing={refreshing}
-        />
+        </>
       )}
-
-      <NamePromptModal
-        visible={creating}
-        title={t('albums.createTitle')}
-        onCancel={() => setCreating(false)}
-        onSubmit={async (name) => {
-          await createAlbum(name);
-          setCreating(false);
-          await load();
-        }}
-      />
-    </Screen>
+    </ImmersiveGalleryShell>
   );
 }
 

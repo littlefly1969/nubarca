@@ -12,10 +12,33 @@ const PHOTOS = code(readFileSync(resolve(ROOT, 'app', '(tabs)', 'photos.tsx'), '
 // screen. BRAND-APP-02 migrates its CHROME and nothing else, so these
 // assertions are mostly about what did not move.
 
-test('the three header actions still invoke the same callbacks', () => {
+test('the header actions invoke the same callbacks they always did', () => {
   assert.match(PHOTOS, /accessibilityLabel=\{t\('filters\.open'\)\}[\s\S]{0,80}?onPress=\{\(\) => setFiltersOpen\(true\)\}/);
-  assert.match(PHOTOS, /accessibilityLabel=\{t\('selection\.select'\)\}[\s\S]{0,80}?onPress=\{\(\) => selectionState\.begin\(\)\}/);
-  assert.match(PHOTOS, /accessibilityLabel=\{t\('settings\.open'\)\}[\s\S]{0,80}?onPress=\{\(\) => router\.push\('\/settings'\)\}/);
+  assert.match(PHOTOS, /onPress=\{\(\) => router\.push\('\/account'\)\}/);
+});
+
+test('normal browsing offers no Select control', () => {
+  // NUBARCA-UX-01 §6. Selection begins with a long-press on an item, which is
+  // where the user's hand already is; a Select button in the header asks them
+  // to travel to the top of the screen to say what they want to do to
+  // something at the bottom of it.
+  assert.doesNotMatch(PHOTOS, /t\('selection\.select'\)/);
+  assert.doesNotMatch(PHOTOS, /checkmark-circle-outline/);
+  // The long-press entry is unchanged and still atomic.
+  assert.match(PHOTOS, /onLongPressItem=\{\(item\) => selectionState\.beginWith\(item\.id\)\}/);
+});
+
+test('the gallery owns the viewport and its chrome floats', () => {
+  assert.match(PHOTOS, /<ImmersiveGalleryShell/);
+  assert.match(PHOTOS, /bottomOverlayHeight=\{TAB_BAR_CONTENT_HEIGHT\}/);
+  // The applied-query strip travels with the chrome instead of being pinned
+  // over the gallery as a second header.
+  assert.ok(
+    PHOTOS.indexOf('<MediaFilterChips') < PHOTOS.indexOf('{(scroll) => ('),
+    'the filter chips are not in the collapsible chrome',
+  );
+  assert.match(PHOTOS, /onScroll=\{scroll\.onScroll\}/);
+  assert.match(PHOTOS, /contentPaddingBottom=\{scroll\.contentPaddingBottom\}/);
 });
 
 test('the chrome uses the shared control, not hand-rolled Pressables', () => {

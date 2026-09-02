@@ -348,6 +348,9 @@ const it = {
   'login.title': 'Accedi',
   'login.subtitle': 'La tua libreria, sul tuo server.',
 
+  'account.title': 'Account',
+  'account.open': 'Account',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

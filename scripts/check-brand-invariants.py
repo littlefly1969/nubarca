@@ -95,9 +95,11 @@ def check_contract(errors: list[str]) -> None:
 # --- Stage B: mobile strict ------------------------------------------------
 
 MOBILE_STRICT_PATHS = ("mobile/app", "mobile/src/ui")
-# Alternate spellings of the product. `NUBARCA_` prefixed names are operator
-# configuration variables and are deliberately not product spellings.
-SPELLING_RE = re.compile(r"\bNubarca\b|\bNUBARCA(?!_)\b|\bNub\s+Arca\b")
+# Alternate spellings of the PRODUCT. Two things that look like one and are
+# not: `NUBARCA_` prefixed names are operator configuration variables, and
+# `NUBARCA-UX-01` style tokens are slice and contract identifiers. Neither is
+# ever shown to a user, so neither is a spelling of the product.
+SPELLING_RE = re.compile(r"\bNubarca\b|\bNUBARCA(?![_-])\b|\bNub\s+Arca\b")
 
 
 def read(path: Path) -> str:
@@ -308,8 +310,14 @@ def check_font_integrity(errors: list[str]) -> None:
 # there. Everything not listed is still carrying declared debt.
 MIGRATED_FILES = (
     "mobile/app/login.tsx",
+    "mobile/app/account.tsx",
     "mobile/app/(tabs)/_layout.tsx",
     "mobile/app/(tabs)/photos.tsx",
+    # NUBARCA-UX-01 — the immersive gallery surfaces.
+    "mobile/app/(tabs)/videos.tsx",
+    "mobile/app/sync.tsx",
+    "mobile/app/album/[id].tsx",
+    "mobile/src/ui/ImmersiveGalleryShell.tsx",
     "mobile/src/ui/components.tsx",
     "mobile/src/ui/states.tsx",
     "mobile/src/ui/fields.tsx",

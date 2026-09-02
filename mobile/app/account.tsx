@@ -1,10 +1,13 @@
-// Settings: the one place the app keeps choices that are not about media.
+// Account: the personal hub behind every gallery (NUBARCA-UX-01 §11).
 //
-// It exists because there was no such place. Sign-out was an icon in the Photos
-// header, and there was nowhere at all to choose a theme — which is how a
-// preference that the web has had all along was simply unreachable on the
-// phone. Appearance lives here; the account section starts with sign-out and is
-// where the password change will join it.
+// The hierarchy is `gallery -> account -> preferences`. A gallery should offer
+// a person, not a cog: what sits behind it is who you are signed in as, and the
+// settings are one of the things that follow from that — not the other way
+// round.
+//
+// This is where account identity, appearance, synchronisation, security and
+// sign-out progressively live. It began as the Settings screen and keeps that
+// content; the entry point and the framing are what changed.
 import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,7 +15,7 @@ import { Redirect, router } from 'expo-router';
 import { Screen, AppHeader, HeaderButton, SectionTitle } from '../src/ui/components';
 import { useSession } from '../src/session/SessionProvider';
 import { useI18n } from '../src/i18n';
-import { radii, spacing, touch, type } from '../src/ui/tokens';
+import { iconSizes, radius, spacing, touch, typography } from '../src/ui/tokens';
 import { themed, useColors, useTheme } from '../src/ui/theme';
 import { THEME_PREFERENCES, type ThemePreference } from '../src/ui/themePreference.ts';
 
@@ -28,7 +31,7 @@ const THEME_ICONS: Record<ThemePreference, 'moon-outline' | 'sunny-outline' | 'p
   system: 'phone-portrait-outline',
 };
 
-export default function Settings(): React.JSX.Element {
+export default function Account(): React.JSX.Element {
   const styles = useStyles();
   const colors = useColors();
   const { t } = useI18n();
@@ -42,10 +45,23 @@ export default function Settings(): React.JSX.Element {
   return (
     <Screen>
       <AppHeader
-        title={t('settings.title')}
+        title={t('account.title')}
         actions={<HeaderButton label={t('common.back')} onPress={() => router.back()} />}
       />
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Who you are signed in as. The hub's subject, stated first. */}
+        <View style={styles.identity}>
+          <Ionicons name="person-circle-outline" size={iconSizes.l * 2} color={colors.accent} />
+          <View style={styles.identityText}>
+            <Text style={styles.identityName} numberOfLines={1}>
+              {session.user?.displayName ?? ''}
+            </Text>
+            <Text style={styles.identityMail} numberOfLines={1}>
+              {session.user?.email ?? ''}
+            </Text>
+          </View>
+        </View>
+
         <SectionTitle text={t('settings.appearance')} />
         {/* Three radio rows rather than a switch: `system` is a real third
             answer, not the absence of a choice, and a two-state control cannot
@@ -80,6 +96,20 @@ export default function Settings(): React.JSX.Element {
         </View>
         <Text style={styles.hint}>{t('settings.themeSystemHint')}</Text>
 
+        <SectionTitle text={t('tabs.sync')} />
+        <View style={styles.group}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('tabs.sync')}
+            onPress={() => router.push('/sync')}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          >
+            <Ionicons name="sync-outline" size={20} color={colors.textSecondary} />
+            <Text style={styles.rowLabel}>{t('tabs.sync')}</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          </Pressable>
+        </View>
+
         <SectionTitle text={t('settings.account')} />
         <View style={styles.group}>
           <Pressable
@@ -109,9 +139,19 @@ export default function Settings(): React.JSX.Element {
 const useStyles = themed((colors) =>
   StyleSheet.create({
       content: { paddingBottom: spacing.xxl },
+    identity: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.m,
+      paddingHorizontal: spacing.l,
+      paddingTop: spacing.m,
+    },
+    identityText: { flex: 1 },
+    identityName: { ...typography.sectionTitle, color: colors.textPrimary },
+    identityMail: { ...typography.secondary, color: colors.textSecondary },
       group: {
         marginHorizontal: spacing.l,
-        borderRadius: radii.l,
+        borderRadius: radius.card,
         backgroundColor: colors.surface,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: colors.separator,
@@ -125,12 +165,12 @@ const useStyles = themed((colors) =>
         alignItems: 'center',
         gap: spacing.m,
       },
-      pressed: { backgroundColor: colors.surfaceMuted },
-      rowLabel: { ...type.body, color: colors.textPrimary, flex: 1 },
-      rowLabelOn: { fontWeight: '600', color: colors.accent },
+      pressed: { backgroundColor: colors.surfaceSubtle },
+      rowLabel: { ...typography.body, color: colors.textPrimary, flex: 1 },
+      rowLabelOn: { ...typography.label, color: colors.accent },
       destructive: { color: colors.danger },
       hint: {
-        ...type.secondary,
+        ...typography.secondary,
         color: colors.textTertiary,
         paddingHorizontal: spacing.l,
         marginTop: spacing.s,

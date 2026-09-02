@@ -1103,6 +1103,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `media.highlight` was DELETED: it was a generic route to Soft Violet, and
   BRAND-AI-01 reserves that colour for inference — `signalIntelligence` is the
   role that says so.
+- **Gallery surfaces are immersive, and the shell is one piece of code.**
+  NUBARCA-UX-01: Photos, Videos, Albums and both album-detail screens run
+  `ImmersiveGalleryShell` — full viewport, chrome that collapses on the way in
+  and returns on a deliberate reversal, bottom navigation floating over the
+  media with clearance supplied as scroll-content padding. The hide/show rule
+  is pure (`galleryChrome.ts`) and anchor-based: comparing against the previous
+  frame makes a shaky thumb strobe the bar. Scrolling never re-renders React.
+  There is no Select control — long-press is the entry — and no settings cog:
+  the gallery offers a person, and `gallery -> account -> preferences` is the
+  hierarchy. Primary navigation is four browsing destinations; Sync moved under
+  Account with its engine untouched.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and

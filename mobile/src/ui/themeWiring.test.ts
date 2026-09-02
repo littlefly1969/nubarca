@@ -34,14 +34,16 @@ test('the native shell follows the system so that `system` is a real choice', ()
   assert.match(readFileSync(resolve(ROOT, 'app.config.js'), 'utf8'), /userInterfaceStyle: 'automatic'/);
 });
 
-test('settings is reachable, and is where signing out now lives', () => {
-  assert.match(read('app', '_layout.tsx'), /<Stack\.Screen name="settings"/);
+test('the account hub is reachable, and is where signing out lives', () => {
+  // NUBARCA-UX-01 §11: a gallery offers a PERSON, not a cog. The hierarchy is
+  // gallery -> account -> preferences, so the theme and sign-out are things
+  // that follow from who you are signed in as.
+  assert.match(read('app', '_layout.tsx'), /<Stack\.Screen name="account"/);
   const photos = read('app', '(tabs)', 'photos.tsx');
-  assert.match(photos, /router\.push\('\/settings'\)/);
-  // The header had six controls and was overflowing; sign-out moved rather
-  // than being duplicated.
-  assert.doesNotMatch(photos, /log-out-outline/);
-  assert.match(read('app', 'settings.tsx'), /session\.logout\(\)/);
+  assert.match(photos, /router\.push\('\/account'\)/);
+  assert.match(photos, /person-circle-outline/);
+  assert.doesNotMatch(photos, /settings-outline|log-out-outline/);
+  assert.match(read('app', 'account.tsx'), /session\.logout\(\)/);
 });
 
 test('tokens.ts offers no palette, so a stale colour cannot be imported', () => {
