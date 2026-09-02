@@ -21,3 +21,19 @@ PROJECT_PLAN.md
 CLAUDE.md
 .editorconfig
 tests/
+
+# The frontend and backend production images share the repository-root context.
+# These are generated/local artifacts, never build inputs.
+**/node_modules/
+**/dist/
+**/.vite/
+**/*.tsbuildinfo
+**/publish/
+**/coverage/
+storage/
+backups/
+deploy-history/
+models/
+graphify-out/
+.claude/
+.codex/
