@@ -4,7 +4,9 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, AppHeader, HeaderButton, IconButton } from '../../src/ui/components';
+import { AppHeader, HeaderButton, IconButton } from '../../src/ui/components';
+import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
 import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
@@ -104,10 +106,15 @@ export default function Photos(): React.JSX.Element {
   };
 
   return (
-    <Screen>
-      <AppHeader
-        title={t('tabs.photos')}
-        actions={
+    // NUBARCA-UX-01: the gallery owns the viewport. The chrome floats over it
+    // and gets out of the way as the user travels into the library.
+    <ImmersiveGalleryShell
+      bottomOverlayHeight={TAB_BAR_CONTENT_HEIGHT}
+      topChrome={
+        <>
+          <AppHeader
+            title={t('tabs.photos')}
+            actions={
           selectionState.selecting ? (
             <>
               <HeaderButton
@@ -133,16 +140,9 @@ export default function Photos(): React.JSX.Element {
                   color={colors.accent}
                 />
               </IconButton>
-              <IconButton
-                accessibilityLabel={t('selection.select')}
-                onPress={() => selectionState.begin()}
-              >
-                <Ionicons
-                  name="checkmark-circle-outline"
-                  size={iconSizes.m}
-                  color={colors.accent}
-                />
-              </IconButton>
+              {/* No Select control in normal browsing: selection begins with
+                  a long-press on an item, which is where the user's hand
+                  already is. */}
               <IconButton
                 accessibilityLabel={t('settings.open')}
                 onPress={() => router.push('/settings')}
@@ -151,73 +151,82 @@ export default function Photos(): React.JSX.Element {
               </IconButton>
             </>
           )
-        }
-      />
-
-      <MediaFilterChips
-        chips={filters.chips}
-        people={filters.people}
-        inert={filters.inert}
-        onRemove={filters.removeChip}
-        onClearAll={filters.clearAll}
-      />
-
-      {snapshot.phase === 'loading' ? (
-        <LoadingState />
-      ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
-        <ErrorState
-          title={t('grid.errorTitle')}
-          message={t('gallery.loadErrorNetwork', { what: t('gallery.whatPhotos') })}
-          onRetry={() => {
-            void refresh();
-          }}
-        />
-      ) : snapshot.items.length === 0 ? (
-        <EmptyState title={t('grid.emptyPhotos')} hint={t('grid.emptyHint')} />
-      ) : (
+            }
+          />
+          {/* The applied-query strip travels WITH the chrome: a permanently
+              pinned chip row over a gallery is a second header. */}
+          <MediaFilterChips
+            chips={filters.chips}
+            people={filters.people}
+            inert={filters.inert}
+            onRemove={filters.removeChip}
+            onClearAll={filters.clearAll}
+          />
+        </>
+      }
+    >
+      {(scroll) => (
         <>
-          <MediaGrid
-            items={snapshot.items}
-            selecting={selectionState.selecting}
-            selectedIds={selectionState.ids}
-            onPressItem={openViewer}
-            onToggleSelect={selectionState.toggle}
-            // ONE transition: enter the mode and keep the item. Doing it in
-            // two steps is what made the first long-pressed photo not stick.
-            onLongPressItem={(item) => selectionState.beginWith(item.id)}
-            refreshing={snapshot.phase === 'refreshing'}
-            onRefresh={() => {
+        {snapshot.phase === 'loading' ? (
+          <LoadingState />
+        ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
+          <ErrorState
+            title={t('grid.errorTitle')}
+            message={t('gallery.loadErrorNetwork', { what: t('gallery.whatPhotos') })}
+            onRetry={() => {
               void refresh();
             }}
-            onEndReached={
-              snapshot.hasMore
-                ? () => {
-                    void loadMore();
-                  }
-                : undefined
-            }
-            footerPhase={
-              snapshot.phase === 'loadingMore'
-                ? 'loadingMore'
-                : snapshot.phase === 'error'
-                  ? 'error'
-                  : null
-            }
-            onLoadMoreRetry={() => {
-              void retryFailed();
-            }}
           />
-          {selectionState.selecting && (
-            <MediaSelectionBar
+        ) : snapshot.items.length === 0 ? (
+          <EmptyState title={t('grid.emptyPhotos')} hint={t('grid.emptyHint')} />
+        ) : (
+          <>
+            <MediaGrid
+              items={snapshot.items}
               selecting={selectionState.selecting}
-              count={selectionState.count}
-              capabilities={capabilities}
-              onAddToAlbum={() => setSheetVisible(true)}
-              onTrash={() => { void runLifecycle(moveToTrash); }}
-              onRestore={() => { void runLifecycle(restoreFromTrash); }}
-              onCancel={selectionState.cancel}
+              selectedIds={selectionState.ids}
+              onPressItem={openViewer}
+              onToggleSelect={selectionState.toggle}
+              // ONE transition: enter the mode and keep the item. Doing it in
+              // two steps is what made the first long-pressed photo not stick.
+              onLongPressItem={(item) => selectionState.beginWith(item.id)}
+              refreshing={snapshot.phase === 'refreshing'}
+              onRefresh={() => {
+                void refresh();
+              }}
+              onEndReached={
+                snapshot.hasMore
+                  ? () => {
+                      void loadMore();
+                    }
+                  : undefined
+              }
+              footerPhase={
+                snapshot.phase === 'loadingMore'
+                  ? 'loadingMore'
+                  : snapshot.phase === 'error'
+                    ? 'error'
+                    : null
+              }
+              onLoadMoreRetry={() => {
+                void retryFailed();
+              }}
+              onScroll={scroll.onScroll}
+              scrollEventThrottle={scroll.scrollEventThrottle}
+              contentPaddingTop={scroll.contentPaddingTop}
+              contentPaddingBottom={scroll.contentPaddingBottom}
             />
-          )}
+            {selectionState.selecting && (
+              <MediaSelectionBar
+                selecting={selectionState.selecting}
+                count={selectionState.count}
+                capabilities={capabilities}
+                onAddToAlbum={() => setSheetVisible(true)}
+                onTrash={() => { void runLifecycle(moveToTrash); }}
+                onRestore={() => { void runLifecycle(restoreFromTrash); }}
+                onCancel={selectionState.cancel}
+              />
+            )}
         </>
       )}
 
@@ -239,7 +248,9 @@ export default function Photos(): React.JSX.Element {
         }}
         fileItemIds={[...selectionState.ids]}
       />
-    </Screen>
+        </>
+      )}
+    </ImmersiveGalleryShell>
   );
 }
 
