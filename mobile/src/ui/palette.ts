@@ -210,6 +210,17 @@ export const media = {
   scrim: 'rgba(10, 15, 26, 0.55)',
   scrimSoft: 'rgba(10, 15, 26, 0.25)',
   scrimStrong: 'rgba(10, 15, 26, 0.6)',
-  /** Soft Violet, the brand's LIMITED highlight — never a primary action. */
-  highlight: 'rgba(154, 108, 255, 0.9)',
+  //
+  // THERE IS DELIBERATELY NO `highlight` HERE.
+  //
+  // There used to be: Soft Violet at 90%, reachable by any overlay that wanted
+  // to stand out. Its only consumer was the duplicate-count badge, and
+  // duplicate detection is arithmetic — so the colour that means INFERENCE was
+  // being spent on a number that a database can produce.
+  //
+  // Soft Violet identifies AI and inference (BRAND-AI-01). A generic route to
+  // it guarantees it will be used decoratively, and once it is, the product has
+  // no colour left that means "a model produced this". When a media state
+  // genuinely carries that meaning, it gets a role that SAYS so — not this one
+  // back again.
 } as const;
