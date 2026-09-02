@@ -95,9 +95,11 @@ def check_contract(errors: list[str]) -> None:
 # --- Stage B: mobile strict ------------------------------------------------
 
 MOBILE_STRICT_PATHS = ("mobile/app", "mobile/src/ui")
-# Alternate spellings of the product. `NUBARCA_` prefixed names are operator
-# configuration variables and are deliberately not product spellings.
-SPELLING_RE = re.compile(r"\bNubarca\b|\bNUBARCA(?!_)\b|\bNub\s+Arca\b")
+# Alternate spellings of the PRODUCT. Two things that look like one and are
+# not: `NUBARCA_` prefixed names are operator configuration variables, and
+# `NUBARCA-UX-01` style tokens are slice and contract identifiers. Neither is
+# ever shown to a user, so neither is a spelling of the product.
+SPELLING_RE = re.compile(r"\bNubarca\b|\bNUBARCA(?![_-])\b|\bNub\s+Arca\b")
 
 
 def read(path: Path) -> str:
