@@ -30,7 +30,18 @@ const brand = {
 export interface Palette {
   // Surfaces, back to front.
   canvas: string;
+  /** A raised surface: a sheet, a card, the thing in front of the canvas. */
   surface: string;
+  /** A surface floating ABOVE a raised one — a menu, a popover. */
+  surfaceOverlay: string;
+  /** A quiet recess WITHIN a surface — an input, a chip, an inset row. */
+  surfaceSubtle: string;
+  /**
+   * @deprecated Conflated `overlay` and `subtle`: it is the overlay value in
+   * dark and the subtle value in light, which is why it could serve both and
+   * be right in neither. Kept so the screens BRAND-APP-01 does not redesign
+   * keep compiling. No new call site may use it.
+   */
   surfaceMuted: string;
   separator: string;
 
@@ -57,6 +68,8 @@ export interface Palette {
   // Feedback and status signals (BRAND-COLOR-SEMANTICS-01). Cyan means
   // connection/activity and Violet means inference — they are MEANINGS, not
   // decoration, and a component may not reach for them for anything else.
+  /** Keyboard/assistive focus, where the platform exposes it. */
+  signalFocus: string;
   /** Live, syncing, connected. */
   signalConnected: string;
   /** AI-derived or inferred. */
@@ -80,6 +93,8 @@ export interface Palette {
 export const lightPalette: Palette = {
   canvas: brand.cloudWhite,
   surface: '#FFFFFF',
+  surfaceOverlay: '#FFFFFF',
+  surfaceSubtle: '#E7ECF5',
   surfaceMuted: '#E7ECF5',
   separator: '#C9D4E6',
 
@@ -93,6 +108,7 @@ export const lightPalette: Palette = {
   accentSubtle: '#DCE6FA',
   accentDisabled: '#B9CBF5',
 
+  signalFocus: '#0B4FD6',
   signalConnected: '#0B4FD6',
   signalIntelligence: '#6D3FD6',
   signalSuccess: '#0E6B42',
@@ -111,6 +127,8 @@ export const lightPalette: Palette = {
 export const darkPalette: Palette = {
   canvas: brand.midnightNavy,
   surface: brand.deepBlue,
+  surfaceOverlay: '#132546',
+  surfaceSubtle: '#0D1729',
   surfaceMuted: '#132546',
   separator: '#22355C',
 
@@ -130,6 +148,7 @@ export const darkPalette: Palette = {
   accentSubtle: '#0C1E43',
   accentDisabled: '#2A4172',
 
+  signalFocus: brand.cyanGlow,
   signalConnected: brand.cyanGlow,
   signalIntelligence: brand.softViolet,
   signalSuccess: '#3FD98C',

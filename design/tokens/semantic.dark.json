@@ -18,7 +18,7 @@
     "accentText": "#3D82FF",
     "primaryFill": "{color.electricBlue}",
     "primaryHover": "#5A97FF",
-    "subtle": "rgba(21, 101, 255, 0.20)"
+    "subtle": "#0C1E43"
   },
   "signal": {
     "focus": "{color.cyanGlow}",

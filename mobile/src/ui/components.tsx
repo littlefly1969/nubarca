@@ -337,7 +337,7 @@ const useComponentStyles = themed((colors) =>
     buttonDanger: { backgroundColor: colors.dangerSurface },
     // `quiet` deliberately has no container of its own until it is pressed.
     buttonPressed: { opacity: 0.7 },
-    buttonDisabled: { backgroundColor: colors.surfaceMuted },
+    buttonDisabled: { backgroundColor: colors.surfaceSubtle },
     buttonLabel: { ...typography.button, color: colors.accent },
     buttonLabelOnFill: { color: colors.textOnAccent },
     buttonLabelDanger: { color: colors.danger },
@@ -368,7 +368,7 @@ const useComponentStyles = themed((colors) =>
       paddingHorizontal: spacing.m,
       paddingVertical: spacing.xs,
       borderRadius: radius.pill,
-      backgroundColor: colors.surfaceMuted,
+      backgroundColor: colors.surfaceSubtle,
       alignSelf: 'flex-start',
     },
     badgeDot: { width: 6, height: 6, borderRadius: radius.pill },

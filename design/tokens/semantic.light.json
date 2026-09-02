@@ -18,7 +18,7 @@
     "accentText": "#0B4FD6",
     "primaryFill": "#0B4FD6",
     "primaryHover": "#093FAC",
-    "subtle": "rgba(11, 79, 214, 0.12)"
+    "subtle": "#DCE6FA"
   },
   "signal": {
     "focus": "#0B4FD6",

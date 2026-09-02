@@ -72,6 +72,18 @@ A tint is a semantic implementation detail and never becomes a seventh brand pri
 - Exo 2: 400 / 500 / 600 for body/UI roles.
 - Monospace only for machine/code content.
 
+An approved product weight is not the same thing as an upstream named instance.
+Space Grotesk **600 is an approved NubArca weight** although the typeface
+publishes no SemiBold: its named instances are Light 300, Regular 400,
+Medium 500 and Bold 700, and its STAT table carries no Axis Value at 600. The
+face is generated as a static instance at `wght=600` from the official Google
+Fonts variable binary, whose weight axis is continuous over 300–700 and designed
+to be interpolated. The visible weight is not moved to 500 or 700 to match an
+upstream name.
+
+Any such generated face carries mandatory provenance and a SHA-256 in its
+platform font manifest, and the invariant checker verifies both.
+
 Font binaries are locally bundled per platform. No runtime CDN font dependency.
 
 ### BRAND-GEOMETRY-01 — Shape language

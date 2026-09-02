@@ -165,6 +165,23 @@ ones, so any consumer path traces back to the package by name.
 Run `python3 scripts/sync-brand-assets.py` after changing the package;
 `--check` fails the build if a consumer copy drifts.
 
+### Type weights
+
+The approved display weights are Space Grotesk 500 / 600 / 700 and the approved
+UI weights are Exo 2 400 / 500 / 600 (BRAND-TYPE-01).
+
+**Space Grotesk 600 is an approved product weight that the typeface does not
+publish.** Its named instances are Light 300, Regular 400, Medium 500 and
+Bold 700, and its STAT table carries no Axis Value at 600. The face is generated
+as a static instance at `wght=600` from the official Google Fonts variable
+binary, whose weight axis is continuous over 300–700 and designed to be
+interpolated. It is not moved to 500 or 700 to match an upstream name.
+
+Mobile bundles the six faces locally, with provenance and SHA-256 for each in
+[`mobile/assets/fonts/fonts-manifest.json`](../mobile/assets/fonts/fonts-manifest.json).
+`scripts/check-brand-invariants.py` verifies the hashes, refuses an unmanifested
+binary, and refuses a runtime font fetch.
+
 ### Which artwork goes where
 
 Two rules the code enforces rather than documents:

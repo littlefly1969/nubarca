@@ -16,6 +16,7 @@ from being undone one convenient hex at a time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -175,6 +176,132 @@ def check_mobile_tokens(errors: list[str], contract: dict) -> None:
                 fail(errors, f"mobile palette.ts is missing the {role} identity value {value}")
 
 
+# The mobile Palette is an ADAPTER of the design semantic tokens. This is the
+# mapping between them, and it is the whole reason the two cannot drift apart.
+SEMANTIC_ROLES = (
+    ("surface", "canvas", "canvas"),
+    ("surface", "raised", "surface"),
+    ("surface", "overlay", "surfaceOverlay"),
+    ("surface", "subtle", "surfaceSubtle"),
+    ("text", "primary", "textPrimary"),
+    ("text", "secondary", "textSecondary"),
+    ("text", "muted", "textTertiary"),
+    ("text", "onAccent", "textOnAccent"),
+    ("action", "accentText", "accent"),
+    ("action", "primaryFill", "accentStrong"),
+    ("action", "subtle", "accentSubtle"),
+    ("signal", "focus", "signalFocus"),
+    ("signal", "connected", "signalConnected"),
+    ("signal", "intelligence", "signalIntelligence"),
+    ("signal", "danger", "danger"),
+    ("signal", "success", "signalSuccess"),
+)
+
+PALETTE_LITERAL_RE = re.compile(r"^\s{2}(\w+): (?:'([^']+)'|brand\.(\w+)),\s*$", re.M)
+
+
+def parse_palette(source: str, export_name: str, brand_colors: dict) -> dict:
+    """Read one palette object literal into a role -> value mapping.
+
+    Per-key extraction rather than a whole-file substring search: a value that
+    moves to another role, or a role that quietly disappears, is then a real
+    difference instead of a string that still happens to be somewhere.
+    """
+    start = source.index(f"export const {export_name}: Palette = {{")
+    body = source[start : source.index("\n};", start)]
+    values = {}
+    for match in PALETTE_LITERAL_RE.finditer(body):
+        role, literal, brand_ref = match.group(1), match.group(2), match.group(3)
+        values[role] = literal if literal is not None else brand_colors.get(brand_ref, "")
+    return values
+
+
+def check_semantic_parity(errors: list[str], contract: dict) -> None:
+    """The mobile adapter must say exactly what the design contract says."""
+    primitives = load_json(ROOT / contract["tokens"]["primitives"])["color"]
+    palette_source = read(ROOT / "mobile/src/ui/palette.ts")
+    identity_values = parse_palette_object(palette_source, "identity", primitives)
+
+    for theme_key, export_name in (("dark", "darkPalette"), ("light", "lightPalette")):
+        semantic = load_json(ROOT / contract["tokens"][theme_key])
+        adapter = parse_palette(palette_source, export_name, primitives)
+        for group, key, role in SEMANTIC_ROLES:
+            expected = resolve_token(semantic[group][key], {"color": primitives})
+            actual = adapter.get(role)
+            if actual is None:
+                fail(errors, f"mobile palette {export_name} has no role {role}")
+            elif actual.upper() != expected.upper():
+                fail(
+                    errors,
+                    f"{export_name}.{role} is {actual}, contract {group}.{key} is {expected}",
+                )
+        for role, token in semantic["identity"].items():
+            expected = resolve_token(token, {"color": primitives})
+            actual = identity_values.get(role)
+            if actual is None or actual.upper() != expected.upper():
+                fail(errors, f"mobile identity.{role} is {actual}, contract is {expected}")
+
+
+def parse_palette_object(source: str, export_name: str, brand_colors: dict) -> dict:
+    start = source.index(f"export const {export_name} = {{")
+    body = source[start : source.index("\n} as const;", start)]
+    values = {}
+    for match in PALETTE_LITERAL_RE.finditer(body):
+        role, literal, brand_ref = match.group(1), match.group(2), match.group(3)
+        values[role] = literal if literal is not None else brand_colors.get(brand_ref, "")
+    return values
+
+
+APPROVED_WEIGHTS = {"SpaceGrotesk": [500, 600, 700], "Exo2": [400, 500, 600]}
+
+
+def check_font_integrity(errors: list[str]) -> None:
+    """BRAND-TYPE-01: the bundled faces are the declared ones, byte for byte.
+
+    An approved product weight is not the same as an upstream named instance —
+    Space Grotesk 600 is generated from the official variable binary — so the
+    manifest's provenance is not documentation, it is the only thing that
+    distinguishes an approved derivative from an arbitrary font somebody
+    dropped into the directory.
+    """
+    fonts_dir = ROOT / "mobile/assets/fonts"
+    manifest_path = fonts_dir / "fonts-manifest.json"
+    if not manifest_path.exists():
+        fail(errors, "missing mobile/assets/fonts/fonts-manifest.json")
+        return
+    manifest = load_json(manifest_path)
+    declared = {entry["file"]: entry for entry in manifest["fonts"]}
+
+    for name, entry in declared.items():
+        path = fonts_dir / name
+        if not path.exists():
+            fail(errors, f"manifested font is missing: {name}")
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != entry["sha256"]:
+            fail(errors, f"{name} does not match its manifest SHA-256")
+        if not entry.get("namedInstance", False) and not entry.get("derivation", "").strip():
+            fail(errors, f"{name} is a derivative with no recorded derivation")
+
+    for source, weights in APPROVED_WEIGHTS.items():
+        actual = sorted(e["weight"] for e in manifest["fonts"] if e["source"] == source)
+        if actual != weights:
+            fail(errors, f"{source} weights are {actual}, approved are {weights}")
+
+    # Every binary in the directory is accounted for: an unmanifested font is a
+    # font nobody approved.
+    for path in fonts_dir.glob("*.ttf"):
+        if path.name not in declared:
+            fail(errors, f"unmanifested font binary: {path.name}")
+
+    fonts_ts = read(ROOT / "mobile/src/ui/fonts.ts")
+    for required in re.findall(r"assets/fonts/([\w-]+\.ttf)", fonts_ts):
+        if required not in declared:
+            fail(errors, f"mobile fonts.ts loads an unmanifested font: {required}")
+    if re.search(r"https?://", fonts_ts):
+        fail(errors, "mobile fonts.ts introduces a runtime font fetch")
+
+
 def check_product_spelling(errors: list[str]) -> None:
     """BRAND-NAME-01: the product is spelled NubArca, everywhere it is user-facing."""
     for rel in MOBILE_STRICT_PATHS:
@@ -252,6 +379,8 @@ def main() -> int:
         contract = load_json(CONTRACT_PATH)
         check_mobile_splash(errors, contract)
         check_mobile_tokens(errors, contract)
+        check_semantic_parity(errors, contract)
+        check_font_integrity(errors)
         check_product_spelling(errors)
         check_mobile_color_literals(errors, contract)
 

@@ -54,5 +54,9 @@
     "runtimeNetworkFetch": false,
     "mobileFormat": "TTF/OTF local bundle",
     "webFormat": "WOFF2 self-hosted"
+  },
+  "provenance": {
+    "note": "Weights listed above are the APPROVED product weights, which is not the same as the upstream named instances.",
+    "Space Grotesk 600": "An approved NubArca product weight. Space Grotesk publishes no SemiBold: its named instances are Light 300, Regular 400, Medium 500 and Bold 700, and its STAT table carries no Axis Value at 600. The 600 face is generated as a static instance at wght=600 from the official Google Fonts variable binary, whose wght axis is continuous over 300-700 and designed to be interpolated. Provenance and SHA-256 are mandatory and live in mobile/assets/fonts/fonts-manifest.json. The visible weight is NOT to be moved to 500 or 700 to match an upstream name."
   }
 }

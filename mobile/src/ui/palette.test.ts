@@ -4,7 +4,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { code } from '../testing/sourceText.ts';
-import { darkPalette, lightPalette, media, palettes, type Palette } from './palette.ts';
+import { darkPalette, identity, lightPalette, media, palettes, type Palette } from './palette.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MOBILE_ROOT = resolve(HERE, '..', '..');
@@ -159,4 +159,94 @@ test('accent fills use accentStrong, never the text tint', () => {
     }
   }
   assert.deepEqual(offenders, [], `accent used as a fill in: ${offenders.join(', ')}`);
+});
+
+// --- Semantic parity with the design contract ------------------------------
+//
+// The mobile palette is an ADAPTER of design/tokens/semantic.*.json, not a
+// second opinion about it. Comparing real imported values against the real
+// contract files is what makes that true: a value edited on either side fails
+// here, and neither can drift quietly toward the other.
+
+/** design token path -> the Palette role that adapts it. */
+const SEMANTIC_ROLES: [string, keyof Palette][] = [
+  ['surface.canvas', 'canvas'],
+  ['surface.raised', 'surface'],
+  ['surface.overlay', 'surfaceOverlay'],
+  ['surface.subtle', 'surfaceSubtle'],
+  ['text.primary', 'textPrimary'],
+  ['text.secondary', 'textSecondary'],
+  ['text.muted', 'textTertiary'],
+  ['text.onAccent', 'textOnAccent'],
+  ['action.accentText', 'accent'],
+  ['action.primaryFill', 'accentStrong'],
+  ['action.subtle', 'accentSubtle'],
+  ['signal.focus', 'signalFocus'],
+  ['signal.connected', 'signalConnected'],
+  ['signal.intelligence', 'signalIntelligence'],
+  ['signal.danger', 'danger'],
+  ['signal.success', 'signalSuccess'],
+];
+
+const IDENTITY_ROLES: [string, keyof typeof identity][] = [
+  ['bootBackground', 'bootBackground'],
+  ['bootForeground', 'bootForeground'],
+  ['bootActivity', 'bootActivity'],
+];
+
+interface SemanticTokens {
+  [group: string]: Record<string, string> | string | number;
+}
+
+function designTokens(theme: 'dark' | 'light'): SemanticTokens {
+  return JSON.parse(
+    readFileSync(resolve(MOBILE_ROOT, '..', 'design', 'tokens', `semantic.${theme}.json`), 'utf8'),
+  ) as SemanticTokens;
+}
+
+function primitives(): Record<string, string> {
+  const parsed = JSON.parse(
+    readFileSync(resolve(MOBILE_ROOT, '..', 'design', 'tokens', 'brand.primitives.json'), 'utf8'),
+  ) as { color: Record<string, string> };
+  return parsed.color;
+}
+
+/** `{color.midnightNavy}` is a reference; anything else is already a value. */
+function resolveToken(value: string, color: Record<string, string>): string {
+  const reference = /^\{color\.(\w+)\}$/.exec(value);
+  return reference === null ? value : color[reference[1]];
+}
+
+test('the mobile palette adapts the design semantic tokens exactly', () => {
+  const color = primitives();
+  for (const theme of ['dark', 'light'] as const) {
+    const tokens = designTokens(theme);
+    for (const [path, role] of SEMANTIC_ROLES) {
+      const [group, key] = path.split('.');
+      const raw = (tokens[group] as Record<string, string>)[key];
+      assert.ok(raw !== undefined, `design semantic.${theme}.json has no ${path}`);
+      assert.equal(
+        palettes[theme][role].toUpperCase(),
+        resolveToken(raw, color).toUpperCase(),
+        `${theme}: ${role} disagrees with design token ${path}`,
+      );
+    }
+  }
+});
+
+test('the identity roles are the same in both themes, and match the contract', () => {
+  // Theme-independent by contract: a cold launch is Midnight Navy whichever
+  // theme the user eventually gets.
+  const color = primitives();
+  for (const theme of ['dark', 'light'] as const) {
+    const tokens = designTokens(theme);
+    for (const [path, role] of IDENTITY_ROLES) {
+      const raw = (tokens.identity as Record<string, string>)[path];
+      assert.equal(
+        identity[role].toUpperCase(),
+        resolveToken(raw, color).toUpperCase(),
+        `${theme}: identity.${role} disagrees with the contract`,
+      );
+    }
+  }
 });
