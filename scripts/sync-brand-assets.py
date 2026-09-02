@@ -80,6 +80,13 @@ COPIES: list[tuple[str, Path]] = [
     # --- Mobile Android launcher --------------------------------------------
     ("pwa/nubarca-expo-app-icon-1024.png", MOBILE_ASSETS),
     ("tv/nubarca-android-adaptive-foreground-432.png", MOBILE_ASSETS),
+    # --- Mobile identity (BRAND-SPLASH-01, BRAND-BOOT-01) --------------------
+    # The launcher artwork above is luminous and framed: it is an app icon, and
+    # BRAND-SPLASH-01 forbids reusing it as splash art. The native splash and
+    # the branded boot state take the approved FLAT on-dark mark and the on-dark
+    # wordmark instead — both already in the package, neither regenerated here.
+    ("web/nubarca-mark-flat-on-dark-256.png", MOBILE_ASSETS),
+    ("web/nubarca-wordmark-on-dark-480w.png", MOBILE_ASSETS),
 ]
 
 

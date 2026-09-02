@@ -157,6 +157,10 @@ ones, so any consumer path traces back to the package by name.
 | `tv/assets/brand/nubarca-fire-tv-{icon-512,banner-1280x720}.png` | `runtime/tv/` | Fire TV icon and banner |
 | `tv/assets/brand/nubarca-tv-lockup-transparent-{640,1280,1800}w.png` | `runtime/tv/` | in-app TV branding |
 | `tv/assets/brand/nubarca-tv-splash-1920x1080.png` | `runtime/tv/` | TV splash composition |
+| `mobile/assets/brand/nubarca-expo-app-icon-1024.png` | `runtime/pwa/` | Expo top-level (iOS) icon |
+| `mobile/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground |
+| `mobile/assets/brand/nubarca-mark-flat-on-dark-256.png` | `runtime/web/` | native splash art (BRAND-SPLASH-01) |
+| `mobile/assets/brand/nubarca-wordmark-on-dark-480w.png` | `runtime/web/` | branded boot state (BRAND-BOOT-01) |
 
 Run `python3 scripts/sync-brand-assets.py` after changing the package;
 `--check` fails the build if a consumer copy drifts.
