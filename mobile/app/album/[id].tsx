@@ -23,6 +23,7 @@ import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { useSelectionState } from '../../src/lib/useSelectionState';
+import { useReportSelectionMode } from '../../src/ui/selectionMode';
 import {
   getAlbum,
   updateAlbum,
@@ -50,6 +51,8 @@ export default function AlbumDetail(): React.JSX.Element {
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
   const selectionState = useSelectionState();
+  // The bottom navigation steps aside while this is on.
+  useReportSelectionMode(selectionState.selecting);
   const [detail, setDetail] = useState<AlbumDetail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [renaming, setRenaming] = useState(false);

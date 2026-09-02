@@ -117,20 +117,24 @@ export function MediaSelectionBar({
   };
 
   return (
-    <View style={[styles.bar, { paddingBottom: spacing.s + insets.bottom }]}>
-      <View style={styles.countRow}>
-        {/* With nothing picked yet, say what to do rather than show a bare 0. */}
-        <Text style={count === 0 ? styles.hint : styles.count}>
+    // A floating capsule, not a second navigation bar: shorter than the
+    // viewport, centred, and clearly a temporary tool.
+    <View
+      style={[styles.dock, { paddingBottom: spacing.m + insets.bottom }]}
+      pointerEvents="box-none"
+    >
+      <View style={styles.capsule}>
+        {/* Count and close sit OUTSIDE the scrolling action region: they must
+            never be the thing that scrolls out of reach. */}
+        <Text style={count === 0 ? styles.hint : styles.count} numberOfLines={1}>
           {count === 0 ? t('selection.hint') : String(count)}
         </Text>
-        <IconButton
-          accessibilityLabel={t('albumDetail.cancelSelection')}
-          onPress={onCancel}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.actions}
+          style={styles.actionScroll}
         >
-          <Ionicons name="close" size={iconSizes.m} color={colors.textSecondary} />
-        </IconButton>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
         {actions.map((action) => (
           <Pressable
             key={action.id}
@@ -151,37 +155,47 @@ export function MediaSelectionBar({
               {action.label}
             </Text>
           </Pressable>
-        ))}
-      </ScrollView>
+          ))}
+        </ScrollView>
+        <IconButton
+          accessibilityLabel={t('albumDetail.cancelSelection')}
+          onPress={onCancel}
+        >
+          <Ionicons name="close" size={iconSizes.m} color={colors.textSecondary} />
+        </IconButton>
+      </View>
     </View>
   );
 }
 
 const useStyles = themed((colors) =>
   StyleSheet.create({
-    // A temporary operating mode, not a second bottom navigation: one surface,
-    // one hairline, and the real inset instead of a 20 px guess at a home bar.
-    bar: {
+    // A temporary operating mode, not a second bottom navigation.
+    dock: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
-      backgroundColor: colors.surface,
-      paddingTop: spacing.s,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.separator,
+      alignItems: 'center',
+      paddingHorizontal: spacing.l,
     },
-    countRow: {
+    capsule: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
+      gap: spacing.s,
+      maxWidth: '100%',
       paddingLeft: spacing.l,
-      paddingRight: spacing.s,
-      paddingBottom: spacing.xs + 2,
+      paddingRight: spacing.xs,
+      paddingVertical: spacing.xs,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
     },
+    actionScroll: { flexShrink: 1 },
     count: { ...typography.label, color: colors.textPrimary },
     hint: { ...typography.secondary, color: colors.textTertiary, flexShrink: 1 },
-    actions: { paddingHorizontal: spacing.m, gap: spacing.s },
+    actions: { alignItems: 'center', gap: spacing.s },
     // Accent TEXT and icon on a quiet surface. No filled blue call to action:
     // the capability matrix may offer several of these at once, and a row of
     // primary buttons would say they are all the dominant one.

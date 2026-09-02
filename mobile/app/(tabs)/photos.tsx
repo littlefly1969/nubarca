@@ -17,6 +17,7 @@ import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useSelectionState } from '../../src/lib/useSelectionState';
+import { useReportSelectionMode } from '../../src/ui/selectionMode';
 import type { MediaItem } from '../../src/api/media.ts';
 import { useMediaFilters } from '../../src/media/useMediaFilters';
 import { MediaFilterChips } from '../../src/components/MediaFilterChips';
@@ -37,6 +38,8 @@ export default function Photos(): React.JSX.Element {
   const viewer = useViewer();
   const returnAnchor = useReturnAnchor();
   const selectionState = useSelectionState();
+  // The bottom navigation steps aside while this is on.
+  useReportSelectionMode(selectionState.selecting);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 

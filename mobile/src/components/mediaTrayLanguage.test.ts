@@ -29,8 +29,22 @@ test('zero selected still says what to do rather than showing a bare 0', () => {
 
 test('the tray sits on the real inset, not a guessed one', () => {
   assert.match(TRAY, /useSafeAreaInsets\(\)/);
-  assert.match(TRAY, /paddingBottom: spacing\.s \+ insets\.bottom/);
+  assert.match(TRAY, /paddingBottom: spacing\.m \+ insets\.bottom/);
   assert.doesNotMatch(TRAY, /paddingBottom: 20/);
+});
+
+test('it is a floating capsule, and its count and close never scroll away', () => {
+  // NUBARCA-UX-01.1 §2. Shorter than the viewport, centred, one row. The count
+  // and the close sit OUTSIDE the horizontal action region: they are the two
+  // things that must never be what scrolls out of reach.
+  assert.match(TRAY, /borderRadius: radius\.pill/);
+  assert.match(TRAY, /alignItems: 'center',\n      paddingHorizontal: spacing\.l,/);
+  const scrollStart = TRAY.indexOf('<ScrollView');
+  const scrollEnd = TRAY.indexOf('</ScrollView>');
+  const count = TRAY.indexOf("count === 0 ? t('selection.hint')");
+  const close = TRAY.indexOf("t('albumDetail.cancelSelection')");
+  assert.ok(count < scrollStart, 'the count is inside the scrolling actions');
+  assert.ok(close > scrollEnd, 'the close is inside the scrolling actions');
 });
 
 test('it is an operating mode, not a second bottom navigation', () => {
