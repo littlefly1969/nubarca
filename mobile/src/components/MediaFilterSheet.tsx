@@ -12,15 +12,8 @@
 // half-finished choice is worse than one that waits.
 
 import React, { useEffect, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type {
   AlbumMembership,
@@ -32,6 +25,9 @@ import type {
 import { draftFrom, referencedPersonIds } from '../media/mediaFilterState';
 import { PeopleFilterSheet } from './PeopleFilterSheet';
 import { useI18n } from '../i18n';
+import { Button, IconButton } from '../ui/components';
+import { TextField } from '../ui/fields';
+import { iconSizes, radius, spacing, touch, typography } from '../ui/tokens';
 import { themed, useColors } from '../ui/theme';
 
 /** A row of mutually exclusive choices; the selected one can be tapped off. */
@@ -59,7 +55,7 @@ function Choice<T extends string>({
               accessibilityRole="radio"
               accessibilityState={{ selected: on }}
               onPress={() => onChange(on ? null : option.value)}
-              style={[styles.option, on && styles.optionOn]}
+              style={({ pressed }) => [styles.option, on && styles.optionOn, pressed && styles.pressed]}
             >
               <Text style={[styles.optionText, on && styles.optionTextOn]}>{option.label}</Text>
             </Pressable>
@@ -81,21 +77,18 @@ function NumberField({
 }): React.JSX.Element {
   const styles = useStyles();
   return (
-    <View style={styles.numberField}>
-      <Text style={styles.numberLabel}>{label}</Text>
-      <TextInput
-        style={styles.numberInput}
-        keyboardType="number-pad"
-        value={value === null ? '' : String(value)}
-        onChangeText={(text) => {
-          const trimmed = text.trim();
-          if (trimmed.length === 0) return onChange(null);
-          const parsed = Number(trimmed);
-          onChange(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
-        }}
-        accessibilityLabel={label}
-      />
-    </View>
+    <TextField
+      containerStyle={styles.numberField}
+      label={label}
+      keyboardType="number-pad"
+      value={value === null ? '' : String(value)}
+      onChangeText={(text) => {
+        const trimmed = text.trim();
+        if (trimmed.length === 0) return onChange(null);
+        const parsed = Number(trimmed);
+        onChange(Number.isFinite(parsed) && parsed >= 0 ? parsed : null);
+      }}
+    />
   );
 }
 
@@ -112,6 +105,7 @@ export function MediaFilterSheet({
 }): React.JSX.Element {
   const styles = useStyles();
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const [draft, setDraft] = useState<MediaWorkspaceIdentity>(() => draftFrom(identity));
   const [peopleOpen, setPeopleOpen] = useState(false);
@@ -136,30 +130,21 @@ export function MediaFilterSheet({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.root}>
+      <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
           <Text style={styles.title}>{t('filters.title')}</Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('filters.close')}
-            onPress={onClose}
-            hitSlop={8}
-          >
-            <Ionicons name="close" size={26} color={colors.textPrimary} />
-          </Pressable>
+          <IconButton accessibilityLabel={t('filters.close')} onPress={onClose}>
+            <Ionicons name="close" size={iconSizes.l} color={colors.textPrimary} />
+          </IconButton>
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
-          <View style={styles.group}>
-            <Text style={styles.groupLabel}>{t('filters.search')}</Text>
-            <TextInput
-              style={styles.textInput}
-              value={filters.common.metadataQuery}
-              onChangeText={(text) => setCommon({ metadataQuery: text })}
-              autoCorrect={false}
-              accessibilityLabel={t('filters.search')}
-            />
-          </View>
+          <TextField
+            label={t('filters.search')}
+            value={filters.common.metadataQuery}
+            onChangeText={(text) => setCommon({ metadataQuery: text })}
+            autoCorrect={false}
+          />
 
           {/* VISUAL search (§10) is a different backend operation from the
               metadata search above: it ranks by what a photo or video SHOWS,
@@ -170,17 +155,13 @@ export function MediaFilterSheet({
               search is CONFINED to it rather than hidden or answered from the
               whole library. The predicate that used to guard this disappeared
               with the limitation it described. */}
-          <View style={styles.group}>
-            <Text style={styles.groupLabel}>{t('filters.visual')}</Text>
-            <TextInput
-              style={styles.textInput}
-              value={filters.photo.visualQuery}
-              onChangeText={(text) => setPhoto({ visualQuery: text })}
-              autoCorrect={false}
-              accessibilityLabel={t('filters.visual')}
-            />
-            <Text style={styles.hint}>{t('filters.visualHint')}</Text>
-          </View>
+          <TextField
+            label={t('filters.visual')}
+            hint={t('filters.visualHint')}
+            value={filters.photo.visualQuery}
+            onChangeText={(text) => setPhoto({ visualQuery: text })}
+            autoCorrect={false}
+          />
 
           <Choice
             label={t('filters.favorite')}
@@ -199,28 +180,25 @@ export function MediaFilterSheet({
             onChange={(next) => setCommon({ minRating: next === null ? null : Number(next) })}
           />
 
-          <View style={styles.group}>
-            <Text style={styles.groupLabel}>{t('filters.dateFrom')} / {t('filters.dateTo')}</Text>
-            <View style={styles.dateRow}>
-              <TextInput
-                style={[styles.textInput, styles.dateInput]}
-                placeholderTextColor={colors.textTertiary}
-                placeholder="YYYY-MM-DD"
-                value={filters.common.dateTakenFrom.slice(0, 10)}
-                onChangeText={(text) =>
-                  setCommon({ dateTakenFrom: text.length === 10 ? `${text}T00:00:00.000Z` : '' })}
-                accessibilityLabel={t('filters.dateFrom')}
-              />
-              <TextInput
-                style={[styles.textInput, styles.dateInput]}
-                placeholderTextColor={colors.textTertiary}
-                placeholder="YYYY-MM-DD"
-                value={filters.common.dateTakenTo.slice(0, 10)}
-                onChangeText={(text) =>
-                  setCommon({ dateTakenTo: text.length === 10 ? `${text}T23:59:59.999Z` : '' })}
-                accessibilityLabel={t('filters.dateTo')}
-              />
-            </View>
+          {/* Two labelled fields rather than one shared label over two boxes:
+              each date now says which end of the range it is. */}
+          <View style={styles.dateRow}>
+            <TextField
+              containerStyle={styles.dateInput}
+              label={t('filters.dateFrom')}
+              placeholder="YYYY-MM-DD"
+              value={filters.common.dateTakenFrom.slice(0, 10)}
+              onChangeText={(text) =>
+                setCommon({ dateTakenFrom: text.length === 10 ? `${text}T00:00:00.000Z` : '' })}
+            />
+            <TextField
+              containerStyle={styles.dateInput}
+              label={t('filters.dateTo')}
+              placeholder="YYYY-MM-DD"
+              value={filters.common.dateTakenTo.slice(0, 10)}
+              onChangeText={(text) =>
+                setCommon({ dateTakenTo: text.length === 10 ? `${text}T23:59:59.999Z` : '' })}
+            />
           </View>
 
           {/* Album membership is a LIBRARY concern: inside an album every item
@@ -266,10 +244,10 @@ export function MediaFilterSheet({
                 onPress={() => setPeopleOpen(true)}
                 style={({ pressed }) => [styles.peopleBtn, pressed && styles.pressed]}
               >
-                <Ionicons name="people-outline" size={20} color={colors.accent} />
+                <Ionicons name="people-outline" size={iconSizes.m} color={colors.accent} />
                 <Text style={styles.peopleBtnText}>{t('filters.people')}</Text>
                 {peopleCount > 0 && <Text style={styles.peopleCount}>{peopleCount}</Text>}
-                <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+                <Ionicons name="chevron-forward" size={iconSizes.s} color={colors.textTertiary} />
               </Pressable>
 
               <Choice
@@ -314,17 +292,13 @@ export function MediaFilterSheet({
                 options={[720, 1080, 2160].map((h) => ({ value: String(h), label: `${h}p` }))}
                 onChange={(next) => setVideo({ minHeight: next === null ? null : Number(next) })}
               />
-              <View style={styles.group}>
-                <Text style={styles.groupLabel}>{t('filters.codec')}</Text>
-                <TextInput
-                  style={styles.textInput}
-                  value={filters.video.codec}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={(text) => setVideo({ codec: text.trim() })}
-                  accessibilityLabel={t('filters.codec')}
-                />
-              </View>
+              <TextField
+                label={t('filters.codec')}
+                value={filters.video.codec}
+                autoCapitalize="none"
+                autoCorrect={false}
+                onChangeText={(text) => setVideo({ codec: text.trim() })}
+              />
               <Choice
                 label={t('filters.hasAudio')}
                 value={filters.video.hasAudio === null ? null : filters.video.hasAudio ? 'yes' : 'no'}
@@ -338,14 +312,11 @@ export function MediaFilterSheet({
           )}
         </ScrollView>
 
-        <View style={styles.footer}>
-          <Pressable
-            accessibilityRole="button"
+        <View style={[styles.footer, { paddingBottom: spacing.l + insets.bottom }]}>
+          <Button
+            label={t('filters.apply')}
             onPress={() => onApply(draft.filters, draft.sort, draft.direction)}
-            style={({ pressed }) => [styles.apply, pressed && styles.pressed]}
-          >
-            <Text style={styles.applyText}>{t('filters.apply')}</Text>
-          </Pressable>
+          />
         </View>
 
         <PeopleFilterSheet
@@ -361,45 +332,69 @@ export function MediaFilterSheet({
 
 const useStyles = themed((colors) =>
   StyleSheet.create({
-    root: { flex: 1, backgroundColor: colors.surface, paddingTop: 48 },
+    // Real safe area, not a 48 px guess at where a status bar might be: that
+    // number is wrong on a notch and wasteful without one.
+    root: { flex: 1, backgroundColor: colors.surface },
     header: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 16, paddingBottom: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingLeft: spacing.l,
+      paddingRight: spacing.s,
+      paddingBottom: spacing.s,
     },
-    title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
-    body: { paddingHorizontal: 16, paddingBottom: 24, gap: 18 },
-    group: { gap: 8 },
-    groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
-    hint: { fontSize: 12, color: colors.textTertiary },
-    optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.surfaceMuted },
-    optionOn: { backgroundColor: colors.accentStrong },
-    optionText: { fontSize: 14, color: colors.textSecondary },
-    optionTextOn: { color: colors.textOnAccent },
-    textInput: {
-      paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
+    title: { ...typography.pageTitle, color: colors.textPrimary },
+    // Groups are separated by RHYTHM. No card around each one: this is a dense
+    // precision tool, and a page of boxes would make it a form to fill in.
+    body: { paddingHorizontal: spacing.l, paddingBottom: spacing.xl, gap: spacing.xl },
+    group: { gap: spacing.s },
+    // Sentence case: the brand does not shout its labels.
+    groupLabel: { ...typography.label, color: colors.textSecondary },
+    optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.s },
+    // A CHOICE, not an action: the selected state is the accent wash and an
+    // accent border, never a filled primary button. A row of blue fills would
+    // claim that picking a sort order is the dominant action on the screen.
+    option: {
+      paddingHorizontal: spacing.m + 2,
+      paddingVertical: spacing.s,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      backgroundColor: colors.surfaceSubtle,
     },
-    dateRow: { flexDirection: 'row', gap: 12 },
+    optionOn: { backgroundColor: colors.accentSubtle, borderColor: colors.accent },
+    optionText: { ...typography.label, color: colors.textSecondary },
+    optionTextOn: { color: colors.accent },
+    dateRow: { flexDirection: 'row', gap: spacing.m },
     dateInput: { flex: 1 },
-    numberField: { flex: 1, gap: 6 },
-    numberLabel: { fontSize: 12, color: colors.textTertiary },
-    numberInput: {
-      paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
-    },
+    numberField: { flex: 1 },
     peopleBtn: {
-      flexDirection: 'row', alignItems: 'center', gap: 10,
-      paddingHorizontal: 14, paddingVertical: 14, borderRadius: 12, backgroundColor: colors.surfaceMuted,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s + 2,
+      minHeight: touch.minSize,
+      paddingHorizontal: spacing.m + 2,
+      paddingVertical: spacing.m,
+      borderRadius: radius.control,
+      backgroundColor: colors.surfaceSubtle,
     },
-    peopleBtnText: { flex: 1, fontSize: 15, color: colors.textPrimary },
+    peopleBtnText: { ...typography.body, flex: 1, color: colors.textPrimary },
     peopleCount: {
-      minWidth: 22, textAlign: 'center', color: colors.textOnAccent, backgroundColor: colors.accentStrong,
-      borderRadius: 11, paddingVertical: 2, fontSize: 12, overflow: 'hidden',
+      ...typography.badge,
+      minWidth: 22,
+      textAlign: 'center',
+      color: colors.textOnAccent,
+      backgroundColor: colors.accentStrong,
+      borderRadius: radius.pill,
+      paddingVertical: 2,
+      overflow: 'hidden',
     },
-    footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
-    apply: { backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-    applyText: { color: colors.textOnAccent, fontSize: 16, fontWeight: '600' },
+    footer: {
+      paddingHorizontal: spacing.l,
+      paddingTop: spacing.l,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
+    },
     pressed: { opacity: 0.7 },
   }),
 );
