@@ -5,6 +5,7 @@ using NubArca.PrintAgent.Adapters;
 using NubArca.PrintAgent.Api;
 using NubArca.PrintAgent.Execution;
 using NubArca.PrintAgent.Journal;
+using NubArca.PrintAgent.Security;
 
 namespace NubArca.PrintAgent.Tests;
 
@@ -75,6 +76,20 @@ public sealed class AgentExecutionTests : IDisposable
             "/artifact", 4, "image/png", "fake-10x15"), default);
         Assert.Equal("failed", handler.LastOutcome);
         Assert.Empty(await journal.LoadPendingAsync(default));
+    }
+
+    [Fact]
+    public async Task Linux_Credential_Store_Uses_OwnerOnly_Mode_And_Refuses_Weaker_Mode()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        var path = Path.Combine(_root, "credential.bin");
+        var store = new LinuxFileCredentialStore(path);
+        await store.SaveAsync("station.credential", default);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(path));
+        Assert.Equal("station.credential", await store.LoadAsync(default));
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.GroupRead);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.LoadAsync(default));
     }
 
     private async Task<(AgentExecutionCoordinator Coordinator, ExecutionJournal Journal,

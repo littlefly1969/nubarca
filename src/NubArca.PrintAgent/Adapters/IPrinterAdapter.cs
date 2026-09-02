@@ -1,5 +1,14 @@
 namespace NubArca.PrintAgent.Adapters;
 
+public static class PrintAdapterKinds
+{
+    public const string Fake = "fake";
+    public const string WindowsSpooler = "windows-spooler";
+    // Reserved contract: a future implementation will discover CUPS queues,
+    // report IPP capabilities and submit only through the local CUPS service.
+    public const string Cups = "cups";
+}
+
 public sealed record PrinterCapabilities(IReadOnlyList<string> Formats, bool Color, int MaxCopies = 1);
 public sealed record DiscoveredPrinter(
     string DeviceKey, string DisplayName, string? Manufacturer, string? Model, string AdapterKind);

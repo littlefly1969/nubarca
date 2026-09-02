@@ -151,7 +151,7 @@ configuration time with `NoSuchFieldError: JvmVendorSpec ... IBM_SEMERU`.
 `expo prebuild --clean` regenerates `tv/android/`; do not run it casually,
 because it discards local native edits.
 
-### 7.1 Headless Windows Print Agent
+### 7.1 Headless Print Agent and Linux simulator
 
 The agent is ordinary .NET source and its fake adapter/tests run on Linux. CI
 also proves a self-contained Windows publish:
@@ -165,8 +165,9 @@ dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj \
 ```
 
 Windows, its spooler and the vendor driver are runtime/hardware prerequisites,
-not development-host prerequisites. Installation and the DS620 acceptance
-boundary are in [`docs/print-agent.md`](print-agent.md).
+not development-host prerequisites. The same source can publish `linux-x64` for
+the fake systemd simulator; installation, CUPS boundary and DS620 acceptance
+are in [`docs/print-agent.md`](print-agent.md).
 
 ## 8. Docker and Compose
 

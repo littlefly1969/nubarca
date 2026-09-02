@@ -21,6 +21,9 @@ public sealed class PrintAgentOptions
         JournalPath = Environment.ExpandEnvironmentVariables(JournalPath);
         TemporaryPath = Environment.ExpandEnvironmentVariables(TemporaryPath);
         FakeOutputPath = Environment.ExpandEnvironmentVariables(FakeOutputPath);
+        Adapter = Adapter.Trim().ToLowerInvariant();
+        if (Adapter is not ("fake" or "windows-spooler" or "cups"))
+            throw new InvalidOperationException("PrintAgent:Adapter must be fake, windows-spooler, or cups.");
         if (IdlePollSeconds < 1 || MaxBackoffSeconds < 2 || MaxArtifactBytes < 1
             || MaxTemporaryBytes < MaxArtifactBytes)
             throw new InvalidOperationException("Print Agent bounds are invalid.");

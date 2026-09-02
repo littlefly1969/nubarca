@@ -6,6 +6,14 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Linux print-station simulator
+
+- Print Agent `0.2.0` adds self-contained `linux-x64` packaging and isolated,
+  multi-instance systemd fake stations. Every instance has its own Unix account,
+  credential, journal and fake-output directory for safe protocol development.
+- `cups` is a reserved future adapter contract; no physical Linux printing is
+  claimed until a real-device acceptance path exists.
+
 ### Headless print stations
 
 - **NubArca can now deliver a real server-rendered 10×15 test page to a remote

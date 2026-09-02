@@ -18,16 +18,16 @@ if (args.FirstOrDefault()?.Equals("enroll", StringComparison.OrdinalIgnoreCase) 
 if (!Uri.TryCreate(options.ServerOrigin, UriKind.Absolute, out var serverOrigin))
     throw new InvalidOperationException("PrintAgent:ServerOrigin must be an absolute URL.");
 
-builder.Services.AddWindowsService(service => service.ServiceName = "NubArca Print Agent");
+if (OperatingSystem.IsWindows())
+    builder.Services.AddWindowsService(service => service.ServiceName = "NubArca Print Agent");
+else if (OperatingSystem.IsLinux())
+    builder.Services.AddSystemd();
+else
+    throw new PlatformNotSupportedException("NubArca Print Agent supports Windows and Linux only.");
 builder.Services.AddSingleton(options);
-builder.Services.AddSingleton<ICredentialStore>(_ => new DpapiCredentialStore(options.CredentialPath));
+builder.Services.AddSingleton<ICredentialStore>(_ => PrintAgentPlatform.CreateCredentialStore(options.CredentialPath));
 builder.Services.AddSingleton(_ => new ExecutionJournal(options.JournalPath));
-builder.Services.AddSingleton<IPrinterAdapter>(_ =>
-    string.Equals(options.Adapter, "fake", StringComparison.OrdinalIgnoreCase)
-        ? new FakePrinterAdapter(options.FakeOutputPath)
-        : OperatingSystem.IsWindows()
-            ? new WindowsSpoolerPrinterAdapter(options.PrinterName)
-            : throw new PlatformNotSupportedException("windows-spooler requires a Windows version supported by .NET 10."));
+builder.Services.AddSingleton<IPrinterAdapter>(_ => PrintAgentPlatform.CreatePrinterAdapter(options));
 builder.Services.AddHttpClient<PrintAgentApiClient>(client =>
 {
     client.BaseAddress = new Uri(serverOrigin.ToString().TrimEnd('/') + "/");
@@ -48,6 +48,8 @@ static async Task<int> EnrollAsync(string[] args, PrintAgentOptions options)
     var server = Value("--server") ?? options.ServerOrigin;
     var stationText = Value("--station");
     var token = Value("--token");
+    if (args.Any(x => string.Equals(x, "--token-stdin", StringComparison.OrdinalIgnoreCase)))
+        token = (await Console.In.ReadToEndAsync()).Trim();
     if (!Uri.TryCreate(server, UriKind.Absolute, out var origin)
         || !Guid.TryParse(stationText, out var stationId) || string.IsNullOrWhiteSpace(token))
     {
@@ -58,8 +60,8 @@ static async Task<int> EnrollAsync(string[] args, PrintAgentOptions options)
     var api = new PrintAgentApiClient(http);
     var version = typeof(PrintAgentWorker).Assembly.GetName().Version?.ToString() ?? "unknown";
     var response = await api.EnrollAsync(stationId, token, version, CancellationToken.None);
-    await new DpapiCredentialStore(options.CredentialPath)
+    await PrintAgentPlatform.CreateCredentialStore(options.CredentialPath)
         .SaveAsync(response.StationCredential, CancellationToken.None);
-    Console.WriteLine($"Print Station {response.StationId:D} enrolled. Credential stored with machine DPAPI.");
+    Console.WriteLine($"Print Station {response.StationId:D} enrolled. Credential stored in the platform credential store.");
     return 0;
 }

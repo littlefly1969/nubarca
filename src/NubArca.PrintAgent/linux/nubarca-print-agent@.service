@@ -1,0 +1,23 @@
+[Unit]
+Description=NubArca Print Agent simulator (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+User=nubarca-print-%i
+Group=nubarca-print-%i
+WorkingDirectory=/opt/nubarca-print-agent
+Environment=DOTNET_ENVIRONMENT=Production
+ExecStart=/opt/nubarca-print-agent/NubArca.PrintAgent
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/nubarca-print-agent/%i
+
+[Install]
+WantedBy=multi-user.target

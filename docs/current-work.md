@@ -13,8 +13,8 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Windows Print Agent `0.1.0`; fake-printer acceptance is
-  automated and DNP DS620 spooler acceptance requires physical hardware
+  packaged headless Print Agent `0.2.0`; Linux fake-agent systemd instances
+  cover protocol acceptance while DNP DS620 still requires Windows hardware
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the

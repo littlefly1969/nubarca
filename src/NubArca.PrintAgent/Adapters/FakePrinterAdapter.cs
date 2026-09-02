@@ -4,7 +4,7 @@ public sealed class FakePrinterAdapter : IPrinterAdapter
 {
     private readonly string _outputPath;
     public FakePrinterAdapter(string outputPath) => _outputPath = outputPath;
-    public string Kind => "fake";
+    public string Kind => PrintAdapterKinds.Fake;
     public bool FailNextSubmission { get; set; }
     public int SubmissionCount { get; private set; }
 
