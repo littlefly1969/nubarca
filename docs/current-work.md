@@ -1075,6 +1075,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   chars, generated once per ledger row and reused across every retry, restart
   and ambiguous response; it is an operation identity, never content identity,
   and carries no account, asset, filename or inventory information.
+- **The brand is a machine-checked contract, and mobile is its first strict scope.**
+  `design/brand-contract.json` plus `design/tokens/*.json` hold the cross-platform
+  palette, geometry, typography and motion; `docs/product/` holds the invariant
+  catalog, splash/boot contract, component language and QA matrix.
+  `scripts/check-brand-invariants.py` enforces them, strictly for `mobile/app`
+  and `mobile/src/ui`: splash configuration, token values, product spelling and
+  colour literals. Web and TV stay in report mode until Stages C and D. The
+  mobile typefaces are static instances derived from the official Google Fonts
+  variable binaries, bundled locally with provenance in
+  `mobile/assets/fonts/fonts-manifest.json` — Space Grotesk publishes no
+  SemiBold, so that one weight is a declared derivative rather than a released
+  instance. `tokens.ts` keeps `radii` and `type` as DEPRECATED aliases so the
+  screens BRAND-APP-01 does not redesign keep their proportions; no new call
+  site may use them.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and
