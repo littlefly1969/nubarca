@@ -302,6 +302,47 @@ def check_font_integrity(errors: list[str]) -> None:
         fail(errors, "mobile fonts.ts introduces a runtime font fetch")
 
 
+# Files declared brand-clean. BRAND-DEBT-01 says the baseline can only shrink,
+# so this list can only GROW: a screen joins it when a slice migrates it, and
+# from then on the deprecated aliases and raw type declarations are errors
+# there. Everything not listed is still carrying declared debt.
+MIGRATED_FILES = (
+    "mobile/app/login.tsx",
+    "mobile/app/(tabs)/_layout.tsx",
+    "mobile/app/(tabs)/photos.tsx",
+    "mobile/src/ui/components.tsx",
+    "mobile/src/ui/states.tsx",
+    "mobile/src/ui/fields.tsx",
+    "mobile/src/ui/BrandLockup.tsx",
+    "mobile/src/ui/BrandTabBar.tsx",
+    "mobile/src/ui/BrandBootState.tsx",
+)
+
+# `tokens.ts` and `palette.ts` DECLARE the deprecated aliases; they are the one
+# place allowed to name them.
+DEPRECATED_USE_RE = re.compile(
+    r"\bradii\.\w+"
+    r"|\btype\.(?:title|sectionTitle|body|secondary|badge)\b"
+    r"|colors\.surfaceMuted\b"
+)
+# A heading weight with no family is the system face wearing a brand size.
+RAW_HEADING_RE = re.compile(r"fontWeight: '[67]00'")
+
+
+def check_migrated_files(errors: list[str]) -> None:
+    for rel in MIGRATED_FILES:
+        path = ROOT / rel
+        if not path.exists():
+            fail(errors, f"migrated file no longer exists: {rel}")
+            continue
+        for number, line in enumerate(read(path).splitlines(), 1):
+            match = DEPRECATED_USE_RE.search(line)
+            if match:
+                fail(errors, f"{rel}:{number}: deprecated token {match.group(0)}")
+            if RAW_HEADING_RE.search(line) and "fontFamily" not in line:
+                fail(errors, f"{rel}:{number}: heading weight with no brand family")
+
+
 def check_product_spelling(errors: list[str]) -> None:
     """BRAND-NAME-01: the product is spelled NubArca, everywhere it is user-facing."""
     for rel in MOBILE_STRICT_PATHS:
@@ -381,6 +422,7 @@ def main() -> int:
         check_mobile_tokens(errors, contract)
         check_semantic_parity(errors, contract)
         check_font_integrity(errors)
+        check_migrated_files(errors)
         check_product_spelling(errors)
         check_mobile_color_literals(errors, contract)
 
