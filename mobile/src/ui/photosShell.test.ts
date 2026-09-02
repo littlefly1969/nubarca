@@ -14,7 +14,7 @@ const PHOTOS = code(readFileSync(resolve(ROOT, 'app', '(tabs)', 'photos.tsx'), '
 
 test('the header actions invoke the same callbacks they always did', () => {
   assert.match(PHOTOS, /accessibilityLabel=\{t\('filters\.open'\)\}[\s\S]{0,80}?onPress=\{\(\) => setFiltersOpen\(true\)\}/);
-  assert.match(PHOTOS, /onPress=\{\(\) => router\.push\('\/settings'\)\}/);
+  assert.match(PHOTOS, /onPress=\{\(\) => router\.push\('\/account'\)\}/);
 });
 
 test('normal browsing offers no Select control', () => {

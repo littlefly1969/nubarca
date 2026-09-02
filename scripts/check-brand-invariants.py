@@ -310,6 +310,7 @@ def check_font_integrity(errors: list[str]) -> None:
 # there. Everything not listed is still carrying declared debt.
 MIGRATED_FILES = (
     "mobile/app/login.tsx",
+    "mobile/app/account.tsx",
     "mobile/app/(tabs)/_layout.tsx",
     "mobile/app/(tabs)/photos.tsx",
     "mobile/src/ui/components.tsx",

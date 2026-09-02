@@ -143,11 +143,13 @@ export default function Photos(): React.JSX.Element {
               {/* No Select control in normal browsing: selection begins with
                   a long-press on an item, which is where the user's hand
                   already is. */}
+              {/* A person, not a cog. What sits behind a gallery is who you
+                  are signed in as; the settings follow from that. */}
               <IconButton
-                accessibilityLabel={t('settings.open')}
-                onPress={() => router.push('/settings')}
+                accessibilityLabel={t('account.open')}
+                onPress={() => router.push('/account')}
               >
-                <Ionicons name="settings-outline" size={iconSizes.m} color={colors.accent} />
+                <Ionicons name="person-circle-outline" size={iconSizes.l} color={colors.accent} />
               </IconButton>
             </>
           )

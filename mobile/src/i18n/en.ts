@@ -340,6 +340,9 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'login.title': 'Sign in',
   'login.subtitle': 'Your library, on your own server.',
 
+  'account.title': 'Account',
+  'account.open': 'Account',
+
 };
 
 export default en;
