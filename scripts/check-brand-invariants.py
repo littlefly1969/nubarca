@@ -313,6 +313,11 @@ MIGRATED_FILES = (
     "mobile/app/account.tsx",
     "mobile/app/(tabs)/_layout.tsx",
     "mobile/app/(tabs)/photos.tsx",
+    # NUBARCA-UX-01 — the immersive gallery surfaces.
+    "mobile/app/(tabs)/videos.tsx",
+    "mobile/app/sync.tsx",
+    "mobile/app/album/[id].tsx",
+    "mobile/src/ui/ImmersiveGalleryShell.tsx",
     "mobile/src/ui/components.tsx",
     "mobile/src/ui/states.tsx",
     "mobile/src/ui/fields.tsx",
