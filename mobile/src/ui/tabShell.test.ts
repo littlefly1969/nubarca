@@ -9,9 +9,22 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const LAYOUT = code(readFileSync(resolve(ROOT, 'app', '(tabs)', '_layout.tsx'), 'utf8'));
 const BAR = code(readFileSync(resolve(ROOT, 'src', 'ui', 'BrandTabBar.tsx'), 'utf8'));
 
-test('the five destinations, and their order, are unchanged', () => {
+test('primary navigation is four browsing destinations, in order', () => {
+  // NUBARCA-UX-01 §5. Sync left the bar deliberately: those four are places
+  // you look at, and synchronisation is a capability you configure once. It
+  // took a fifth of the navigation for something most people open twice.
   const names = [...LAYOUT.matchAll(/name="(\w+)"/g)].map((m) => m[1]);
-  assert.deepEqual(names, ['photos', 'videos', 'albums', 'files', 'sync']);
+  assert.deepEqual(names, ['photos', 'videos', 'albums', 'files']);
+});
+
+test('sync is still reachable, and its engine is untouched', () => {
+  const account = code(readFileSync(resolve(ROOT, 'app', 'account.tsx'), 'utf8'));
+  assert.match(account, /router\.push\('\/sync'\)/);
+  // The route renders the SAME screen; nothing about synchronisation moved
+  // except where you find it.
+  const route = code(readFileSync(resolve(ROOT, 'app', 'sync.tsx'), 'utf8'));
+  assert.match(route, /import \{ SyncScreen \} from '\.\.\/src\/sync\/SyncScreen'/);
+  assert.match(route, /<SyncScreen \/>/);
 });
 
 test('the bar renders the router state and keeps none of its own', () => {

@@ -102,6 +102,7 @@ function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
       <Stack.Screen name="login" options={{ animation: 'fade' }} />
       <Stack.Screen name="album/[id]" />
       <Stack.Screen name="account" />
+      <Stack.Screen name="sync" />
       <Stack.Screen
         name="media/[id]"
         options={{ presentation: 'fullScreenModal', animation: 'fade' }}

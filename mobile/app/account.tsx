@@ -96,6 +96,20 @@ export default function Account(): React.JSX.Element {
         </View>
         <Text style={styles.hint}>{t('settings.themeSystemHint')}</Text>
 
+        <SectionTitle text={t('tabs.sync')} />
+        <View style={styles.group}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t('tabs.sync')}
+            onPress={() => router.push('/sync')}
+            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+          >
+            <Ionicons name="sync-outline" size={20} color={colors.textSecondary} />
+            <Text style={styles.rowLabel}>{t('tabs.sync')}</Text>
+            <Ionicons name="chevron-forward" size={20} color={colors.textTertiary} />
+          </Pressable>
+        </View>
+
         <SectionTitle text={t('settings.account')} />
         <View style={styles.group}>
           <Pressable

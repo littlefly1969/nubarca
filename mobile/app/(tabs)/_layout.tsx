@@ -1,4 +1,8 @@
-// Bottom tabs: Photos / Videos / Albums / Files / Sync.
+// Bottom tabs: Photos / Videos / Albums / Files.
+//
+// Four browsing destinations, and Sync is deliberately not one of them
+// (NUBARCA-UX-01 §5): those are places you look at, while synchronisation is a
+// capability you configure once. It lives under Account now.
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,15 +59,6 @@ export default function TabsLayout(): React.JSX.Element {
           title: t('tabs.files'),
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="folder-open-outline" size={Math.min(size, iconSizes.l)} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="sync"
-        options={{
-          title: t('tabs.sync'),
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="sync-outline" size={Math.min(size, iconSizes.l)} color={color} />
           ),
         }}
       />
