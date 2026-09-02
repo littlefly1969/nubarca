@@ -172,7 +172,8 @@ jobs:
       # application variable: nginx has no use for one, and a label is the
       # standard place a build says what it came from. `npm run build` already
       # runs `tsc -b && vite build`, so the Dockerfile needs no change to move
-      # the compile here — which is the point of this migration.
+      # the compile here. Its context is the repository root because the
+      # frontend typechecks the source-shared @nubarca/contracts package.
       - name: Build frontend image
         run: >-
           docker buildx build --load
@@ -180,7 +181,7 @@ jobs:
           --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           -f frontend/Dockerfile
           -t ${{ steps.refs.outputs.frontend }}
-          frontend
+          .
 
       - name: Verify frontend image
         run: >-
