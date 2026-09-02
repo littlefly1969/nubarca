@@ -1,0 +1,35 @@
+{
+  "$schemaVersion": 1,
+  "theme": "light",
+  "surface": {
+    "canvas": "{color.cloudWhite}",
+    "raised": "#FFFFFF",
+    "overlay": "#FFFFFF",
+    "subtle": "#E7ECF5",
+    "media": "{color.midnightNavy}"
+  },
+  "text": {
+    "primary": "{color.midnightNavy}",
+    "secondary": "#36455F",
+    "muted": "#596884",
+    "onAccent": "#FFFFFF"
+  },
+  "action": {
+    "accentText": "#0B4FD6",
+    "primaryFill": "#0B4FD6",
+    "primaryHover": "#093FAC",
+    "subtle": "rgba(11, 79, 214, 0.12)"
+  },
+  "signal": {
+    "focus": "#0B4FD6",
+    "connected": "#0B4FD6",
+    "intelligence": "#6D3FD6",
+    "danger": "#C21127",
+    "success": "#0E6B42"
+  },
+  "identity": {
+    "bootBackground": "{color.midnightNavy}",
+    "bootForeground": "{color.cloudWhite}",
+    "bootActivity": "{color.cyanGlow}"
+  }
+}

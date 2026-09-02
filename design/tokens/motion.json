@@ -1,0 +1,15 @@
+{
+  "$schemaVersion": 1,
+  "durationMs": {
+    "fast": 120,
+    "standard": 180,
+    "navigation": 240,
+    "deliberate": 320
+  },
+  "easing": {
+    "standard": "cubic-bezier(0.2, 0, 0, 1)"
+  },
+  "reducedMotion": {
+    "nonEssentialAnimation": "disabled"
+  }
+}

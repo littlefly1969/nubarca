@@ -1,0 +1,28 @@
+{
+  "$schemaVersion": 1,
+  "spacing": {
+    "base": 8,
+    "half": 4,
+    "one": 8,
+    "oneHalf": 12,
+    "two": 16,
+    "three": 24,
+    "four": 32,
+    "six": 48
+  },
+  "radius": {
+    "compact": 8,
+    "control": 12,
+    "card": 16,
+    "hero": 24,
+    "pill": 999
+  },
+  "touch": {
+    "mobileMinimum": 48
+  },
+  "brandMark": {
+    "minimumIconPx": 24,
+    "minimumWordmarkWidthPx": 120,
+    "clearSpaceRatio": 0.25
+  }
+}

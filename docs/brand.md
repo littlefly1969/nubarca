@@ -116,14 +116,18 @@ visual asset. It is the approved handoff package, imported without redesign:
 ```
 assets/brand/nubarca/
   README.md  NUBARCA_BRAND_HANDOFF.md  brand-manifest.json  checksums.sha256
-  source/      8 masters      — preserved originals, never shipped
-  runtime/     39 assets      — the only assets applications may use
+  source/     preserved originals, never shipped
+  runtime/    the only assets applications may use
     favicon/  pwa/  tv/  web/
-  reference/   7 boards       — documentation, never runtime UI
+  reference/  documentation, never runtime UI
 ```
 
-54 catalogued assets. `sha256sum --check checksums.sha256` must pass; the
-manifest records each asset's dimensions, alpha, glow and provenance, and
+Asset inventory, dimensions, runtime-readiness and checksums are authoritative
+in `assets/brand/nubarca/brand-manifest.json` and `checksums.sha256`.
+Documentation does not duplicate inventory counts.
+
+`sha256sum --check checksums.sha256` must pass; the manifest records each
+asset's dimensions, alpha, glow and provenance, and
 `frontend/src/brand/brandPackage.test.ts` verifies all of it against the real
 binaries — including that every `runtime/` file is runtime-ready and that no
 source master or reference board can reach a shipped directory.

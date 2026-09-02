@@ -1,0 +1,13 @@
+{
+  "$schemaVersion": 1,
+  "authority": "assets/brand/nubarca/brand-manifest.json#palette",
+  "brand": "NubArca",
+  "color": {
+    "midnightNavy": "#0A0F1A",
+    "deepBlue": "#0F1E3A",
+    "electricBlue": "#1565FF",
+    "cyanGlow": "#00D4FF",
+    "softViolet": "#9A6CFF",
+    "cloudWhite": "#F5F7FB"
+  }
+}

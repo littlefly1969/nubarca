@@ -1,0 +1,58 @@
+{
+  "$schemaVersion": 1,
+  "families": {
+    "display": "Space Grotesk",
+    "ui": "Exo 2",
+    "mono": "platform monospace"
+  },
+  "weights": {
+    "display": [
+      500,
+      600,
+      700
+    ],
+    "ui": [
+      400,
+      500,
+      600
+    ]
+  },
+  "roles": {
+    "hero": {
+      "family": "display",
+      "weight": 700
+    },
+    "pageTitle": {
+      "family": "display",
+      "weight": 600
+    },
+    "sectionTitle": {
+      "family": "display",
+      "weight": 600
+    },
+    "body": {
+      "family": "ui",
+      "weight": 400
+    },
+    "label": {
+      "family": "ui",
+      "weight": 500
+    },
+    "button": {
+      "family": "ui",
+      "weight": 600
+    },
+    "metadata": {
+      "family": "ui",
+      "weight": 400
+    },
+    "code": {
+      "family": "mono"
+    }
+  },
+  "delivery": {
+    "runtimeNetworkFetch": false,
+    "mobileFormat": "TTF/OTF local bundle",
+    "webFormat": "WOFF2 self-hosted"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "$schemaVersion": 1,
+  "name": "NubArca brand invariant contract",
+  "productNames": [
+    "NubArca",
+    "NubArca TV"
+  ],
+  "canonicalBrandManifest": "assets/brand/nubarca/brand-manifest.json",
+  "canonicalChecksums": "assets/brand/nubarca/checksums.sha256",
+  "tokens": {
+    "primitives": "design/tokens/brand.primitives.json",
+    "dark": "design/tokens/semantic.dark.json",
+    "light": "design/tokens/semantic.light.json",
+    "geometry": "design/tokens/geometry.json",
+    "typography": "design/tokens/typography.json",
+    "motion": "design/tokens/motion.json"
+  },
+  "mobile": {
+    "splash": {
+      "sourceAsset": "assets/brand/nubarca/runtime/web/nubarca-mark-flat-on-dark-256.png",
+      "consumerAsset": "mobile/assets/brand/nubarca-mark-flat-on-dark-256.png",
+      "background": "#0A0F1A",
+      "imageWidth": 120,
+      "resizeMode": "contain"
+    },
+    "bootWordmark": {
+      "sourceAsset": "assets/brand/nubarca/runtime/web/nubarca-wordmark-on-dark-480w.png",
+      "consumerAsset": "mobile/assets/brand/nubarca-wordmark-on-dark-480w.png"
+    }
+  },
+  "enforcement": {
+    "stage": "A-contract",
+    "strictPaths": [
+      "design"
+    ],
+    "migrationReportPaths": [
+      "mobile/app",
+      "mobile/src/ui",
+      "frontend/src",
+      "tv"
+    ],
+    "allowedColorSourceFiles": [
+      "assets/brand/nubarca/brand-manifest.json",
+      "design/tokens/brand.primitives.json",
+      "design/tokens/semantic.dark.json",
+      "design/tokens/semantic.light.json",
+      "mobile/src/ui/palette.ts",
+      "frontend/src/styles.css"
+    ]
+  }
+}
