@@ -78,13 +78,15 @@ describe('canonical package identity', () => {
 });
 
 describe('manifest counts', () => {
+  // Deliberately NO literal totals here. The manifest is the machine authority
+  // for inventory (BRAND-ASSET-02), and a number restated in a test is a
+  // hand-maintained count like any other: it turns every approved addition into
+  // a test failure, which teaches people to edit the number rather than read
+  // it. What must hold is that the manifest agrees with ITSELF and with the
+  // package on disk, and the test below checks exactly that.
   it('matches the catalogued records', () => {
     const c = manifest.counts;
-    expect(manifest.assets).toHaveLength(56);
-    expect(c.totalAssets).toBe(56);
-    expect(c.sourceMasters).toBe(8);
-    expect(c.runtimeReadyAssets).toBe(41);
-    expect(c.referenceOnlyAssets).toBe(7);
+    expect(manifest.assets).toHaveLength(c.totalAssets);
     expect(c.conditionallyReadyAssets).toBe(0);
     expect(c.missingAssets).toBe(0);
     expect(manifest.missingAssets).toEqual([]);

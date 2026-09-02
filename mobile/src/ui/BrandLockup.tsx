@@ -6,13 +6,19 @@
 // is approved artwork with its own drawing; typing "NubArca" in the heading
 // face is a different mark that nobody approved.
 //
-// SECOND: sizing the FILE instead of the LOCKUP. The two approved binaries put
-// the same 3.75:1 lockup on very different canvases — the on-dark files are
-// tightly cropped, the on-light one sits on a much larger transparent field. At
-// one shared width the light variant would render visibly smaller, and could
-// silently fall under the 120 px minimum while the code still said 120. The
-// ratios below are the fraction of each file that the artwork occupies, so a
-// requested width is the width of what a person can actually see.
+// SECOND: sizing the FILE instead of the LOCKUP. Both approved binaries now
+// share the 480x135 compact frame, but they still do not fill it identically —
+// the artwork occupies 98.33% of the on-dark file and 98.54% of the on-light
+// one — so a requested width is still divided by the measured ratio. That is
+// what keeps `visibleWidth` meaning the width of what a person can see, and
+// what keeps the 120 px minimum a real minimum rather than a number in the
+// code.
+//
+// Both files were once very different shapes: the on-light artwork shipped on a
+// 1516x1024 canvas at 77.24% width, which cost 1.9 MB to draw a 200 px logo and
+// rendered visibly smaller than the dark one at the same width. The approved
+// compact rendition removed that difference at the source, in the brand
+// package, rather than here in a per-theme layout correction.
 //
 // Nothing here recolours, redraws, stretches or crops: it picks an approved
 // binary and scales it uniformly.
@@ -25,27 +31,21 @@ import type { ThemeName } from './themePreference.ts';
 /** Minimum VISIBLE lockup width, from the brand geometry contract. */
 export const MIN_WORDMARK_WIDTH = 120;
 
-// Measured from the alpha bounding boxes of the approved binaries, matching
-// frontend/src/brand/brand.ts. The binaries are never modified to make these
-// numbers rounder.
+// Measured from the alpha bounding boxes of the approved binaries. They are
+// never modified to make these numbers rounder.
 const CONTENT_WIDTH_RATIO: Record<ThemeName, number> = {
   dark: 0.9833,
-  light: 0.7724,
+  light: 0.9854,
 };
 
-// File aspect, which is NOT the lockup's aspect: the element has to match the
-// file it draws, or the artwork is stretched.
-const WORDMARK: Record<ThemeName, { source: number; fileWidth: number; fileHeight: number }> = {
-  dark: {
-    source: require('../../assets/brand/nubarca-wordmark-on-dark-480w.png'),
-    fileWidth: 480,
-    fileHeight: 135,
-  },
-  light: {
-    source: require('../../assets/brand/nubarca-wordmark-on-light.png'),
-    fileWidth: 1516,
-    fileHeight: 1024,
-  },
+// One frame for both themes, which is the point of the compact rendition: the
+// element box no longer depends on which theme is drawing it.
+const FILE_WIDTH = 480;
+const FILE_HEIGHT = 135;
+
+const WORDMARK: Record<ThemeName, number> = {
+  dark: require('../../assets/brand/nubarca-wordmark-on-dark-480w.png'),
+  light: require('../../assets/brand/nubarca-wordmark-on-light-480w.png'),
 };
 
 /**
@@ -58,8 +58,7 @@ export function lockupLayout(
 ): { width: number; height: number } {
   const clamped = Math.max(visibleWidth, MIN_WORDMARK_WIDTH);
   const width = Math.round(clamped / CONTENT_WIDTH_RATIO[theme]);
-  const { fileWidth, fileHeight } = WORDMARK[theme];
-  return { width, height: Math.round((width * fileHeight) / fileWidth) };
+  return { width, height: Math.round((width * FILE_HEIGHT) / FILE_WIDTH) };
 }
 
 export function BrandLockup({
@@ -77,7 +76,7 @@ export function BrandLockup({
     // product is announced exactly once rather than twice.
     <View accessible accessibilityRole="image" accessibilityLabel="NubArca" style={style}>
       <Image
-        source={WORDMARK[theme].source}
+        source={WORDMARK[theme]}
         style={[styles.image, layout]}
         resizeMode="contain"
         accessible={false}

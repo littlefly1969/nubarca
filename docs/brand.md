@@ -150,6 +150,11 @@ ones, so any consumer path traces back to the package by name.
 | `frontend/public/brand/nubarca-pwa-*`, `nubarca-apple-touch-icon-180.png` | `runtime/pwa/` | PWA install + Apple touch |
 | `frontend/public/brand/nubarca-mark-flat-on-{dark,light}-{16..256}.png` | `runtime/web/` | shell, navigation, drawer |
 | `frontend/public/brand/nubarca-wordmark-on-dark-{480,960,1440}w.png`, `nubarca-wordmark-on-light.png` | `runtime/web/` | login and prominent placements |
+
+`nubarca-wordmark-on-light-480w.png` is an approved runtime **derivative** of
+`nubarca-wordmark-on-light.png`: the same artwork reframed into the on-dark
+compact geometry, purely geometrically. `scripts/build-brand-derivatives.py`
+regenerates it and `--check` proves it is still reproducible from its source.
 | `tv/assets/brand/nubarca-expo-app-icon-1024.png` | `runtime/pwa/` | Expo top-level (iOS) icon |
 | `tv/assets/brand/nubarca-android-launcher-icon-512.png` | `runtime/tv/` | Android legacy launcher icon (transparent corners) |
 | `tv/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground (transparent) |
@@ -161,7 +166,7 @@ ones, so any consumer path traces back to the package by name.
 | `mobile/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground |
 | `mobile/assets/brand/nubarca-mark-flat-on-dark-256.png` | `runtime/web/` | native splash art (BRAND-SPLASH-01) |
 | `mobile/assets/brand/nubarca-wordmark-on-dark-480w.png` | `runtime/web/` | branded boot state (BRAND-BOOT-01) |
-| `mobile/assets/brand/nubarca-wordmark-on-light.png` | `runtime/web/` | brand lockup on light surfaces |
+| `mobile/assets/brand/nubarca-wordmark-on-light-480w.png` | `runtime/web/` | brand lockup on light surfaces |
 
 Run `python3 scripts/sync-brand-assets.py` after changing the package;
 `--check` fails the build if a consumer copy drifts.
