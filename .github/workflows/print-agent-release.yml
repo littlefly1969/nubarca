@@ -1,0 +1,79 @@
+name: Print Agent release
+
+# The station is independent from the server containers. This manual main-only
+# workflow emits a self-contained Windows service bundle; installation and
+# enrollment remain explicit operator actions on the print PC.
+on:
+  workflow_dispatch:
+    inputs:
+      runtime:
+        description: Windows target architecture
+        required: true
+        default: win-x64
+        type: choice
+        options:
+          - win-x64
+          - win-arm64
+
+permissions:
+  contents: read
+
+concurrency:
+  group: print-agent-release-${{ inputs.runtime }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and validate headless Windows Print Agent
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Enforce release policy
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Print Agent releases are allowed only from main; got $GITHUB_REF" >&2
+            exit 1
+          }
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore Print Agent tests
+        run: dotnet restore tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj
+
+      - name: Test Print Agent
+        run: dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj --no-restore --configuration Release
+
+      - name: Publish self-contained service
+        env:
+          RUNTIME: ${{ inputs.runtime }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/NubArca.PrintAgent/NubArca.PrintAgent.csproj)"
+          [[ -n "$version" ]] || { echo 'Print Agent version is missing' >&2; exit 1; }
+          output="$RUNNER_TEMP/nubarca-print-agent-${version}-${RUNTIME}"
+          dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj \
+            --configuration Release --runtime "$RUNTIME" --self-contained true \
+            --no-restore -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false \
+            --output "$output"
+          printf '%s\n' "$GITHUB_SHA" > "$output/source-commit.txt"
+          (cd "$output" && sha256sum NubArca.PrintAgent.exe > SHA256SUMS)
+          echo "output=$output" >> "$GITHUB_OUTPUT"
+          echo "artifact=nubarca-print-agent-${version}-${RUNTIME}" >> "$GITHUB_OUTPUT"
+        id: publish
+
+      - name: Upload Windows service bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.publish.outputs.artifact }}
+          path: ${{ steps.publish.outputs.output }}
+          if-no-files-found: error
+          retention-days: 30

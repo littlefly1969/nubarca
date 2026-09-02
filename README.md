@@ -16,6 +16,7 @@ NubArca is designed for a **single operator and their users**, running on one sm
 - **Local AI, under your control** — optional services provide semantic text-to-photo search, image similarity and post-ingestion face detection/embedding. The experimental **Aesthetics Lab** evaluates selected images locally and remains isolated from the main library.
 - **Built for the living room** — the dedicated Fire TV / Android TV experience supports secure QR pairing, remote-first albums and slideshows, personal videos and live Party Mode refresh as new guest photos arrive.
 - **Cast a video to the television** — Chrome on a desktop or on Android can send a video to a Chromecast, a Google TV or any certified Google Cast receiver, and stays a real remote control while it plays. The receiver never holds a NubArca session: it is handed a short-lived, single-video capability whose permission, account and file are re-checked on every request. See [Google Cast](docs/google-cast.md).
+- **Print without exposing an owner session** — the server renders bounded 10×15 artifacts and a separately packaged headless Windows Print Agent delivers them through an installed spooler queue. Enrollment is one-shot, credentials are station-scoped and ambiguous driver outcomes are never auto-reprinted. See [Print Agent](docs/print-agent.md).
 
 ## Current state — 0.3.0
 
@@ -29,6 +30,8 @@ The core product is implemented and usable for controlled self-hosted deployment
 - exact deduplication, quota accounting and storage integrity tooling;
 - durable PostgreSQL-backed jobs with leases, heartbeats, retries, progress and cooperative cancellation;
 - resumable staged uploads and resumable server-side imports;
+- owner-managed Print Stations with a fake-printer contract and independently
+  packaged Windows Service agent (physical DS620 acceptance remains explicit);
 - production Docker Compose deployment, reverse-proxy examples, migrations, backup/restore scripts and operational diagnostics.
 
 Some capabilities are intentionally **opt-in**: background workers, staged uploads, server-side imports, cleanup services, HLS, FFmpeg media derivatives and AI sidecars. HLS requires an FFmpeg/FFprobe-enabled runtime and an active job worker. The Aesthetics Lab is **experimental and disabled by default**.
@@ -64,6 +67,7 @@ To run NubArca, start with the production runbook:
 - [First deployment](deploy/FIRST_DEPLOY.md)
 - [Operations](docs/OPERATIONS.md)
 - [TV APK/OTA release runbook](docs/tv-release.md)
+- [Headless Windows Print Agent](docs/print-agent.md)
 - [Google Cast](docs/google-cast.md)
 - [Architecture](ARCHITECTURE.md)
 - [Development state](DEVELOPMENT_STATE.md)

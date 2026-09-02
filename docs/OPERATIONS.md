@@ -348,6 +348,19 @@ $DC exec api sh -c 'grep VmRSS /proc/1/status'
 intel_gpu_top
 ```
 
+## Remote Print Stations
+
+The server containers render and queue print artifacts, but they never talk to
+a USB printer. A separately released headless Windows Service owns that physical
+boundary. Creation, one-shot enrollment, pause/resume, revocation, status and a
+10×15 diagnostic print are documented in [NubArca Print Agent](print-agent.md).
+
+Do not install agent binaries on the Linux production server, copy an owner
+cookie to a print PC, delete a station journal to clear a job, or automatically
+retry `delivery-unknown`: each would bypass the one-copy safety contract. Print
+schema changes follow the normal reviewed migration/update path; agent package
+installation is an independent Windows operation.
+
 ## Troubleshooting
 
 - **Logs** (sanitized — no secrets/paths/keys):

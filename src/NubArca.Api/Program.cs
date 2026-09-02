@@ -182,7 +182,8 @@ if (!string.IsNullOrWhiteSpace(dpKeyPath))
         .PersistKeysToFileSystem(new DirectoryInfo(dpKeyPath));
 }
 
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+var authentication = builder.Services
+    .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
         // The auth cookie name is the wire contract with every live browser
@@ -211,6 +212,12 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         // before the user was disabled or deleted must not keep working.
         options.Events.OnValidatePrincipal = CookieSessionValidator.ValidateAsync;
     });
+if (!string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Postgres")))
+{
+    authentication.AddScheme<AuthenticationSchemeOptions,
+        NubArca.Api.Print.PrintStationAuthenticationHandler>(
+        NubArca.Api.Print.PrintStationAuthentication.Scheme, _ => { });
+}
 builder.Services.AddAuthorization(options =>
 {
     // One policy per permission key, plus the two composite Laboratory
@@ -355,6 +362,8 @@ var castGrantCreateWindowSeconds = builder.Configuration.GetValue<int?>("RateLim
 var tvPersonalInterpretPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:PermitLimit") ?? 15;
 var tvPersonalInterpretWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:WindowSeconds") ?? 60;
 var tvPersonalInterpretQueueLimit = builder.Configuration.GetValue<int?>("RateLimits:TvPersonalInterpret:QueueLimit") ?? 2;
+var printEnrollmentPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PrintEnrollment:PermitLimit") ?? 10;
+var printEnrollmentWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PrintEnrollment:WindowSeconds") ?? 60;
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -376,6 +385,17 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = loginPermitLimit,
                 Window = TimeSpan.FromSeconds(loginWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    options.AddPolicy(NubArca.Api.Endpoints.PrintEndpoints.EnrollmentRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = printEnrollmentPermitLimit,
+                Window = TimeSpan.FromSeconds(printEnrollmentWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
@@ -807,6 +827,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<BlobReferenceAuditService>();
     builder.Services.AddScoped<IJobQueue, JobQueue>();
     builder.Services.AddScoped<JobProcessor>();
+    builder.Services.AddScoped<NubArca.Api.Print.PrintStationService>();
+    builder.Services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
 
     // Slice 81: admin-only server-side directory import. Reuses the file +
     // folder pipelines; runs as an `admin.import` background job.
@@ -1044,6 +1066,8 @@ builder.Services.Configure<BlobStorageOptions>(
     builder.Configuration.GetSection(BlobStorageOptions.SectionName));
 builder.Services.Configure<ImageProcessingOptions>(
     builder.Configuration.GetSection(ImageProcessingOptions.SectionName));
+builder.Services.Configure<NubArca.Api.Print.PrintOptions>(
+    builder.Configuration.GetSection(NubArca.Api.Print.PrintOptions.SectionName));
 builder.Services.AddSingleton(TimeProvider.System);
 // Password-recovery email. Bound outside the Postgres-conditional block so the
 // public status endpoint answers even on a host without a database, and so a
@@ -1223,6 +1247,7 @@ app.MapAuthEndpoints();
 // modular-monolith cleanup. Same routes, same session/PIN/auth behavior;
 // see that file for the implementation.
 app.MapTvEndpoints();
+app.MapPrintEndpoints();
 
 // Slice 65: the caller's own logical storage usage + quota. Owner-scoped:
 // returns ONLY the authenticated user's figures, never anyone else's. No

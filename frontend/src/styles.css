@@ -8607,3 +8607,24 @@ video.lightbox-image {
 .help-ai-composer { display: flex; flex-direction: column; gap: 0.4rem; }
 .help-ai-composer textarea { width: 100%; padding: 0.5rem; resize: vertical; }
 .help-ai-composer button { align-self: flex-start; }
+
+/* Print Foundation: dense owner dashboard; the agent itself has no GUI. */
+.print-station-create { display: flex; align-items: end; gap: .75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.print-station-create label { display: grid; gap: .3rem; min-width: min(22rem, 100%); }
+.print-station-create input { padding: .55rem .7rem; }
+.print-enrollment { margin: 1rem 0; padding: 1rem; border: 1px solid var(--warning-border, #f59e0b); border-radius: 10px; background: var(--surface-muted, rgba(0,0,0,.03)); }
+.print-enrollment h3 { margin-top: 0; }
+.print-enrollment code { display: block; padding: .75rem; margin: .65rem 0; overflow-wrap: anywhere; user-select: all; background: var(--surface-2, rgba(127,127,127,.12)); border-radius: 6px; }
+.print-station-list { list-style: none; padding: 0; display: grid; gap: 1rem; }
+.print-station-card { border: 1px solid var(--border); border-radius: 12px; padding: 1rem; background: var(--surface); }
+.print-station-card > header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+.print-station-card h3 { display: inline; margin: 0 .6rem 0 0; }
+.print-status { display: inline-block; padding: .15rem .5rem; border-radius: 999px; border: 1px solid currentColor; font-size: .75rem; }
+.print-status-online { color: var(--success, #15803d); }
+.print-status-degraded { color: var(--warning, #b45309); }
+.print-status-offline, .print-status-revoked { color: var(--muted); }
+.print-station-card dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .75rem; margin: 1rem 0; }
+.print-station-card dl div { min-width: 0; }
+.print-station-card dt { color: var(--muted); font-size: .75rem; }
+.print-station-card dd { margin: .2rem 0 0; overflow-wrap: anywhere; }
+.print-station-actions { display: flex; flex-wrap: wrap; gap: .5rem; }

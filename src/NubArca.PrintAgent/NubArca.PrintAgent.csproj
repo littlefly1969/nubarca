@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <Version>0.1.0</Version>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.4" />
+    <!-- Microsoft.Data.Sqlite 10.0.4 resolves 2.1.11 transitively; pin the
+         compatible patched native bundle so the service never ships the
+         GHSA-2m69-gcr7-jv3q library. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.4" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.4" />
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="install-service.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="uninstall-service.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

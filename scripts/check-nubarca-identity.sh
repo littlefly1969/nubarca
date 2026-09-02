@@ -44,8 +44,12 @@ SLUG = "nubarca"
 SOLUTION = "NubArca.sln"
 API_PROJECT = "src/NubArca.Api/NubArca.Api.csproj"
 TEST_PROJECT = "tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj"
+PRINT_AGENT_PROJECT = "src/NubArca.PrintAgent/NubArca.PrintAgent.csproj"
+PRINT_AGENT_TEST_PROJECT = "tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj"
 API_NAMESPACE = "NubArca.Api"
 TEST_NAMESPACE = "NubArca.Api.Tests"
+PRINT_AGENT_NAMESPACE = "NubArca.PrintAgent"
+PRINT_AGENT_TEST_NAMESPACE = "NubArca.PrintAgent.Tests"
 FRONTEND_PACKAGE = "nubarca-frontend"
 TV_ANDROID_PACKAGE = "it.littlefly.nubarca.tv"
 TV_SLUG = "nubarca-tv"
@@ -293,6 +297,14 @@ def check_solution(c: Contract) -> None:
         TEST_PROJECT.replace("/", "\\") in sln or TEST_PROJECT in sln,
         f"solution {SOLUTION} contains {TEST_PROJECT}",
     )
+    c.require(
+        PRINT_AGENT_PROJECT.replace("/", "\\") in sln or PRINT_AGENT_PROJECT in sln,
+        f"solution {SOLUTION} contains {PRINT_AGENT_PROJECT}",
+    )
+    c.require(
+        PRINT_AGENT_TEST_PROJECT.replace("/", "\\") in sln or PRINT_AGENT_TEST_PROJECT in sln,
+        f"solution {SOLUTION} contains {PRINT_AGENT_TEST_PROJECT}",
+    )
 
 
 def check_version(c: Contract) -> str | None:
@@ -324,7 +336,14 @@ def check_version(c: Contract) -> str | None:
 
 
 def check_namespaces(c: Contract, files: list[str]) -> None:
-    for root, expected in (("src/", API_NAMESPACE), ("tests/", TEST_NAMESPACE)):
+    rules = (
+        ("src/NubArca.Api/", API_NAMESPACE),
+        ("src/NubArca.PrintAgent/", PRINT_AGENT_NAMESPACE),
+        ("tests/NubArca.Api.Tests/", TEST_NAMESPACE),
+        ("tests/NubArca.PrintAgent.Tests/", PRINT_AGENT_TEST_NAMESPACE),
+    )
+    classified: set[str] = set()
+    for root, expected in rules:
         offenders = []
         checked = 0
         for path in files:
@@ -334,6 +353,7 @@ def check_namespaces(c: Contract, files: list[str]) -> None:
             declared = re.findall(r"^\s*namespace\s+([A-Za-z0-9_.]+)", text, re.MULTILINE)
             if not declared:
                 continue
+            classified.add(path)
             checked += 1
             for namespace in declared:
                 if namespace != expected and not namespace.startswith(expected + "."):
@@ -343,6 +363,21 @@ def check_namespaces(c: Contract, files: list[str]) -> None:
             f"every namespace under {root} is {expected} or below ({checked} files)",
             "; ".join(offenders[:5]),
         )
+
+    unclassified = []
+    for path in files:
+        if path in classified or not path.endswith(".cs"):
+            continue
+        if not path.startswith(("src/", "tests/")):
+            continue
+        text = (ROOT / path).read_text(encoding="utf-8", errors="replace")
+        if re.search(r"^\s*namespace\s+[A-Za-z0-9_.]+", text, re.MULTILINE):
+            unclassified.append(path)
+    c.require(
+        not unclassified,
+        "every C# namespace under src/ and tests/ belongs to an explicit product project",
+        "; ".join(unclassified[:5]),
+    )
 
 
 def check_runtime_identity(c: Contract) -> None:

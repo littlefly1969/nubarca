@@ -9,6 +9,7 @@ import { StagingUploadPanel } from '../cloud/StagingUploadPanel';
 import { TvDevicesPanel } from '../cloud/TvDevicesPanel';
 import { ExactMediaDuplicatesPanel } from '../cloud/ExactMediaDuplicatesPanel';
 import { FaceClusterRebuildPanel } from '../cloud/FaceClusterRebuildPanel';
+import { PrintStationsPanel } from '../cloud/PrintStationsPanel';
 import {
   CLOUD_TOOL_PARAM,
   resolveCloudTool,
@@ -130,6 +131,7 @@ export function CloudFunctionsPage() {
           {active === 'dedupe' && <ExactMediaDuplicatesPanel key="dedupe" />}
           {active === 'archive' && <PhotoArchiveExportPanel key="archive" />}
           {active === 'tv-devices' && <TvDevicesPanel key="tv-devices" />}
+          {active === 'print-stations' && <PrintStationsPanel key="print-stations" />}
           {active === 'face-cluster' && <FaceClusterRebuildPanel key="face-cluster" />}
         </div>
       )}

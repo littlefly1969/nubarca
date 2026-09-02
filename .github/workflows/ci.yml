@@ -83,6 +83,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  print_agent:
+    name: Print Agent build and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj
+
+      - name: Build and test
+        run: dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj --configuration Release --no-restore
+
+      - name: Prove Windows publish
+        run: >-
+          dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj
+          --configuration Release --runtime win-x64 --self-contained true
+          --no-restore -p:PublishSingleFile=false -p:DebugType=None
+          --output "$RUNNER_TEMP/print-agent-smoke"
+
   frontend:
     name: Frontend typecheck, tests, and build
     runs-on: ubuntu-24.04

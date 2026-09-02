@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -129,7 +130,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
-                "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate"
+                "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
                 builder.UseSetting($"RateLimits:{policy}:PermitLimit", "100000");
@@ -301,6 +302,11 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // JobProcessor / IJobQueue directly or via the `jobs` CLI).
             services.AddScoped<IJobQueue, JobQueue>();
             services.AddScoped<JobProcessor>();
+            services.AddScoped<NubArca.Api.Print.PrintStationService>();
+            services.AddSingleton<NubArca.Api.Print.PrintArtifactRenderer>();
+            services.AddAuthentication().AddScheme<AuthenticationSchemeOptions,
+                NubArca.Api.Print.PrintStationAuthenticationHandler>(
+                NubArca.Api.Print.PrintStationAuthentication.Scheme, _ => { });
             // AI substrate (Phase 0B): mirror the web/CLI host registration so
             // endpoint tests can resolve the AI services. AiOptions is bound by
             // Program.cs (outside the Postgres conditional), so it resolves here.

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Domain;
 using NubArca.Api.Domain.Ai;
 using NubArca.Api.Domain.Rag;
+using NubArca.Api.Domain.Print;
 
 namespace NubArca.Api.Data;
 
@@ -49,6 +50,10 @@ public class AppDbContext : DbContext
     public DbSet<AlbumTransfer> AlbumTransfers => Set<AlbumTransfer>();
     public DbSet<AlbumTransferItem> AlbumTransferItems => Set<AlbumTransferItem>();
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
+    public DbSet<PrintStation> PrintStations => Set<PrintStation>();
+    public DbSet<PrintStationEnrollment> PrintStationEnrollments => Set<PrintStationEnrollment>();
+    public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
+    public DbSet<PrintJob> PrintJobs => Set<PrintJob>();
     public DbSet<AdminImportRun> AdminImportRuns => Set<AdminImportRun>();
     public DbSet<AdminImportItem> AdminImportItems => Set<AdminImportItem>();
     public DbSet<RemoteUploadSession> RemoteUploadSessions => Set<RemoteUploadSession>();

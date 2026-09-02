@@ -12,12 +12,17 @@ is built is described by `ARCHITECTURE.md`.
 - Backend: ASP.NET Core / .NET 10, EF Core, PostgreSQL 17
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
+- Print foundation: server-owned stations/devices/jobs plus a separately
+  packaged headless Windows Print Agent `0.1.0`; fake-printer acceptance is
+  automated and DNP DS620 spooler acceptance requires physical hardware
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
   definitively signed APK and optionally publishes an immutable GHCR bundle. A
   separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and
-  publishes a signed immutable GHCR bundle without contacting production.
+  publishes a signed immutable GHCR bundle without contacting production. A
+  third manual, `main`-only Print Agent workflow tests and emits self-contained
+  `win-x64` or `win-arm64` Windows Service bundles.
   Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path can back up and apply explicitly
   confirmed, policy-approved additive migrations and never builds on the server
@@ -65,6 +70,14 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   or incompatible policies fail before production mutation. The old image may
   be restored after a smoke failure only because that compatibility was
   reviewed; the script never automatically reverses schema.
+
+- **A print-agent retry is not permission to print twice.** The server owns the
+  job and lease; the Windows station journals `submitting` locally immediately
+  before invoking a driver. A missing result acknowledgement retries only the
+  acknowledgement. A restart or exception across the driver boundary becomes
+  `delivery-unknown` and requires an owner decision. Enrollment and station
+  credentials are separate CSPRNG capabilities stored server-side only as
+  digests; the station credential cannot act as an owner or browse files.
 
 - **Authorization is permissions; a user holds exactly one role and the role owns
   its permissions.** An endpoint names a permission

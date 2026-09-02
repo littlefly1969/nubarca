@@ -6,6 +6,26 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Headless print stations
+
+- **NubArca can now deliver a real server-rendered 10×15 test page to a remote
+  Windows print station.** The owner dashboard creates, pauses, resumes and
+  revokes stations, discovers their printer queues and shows server-derived
+  status, queue depth, current job and bounded error state.
+- **The print PC holds no owner login.** A short-lived one-shot token enrolls a
+  dedicated station credential; only digests persist on the server and Windows
+  protects the local credential with machine DPAPI. The credential can report
+  printers, claim that station's work, download only the claimed artifact and
+  report its result.
+- **A lost acknowledgement cannot produce a second physical copy.** A local
+  SQLite journal records the moment before driver submission. Definite failures
+  are retryable by explicit owner policy; ambiguous crashes or driver outcomes
+  become `delivery-unknown` and are never automatically resubmitted.
+- **Packaging is independent and reproducible.** A manual main-only GitHub
+  workflow tests and publishes self-contained x64/ARM64 Windows Service bundles
+  with installer scripts and checksums. The fake printer path is automated; DNP
+  DS620 through its Windows spooler driver remains an explicit physical test.
+
 ### Safer production updates with database changes
 
 - **One reviewed command path now covers additive database migrations.** The

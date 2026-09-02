@@ -13,6 +13,15 @@ local content-addressed blob storage and Docker Compose deployment.
 - Storage reconciliation, reference accounting and controlled cleanup
 - Local face, image-semantic and video-semantic processing
 - Web and TV clients
+- Owner-managed Print Station backend/dashboard and fake-printer contract
+
+## Areas awaiting physical acceptance
+
+- The independently packaged `NubArca.PrintAgent` Windows Service is built and
+  tested headlessly with a deterministic fake adapter. The generic Windows
+  spooler adapter compiles and publishes for `win-x64`/`win-arm64`; DNP DS620
+  driver, USB, media and physical one-copy behavior are not called verified
+  until the manual matrix in `docs/print-agent.md` is completed.
 
 ## Core invariants
 
@@ -31,6 +40,8 @@ local content-addressed blob storage and Docker Compose deployment.
 ## Operational notes
 
 - Production uses separate API, worker and frontend containers.
+- Print delivery uses a separate Windows Service on the print PC; it is not a
+  production container and is released by its own manual, main-only workflow.
 - Database migrations are applied explicitly during deployment.
 - Trash retention and unreferenced-blob grace are independent controls.
 - Cleanup and deployment procedures are documented in
@@ -73,4 +84,5 @@ tracked file supplies any of them as a default, and
 that *is* ours — inside the images and inside the checkout — is `nubarca`.
 
 See `ARCHITECTURE.md` for the complete design and invariants, `README.md` for
-setup and usage, and `docs/current-work.md` for the current baseline.
+setup and usage, `docs/print-agent.md` for Print Station operations, and
+`docs/current-work.md` for the current baseline.
