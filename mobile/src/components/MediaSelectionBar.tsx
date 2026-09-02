@@ -15,7 +15,10 @@ import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { MediaSelectionCapabilities } from '@nubarca/contracts';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../i18n';
+import { IconButton } from '../ui/components';
+import { iconSizes, radius, spacing, touch, typography } from '../ui/tokens';
 import { themed, useColors } from '../ui/theme';
 
 export interface SelectionAction {
@@ -53,6 +56,7 @@ export function MediaSelectionBar({
 }): React.JSX.Element | null {
   const styles = useStyles();
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { t } = useI18n();
   if (!selecting) return null;
 
@@ -113,20 +117,18 @@ export function MediaSelectionBar({
   };
 
   return (
-    <View style={styles.bar}>
+    <View style={[styles.bar, { paddingBottom: spacing.s + insets.bottom }]}>
       <View style={styles.countRow}>
         {/* With nothing picked yet, say what to do rather than show a bare 0. */}
         <Text style={count === 0 ? styles.hint : styles.count}>
           {count === 0 ? t('selection.hint') : String(count)}
         </Text>
-        <Pressable
-          accessibilityRole="button"
+        <IconButton
           accessibilityLabel={t('albumDetail.cancelSelection')}
           onPress={onCancel}
-          hitSlop={8}
         >
-          <Ionicons name="close" size={22} color={colors.textSecondary} />
-        </Pressable>
+          <Ionicons name="close" size={iconSizes.m} color={colors.textSecondary} />
+        </IconButton>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actions}>
         {actions.map((action) => (
@@ -139,7 +141,7 @@ export function MediaSelectionBar({
           >
             <Ionicons
               name={action.icon}
-              size={20}
+              size={iconSizes.m}
               color={action.destructive === true ? colors.danger : colors.accent}
             />
             <Text
@@ -157,24 +159,43 @@ export function MediaSelectionBar({
 
 const useStyles = themed((colors) =>
   StyleSheet.create({
+    // A temporary operating mode, not a second bottom navigation: one surface,
+    // one hairline, and the real inset instead of a 20 px guess at a home bar.
     bar: {
-      position: 'absolute', left: 0, right: 0, bottom: 0,
-      backgroundColor: colors.surface, paddingBottom: 20, paddingTop: 8,
-      borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator,
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: colors.surface,
+      paddingTop: spacing.s,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.separator,
     },
     countRow: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-      paddingHorizontal: 16, paddingBottom: 6,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingLeft: spacing.l,
+      paddingRight: spacing.s,
+      paddingBottom: spacing.xs + 2,
     },
-    count: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-    hint: { fontSize: 14, color: colors.textTertiary, flexShrink: 1 },
-    actions: { paddingHorizontal: 12, gap: 8 },
+    count: { ...typography.label, color: colors.textPrimary },
+    hint: { ...typography.secondary, color: colors.textTertiary, flexShrink: 1 },
+    actions: { paddingHorizontal: spacing.m, gap: spacing.s },
+    // Accent TEXT and icon on a quiet surface. No filled blue call to action:
+    // the capability matrix may offer several of these at once, and a row of
+    // primary buttons would say they are all the dominant one.
     action: {
-      flexDirection: 'row', alignItems: 'center', gap: 8,
-      paddingHorizontal: 14, paddingVertical: 10,
-      borderRadius: 12, backgroundColor: colors.surfaceMuted,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.s,
+      minHeight: touch.minSize,
+      paddingHorizontal: spacing.m + 2,
+      paddingVertical: spacing.s + 2,
+      borderRadius: radius.control,
+      backgroundColor: colors.surfaceSubtle,
     },
-    actionLabel: { fontSize: 14, color: colors.accent },
+    actionLabel: { ...typography.label, color: colors.accent },
     destructive: { color: colors.danger },
     pressed: { opacity: 0.7 },
   }),
