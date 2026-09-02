@@ -9,6 +9,11 @@ Nothing here is a commitment or a schedule, and nothing here is a defect.
 
 ## Near-term
 
+- Complete the **physical DNP DS620 acceptance matrix** for the headless Print
+  Agent: Windows service install/upgrade, driver-exposed 10×15 media, USB
+  disconnect, paper/error recovery and one-copy delivery across an agent
+  restart. The fake adapter and server contract are automated; hardware claims
+  wait for hardware evidence.
 - A private, owner-scoped **photo map** view on top of `file_item_locations`.
 - **Operationalise blob cleanup** — a safe admin-triggered reclaim, so recovering
   space is an explicit action rather than only background configuration.
@@ -20,6 +25,9 @@ Nothing here is a commitment or a schedule, and nothing here is a defect.
 
 ## Later
 
+- Build event/Party print experiences on the general Print bounded context only
+  after station and DS620 acceptance; Party must not own a second printer queue,
+  credential or retry model.
 - A **desktop sync client**, once the local-first core warrants it.
 - **Auth hardening**, e.g. two-factor authentication.
 - Pluggable storage backends (S3/MinIO) and a faster search backend

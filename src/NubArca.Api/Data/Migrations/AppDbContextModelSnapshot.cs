@@ -4714,6 +4714,237 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("plate_redacted_media", (string)null);
                 });
 
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintJob", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("ArtifactByteLength")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("ArtifactContentType")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("ArtifactStorageKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ClaimTokenHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .IsFixedLength();
+
+                    b.Property<DateTime?>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("FileItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Format")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PrintStationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PrinterDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long?>("PublicSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RenderSpecificationJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime?>("RenderedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FileItemId");
+
+                    b.HasIndex("PrinterDeviceId");
+
+                    b.HasIndex("OwnerUserId", "CreatedAt")
+                        .HasDatabaseName("ix_print_jobs_owner_created");
+
+                    b.HasIndex("PrintStationId", "State", "CreatedAt")
+                        .HasDatabaseName("ix_print_jobs_station_state_created");
+
+                    b.ToTable("print_jobs", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintStation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AgentVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CredentialHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .IsFixedLength();
+
+                    b.Property<string>("DesiredState")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_print_stations_credential_hash")
+                        .HasFilter("\"CredentialHash\" IS NOT NULL");
+
+                    b.HasIndex("OwnerUserId", "CreatedAt")
+                        .HasDatabaseName("ix_print_stations_owner_created");
+
+                    b.ToTable("print_stations", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintStationEnrollment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PrintStationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .IsFixedLength();
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_print_station_enrollments_token_hash");
+
+                    b.HasIndex("PrintStationId", "ExpiresAt")
+                        .HasDatabaseName("ix_print_station_enrollments_station_expires");
+
+                    b.ToTable("print_station_enrollments", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrinterDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AdapterKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("CapabilitiesJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("DeviceKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("LastObservedState")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Manufacturer")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<Guid>("PrintStationId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrintStationId", "DeviceKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_printer_devices_station_device_key");
+
+                    b.ToTable("printer_devices", (string)null);
+                });
+
             modelBuilder.Entity("NubArca.Api.Domain.PrivateVault", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6607,6 +6838,59 @@ namespace NubArca.Api.Data.Migrations
                     b.HasOne("NubArca.Api.Domain.PlateImage", null)
                         .WithMany()
                         .HasForeignKey("PlateImageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintJob", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.FileItem", null)
+                        .WithMany()
+                        .HasForeignKey("FileItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.Print.PrintStation", null)
+                        .WithMany()
+                        .HasForeignKey("PrintStationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.Print.PrinterDevice", null)
+                        .WithMany()
+                        .HasForeignKey("PrinterDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintStation", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.User", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrintStationEnrollment", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Print.PrintStation", null)
+                        .WithMany()
+                        .HasForeignKey("PrintStationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.Print.PrinterDevice", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Print.PrintStation", null)
+                        .WithMany()
+                        .HasForeignKey("PrintStationId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -42,6 +42,7 @@ function toolHandlers(): Parameters<typeof installFetchMock>[0] {
     'GET /api/uploads/staging/config': () => jsonResponse(STAGING_CONFIG),
     'GET /api/uploads/staging/sessions': () => jsonResponse({ sessions: [], total: 0 }),
     'GET /api/tv-devices': () => jsonResponse([TV_DEVICE]),
+    'GET /api/print/stations': () => jsonResponse([]),
     'GET /api/tv-personal/pin': () => jsonResponse({ configured: true, updatedAt: '2026-07-01T10:00:00Z' }),
     '* /api/photo-organizer/date-taken/dry-run': () => jsonResponse({
       summary: {
@@ -87,13 +88,14 @@ describe('Cloud Functions hub — tools', () => {
     const tablist = screen.getByRole('tablist', { name: 'Strumenti delle funzioni cloud' });
     expect(tablist).toBeInTheDocument();
     const all = tabs().getAllByRole('tab');
-    expect(all).toHaveLength(6);
+    expect(all).toHaveLength(7);
     expect(all.map((t) => t.textContent)).toEqual([
       'Caricamento in blocco',
       'Organizza le foto per data',
       'Rimuovi duplicati multimediali esatti',
       'Scarica archivio foto',
       'Dispositivi TV',
+      'Stazioni di stampa',
       'Ricalcola cluster volti',
     ]);
   });
@@ -376,7 +378,7 @@ describe('Cloud Functions hub — permission gating', () => {
     expect(screen.queryByTestId('cf-tool-face-cluster')).toBeNull();
     // The other tools are untouched — this gates one tool, not the hub.
     expect(screen.getByTestId('cf-tool-upload')).toBeInTheDocument();
-    expect(tabs().getAllByRole('tab')).toHaveLength(5);
+    expect(tabs().getAllByRole('tab')).toHaveLength(6);
   });
 
   it('falls back safely when an unauthorized deep link names the tool', () => {
@@ -402,8 +404,8 @@ describe('Cloud Functions hub — permission gating', () => {
     // it would land on a hidden index and focus nothing.
     screen.getByTestId('cf-tool-upload').focus();
     await user.keyboard('{End}');
-    expect(screen.getByTestId('cf-tool-tv-devices')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('cf-tool-tv-devices')).toHaveFocus();
+    expect(screen.getByTestId('cf-tool-print-stations')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('cf-tool-print-stations')).toHaveFocus();
 
     // …and wrapping forward from the last one returns to the first.
     await user.keyboard('{ArrowRight}');

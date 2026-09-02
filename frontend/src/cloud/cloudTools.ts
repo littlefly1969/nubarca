@@ -15,7 +15,7 @@ import type { IconName } from '../components/icons/Icon';
 // whose endpoint would answer 403 must not be offered. The filtering here is
 // UX only — the server remains the authority on every call the tool makes.
 
-export type CloudToolId = 'upload' | 'organize' | 'dedupe' | 'archive' | 'tv-devices' | 'face-cluster';
+export type CloudToolId = 'upload' | 'organize' | 'dedupe' | 'archive' | 'tv-devices' | 'print-stations' | 'face-cluster';
 
 export interface CloudTool {
   id: CloudToolId;
@@ -32,6 +32,7 @@ export const CLOUD_TOOLS: readonly CloudTool[] = [
   { id: 'dedupe', titleKey: 'cloud.dedupe', descriptionKey: 'cloud.dedupeDesc', icon: 'trash' },
   { id: 'archive', titleKey: 'cloud.downloadArchive', descriptionKey: 'cloud.downloadArchiveDesc', icon: 'archive' },
   { id: 'tv-devices', titleKey: 'cloud.tvDevices', descriptionKey: 'cloud.tvDevicesDesc', icon: 'tv' },
+  { id: 'print-stations', titleKey: 'cloud.printStations', descriptionKey: 'cloud.printStationsDesc', icon: 'print' },
   {
     id: 'face-cluster',
     titleKey: 'cloud.faceCluster',

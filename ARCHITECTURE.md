@@ -1396,6 +1396,38 @@ A complete recoverable backup consists of at least:
 
 Derived media and AI artifacts can theoretically be regenerated but are persisted for performance and may be expensive to rebuild. Whether to back them up is an operator cost/recovery-time decision. Staging is temporary and should not be treated as authoritative backup content.
 
+### 22.6 Print stations and physical delivery
+
+Printing is a bounded server domain, not a Party sub-feature and not a generic
+background-job handler. PostgreSQL owns `PrintStation`, `PrinterDevice`,
+one-shot enrollment and `PrintJob` delivery state. The server renders a bounded
+immutable 10×15 artifact before a job becomes claimable; a conditional update
+grants one station a time-limited claim. Owner routes list and control only the
+caller's stations. The separate `/api/print-agent` surface accepts only a
+station credential and exposes heartbeat/device reporting, claim, the claimed
+artifact, the submitting boundary and terminal result — never file browsing or
+an owner session.
+
+Enrollment tokens and long-lived station credentials are CSPRNG values whose
+raw form is returned once; PostgreSQL stores only SHA-256 digests. Enrollment is
+short-lived, station-bound and consumed with a conditional database update, so
+two concurrent exchanges cannot both succeed. Revocation removes the credential
+digest and disables the station immediately. Online/degraded/offline is derived
+from server time, heartbeat age and current printer observations; a printer
+absent from the latest heartbeat becomes offline rather than preserving stale
+readiness.
+
+`NubArca.PrintAgent` is an independently packaged, headless Windows Service.
+Its credential is protected by machine-scope DPAPI and its local SQLite journal
+records the physical delivery boundary. The journal is deliberately separate
+from the server queue: it prevents an ACK retry or process restart from
+submitting a second physical copy. A restart after durable `submitting`, or an
+adapter exception whose acceptance cannot be disproved, ends in
+`delivery-unknown`; automatic retry is forbidden. The fake adapter is the
+automated contract implementation. The generic Windows spooler adapter discovers
+installed queues and requires a driver-exposed 4×6/10×15 paper size. DNP DS620
+acceptance remains a manual hardware gate; no vendor SDK behavior is claimed.
+
 ## 23. Security and privacy boundary checklist
 
 Every new route, service, query, job, or client feature must preserve all applicable checks below.
@@ -1418,6 +1450,10 @@ Every new route, service, query, job, or client feature must preserve all applic
 - Log profile, trust, protocol, timing and status class only — never the question, conversation, answer, evidence text, base URL, key, or any raw body.
 
 ### 23.2 Public capability data
+
+- Print enrollment and station credentials never appear in logs or persisted
+  raw columns; a station cannot enumerate owner files, other stations or other
+  stations' jobs/artifacts.
 
 - Validate token/hash, expiry, revocation, scope, and current target visibility on every request.
 - Apply separate rate and size limits to listing, media, upload, and inference-like operations.
@@ -1466,6 +1502,8 @@ Testcontainers coverage validates provider-specific behavior such as filtered un
 - mobile: Node tests for session/cookie boundaries, API and timeout contracts,
   authenticated image-loader cache/concurrency/generation behavior, gallery
   models and the sync engine, plus TypeScript type-checking through `lint`.
+- Print Agent: adapter contracts, local journal recovery, ACK retry without
+  resubmission, ambiguous delivery and self-contained Windows publish.
 
 ### 24.5 Required regression themes
 
@@ -1527,6 +1565,8 @@ New implementations must preserve the existing ownership, token, immutable-blob,
 | Direct video plus optional HLS | Preserves simple Range playback while adding a durable adaptive path for clients that need it |
 | Capability tokens for public flows | Grants the minimum unauthenticated authority without exposing owner sessions or complex ACLs |
 | Explicit reverse proxy and loopback exposure | Keeps TLS and internet exposure at the host boundary and PostgreSQL private |
+| Dedicated print domain plus station-scoped agent | Keeps physical delivery credentials and retry semantics outside owner sessions and the generic job scheduler |
+| Local pre-submit journal with unknown terminal state | Prevents duplicate physical prints when a driver outcome cannot be proved after a crash |
 
 ## 27. Source map for maintainers
 
@@ -1549,6 +1589,7 @@ When changing a subsystem, review the following implementation anchors together 
 | Owner-private documents | `Ai/Documents/`, `Rag/Retrieval/OwnerDocument*`, `Endpoints/PrivateDocumentAssistantEndpoints.cs`, `Cli/DocumentsCliCommands.cs`, document entities/configurations |
 | Party | `Party/`, Party entities, public/owner/TV route sections |
 | TV | `Tv/`, `TvUpdates/`, `tv/`, `docs/tv-release.md` (canonical operations), `docs/tv-ota-updates.md`, `docs/tv-apk-distribution.md` |
+| Print | `Print/`, `Domain/Print/`, `Endpoints/PrintEndpoints.cs`, `src/NubArca.PrintAgent/`, `docs/print-agent.md` |
 | Vault | `Vault/`, `PrivateVault*` entities/configurations, global query filters |
 | Plates | `Plates/`, Plate entities/configurations and job handler |
 | Aesthetics | `Aesthetics/`, Aesthetic entities/configurations, HumanAesExpert deployment docs |

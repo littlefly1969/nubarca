@@ -75,6 +75,8 @@ the tested expectation, not a guarantee.
 | **Frontend** (React/Vite) | Node 22 + npm. A running API is optional for unit tests |
 | **TV app — JS/OTA only** | Node 22 + npm. No JDK, no Android SDK |
 | **TV app — native APK** | the above **plus** JDK 17/21 **plus** Android SDK (android-36, build-tools 36, NDK 27) |
+| **Print backend / fake agent** | .NET SDK 10; works on the normal Linux development host |
+| **Windows spooler Print Agent** | .NET SDK 10 cross-publishes it; a Windows version supported by .NET 10, Print Spooler and an installed printer driver are required to run it |
 | **Media derivatives** (posters, HLS) | FFmpeg + FFprobe, or run the API in its container |
 | **OpenVINO AI** | Docker only — the native stack is fetched and verified *inside* the image build. Nothing is installed on the host |
 | **Deploying** | see `deploy/FAST_DEPLOY.md`; additionally `jq` and `rsync` |
@@ -148,6 +150,23 @@ configuration time with `NoSuchFieldError: JvmVendorSpec ... IBM_SEMERU`.
 
 `expo prebuild --clean` regenerates `tv/android/`; do not run it casually,
 because it discards local native edits.
+
+### 7.1 Headless Windows Print Agent
+
+The agent is ordinary .NET source and its fake adapter/tests run on Linux. CI
+also proves a self-contained Windows publish:
+
+```bash
+dotnet restore tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj
+dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj
+dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj \
+  --configuration Release --runtime win-x64 --self-contained true \
+  --output ./artifacts/print-agent
+```
+
+Windows, its spooler and the vendor driver are runtime/hardware prerequisites,
+not development-host prerequisites. Installation and the DS620 acceptance
+boundary are in [`docs/print-agent.md`](print-agent.md).
 
 ## 8. Docker and Compose
 

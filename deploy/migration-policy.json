@@ -21,6 +21,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Additive Party challenge tables, indexes, and settings with disabled/default-compatible values."
+    },
+    "20260901134021_AddPrintFoundation": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds only new owner-scoped Print station, enrollment, device, and job tables; the previous application does not read or write them."
     }
   }
 }

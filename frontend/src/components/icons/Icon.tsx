@@ -59,7 +59,8 @@ export type IconName =
   | 'minus'
   | 'eye-off'
   | 'skip'
-  | 'next-photo';
+  | 'next-photo'
+  | 'print';
 
 const PATHS: Record<IconName, string> = {
   files: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
@@ -121,6 +122,7 @@ const PATHS: Record<IconName, string> = {
   skip: 'M6 5l9 7-9 7zM19 5v14',
   // A photo with an arrow out of it: the NEXT picture, not the next face.
   'next-photo': 'M3 6h11v10H3zM3 13.5l3.5-3.5 2.5 2.5M17 8l4 4-4 4M21 12h-6',
+  print: 'M7 8V3h10v5M6 17H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M7 14h10v7H7zM18 11h.01',
 };
 
 export interface IconProps {

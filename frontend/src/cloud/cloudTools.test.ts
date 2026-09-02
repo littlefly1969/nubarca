@@ -17,7 +17,7 @@ const holding = (...held: PermissionKey[]) => (p: PermissionKey) => held.include
 describe('Cloud Functions tool model', () => {
   it('offers the normal-user tools in order', () => {
     expect(CLOUD_TOOLS.map((tool) => tool.id)).toEqual([
-      'upload', 'organize', 'dedupe', 'archive', 'tv-devices', 'face-cluster',
+      'upload', 'organize', 'dedupe', 'archive', 'tv-devices', 'print-stations', 'face-cluster',
     ]);
   });
 
@@ -59,6 +59,7 @@ describe('Cloud Functions tool model', () => {
     expect(cloudToolUrl('dedupe')).toBe('/cloud-functions?tool=dedupe');
     expect(cloudToolUrl('archive')).toBe('/cloud-functions?tool=archive');
     expect(cloudToolUrl('tv-devices')).toBe('/cloud-functions?tool=tv-devices');
+    expect(cloudToolUrl('print-stations')).toBe('/cloud-functions?tool=print-stations');
   });
 
   it('round-trips every canonical URL back to its tool', () => {
@@ -86,7 +87,7 @@ describe('Cloud Functions tool visibility', () => {
     const withoutIt = visibleCloudTools(holding()).map((tool) => tool.id);
     expect(withoutIt).not.toContain('face-cluster');
     // …and hides nothing else.
-    expect(withoutIt).toEqual(['upload', 'organize', 'dedupe', 'archive', 'tv-devices']);
+    expect(withoutIt).toEqual(['upload', 'organize', 'dedupe', 'archive', 'tv-devices', 'print-stations']);
 
     const withIt = visibleCloudTools(holding(PERMISSIONS.peopleClusterRebuild)).map((t) => t.id);
     expect(withIt).toContain('face-cluster');
@@ -95,7 +96,7 @@ describe('Cloud Functions tool visibility', () => {
   it('states which permission each gated tool needs', () => {
     expect(findCloudTool('face-cluster').requiredPermission).toBe(PERMISSIONS.peopleClusterRebuild);
     // The ordinary tools are open to anyone who can reach the hub.
-    for (const id of ['upload', 'organize', 'dedupe', 'archive', 'tv-devices'] as const) {
+    for (const id of ['upload', 'organize', 'dedupe', 'archive', 'tv-devices', 'print-stations'] as const) {
       expect(findCloudTool(id).requiredPermission).toBeUndefined();
     }
   });
