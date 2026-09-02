@@ -1,15 +1,19 @@
 // State primitives: empty, error, loading, and the one primary action.
+//
+// Normalised onto the Component Language (BRAND-APP-02 §G). An empty state is a
+// heading, one sentence and at most ONE dominant action; an error is clearly
+// destructive without turning the screen red; loading is one restrained
+// indicator rather than a piece of theatre.
+//
+// The actions here are the shared `Button`, not local Pressables: three
+// different ideas of what a primary action looks like is how a product stops
+// looking like one product.
 
 import React from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { radii, spacing, touch, type } from './tokens';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { spacing, typography } from './tokens';
 import { useI18n } from '../i18n';
+import { Button } from './components';
 import { themed, useColors } from '../ui/theme';
 
 export function EmptyState({
@@ -50,14 +54,9 @@ export function ErrorState({
         <Text style={styles.emptyHint}>{message}</Text>
       )}
       {onRetry !== undefined && (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('common.retry')}
-          onPress={onRetry}
-          style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
-        >
-          <Text style={styles.retryText}>{t('common.retry')}</Text>
-        </Pressable>
+        <View style={styles.action}>
+          <Button label={t('common.retry')} onPress={onRetry} />
+        </View>
       )}
     </View>
   );
@@ -73,7 +72,12 @@ export function LoadingState(): React.JSX.Element {
   );
 }
 
-// PrimaryButton: one accent-filled action per view.
+/**
+ * One accent-filled action per view.
+ *
+ * Kept as a name so its call sites do not have to change in this slice, but it
+ * is now the shared `Button` — there is only one primary action in the product.
+ */
 export function PrimaryButton({
   label,
   onPress,
@@ -83,26 +87,7 @@ export function PrimaryButton({
   onPress: () => void;
   disabled?: boolean;
 }): React.JSX.Element {
-  const styles = useStyles();
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      disabled={disabled}
-      style={({ pressed }) => [
-        styles.primaryBtn,
-        pressed && styles.pressed,
-        disabled && styles.primaryBtnDisabled,
-      ]}
-    >
-      <Text
-        style={[styles.primaryBtnText, disabled && styles.primaryBtnTextDisabled]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
+  return <Button label={label} onPress={onPress} disabled={disabled} />;
 }
 
 const useStyles = themed((colors) =>
@@ -115,46 +100,19 @@ const useStyles = themed((colors) =>
     },
     emptyIcon: { fontSize: 40, marginBottom: spacing.m },
     errorIcon: { fontSize: 34 },
+    // The heading is a real heading role, so an empty screen reads like part of
+    // the product rather than like a paragraph that lost its page.
     emptyTitle: {
-      ...type.body,
+      ...typography.sectionTitle,
       color: colors.textPrimary,
-      fontWeight: '600',
       textAlign: 'center',
     },
     emptyHint: {
-      ...type.secondary,
+      ...typography.secondary,
       color: colors.textSecondary,
-      marginTop: spacing.xs,
+      marginTop: spacing.s,
       textAlign: 'center',
     },
-    retryBtn: {
-      marginTop: spacing.l,
-      backgroundColor: colors.accentStrong,
-      borderRadius: radii.m,
-      minHeight: touch.minSize - 4,
-      justifyContent: 'center',
-      paddingHorizontal: spacing.xl,
-    },
-    retryText: {
-      color: colors.textOnAccent,
-      fontWeight: '600',
-      fontSize: 15,
-    },
-    pressed: { opacity: 0.75 },
-    primaryBtn: {
-      backgroundColor: colors.accentStrong,
-      borderRadius: radii.m,
-      minHeight: touch.minSize,
-      justifyContent: 'center',
-      alignItems: 'center',
-      paddingHorizontal: spacing.xl,
-    },
-    primaryBtnDisabled: { backgroundColor: colors.accentDisabled },
-    primaryBtnText: {
-      color: colors.textOnAccent,
-      fontWeight: '600',
-      fontSize: 15,
-    },
-    primaryBtnTextDisabled: { color: colors.surface },
+    action: { marginTop: spacing.l },
   }),
 );

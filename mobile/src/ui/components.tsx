@@ -142,7 +142,7 @@ const useStyles = themed((colors) =>
       paddingHorizontal: spacing.m,
       borderRadius: radius.control,
       justifyContent: 'center',
-      backgroundColor: colors.surfaceMuted,
+      backgroundColor: colors.surfaceSubtle,
     },
     headerBtnPressed: { opacity: 0.7 },
     headerBtnText: {
