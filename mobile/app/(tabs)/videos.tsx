@@ -2,9 +2,11 @@
 // Tapping a tile opens the shared media route, which becomes the native player.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Redirect, useFocusEffect } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, AppHeader } from '../../src/ui/components';
+import { AppHeader, IconButton } from '../../src/ui/components';
+import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { iconSizes } from '../../src/ui/tokens';
+import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
 import { ownedSlides } from '../../src/media/viewerEntries';
@@ -69,88 +71,95 @@ export default function Videos(): React.JSX.Element {
   };
 
   return (
-    <Screen>
-      <AppHeader
-        title={t('tabs.videos')}
-        actions={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={t('filters.open')}
-            onPress={() => setFiltersOpen(true)}
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-            hitSlop={4}
-          >
-            <Ionicons
-              name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
-              size={20}
-              color={colors.accent}
-            />
-          </Pressable>
-        }
-      />
+    // The SAME shell as Photos. A conventional Videos page beside an immersive
+    // Photos page would be two products.
+    <ImmersiveGalleryShell
+      bottomOverlayHeight={TAB_BAR_CONTENT_HEIGHT}
+      topChrome={
+        <>
+          <AppHeader
+            title={t('tabs.videos')}
+            actions={
+              <IconButton
+                accessibilityLabel={t('filters.open')}
+                onPress={() => setFiltersOpen(true)}
+                selected={filters.chips.length > 0}
+              >
+                <Ionicons
+                  name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
+                  size={iconSizes.m}
+                  color={colors.accent}
+                />
+              </IconButton>
+            }
+          />
+          <MediaFilterChips
+            chips={filters.chips}
+            people={filters.people}
+            inert={filters.inert}
+            onRemove={filters.removeChip}
+            onClearAll={filters.clearAll}
+          />
+        </>
+      }
+    >
+      {(scroll) => (
+        <>
+        {snapshot.phase === 'loading' ? (
+          <LoadingState />
+        ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
+          <ErrorState
+            title={t('grid.errorTitle')}
+            message={t('gallery.loadErrorNetwork', { what: t('gallery.whatVideos') })}
+            onRetry={() => {
+              void refresh();
+            }}
+          />
+        ) : snapshot.items.length === 0 ? (
+          <EmptyState title={t('grid.emptyVideos')} hint={t('grid.emptyHint')} />
+        ) : (
+          <MediaGrid
+            items={snapshot.items}
+            onPressItem={openPlayer}
+            refreshing={snapshot.phase === 'refreshing'}
+            onRefresh={() => {
+              void refresh();
+            }}
+            onEndReached={
+              snapshot.hasMore
+                ? () => {
+                    void loadMore();
+                  }
+                : undefined
+            }
+            footerPhase={
+              snapshot.phase === 'loadingMore'
+                ? 'loadingMore'
+                : snapshot.phase === 'error'
+                  ? 'error'
+                  : null
+            }
+            onLoadMoreRetry={() => {
+              void retryFailed();
+            }}
+            onScroll={scroll.onScroll}
+            scrollEventThrottle={scroll.scrollEventThrottle}
+            contentPaddingTop={scroll.contentPaddingTop}
+            contentPaddingBottom={scroll.contentPaddingBottom}
+          />
+        )}
 
-      <MediaFilterChips
-        chips={filters.chips}
-        people={filters.people}
-        inert={filters.inert}
-        onRemove={filters.removeChip}
-        onClearAll={filters.clearAll}
-      />
-
-      {snapshot.phase === 'loading' ? (
-        <LoadingState />
-      ) : snapshot.phase === 'error' && snapshot.items.length === 0 ? (
-        <ErrorState
-          title={t('grid.errorTitle')}
-          message={t('gallery.loadErrorNetwork', { what: t('gallery.whatVideos') })}
-          onRetry={() => {
-            void refresh();
+        <MediaFilterSheet
+          visible={filtersOpen}
+          identity={filters.identity}
+          onApply={(next, sort, direction) => {
+            filters.apply(next, sort, direction);
+            setFiltersOpen(false);
           }}
+          onClose={() => setFiltersOpen(false)}
         />
-      ) : snapshot.items.length === 0 ? (
-        <EmptyState title={t('grid.emptyVideos')} hint={t('grid.emptyHint')} />
-      ) : (
-        <MediaGrid
-          items={snapshot.items}
-          onPressItem={openPlayer}
-          refreshing={snapshot.phase === 'refreshing'}
-          onRefresh={() => {
-            void refresh();
-          }}
-          onEndReached={
-            snapshot.hasMore
-              ? () => {
-                  void loadMore();
-                }
-              : undefined
-          }
-          footerPhase={
-            snapshot.phase === 'loadingMore'
-              ? 'loadingMore'
-              : snapshot.phase === 'error'
-                ? 'error'
-                : null
-          }
-          onLoadMoreRetry={() => {
-            void retryFailed();
-          }}
-        />
+        </>
       )}
-
-      <MediaFilterSheet
-        visible={filtersOpen}
-        identity={filters.identity}
-        onApply={(next, sort, direction) => {
-          filters.apply(next, sort, direction);
-          setFiltersOpen(false);
-        }}
-        onClose={() => setFiltersOpen(false)}
-      />
-    </Screen>
+    </ImmersiveGalleryShell>
   );
 }
-
-const styles = StyleSheet.create({
-  iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  pressed: { opacity: 0.7 },
-});
