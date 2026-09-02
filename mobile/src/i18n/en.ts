@@ -319,6 +319,24 @@ const en: Partial<Record<MobileMessageKey, string>> = {
   'sharing.loadFailed': 'Could not load members.',
   'sharing.actionFailed': 'The action failed.',
 
+  'menu.more': 'More',
+  'menu.close': 'Close',
+
+  'selection.hint': 'Tap the items to select',
+
+  'chips.inert': 'not applied to the visual search',
+  'filters.semanticNotice': 'Visual search ranks by content: some filters do not apply.',
+
+  'settings.title': 'Settings',
+  'settings.open': 'Settings',
+  'settings.appearance': 'Appearance',
+  'settings.theme': 'Theme',
+  'settings.theme.dark': 'Dark',
+  'settings.theme.light': 'Light',
+  'settings.theme.system': 'System',
+  'settings.themeSystemHint': 'Follows the phone’s theme.',
+  'settings.account': 'Account',
+
 };
 
 export default en;

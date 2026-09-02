@@ -6,10 +6,11 @@ import React, { useCallback, useMemo } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaTile } from './MediaTile';
-import { colors, columnsForWidth, spacing } from '../ui/tokens';
+import { columnsForWidth, spacing } from '../ui/tokens';
 import { useI18n } from '../i18n';
 import { useWindowDimensions } from 'react-native';
 import type { MediaItem } from '../api/media';
+import { themed, useColors } from '../ui/theme';
 
 export interface MediaGridProps {
   items: MediaItem[];
@@ -45,6 +46,8 @@ export function MediaGrid({
   onLongPressItem,
   ListHeaderComponent,
 }: MediaGridProps): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -117,7 +120,7 @@ export function MediaGrid({
       onEndReachedThreshold={0.5}
       refreshControl={
         onRefresh !== undefined ? (
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />
+          <RefreshControl progressBackgroundColor={colors.surface} refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.accent} colors={[colors.accent]} />
         ) : undefined
       }
       ListHeaderComponent={ListHeaderComponent ?? null}
@@ -136,29 +139,31 @@ export function MediaGrid({
   );
 }
 
-const styles = StyleSheet.create({
-  list: { flex: 1 },
-  content: {
-    paddingTop: spacing.s,
-    paddingBottom: spacing.xxl,
-    gap: spacing.xs,
-  },
-  footer: {
-    paddingVertical: spacing.l,
-    alignItems: 'center',
-  },
-  footerText: { color: colors.textTertiary, fontSize: 13 },
-  loadMoreBtn: {
-    marginHorizontal: spacing.l,
-    marginTop: spacing.m,
-    marginBottom: spacing.xl,
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadMoreText: { color: colors.accent, fontWeight: '600', fontSize: 13 },
-  pressed: { opacity: 0.75 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    list: { flex: 1 },
+    content: {
+      paddingTop: spacing.s,
+      paddingBottom: spacing.xxl,
+      gap: spacing.xs,
+    },
+    footer: {
+      paddingVertical: spacing.l,
+      alignItems: 'center',
+    },
+    footerText: { color: colors.textTertiary, fontSize: 13 },
+    loadMoreBtn: {
+      marginHorizontal: spacing.l,
+      marginTop: spacing.m,
+      marginBottom: spacing.xl,
+      minHeight: 44,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    loadMoreText: { color: colors.accent, fontWeight: '600', fontSize: 13 },
+    pressed: { opacity: 0.75 },
+  }),
+);

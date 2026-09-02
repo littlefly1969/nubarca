@@ -170,6 +170,35 @@ export function emptyIdentity(source: MediaWorkspaceSource): MediaWorkspaceIdent
 // to a non-photo tab inside an album — this predicate is the SINGLE place that
 // knows it, so the sheet never offers it, the chips never claim it and the
 // fingerprint never keys on it there. `queryToWire` never emits it.
+/**
+ * The filters the SEMANTIC route understands.
+ *
+ * Ranking runs over a candidate set the server narrows first, and it narrows
+ * it with these and nothing else. Everything absent from this list — the
+ * metadata search, GPS, duplicate collapsing, People, similar-to and every
+ * video filter — has NO effect on a visual search.
+ *
+ * That is a real property of the operation, not an oversight, and it has to be
+ * VISIBLE. A filter that is set, drawn as a chip and silently ignored is worse
+ * than one that is refused, because the results look filtered and are not.
+ */
+export const SEMANTIC_SUPPORTED_FILTERS = [
+  'favorite',
+  'min-rating',
+  'date',
+  'album-membership',
+] as const;
+
+/** The chips a running visual search does NOT apply. Empty when none is set,
+ * and empty when no visual search is running. */
+export function inertUnderSemantic(identity: MediaWorkspaceIdentity): FilterChipKind[] {
+  if (!isSemanticActive(identity)) return [];
+  const supported = new Set<string>([...SEMANTIC_SUPPORTED_FILTERS, 'visual']);
+  return buildFilterChips(identity)
+    .map((chip) => chip.kind)
+    .filter((kind) => !supported.has(kind));
+}
+
 export function isSemanticActive(identity: MediaWorkspaceIdentity): boolean {
   return identity.filters.photo.visualQuery.trim().length > 0;
 }

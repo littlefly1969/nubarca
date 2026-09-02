@@ -47,8 +47,10 @@ import {
   runSharedAlbumOriginalDownload,
   type SharedDownloadIo,
 } from '../../src/media/sharedDownload.ts';
-import { colors, radii, spacing, touch } from '../../src/ui/tokens';
+import { radii, spacing, touch } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { themed, useColors } from '../../src/ui/theme';
+import { media } from '../../src/ui/palette.ts';
 
 const PAGE_SIZE = 60;
 type Kind = 'all' | 'image' | 'video';
@@ -73,6 +75,8 @@ const sharedDownloadIo: SharedDownloadIo = {
 };
 
 export default function SharedAlbum(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string }>();
@@ -326,12 +330,12 @@ export default function SharedAlbum(): React.JSX.Element {
                 />
                 {item.kind === 'video' && (
                   <View style={styles.playBadge} pointerEvents="none">
-                    <Ionicons name="play" size={14} color="#fff" />
+                    <Ionicons name="play" size={14} color={media.text} />
                   </View>
                 )}
                 {busy && (
                   <View style={styles.busyOverlay} pointerEvents="none">
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator color={media.text} />
                   </View>
                 )}
                 {item.canWithdraw && !busy && (
@@ -348,80 +352,82 @@ export default function SharedAlbum(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.7 },
-  infoLine: {
-    paddingHorizontal: spacing.l,
-    paddingBottom: spacing.s,
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  filters: {
-    flexDirection: 'row',
-    gap: spacing.s,
-    paddingHorizontal: spacing.l,
-    paddingBottom: spacing.s,
-  },
-  chip: {
-    borderRadius: radii.m,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
-    paddingHorizontal: spacing.m,
-    minHeight: touch.minSize - 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  chipText: { fontSize: 13, color: colors.textSecondary },
-  chipTextOn: { color: '#FFFFFF', fontWeight: '600' },
-  listContent: {
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.s,
-    paddingBottom: spacing.xl,
-  },
-  tile: {
-    margin: spacing.xs / 2,
-    aspectRatio: 1,
-    borderRadius: radii.s,
-    overflow: 'hidden',
-    backgroundColor: colors.tilePlaceholder,
-  },
-  tileImg: { width: '100%', height: '100%' },
-  playBadge: {
-    position: 'absolute',
-    right: spacing.xs,
-    bottom: spacing.xs,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(10,15,26,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  busyOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10,15,26,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  withdrawDot: {
-    position: 'absolute',
-    left: spacing.xs,
-    top: spacing.xs,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  withdrawDotText: { color: '#FFFFFF', fontSize: 11 },
-  footerSpinner: { paddingVertical: spacing.m },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    iconBtn: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pressed: { opacity: 0.7 },
+    infoLine: {
+      paddingHorizontal: spacing.l,
+      paddingBottom: spacing.s,
+      fontSize: 12,
+      color: colors.textSecondary,
+    },
+    filters: {
+      flexDirection: 'row',
+      gap: spacing.s,
+      paddingHorizontal: spacing.l,
+      paddingBottom: spacing.s,
+    },
+    chip: {
+      borderRadius: radii.m,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      paddingHorizontal: spacing.m,
+      minHeight: touch.minSize - 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+    },
+    chipOn: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
+    chipText: { fontSize: 13, color: colors.textSecondary },
+    chipTextOn: { color: colors.textOnAccent, fontWeight: '600' },
+    listContent: {
+      paddingHorizontal: spacing.l,
+      paddingTop: spacing.s,
+      paddingBottom: spacing.xl,
+    },
+    tile: {
+      margin: spacing.xs / 2,
+      aspectRatio: 1,
+      borderRadius: radii.s,
+      overflow: 'hidden',
+      backgroundColor: colors.tilePlaceholder,
+    },
+    tileImg: { width: '100%', height: '100%' },
+    playBadge: {
+      position: 'absolute',
+      right: spacing.xs,
+      bottom: spacing.xs,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: media.scrimStrong,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    busyOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: media.chrome,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    withdrawDot: {
+      position: 'absolute',
+      left: spacing.xs,
+      top: spacing.xs,
+      width: 18,
+      height: 18,
+      borderRadius: 9,
+      backgroundColor: colors.accentStrong,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    withdrawDotText: { color: media.text, fontSize: 11 },
+    footerSpinner: { paddingVertical: spacing.m },
+  }),
+);

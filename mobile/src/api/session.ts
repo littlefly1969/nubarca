@@ -58,3 +58,16 @@ export async function clearPersistedSession(): Promise<void> {
 }
 
 export { SESSION_STORAGE_KEY };
+
+// The theme choice. Not a secret either — stored here so every persisted
+// preference goes through one module, and read on a cold start before the
+// first frame is painted.
+const THEME_PREFERENCE_KEY = 'nubarca.mobile.theme';
+
+export async function persistThemePreference(preference: string): Promise<void> {
+  await SecureStore.setItemAsync(THEME_PREFERENCE_KEY, preference);
+}
+
+export async function getStoredThemePreference(): Promise<string | null> {
+  return readSecureItem(THEME_PREFERENCE_KEY);
+}

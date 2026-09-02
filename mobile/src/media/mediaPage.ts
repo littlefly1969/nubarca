@@ -10,7 +10,12 @@
 // So the shared shape carries only what BOTH sources really know. Anything one
 // of them knows and the other does not is optional, and absent means absent.
 
-import type { MediaItem, MediaListResponse, SemanticMediaSearchResponse } from '@nubarca/contracts';
+import type {
+  MediaItem,
+  MediaListResponse,
+  SemanticBestMatch,
+  SemanticMediaSearchResponse,
+} from '@nubarca/contracts';
 
 export interface MediaPage {
   items: MediaItem[];
@@ -21,6 +26,18 @@ export interface MediaPage {
    * produce them, and absent is the honest answer there. */
   photoCount?: number;
   videoCount?: number;
+  /**
+   * Where in a video the match actually is, by media id — the ranked route
+   * only.
+   *
+   * This used to be dropped on the grounds that "this list surface does not
+   * show it". That was wrong: a visual search that finds a video and cannot
+   * say WHICH MOMENT matched has answered half the question, and on a device
+   * it reads as a search that ignored the query. The projection now carries
+   * it; what a surface does with it is the surface's decision, not the
+   * mapper's.
+   */
+  evidence?: ReadonlyMap<string, SemanticBestMatch>;
 }
 
 export function pageFromListing(response: MediaListResponse): MediaPage {
@@ -35,9 +52,9 @@ export function pageFromListing(response: MediaListResponse): MediaPage {
 }
 
 /**
- * A ranked page. The temporal evidence a video result carries is dropped here
- * rather than widened into the item type: this list surface does not show it,
- * and a field nothing renders is a field that drifts.
+ * A ranked page, carrying the temporal evidence alongside the items rather
+ * than inside them: an item stays the server's MediaItem, and the "where in
+ * the video" answer travels next to it.
  */
 export function pageFromSemantic(response: SemanticMediaSearchResponse): MediaPage {
   return {
@@ -45,5 +62,6 @@ export function pageFromSemantic(response: SemanticMediaSearchResponse): MediaPa
     nextCursor: response.nextCursor,
     hasMore: response.hasMore,
     total: response.total,
+    evidence: new Map(response.items.map((result) => [result.media.id, result.bestMatch])),
   };
 }

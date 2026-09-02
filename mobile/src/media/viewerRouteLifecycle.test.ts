@@ -145,3 +145,18 @@ test('hardware Back delegates to the same closeAndLeave path as the chrome butto
   );
   assert.match(source, /onPress=\{closeAndLeave\}/);
 });
+
+test('the viewer goes full screen with the chrome, and always restores the bars', async () => {
+  // Device-reported: the Android navigation bar stayed over full-screen media.
+  // The rule itself is proven in media/immersiveViewer.test.ts; this pins that
+  // the route asks it, and that the cleanup restores unconditionally.
+  const source = await routeSource();
+  assert.match(source, /systemBarsFor\(\{ viewerOpen: true, chromeVisible \}\)/);
+  assert.match(source, /void applySystemBars\(controller, 'visible'\);/);
+  assert.match(source, /\}, \[chromeVisible\]\);/);
+});
+
+test('the navigation-bar module is only loaded on Android', async () => {
+  const source = await routeSource();
+  assert.match(source, /if \(Platform\.OS === 'android'\)/);
+});

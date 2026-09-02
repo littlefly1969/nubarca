@@ -43,6 +43,7 @@ import {
   videoPresentation,
   type VideoProbeState,
 } from './videoPlayback';
+import { media } from '../ui/palette.ts';
 
 export function VideoSlide({
   slide,
@@ -59,13 +60,21 @@ export function VideoSlide({
   // manual jar. A viewer can stay open across ASP.NET sliding-cookie renewal;
   // replaying the grid-time snapshot eventually turns valid media into a false
   // 401/403. Memoization keeps the player identity stable while the cookie is.
+  // The source is keyed on the MEDIA, never on focus.
+  //
+  // It used to depend on `active` as well, to latch a fresh cookie at each
+  // focus transition. That is what made rotating the phone restart the video:
+  // the pager re-anchors on a rotation, `active` can flicker, and a new source
+  // object makes expo-video replace the source on the player — which starts it
+  // again from zero. Two earlier attempts to fix this treated the symptom.
+  //
+  // The cookie is still refreshed, but only when it has ACTUALLY changed, which
+  // is the thing the old dependency was really approximating. A renewed
+  // sliding cookie still reaches the player; a focus flicker no longer does.
+  const cookie = sessionCookieSource().current;
   const source = useMemo(
-    () => refreshVideoSourceCookie(slide.videoSource, sessionCookieSource().current),
-    // `active` deliberately latches a fresh cookie at each focus transition.
-    // A later status event must not replace a player halfway through playback.
-    // It is an explicit lifecycle signal rather than an accidentally unread
-    // dependency.
-    [active, slide.videoSource],
+    () => refreshVideoSourceCookie(slide.videoSource, cookie),
+    [slide.videoSource, cookie],
   );
 
   // RANGE PROBE over the CANONICAL delivery contract (media/videoDelivery.ts,
@@ -188,11 +197,15 @@ export function VideoSlide({
   // One shot per source: after the restore, or after a source that had nothing
   // to restore, the playhead belongs to the user and must not be yanked back
   // by a later readiness event.
-  const restoredForRef = useRef<string | null>(null);
+  // Keyed on the PLAYER as well as the uri. A replaced source produces a
+  // player that is back at zero for the same uri, and a guard that only knew
+  // the uri would refuse to restore exactly then.
+  const restoredForRef = useRef<{ player: VideoPlayer; uri: string } | null>(null);
   useEffect(() => {
     if (uri === null || nativeStatus !== 'readyToPlay') return;
-    if (restoredForRef.current === uri) return;
-    restoredForRef.current = uri;
+    const done = restoredForRef.current;
+    if (done !== null && done.player === player && done.uri === uri) return;
+    restoredForRef.current = { player, uri };
     const resume = restorablePosition(recallPosition(uri), uri, player.duration ?? null);
     if (resume === null) return;
     try {
@@ -330,14 +343,14 @@ export function VideoSlide({
 
 const styles = StyleSheet.create({
   full: { width: '100%', height: '100%' },
-  dark: { backgroundColor: '#0A0F1A' },
+  dark: { backgroundColor: media.background },
   centerDark: {
     flex: 1,
-    backgroundColor: '#0A0F1A',
+    backgroundColor: media.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loadingText: { color: '#F5F7FB', marginTop: 12, fontSize: 14 },
+  loadingText: { color: media.text, marginTop: 12, fontSize: 14 },
   poster: { width: '86%', height: '52%', borderRadius: 12, marginBottom: 16 },
-  errorText: { color: '#F5F7FB', padding: 24, textAlign: 'center' },
+  errorText: { color: media.text, padding: 24, textAlign: 'center' },
 });

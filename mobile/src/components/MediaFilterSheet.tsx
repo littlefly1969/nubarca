@@ -32,7 +32,7 @@ import type {
 import { draftFrom, referencedPersonIds } from '../media/mediaFilterState';
 import { PeopleFilterSheet } from './PeopleFilterSheet';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme';
 
 /** A row of mutually exclusive choices; the selected one can be tapped off. */
 function Choice<T extends string>({
@@ -46,6 +46,7 @@ function Choice<T extends string>({
   options: Array<{ value: T; label: string }>;
   onChange: (next: T | null) => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <View style={styles.group}>
       <Text style={styles.groupLabel}>{label}</Text>
@@ -78,6 +79,7 @@ function NumberField({
   value: number | null;
   onChange: (next: number | null) => void;
 }): React.JSX.Element {
+  const styles = useStyles();
   return (
     <View style={styles.numberField}>
       <Text style={styles.numberLabel}>{label}</Text>
@@ -108,6 +110,8 @@ export function MediaFilterSheet({
   onApply: (filters: MediaWorkspaceFilters, sort: MediaSortField, direction: 'asc' | 'desc') => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [draft, setDraft] = useState<MediaWorkspaceIdentity>(() => draftFrom(identity));
   const [peopleOpen, setPeopleOpen] = useState(false);
@@ -200,6 +204,7 @@ export function MediaFilterSheet({
             <View style={styles.dateRow}>
               <TextInput
                 style={[styles.textInput, styles.dateInput]}
+                placeholderTextColor={colors.textTertiary}
                 placeholder="YYYY-MM-DD"
                 value={filters.common.dateTakenFrom.slice(0, 10)}
                 onChangeText={(text) =>
@@ -208,6 +213,7 @@ export function MediaFilterSheet({
               />
               <TextInput
                 style={[styles.textInput, styles.dateInput]}
+                placeholderTextColor={colors.textTertiary}
                 placeholder="YYYY-MM-DD"
                 value={filters.common.dateTakenTo.slice(0, 10)}
                 onChangeText={(text) =>
@@ -353,45 +359,47 @@ export function MediaFilterSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff', paddingTop: 48 },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 8,
-  },
-  title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
-  body: { paddingHorizontal: 16, paddingBottom: 24, gap: 18 },
-  group: { gap: 8 },
-  groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
-  hint: { fontSize: 12, color: colors.textTertiary },
-  optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: '#F1F4F9' },
-  optionOn: { backgroundColor: colors.accent },
-  optionText: { fontSize: 14, color: colors.textSecondary },
-  optionTextOn: { color: '#fff' },
-  textInput: {
-    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: '#F1F4F9', fontSize: 15,
-  },
-  dateRow: { flexDirection: 'row', gap: 12 },
-  dateInput: { flex: 1 },
-  numberField: { flex: 1, gap: 6 },
-  numberLabel: { fontSize: 12, color: colors.textTertiary },
-  numberInput: {
-    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: '#F1F4F9', fontSize: 15,
-  },
-  peopleBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 14, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F1F4F9',
-  },
-  peopleBtnText: { flex: 1, fontSize: 15, color: colors.textPrimary },
-  peopleCount: {
-    minWidth: 22, textAlign: 'center', color: '#fff', backgroundColor: colors.accent,
-    borderRadius: 11, paddingVertical: 2, fontSize: 12, overflow: 'hidden',
-  },
-  footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E2E7EF' },
-  apply: { backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  applyText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surface, paddingTop: 48 },
+    header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16, paddingBottom: 8,
+    },
+    title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
+    body: { paddingHorizontal: 16, paddingBottom: 24, gap: 18 },
+    group: { gap: 8 },
+    groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
+    hint: { fontSize: 12, color: colors.textTertiary },
+    optionRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    option: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 16, backgroundColor: colors.surfaceMuted },
+    optionOn: { backgroundColor: colors.accentStrong },
+    optionText: { fontSize: 14, color: colors.textSecondary },
+    optionTextOn: { color: colors.textOnAccent },
+    textInput: {
+      paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
+    },
+    dateRow: { flexDirection: 'row', gap: 12 },
+    dateInput: { flex: 1 },
+    numberField: { flex: 1, gap: 6 },
+    numberLabel: { fontSize: 12, color: colors.textTertiary },
+    numberInput: {
+      paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
+    },
+    peopleBtn: {
+      flexDirection: 'row', alignItems: 'center', gap: 10,
+      paddingHorizontal: 14, paddingVertical: 14, borderRadius: 12, backgroundColor: colors.surfaceMuted,
+    },
+    peopleBtnText: { flex: 1, fontSize: 15, color: colors.textPrimary },
+    peopleCount: {
+      minWidth: 22, textAlign: 'center', color: colors.textOnAccent, backgroundColor: colors.accentStrong,
+      borderRadius: 11, paddingVertical: 2, fontSize: 12, overflow: 'hidden',
+    },
+    footer: { padding: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+    apply: { backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+    applyText: { color: colors.textOnAccent, fontSize: 16, fontWeight: '600' },
+    pressed: { opacity: 0.7 },
+  }),
+);

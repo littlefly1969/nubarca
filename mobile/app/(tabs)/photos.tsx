@@ -21,12 +21,14 @@ import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
 import { MediaSelectionBar } from '../../src/components/MediaSelectionBar';
 import { getMediaSelectionCapabilities } from '@nubarca/contracts';
 import { applyToSelection, moveToTrash, restoreFromTrash } from '../../src/api/mediaLifecycle';
-import { colors } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { themed, useColors } from '../../src/ui/theme';
 
 const PAGE_SIZE = 60;
 
 export default function Photos(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
@@ -140,25 +142,12 @@ export default function Photos(): React.JSX.Element {
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={t('common.signOut')}
-                onPress={() => {
-                  Alert.alert(
-                    t('common.signOut'),
-                    t('common.signOutConfirmBody'),
-                    [
-                      { text: t('albums.cancel'), style: 'cancel' },
-                      {
-                        text: t('common.signOut'),
-                        style: 'destructive',
-                        onPress: () => void session.logout(),
-                      },
-                    ],
-                  );
-                }}
+                accessibilityLabel={t('settings.open')}
+                onPress={() => router.push('/settings')}
                 style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
                 hitSlop={4}
               >
-                <Ionicons name="log-out-outline" size={22} color={colors.accent} />
+                <Ionicons name="settings-outline" size={22} color={colors.accent} />
               </Pressable>
             </>
           )
@@ -168,6 +157,7 @@ export default function Photos(): React.JSX.Element {
       <MediaFilterChips
         chips={filters.chips}
         people={filters.people}
+        inert={filters.inert}
         onRemove={filters.removeChip}
         onClearAll={filters.clearAll}
       />
@@ -192,10 +182,9 @@ export default function Photos(): React.JSX.Element {
             selectedIds={selectionState.ids}
             onPressItem={openViewer}
             onToggleSelect={selectionState.toggle}
-            onLongPressItem={(item) => {
-              selectionState.begin();
-              selectionState.toggle(item.id);
-            }}
+            // ONE transition: enter the mode and keep the item. Doing it in
+            // two steps is what made the first long-pressed photo not stick.
+            onLongPressItem={(item) => selectionState.beginWith(item.id)}
             refreshing={snapshot.phase === 'refreshing'}
             onRefresh={() => {
               void refresh();
@@ -220,6 +209,7 @@ export default function Photos(): React.JSX.Element {
           />
           {selectionState.selecting && (
             <MediaSelectionBar
+              selecting={selectionState.selecting}
               count={selectionState.count}
               capabilities={capabilities}
               onAddToAlbum={() => setSheetVisible(true)}
@@ -253,13 +243,15 @@ export default function Photos(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: { backgroundColor: '#F5F7FB' },
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    screen: { backgroundColor: colors.canvas },
+    iconBtn: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pressed: { opacity: 0.7 },
+  }),
+);

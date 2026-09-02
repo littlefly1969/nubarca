@@ -21,7 +21,8 @@ import { useSession } from '../src/session/SessionProvider';
 import { getStoredBaseUrl } from '../src/api/session';
 import { configureBaseUrl, ApiError } from '../src/api/client';
 import { useI18n } from '../src/i18n';
-import { colors, radii, spacing, touch } from '../src/ui/tokens';
+import { radii, spacing, touch } from '../src/ui/tokens';
+import { themed, useColors } from '../src/ui/theme';
 
 // Android emulator reaches the host at 10.0.2.2; iOS simulator uses localhost.
 const configuredUrl = (
@@ -32,6 +33,8 @@ const defaultBaseUrl =
   (Platform.OS === 'android' ? 'http://10.0.2.2:5177' : 'http://localhost:5177');
 
 export default function Login(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
@@ -139,7 +142,7 @@ export default function Login(): React.JSX.Element {
             disabled={busy}
           >
             {busy ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={colors.textOnAccent} />
             ) : (
               <Text style={styles.buttonText}>{t('login.signIn')}</Text>
             )}
@@ -156,67 +159,69 @@ export default function Login(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  container: {
-    flexGrow: 1,
-    padding: spacing.xl,
-    paddingTop: spacing.xxl + spacing.l,
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    marginBottom: spacing.xl,
-    color: colors.textPrimary,
-  },
-  notice: {
-    padding: spacing.m,
-    backgroundColor: colors.warningSurface,
-    borderRadius: radii.m,
-    marginBottom: spacing.m,
-  },
-  noticeText: { color: colors.warningText, fontSize: 13 },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginTop: spacing.m,
-    marginBottom: spacing.xs,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  hint: {
-    fontSize: 12,
-    color: colors.textTertiary,
-    marginTop: spacing.xs,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.separator,
-    borderRadius: radii.m,
-    paddingHorizontal: spacing.m,
-    paddingVertical: spacing.m - 2,
-    backgroundColor: colors.surface,
-    fontSize: 15,
-    color: colors.textPrimary,
-  },
-  button: {
-    marginTop: spacing.xl,
-    backgroundColor: colors.accent,
-    borderRadius: radii.m,
-    minHeight: touch.minSize,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buttonDisabled: { backgroundColor: colors.accentDisabled },
-  pressed: { opacity: 0.8 },
-  buttonText: { color: colors.textOnAccent, fontWeight: '600', fontSize: 15 },
-  errorCard: {
-    marginTop: spacing.l,
-    padding: spacing.m,
-    backgroundColor: colors.dangerSurface,
-    borderRadius: radii.m,
-  },
-  errorText: { color: colors.danger, fontSize: 13 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    flex: { flex: 1 },
+    container: {
+      flexGrow: 1,
+      padding: spacing.xl,
+      paddingTop: spacing.xxl + spacing.l,
+    },
+    title: {
+      fontSize: 26,
+      fontWeight: '700',
+      marginBottom: spacing.xl,
+      color: colors.textPrimary,
+    },
+    notice: {
+      padding: spacing.m,
+      backgroundColor: colors.warningSurface,
+      borderRadius: radii.m,
+      marginBottom: spacing.m,
+    },
+    noticeText: { color: colors.warningText, fontSize: 13 },
+    label: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      marginTop: spacing.m,
+      marginBottom: spacing.xs,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    hint: {
+      fontSize: 12,
+      color: colors.textTertiary,
+      marginTop: spacing.xs,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: colors.separator,
+      borderRadius: radii.m,
+      paddingHorizontal: spacing.m,
+      paddingVertical: spacing.m - 2,
+      backgroundColor: colors.surface,
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    button: {
+      marginTop: spacing.xl,
+      backgroundColor: colors.accentStrong,
+      borderRadius: radii.m,
+      minHeight: touch.minSize,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    buttonDisabled: { backgroundColor: colors.accentDisabled },
+    pressed: { opacity: 0.8 },
+    buttonText: { color: colors.textOnAccent, fontWeight: '600', fontSize: 15 },
+    errorCard: {
+      marginTop: spacing.l,
+      padding: spacing.m,
+      backgroundColor: colors.dangerSurface,
+      borderRadius: radii.m,
+    },
+    errorText: { color: colors.danger, fontSize: 13 },
+  }),
+);
 

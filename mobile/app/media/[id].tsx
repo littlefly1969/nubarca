@@ -25,10 +25,11 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Redirect, router, useLocalSearchParams } from 'expo-router';
-import { FlatList } from 'react-native';
+import { FlatList, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ImageSlide } from '../../src/components/ImageSlide';
 import { forgetAllPositions } from '../../src/media/videoPosition';
+import { applySystemBars, systemBarsFor } from '../../src/media/immersiveViewer';
 import { VideoSlide } from '../../src/components/VideoSlide';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
@@ -46,8 +47,9 @@ import {
   viewerIndexFromUserScroll,
   viewerOffsetForIndex,
 } from '../../src/media/viewerRoute';
-import { colors, spacing } from '../../src/ui/tokens';
+import { spacing } from '../../src/ui/tokens';
 import { useI18n } from '../../src/i18n';
+import { media } from '../../src/ui/palette.ts';
 
 export default function MediaRoute(): React.JSX.Element {
   const session = useSession();
@@ -113,6 +115,27 @@ export default function MediaRoute(): React.JSX.Element {
   );
   const [index, setIndex] = useState(startIndex);
   const [chromeVisible, setChromeVisible] = useState(true);
+
+  // FULL SCREEN while the chrome is hidden, and the system bars back the
+  // moment it returns — hiding both at once would leave no visible way out.
+  // Android only; the module no-ops elsewhere.
+  useEffect(() => {
+    let controller: Parameters<typeof applySystemBars>[0] = null;
+    if (Platform.OS === 'android') {
+      // Imported lazily so a platform without the module never loads it.
+      controller = require('expo-navigation-bar') as NonNullable<typeof controller>;
+    }
+    void applySystemBars(
+      controller,
+      systemBarsFor({ viewerOpen: true, chromeVisible }),
+    );
+    // ALWAYS restored on the way out, including after an error: a viewer that
+    // left the phone immersive would have broken the rest of the app.
+    return () => {
+      void applySystemBars(controller, 'visible');
+    };
+  }, [chromeVisible]);
+
   // GESTURE OWNERSHIP (§4). The active photo slide reports whether it is at
   // rest; while it is zoomed the pager stops scrolling so a pan cannot page to
   // the neighbouring item, and the instant zoom returns to 1 paging is live
@@ -284,7 +307,7 @@ export default function MediaRoute(): React.JSX.Element {
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
             hitSlop={8}
           >
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Ionicons name="arrow-back" size={24} color={media.text} />
           </Pressable>
           {current !== undefined && (
             <>
@@ -300,10 +323,11 @@ export default function MediaRoute(): React.JSX.Element {
   );
 }
 
+// NOT themed: the viewer is dark in both themes (see palette.ts).
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.mediaBackground,
+    backgroundColor: media.background,
   },
   pager: {
     flex: 1,
@@ -319,24 +343,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.m,
     paddingTop: spacing.xl + spacing.l,
     paddingBottom: spacing.s,
-    backgroundColor: 'rgba(10,15,26,0.45)',
+    backgroundColor: media.chrome,
   },
   backBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: media.chromeButton,
     alignItems: 'center',
     justifyContent: 'center',
   },
   title: {
     flex: 1,
-    color: '#FFFFFF',
+    color: media.text,
     fontSize: 14,
     fontWeight: '600',
   },
   counter: {
-    color: 'rgba(255,255,255,0.75)',
+    color: media.textSecondary,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
   },

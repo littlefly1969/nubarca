@@ -43,9 +43,10 @@ import {
   type AlbumFilter,
   type UnifiedAlbumCard,
 } from '../../src/albums/albumCardModel.ts';
-import { albumColumnsForWidth, colors, radii, spacing, touch } from '../../src/ui/tokens';
+import { albumColumnsForWidth, radii, spacing, touch } from '../../src/ui/tokens';
 import { useWindowDimensions } from 'react-native';
 import { useI18n } from '../../src/i18n';
+import { themed, useColors } from '../../src/ui/theme';
 
 function roleLabel(role: AlbumRole, t: TFn): string {
   if (role === 'viewer') return t('shared.roleViewer');
@@ -56,6 +57,8 @@ function roleLabel(role: AlbumRole, t: TFn): string {
 type TFn = ReturnType<typeof useI18n>['t'];
 
 export default function Albums(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const { width } = useWindowDimensions();
@@ -332,104 +335,106 @@ export default function Albums(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  iconBtn: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pressed: { opacity: 0.7 },
-  filters: {
-    flexDirection: 'row',
-    gap: spacing.s,
-    paddingHorizontal: spacing.l,
-    paddingBottom: spacing.s,
-  },
-  chip: {
-    borderRadius: radii.m,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
-    paddingHorizontal: spacing.m,
-    minHeight: touch.minSize - 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  chipOn: { backgroundColor: colors.accent, borderColor: colors.accent },
-  chipText: { fontSize: 13, color: colors.textSecondary },
-  chipTextOn: { color: '#FFFFFF', fontWeight: '600' },
-  invitesBlock: {
-    marginHorizontal: spacing.l,
-    marginBottom: spacing.s,
-    borderRadius: radii.m,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
-    backgroundColor: colors.surface,
-    paddingVertical: spacing.s,
-  },
-  invitesTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    color: colors.textTertiary,
-    paddingHorizontal: spacing.m,
-    paddingVertical: spacing.xs,
-  },
-  inviteRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.m,
-    paddingVertical: spacing.s,
-    gap: spacing.s,
-  },
-  inviteInfo: { flex: 1 },
-  inviteName: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
-  inviteMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  inviteActions: { flexDirection: 'row', gap: spacing.s },
-  inviteBtn: {
-    minHeight: touch.minSize - 10,
-    paddingHorizontal: spacing.m,
-    borderRadius: radii.m,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.separator,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inviteAccept: { backgroundColor: colors.accent, borderColor: colors.accent },
-  inviteAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
-  inviteDeclineText: { color: colors.textSecondary, fontSize: 13 },
-  listContent: {
-    paddingHorizontal: spacing.l,
-    paddingTop: spacing.s,
-    paddingBottom: spacing.xl,
-  },
-  card: {
-    flex: 1,
-    margin: spacing.xs,
-    borderRadius: radii.m,
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  coverRow: {
-    flexDirection: 'row',
-    gap: 1,
-    backgroundColor: colors.tilePlaceholder,
-  },
-  coverImg: { flex: 1, height: '100%' },
-  coverEmpty: { backgroundColor: colors.tilePlaceholder },
-  cardName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    marginTop: spacing.s,
-    paddingHorizontal: spacing.s,
-  },
-  cardMeta: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginBottom: spacing.s,
-    paddingHorizontal: spacing.s,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    iconBtn: {
+      width: 40,
+      height: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    pressed: { opacity: 0.7 },
+    filters: {
+      flexDirection: 'row',
+      gap: spacing.s,
+      paddingHorizontal: spacing.l,
+      paddingBottom: spacing.s,
+    },
+    chip: {
+      borderRadius: radii.m,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      paddingHorizontal: spacing.m,
+      minHeight: touch.minSize - 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+    },
+    chipOn: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
+    chipText: { fontSize: 13, color: colors.textSecondary },
+    chipTextOn: { color: colors.textOnAccent, fontWeight: '600' },
+    invitesBlock: {
+      marginHorizontal: spacing.l,
+      marginBottom: spacing.s,
+      borderRadius: radii.m,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      backgroundColor: colors.surface,
+      paddingVertical: spacing.s,
+    },
+    invitesTitle: {
+      fontSize: 12,
+      fontWeight: '600',
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+      color: colors.textTertiary,
+      paddingHorizontal: spacing.m,
+      paddingVertical: spacing.xs,
+    },
+    inviteRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.m,
+      paddingVertical: spacing.s,
+      gap: spacing.s,
+    },
+    inviteInfo: { flex: 1 },
+    inviteName: { fontSize: 14, color: colors.textPrimary, fontWeight: '600' },
+    inviteMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+    inviteActions: { flexDirection: 'row', gap: spacing.s },
+    inviteBtn: {
+      minHeight: touch.minSize - 10,
+      paddingHorizontal: spacing.m,
+      borderRadius: radii.m,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    inviteAccept: { backgroundColor: colors.accentStrong, borderColor: colors.accent },
+    inviteAcceptText: { color: colors.textOnAccent, fontSize: 13, fontWeight: '600' },
+    inviteDeclineText: { color: colors.textSecondary, fontSize: 13 },
+    listContent: {
+      paddingHorizontal: spacing.l,
+      paddingTop: spacing.s,
+      paddingBottom: spacing.xl,
+    },
+    card: {
+      flex: 1,
+      margin: spacing.xs,
+      borderRadius: radii.m,
+      backgroundColor: colors.surface,
+      overflow: 'hidden',
+    },
+    coverRow: {
+      flexDirection: 'row',
+      gap: 1,
+      backgroundColor: colors.tilePlaceholder,
+    },
+    coverImg: { flex: 1, height: '100%' },
+    coverEmpty: { backgroundColor: colors.tilePlaceholder },
+    cardName: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.textPrimary,
+      marginTop: spacing.s,
+      paddingHorizontal: spacing.s,
+    },
+    cardMeta: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      marginBottom: spacing.s,
+      paddingHorizontal: spacing.s,
+    },
+  }),
+);

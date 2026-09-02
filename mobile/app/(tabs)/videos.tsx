@@ -16,13 +16,14 @@ import type { MediaItem } from '../../src/api/media.ts';
 import { useMediaFilters } from '../../src/media/useMediaFilters';
 import { MediaFilterChips } from '../../src/components/MediaFilterChips';
 import { MediaFilterSheet } from '../../src/components/MediaFilterSheet';
-import { colors } from '../../src/ui/tokens';
 import { router } from 'expo-router';
 import { useI18n } from '../../src/i18n';
+import { useColors } from '../../src/ui/theme';
 
 const PAGE_SIZE = 60;
 
 export default function Videos(): React.JSX.Element {
+  const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
@@ -91,6 +92,7 @@ export default function Videos(): React.JSX.Element {
       <MediaFilterChips
         chips={filters.chips}
         people={filters.people}
+        inert={filters.inert}
         onRemove={filters.removeChip}
         onClearAll={filters.clearAll}
       />

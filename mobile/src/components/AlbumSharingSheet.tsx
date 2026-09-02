@@ -46,7 +46,7 @@ import {
   setAlbumMemberRole,
 } from '../api/sharedAlbums';
 import { useI18n } from '../i18n';
-import { colors } from '../ui/tokens';
+import { themed, useColors } from '../ui/theme';
 
 const ROLE_LABELS: Record<AlbumRole, string> = {
   viewer: 'sharing.roleViewer',
@@ -70,6 +70,8 @@ export function AlbumSharingSheet({
   visible: boolean;
   onClose: () => void;
 }): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const [members, setMembers] = useState<AlbumMember[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -263,6 +265,7 @@ export function AlbumSharingSheet({
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
+                placeholderTextColor={colors.textTertiary}
                 placeholder={t('sharing.email')}
                 accessibilityLabel={t('sharing.email')}
               />
@@ -332,49 +335,51 @@ export function AlbumSharingSheet({
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#fff', paddingTop: 48 },
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingBottom: 8,
-  },
-  title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
-  body: { paddingHorizontal: 16, paddingBottom: 32, gap: 12 },
-  group: { gap: 8 },
-  groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
-  section: {
-    fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase', marginTop: 18,
-  },
-  input: {
-    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
-    backgroundColor: '#F1F4F9', fontSize: 15,
-  },
-  hint: { fontSize: 12, color: colors.textTertiary },
-  roleRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
-  roleChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: '#F1F4F9' },
-  roleChipOn: { backgroundColor: colors.accent },
-  roleText: { fontSize: 13, color: colors.textSecondary },
-  roleTextOn: { color: '#fff' },
-  switchRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4,
-  },
-  switchLabel: { fontSize: 14, color: colors.textPrimary },
-  primary: {
-    backgroundColor: colors.accent, borderRadius: 12, paddingVertical: 12, alignItems: 'center',
-  },
-  primaryText: { color: '#fff', fontSize: 15, fontWeight: '600' },
-  disabled: { opacity: 0.5 },
-  member: {
-    backgroundColor: '#F7F9FC', borderRadius: 12, padding: 12, gap: 10, marginBottom: 8,
-  },
-  memberHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  memberWho: { flex: 1 },
-  memberName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-  memberEmail: { fontSize: 12, color: colors.textTertiary },
-  state: { fontSize: 12, color: colors.textTertiary },
-  revoke: { paddingVertical: 8, alignItems: 'center' },
-  revokeText: { color: '#B4344B', fontSize: 14 },
-  empty: { textAlign: 'center', color: colors.textTertiary, paddingVertical: 24 },
-  loading: { marginTop: 32 },
-  pressed: { opacity: 0.7 },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.surface, paddingTop: 48 },
+    header: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: 16, paddingBottom: 8,
+    },
+    title: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
+    body: { paddingHorizontal: 16, paddingBottom: 32, gap: 12 },
+    group: { gap: 8 },
+    groupLabel: { fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase' },
+    section: {
+      fontSize: 13, color: colors.textTertiary, textTransform: 'uppercase', marginTop: 18,
+    },
+    input: {
+      paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+      backgroundColor: colors.surfaceMuted, color: colors.textPrimary, fontSize: 15,
+    },
+    hint: { fontSize: 12, color: colors.textTertiary },
+    roleRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+    roleChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 14, backgroundColor: colors.surfaceMuted },
+    roleChipOn: { backgroundColor: colors.accentStrong },
+    roleText: { fontSize: 13, color: colors.textSecondary },
+    roleTextOn: { color: colors.textOnAccent },
+    switchRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 4,
+    },
+    switchLabel: { fontSize: 14, color: colors.textPrimary },
+    primary: {
+      backgroundColor: colors.accentStrong, borderRadius: 12, paddingVertical: 12, alignItems: 'center',
+    },
+    primaryText: { color: colors.textOnAccent, fontSize: 15, fontWeight: '600' },
+    disabled: { opacity: 0.5 },
+    member: {
+      backgroundColor: colors.surfaceMuted, borderRadius: 12, padding: 12, gap: 10, marginBottom: 8,
+    },
+    memberHead: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+    memberWho: { flex: 1 },
+    memberName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+    memberEmail: { fontSize: 12, color: colors.textTertiary },
+    state: { fontSize: 12, color: colors.textTertiary },
+    revoke: { paddingVertical: 8, alignItems: 'center' },
+    revokeText: { color: colors.danger, fontSize: 14 },
+    empty: { textAlign: 'center', color: colors.textTertiary, paddingVertical: 24 },
+    loading: { marginTop: 32 },
+    pressed: { opacity: 0.7 },
+  }),
+);

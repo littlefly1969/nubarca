@@ -17,7 +17,7 @@ import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
 import { viewerIdentityKey } from '../src/media/viewerIdentity';
 import { SyncProvider } from '../src/sync/SyncProvider';
-import { colors } from '../src/ui/tokens';
+import { ThemeProvider, themed, useColors, useTheme } from '../src/ui/theme';
 
 function IdentityKeyedViewerProvider({
   children,
@@ -75,17 +75,23 @@ function RootGate(): React.JSX.Element {
 }
 
 function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
+  const colors = useColors();
   return (
     <Stack
       key={identityKey}
       screenOptions={{
         headerShown: false,
         animation: 'slide_from_right',
+        // The surface a screen slides ACROSS belongs to the native stack, not
+        // to any screen, so nothing else can paint it: without this a push
+        // reveals a white gutter for the length of the animation.
+        contentStyle: { backgroundColor: colors.canvas },
       }}
     >
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="login" options={{ animation: 'fade' }} />
       <Stack.Screen name="album/[id]" />
+      <Stack.Screen name="settings" />
       <Stack.Screen
         name="media/[id]"
         options={{ presentation: 'fullScreenModal', animation: 'fade' }}
@@ -95,6 +101,8 @@ function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
 }
 
 function Splash(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   return (
     <View style={styles.splash}>
@@ -104,38 +112,54 @@ function Splash(): React.JSX.Element {
   );
 }
 
+// The status bar's CONTENT — the clock, the battery, the signal — is drawn by
+// the system, so it has to contrast with OUR canvas, not with the phone's own
+// theme. A user on a light phone who chooses the dark theme would otherwise get
+// dark glyphs on Midnight Navy: an invisible status bar.
+function ThemedStatusBar(): React.JSX.Element {
+  const { theme } = useTheme();
+  return <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />;
+}
+
 export default function RootLayout(): React.JSX.Element {
   // GestureHandlerRootView must be the OUTERMOST view: react-native-gesture-
   // handler resolves every gesture against the nearest root, and without one
   // the viewer's pinch/pan simply never fire on Android — silently, with no
-  // error to point at.
+  // error to point at. It carries no colour of its own, so it is the one
+  // stylesheet in the app that is NOT themed — it sits outside the provider
+  // that would supply the palette.
   return (
-    <GestureHandlerRootView style={styles.gestureRoot}>
-      <SafeAreaProvider>
-        <I18nProvider>
-          <SessionProvider>
-            <IdentityKeyedViewerProvider>
-              <StatusBar style="dark" />
-              <RootGate />
-            </IdentityKeyedViewerProvider>
-          </SessionProvider>
-        </I18nProvider>
-      </SafeAreaProvider>
+    <GestureHandlerRootView style={rootStyles.gestureRoot}>
+      <ThemeProvider>
+        <SafeAreaProvider>
+          <I18nProvider>
+            <SessionProvider>
+              <IdentityKeyedViewerProvider>
+                <ThemedStatusBar />
+                <RootGate />
+              </IdentityKeyedViewerProvider>
+            </SessionProvider>
+          </I18nProvider>
+        </SafeAreaProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }
 
-const styles = StyleSheet.create({
-  gestureRoot: { flex: 1 },
-  splash: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.canvas,
-  },
-  splashText: {
-    marginTop: 16,
-    color: colors.textSecondary,
-    fontSize: 14,
-  },
-});
+const rootStyles = StyleSheet.create({ gestureRoot: { flex: 1 } });
+
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    splash: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.canvas,
+    },
+    splashText: {
+      marginTop: 16,
+      color: colors.textSecondary,
+      fontSize: 14,
+    },
+  }),
+);

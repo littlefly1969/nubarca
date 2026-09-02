@@ -11,10 +11,10 @@ import { ActivityIndicator, ScrollView, StyleSheet, Switch, Text, View } from 'r
 import { useI18n } from '../i18n';
 import type { MobileMessageKey } from '../i18n/it';
 import { AppHeader, Screen, SectionTitle } from '../ui/components';
-import { colors } from '../ui/tokens';
 import { deriveUiStatus, type SyncUiStatus } from './syncPolicy.ts';
 import { useSync } from './SyncProvider';
 import { mediaLibraryPort } from './mediaLibraryAdapter';
+import { themed, useColors } from '../ui/theme';
 
 function statusKey(status: SyncUiStatus): MobileMessageKey {
   switch (status) {
@@ -42,6 +42,8 @@ function statusKey(status: SyncUiStatus): MobileMessageKey {
 }
 
 export function SyncScreen(): React.JSX.Element {
+  const styles = useStyles();
+  const colors = useColors();
   const { t } = useI18n();
   const { engine, snapshot } = useSync();
   const [requestingPermission, setRequestingPermission] = useState(false);
@@ -190,87 +192,89 @@ export function SyncScreen(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  content: {
-    padding: 16,
-    gap: 12,
-  },
-  statusCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 16,
-    gap: 4,
-  },
-  statusLabel: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-  },
-  statusText: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  statusAttention: {
-    color: '#B3261E',
-  },
-  metaLine: {
-    fontSize: 12,
-    color: colors.textTertiary,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  rowLabel: {
-    fontSize: 15,
-    color: colors.textPrimary,
-  },
-  counts: {
-    gap: 2,
-  },
-  countLine: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  countFailed: {
-    fontSize: 13,
-    color: '#B3261E',
-  },
-  buttonGroup: {
-    gap: 8,
-  },
-  button: {
-    backgroundColor: colors.surface,
-    borderColor: colors.separator,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 15,
-    color: colors.textPrimary,
-    overflow: 'hidden',
-    textAlign: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  retryButton: {
-    borderColor: '#B3261E',
-  },
-  hint: {
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  hintRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  privacyNote: {
-    fontSize: 12,
-    color: colors.textTertiary,
-    marginTop: 8,
-  },
-});
+const useStyles = themed((colors) =>
+  StyleSheet.create({
+    content: {
+      padding: 16,
+      gap: 12,
+    },
+    statusCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      padding: 16,
+      gap: 4,
+    },
+    statusLabel: {
+      fontSize: 12,
+      color: colors.textSecondary,
+      textTransform: 'uppercase',
+    },
+    statusText: {
+      fontSize: 20,
+      fontWeight: '600',
+      color: colors.textPrimary,
+    },
+    statusAttention: {
+      color: colors.danger,
+    },
+    metaLine: {
+      fontSize: 12,
+      color: colors.textTertiary,
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    rowLabel: {
+      fontSize: 15,
+      color: colors.textPrimary,
+    },
+    counts: {
+      gap: 2,
+    },
+    countLine: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    countFailed: {
+      fontSize: 13,
+      color: colors.danger,
+    },
+    buttonGroup: {
+      gap: 8,
+    },
+    button: {
+      backgroundColor: colors.surface,
+      borderColor: colors.separator,
+      borderWidth: 1,
+      borderRadius: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      fontSize: 15,
+      color: colors.textPrimary,
+      overflow: 'hidden',
+      textAlign: 'center',
+    },
+    buttonDisabled: {
+      opacity: 0.4,
+    },
+    retryButton: {
+      borderColor: colors.danger,
+    },
+    hint: {
+      fontSize: 13,
+      color: colors.textSecondary,
+    },
+    hintRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    privacyNote: {
+      fontSize: 12,
+      color: colors.textTertiary,
+      marginTop: 8,
+    },
+  }),
+);

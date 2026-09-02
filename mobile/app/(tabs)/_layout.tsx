@@ -3,9 +3,11 @@ import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../src/i18n';
-import { colors, iconSizes } from '../../src/ui/tokens';
+import { iconSizes } from '../../src/ui/tokens';
+import { useColors } from '../../src/ui/theme';
 
 export default function TabsLayout(): React.JSX.Element {
+  const colors = useColors();
   const { t } = useI18n();
   return (
     <Tabs
@@ -14,6 +16,13 @@ export default function TabsLayout(): React.JSX.Element {
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.textTertiary,
         tabBarLabelStyle: { fontSize: 11 },
+        // React Navigation paints its own bar, and its default is light. On
+        // the dark canvas that reads as a white slab bolted to the bottom of
+        // the app.
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.separator,
+        },
       }}
     >
       <Tabs.Screen
