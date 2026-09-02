@@ -69,3 +69,68 @@ test('opening an EMPTY sequence resets instead of mounting garbage', () => {
   m.open([], 'x');
   assert.equal(m.snapshot(), null);
 });
+
+/** A sequence from a list of keys. */
+const keys = (ks: string[]): ViewerSlide[] => ks.map(slide);
+
+// --- NUBARCA-UX-01.1 §4: the viewer's current item, and the way back --------
+
+test('focus follows the index, so the viewer knows what it is showing', () => {
+  // It used to stay on whatever was opened. After swiping from item 24 to 29
+  // the viewer still believed it was showing 24 — and the gallery, on the way
+  // back, returned to the wrong photo.
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b', 'c', 'd']), 'a');
+  model.setIndex(2);
+  const snapshot = model.snapshot()!;
+  assert.equal(snapshot.index, 2);
+  assert.equal(snapshot.focusedKey, 'c');
+  assert.equal(snapshot.focusedKey, snapshot.slides[snapshot.index].key);
+});
+
+test('opening already satisfies the invariant', () => {
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b', 'c']), 'b');
+  const snapshot = model.snapshot()!;
+  assert.equal(snapshot.focusedKey, snapshot.slides[snapshot.index].key);
+});
+
+test('an invalid index moves neither the index nor the focus', () => {
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b']), 'a');
+  for (const bad of [-1, 2, 99]) {
+    model.setIndex(bad);
+    const snapshot = model.snapshot()!;
+    assert.equal(snapshot.index, 0, `index moved on ${bad}`);
+    assert.equal(snapshot.focusedKey, 'a', `focus moved on ${bad}`);
+  }
+});
+
+test('closing hands back the item on screen, and drops the slides', () => {
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b', 'c']), 'a');
+  model.setIndex(2);
+  model.close();
+  assert.equal(model.snapshot(), null, 'the sequence survived the close');
+  assert.equal(model.takeReturnAnchor(), 'c');
+});
+
+test('the return anchor is one-shot', () => {
+  // A second visit to the same gallery, without a second viewer visit, must
+  // not be yanked back to something somebody looked at once.
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b']), 'b');
+  model.close();
+  assert.equal(model.takeReturnAnchor(), 'b');
+  assert.equal(model.takeReturnAnchor(), null);
+});
+
+test('an account boundary keeps nothing at all', () => {
+  // A pending return anchor is one account's browsing position.
+  const model = new ViewerSequenceModel();
+  model.open(keys(['a', 'b']), 'b');
+  model.close();
+  model.reset();
+  assert.equal(model.takeReturnAnchor(), null);
+  assert.equal(model.snapshot(), null);
+});

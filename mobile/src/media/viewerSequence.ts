@@ -34,6 +34,11 @@ export interface ViewerSequenceSnapshot {
 export class ViewerSequenceModel {
   private snapshotValue: ViewerSequenceSnapshot | null = null;
 
+  // What the gallery should look at when it comes back. Set on close, taken
+  // once, and never accompanied by the slides themselves — the sequence is
+  // dropped, only the identity of the last item survives.
+  private returnAnchorValue: string | null = null;
+
   snapshot(): ViewerSequenceSnapshot | null {
     return this.snapshotValue;
   }
@@ -50,21 +55,49 @@ export class ViewerSequenceModel {
     this.snapshotValue = { slides, focusedKey, index };
   }
 
+  /**
+   * Move to another slide.
+   *
+   * `focusedKey` moves WITH the index. It used to stay pointing at whatever was
+   * opened, so after swiping from item 24 to item 29 the viewer's own idea of
+   * its current item was still 24 — and the gallery, on the way back, returned
+   * to the wrong photo. The invariant is now simply
+   * `focusedKey === slides[index].key` for every non-empty snapshot.
+   */
   setIndex(index: number): void {
     if (this.snapshotValue === null) return;
     if (index < 0 || index >= this.snapshotValue.slides.length) return;
-    this.snapshotValue = { ...this.snapshotValue, index };
+    this.snapshotValue = {
+      ...this.snapshotValue,
+      index,
+      focusedKey: this.snapshotValue.slides[index].key,
+    };
   }
 
-  // Close the viewer. After this call nothing about any previous sequence is
-  // reachable from this object.
+  // Close the viewer. The slide sequence is dropped; the identity of the item
+  // that was on screen is kept, once, for the gallery that is about to reappear.
   close(): void {
+    this.returnAnchorValue = this.snapshotValue?.focusedKey ?? null;
     this.snapshotValue = null;
   }
 
-  // Account switch / logout: identical to close, named for intent. Both names
-  // exist so call sites read correctly at a glance.
+  /**
+   * The item the gallery should return to, consumed.
+   *
+   * One-shot by construction: reading it clears it, so a later unrelated visit
+   * to the same gallery is not yanked back to an item somebody looked at once.
+   */
+  takeReturnAnchor(): string | null {
+    const anchor = this.returnAnchorValue;
+    this.returnAnchorValue = null;
+    return anchor;
+  }
+
+  // Account switch / logout. Unlike close this keeps NOTHING: a pending return
+  // anchor is one account's browsing position, and the next account must not
+  // inherit it.
   reset(): void {
-    this.close();
+    this.snapshotValue = null;
+    this.returnAnchorValue = null;
   }
 }

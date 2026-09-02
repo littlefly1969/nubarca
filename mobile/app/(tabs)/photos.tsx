@@ -13,6 +13,7 @@ import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useSelectionState } from '../../src/lib/useSelectionState';
@@ -34,6 +35,7 @@ export default function Photos(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
   const selectionState = useSelectionState();
   const [sheetVisible, setSheetVisible] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -213,7 +215,9 @@ export default function Photos(): React.JSX.Element {
               onLoadMoreRetry={() => {
                 void retryFailed();
               }}
-              onScroll={scroll.onScroll}
+              anchorItemId={returnAnchor.itemId}
+              onAnchorConsumed={returnAnchor.consume}
+          onScroll={scroll.onScroll}
               scrollEventThrottle={scroll.scrollEventThrottle}
               contentPaddingTop={scroll.contentPaddingTop}
               contentPaddingBottom={scroll.contentPaddingBottom}

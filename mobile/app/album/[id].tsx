@@ -19,6 +19,7 @@ import { MediaGrid } from '../../src/components/MediaGrid';
 import { NamePromptModal } from '../../src/components/NamePromptModal';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { useSelectionState } from '../../src/lib/useSelectionState';
@@ -45,6 +46,7 @@ export default function AlbumDetail(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
   const selectionState = useSelectionState();
@@ -307,7 +309,9 @@ export default function AlbumDetail(): React.JSX.Element {
             onLoadMoreRetry={() => {
               void retryFailed();
             }}
-            onScroll={scroll.onScroll}
+            anchorItemId={returnAnchor.itemId}
+            onAnchorConsumed={returnAnchor.consume}
+          onScroll={scroll.onScroll}
             scrollEventThrottle={scroll.scrollEventThrottle}
             contentPaddingTop={scroll.contentPaddingTop}
             contentPaddingBottom={scroll.contentPaddingBottom}

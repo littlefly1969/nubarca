@@ -27,6 +27,8 @@ interface ViewerContextValue {
   open: (slides: ViewerSlide[], focusedKey: string) => void;
   setIndex: (index: number) => void;
   close: () => void;
+  /** The item a returning gallery should scroll to. Consumed on read. */
+  takeReturnAnchor: () => string | null;
 }
 
 const ViewerContext = createContext<ViewerContextValue | null>(null);
@@ -75,9 +77,11 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
     sync();
   }, [sync]);
 
+  const takeReturnAnchor = useCallback(() => modelRef.current.takeReturnAnchor(), []);
+
   const value = useMemo<ViewerContextValue>(
-    () => ({ sequence: snapshot, open, setIndex, close }),
-    [snapshot, open, setIndex, close],
+    () => ({ sequence: snapshot, open, setIndex, close, takeReturnAnchor }),
+    [snapshot, open, setIndex, close, takeReturnAnchor],
   );
 
   return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;
