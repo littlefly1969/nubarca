@@ -1,10 +1,10 @@
 // Photos tab: the whole owner photo library, newest first, cursor-paginated.
 // Opens the shared viewer; long-press starts multi-select for bulk add-to-album.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet } from 'react-native';
+import { Alert } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Screen, AppHeader, HeaderButton } from '../../src/ui/components';
+import { Screen, AppHeader, HeaderButton, IconButton } from '../../src/ui/components';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
 import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
@@ -22,12 +22,12 @@ import { MediaSelectionBar } from '../../src/components/MediaSelectionBar';
 import { getMediaSelectionCapabilities } from '@nubarca/contracts';
 import { applyToSelection, moveToTrash, restoreFromTrash } from '../../src/api/mediaLifecycle';
 import { useI18n } from '../../src/i18n';
-import { themed, useColors } from '../../src/ui/theme';
+import { useColors } from '../../src/ui/theme';
+import { iconSizes } from '../../src/ui/tokens';
 
 const PAGE_SIZE = 60;
 
 export default function Photos(): React.JSX.Element {
-  const styles = useStyles();
   const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
@@ -104,7 +104,7 @@ export default function Photos(): React.JSX.Element {
   };
 
   return (
-    <Screen style={styles.screen}>
+    <Screen>
       <AppHeader
         title={t('tabs.photos')}
         actions={
@@ -118,37 +118,37 @@ export default function Photos(): React.JSX.Element {
             </>
           ) : (
             <>
-              <Pressable
-                accessibilityRole="button"
+              {/* Shell only: the same three actions, invoking the same
+                  callbacks, expressed with the shared control instead of three
+                  hand-rolled Pressables. `selected` on the filter button is a
+                  semantic state, not a second icon style invented here. */}
+              <IconButton
                 accessibilityLabel={t('filters.open')}
                 onPress={() => setFiltersOpen(true)}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-                hitSlop={4}
+                selected={filters.chips.length > 0}
               >
                 <Ionicons
                   name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
-                  size={20}
+                  size={iconSizes.m}
                   color={colors.accent}
                 />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
+              </IconButton>
+              <IconButton
                 accessibilityLabel={t('selection.select')}
                 onPress={() => selectionState.begin()}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-                hitSlop={4}
               >
-                <Ionicons name="checkmark-circle-outline" size={22} color={colors.accent} />
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
+                <Ionicons
+                  name="checkmark-circle-outline"
+                  size={iconSizes.m}
+                  color={colors.accent}
+                />
+              </IconButton>
+              <IconButton
                 accessibilityLabel={t('settings.open')}
                 onPress={() => router.push('/settings')}
-                style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-                hitSlop={4}
               >
-                <Ionicons name="settings-outline" size={22} color={colors.accent} />
-              </Pressable>
+                <Ionicons name="settings-outline" size={iconSizes.m} color={colors.accent} />
+              </IconButton>
             </>
           )
         }
@@ -243,15 +243,3 @@ export default function Photos(): React.JSX.Element {
   );
 }
 
-const useStyles = themed((colors) =>
-  StyleSheet.create({
-    screen: { backgroundColor: colors.canvas },
-    iconBtn: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    pressed: { opacity: 0.7 },
-  }),
-);

@@ -345,6 +345,9 @@ const it = {
   'settings.themeSystemHint': 'Segue il tema del telefono.',
   'settings.account': 'Account',
 
+  'login.title': 'Accedi',
+  'login.subtitle': 'La tua libreria, sul tuo server.',
+
 } as const;
 
 export type MobileMessageKey = keyof typeof it;

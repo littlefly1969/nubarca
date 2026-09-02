@@ -36,9 +36,9 @@
     }
   },
   "counts": {
-    "totalAssets": 56,
+    "totalAssets": 57,
     "sourceMasters": 8,
-    "runtimeReadyAssets": 41,
+    "runtimeReadyAssets": 42,
     "conditionallyReadyAssets": 0,
     "referenceOnlyAssets": 7,
     "missingAssets": 0
@@ -1003,6 +1003,26 @@
       "safeArea": "25% logo height",
       "glow": false,
       "sha256": "98064c8b5ef4f02c4ffe94a88875568e317d1cbc2e00a146b5d583800fabc021"
+    },
+    {
+      "path": "runtime/web/nubarca-wordmark-on-light-480w.png",
+      "role": "wordmark on light, compact framing",
+      "source": "runtime derivative of runtime/web/nubarca-wordmark-on-light.png. Purely geometric and raster: the artwork's own alpha bounds are measured, the whole source is scaled by ONE factor so those bounds match the on-dark 480w rendition's, and the result is placed on a 480x135 transparent canvas. No redraw, no recolour, no tint, no effect, no re-typesetting, and the artwork's proportions are untouched. Both themes therefore share one visible geometry. The faint halo (alpha 1-8, under 3% opacity) is clipped to the compact frame exactly as it already is in the approved on-dark 480w rendition. Regenerate and verify with scripts/build-brand-derivatives.py.",
+      "format": "png",
+      "runtimeReady": true,
+      "conditionallyReady": false,
+      "notes": "Replaces the 1516x1024 on-light file as the mobile consumer; 49 kB against 1.9 MB.",
+      "width": 480,
+      "height": 135,
+      "aspectRatio": "480:135",
+      "hasAlpha": true,
+      "backgrounds": [
+        "transparent"
+      ],
+      "minimumDisplaySizePx": 120,
+      "safeArea": "25% logo height",
+      "glow": false,
+      "sha256": "d9bcbbc413532ee11be63df4e9681912674260458316477dd9c711a731295251"
     },
     {
       "path": "source/nubarca-app-icon-master.png",

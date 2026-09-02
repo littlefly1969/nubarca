@@ -4,6 +4,7 @@
 
 import React from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   StyleSheet,
   Text,
@@ -141,7 +142,7 @@ const useStyles = themed((colors) =>
       paddingHorizontal: spacing.m,
       borderRadius: radius.control,
       justifyContent: 'center',
-      backgroundColor: colors.surfaceMuted,
+      backgroundColor: colors.surfaceSubtle,
     },
     headerBtnPressed: { opacity: 0.7 },
     headerBtnText: {
@@ -188,41 +189,53 @@ export function Button({
   onPress,
   variant = 'primary',
   disabled = false,
+  loading = false,
   accessibilityLabel,
 }: {
   label: string;
   onPress: () => void;
   variant?: ButtonVariant;
   disabled?: boolean;
+  /** Work in flight. Implies disabled, and keeps the control's own size. */
+  loading?: boolean;
   accessibilityLabel?: string;
 }): React.JSX.Element {
   const styles = useComponentStyles();
+  const colors = useColors();
+  const inert = disabled || loading;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled }}
-      disabled={disabled}
+      accessibilityState={{ disabled: inert, busy: loading }}
+      disabled={inert}
       onPress={onPress}
       style={({ pressed }) => [
         styles.button,
         variant === 'primary' && styles.buttonPrimary,
         variant === 'secondary' && styles.buttonSecondary,
         variant === 'danger' && styles.buttonDanger,
-        pressed && !disabled && styles.buttonPressed,
+        pressed && !inert && styles.buttonPressed,
         disabled && styles.buttonDisabled,
       ]}
     >
-      <Text
-        style={[
-          styles.buttonLabel,
-          variant === 'primary' && styles.buttonLabelOnFill,
-          variant === 'danger' && styles.buttonLabelDanger,
-          disabled && styles.buttonLabelDisabled,
-        ]}
-      >
-        {label}
-      </Text>
+      {loading ? (
+        <ActivityIndicator
+          size="small"
+          color={variant === 'primary' ? colors.textOnAccent : colors.accent}
+        />
+      ) : (
+        <Text
+          style={[
+            styles.buttonLabel,
+            variant === 'primary' && styles.buttonLabelOnFill,
+            variant === 'danger' && styles.buttonLabelDanger,
+            disabled && styles.buttonLabelDisabled,
+          ]}
+        >
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }

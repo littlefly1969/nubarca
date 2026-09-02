@@ -4,26 +4,16 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useI18n } from '../../src/i18n';
 import { iconSizes } from '../../src/ui/tokens';
-import { useColors } from '../../src/ui/theme';
+import { BrandTabBar } from '../../src/ui/BrandTabBar';
 
 export default function TabsLayout(): React.JSX.Element {
-  const colors = useColors();
   const { t } = useI18n();
   return (
+    // The bar is ours (BRAND-APP-02 §D); the ROUTING stays React Navigation's.
+    // The five destinations, their order and their names are unchanged.
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textTertiary,
-        tabBarLabelStyle: { fontSize: 11 },
-        // React Navigation paints its own bar, and its default is light. On
-        // the dark canvas that reads as a white slab bolted to the bottom of
-        // the app.
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.separator,
-        },
-      }}
+      tabBar={(props) => <BrandTabBar {...props} />}
+      screenOptions={{ headerShown: false }}
     >
       <Tabs.Screen
         name="photos"

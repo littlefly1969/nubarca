@@ -87,6 +87,14 @@ COPIES: list[tuple[str, Path]] = [
     # wordmark instead — both already in the package, neither regenerated here.
     ("web/nubarca-mark-flat-on-dark-256.png", MOBILE_ASSETS),
     ("web/nubarca-wordmark-on-dark-480w.png", MOBILE_ASSETS),
+    # The LIGHT-surface wordmark carries Midnight Navy artwork, so it is a
+    # different binary rather than a tint of the other one: Cloud White artwork
+    # on a Cloud White canvas is not a lighter logo, it is no logo.
+    #
+    # The COMPACT rendition, not the 1516x1024 original: the same artwork in the
+    # same frame as the on-dark 480w, so the two themes share ONE visible
+    # geometry — and 49 kB instead of 1.9 MB to draw a 200 px logo.
+    ("web/nubarca-wordmark-on-light-480w.png", MOBILE_ASSETS),
 ]
 
 

@@ -1088,7 +1088,13 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   SemiBold, so that one weight is a declared derivative rather than a released
   instance. `tokens.ts` keeps `radii` and `type` as DEPRECATED aliases so the
   screens BRAND-APP-01 does not redesign keep their proportions; no new call
-  site may use them.
+  site may use them. BRAND-APP-02 added the mobile entry shell: `BrandLockup`
+  (theme-aware, sized by the VISIBLE lockup rather than the file), `TextField` /
+  `FieldLabel` / `InlineNotice`, a custom `BrandTabBar` that renders React
+  Navigation's own state and keeps none, and the redesigned login. The checker
+  carries a `MIGRATED_FILES` ratchet: a file joins it when a slice migrates it,
+  and from then on a deprecated alias or a family-less heading weight there is
+  an error. The list can only grow.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and
