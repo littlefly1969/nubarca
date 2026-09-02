@@ -3,10 +3,11 @@
 // never traded for ScrollView + map.
 
 import React, { useCallback, useMemo } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaTile } from './MediaTile';
-import { columnsForWidth, spacing } from '../ui/tokens';
+import { columnsForWidth, grid, spacing, typography } from '../ui/tokens';
+import { Button } from '../ui/components';
 import { useI18n } from '../i18n';
 import { useWindowDimensions } from 'react-native';
 import type { MediaItem } from '../api/media';
@@ -52,7 +53,10 @@ export function MediaGrid({
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const columns = columnsForWidth(width);
-  const gap = spacing.xs;
+  // The canonical GALLERY gutter, not a generic spacing step: a media library
+  // is a seam between pictures, and at four pixels it starts to read as a set
+  // of tiles rather than as one surface.
+  const gap = grid.gap;
   const tileSize = Math.floor((width - insets.left - insets.right - gap * (columns + 1)) / columns);
 
   // Stable callback identity keeps FlatList from re-mounting rows.
@@ -95,14 +99,14 @@ export function MediaGrid({
     }
     if (footerPhase === 'error' && onLoadMoreRetry !== undefined) {
       return (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t('common.retry')}
-          onPress={onLoadMoreRetry}
-          style={({ pressed }) => [styles.loadMoreBtn, pressed && styles.pressed]}
-        >
-          <Text style={styles.loadMoreText}>{t('gallery.loadMoreError')}</Text>
-        </Pressable>
+        <View style={styles.loadMore}>
+          <Button
+            label={t('gallery.loadMoreError')}
+            variant="secondary"
+            onPress={onLoadMoreRetry}
+            accessibilityLabel={t('common.retry')}
+          />
+        </View>
       );
     }
     return null;
@@ -145,25 +149,17 @@ const useStyles = themed((colors) =>
     content: {
       paddingTop: spacing.s,
       paddingBottom: spacing.xxl,
-      gap: spacing.xs,
+      gap: grid.gap,
     },
     footer: {
       paddingVertical: spacing.l,
       alignItems: 'center',
     },
-    footerText: { color: colors.textTertiary, fontSize: 13 },
-    loadMoreBtn: {
+    footerText: { ...typography.secondary, color: colors.textTertiary },
+    loadMore: {
       marginHorizontal: spacing.l,
       marginTop: spacing.m,
       marginBottom: spacing.xl,
-      minHeight: 44,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: colors.accent,
-      alignItems: 'center',
-      justifyContent: 'center',
     },
-    loadMoreText: { color: colors.accent, fontWeight: '600', fontSize: 13 },
-    pressed: { opacity: 0.75 },
   }),
 );

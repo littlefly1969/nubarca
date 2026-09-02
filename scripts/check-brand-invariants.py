@@ -316,6 +316,13 @@ MIGRATED_FILES = (
     "mobile/src/ui/BrandLockup.tsx",
     "mobile/src/ui/BrandTabBar.tsx",
     "mobile/src/ui/BrandBootState.tsx",
+    # BRAND-APP-03 — the media experience.
+    "mobile/src/components/MediaGrid.tsx",
+    "mobile/src/components/MediaTile.tsx",
+    "mobile/src/components/MediaFilterChips.tsx",
+    "mobile/src/components/MediaFilterSheet.tsx",
+    "mobile/src/components/MediaSelectionBar.tsx",
+    "mobile/app/media/[id].tsx",
 )
 
 # `tokens.ts` and `palette.ts` DECLARE the deprecated aliases; they are the one
@@ -327,6 +334,9 @@ DEPRECATED_USE_RE = re.compile(
 )
 # A heading weight with no family is the system face wearing a brand size.
 RAW_HEADING_RE = re.compile(r"fontWeight: '[67]00'")
+# Five radius roles cover every shape the product draws, so a literal here is a
+# sixth geometry nobody agreed to.
+LOCAL_RADIUS_RE = re.compile(r"borderRadius: \d")
 
 
 def check_migrated_files(errors: list[str]) -> None:
@@ -341,6 +351,8 @@ def check_migrated_files(errors: list[str]) -> None:
                 fail(errors, f"{rel}:{number}: deprecated token {match.group(0)}")
             if RAW_HEADING_RE.search(line) and "fontFamily" not in line:
                 fail(errors, f"{rel}:{number}: heading weight with no brand family")
+            if LOCAL_RADIUS_RE.search(line):
+                fail(errors, f"{rel}:{number}: literal radius where a role exists")
 
 
 def check_product_spelling(errors: list[str]) -> None:

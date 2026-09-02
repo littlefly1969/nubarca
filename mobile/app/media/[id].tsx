@@ -47,13 +47,15 @@ import {
   viewerIndexFromUserScroll,
   viewerOffsetForIndex,
 } from '../../src/media/viewerRoute';
-import { spacing } from '../../src/ui/tokens';
+import { iconSizes, radius, spacing, touch, typography } from '../../src/ui/tokens';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../../src/i18n';
 import { media } from '../../src/ui/palette.ts';
 
 export default function MediaRoute(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id: string; kind?: string; name?: string }>();
   const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
   const { width: initialWindowWidth } = useWindowDimensions();
@@ -299,7 +301,10 @@ export default function MediaRoute(): React.JSX.Element {
       />
 
       {chromeVisible && (
-        <View style={styles.chromeTop} pointerEvents="box-none">
+        <View
+          style={[styles.chromeTop, { paddingTop: insets.top + spacing.s }]}
+          pointerEvents="box-none"
+        >
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t('viewer.back')}
@@ -307,7 +312,7 @@ export default function MediaRoute(): React.JSX.Element {
             style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
             hitSlop={8}
           >
-            <Ionicons name="arrow-back" size={24} color={media.text} />
+            <Ionicons name="arrow-back" size={iconSizes.m} color={media.text} />
           </Pressable>
           {current !== undefined && (
             <>
@@ -332,6 +337,9 @@ const styles = StyleSheet.create({
   pager: {
     flex: 1,
   },
+  // ONE quiet translucent region across the top. The status bar's own height
+  // comes from the real inset: `spacing.xl + spacing.l` was a guess that is too
+  // small on a notch and too large without one.
   chromeTop: {
     position: 'absolute',
     top: 0,
@@ -341,27 +349,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.m,
     paddingHorizontal: spacing.m,
-    paddingTop: spacing.xl + spacing.l,
     paddingBottom: spacing.s,
     backgroundColor: media.chrome,
   },
   backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: touch.minSize,
+    height: touch.minSize,
+    borderRadius: radius.pill,
     backgroundColor: media.chromeButton,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: {
-    flex: 1,
-    color: media.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  // No card around the title, and no accent ornament anywhere up here: over an
+  // unknown photograph the only colours that stay legible are the media ones.
+  title: { ...typography.label, flex: 1, color: media.text },
   counter: {
+    ...typography.badge,
     color: media.textSecondary,
-    fontSize: 12,
+    // Tabular figures, so the counter does not shuffle its own width as the
+    // page number changes under a swipe.
     fontVariant: ['tabular-nums'],
   },
   pressed: { opacity: 0.7 },

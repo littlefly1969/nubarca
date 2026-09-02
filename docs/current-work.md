@@ -1094,7 +1094,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   Navigation's own state and keeps none, and the redesigned login. The checker
   carries a `MIGRATED_FILES` ratchet: a file joins it when a slice migrates it,
   and from then on a deprecated alias or a family-less heading weight there is
-  an error. The list can only grow.
+  an error. The list can only grow. BRAND-APP-03 added the media surfaces:
+  `grid.gap` is the canonical gallery seam, the tile is a square media frame
+  whose selection is a 2 px accent edge plus a filled control rather than a wash
+  over the picture, chips and the filter sheet share one applied/inert language,
+  the selection tray is accent-on-quiet rather than a row of blue calls to
+  action, and the viewer chrome is safe-area correct and theme-independent.
+  `media.highlight` was DELETED: it was a generic route to Soft Violet, and
+  BRAND-AI-01 reserves that colour for inference — `signalIntelligence` is the
+  role that says so.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and

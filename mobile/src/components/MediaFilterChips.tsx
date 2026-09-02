@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { FilterChipDescriptor, FilterChipKind } from '../media/mediaFilterState';
 import type { PersonSummary } from '../api/people';
 import { useI18n } from '../i18n';
+import { radius, spacing, typography } from '../ui/tokens';
 import { themed, useColors } from '../ui/theme';
 
 function personLabel(
@@ -162,25 +163,40 @@ export function MediaFilterChips({
 const useStyles = themed((colors) =>
   StyleSheet.create({
     strip: { flexGrow: 0, maxHeight: 46 },
-    stripContent: { paddingHorizontal: 12, paddingVertical: 6, gap: 8, alignItems: 'center' },
+    stripContent: {
+      paddingHorizontal: spacing.m,
+      paddingVertical: spacing.s - 2,
+      gap: spacing.s,
+      alignItems: 'center',
+    },
+    // An APPLIED filter: the accent wash with an accent border and an accent
+    // label. One language, whatever the filter is about.
     chip: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: colors.accentSubtle,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.accent,
-      borderRadius: 16,
-      paddingLeft: 12,
-      paddingRight: 8,
-      paddingVertical: 6,
+      borderRadius: radius.pill,
+      paddingLeft: spacing.m,
+      paddingRight: spacing.s,
+      paddingVertical: spacing.s - 2,
       maxWidth: 240,
     },
-    chipText: { color: colors.accent, fontSize: 13, flexShrink: 1 },
-    inert: { backgroundColor: colors.surfaceMuted },
+    chipText: { ...typography.label, color: colors.accent, flexShrink: 1 },
+    // INERT: set, shown, and not applied to this query. It recedes to a quiet
+    // recess with tertiary text, and the strike-through says so without colour.
+    inert: { backgroundColor: colors.surfaceSubtle, borderColor: colors.separator },
     inertText: { color: colors.textTertiary, textDecorationLine: 'line-through' },
-    chipIcon: { marginLeft: 4 },
-    clearAll: { paddingHorizontal: 10, paddingVertical: 6 },
-    clearAllText: { color: colors.textTertiary, fontSize: 13, textDecorationLine: 'underline' },
+    chipIcon: { marginLeft: spacing.xs },
+    // Tertiary, deliberately: Clear All removes everything, and dressing it as
+    // another blue chip would make the most destructive control the loudest.
+    clearAll: { paddingHorizontal: spacing.s + 2, paddingVertical: spacing.s - 2 },
+    clearAllText: {
+      ...typography.label,
+      color: colors.textTertiary,
+      textDecorationLine: 'underline',
+    },
     pressed: { opacity: 0.6 },
   }),
 );

@@ -250,3 +250,17 @@ test('the identity roles are the same in both themes, and match the contract', (
     }
   }
 });
+
+test('there is no generic route to Soft Violet', () => {
+  // BRAND-AI-01: Soft Violet identifies AI and inference. A general-purpose
+  // `highlight` role guarantees it will be spent on decoration — it already had
+  // been, on a duplicate COUNT, which a database produces without a model. Once
+  // that happens the product has no colour left that means "inference".
+  //
+  // `signalIntelligence` remains, in the themed palette, where its name says
+  // what it is for.
+  assert.equal((media as Record<string, unknown>).highlight, undefined);
+  const source = readFileSync(resolve(MOBILE_ROOT, 'src', 'ui', 'palette.ts'), 'utf8');
+  const mediaBlock = source.slice(source.indexOf('export const media = {'));
+  assert.doesNotMatch(code(mediaBlock), /154, 108, 255|softViolet/);
+});
