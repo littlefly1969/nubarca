@@ -1,7 +1,7 @@
 # NubArca Print Agent
 
-The Print Agent is a headless Windows Service that connects one NubArca Print
-Station to printers installed in the Windows spooler. It never receives an
+The Print Agent is a headless Windows Service or Linux simulator that connects
+one NubArca Print Station to a printer adapter. It never receives an
 owner cookie and cannot browse files: its credential is scoped to heartbeat,
 printer reporting, claiming its own jobs, downloading the claimed artifact and
 reporting the result.
@@ -11,7 +11,7 @@ reporting the result.
 ## Build and package
 
 The manual **Print Agent release** GitHub workflow runs only on `main`, tests
-the agent and publishes a self-contained `win-x64` or `win-arm64` artifact. The
+the agent and publishes a self-contained `win-x64`, `win-arm64` or `linux-x64` artifact. The
 artifact contains the executable, runtime, configuration defaults, install and
 uninstall scripts, the source commit and an executable SHA-256 checksum. No
 .NET runtime installation is required on the station.
@@ -24,7 +24,37 @@ dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj `
   --output .\artifacts\print-agent
 ```
 
-## Enroll and install
+## Linux fake simulator
+
+The `linux-x64` bundle runs the real station protocol with the `fake` adapter:
+it enrolls, heartbeats, claims jobs, downloads artifacts, journals submission
+and acknowledges the result, then copies the rendered artifact to a private
+`fake-output` directory. It never contacts a physical printer or CUPS.
+
+Extract the bundle in the agent installation directory. From its `linux/`
+directory, for every simulator create a station in **Cloud functions → Print
+stations**, then run:
+
+```bash
+sudo ./install-fake-instance.sh --instance sim-sala \
+  --server https://your-nubarca-origin.example \
+  --station 00000000-0000-0000-0000-000000000000
+```
+
+The script prompts silently for the one-shot token. Each instance has a unique
+Unix account, mode-0700 state directory, mode-0600 credential, SQLite journal
+and output directory under `/var/lib/nubarca-print-agent/<instance>`. Repeat
+with `sim-lab` and `sim-test`. Check it with
+`systemctl status nubarca-print-agent@sim-sala`; its fake pages are in that
+instance's `fake-output` directory. `uninstall-instance.sh` retains state by
+default; `--purge-state` is only for intentional station replacement.
+
+`cups` is an explicit reserved adapter contract, not a fallback and not yet an
+implementation. A future CUPS adapter must retain this same journal boundary;
+until physical acceptance exists, Linux uses only `fake` and DS620 remains the
+Windows-spooler path.
+
+## Windows enroll and install
 
 1. In **Cloud functions → Print stations**, create a station. NubArca displays
    the enrollment token once and keeps only its SHA-256 digest.

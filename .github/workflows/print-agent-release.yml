@@ -1,19 +1,20 @@
 name: Print Agent release
 
 # The station is independent from the server containers. This manual main-only
-# workflow emits a self-contained Windows service bundle; installation and
-# enrollment remain explicit operator actions on the print PC.
+# workflow emits a self-contained Windows service or Linux simulator bundle;
+# installation and enrollment remain explicit operator actions on the station.
 on:
   workflow_dispatch:
     inputs:
       runtime:
-        description: Windows target architecture
+        description: Target platform and architecture
         required: true
         default: win-x64
         type: choice
         options:
           - win-x64
           - win-arm64
+          - linux-x64
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ concurrency:
 
 jobs:
   release:
-    name: Build and validate headless Windows Print Agent
+    name: Build and validate headless Print Agent
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -52,7 +53,7 @@ jobs:
       - name: Test Print Agent
         run: dotnet test tests/NubArca.PrintAgent.Tests/NubArca.PrintAgent.Tests.csproj --no-restore --configuration Release
 
-      - name: Publish self-contained service
+      - name: Publish self-contained agent bundle
         env:
           RUNTIME: ${{ inputs.runtime }}
         run: |
@@ -65,12 +66,24 @@ jobs:
             --no-restore -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false \
             --output "$output"
           printf '%s\n' "$GITHUB_SHA" > "$output/source-commit.txt"
-          (cd "$output" && sha256sum NubArca.PrintAgent.exe > SHA256SUMS)
+          executable='NubArca.PrintAgent'
+          [[ "$RUNTIME" == win-* ]] && executable='NubArca.PrintAgent.exe'
+          (cd "$output" && sha256sum "$executable" > SHA256SUMS)
           echo "output=$output" >> "$GITHUB_OUTPUT"
           echo "artifact=nubarca-print-agent-${version}-${RUNTIME}" >> "$GITHUB_OUTPUT"
         id: publish
 
-      - name: Upload Windows service bundle
+      - name: Validate Linux simulator bundle
+        if: inputs.runtime == 'linux-x64'
+        run: |
+          set -euo pipefail
+          output="${{ steps.publish.outputs.output }}"
+          test -x "$output/NubArca.PrintAgent"
+          test -f "$output/linux/install-fake-instance.sh"
+          test -f "$output/linux/uninstall-instance.sh"
+          test -f "$output/linux/nubarca-print-agent@.service"
+
+      - name: Upload Print Agent bundle
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.publish.outputs.artifact }}

@@ -16,7 +16,7 @@ NubArca is designed for a **single operator and their users**, running on one sm
 - **Local AI, under your control** — optional services provide semantic text-to-photo search, image similarity and post-ingestion face detection/embedding. The experimental **Aesthetics Lab** evaluates selected images locally and remains isolated from the main library.
 - **Built for the living room** — the dedicated Fire TV / Android TV experience supports secure QR pairing, remote-first albums and slideshows, personal videos and live Party Mode refresh as new guest photos arrive.
 - **Cast a video to the television** — Chrome on a desktop or on Android can send a video to a Chromecast, a Google TV or any certified Google Cast receiver, and stays a real remote control while it plays. The receiver never holds a NubArca session: it is handed a short-lived, single-video capability whose permission, account and file are re-checked on every request. See [Google Cast](docs/google-cast.md).
-- **Print without exposing an owner session** — the server renders bounded 10×15 artifacts and a separately packaged headless Windows Print Agent delivers them through an installed spooler queue. Enrollment is one-shot, credentials are station-scoped and ambiguous driver outcomes are never auto-reprinted. See [Print Agent](docs/print-agent.md).
+- **Print without exposing an owner session** — the server renders bounded 10×15 artifacts and a separately packaged headless Windows Print Agent or Linux fake simulator delivers them through a station-scoped credential. Enrollment is one-shot and ambiguous outcomes are never auto-reprinted. See [Print Agent](docs/print-agent.md).
 
 ## Current state — 0.3.0
 

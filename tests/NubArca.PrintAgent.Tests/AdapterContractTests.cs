@@ -1,4 +1,5 @@
 using NubArca.PrintAgent.Adapters;
+using NubArca.PrintAgent;
 
 namespace NubArca.PrintAgent.Tests;
 
@@ -22,5 +23,14 @@ public sealed class AdapterContractTests
         {
             if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
         }
+    }
+
+    [Fact]
+    public void Cups_Is_An_Explicit_Future_Adapter_Not_A_Silent_Fallback()
+    {
+        var options = new PrintAgentOptions { Adapter = PrintAdapterKinds.Cups };
+        options.NormalizeAndValidate();
+        var error = Assert.Throws<NotSupportedException>(() => PrintAgentPlatform.CreatePrinterAdapter(options));
+        Assert.Contains("not implemented", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 }

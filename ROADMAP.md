@@ -14,6 +14,8 @@ Nothing here is a commitment or a schedule, and nothing here is a defect.
   disconnect, paper/error recovery and one-copy delivery across an agent
   restart. The fake adapter and server contract are automated; hardware claims
   wait for hardware evidence.
+- Implement the reserved **CUPS** adapter only after a real Linux-printer
+  acceptance matrix; the Linux fake simulator is protocol evidence, not CUPS support.
 - A private, owner-scoped **photo map** view on top of `file_item_locations`.
 - **Operationalise blob cleanup** — a safe admin-triggered reclaim, so recovering
   space is an explicit action rather than only background configuration.

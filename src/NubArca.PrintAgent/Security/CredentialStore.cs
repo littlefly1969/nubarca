@@ -37,3 +37,48 @@ public sealed class DpapiCredentialStore : ICredentialStore
         return Encoding.UTF8.GetString(bytes);
     }
 }
+
+// Linux has no DPAPI equivalent available to a self-contained .NET service.
+// Isolation is therefore explicit: the systemd installer creates one service
+// account per station and a mode-0700 state directory; this store refuses a
+// credential file readable or writable by another account.
+public sealed class LinuxFileCredentialStore : ICredentialStore
+{
+    private const UnixFileMode CredentialMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+    private const UnixFileMode ForbiddenMode = UnixFileMode.GroupRead | UnixFileMode.GroupWrite
+        | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite | UnixFileMode.OtherExecute;
+    private readonly string _path;
+
+    public LinuxFileCredentialStore(string path) => _path = path;
+
+    public async Task SaveAsync(string credential, CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("The Linux file credential store requires Linux.");
+        if (string.IsNullOrWhiteSpace(credential)) throw new ArgumentException("Credential is required.", nameof(credential));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
+        var temporary = _path + ".new-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            await File.WriteAllTextAsync(temporary, credential, Encoding.UTF8, cancellationToken);
+            File.SetUnixFileMode(temporary, CredentialMode);
+            File.Move(temporary, _path, overwrite: true);
+            File.SetUnixFileMode(_path, CredentialMode);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
+    public async Task<string?> LoadAsync(CancellationToken cancellationToken)
+    {
+        if (!File.Exists(_path)) return null;
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("The Linux file credential store requires Linux.");
+        var mode = File.GetUnixFileMode(_path);
+        if ((mode & ForbiddenMode) != 0)
+            throw new InvalidOperationException("Print Agent credential permissions must be 0600.");
+        return await File.ReadAllTextAsync(_path, cancellationToken);
+    }
+}

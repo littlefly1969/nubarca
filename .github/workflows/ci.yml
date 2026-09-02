@@ -123,6 +123,19 @@ jobs:
           --no-restore -p:PublishSingleFile=false -p:DebugType=None
           --output "$RUNNER_TEMP/print-agent-smoke"
 
+      - name: Prove Linux simulator publish
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/print-agent-linux-smoke"
+          dotnet publish src/NubArca.PrintAgent/NubArca.PrintAgent.csproj \
+            --configuration Release --runtime linux-x64 --self-contained true \
+            --no-restore -p:PublishSingleFile=false -p:DebugType=None \
+            --output "$output"
+          test -x "$output/NubArca.PrintAgent"
+          test -f "$output/linux/install-fake-instance.sh"
+          test -f "$output/linux/uninstall-instance.sh"
+          test -f "$output/linux/nubarca-print-agent@.service"
+
   frontend:
     name: Frontend typecheck, tests, and build
     runs-on: ubuntu-24.04

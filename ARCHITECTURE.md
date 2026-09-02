@@ -1417,8 +1417,10 @@ from server time, heartbeat age and current printer observations; a printer
 absent from the latest heartbeat becomes offline rather than preserving stale
 readiness.
 
-`NubArca.PrintAgent` is an independently packaged, headless Windows Service.
-Its credential is protected by machine-scope DPAPI and its local SQLite journal
+`NubArca.PrintAgent` is an independently packaged, headless Windows Service or
+Linux systemd simulator. Windows credentials use machine-scope DPAPI; every
+Linux simulator has its own Unix service account, mode-0600 credential and
+mode-0700 state directory. Its local SQLite journal
 records the physical delivery boundary. The journal is deliberately separate
 from the server queue: it prevents an ACK retry or process restart from
 submitting a second physical copy. A restart after durable `submitting`, or an
