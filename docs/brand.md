@@ -116,14 +116,18 @@ visual asset. It is the approved handoff package, imported without redesign:
 ```
 assets/brand/nubarca/
   README.md  NUBARCA_BRAND_HANDOFF.md  brand-manifest.json  checksums.sha256
-  source/      8 masters      — preserved originals, never shipped
-  runtime/     39 assets      — the only assets applications may use
+  source/     preserved originals, never shipped
+  runtime/    the only assets applications may use
     favicon/  pwa/  tv/  web/
-  reference/   7 boards       — documentation, never runtime UI
+  reference/  documentation, never runtime UI
 ```
 
-54 catalogued assets. `sha256sum --check checksums.sha256` must pass; the
-manifest records each asset's dimensions, alpha, glow and provenance, and
+Asset inventory, dimensions, runtime-readiness and checksums are authoritative
+in `assets/brand/nubarca/brand-manifest.json` and `checksums.sha256`.
+Documentation does not duplicate inventory counts.
+
+`sha256sum --check checksums.sha256` must pass; the manifest records each
+asset's dimensions, alpha, glow and provenance, and
 `frontend/src/brand/brandPackage.test.ts` verifies all of it against the real
 binaries — including that every `runtime/` file is runtime-ready and that no
 source master or reference board can reach a shipped directory.
@@ -153,9 +157,30 @@ ones, so any consumer path traces back to the package by name.
 | `tv/assets/brand/nubarca-fire-tv-{icon-512,banner-1280x720}.png` | `runtime/tv/` | Fire TV icon and banner |
 | `tv/assets/brand/nubarca-tv-lockup-transparent-{640,1280,1800}w.png` | `runtime/tv/` | in-app TV branding |
 | `tv/assets/brand/nubarca-tv-splash-1920x1080.png` | `runtime/tv/` | TV splash composition |
+| `mobile/assets/brand/nubarca-expo-app-icon-1024.png` | `runtime/pwa/` | Expo top-level (iOS) icon |
+| `mobile/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground |
+| `mobile/assets/brand/nubarca-mark-flat-on-dark-256.png` | `runtime/web/` | native splash art (BRAND-SPLASH-01) |
+| `mobile/assets/brand/nubarca-wordmark-on-dark-480w.png` | `runtime/web/` | branded boot state (BRAND-BOOT-01) |
 
 Run `python3 scripts/sync-brand-assets.py` after changing the package;
 `--check` fails the build if a consumer copy drifts.
+
+### Type weights
+
+The approved display weights are Space Grotesk 500 / 600 / 700 and the approved
+UI weights are Exo 2 400 / 500 / 600 (BRAND-TYPE-01).
+
+**Space Grotesk 600 is an approved product weight that the typeface does not
+publish.** Its named instances are Light 300, Regular 400, Medium 500 and
+Bold 700, and its STAT table carries no Axis Value at 600. The face is generated
+as a static instance at `wght=600` from the official Google Fonts variable
+binary, whose weight axis is continuous over 300–700 and designed to be
+interpolated. It is not moved to 500 or 700 to match an upstream name.
+
+Mobile bundles the six faces locally, with provenance and SHA-256 for each in
+[`mobile/assets/fonts/fonts-manifest.json`](../mobile/assets/fonts/fonts-manifest.json).
+`scripts/check-brand-invariants.py` verifies the hashes, refuses an unmanifested
+binary, and refuses a runtime font fetch.
 
 ### Which artwork goes where
 

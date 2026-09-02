@@ -72,6 +72,28 @@ module.exports = {
             'Allow NubArca to read the videos you choose so they can be synced to your own private library.',
         },
       ],
+      // BRAND-SPLASH-01. The launcher icon is deliberately NOT the splash art:
+      // it is luminous and framed, and at splash scale its halo and frame read
+      // as a rendering defect. The approved FLAT on-dark mark is used instead,
+      // copied byte-for-byte from the brand package by scripts/sync-brand-assets.py.
+      //
+      // The dark variant is the SAME identity on purpose: a cold launch is
+      // Midnight Navy whatever theme the user eventually gets, because the
+      // stored preference is application state and is not readable by the
+      // native launch (BRAND-BOOT-01).
+      [
+        'expo-splash-screen',
+        {
+          backgroundColor: '#0A0F1A',
+          image: './assets/brand/nubarca-mark-flat-on-dark-256.png',
+          imageWidth: 120,
+          resizeMode: 'contain',
+          dark: {
+            backgroundColor: '#0A0F1A',
+            image: './assets/brand/nubarca-mark-flat-on-dark-256.png',
+          },
+        },
+      ],
       // `expo prebuild --clean` regenerates android/. This plugin is therefore
       // the durable release-signing authority and refuses a debug-key fallback.
       './plugins/withReleaseSigning',

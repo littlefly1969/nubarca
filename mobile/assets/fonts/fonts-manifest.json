@@ -1,0 +1,68 @@
+{
+  "$schemaVersion": 1,
+  "note": "BRAND-TYPE-01. Every file here is a static instance derived from the OFFICIAL Google Fonts variable binary named in `sources`, with fontTools varLib.instancer. Nothing is fetched at runtime: these are the only font binaries the app loads.",
+  "generatedWith": "fontTools 4.63.0 varLib.instancer",
+  "sources": {
+    "SpaceGrotesk": {
+      "family": "Space Grotesk",
+      "upstream": "https://github.com/google/fonts/blob/main/ofl/spacegrotesk/SpaceGrotesk%5Bwght%5D.ttf",
+      "variableSha256": "acad6de1fc93436f5c0f1f4137751ef04f1aea3063e7036535970ffcfbd79f72",
+      "axis": "wght 300-700",
+      "license": "OFL-1.1",
+      "licenseFile": "OFL-SpaceGrotesk.txt"
+    },
+    "Exo2": {
+      "family": "Exo 2",
+      "upstream": "https://github.com/google/fonts/blob/main/ofl/exo2/Exo2%5Bwght%5D.ttf",
+      "variableSha256": "205a448676a2586f9c57c25f3d5c58ca8db7e6cf5edf7506783a010c6fe2bfb5",
+      "axis": "wght 100-900",
+      "license": "OFL-1.1",
+      "licenseFile": "OFL-Exo2.txt"
+    }
+  },
+  "fonts": [
+    {
+      "file": "SpaceGrotesk-Medium.ttf",
+      "source": "SpaceGrotesk",
+      "weight": 500,
+      "sha256": "5a2d77dd2c72c804803bd992d6d468874b8d8cecefc7c6f3fbc865d4a5799a4e",
+      "namedInstance": true
+    },
+    {
+      "file": "SpaceGrotesk-SemiBold.ttf",
+      "source": "SpaceGrotesk",
+      "weight": 600,
+      "sha256": "97c629dcf93f18c0cc432ffdf8efb981f47fed55b1bb4935fd2369a9020a9aa3",
+      "namedInstance": false,
+      "derivation": "Space Grotesk publishes no SemiBold: its named instances are Light 300, Regular 400, Medium 500 and Bold 700, and its STAT table carries no Axis Value at 600. The wght axis is continuous over 300-700 and designed to be interpolated, so this instance is pinned at 600 from the official variable binary and named explicitly. It is a DERIVATIVE, not a released weight of the typeface."
+    },
+    {
+      "file": "SpaceGrotesk-Bold.ttf",
+      "source": "SpaceGrotesk",
+      "weight": 700,
+      "sha256": "a88507d0af859a817c6ceb930515bfe34cb61f74f48b2d1b2c0007beb5c6cb33",
+      "namedInstance": true
+    },
+    {
+      "file": "Exo2-Regular.ttf",
+      "source": "Exo2",
+      "weight": 400,
+      "sha256": "db9e528e546a4a16b5469e154ed2f45edcd891461d073ad31e1c0da306d3b241",
+      "namedInstance": true
+    },
+    {
+      "file": "Exo2-Medium.ttf",
+      "source": "Exo2",
+      "weight": 500,
+      "sha256": "5c51a45705974c983ee169f8b0ffd9a432153f79243597400609f014f3e0bd82",
+      "namedInstance": true
+    },
+    {
+      "file": "Exo2-SemiBold.ttf",
+      "source": "Exo2",
+      "weight": 600,
+      "sha256": "1bd3c09c7572b50ffc77bac75204c263f803ce9f07704ca3228142d048c8c52a",
+      "namedInstance": true
+    }
+  ]
+}
