@@ -161,6 +161,7 @@ ones, so any consumer path traces back to the package by name.
 | `mobile/assets/brand/nubarca-android-adaptive-foreground-432.png` | `runtime/tv/` | Android adaptive icon foreground |
 | `mobile/assets/brand/nubarca-mark-flat-on-dark-256.png` | `runtime/web/` | native splash art (BRAND-SPLASH-01) |
 | `mobile/assets/brand/nubarca-wordmark-on-dark-480w.png` | `runtime/web/` | branded boot state (BRAND-BOOT-01) |
+| `mobile/assets/brand/nubarca-wordmark-on-light.png` | `runtime/web/` | brand lockup on light surfaces |
 
 Run `python3 scripts/sync-brand-assets.py` after changing the package;
 `--check` fails the build if a consumer copy drifts.
