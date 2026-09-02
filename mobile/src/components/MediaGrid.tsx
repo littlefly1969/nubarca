@@ -23,6 +23,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MediaTile } from './MediaTile';
 import { columnsForWidth, grid, spacing, typography } from '../ui/tokens';
+import { gridMetrics } from '../ui/gridMetrics.ts';
 import { Button } from '../ui/components';
 import { useI18n } from '../i18n';
 import { useWindowDimensions } from 'react-native';
@@ -97,7 +98,9 @@ export function MediaGrid({
   // is a seam between pictures, and at four pixels it starts to read as a set
   // of tiles rather than as one surface.
   const gap = grid.gap;
-  const tileSize = Math.floor((width - insets.left - insets.right - gap * (columns + 1)) / columns);
+  // One source of truth for the geometry, so the size a tile is given and the
+  // space actually left between tiles cannot disagree.
+  const { tileSize, sidePadding } = gridMetrics(width, insets.left + insets.right, columns, gap);
 
   // Stable callback identity keeps FlatList from re-mounting rows.
   const renderItem = useCallback(
@@ -221,9 +224,12 @@ export function MediaGrid({
       onScrollToIndexFailed={(info) => {
         pendingAnchor.current = items[info.index]?.id ?? null;
       }}
+      // `numColumns` lays a row out with flex-start, so the column seam has to
+      // be stated explicitly — a container gap does not distribute it.
+      columnWrapperStyle={columns > 1 ? { gap } : undefined}
       contentContainerStyle={[
         styles.content,
-        { paddingHorizontal: insets.left + gap },
+        { paddingHorizontal: insets.left + sidePadding },
         contentPaddingTop !== undefined && { paddingTop: contentPaddingTop },
         contentPaddingBottom !== undefined && { paddingBottom: contentPaddingBottom },
       ]}
