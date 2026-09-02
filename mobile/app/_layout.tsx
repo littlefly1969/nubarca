@@ -6,18 +6,28 @@
 // by user id so switching accounts remounts every authenticated screen and no
 // selection or cached state crosses accounts.
 
-import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect } from 'react';
+import { StyleSheet } from 'react-native';
 import { Stack, Redirect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { I18nProvider, useI18n } from '../src/i18n';
+import { I18nProvider } from '../src/i18n';
 import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
 import { viewerIdentityKey } from '../src/media/viewerIdentity';
 import { SyncProvider } from '../src/sync/SyncProvider';
-import { ThemeProvider, themed, useColors, useTheme } from '../src/ui/theme';
+import { ThemeProvider, useColors, useTheme } from '../src/ui/theme';
+import { BrandBootState } from '../src/ui/BrandBootState';
+import { useBrandFonts } from '../src/ui/fonts';
+import { identity } from '../src/ui/palette';
+
+// Held from MODULE SCOPE: this is the only point early enough to stop Expo
+// hiding the native splash before the first frame exists. A failure here means
+// the splash lifts on its own — a cosmetic loss, never a stuck app, which is
+// why it is swallowed rather than awaited.
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function IdentityKeyedViewerProvider({
   children,
@@ -39,7 +49,7 @@ function RootGate(): React.JSX.Element {
   const session = useSession();
 
   if (session.status === 'restoring') {
-    return <Splash />;
+    return <BrandBootState />;
   }
 
   if (session.status === 'unauthed') {
@@ -100,18 +110,6 @@ function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
   );
 }
 
-function Splash(): React.JSX.Element {
-  const styles = useStyles();
-  const colors = useColors();
-  const { t } = useI18n();
-  return (
-    <View style={styles.splash}>
-      <ActivityIndicator size="large" color={colors.accent} />
-      <Text style={styles.splashText}>{t('app.restoring')}</Text>
-    </View>
-  );
-}
-
 // The status bar's CONTENT — the clock, the battery, the signal — is drawn by
 // the system, so it has to contrast with OUR canvas, not with the phone's own
 // theme. A user on a light phone who chooses the dark theme would otherwise get
@@ -122,12 +120,24 @@ function ThemedStatusBar(): React.JSX.Element {
 }
 
 export default function RootLayout(): React.JSX.Element {
+  // The local visual foundation is JS plus the brand typefaces. `settled` is
+  // deliberately not `loaded`: a font bundle that FAILED has also finished, and
+  // a splash that waits for a load that will never succeed costs the whole app
+  // to save its typography.
+  //
+  // Nothing here waits on the network or on session restoration. That is
+  // BRAND-BOOT-01: the native splash is a boot bridge, and the branded boot
+  // state below owns whatever takes longer.
+  const { settled } = useBrandFonts();
+  useEffect(() => {
+    if (settled) void SplashScreen.hideAsync().catch(() => {});
+  }, [settled]);
+
   // GestureHandlerRootView must be the OUTERMOST view: react-native-gesture-
   // handler resolves every gesture against the nearest root, and without one
   // the viewer's pinch/pan simply never fire on Android — silently, with no
-  // error to point at. It carries no colour of its own, so it is the one
-  // stylesheet in the app that is NOT themed — it sits outside the provider
-  // that would supply the palette.
+  // error to point at. Its background is the identity one rather than a theme
+  // colour, for the reason given on rootStyles below.
   return (
     <GestureHandlerRootView style={rootStyles.gestureRoot}>
       <ThemeProvider>
@@ -146,20 +156,9 @@ export default function RootLayout(): React.JSX.Element {
   );
 }
 
-const rootStyles = StyleSheet.create({ gestureRoot: { flex: 1 } });
-
-const useStyles = themed((colors) =>
-  StyleSheet.create({
-    splash: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: colors.canvas,
-    },
-    splashText: {
-      marginTop: 16,
-      color: colors.textSecondary,
-      fontSize: 14,
-    },
-  }),
-);
+// The root carries the IDENTITY background, not a theme colour: it is what
+// shows through in the instant between the native splash and the first painted
+// screen, and the system's own default there is white.
+const rootStyles = StyleSheet.create({
+  gestureRoot: { flex: 1, backgroundColor: identity.bootBackground },
+});
