@@ -102,3 +102,34 @@ test('the grid keeps its position outside the list that remounts', () => {
   const restore = grid.slice(grid.indexOf('const restoreAnchor'), grid.indexOf('return ('));
   assert.doesNotMatch(restore, /refresh|loadMore|fetch/);
 });
+
+test('an arriving anchor is applied, not merely recorded', () => {
+  // THE DEFECT THIS PREVENTS. The restore was driven only by
+  // `onContentSizeChange`, and returning from the viewer changes neither the
+  // content size nor the column count — so the anchor was stored and then
+  // nothing ever asked for it. It looked implemented and did nothing.
+  for (const [file, effectMarker] of [
+    [['src', 'components', 'MediaGrid.tsx'], 'anchorItemId === null'],
+    [['app', 'shared-album', '[id].tsx'], 'returnAnchor.itemId === null'],
+  ] as [string[], string][]) {
+    const source = read(...file);
+    const at = source.indexOf(effectMarker);
+    assert.ok(at > 0, `${file.join('/')} has no arriving-anchor effect`);
+    const effect = source.slice(at, at + 320);
+    assert.match(
+      effect,
+      /restoreAnchor\(\)/,
+      `${file.join('/')} records the anchor without applying it`,
+    );
+  }
+});
+
+test('a column change asks immediately as well as on the next layout', () => {
+  // A remounted list may not be measured yet; failing to scroll re-arms and the
+  // content-size change asks again. Both paths must exist.
+  const grid = read('src', 'components', 'MediaGrid.tsx');
+  const columnsEffect = grid.slice(grid.indexOf('previousColumns.current === columns'));
+  assert.match(columnsEffect.slice(0, 260), /restoreAnchor\(\)/);
+  assert.match(grid, /onScrollToIndexFailed/);
+  assert.match(grid, /onContentSizeChange=\{restoreAnchor\}/);
+});

@@ -107,5 +107,20 @@ test('leaving a screen mid-selection does not strand the navigation', () => {
   // The publisher clears on unmount as well as on change: otherwise navigating
   // away while selecting would leave the bar hidden behind a mode nobody is in.
   const mode = code(readFileSync(resolve(ROOT, 'src', 'ui', 'selectionMode.tsx'), 'utf8'));
-  assert.match(mode, /return \(\) => context\?\.setSelecting\(false\)/);
+  assert.match(mode, /return \(\) => setSelecting\?\.\(false\)/);
+});
+
+test('publishing selection mode cannot re-trigger itself', () => {
+  // THE CRASH THIS PREVENTS. The context VALUE is memoised on `selecting`, so
+  // its identity changes every time the flag does. An effect that depended on
+  // the context therefore re-ran on its own result — set true, context changes,
+  // cleanup sets false, context changes, set true — an infinite update loop
+  // that took the app down the moment anybody long-pressed a photo.
+  //
+  // `useState`'s setter is stable, so the dependency list may contain it and
+  // must not contain the context object.
+  const mode = code(readFileSync(resolve(ROOT, 'src', 'ui', 'selectionMode.tsx'), 'utf8'));
+  const hook = mode.slice(mode.indexOf('export function useReportSelectionMode'));
+  assert.match(hook, /\}, \[setSelecting, selecting\]\)/);
+  assert.doesNotMatch(hook, /\[context/, 'the effect depends on the context object again');
 });

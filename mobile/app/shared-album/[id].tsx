@@ -252,15 +252,6 @@ export default function SharedAlbum(): React.JSX.Element {
       viewableItems.map((token) => (token.item as SharedAlbumItem).albumItemId),
     );
   }).current;
-  const previousColumns = useRef(columns);
-  useEffect(() => {
-    if (previousColumns.current === columns) return;
-    previousColumns.current = columns;
-    pendingAnchor.current = visibleAnchor.current;
-  }, [columns]);
-  useEffect(() => {
-    if (returnAnchor.itemId !== null) pendingAnchor.current = returnAnchor.itemId;
-  }, [returnAnchor.itemId]);
   const restoreAnchor = useCallback(() => {
     const id = pendingAnchor.current;
     if (id === null) return;
@@ -273,6 +264,20 @@ export default function SharedAlbum(): React.JSX.Element {
     if (index === null) return;
     listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
   }, [snapshot.items, returnAnchor]);
+  const previousColumns = useRef(columns);
+  useEffect(() => {
+    if (previousColumns.current === columns) return;
+    previousColumns.current = columns;
+    pendingAnchor.current = visibleAnchor.current;
+    restoreAnchor();
+  }, [columns, restoreAnchor]);
+  // Applied here, not only on a content-size change: returning from the viewer
+  // changes neither the content size nor the column count.
+  useEffect(() => {
+    if (returnAnchor.itemId === null) return;
+    pendingAnchor.current = returnAnchor.itemId;
+    restoreAnchor();
+  }, [returnAnchor.itemId, restoreAnchor]);
 
   return (
     <ImmersiveGalleryShell
