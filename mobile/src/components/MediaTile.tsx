@@ -27,7 +27,6 @@ import { media } from '../ui/palette.ts';
 
 export interface MediaTileProps {
   item: MediaItem;
-  size: number;
   selected: boolean;
   selecting: boolean;
   onPress: () => void;
@@ -43,7 +42,6 @@ function formatDuration(seconds: number | null): string | null {
 
 export function MediaTile({
   item,
-  size,
   selected,
   selecting,
   onPress,
@@ -70,7 +68,6 @@ export function MediaTile({
       onLongPress={onLongPress}
       style={({ pressed }) => [
         styles.tile,
-        { width: size, height: size },
         pressed && styles.pressed,
         selecting && selected && styles.tileSelected,
       ]}
@@ -118,7 +115,12 @@ export function MediaTile({
 
 const useStyles = themed((colors) =>
   StyleSheet.create({
+    // Intrinsic cell geometry, and nothing beyond it. The tile fills the column
+    // the list gives it and squares itself; it does not know the screen width,
+    // the column count, the orientation or the list engine.
     tile: {
+      width: '100%',
+      aspectRatio: 1,
       overflow: 'hidden',
       backgroundColor: colors.tilePlaceholder,
       justifyContent: 'center',
