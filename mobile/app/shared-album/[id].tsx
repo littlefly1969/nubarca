@@ -11,7 +11,7 @@
 // the membership grants it, withdrawal of OWN contributions whenever
 // item.canWithdraw === true (even after a role downgrade to Viewer).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -37,6 +37,7 @@ import { GalleryList } from '../../src/components/GalleryList';
 import { sharedSlides } from '../../src/media/viewerEntries';
 import { authenticatedSource } from '../../src/media/imageSource';
 import { usePagedList } from '../../src/lib/usePagedList';
+import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { getAlbumExperienceCapabilities } from '../../src/albums/albumCapabilities';
 import {
   getSharedAlbum,
@@ -125,11 +126,22 @@ export default function SharedAlbum(): React.JSX.Element {
     fetcher,
   );
 
+  const itemCountRef = useRef(0);
+  itemCountRef.current = snapshot.items.length;
   useFocusEffect(
     useCallback(() => {
       if (session.status !== 'authed') return;
       let cancelled = false;
-      void refresh();
+      // Same rule as every other paginated gallery: a refresh REPLACES the
+      // accumulator with page one, so it is only for a list that has nothing
+      // to lose. Opening an item from page two and coming back used to drop
+      // the user to the end of page one — and the return anchor could not
+      // save them, because the item it named was no longer loaded.
+      if (shouldRefreshOnFocus({ itemCount: itemCountRef.current, stale: false })) {
+        void refresh();
+      }
+      // The album's own metadata and permissions are cheap and not paginated,
+      // so those keep refreshing on every focus.
       void getSharedAlbum(albumId).then(
         (d) => {
           if (!cancelled) setDetail(d);
