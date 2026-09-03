@@ -8,6 +8,7 @@ import { code } from '../testing/sourceText.ts';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GRID = code(readFileSync(resolve(HERE, 'MediaGrid.tsx'), 'utf8'));
 const TILE = code(readFileSync(resolve(HERE, 'MediaTile.tsx'), 'utf8'));
+const LIST = code(readFileSync(resolve(HERE, 'GalleryList.tsx'), 'utf8'));
 
 // BRAND-APP-03 changes the media LANGUAGE, not the media engine. Most of this
 // file is therefore about what did not move.
@@ -17,9 +18,9 @@ test('virtualization survives; the grid no longer tunes it', () => {
   // recycling and viewport management to FlashList, so the tuning constants
   // this used to pin are gone on purpose — what must not come back is a
   // gallery that renders every tile.
-  assert.match(GRID, /<FlashList/);
-  assert.doesNotMatch(GRID, /<ScrollView/);
-  assert.doesNotMatch(GRID, /windowSize|maxToRenderPerBatch|initialNumToRender/);
+  assert.match(LIST, /<FlashList/);
+  assert.doesNotMatch(LIST, /<ScrollView/);
+  assert.doesNotMatch(LIST, /windowSize|maxToRenderPerBatch|initialNumToRender/);
 });
 
 test('a selection change does not reshuffle the grid', () => {
@@ -27,7 +28,7 @@ test('a selection change does not reshuffle the grid', () => {
   // tile squares itself inside the column, so a rotation cannot invalidate it.
   assert.match(
     GRID,
-    /\[styles, selecting, selectedIds, onPressItem, onToggleSelect, onLongPressItem\]/,
+    /\[selecting, selectedIds, onPressItem, onToggleSelect, onLongPressItem\]/,
   );
   assert.match(GRID, /const keyOf = useCallback\(\(item: MediaItem\) => item\.id, \[\]\)/);
   // The list key must not change with the column count: that destroyed the
@@ -40,9 +41,9 @@ test('the grid is a gallery seam, not a gap between cards', () => {
   // seam between pictures, and at four pixels it starts to read as a set of
   // tiles rather than as one surface. Half on the content and half on each
   // cell makes the outer margin equal the seam, with no per-tile arithmetic.
-  assert.match(GRID, /paddingHorizontal: grid\.gap \/ 2/);
-  assert.match(GRID, /paddingLeft: insets\.left \+ grid\.gap \/ 2/);
-  assert.doesNotMatch(GRID, /gap = spacing\./);
+  assert.match(LIST, /paddingHorizontal: grid\.gap \/ 2/);
+  assert.match(LIST, /paddingLeft: insets\.left \+ grid\.gap \/ 2/);
+  assert.doesNotMatch(LIST, /gap = spacing\./);
 });
 
 test('the tile is a media frame: no card chrome anywhere', () => {

@@ -19,7 +19,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useWindowDimensions,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -34,9 +33,7 @@ import { AuthedImage } from '../../src/components/AuthedImage';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { useReturnAnchor } from '../../src/media/useReturnAnchor';
-import { VirtualizedGalleryRows } from '../../src/components/VirtualizedGalleryRows';
-import { columnsForWidth, grid } from '../../src/ui/tokens';
-import { gridMetrics } from '../../src/ui/gridMetrics.ts';
+import { GalleryList } from '../../src/components/GalleryList';
 import { sharedSlides } from '../../src/media/viewerEntries';
 import { authenticatedSource } from '../../src/media/imageSource';
 import { usePagedList } from '../../src/lib/usePagedList';
@@ -87,12 +84,6 @@ export default function SharedAlbum(): React.JSX.Element {
   const { t } = useI18n();
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
-  const { width } = useWindowDimensions();
-  const columns = columnsForWidth(width);
-  // The same geometry function every gallery uses: one seam value, one tile
-  // size, symmetric outer insets.
-  const { tileSize: tile, sidePadding } = gridMetrics(width, 0, columns, grid.gap);
-
   const [detail, setDetail] = useState<SharedAlbumDetail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [kind, setKind] = useState<Kind>('all');
@@ -314,13 +305,9 @@ export default function SharedAlbum(): React.JSX.Element {
         ) : snapshot.items.length === 0 ? (
           <EmptyState icon="🖼" title={t('albumDetail.empty')} hint={t('albumDetail.emptyHint')} />
         ) : (
-          <VirtualizedGalleryRows
+          <GalleryList
             items={snapshot.items}
             keyOf={keyOfItem}
-            columns={columns}
-            tileSize={tile}
-            sidePadding={sidePadding}
-            gap={grid.gap}
             contentPaddingTop={scroll.contentPaddingTop}
             contentPaddingBottom={scroll.contentPaddingBottom}
             onScroll={scroll.onScroll}
@@ -339,7 +326,7 @@ export default function SharedAlbum(): React.JSX.Element {
                 <ActivityIndicator color={colors.accent} style={styles.footerSpinner} />
               ) : null
             }
-            renderTile={(item, size) => {
+            renderTile={(item) => {
               const busy = busyItem === item.albumItemId;
               return (
                 <Pressable
@@ -347,11 +334,7 @@ export default function SharedAlbum(): React.JSX.Element {
                   accessibilityLabel={item.kind === 'video' ? t('tabs.videos') : t('gallery.photos')}
                   onPress={() => openItem(item)}
                   onLongPress={() => itemActions(item)}
-                  style={({ pressed }) => [
-                    styles.tile,
-                    { width: size, height: size },
-                    pressed && styles.pressed,
-                  ]}
+                  style={({ pressed }) => [styles.tile, pressed && styles.pressed]}
                 >
                   <AuthedImage
                     path={item.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}
