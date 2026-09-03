@@ -321,10 +321,6 @@ MIGRATED_FILES = (
     # NUBARCA-UX-01.1 — position, selection and the global account affordance.
     "mobile/src/ui/AccountButton.tsx",
     "mobile/src/ui/selectionMode.tsx",
-    "mobile/src/ui/gridMetrics.ts",
-    "mobile/src/media/galleryRows.ts",
-    "mobile/src/media/galleryPosition.ts",
-    "mobile/src/components/VirtualizedGalleryRows.tsx",
     "mobile/src/media/useReturnAnchor.ts",
     "mobile/src/ui/components.tsx",
     "mobile/src/ui/states.tsx",
@@ -333,6 +329,7 @@ MIGRATED_FILES = (
     "mobile/src/ui/BrandTabBar.tsx",
     "mobile/src/ui/BrandBootState.tsx",
     # BRAND-APP-03 — the media experience.
+    "mobile/src/components/GalleryList.tsx",
     "mobile/src/components/MediaGrid.tsx",
     "mobile/src/components/MediaTile.tsx",
     "mobile/src/components/MediaFilterChips.tsx",
