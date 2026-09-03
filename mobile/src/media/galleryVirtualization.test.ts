@@ -8,27 +8,37 @@ import { code } from '../testing/sourceText.ts';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (...p: string[]): string => code(readFileSync(resolve(ROOT, ...p), 'utf8'));
 
-const GRID = read('src', 'components', 'MediaGrid.tsx');
+// The ONE gallery list. Every media surface virtualizes through this file.
+const LIST = read('src', 'components', 'GalleryList.tsx');
 
-/**
- * Files that own a media gallery list. The shared album joins this list when
- * it stops carrying its own grid; until then it is migrated separately, not
- * exempted.
- */
-const GALLERY_LAYER = [['src', 'components', 'MediaGrid.tsx']];
+/** Everything that renders a media gallery, plus the list they all share. */
+const GALLERY_LAYER = [
+  ['src', 'components', 'GalleryList.tsx'],
+  ['src', 'components', 'MediaGrid.tsx'],
+  ['app', 'shared-album', '[id].tsx'],
+];
 
-test('the grid hands FlashList the flat media items', () => {
+test('there is one gallery list, and every surface goes through it', () => {
+  // The shared album used to carry its own grid and its own anchor, which is
+  // how one defect became two fixes.
+  for (const file of [['src', 'components', 'MediaGrid.tsx'], ['app', 'shared-album', '[id].tsx']]) {
+    const source = read(...file);
+    assert.match(source, /<GalleryList/, `${file.join('/')} does not use the shared list`);
+    assert.doesNotMatch(source, /<FlashList/, `${file.join('/')} virtualizes on its own`);
+  }
+});
+
+test('the list hands FlashList the flat items', () => {
   // The defect this forbids: the previous engine derived a SECOND
   // representation — rows — from the item array, and memoised it. When a page
   // was appended the derived value did not change identity, so the new media
   // simply never appeared. One representation cannot go stale against itself.
-  assert.match(GRID, /from '@shopify\/flash-list'/);
-  assert.match(GRID, /<FlashList/);
-  assert.match(GRID, /data=\{items\}/);
-  assert.match(GRID, /numColumns=\{columns\}/);
-  assert.match(GRID, /const keyOf = useCallback\(\(item: MediaItem\) => item\.id, \[\]\)/);
-  assert.match(GRID, /keyExtractor=\{keyOf\}/);
-  assert.doesNotMatch(GRID, /<ScrollView/);
+  assert.match(LIST, /from '@shopify\/flash-list'/);
+  assert.match(LIST, /<FlashList/);
+  assert.match(LIST, /data=\{items\}/);
+  assert.match(LIST, /numColumns=\{columns\}/);
+  assert.match(LIST, /keyExtractor=\{keyOf\}/);
+  assert.doesNotMatch(LIST, /<ScrollView/);
 });
 
 test('no gallery keeps a second geometry or position engine', () => {
@@ -61,7 +71,7 @@ test('the tile is given no geometry to disagree with', () => {
   // grid's arithmetic and made a rotation invalidate the renderer.
   const tile = read('src', 'components', 'MediaTile.tsx');
   assert.doesNotMatch(tile, /size: number/);
-  assert.doesNotMatch(GRID, /size=\{/);
+  assert.doesNotMatch(LIST, /tileSize/);
   assert.match(tile, /width: '100%',\s*aspectRatio: 1,/);
 });
 
@@ -69,7 +79,7 @@ test('a column change is the only thing that moves the gallery on relayout', () 
   // Scoping this narrowly is the point. Restoring on append, on selection, on
   // a footer change or on any width change is how a position engine grows back.
   assert.match(
-    GRID,
+    LIST,
     /useLayoutEffect\(\(\) => \{[\s\S]*?previousColumnsRef\.current === columns[\s\S]*?\}, \[columns\]\);/,
   );
 });
@@ -78,14 +88,14 @@ test('the restore is one scroll per transition, addressed by item id', () => {
   // FlashList holds the FLAT items, so an index is an item index. The engine
   // this replaced virtualized ROWS, where the same call addressed nothing:
   // 120 items in 3 columns is 40 rows, so item 73 was out of range and crashed.
-  assert.match(GRID, /indexOfItemId/);
+  assert.match(LIST, /indexOfItemId/);
   // Armed on the change, cleared before the scroll: a still-armed anchor would
   // start a second, competing scroll on the next layout commit.
-  assert.match(GRID, /pendingColumnAnchorRef\.current = null;\s*scrollToItemId\(id\);/);
+  assert.match(LIST, /pendingColumnAnchorRef\.current = null;\s*scrollToItemId\(id\);/);
 });
 
 test('the viewer return is honoured from an effect, never during render', () => {
   // Calling the parent's onAnchorConsumed during render set state on another
   // component mid-render. It belongs in an effect.
-  assert.match(GRID, /useEffect\(\(\) => \{[\s\S]*?onAnchorConsumed\?\.\(\);[\s\S]*?\}, \[/);
+  assert.match(LIST, /useEffect\(\(\) => \{[\s\S]*?onAnchorConsumed\?\.\(\);[\s\S]*?\}, \[/);
 });

@@ -118,12 +118,15 @@ test('hiding the chrome does not disturb the list', () => {
   // padding and a scroll handler, and nothing else about it depends on whether
   // the chrome is showing.
   const grid = read('src', 'components', 'MediaGrid.tsx');
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  assert.match(grid, /const columns = columnsForWidth\(width\)/);
-  // NUBARCA-UX-01.2: the list key no longer follows the column count at all,
-  // so nothing about the chrome or a rotation can rebuild it.
+  const list = read('src', 'components', 'GalleryList.tsx');
+  // The column count is derived from the window inside the list, so the chrome
+  // cannot influence it: the grid does not even see the width.
+  assert.match(list, /const columns = columnsForWidth\(width\)/);
+  assert.doesNotMatch(grid, /columnsForWidth/);
+  // The list key no longer follows the column count at all, so nothing about
+  // the chrome or a rotation can rebuild it.
   assert.doesNotMatch(grid, /key=\{columns\}/);
-  assert.doesNotMatch(engine, /key=\{columns\}/);
+  assert.doesNotMatch(list, /key=\{columns\}/);
   assert.doesNotMatch(grid, /chrome|hidden|collaps/i);
 });
 

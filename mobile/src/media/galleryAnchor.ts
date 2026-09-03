@@ -5,13 +5,14 @@
 // keeping your place when the column count changes — are the same three steps:
 // stable item ID, flat index, one scroll. This is the middle step, and it is
 // the whole of it. There is deliberately no position service, no geometry and
-// no pixels here: the list owns those, and the last engine that tried to own
-// them alongside it is what this replaced.
+// no pixels here: the list owns those, and the engine that tried to own them
+// alongside it is what this replaced.
 
-export function indexOfItemId<T extends { id: string }>(
-  items: readonly T[],
+export function indexOfItemId<TItem>(
+  items: readonly TItem[],
+  keyOf: (item: TItem) => string,
   id: string | null,
 ): number {
   if (id === null) return -1;
-  return items.findIndex((item) => item.id === id);
+  return items.findIndex((item) => keyOf(item) === id);
 }
