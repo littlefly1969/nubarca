@@ -114,12 +114,16 @@ test('scrolling never re-renders the gallery', () => {
 });
 
 test('hiding the chrome does not disturb the list', () => {
-  // §14 again: no remount, no key change, no column recalculation. The grid
-  // receives padding and a scroll handler, and nothing else about it depends
-  // on whether the chrome is showing.
+  // §14: no remount, no key change, no column recalculation. The grid receives
+  // padding and a scroll handler, and nothing else about it depends on whether
+  // the chrome is showing.
   const grid = read('src', 'components', 'MediaGrid.tsx');
-  assert.match(grid, /key=\{columns\}/);
+  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
   assert.match(grid, /const columns = columnsForWidth\(width\)/);
+  // NUBARCA-UX-01.2: the list key no longer follows the column count at all,
+  // so nothing about the chrome or a rotation can rebuild it.
+  assert.doesNotMatch(grid, /key=\{columns\}/);
+  assert.doesNotMatch(engine, /key=\{columns\}/);
   assert.doesNotMatch(grid, /chrome|hidden|collaps/i);
 });
 

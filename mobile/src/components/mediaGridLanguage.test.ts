@@ -12,25 +12,32 @@ const TILE = code(readFileSync(resolve(HERE, 'MediaTile.tsx'), 'utf8'));
 // BRAND-APP-03 changes the media LANGUAGE, not the media engine. Most of this
 // file is therefore about what did not move.
 
-test('virtualization and its tuning survive', () => {
-  assert.match(GRID, /<FlatList/);
+test('virtualization and its tuning survive, in the engine that owns them', () => {
+  // NUBARCA-UX-01.2 moved rows, geometry and position into one engine. The
+  // grid still virtualizes; it just no longer decides how.
+  const engine = code(
+    readFileSync(resolve(HERE, 'VirtualizedGalleryRows.tsx'), 'utf8'),
+  );
+  assert.match(GRID, /<VirtualizedGalleryRows/);
   assert.doesNotMatch(GRID, /<ScrollView/);
-  assert.match(GRID, /removeClippedSubviews/);
-  assert.match(GRID, /windowSize=\{7\}/);
-  assert.match(GRID, /maxToRenderPerBatch=\{columns \* 3\}/);
-  assert.match(GRID, /initialNumToRender=\{columns \* 2\}/);
-  assert.match(GRID, /onEndReachedThreshold=\{0\.5\}/);
+  assert.match(engine, /<FlatList/);
+  assert.doesNotMatch(engine, /<ScrollView/);
+  assert.match(engine, /removeClippedSubviews/);
+  assert.match(engine, /windowSize=\{7\}/);
+  assert.match(engine, /onEndReachedThreshold=\{onEndReachedThreshold\}/);
 });
 
-test('the callbacks keep the identities that stop rows remounting', () => {
-  // Selection changing must not reshuffle the grid: the key extractor has no
-  // dependencies, and renderItem's list is unchanged.
-  assert.match(GRID, /const keyExtractor = useCallback\(\(item: MediaItem\) => item\.id, \[\]\)/);
+test('a selection change does not reshuffle the grid', () => {
+  // The tile renderer no longer depends on tileSize — the engine passes the
+  // size in — so a rotation cannot invalidate it either.
   assert.match(
     GRID,
-    /\[tileSize, selecting, selectedIds, onPressItem, onToggleSelect, onLongPressItem\]/,
+    /\[selecting, selectedIds, onPressItem, onToggleSelect, onLongPressItem\]/,
   );
-  assert.match(GRID, /key=\{columns\}/);
+  assert.match(GRID, /const keyOf = useCallback\(\(item: MediaItem\) => item\.id, \[\]\)/);
+  // The list key must not change with the column count: that destroyed the
+  // list on every rotation and put it back at the top.
+  assert.doesNotMatch(GRID, /key=\{columns\}/);
 });
 
 test('the grid is a gallery seam, not a gap between cards', () => {
