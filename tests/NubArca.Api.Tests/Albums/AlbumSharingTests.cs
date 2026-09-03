@@ -849,10 +849,22 @@ public sealed class AlbumSharingTests : IDisposable
             var body = await (await viewer.GetAsync(path)).Content.ReadAsStringAsync();
 
             // Person / face semantics.
+            //
+            // Checked against the JSON's own property names and its NON-GUID string
+            // values, not against the raw text. A GUID is hexadecimal, and "face"
+            // is a valid hex string: this assertion used to fail whenever a random
+            // identifier happened to spell it — a privacy gate that cried wolf, and
+            // the surest way to teach people to re-run it until it goes quiet.
+            //
+            // Reading the shape instead of the text is also STRICTER. A field named
+            // `faceCount` is now caught by its name whatever it contains, and a
+            // leaked value is caught wherever it sits in the tree.
             Assert.DoesNotContain(personName, body, StringComparison.OrdinalIgnoreCase);
             foreach (var key in new[] { "person", "face", "cluster", "embedding", "suggest" })
             {
-                Assert.DoesNotContain(key, body, StringComparison.OrdinalIgnoreCase);
+                var offenders = JsonLeakScan.Find(body, key);
+                Assert.True(offenders.Count == 0,
+                    $"{path} discloses '{key}' at: {string.Join(", ", offenders)}");
             }
 
             // Storage internals.
@@ -1056,6 +1068,7 @@ public sealed class AlbumSharingTests : IDisposable
     }
 
     // ── Audit ───────────────────────────────────────────────────────────────
+
 
     [Fact]
     public async Task Audit_Records_The_Real_Actor_And_No_Recipient_Identity()

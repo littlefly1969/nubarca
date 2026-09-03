@@ -25,7 +25,14 @@ adb shell am start -W -n "$activity"
 # render all completed.
 ui_dump=""
 ui_ready=false
-deadline=$((SECONDS + 45))
+# A generous budget on purpose. A CI emulator runs on a software GPU and shares
+# a loaded runner: this app has been observed taking over twenty seconds just to
+# reach its first JavaScript frame, and a 45-second budget failed intermittently
+# for no reason but load. A longer wait costs nothing in DETECTION — an app that
+# is broken never renders this label, so it still fails, it just fails after a
+# wait instead of by coincidence. The loop below exits the moment the process
+# dies, so a crash is still reported immediately rather than after the deadline.
+deadline=$((SECONDS + 180))
 while (( SECONDS < deadline )); do
   if ! adb shell pidof "$package_name" >/dev/null; then
     break

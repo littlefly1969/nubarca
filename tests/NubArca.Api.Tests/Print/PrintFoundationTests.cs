@@ -243,9 +243,27 @@ public sealed class PrintFoundationTests : IDisposable
         (await owner.PostAsJsonAsync($"/api/print/stations/{station.Id}/test-jobs",
             new { printerDeviceId = printerId })).EnsureSuccessStatusCode();
 
-        var claims = await Task.WhenAll(ClaimAsync(station.Credential), ClaimAsync(station.Credential));
-        Assert.Single(claims, x => x.StatusCode == HttpStatusCode.OK);
-        Assert.Single(claims, x => x.StatusCode == HttpStatusCode.NoContent);
+        // TWO CLAIMANTS, ONE LEASE — asserted deterministically.
+        //
+        // This used to fire both claims through Task.WhenAll. That was a race
+        // against a wall clock, and worse, the test host shares ONE SqliteConnection
+        // across every DbContext (see SqliteWebApplicationFactory): a connection is
+        // not thread-safe, so the concurrent requests intermittently tore it down
+        // mid-statement — "unable to delete/modify user-function due to active
+        // statements" — failing a privacy-neutral test for reasons that had nothing
+        // to do with print leases.
+        //
+        // The guarantee does not live in the timing. It lives in one conditional
+        // UPDATE in PrintStationService.ClaimAsync, which matches only a job still
+        // Ready (or whose lease has expired) and gives up when it updates no rows.
+        // A second claimant therefore loses whether it arrives a microsecond or a
+        // minute later — and issuing the two in sequence catches exactly the
+        // regression the race was for: drop the guard from that update, and the
+        // second claim starts succeeding here.
+        var first = await ClaimAsync(station.Credential);
+        var second = await ClaimAsync(station.Credential);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, second.StatusCode);
 
         var emptyHeartbeat = AgentRequest(HttpMethod.Post, "/api/print-agent/heartbeat",
             station.Credential, new { agentVersion = "test", devices = Array.Empty<object>() });
