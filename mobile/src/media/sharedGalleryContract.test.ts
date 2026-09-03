@@ -49,3 +49,27 @@ test('a filter change still restarts pagination for the slice it selected', () =
   // asks the server for the right slice.
   assert.match(SHARED, /\[albumId, kind\],/);
 });
+
+test('the shared tile brings no gallery spacing of its own', () => {
+  // GalleryList already puts half a gutter on the content and half on each
+  // cell. A margin here made the shared album's seam wider than Photos and
+  // Videos — a second geometry layer, which is the thing this whole rewrite
+  // removed.
+  const tile = SHARED.slice(SHARED.indexOf('    tile: {'), SHARED.indexOf('    tileImg:'));
+  assert.doesNotMatch(tile, /margin|padding/);
+  assert.match(tile, /width: '100%',\s*aspectRatio: 1,/);
+});
+
+test('the gallery seam is owned in exactly one place', () => {
+  const list = read('src', 'components', 'GalleryList.tsx');
+  assert.match(list, /paddingHorizontal: grid\.gap \/ 2/);
+  assert.match(list, /paddingBottom: grid\.gap/);
+  // No media surface computes a seam beside it.
+  for (const [name, source] of [
+    ['shared album', SHARED],
+    ['media grid', read('src', 'components', 'MediaGrid.tsx')],
+    ['media tile', read('src', 'components', 'MediaTile.tsx')],
+  ] as const) {
+    assert.doesNotMatch(source, /grid\.gap/, `${name} computes its own gallery seam`);
+  }
+});
