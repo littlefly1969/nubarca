@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { code } from '../testing/sourceText.ts';
 import { ViewerSequenceModel, type ViewerSlide } from './viewerSequence.ts';
-import { rowForItemIndex } from './galleryRows.ts';
+import { indexOfItemId } from './galleryAnchor.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (...p: string[]): string => code(readFileSync(resolve(ROOT, ...p), 'utf8'));
@@ -45,13 +45,11 @@ test('open, swipe, close returns where the user actually was', () => {
 });
 
 test('the returned item lands correctly in a NEW column geometry', () => {
-  // Rotating changes the column count. The anchor is an id, so it survives —
-  // and its row is recomputed rather than carried over as a stale offset.
+  // Rotating changes the column count. The anchor is an ID, and the list holds
+  // the FLAT items, so the same index answers at every column count — there is
+  // no row arithmetic left to get wrong, and no stale offset to carry over.
   const anchor = journey('item-24', 29);
-  const index = gallery.findIndex((i) => i.id === anchor);
-  assert.equal(rowForItemIndex(index, 3), 9);
-  assert.equal(rowForItemIndex(index, 4), 7);
-  assert.equal(rowForItemIndex(index, 5), 5);
+  assert.equal(indexOfItemId(gallery, (i) => i.id, anchor), 29);
 });
 
 test('an anchor that no longer exists fails safely', () => {
@@ -101,25 +99,19 @@ test('every gallery uses the same mechanism, not four of its own', () => {
 });
 
 test('the list survives a rotation instead of being rebuilt by it', () => {
-  // NUBARCA-UX-01.2. Explicit rows in a single-column list mean the instance
-  // lives through a geometry change; only its data and layout change. The
-  // previous design destroyed it with `key={columns}`, and the new list then
-  // reported its own first row as the position — which is how "restore" landed
-  // on the first photo.
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  assert.doesNotMatch(engine, /key=\{columns\}|numColumns/);
-  assert.match(engine, /buildGalleryRows\(items, columns\)/);
-  assert.match(engine, /geometryChanged\(activeGeometry\.current, geometry\)/);
-  // Position is a computed offset, never an index into a list whose index
-  // space is rows.
-  assert.match(engine, /scrollToOffset\(\{ offset, animated: false \}\)/);
-  assert.doesNotMatch(engine, /scrollToIndex/);
-  // And the restore path itself may not fetch. Scoped to that path: the engine
-  // legitimately accepts a `refreshControl` it never invokes.
-  const restore = engine.slice(
-    engine.indexOf('geometryChanged(activeGeometry.current, geometry)'),
-    engine.indexOf('const renderRow'),
-  );
+  // The design that destroyed the list with `key={columns}` put the new one
+  // back at the top, and it then reported its own first cell as the position —
+  // which is how "restore" landed on the first photo. The list instance must
+  // live through a column change; only its layout changes.
+  const list = read('src', 'components', 'GalleryList.tsx');
+  assert.doesNotMatch(list, /key=\{columns\}|key=\{width\}/);
+  // Position is an item index into the flat data, which is defined at every
+  // column count.
+  assert.match(list, /scrollToIndex\(\{ index, animated: false, viewPosition: 0\.5 \}\)/);
+  assert.doesNotMatch(list, /scrollToOffset/);
+  // And the restore path may not fetch: the list legitimately accepts a
+  // refreshControl it never invokes.
+  const restore = list.slice(list.indexOf('const scrollToItemId'), list.indexOf('const renderItem'));
   assert.doesNotMatch(restore, /loadMore|fetch\(|refetch|\brefresh\(/);
 });
 
@@ -128,12 +120,11 @@ test('an arriving anchor is applied, not merely recorded', () => {
   // `onContentSizeChange`, and returning from the viewer changes neither the
   // content size nor the column count — so the anchor was stored and nothing
   // ever asked for it. It looked implemented and did nothing.
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  const at = engine.indexOf('if (anchorItemId === null) return;');
-  assert.ok(at > 0, 'the engine has no viewer-return path');
-  const block = engine.slice(at, at + 600);
-  assert.match(block, /offsetForAnchor\(/, 'the anchor is recorded without being resolved');
-  assert.match(block, /scrollToOffset/, 'the anchor is resolved without being applied');
+  const list = read('src', 'components', 'GalleryList.tsx');
+  const at = list.indexOf('if (anchorItemId === null) return;');
+  assert.ok(at > 0, 'the list has no viewer-return path');
+  const block = list.slice(at, at + 600);
+  assert.match(block, /scrollToItemId\(anchorItemId\)/, 'the anchor is recorded without being applied');
   assert.match(block, /onAnchorConsumed\?\.\(\)/, 'the anchor is never consumed');
 });
 
@@ -141,10 +132,11 @@ test('a geometry change is one scroll, not a retry loop', () => {
   // The previous design recovered through `onScrollToIndexFailed`,
   // `onContentSizeChange` and a pending ref — position restoration driven by
   // unrelated layout events. One computed offset replaces all of it.
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  assert.doesNotMatch(engine, /onScrollToIndexFailed|onContentSizeChange/);
-  // Incoming scroll during a restore belongs to the replay, not to the user.
-  assert.match(engine, /if \(restoring\.current\) return;/);
+  const list = read('src', 'components', 'GalleryList.tsx');
+  assert.doesNotMatch(list, /onScrollToIndexFailed|onContentSizeChange|requestAnimationFrame|setTimeout/);
+  // A visible window reported mid-restore describes the position being
+  // corrected, so it must not write back as the user's anchor.
+  assert.match(list, /if \(pendingColumnAnchorRef\.current !== null\) return;/);
 });
 
 test('a return position belongs to the gallery that opened it', () => {
@@ -194,33 +186,40 @@ test('the engine never scrolls or notifies during a render', () => {
   // starves the virtualization batches that fill the screen: blank tiles, a
   // list that stops producing content, and a gallery that only recovers when a
   // rotation forces a full re-render.
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  const body = engine.slice(engine.indexOf('const listRef'), engine.indexOf('return ('));
-  // Every scroll command and every parent notification is inside an effect.
-  for (const call of ['scrollToOffset', 'onAnchorConsumed?.()']) {
+  const list = read('src', 'components', 'GalleryList.tsx');
+  const body = list.slice(list.indexOf('const listRef'), list.indexOf('return ('));
+  // Every scroll command and every parent notification sits inside a hook
+  // callback — an effect, or a callback the list invokes later. What must never
+  // happen is one of them evaluating on the render path itself.
+  for (const call of ['scrollToItemId(', 'onAnchorConsumed?.()']) {
     let from = 0;
     for (;;) {
       const at = body.indexOf(call, from);
       if (at === -1) break;
       const preceding = body.slice(0, at);
-      const lastEffect = preceding.lastIndexOf('useEffect(');
-      const lastClose = preceding.lastIndexOf('  }, [');
+      const opened = Math.max(
+        preceding.lastIndexOf('useEffect('),
+        preceding.lastIndexOf('useCallback('),
+        preceding.lastIndexOf('useLayoutEffect('),
+      );
+      const closed = preceding.lastIndexOf('  }, [');
       assert.ok(
-        lastEffect > lastClose,
-        `${call} at ${at} is outside a useEffect — it would run during render`,
+        opened > closed,
+        `${call} at ${at} is on the render path — it would run during render`,
       );
       from = at + call.length;
     }
   }
 });
 
-test('the declared geometry starts where the content starts', () => {
-  // The first version's getItemLayout omitted the top padding, so every frame
-  // it reported was one chrome-height too high and the window RN chose did not
-  // contain the rows on screen. The extent was right; the ORIGIN was not, and
-  // the test only checked the extent.
-  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  assert.match(engine, /offset: contentPaddingTop \+ extent \* index/);
-  // Sound only while the list has no unmeasured header shifting the content.
-  assert.doesNotMatch(engine, /ListHeaderComponent/);
+test('the list declares no geometry for anyone to get wrong', () => {
+  // The previous engine declared every frame through getItemLayout, and its
+  // first version omitted the top padding: the extent was right, the ORIGIN was
+  // one chrome-height out, and the window the list chose did not contain the
+  // rows on screen. A test that checks only the extent cannot catch that.
+  //
+  // Nothing here declares a frame at all now — the list measures — so the class
+  // of defect is gone rather than guarded.
+  const list = read('src', 'components', 'GalleryList.tsx');
+  assert.doesNotMatch(list, /getItemLayout|estimatedItemSize|tileSize|rowExtent/);
 });
