@@ -128,10 +128,13 @@ test('an arriving anchor is applied, not merely recorded', () => {
   assert.match(block, /onAnchorConsumed\?\.\(\)/, 'the anchor is never consumed');
 });
 
-test('a geometry change is one scroll, not a retry loop', () => {
+test('a geometry change is a bounded two-pass, not a retry loop', () => {
   // The previous design recovered through `onScrollToIndexFailed`,
   // `onContentSizeChange` and a pending ref — position restoration driven by
-  // unrelated layout events. One computed offset replaces all of it.
+  // unrelated layout events, with no bound on how many times it could fire.
+  // What replaces it is a fixed two-pass sequence: the first pass renders and
+  // measures the target region, the second lands on real layout, and nothing
+  // schedules a third.
   const list = read('src', 'components', 'GalleryList.tsx');
   assert.doesNotMatch(list, /onScrollToIndexFailed|onContentSizeChange|requestAnimationFrame|setTimeout/);
   // A visible window reported mid-restore describes the position being
