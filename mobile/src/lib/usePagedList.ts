@@ -20,7 +20,6 @@ export function usePagedList<TItem>(
   patchItem: (key: string, patch: (item: TItem) => TItem) => void;
   removeItems: (keys: ReadonlySet<string>) => void;
   /** Version counter that increments whenever items change (list re-render). */
-  version: number;
 } {
   const listRef = useRef<PagedList<TItem> | null>(null);
   if (listRef.current === null) {
@@ -31,11 +30,14 @@ export function usePagedList<TItem>(
   const [snapshot, setSnapshot] = useState<PagedSnapshot<TItem>>(() =>
     list.snapshot(),
   );
-  const [version, setVersion] = useState(0);
 
+  // A fresh snapshot object each time, holding whatever the list currently
+  // has. There is deliberately no counter beside it: the item array changes
+  // identity when its contents change (see PagedList), so a second
+  // invalidation signal would only be a way to paper over a data layer that
+  // had stopped telling the truth.
   const sync = useCallback(() => {
     setSnapshot({ ...list.snapshot() });
-    setVersion((v) => v + 1);
   }, [list]);
 
   // IMMEDIATE PHASES (acceptance fix): the state machine flips its phase
@@ -81,7 +83,7 @@ export function usePagedList<TItem>(
     [list, sync],
   );
 
-  return { snapshot, refresh, loadMore, retryFailed, patchItem, removeItems, version };
+  return { snapshot, refresh, loadMore, retryFailed, patchItem, removeItems };
 }
 
 export type { FetchPage, Page };
