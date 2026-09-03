@@ -3,6 +3,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PagedList, type FetchPage, type Page } from './pagination.ts';
 
 interface Row {
@@ -201,4 +204,147 @@ test('a FAILED refresh keeps prior content, surfaces error, and disarms loadMore
   await list.refresh(() => Promise.resolve(pageOf(['fresh'], false, null)));
   assert.equal(list.snapshot().phase, 'ready');
   assert.deepEqual(list.snapshot().items.map((r) => r.id), ['fresh']);
+});
+
+// --- immutability: the defect that made an appended page invisible ----------
+//
+// `loadMore` used to push into `this.items`, so a snapshot taken after an
+// append had the SAME array reference as one taken before. Every consumer that
+// memoises on the item list — which is every list deriving layout from it — had
+// no way to know a page had arrived, and did not show it. Rotating happened to
+// change another dependency, which is why the media appeared only after a turn.
+
+/** A fetcher serving fixed-size pages from a synthetic library. */
+function library(total: number, pageSize: number) {
+  return async (cursor: string | null) => {
+    const start = cursor === null ? 0 : Number(cursor);
+    const items = Array.from(
+      { length: Math.min(pageSize, total - start) },
+      (_, i) => row(`id-${start + i}`),
+    );
+    const next = start + items.length;
+    return {
+      items,
+      nextCursor: next < total ? String(next) : null,
+      hasMore: next < total,
+    };
+  };
+}
+
+/** A list plus the fetcher it is driven with, since the fetcher is per call. */
+function paged(total: number, pageSize = 60) {
+  const list = new PagedList<Row>(key);
+  const fetch = library(total, pageSize);
+  return {
+    list,
+    refresh: () => list.refresh(fetch),
+    loadMore: () => list.loadMore(fetch),
+  };
+}
+
+test('a successful loadMore replaces the item array', async () => {
+  const { list, refresh, loadMore } = paged(120);
+  await refresh();
+  const before = list.snapshot().items;
+  await loadMore();
+  const after = list.snapshot().items;
+  assert.notEqual(after, before, 'the appended page kept the same array reference');
+  assert.equal(before.length, 60);
+  assert.equal(after.length, 120);
+});
+
+test('the items already loaded keep their order and identity', async () => {
+  const { list, refresh, loadMore } = paged(180);
+  await refresh();
+  const before = [...list.snapshot().items];
+  await loadMore();
+  const after = list.snapshot().items;
+  assert.deepEqual(after.slice(0, before.length), before);
+  assert.equal(after[0], before[0], 'an existing item was replaced by a copy');
+});
+
+test('the page boundaries the gallery actually hits', async () => {
+  for (const [total, pageSize, expected] of [
+    [61, 60, [60, 61]],
+    [120, 60, [60, 120]],
+    [180, 60, [60, 120, 180]],
+  ] as [number, number, number[]][]) {
+    const { list, refresh, loadMore } = paged(total, pageSize);
+    await refresh();
+    const seen: number[] = [list.snapshot().items.length];
+    const references = [list.snapshot().items];
+    while (list.snapshot().hasMore) {
+      await loadMore();
+      seen.push(list.snapshot().items.length);
+      references.push(list.snapshot().items);
+    }
+    assert.deepEqual(seen, expected, `${total} in pages of ${pageSize}`);
+    // Every step produced a genuinely new array.
+    for (let i = 1; i < references.length; i += 1) {
+      assert.notEqual(references[i], references[i - 1], `step ${i} reused its array`);
+    }
+  }
+});
+
+test('a page of nothing but duplicates changes neither items nor identity', async () => {
+  // Deduplication is preserved, and a no-op append does not invent a change
+  // that would make every list downstream re-derive its layout for nothing.
+  let served = 0;
+  const list = new PagedList<Row>(key);
+  const fetch = async () => {
+    served += 1;
+    return {
+      items: [row('id-0'), row('id-1'), row('id-2')],
+      nextCursor: served < 3 ? String(served) : null,
+      hasMore: served < 3,
+    };
+  };
+  await list.refresh(fetch);
+  const before = list.snapshot().items;
+  await list.loadMore(fetch);
+  const after = list.snapshot().items;
+  assert.equal(after.length, 3, 'duplicates were appended');
+  assert.equal(after, before, 'a duplicate-only page invented a new array');
+});
+
+test('patchItem produces a new array, and only when it changes something', async () => {
+  const { list, refresh } = paged(60);
+  await refresh();
+  const before = list.snapshot().items;
+
+  list.patchItem('id-3', (item) => ({ ...item }));
+  const patched = list.snapshot().items;
+  assert.notEqual(patched, before, 'a real patch reused the array');
+  assert.notEqual(patched[3], before[3]);
+  assert.equal(patched[2], before[2], 'an untouched item was copied');
+
+  // Returning the same object is not a change.
+  list.patchItem('id-4', (item) => item);
+  assert.equal(list.snapshot().items, patched, 'a no-op patch invented a new array');
+
+  // A key that is not there does nothing at all.
+  list.patchItem('missing', (item) => ({ ...item, name: 'x' }));
+  assert.equal(list.snapshot().items, patched);
+});
+
+test('a phase change alone does not disturb the items', async () => {
+  const { list, refresh, loadMore } = paged(120);
+  await refresh();
+  const items = list.snapshot().items;
+  const pending = loadMore();
+  assert.equal(list.snapshot().phase, 'loadingMore');
+  assert.equal(list.snapshot().items, items, 'entering loadingMore replaced the items');
+  await pending;
+});
+
+test('the pagination state machine never mutates its own item array', async () => {
+  // The source-level guarantee, so the defect cannot return by a different
+  // route than the ones the behavioural tests above cover.
+  const source = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'pagination.ts'),
+    'utf8',
+  );
+  assert.doesNotMatch(source, /this\.items\.push\(/, 'items are pushed into again');
+  assert.doesNotMatch(source, /this\.items\[[^\]]+\]\s*=/, 'an item is assigned in place');
+  assert.doesNotMatch(source, /this\.items\.(splice|sort|reverse|fill|copyWithin)\(/);
 });

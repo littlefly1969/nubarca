@@ -132,14 +132,27 @@ export class PagedList<TItem> {
     try {
       const page = await fetcher(myCursor, this.abort.signal);
       if (myToken !== this.token) return; // stale — refresh happened meanwhile
+      // A NEW ARRAY, assigned atomically.
+      //
+      // This used to push into `this.items`, so a snapshot taken after an
+      // append had the SAME array reference as one taken before it. Every
+      // consumer that memoises on the item list — which is every list that
+      // derives layout from it — then had no way to know a page had arrived,
+      // and simply did not show it. The data has to be correct here; a
+      // component cannot detect a change that was never expressed.
       const known = new Set(this.items.map(this.keyOf));
+      const appended: TItem[] = [];
       for (const item of page.items) {
         const key = this.keyOf(item);
         if (!known.has(key)) {
           known.add(key);
-          this.items.push(item);
+          appended.push(item);
         }
       }
+      // Only when something was actually added: a page of nothing but
+      // duplicates leaves the identity alone, so nothing downstream re-derives
+      // for no reason.
+      if (appended.length > 0) this.items = [...this.items, ...appended];
       this.cursor = page.nextCursor;
       this.hasMore = page.hasMore;
       this.lastFailure = null;
@@ -159,10 +172,18 @@ export class PagedList<TItem> {
     }
   }
 
-  // Local mutation after album membership changes etc.: replace one item by id.
+  // Local update after album membership changes etc.: replace one item by id.
+  //
+  // Also a new array, for the same reason — and only when the patch actually
+  // produced a different item, so a no-op patch does not invent a change.
   patchItem(key: string, patch: (item: TItem) => TItem): void {
     const index = this.items.findIndex((i) => this.keyOf(i) === key);
-    if (index >= 0) this.items[index] = patch(this.items[index]);
+    if (index < 0) return;
+    const patched = patch(this.items[index]);
+    if (patched === this.items[index]) return;
+    const next = this.items.slice();
+    next[index] = patched;
+    this.items = next;
   }
 
   removeItems(keys: ReadonlySet<string>): void {
