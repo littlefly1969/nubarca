@@ -22,8 +22,11 @@ test('virtualization and its tuning survive, in the engine that owns them', () =
   assert.doesNotMatch(GRID, /<ScrollView/);
   assert.match(engine, /<FlatList/);
   assert.doesNotMatch(engine, /<ScrollView/);
-  assert.match(engine, /removeClippedSubviews/);
-  assert.match(engine, /windowSize=\{7\}/);
+  assert.match(engine, /windowSize=\{11\}/);
+  // Deliberately NOT removeClippedSubviews: each item is a row VIEW containing
+  // tiles, and clipping a container on Android leaves empty cells that never
+  // come back — which is what it did.
+  assert.doesNotMatch(engine, /removeClippedSubviews/);
   assert.match(engine, /onEndReachedThreshold=\{onEndReachedThreshold\}/);
 });
 
