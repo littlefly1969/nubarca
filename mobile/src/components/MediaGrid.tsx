@@ -44,7 +44,6 @@ export interface MediaGridProps {
    * selection state implicitly.
    */
   onLongPressItem?: (item: MediaItem) => void;
-  ListHeaderComponent?: React.ComponentType<unknown> | React.ReactElement | null;
   /**
    * Scroll plumbing supplied by the immersive shell. The grid reports its
    * offset and leaves room for the chrome floating over it; it does not know
@@ -76,7 +75,6 @@ export function MediaGrid({
   onPressItem,
   onToggleSelect,
   onLongPressItem,
-  ListHeaderComponent,
   onScroll,
   scrollEventThrottle,
   contentPaddingTop,
@@ -174,7 +172,6 @@ export function MediaGrid({
           />
         ) : undefined
       }
-      ListHeaderComponent={ListHeaderComponent ?? null}
       ListFooterComponent={footer}
       style={styles.list}
     />

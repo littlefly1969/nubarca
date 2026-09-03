@@ -129,7 +129,7 @@ test('an arriving anchor is applied, not merely recorded', () => {
   // content size nor the column count — so the anchor was stored and nothing
   // ever asked for it. It looked implemented and did nothing.
   const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
-  const at = engine.indexOf('anchorItemId !== null && anchorItemId !== lastAnchorRequest.current');
+  const at = engine.indexOf('if (anchorItemId === null) return;');
   assert.ok(at > 0, 'the engine has no viewer-return path');
   const block = engine.slice(at, at + 600);
   assert.match(block, /offsetForAnchor\(/, 'the anchor is recorded without being resolved');
@@ -185,4 +185,42 @@ test('the hook moves nothing when the item never changed', () => {
   const hook = read('src', 'media', 'useReturnAnchor.ts');
   assert.match(hook, /if \(position\.focusedKey === position\.openedKey\) return;/);
   assert.match(hook, /viewer\.takeReturnPosition\(scopeKey\)/);
+});
+
+test('the engine never scrolls or notifies during a render', () => {
+  // THE DEFECT THIS PREVENTS. Both restores once ran in the render body, and
+  // the viewer-return one called the parent's `onAnchorConsumed` there — a
+  // setState during another component's render. React re-enters, and the churn
+  // starves the virtualization batches that fill the screen: blank tiles, a
+  // list that stops producing content, and a gallery that only recovers when a
+  // rotation forces a full re-render.
+  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
+  const body = engine.slice(engine.indexOf('const listRef'), engine.indexOf('return ('));
+  // Every scroll command and every parent notification is inside an effect.
+  for (const call of ['scrollToOffset', 'onAnchorConsumed?.()']) {
+    let from = 0;
+    for (;;) {
+      const at = body.indexOf(call, from);
+      if (at === -1) break;
+      const preceding = body.slice(0, at);
+      const lastEffect = preceding.lastIndexOf('useEffect(');
+      const lastClose = preceding.lastIndexOf('  }, [');
+      assert.ok(
+        lastEffect > lastClose,
+        `${call} at ${at} is outside a useEffect — it would run during render`,
+      );
+      from = at + call.length;
+    }
+  }
+});
+
+test('the declared geometry starts where the content starts', () => {
+  // The first version's getItemLayout omitted the top padding, so every frame
+  // it reported was one chrome-height too high and the window RN chose did not
+  // contain the rows on screen. The extent was right; the ORIGIN was not, and
+  // the test only checked the extent.
+  const engine = read('src', 'components', 'VirtualizedGalleryRows.tsx');
+  assert.match(engine, /offset: contentPaddingTop \+ extent \* index/);
+  // Sound only while the list has no unmeasured header shifting the content.
+  assert.doesNotMatch(engine, /ListHeaderComponent/);
 });

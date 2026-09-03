@@ -17,7 +17,7 @@
 // selection capabilities or viewer state; a screen hands it items and a tile
 // renderer and keeps its domain.
 
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   FlatList,
   StyleSheet,
@@ -64,7 +64,6 @@ export interface VirtualizedGalleryRowsProps<T> {
   onEndReached?: () => void;
   onEndReachedThreshold?: number;
   refreshControl?: React.ReactElement<RefreshControlProps>;
-  ListHeaderComponent?: React.ComponentType<unknown> | React.ReactElement | null;
   ListFooterComponent?: React.ComponentType<unknown> | React.ReactElement | null;
   style?: StyleProp<ViewStyle>;
   testID?: string;
@@ -87,7 +86,6 @@ export function VirtualizedGalleryRows<T>({
   onEndReached,
   onEndReachedThreshold = 0.5,
   refreshControl,
-  ListHeaderComponent,
   ListFooterComponent,
   style,
   testID,
@@ -130,32 +128,37 @@ export function VirtualizedGalleryRows<T>({
 
   // A geometry change is applied in ONE scroll, from the anchor captured under
   // the previous geometry. No measurement, no retry, no remount.
-  if (geometryChanged(activeGeometry.current, geometry)) {
+  //
+  // IN AN EFFECT, NOT IN RENDER. The first version did this in the render body
+  // and called `onAnchorConsumed` there — a parent setState during another
+  // component's render, which React forbids: it re-enters, and the churn
+  // starves the very virtualization batches that fill the screen. Scroll
+  // commands and parent notifications belong after the commit that laid the
+  // new rows out.
+  useEffect(() => {
+    if (!geometryChanged(activeGeometry.current, geometry)) {
+      if (activeGeometry.current === null) activeGeometry.current = geometry;
+      return;
+    }
     const anchor = browseAnchor.current;
     activeGeometry.current = geometry;
-    if (anchor !== null) {
-      restoring.current = true;
-      const offset = offsetForAnchor({ anchor, geometry, items: identified });
-      if (offset !== null) {
-        // After this render commits the new row layout.
-        requestAnimationFrame(() => {
-          listRef.current?.scrollToOffset({ offset, animated: false });
-          restoring.current = false;
-        });
-      } else {
-        restoring.current = false;
-      }
-    }
-  } else if (activeGeometry.current === null) {
-    activeGeometry.current = geometry;
-  }
+    if (anchor === null) return;
+    const offset = offsetForAnchor({ anchor, geometry, items: identified });
+    if (offset === null) return;
+    restoring.current = true;
+    listRef.current?.scrollToOffset({ offset, animated: false });
+    // The scroll event this produces belongs to the replay, not to the user.
+    const settle = requestAnimationFrame(() => {
+      restoring.current = false;
+    });
+    return () => cancelAnimationFrame(settle);
+  }, [geometry, identified]);
 
   // A viewer return: bring the item the user was last looking at to the top of
   // the viewport. Row progress 0, because this is a jump to a thing rather than
   // a continuation of a scroll.
-  const lastAnchorRequest = useRef<string | null>(null);
-  if (anchorItemId !== null && anchorItemId !== lastAnchorRequest.current) {
-    lastAnchorRequest.current = anchorItemId;
+  useEffect(() => {
+    if (anchorItemId === null) return;
     const offset = offsetForAnchor({
       anchor: { itemId: anchorItemId, rowProgress: 0 },
       geometry,
@@ -164,14 +167,13 @@ export function VirtualizedGalleryRows<T>({
     // A missing item asks for no movement, and is still consumed.
     if (offset !== null) {
       restoring.current = true;
+      listRef.current?.scrollToOffset({ offset, animated: false });
       requestAnimationFrame(() => {
-        listRef.current?.scrollToOffset({ offset, animated: false });
         restoring.current = false;
       });
     }
     onAnchorConsumed?.();
-  }
-  if (anchorItemId === null) lastAnchorRequest.current = null;
+  }, [anchorItemId, geometry, identified, onAnchorConsumed]);
 
   const renderRow = useCallback(
     ({ item: row }: { item: GalleryRow<T> }) => (
@@ -184,15 +186,21 @@ export function VirtualizedGalleryRows<T>({
     [gap, keyOf, renderTile, tileSize],
   );
 
-  // Declared, not measured. The row's own margin is the seam, so the extent
-  // here is exactly what the row occupies.
+  // Declared, not measured — and declared from the same origin the content
+  // actually starts at. The first version omitted the top padding, so every
+  // frame it reported was one chrome-height too high: the window RN chose did
+  // not contain the rows on screen, which is what left tiles blank.
+  //
+  // This is only sound because the list has no header component: an unmeasured
+  // header would shift the content without shifting these numbers, and the
+  // engine deliberately does not accept one.
   const getItemLayout = useCallback(
     (_data: ArrayLike<GalleryRow<T>> | null | undefined, index: number) => ({
       length: extent,
-      offset: extent * index,
+      offset: contentPaddingTop + extent * index,
       index,
     }),
-    [extent],
+    [extent, contentPaddingTop],
   );
 
   const keyExtractor = useCallback(
@@ -213,17 +221,22 @@ export function VirtualizedGalleryRows<T>({
       onEndReached={onEndReached}
       onEndReachedThreshold={onEndReachedThreshold}
       refreshControl={refreshControl}
-      ListHeaderComponent={ListHeaderComponent ?? null}
       ListFooterComponent={ListFooterComponent ?? null}
       contentContainerStyle={{
         paddingTop: contentPaddingTop,
         paddingBottom: contentPaddingBottom,
         paddingHorizontal: sidePadding,
       }}
-      removeClippedSubviews
-      windowSize={7}
-      maxToRenderPerBatch={4}
-      initialNumToRender={4}
+      // NO removeClippedSubviews. Each item is a row VIEW containing tiles, and
+      // clipping a container on Android is a well-known way to end up with
+      // empty cells that never come back.
+      //
+      // The batch numbers are rows now, not items: a row is roughly a third of
+      // the viewport width tall, so a screen holds about six of them and these
+      // fill one screen plus margin per batch.
+      windowSize={11}
+      maxToRenderPerBatch={8}
+      initialNumToRender={8}
       style={style}
     />
   );

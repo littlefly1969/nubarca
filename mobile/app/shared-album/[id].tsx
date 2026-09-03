@@ -99,6 +99,9 @@ export default function SharedAlbum(): React.JSX.Element {
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const viewer = useViewer();
   const galleryScope = `shared-album:${albumId}`;
+  // Stable: an inline arrow here rebuilds the gallery's position identity on
+  // every render, and with it the scroll handler the list is holding.
+  const keyOfItem = useCallback((item: SharedAlbumItem) => item.albumItemId, []);
   const returnAnchor = useReturnAnchor(galleryScope);
 
   const capabilities = useMemo(
@@ -313,7 +316,7 @@ export default function SharedAlbum(): React.JSX.Element {
         ) : (
           <VirtualizedGalleryRows
             items={snapshot.items}
-            keyOf={(i) => i.albumItemId}
+            keyOf={keyOfItem}
             columns={columns}
             tileSize={tile}
             sidePadding={sidePadding}
