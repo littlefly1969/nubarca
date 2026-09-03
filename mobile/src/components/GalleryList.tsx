@@ -3,8 +3,9 @@
 //
 // It owns exactly three things: FlashList over the FLAT items, the responsive
 // column count, and the two position commands the product needs. It owns no
-// geometry: the gutter comes from ordinary padding, and the tile squares
-// itself inside the column the list hands it.
+// geometry: the gutter comes from ordinary padding — including for callers
+// with their own tile renderer — and the tile squares itself inside the column
+// the list hands it.
 //
 // What a tile IS, and what happens when one is pressed, belongs to the caller.
 
@@ -103,14 +104,21 @@ export function GalleryList<TItem>({
       const index = indexOfItemId(items, keyOf, id);
       const list = listRef.current;
       if (index < 0 || list === null) return false;
-      // Two calls, not a retry loop, and centred rather than pinned to the top.
-      // The first cannot be exact: a deep index sits outside the rendered
+      // A BOUNDED TWO-PASS RESTORE: at most two sequential scrollToIndex calls
+      // per position command, never a retry loop. The count is fixed in the
+      // source — there is no condition under which a third runs.
+      //
+      // The first pass cannot be exact: a deep index sits outside the rendered
       // window, so FlashList has only an estimate of its offset from average
-      // item size, and that error grows with distance. The first scroll renders
-      // and measures the target region; the second is then arithmetic on real
-      // layout, and a third has nothing left to improve. Centring spends
-      // whatever remains on empty space rather than on pushing the user's own
-      // tile off screen.
+      // item size, and that error grows with distance — measured as invisible
+      // at index 33 and two full rows at index 105. Its promise resolves after
+      // FlashList's own positioning sequence, by which point the target region
+      // is rendered and measured, so the second pass is arithmetic on real
+      // layout and a third would have nothing left to improve.
+      //
+      // Centred rather than pinned to the top, so whatever error remains is
+      // spent on empty space rather than on pushing the user's own tile off
+      // screen.
       void list
         .scrollToIndex({ index, animated: false, viewPosition: 0.5 })
         .then(() => list.scrollToIndex({ index, animated: false, viewPosition: 0.5 }))
@@ -120,20 +128,23 @@ export function GalleryList<TItem>({
     [items, keyOf],
   );
 
-  // Fires once FlashList has committed a layout, which is the first moment an
-  // index means what we think it means. Refs only in here: the documented
-  // hazard of this hook is setState.
+  // FlashList may invoke this across several commit/layout phases during one
+  // rotation, so it is not by itself a signal that anything is settled. The
+  // guard below is what makes an index mean what we think it means. Refs only
+  // in here: the documented hazard of this hook is setState.
   const onCommitLayoutEffect = useCallback(() => {
     const id = pendingColumnAnchorRef.current;
     if (id === null) return;
     const listWidth = listRef.current?.getWindowSize().width;
     if (listWidth === undefined) return;
-    // A rotation produces SEVERAL layout commits, and the early ones carry the
-    // new column count inside the OLD viewport — five columns laid out in a
-    // portrait width, giving rows less than half their eventual height. An
-    // index resolved there points somewhere else entirely. Asking
-    // columnsForWidth what the list's own measured width implies is an exact
-    // test for "has the list caught up", with no tolerance to tune.
+    // THE INVARIANT: do not restore until the list's OWN measured viewport
+    // implies the same column count React is currently rendering.
+    //
+    // The early phases of a rotation carry the new column count inside the old
+    // viewport — five columns laid out in a portrait width, giving rows less
+    // than half their eventual height — and an index resolved there points
+    // somewhere else entirely. Asking columnsForWidth what the measured width
+    // implies is an exact test, with no tolerance to tune.
     if (columnsForWidth(listWidth) !== columns) return;
     // Consumed once: a still-armed anchor would start a second scroll that
     // fights the first, since each pauses offset correction and runs its own

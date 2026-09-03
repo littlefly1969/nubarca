@@ -84,14 +84,52 @@ test('a column change is the only thing that moves the gallery on relayout', () 
   );
 });
 
-test('the restore is one scroll per transition, addressed by item id', () => {
+test('the restore is a BOUNDED two-pass, addressed by item id', () => {
   // FlashList holds the FLAT items, so an index is an item index. The engine
   // this replaced virtualized ROWS, where the same call addressed nothing:
   // 120 items in 3 columns is 40 rows, so item 73 was out of range and crashed.
   assert.match(LIST, /indexOfItemId/);
-  // Armed on the change, cleared before the scroll: a still-armed anchor would
-  // start a second, competing scroll on the next layout commit.
+
+  // BOUNDEDNESS IS THE CONTRACT, and counting the call sites is what makes it
+  // checkable without pinning one particular promise chain: two scrollToIndex
+  // calls exist in the whole file, and both are inside the one restore
+  // function. There is no third, and no branch that could produce one.
+  const calls = [...LIST.matchAll(/scrollToIndex\(/g)];
+  assert.equal(calls.length, 2, `the restore has ${calls.length} scroll passes, not 2`);
+  const restore = LIST.slice(LIST.indexOf('const scrollToItemId'), LIST.indexOf('const onCommitLayoutEffect'));
+  assert.equal([...restore.matchAll(/scrollToIndex\(/g)].length, 2);
+
+  // The bounded shape is a fixed sequence, never a loop, a schedule or a
+  // recursion. Each of these is how a two-pass restore grows into the retry
+  // machine this replaced.
+  for (const unbounded of [
+    /requestAnimationFrame/,
+    /setTimeout/,
+    /setInterval/,
+    /onScrollToIndexFailed/,
+    /onContentSizeChange/,
+    /attempts|retries|retryCount|passCount/,
+    /while \(/,
+    /for \(/,
+  ]) {
+    assert.doesNotMatch(LIST, unbounded, `the restore may grow unbounded via ${unbounded.source}`);
+  }
+  // No recursion: the restore does not re-enter itself.
+  assert.equal([...restore.matchAll(/scrollToItemId\(/g)].length, 0);
+
+  // Armed on the change, and CLEARED BEFORE the restore starts: a still-armed
+  // anchor would start a second, competing transaction on the next layout
+  // phase — two convergence sequences fighting, each having paused the
+  // other's offset correction.
   assert.match(LIST, /pendingColumnAnchorRef\.current = null;\s*scrollToItemId\(id\);/);
+});
+
+test('the viewer return takes the same bounded path', () => {
+  // Two position commands, one mechanism. A second scroll implementation is
+  // how the shared album ended up with its own anchor the first time.
+  const viewerReturn = LIST.slice(LIST.indexOf('if (anchorItemId === null) return;'));
+  assert.match(viewerReturn, /scrollToItemId\(anchorItemId\)/);
+  assert.doesNotMatch(viewerReturn, /scrollToIndex\(/);
 });
 
 test('the viewer return is honoured from an effect, never during render', () => {
