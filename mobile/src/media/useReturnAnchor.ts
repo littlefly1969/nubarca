@@ -36,8 +36,8 @@ export function useReturnAnchor(scopeKey: string): ReturnAnchor {
       if (position === null) return;
       // OPENED AND CLOSED THE SAME ITEM: move nothing. The gallery is already
       // where the user left it, and scrolling it "back" to an item they never
-      // left is a jump they did not ask for. If the geometry changed while the
-      // viewer was open, the gallery's own controller has already restored it.
+      // left is a jump they did not ask for. If the column count changed while
+      // the viewer was open, the list's own anchor has already handled it.
       if (position.focusedKey === position.openedKey) return;
       setItemId(position.focusedKey);
     }, [viewer, scopeKey]),
