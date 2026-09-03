@@ -26,12 +26,16 @@ import { useColors } from '../../src/ui/theme';
 
 const PAGE_SIZE = 60;
 
+// Names this gallery for the viewer's return position: a viewer opened
+// elsewhere must not leave an anchor this screen consumes.
+const GALLERY_SCOPE = 'videos';
+
 export default function Videos(): React.JSX.Element {
   const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
-  const returnAnchor = useReturnAnchor();
+  const returnAnchor = useReturnAnchor(GALLERY_SCOPE);
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filters = useMediaFilters('video', PAGE_SIZE);
@@ -69,7 +73,7 @@ export default function Videos(): React.JSX.Element {
   }
 
   const openPlayer = (item: MediaItem): void => {
-    viewer.open(ownedSlides(snapshot.items), item.id);
+    viewer.open(ownedSlides(snapshot.items), item.id, GALLERY_SCOPE);
     router.push(`/media/${item.id}`);
   };
 

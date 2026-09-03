@@ -65,7 +65,7 @@ test('REGRESSION: first observable viewer state under a NEW identity is empty', 
         posterUrl: null,
       },
     ],
-    'item-1',
+    'item-1', 'photos',
   );
   assert.notEqual(modelA.snapshot(), null);
 

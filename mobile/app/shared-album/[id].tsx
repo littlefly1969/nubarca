@@ -11,17 +11,15 @@
 // the membership grants it, withdrawal of OWN contributions whenever
 // item.canWithdraw === true (even after a role downgrade to Viewer).
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Pressable,
   StyleSheet,
   Text,
   View,
   useWindowDimensions,
-  type ViewToken,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -36,7 +34,9 @@ import { AuthedImage } from '../../src/components/AuthedImage';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
 import { useReturnAnchor } from '../../src/media/useReturnAnchor';
-import { anchorFromVisible, anchorIndexOf } from '../../src/media/galleryAnchor.ts';
+import { VirtualizedGalleryRows } from '../../src/components/VirtualizedGalleryRows';
+import { columnsForWidth, grid } from '../../src/ui/tokens';
+import { gridMetrics } from '../../src/ui/gridMetrics.ts';
 import { sharedSlides } from '../../src/media/viewerEntries';
 import { authenticatedSource } from '../../src/media/imageSource';
 import { usePagedList } from '../../src/lib/usePagedList';
@@ -88,15 +88,18 @@ export default function SharedAlbum(): React.JSX.Element {
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
   const { width } = useWindowDimensions();
-  const columns = 3;
-  const tile = Math.floor((width - spacing.l * 2 - spacing.xs * (columns + 1)) / columns);
+  const columns = columnsForWidth(width);
+  // The same geometry function every gallery uses: one seam value, one tile
+  // size, symmetric outer insets.
+  const { tileSize: tile, sidePadding } = gridMetrics(width, 0, columns, grid.gap);
 
   const [detail, setDetail] = useState<SharedAlbumDetail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [kind, setKind] = useState<Kind>('all');
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const viewer = useViewer();
-  const returnAnchor = useReturnAnchor();
+  const galleryScope = `shared-album:${albumId}`;
+  const returnAnchor = useReturnAnchor(galleryScope);
 
   const capabilities = useMemo(
     () =>
@@ -160,7 +163,7 @@ export default function SharedAlbum(): React.JSX.Element {
 
   function openItem(item: SharedAlbumItem): void {
     // Slides carry the SERVER-PROVIDED album-scoped URLs as-is.
-    viewer.open(sharedSlides(snapshot.items), item.albumItemId);
+    viewer.open(sharedSlides(snapshot.items), item.albumItemId, galleryScope);
     router.push(`/media/${item.albumItemId}`);
   }
 
@@ -244,41 +247,6 @@ export default function SharedAlbum(): React.JSX.Element {
       } · ${t('shared.itemsCount', { count: snapshot.items.length ? detail.itemCount : 0 })}`
     : '';
 
-  const listRef = useRef<FlatList<SharedAlbumItem> | null>(null);
-  const visibleAnchor = useRef<string | null>(null);
-  const pendingAnchor = useRef<string | null>(null);
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    visibleAnchor.current = anchorFromVisible(
-      viewableItems.map((token) => (token.item as SharedAlbumItem).albumItemId),
-    );
-  }).current;
-  const restoreAnchor = useCallback(() => {
-    const id = pendingAnchor.current;
-    if (id === null) return;
-    pendingAnchor.current = null;
-    returnAnchor.consume();
-    const index = anchorIndexOf(
-      snapshot.items.map((i) => ({ id: i.albumItemId })),
-      id,
-    );
-    if (index === null) return;
-    listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
-  }, [snapshot.items, returnAnchor]);
-  const previousColumns = useRef(columns);
-  useEffect(() => {
-    if (previousColumns.current === columns) return;
-    previousColumns.current = columns;
-    pendingAnchor.current = visibleAnchor.current;
-    restoreAnchor();
-  }, [columns, restoreAnchor]);
-  // Applied here, not only on a content-size change: returning from the viewer
-  // changes neither the content size nor the column count.
-  useEffect(() => {
-    if (returnAnchor.itemId === null) return;
-    pendingAnchor.current = returnAnchor.itemId;
-    restoreAnchor();
-  }, [returnAnchor.itemId, restoreAnchor]);
-
   return (
     <ImmersiveGalleryShell
       topChrome={
@@ -343,24 +311,19 @@ export default function SharedAlbum(): React.JSX.Element {
         ) : snapshot.items.length === 0 ? (
           <EmptyState icon="🖼" title={t('albumDetail.empty')} hint={t('albumDetail.emptyHint')} />
         ) : (
-          <FlatList
-            ref={listRef}
-            data={snapshot.items}
-            keyExtractor={(i) => i.albumItemId}
-            numColumns={columns}
-            key={columns}
-            onViewableItemsChanged={onViewableItemsChanged}
-            onContentSizeChange={restoreAnchor}
-            onScrollToIndexFailed={() => {
-              /* the row is not measured yet; the next content-size change asks
-                 again rather than throwing */
-            }}
+          <VirtualizedGalleryRows
+            items={snapshot.items}
+            keyOf={(i) => i.albumItemId}
+            columns={columns}
+            tileSize={tile}
+            sidePadding={sidePadding}
+            gap={grid.gap}
+            contentPaddingTop={scroll.contentPaddingTop}
+            contentPaddingBottom={scroll.contentPaddingBottom}
             onScroll={scroll.onScroll}
             scrollEventThrottle={scroll.scrollEventThrottle}
-            contentContainerStyle={[
-              styles.listContent,
-              { paddingTop: scroll.contentPaddingTop, paddingBottom: scroll.contentPaddingBottom },
-            ]}
+            anchorItemId={returnAnchor.itemId}
+            onAnchorConsumed={returnAnchor.consume}
             onEndReached={
               snapshot.hasMore
                 ? () => {
@@ -368,13 +331,12 @@ export default function SharedAlbum(): React.JSX.Element {
                   }
                 : undefined
             }
-            onEndReachedThreshold={0.5}
             ListFooterComponent={
               snapshot.phase === 'loadingMore' ? (
                 <ActivityIndicator color={colors.accent} style={styles.footerSpinner} />
               ) : null
             }
-            renderItem={({ item }) => {
+            renderTile={(item, size) => {
               const busy = busyItem === item.albumItemId;
               return (
                 <Pressable
@@ -382,7 +344,11 @@ export default function SharedAlbum(): React.JSX.Element {
                   accessibilityLabel={item.kind === 'video' ? t('tabs.videos') : t('gallery.photos')}
                   onPress={() => openItem(item)}
                   onLongPress={() => itemActions(item)}
-                  style={({ pressed }) => [styles.tile, { width: tile }, pressed && styles.pressed]}
+                  style={({ pressed }) => [
+                    styles.tile,
+                    { width: size, height: size },
+                    pressed && styles.pressed,
+                  ]}
                 >
                   <AuthedImage
                     path={item.thumbnailUrl /* SERVER-PROVIDED, album-scoped */}

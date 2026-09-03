@@ -32,12 +32,16 @@ import { iconSizes } from '../../src/ui/tokens';
 
 const PAGE_SIZE = 60;
 
+// Names this gallery for the viewer's return position: a viewer opened
+// elsewhere must not leave an anchor this screen consumes.
+const GALLERY_SCOPE = 'photos';
+
 export default function Photos(): React.JSX.Element {
   const colors = useColors();
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
-  const returnAnchor = useReturnAnchor();
+  const returnAnchor = useReturnAnchor(GALLERY_SCOPE);
   const selectionState = useSelectionState();
   // The bottom navigation steps aside while this is on.
   useReportSelectionMode(selectionState.selecting);
@@ -107,7 +111,7 @@ export default function Photos(): React.JSX.Element {
   };
 
   const openViewer = (item: MediaItem): void => {
-    viewer.open(ownedSlides(snapshot.items), item.id);
+    viewer.open(ownedSlides(snapshot.items), item.id, GALLERY_SCOPE);
     router.push(`/media/${item.id}`);
   };
 

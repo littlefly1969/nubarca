@@ -53,7 +53,7 @@ test('the media pipeline is untouched', () => {
   assert.match(PHOTOS, /usePagedList<MediaItem>/);
   assert.match(PHOTOS, /useMediaFilters\('image', PAGE_SIZE\)/);
   assert.match(PHOTOS, /<MediaGrid\b/);
-  assert.match(PHOTOS, /viewer\.open\(ownedSlides\(snapshot\.items\), item\.id\)/);
+  assert.match(PHOTOS, /viewer\.open\(ownedSlides\(snapshot\.items\), item\.id, GALLERY_SCOPE\)/);
   assert.match(PHOTOS, /router\.push\(`\/media\/\$\{item\.id\}`\)/);
   assert.match(PHOTOS, /onLongPressItem=\{\(item\) => selectionState\.beginWith\(item\.id\)\}/);
   assert.match(PHOTOS, /<AddToAlbumSheet\b/);
