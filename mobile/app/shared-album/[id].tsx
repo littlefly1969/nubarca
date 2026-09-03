@@ -98,7 +98,8 @@ export default function SharedAlbum(): React.JSX.Element {
   const [kind, setKind] = useState<Kind>('all');
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const viewer = useViewer();
-  const returnAnchor = useReturnAnchor();
+  const galleryScope = `shared-album:${albumId}`;
+  const returnAnchor = useReturnAnchor(galleryScope);
 
   const capabilities = useMemo(
     () =>
@@ -162,7 +163,7 @@ export default function SharedAlbum(): React.JSX.Element {
 
   function openItem(item: SharedAlbumItem): void {
     // Slides carry the SERVER-PROVIDED album-scoped URLs as-is.
-    viewer.open(sharedSlides(snapshot.items), item.albumItemId);
+    viewer.open(sharedSlides(snapshot.items), item.albumItemId, galleryScope);
     router.push(`/media/${item.albumItemId}`);
   }
 

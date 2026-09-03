@@ -20,15 +20,21 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { ViewerSequenceModel, type ViewerSlide, type ViewerSequenceSnapshot } from './viewerSequence';
+import {
+  ViewerSequenceModel,
+  type ViewerReturnPosition,
+  type ViewerSlide,
+  type ViewerSequenceSnapshot,
+} from './viewerSequence';
 
 interface ViewerContextValue {
   sequence: ViewerSequenceSnapshot | null;
-  open: (slides: ViewerSlide[], focusedKey: string) => void;
+  /** `scopeKey` names the gallery: photos, videos, album:<id>, shared-album:<id>. */
+  open: (slides: ViewerSlide[], focusedKey: string, scopeKey: string) => void;
   setIndex: (index: number) => void;
   close: () => void;
-  /** The item a returning gallery should scroll to. Consumed on read. */
-  takeReturnAnchor: () => string | null;
+  /** Consumed only by the gallery that opened the viewer. */
+  takeReturnPosition: (scopeKey: string) => ViewerReturnPosition | null;
 }
 
 const ViewerContext = createContext<ViewerContextValue | null>(null);
@@ -57,8 +63,8 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
   }, []);
 
   const open = useCallback(
-    (slides: ViewerSlide[], focusedKey: string) => {
-      modelRef.current.open(slides, focusedKey);
+    (slides: ViewerSlide[], focusedKey: string, scopeKey: string) => {
+      modelRef.current.open(slides, focusedKey, scopeKey);
       sync();
     },
     [sync],
@@ -77,11 +83,14 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
     sync();
   }, [sync]);
 
-  const takeReturnAnchor = useCallback(() => modelRef.current.takeReturnAnchor(), []);
+  const takeReturnPosition = useCallback(
+    (scopeKey: string) => modelRef.current.takeReturnPosition(scopeKey),
+    [],
+  );
 
   const value = useMemo<ViewerContextValue>(
-    () => ({ sequence: snapshot, open, setIndex, close, takeReturnAnchor }),
-    [snapshot, open, setIndex, close, takeReturnAnchor],
+    () => ({ sequence: snapshot, open, setIndex, close, takeReturnPosition }),
+    [snapshot, open, setIndex, close, takeReturnPosition],
   );
 
   return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;

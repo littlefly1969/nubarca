@@ -25,25 +25,46 @@ export interface ViewerSlide {
   posterUrl: string | null;
 }
 
+/**
+ * What a gallery gets back when its viewer closes.
+ *
+ * SCOPED, because a viewer opened from Files must not leave an anchor that
+ * Photos consumes later — they are different libraries and the ids mean
+ * different things in each.
+ *
+ * `openedKey` is kept alongside `focusedKey` so a gallery can tell the two
+ * cases apart. Opening an item and closing it again should move nothing: the
+ * gallery is already where the user left it, and scrolling it "back" to the
+ * item they never left is a jump they did not ask for.
+ */
+export interface ViewerReturnPosition {
+  scopeKey: string;
+  openedKey: string;
+  focusedKey: string;
+}
+
 export interface ViewerSequenceSnapshot {
   slides: ViewerSlide[];
   focusedKey: string;
   index: number;
+  /** Which gallery opened this sequence, and with which item. */
+  scopeKey: string;
+  openedKey: string;
 }
 
 export class ViewerSequenceModel {
   private snapshotValue: ViewerSequenceSnapshot | null = null;
 
   // What the gallery should look at when it comes back. Set on close, taken
-  // once, and never accompanied by the slides themselves — the sequence is
-  // dropped, only the identity of the last item survives.
-  private returnAnchorValue: string | null = null;
+  // once by the gallery it belongs to, and never accompanied by the slides
+  // themselves — the sequence is dropped, only the identities survive.
+  private returnValue: ViewerReturnPosition | null = null;
 
   snapshot(): ViewerSequenceSnapshot | null {
     return this.snapshotValue;
   }
 
-  open(slides: ViewerSlide[], focusedKey: string): void {
+  open(slides: ViewerSlide[], focusedKey: string, scopeKey: string): void {
     const index = Math.max(
       0,
       slides.findIndex((s) => s.key === focusedKey),
@@ -52,7 +73,13 @@ export class ViewerSequenceModel {
       this.reset();
       return;
     }
-    this.snapshotValue = { slides, focusedKey, index };
+    this.snapshotValue = {
+      slides,
+      focusedKey: slides[index].key,
+      index,
+      scopeKey,
+      openedKey: slides[index].key,
+    };
   }
 
   /**
@@ -77,20 +104,31 @@ export class ViewerSequenceModel {
   // Close the viewer. The slide sequence is dropped; the identity of the item
   // that was on screen is kept, once, for the gallery that is about to reappear.
   close(): void {
-    this.returnAnchorValue = this.snapshotValue?.focusedKey ?? null;
+    const snapshot = this.snapshotValue;
+    this.returnValue =
+      snapshot === null
+        ? null
+        : {
+            scopeKey: snapshot.scopeKey,
+            openedKey: snapshot.openedKey,
+            focusedKey: snapshot.focusedKey,
+          };
     this.snapshotValue = null;
   }
 
   /**
-   * The item the gallery should return to, consumed.
+   * The return position, consumed — but only by the gallery that opened it.
    *
-   * One-shot by construction: reading it clears it, so a later unrelated visit
-   * to the same gallery is not yanked back to an item somebody looked at once.
+   * One-shot by construction: a matching read clears it, so a later unrelated
+   * visit to the same gallery is not yanked back to an item somebody looked at
+   * once. A NON-matching scope takes nothing and leaves it in place, so the
+   * gallery it belongs to can still claim it.
    */
-  takeReturnAnchor(): string | null {
-    const anchor = this.returnAnchorValue;
-    this.returnAnchorValue = null;
-    return anchor;
+  takeReturnPosition(scopeKey: string): ViewerReturnPosition | null {
+    const position = this.returnValue;
+    if (position === null || position.scopeKey !== scopeKey) return null;
+    this.returnValue = null;
+    return position;
   }
 
   // Account switch / logout. Unlike close this keeps NOTHING: a pending return
@@ -98,6 +136,6 @@ export class ViewerSequenceModel {
   // inherit it.
   reset(): void {
     this.snapshotValue = null;
-    this.returnAnchorValue = null;
+    this.returnValue = null;
   }
 }

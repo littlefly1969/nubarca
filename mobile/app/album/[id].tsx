@@ -48,9 +48,11 @@ export default function AlbumDetail(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
-  const returnAnchor = useReturnAnchor();
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
+  // Per album: two different albums are two different galleries.
+  const galleryScope = `album:${albumId}`;
+  const returnAnchor = useReturnAnchor(galleryScope);
   const selectionState = useSelectionState();
   // The bottom navigation steps aside while this is on.
   useReportSelectionMode(selectionState.selecting);
@@ -288,7 +290,7 @@ export default function AlbumDetail(): React.JSX.Element {
             selecting={selectionState.selecting}
             selectedIds={selectionState.ids}
             onPressItem={(item) => {
-              viewer.open(ownedSlides(snapshot.items), item.id);
+              viewer.open(ownedSlides(snapshot.items), item.id, galleryScope);
               router.push(`/media/${item.id}`);
             }}
             onToggleSelect={selectionState.toggle}

@@ -27,10 +27,10 @@ const sequence = LIBRARY.map(slide);
 /** The whole journey: open something, maybe swipe, close, come back. */
 function journey(openKey: string, swipeTo?: number): string | null {
   const model = new ViewerSequenceModel();
-  model.open(sequence, openKey);
+  model.open(sequence, openKey, 'photos');
   if (swipeTo !== undefined) model.setIndex(swipeTo);
   model.close();
-  return model.takeReturnAnchor();
+  return model.takeReturnPosition('photos')?.focusedKey ?? null;
 }
 
 test('open and close returns the same item', () => {
@@ -63,10 +63,10 @@ test('an anchor that no longer exists fails safely', () => {
 
 test('an account boundary clears a pending return', () => {
   const model = new ViewerSequenceModel();
-  model.open(sequence, 'item-5');
+  model.open(sequence, 'item-5', 'photos');
   model.close();
   model.reset();
-  assert.equal(model.takeReturnAnchor(), null);
+  assert.equal(model.takeReturnPosition('photos')?.focusedKey ?? null, null);
 });
 
 test('every gallery uses the same mechanism, not four of its own', () => {
@@ -77,7 +77,11 @@ test('every gallery uses the same mechanism, not four of its own', () => {
     ['app', 'shared-album', '[id].tsx'],
   ]) {
     const source = read(...screen);
-    assert.match(source, /useReturnAnchor\(\)/, `${screen.join('/')} has no return anchor`);
+    assert.match(
+      source,
+      /useReturnAnchor\((GALLERY_SCOPE|galleryScope)\)/,
+      `${screen.join('/')} does not scope its return anchor`,
+    );
   }
   // ALL FOUR hand it to the same engine now. The shared album used to carry a
   // second copy of the position algorithm, which is how one defect needed two
@@ -141,4 +145,44 @@ test('a geometry change is one scroll, not a retry loop', () => {
   assert.doesNotMatch(engine, /onScrollToIndexFailed|onContentSizeChange/);
   // Incoming scroll during a restore belongs to the replay, not to the user.
   assert.match(engine, /if \(restoring\.current\) return;/);
+});
+
+test('a return position belongs to the gallery that opened it', () => {
+  // A viewer opened from one library must not leave an anchor another consumes:
+  // the ids mean different things in each.
+  const model = new ViewerSequenceModel();
+  model.open(sequence, 'item-5', 'videos');
+  model.setIndex(9);
+  model.close();
+  assert.equal(model.takeReturnPosition('photos'), null, 'the wrong gallery took it');
+  // And it is still there for the one it belongs to.
+  assert.equal(model.takeReturnPosition('videos')?.focusedKey, 'item-9');
+  assert.equal(model.takeReturnPosition('videos'), null, 'it was not one-shot');
+});
+
+test('closing on the item that was opened asks for no movement', () => {
+  // The gallery is already where the user left it. Scrolling it "back" to an
+  // item they never left is a jump nobody asked for.
+  const model = new ViewerSequenceModel();
+  model.open(sequence, 'item-24', 'photos');
+  model.close();
+  const position = model.takeReturnPosition('photos')!;
+  assert.equal(position.openedKey, position.focusedKey);
+});
+
+test('closing after a swipe asks to move, and says where', () => {
+  const model = new ViewerSequenceModel();
+  model.open(sequence, 'item-24', 'photos');
+  model.setIndex(29);
+  model.close();
+  const position = model.takeReturnPosition('photos')!;
+  assert.equal(position.openedKey, 'item-24');
+  assert.equal(position.focusedKey, 'item-29');
+  assert.notEqual(position.openedKey, position.focusedKey);
+});
+
+test('the hook moves nothing when the item never changed', () => {
+  const hook = read('src', 'media', 'useReturnAnchor.ts');
+  assert.match(hook, /if \(position\.focusedKey === position\.openedKey\) return;/);
+  assert.match(hook, /viewer\.takeReturnPosition\(scopeKey\)/);
 });

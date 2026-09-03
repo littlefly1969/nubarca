@@ -6,9 +6,10 @@
 //
 // The anchor is consumed on the way in and cleared as soon as the grid has
 // honoured it, so a later, unrelated visit to the same gallery is never yanked
-// back to something somebody looked at once. It is scoped to the signed-in
-// identity by construction: the viewer provider is remounted per identity, so
-// there is no path by which one account's browsing position reaches another.
+// back to something somebody looked at once. It is scoped twice over: to the
+// signed-in identity by construction — the viewer provider is remounted per
+// identity — and to the ORIGIN GALLERY by key, so a viewer opened from Files
+// cannot leave a position that Photos consumes afterwards.
 
 import { useCallback, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
@@ -21,17 +22,25 @@ export interface ReturnAnchor {
   consume: () => void;
 }
 
-export function useReturnAnchor(): ReturnAnchor {
+export function useReturnAnchor(scopeKey: string): ReturnAnchor {
   const viewer = useViewer();
   const [itemId, setItemId] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       // Taking it here is what makes it one-shot: the viewer no longer holds
-      // it, so a second focus without a second viewer visit finds nothing.
-      const anchor = viewer.takeReturnAnchor();
-      if (anchor !== null) setItemId(anchor);
-    }, [viewer]),
+      // it, so a second focus without a second viewer visit finds nothing. A
+      // scope that does not match takes nothing and leaves it for the gallery
+      // it belongs to.
+      const position = viewer.takeReturnPosition(scopeKey);
+      if (position === null) return;
+      // OPENED AND CLOSED THE SAME ITEM: move nothing. The gallery is already
+      // where the user left it, and scrolling it "back" to an item they never
+      // left is a jump they did not ask for. If the geometry changed while the
+      // viewer was open, the gallery's own controller has already restored it.
+      if (position.focusedKey === position.openedKey) return;
+      setItemId(position.focusedKey);
+    }, [viewer, scopeKey]),
   );
 
   const consume = useCallback(() => setItemId(null), []);
