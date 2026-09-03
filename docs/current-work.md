@@ -1122,6 +1122,21 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   whose count and close sit outside its scrolling actions. `gridMetrics.ts` owns
   the seam arithmetic so the tile size and the space left for it cannot
   disagree, and `AccountButton` is the one Account affordance.
+- **A gallery is a list of ROWS, and its position is a computed offset.**
+  UX-01.2 replaced the anchor implementation outright. `FlatList numColumns`
+  virtualizes rows, so its `scrollToIndex` takes a ROW index — passing a media
+  index was out of range by construction and crashed — and `numColumns` cannot
+  change in place, so keying the list on the column count destroyed it on every
+  rotation and the new list reported its own first row as the position.
+  `VirtualizedGalleryRows` renders explicit rows in a single-column list that
+  SURVIVES a rotation, declares geometry through `getItemLayout`, and restores
+  with one `scrollToOffset` computed from `galleryPosition.ts` — item identity
+  plus progress through its row. Capture is suspended while a restore is in
+  flight. `galleryVirtualization.test.ts` forbids `scrollToIndex`,
+  `onScrollToIndexFailed`, `key={columns}` and `numColumns={columns}` in that
+  layer, and refuses a second position engine in the shared album. The viewer's
+  return position is scoped to the origin gallery and carries opened-versus-
+  focused, so closing on the item you opened moves nothing.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and
