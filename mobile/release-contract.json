@@ -2,7 +2,7 @@
   "applicationName": "NubArca",
   "package": "it.littlefly.nubarca",
   "version": "0.2.7",
-  "versionCode": 13,
+  "versionCode": 14,
   "minSdk": 24,
   "targetSdk": 36,
   "uploadSignerSha256": "1cfe6f9c8a52420717189e0d950196c5810608ac8e720d1d886d3248080fc06a"
