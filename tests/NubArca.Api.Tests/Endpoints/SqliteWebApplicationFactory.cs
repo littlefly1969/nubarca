@@ -104,6 +104,18 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // ONE connection, shared by every DbContext this host resolves.
+        //
+        // That is what keeps an in-memory database alive for the lifetime of the
+        // factory, and it carries a constraint worth stating: a SqliteConnection
+        // is NOT thread-safe. Tests must therefore not issue overlapping requests
+        // against the same factory — two in flight at once can tear the connection
+        // down mid-statement ("unable to delete/modify user-function due to active
+        // statements"), which surfaces as an unrelated test failing at random.
+        //
+        // This is not a limitation to route around with a wall-clock race: a
+        // guarantee that depends on timing belongs in the code that enforces it,
+        // and is asserted by driving that code, not by hoping two requests collide.
         _connection = new SqliteConnection("DataSource=:memory:");
         _connection.Open();
 
