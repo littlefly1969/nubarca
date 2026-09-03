@@ -44,11 +44,21 @@ export function useSelectionMode(): boolean {
  *
  * Clears on unmount as well as on change: leaving a screen mid-selection must
  * not leave the navigation hidden behind a mode nobody is in any more.
+ *
+ * IT DEPENDS ON THE SETTER, NOT ON THE CONTEXT. The context VALUE is memoised
+ * on `selecting`, so its identity changes every time the flag does. An effect
+ * that listed the context as a dependency therefore re-ran on its own result:
+ * set true, context changes, effect re-runs, cleanup sets false, context
+ * changes, set true — an infinite update loop that crashed the app the moment
+ * anybody long-pressed a photo.
+ *
+ * `useState`'s setter has a stable identity, so depending on it alone breaks
+ * the cycle at its source rather than papering over it with a guard.
  */
 export function useReportSelectionMode(selecting: boolean): void {
-  const context = useContext(SelectionModeContext);
+  const setSelecting = useContext(SelectionModeContext)?.setSelecting;
   useEffect(() => {
-    context?.setSelecting(selecting);
-    return () => context?.setSelecting(false);
-  }, [context, selecting]);
+    setSelecting?.(selecting);
+    return () => setSelecting?.(false);
+  }, [setSelecting, selecting]);
 }

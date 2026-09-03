@@ -142,21 +142,6 @@ export function MediaGrid({
     },
   ).current;
 
-  // A column change remounts the FlatList. Capture what we were looking at so
-  // the new one can be pointed back at it.
-  const previousColumns = useRef(columns);
-  useEffect(() => {
-    if (previousColumns.current === columns) return;
-    previousColumns.current = columns;
-    pendingAnchor.current = visibleAnchor.current;
-  }, [columns]);
-
-  // A gallery returning from the viewer overrides the browse anchor: the item
-  // the user was last looking at wins over the one they opened.
-  useEffect(() => {
-    if (anchorItemId !== null) pendingAnchor.current = anchorItemId;
-  }, [anchorItemId]);
-
   const restoreAnchor = useCallback(() => {
     const id = pendingAnchor.current;
     if (id === null) return;
@@ -168,6 +153,30 @@ export function MediaGrid({
     if (index === null) return;
     listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
   }, [items, onAnchorConsumed]);
+
+  // A column change remounts the FlatList. Capture what we were looking at so
+  // the new one can be pointed back at it, then ask immediately — the remounted
+  // list may not be measured yet, in which case `onScrollToIndexFailed` re-arms
+  // and `onContentSizeChange` asks again once it is.
+  const previousColumns = useRef(columns);
+  useEffect(() => {
+    if (previousColumns.current === columns) return;
+    previousColumns.current = columns;
+    pendingAnchor.current = visibleAnchor.current;
+    restoreAnchor();
+  }, [columns, restoreAnchor]);
+
+  // A gallery returning from the viewer overrides the browse anchor: the item
+  // the user was last looking at wins over the one they opened.
+  //
+  // IT MUST BE APPLIED HERE. Returning from the viewer changes no content size
+  // and no column count, so nothing else would ever ask — which is exactly why
+  // the first version of this silently did nothing at all.
+  useEffect(() => {
+    if (anchorItemId === null) return;
+    pendingAnchor.current = anchorItemId;
+    restoreAnchor();
+  }, [anchorItemId, restoreAnchor]);
 
   const contentInset = useMemo(
     () => ({ bottom: insets.bottom }),
@@ -221,6 +230,8 @@ export function MediaGrid({
       onContentSizeChange={restoreAnchor}
       // The row may not be measured yet on a fresh mount; ask again once the
       // list has laid out rather than throwing.
+      // The row is not laid out yet. Re-arm rather than throw; the next
+      // content-size change asks again.
       onScrollToIndexFailed={(info) => {
         pendingAnchor.current = items[info.index]?.id ?? null;
       }}
