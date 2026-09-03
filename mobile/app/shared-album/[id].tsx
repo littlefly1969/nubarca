@@ -418,8 +418,12 @@ const useStyles = themed((colors) =>
       paddingTop: spacing.s,
       paddingBottom: spacing.xl,
     },
+    // Intrinsic cell geometry only. The gallery seam belongs to GalleryList,
+    // which already puts half a gutter on the content and half on each cell;
+    // adding a margin here made the shared album's seam visibly wider than
+    // Photos and Videos for no reason anyone chose.
     tile: {
-      margin: spacing.xs / 2,
+      width: '100%',
       aspectRatio: 1,
       borderRadius: radii.s,
       overflow: 'hidden',
