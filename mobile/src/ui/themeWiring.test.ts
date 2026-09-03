@@ -40,8 +40,7 @@ test('the account hub is reachable, and is where signing out lives', () => {
   // that follow from who you are signed in as.
   assert.match(read('app', '_layout.tsx'), /<Stack\.Screen name="account"/);
   const photos = read('app', '(tabs)', 'photos.tsx');
-  assert.match(photos, /router\.push\('\/account'\)/);
-  assert.match(photos, /person-circle-outline/);
+  assert.match(photos, /<AccountButton \/>/);
   assert.doesNotMatch(photos, /settings-outline|log-out-outline/);
   assert.match(read('app', 'account.tsx'), /session\.logout\(\)/);
 });

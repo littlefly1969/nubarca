@@ -11,7 +11,7 @@
 // the membership grants it, withdrawal of OWN contributions whenever
 // item.canWithdraw === true (even after a role downgrade to Viewer).
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -21,6 +21,7 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type ViewToken,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -28,11 +29,14 @@ import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { iconSizes } from '../../src/ui/tokens';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { AuthedImage } from '../../src/components/AuthedImage';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
+import { anchorFromVisible, anchorIndexOf } from '../../src/media/galleryAnchor.ts';
 import { sharedSlides } from '../../src/media/viewerEntries';
 import { authenticatedSource } from '../../src/media/imageSource';
 import { usePagedList } from '../../src/lib/usePagedList';
@@ -92,6 +96,7 @@ export default function SharedAlbum(): React.JSX.Element {
   const [kind, setKind] = useState<Kind>('all');
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
 
   const capabilities = useMemo(
     () =>
@@ -239,6 +244,36 @@ export default function SharedAlbum(): React.JSX.Element {
       } · ${t('shared.itemsCount', { count: snapshot.items.length ? detail.itemCount : 0 })}`
     : '';
 
+  const listRef = useRef<FlatList<SharedAlbumItem> | null>(null);
+  const visibleAnchor = useRef<string | null>(null);
+  const pendingAnchor = useRef<string | null>(null);
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    visibleAnchor.current = anchorFromVisible(
+      viewableItems.map((token) => (token.item as SharedAlbumItem).albumItemId),
+    );
+  }).current;
+  const previousColumns = useRef(columns);
+  useEffect(() => {
+    if (previousColumns.current === columns) return;
+    previousColumns.current = columns;
+    pendingAnchor.current = visibleAnchor.current;
+  }, [columns]);
+  useEffect(() => {
+    if (returnAnchor.itemId !== null) pendingAnchor.current = returnAnchor.itemId;
+  }, [returnAnchor.itemId]);
+  const restoreAnchor = useCallback(() => {
+    const id = pendingAnchor.current;
+    if (id === null) return;
+    pendingAnchor.current = null;
+    returnAnchor.consume();
+    const index = anchorIndexOf(
+      snapshot.items.map((i) => ({ id: i.albumItemId })),
+      id,
+    );
+    if (index === null) return;
+    listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0 });
+  }, [snapshot.items, returnAnchor]);
+
   return (
     <ImmersiveGalleryShell
       topChrome={
@@ -246,14 +281,17 @@ export default function SharedAlbum(): React.JSX.Element {
           <AppHeader
             title={detail?.name ?? ''}
             actions={
-              capabilities.contribute ? (
-                <IconButton
-                  accessibilityLabel={t('shared.contribute')}
-                  onPress={() => router.push(`/shared-album/${albumId}/add`)}
-                >
-                  <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
-                </IconButton>
-              ) : undefined
+              <>
+                {capabilities.contribute && (
+                  <IconButton
+                    accessibilityLabel={t('shared.contribute')}
+                    onPress={() => router.push(`/shared-album/${albumId}/add`)}
+                  >
+                    <Ionicons name="add-circle-outline" size={iconSizes.l} color={colors.accent} />
+                  </IconButton>
+                )}
+                <AccountButton />
+              </>
             }
           />
 
@@ -301,10 +339,17 @@ export default function SharedAlbum(): React.JSX.Element {
           <EmptyState icon="🖼" title={t('albumDetail.empty')} hint={t('albumDetail.emptyHint')} />
         ) : (
           <FlatList
+            ref={listRef}
             data={snapshot.items}
             keyExtractor={(i) => i.albumItemId}
             numColumns={columns}
             key={columns}
+            onViewableItemsChanged={onViewableItemsChanged}
+            onContentSizeChange={restoreAnchor}
+            onScrollToIndexFailed={() => {
+              /* the row is not measured yet; the next content-size change asks
+                 again rather than throwing */
+            }}
             onScroll={scroll.onScroll}
             scrollEventThrottle={scroll.scrollEventThrottle}
             contentContainerStyle={[

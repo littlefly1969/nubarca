@@ -1113,7 +1113,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   There is no Select control — long-press is the entry — and no settings cog:
   the gallery offers a person, and `gallery -> account -> preferences` is the
   hierarchy. Primary navigation is four browsing destinations; Sync moved under
-  Account with its engine untouched.
+  Account with its engine untouched. UX-01.1 then made a gallery's position an
+  ITEM rather than an offset (`galleryAnchor.ts`), so it survives the remount
+  that a column change requires; the viewer hands back the item that was on
+  screen through a one-shot, identity-scoped anchor, and `setIndex` keeps
+  `focusedKey === slides[index].key`. Selection mode REPLACES the bottom
+  navigation by state rather than by z-index, and the tray is a floating capsule
+  whose count and close sit outside its scrolling actions. `gridMetrics.ts` owns
+  the seam arithmetic so the tile size and the space left for it cannot
+  disagree, and `AccountButton` is the one Account affordance.
 - **Mobile colour is a palette reached through a hook, never a module constant.**
   `mobile/src/ui/palette.ts` holds the two themes; `tokens.ts` deliberately
   exports NO `colors`, so a stylesheet cannot capture one at import time and

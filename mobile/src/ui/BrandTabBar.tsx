@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { iconSizes, spacing, touch, typography } from './tokens';
 import { themed, useColors } from './theme';
+import { useSelectionMode } from './selectionMode';
 
 /**
  * The bar's own height, excluding the bottom safe area. Galleries add this to
@@ -34,10 +35,17 @@ export function BrandTabBar({
   state,
   descriptors,
   navigation,
-}: BottomTabBarProps): React.JSX.Element {
+}: BottomTabBarProps): React.JSX.Element | null {
   const styles = useTabStyles();
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const selecting = useSelectionMode();
+
+  // Selection mode REPLACES primary navigation (NUBARCA-UX-01.1 §1). Stepping
+  // aside is what guarantees the two bottom surfaces are never both on screen;
+  // relying on a stacking order would leave the tray's actions under a
+  // translucent bar, which is exactly the defect this answers.
+  if (selecting) return null;
 
   return (
     <View style={[styles.bar, { paddingBottom: insets.bottom }]}>

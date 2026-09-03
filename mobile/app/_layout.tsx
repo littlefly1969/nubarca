@@ -16,6 +16,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { I18nProvider } from '../src/i18n';
 import { SessionProvider, useSession } from '../src/session/SessionProvider';
 import { ViewerProvider } from '../src/media/viewerContext';
+import { SelectionModeProvider } from '../src/ui/selectionMode';
 import { viewerIdentityKey } from '../src/media/viewerIdentity';
 import { SyncProvider } from '../src/sync/SyncProvider';
 import { ThemeProvider, useColors, useTheme } from '../src/ui/theme';
@@ -146,8 +147,10 @@ export default function RootLayout(): React.JSX.Element {
           <I18nProvider>
             <SessionProvider>
               <IdentityKeyedViewerProvider>
-                <ThemedStatusBar />
-                <RootGate />
+                <SelectionModeProvider>
+                  <ThemedStatusBar />
+                  <RootGate />
+                </SelectionModeProvider>
               </IdentityKeyedViewerProvider>
             </SessionProvider>
           </I18nProvider>

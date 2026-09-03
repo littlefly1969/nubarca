@@ -318,6 +318,12 @@ MIGRATED_FILES = (
     "mobile/app/sync.tsx",
     "mobile/app/album/[id].tsx",
     "mobile/src/ui/ImmersiveGalleryShell.tsx",
+    # NUBARCA-UX-01.1 — position, selection and the global account affordance.
+    "mobile/src/ui/AccountButton.tsx",
+    "mobile/src/ui/selectionMode.tsx",
+    "mobile/src/ui/gridMetrics.ts",
+    "mobile/src/media/galleryAnchor.ts",
+    "mobile/src/media/useReturnAnchor.ts",
     "mobile/src/ui/components.tsx",
     "mobile/src/ui/states.tsx",
     "mobile/src/ui/fields.tsx",

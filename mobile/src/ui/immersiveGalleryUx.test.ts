@@ -62,9 +62,37 @@ test('no gallery offers a settings cog', () => {
   }
 });
 
-test('the account hub is the personal entry point, and owns sync', () => {
-  assert.match(read('app', '(tabs)', 'photos.tsx'), /person-circle-outline/);
-  assert.match(read('app', '(tabs)', 'photos.tsx'), /router\.push\('\/account'\)/);
+test('the account affordance is global, and is ONE component', () => {
+  // NUBARCA-UX-01.1 §6. Account belongs on every primary surface, which is
+  // exactly the situation where five screens grow five slightly different
+  // person icons — different sizes, different labels, one of them eventually
+  // pointing somewhere else.
+  const surfaces = [
+    ['app', '(tabs)', 'photos.tsx'],
+    ['app', '(tabs)', 'videos.tsx'],
+    ['app', '(tabs)', 'albums.tsx'],
+    ['app', '(tabs)', 'files.tsx'],
+    ['app', 'album', '[id].tsx'],
+    ['app', 'shared-album', '[id].tsx'],
+  ];
+  for (const surface of surfaces) {
+    const source = read(...surface);
+    assert.match(source, /<AccountButton \/>/, `${surface.join('/')} has no Account`);
+    // No hand-rolled copies.
+    assert.doesNotMatch(
+      source,
+      /person-circle-outline/,
+      `${surface.join('/')} reimplements the Account icon`,
+    );
+  }
+  const button = read('src', 'ui', 'AccountButton.tsx');
+  assert.match(button, /router\.push\('\/account'\)/);
+  assert.match(button, /t\('account\.open'\)/);
+  assert.match(button, /size=\{iconSizes\.l\}/);
+  assert.match(button, /color=\{colors\.accent\}/);
+});
+
+test('the account hub owns sync, the theme and signing out', () => {
   const account = read('app', 'account.tsx');
   assert.match(account, /router\.push\('\/sync'\)/);
   assert.match(account, /session\.logout\(\)/);

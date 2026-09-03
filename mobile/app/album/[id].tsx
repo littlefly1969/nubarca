@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Redirect, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { AppHeader, HeaderButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { OverflowMenu } from '../../src/components/OverflowMenu';
 import { PartySettingsSheet } from '../../src/components/PartySettingsSheet';
 import { AlbumSharingSheet } from '../../src/components/AlbumSharingSheet';
@@ -19,9 +20,11 @@ import { MediaGrid } from '../../src/components/MediaGrid';
 import { NamePromptModal } from '../../src/components/NamePromptModal';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { useSelectionState } from '../../src/lib/useSelectionState';
+import { useReportSelectionMode } from '../../src/ui/selectionMode';
 import {
   getAlbum,
   updateAlbum,
@@ -45,9 +48,12 @@ export default function AlbumDetail(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
   const params = useLocalSearchParams<{ id: string }>();
   const albumId = params.id;
   const selectionState = useSelectionState();
+  // The bottom navigation steps aside while this is on.
+  useReportSelectionMode(selectionState.selecting);
   const [detail, setDetail] = useState<AlbumDetail | null>(null);
   const [detailFailed, setDetailFailed] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -241,6 +247,7 @@ export default function AlbumDetail(): React.JSX.Element {
                       },
                     ]}
                   />
+                  <AccountButton />
                 </>
               )
             }
@@ -307,7 +314,9 @@ export default function AlbumDetail(): React.JSX.Element {
             onLoadMoreRetry={() => {
               void retryFailed();
             }}
-            onScroll={scroll.onScroll}
+            anchorItemId={returnAnchor.itemId}
+            onAnchorConsumed={returnAnchor.consume}
+          onScroll={scroll.onScroll}
             scrollEventThrottle={scroll.scrollEventThrottle}
             contentPaddingTop={scroll.contentPaddingTop}
             contentPaddingBottom={scroll.contentPaddingBottom}

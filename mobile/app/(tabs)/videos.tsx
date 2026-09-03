@@ -5,6 +5,7 @@ import { Redirect, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { iconSizes } from '../../src/ui/tokens';
 import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
@@ -12,6 +13,7 @@ import { MediaGrid } from '../../src/components/MediaGrid';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import type { MediaItem } from '../../src/api/media.ts';
@@ -29,6 +31,7 @@ export default function Videos(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
 
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filters = useMediaFilters('video', PAGE_SIZE);
@@ -80,17 +83,20 @@ export default function Videos(): React.JSX.Element {
           <AppHeader
             title={t('tabs.videos')}
             actions={
-              <IconButton
-                accessibilityLabel={t('filters.open')}
-                onPress={() => setFiltersOpen(true)}
-                selected={filters.chips.length > 0}
-              >
-                <Ionicons
-                  name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
-                  size={iconSizes.m}
-                  color={colors.accent}
-                />
-              </IconButton>
+              <>
+                <IconButton
+                  accessibilityLabel={t('filters.open')}
+                  onPress={() => setFiltersOpen(true)}
+                  selected={filters.chips.length > 0}
+                >
+                  <Ionicons
+                    name={filters.chips.length > 0 ? 'funnel' : 'funnel-outline'}
+                    size={iconSizes.m}
+                    color={colors.accent}
+                  />
+                </IconButton>
+                <AccountButton />
+              </>
             }
           />
           <MediaFilterChips
@@ -142,7 +148,9 @@ export default function Videos(): React.JSX.Element {
             onLoadMoreRetry={() => {
               void retryFailed();
             }}
-            onScroll={scroll.onScroll}
+            anchorItemId={returnAnchor.itemId}
+            onAnchorConsumed={returnAnchor.consume}
+          onScroll={scroll.onScroll}
             scrollEventThrottle={scroll.scrollEventThrottle}
             contentPaddingTop={scroll.contentPaddingTop}
             contentPaddingBottom={scroll.contentPaddingBottom}

@@ -84,3 +84,28 @@ test('type and icon sizing come from the contract', () => {
   assert.doesNotMatch(BAR, /fontSize: \d/);
   assert.doesNotMatch(BAR, /\bradii\.|colors\.surfaceMuted/);
 });
+
+test('the bottom navigation steps aside for selection, by state', () => {
+  // NUBARCA-UX-01.1 §1. The two bottom surfaces used to be able to occupy the
+  // same space, with the tray rendered under the translucent bar and its
+  // actions unreachable. This is fixed by RENDER, not by a stacking order
+  // somebody has to keep true.
+  assert.match(BAR, /const selecting = useSelectionMode\(\)/);
+  assert.match(BAR, /if \(selecting\) return null;/);
+  // And the galleries that can select publish that state.
+  for (const screen of [['app', '(tabs)', 'photos.tsx'], ['app', 'album', '[id].tsx']]) {
+    const source = code(readFileSync(resolve(ROOT, ...screen), 'utf8'));
+    assert.match(
+      source,
+      /useReportSelectionMode\(selectionState\.selecting\)/,
+      `${screen.join('/')} does not publish selection mode`,
+    );
+  }
+});
+
+test('leaving a screen mid-selection does not strand the navigation', () => {
+  // The publisher clears on unmount as well as on change: otherwise navigating
+  // away while selecting would leave the bar hidden behind a mode nobody is in.
+  const mode = code(readFileSync(resolve(ROOT, 'src', 'ui', 'selectionMode.tsx'), 'utf8'));
+  assert.match(mode, /return \(\) => context\?\.setSelecting\(false\)/);
+});

@@ -6,6 +6,7 @@ import { Redirect, router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { AppHeader, HeaderButton, IconButton } from '../../src/ui/components';
 import { ImmersiveGalleryShell } from '../../src/ui/ImmersiveGalleryShell';
+import { AccountButton } from '../../src/ui/AccountButton';
 import { TAB_BAR_CONTENT_HEIGHT } from '../../src/ui/BrandTabBar';
 import { EmptyState, ErrorState, LoadingState } from '../../src/ui/states';
 import { MediaGrid } from '../../src/components/MediaGrid';
@@ -13,9 +14,11 @@ import { AddToAlbumSheet } from '../../src/components/AddToAlbumSheet';
 import { ownedSlides } from '../../src/media/viewerEntries';
 import { useSession } from '../../src/session/SessionProvider';
 import { useViewer } from '../../src/media/viewerContext';
+import { useReturnAnchor } from '../../src/media/useReturnAnchor';
 import { usePagedList } from '../../src/lib/usePagedList';
 import { shouldRefreshOnFocus } from '../../src/lib/focusRefresh';
 import { useSelectionState } from '../../src/lib/useSelectionState';
+import { useReportSelectionMode } from '../../src/ui/selectionMode';
 import type { MediaItem } from '../../src/api/media.ts';
 import { useMediaFilters } from '../../src/media/useMediaFilters';
 import { MediaFilterChips } from '../../src/components/MediaFilterChips';
@@ -34,7 +37,10 @@ export default function Photos(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const viewer = useViewer();
+  const returnAnchor = useReturnAnchor();
   const selectionState = useSelectionState();
+  // The bottom navigation steps aside while this is on.
+  useReportSelectionMode(selectionState.selecting);
   const [sheetVisible, setSheetVisible] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -145,12 +151,7 @@ export default function Photos(): React.JSX.Element {
                   already is. */}
               {/* A person, not a cog. What sits behind a gallery is who you
                   are signed in as; the settings follow from that. */}
-              <IconButton
-                accessibilityLabel={t('account.open')}
-                onPress={() => router.push('/account')}
-              >
-                <Ionicons name="person-circle-outline" size={iconSizes.l} color={colors.accent} />
-              </IconButton>
+              <AccountButton />
             </>
           )
             }
@@ -213,7 +214,9 @@ export default function Photos(): React.JSX.Element {
               onLoadMoreRetry={() => {
                 void retryFailed();
               }}
-              onScroll={scroll.onScroll}
+              anchorItemId={returnAnchor.itemId}
+              onAnchorConsumed={returnAnchor.consume}
+          onScroll={scroll.onScroll}
               scrollEventThrottle={scroll.scrollEventThrottle}
               contentPaddingTop={scroll.contentPaddingTop}
               contentPaddingBottom={scroll.contentPaddingBottom}
