@@ -61,6 +61,10 @@ public sealed class AdapterContractTests
 
         Assert.Contains("--config \"$config_path\"", installer, StringComparison.Ordinal);
         Assert.Contains("--config /etc/nubarca-print-agent/%i.json", unit, StringComparison.Ordinal);
+        Assert.Contains("install -d -o root -g root -m 0755 \"$config_dir\"", installer,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("-g \"$user\" -m 0750 \"$config_dir\"", installer,
+            StringComparison.Ordinal);
     }
 
     [Fact]

@@ -45,7 +45,9 @@ The script prompts silently for the one-shot token and passes that instance's
 JSON configuration explicitly to both enrollment and systemd runtime. Each
 instance has a unique Unix account, mode-0700 state directory, mode-0600
 credential, SQLite journal and output directory under
-`/var/lib/nubarca-print-agent/<instance>`. Repeat
+`/var/lib/nubarca-print-agent/<instance>`. The shared configuration directory
+is root-owned and traversable; each instance JSON remains readable only by root
+and that instance's group. Repeat
 with `sim-lab` and `sim-test`. Check it with
 `systemctl status nubarca-print-agent@sim-sala`; its fake pages are in that
 instance's `fake-output` directory. `uninstall-instance.sh` retains state by
