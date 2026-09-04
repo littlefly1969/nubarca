@@ -83,6 +83,32 @@ export class ViewerSequenceModel {
   }
 
   /**
+   * Extend the open sequence with whatever the originating gallery has since
+   * loaded.
+   *
+   * The gallery's PagedList stays the only paginator: it may hand back its
+   * WHOLE accumulated set, and only keys not already present are appended.
+   * Existing slide objects are kept rather than replaced, because replacing
+   * them would remount every mounted slide — including the video currently
+   * playing on screen.
+   *
+   * Position is untouched by construction: appending after the end cannot move
+   * an index that points before it. Answers whether anything actually changed,
+   * so the provider can leave React alone when nothing did.
+   */
+  appendSlides(slides: ViewerSlide[]): boolean {
+    const current = this.snapshotValue;
+    // Nothing open: a result arriving after close belongs to a sequence that no
+    // longer exists, and must not resurrect one.
+    if (current === null) return false;
+    const known = new Set(current.slides.map((s) => s.key));
+    const added = slides.filter((s) => !known.has(s.key));
+    if (added.length === 0) return false;
+    this.snapshotValue = { ...current, slides: [...current.slides, ...added] };
+    return true;
+  }
+
+  /**
    * Move to another slide.
    *
    * `focusedKey` moves WITH the index. It used to stay pointing at whatever was

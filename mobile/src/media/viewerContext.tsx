@@ -27,10 +27,37 @@ import {
   type ViewerSequenceSnapshot,
 } from './viewerSequence';
 
+/** What the originating gallery hands back when asked to continue. */
+export interface ViewerContinuationResult {
+  slides: ViewerSlide[];
+  hasMore: boolean;
+}
+
+/**
+ * How the viewer asks the gallery that opened it for more.
+ *
+ * This is the ENTIRE contract. The viewer never learns a cursor, a page size,
+ * an endpoint or a filter: there is one paginator, and it stays in the gallery.
+ */
+export interface ViewerContinuation {
+  hasMore: boolean;
+  loadMore: () => Promise<ViewerContinuationResult>;
+}
+
 interface ViewerContextValue {
   sequence: ViewerSequenceSnapshot | null;
   /** `scopeKey` names the gallery: photos, videos, album:<id>, shared-album:<id>. */
-  open: (slides: ViewerSlide[], focusedKey: string, scopeKey: string) => void;
+  open: (
+    slides: ViewerSlide[],
+    focusedKey: string,
+    scopeKey: string,
+    continuation?: ViewerContinuation,
+  ) => void;
+  /**
+   * Ask the originating gallery to load its next page. Safe to call often: it
+   * suppresses duplicates and stops asking once there is nothing left.
+   */
+  requestMore: () => Promise<void>;
   setIndex: (index: number) => void;
   close: () => void;
   /** Consumed only by the gallery that opened the viewer. */
@@ -54,6 +81,14 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
     forgetAllPositions();
   }
   const modelRef = useRef<ViewerSequenceModel>(new ViewerSequenceModel());
+  // The continuation is transient PROVIDER behaviour, deliberately not part of
+  // the snapshot: the snapshot is renderable state, and a function is not.
+  const continuationRef = useRef<ViewerContinuation | null>(null);
+  const inFlightRef = useRef(false);
+  // Bumped by every open and every close. A result carrying an older token
+  // belongs to a sequence the user has already left — a different album, or a
+  // different account — and is dropped rather than appended.
+  const generationRef = useRef(0);
   const [snapshot, setSnapshotState] = useState<ViewerSequenceSnapshot | null>(
     () => modelRef.current.snapshot(),
   );
@@ -63,12 +98,47 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
   }, []);
 
   const open = useCallback(
-    (slides: ViewerSlide[], focusedKey: string, scopeKey: string) => {
+    (
+      slides: ViewerSlide[],
+      focusedKey: string,
+      scopeKey: string,
+      continuation?: ViewerContinuation,
+    ) => {
+      generationRef.current += 1;
+      continuationRef.current = continuation ?? null;
+      inFlightRef.current = false;
       modelRef.current.open(slides, focusedKey, scopeKey);
       sync();
     },
     [sync],
   );
+
+  const requestMore = useCallback(async () => {
+    const continuation = continuationRef.current;
+    if (continuation === null) return;
+    // Nothing left, or someone already asked. Both are ordinary: the route
+    // calls this on every index change near the end.
+    if (!continuation.hasMore) return;
+    if (inFlightRef.current) return;
+    const generation = generationRef.current;
+    inFlightRef.current = true;
+    try {
+      const result = await continuation.loadMore();
+      // Closed, reopened, or the account changed while we waited.
+      if (generation !== generationRef.current) return;
+      // hasMore first: it must be updated even when the page brought nothing
+      // new, or the viewer would keep asking for a page that will never come.
+      continuationRef.current = { ...continuation, hasMore: result.hasMore };
+      if (modelRef.current.appendSlides(result.slides)) sync();
+    } catch {
+      // A failed page leaves everything usable: the slides already loaded, the
+      // current item, and hasMore, so a later swipe can ask again. There is
+      // deliberately no viewer-owned retry — the gallery's PagedList already
+      // holds the cursor for one.
+    } finally {
+      if (generation === generationRef.current) inFlightRef.current = false;
+    }
+  }, [sync]);
 
   const setIndex = useCallback(
     (index: number) => {
@@ -79,6 +149,13 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
   );
 
   const close = useCallback(() => {
+    // Invalidate before dropping the sequence, so a page still in flight cannot
+    // append to the one being closed. The gallery's own request is left alone:
+    // if it completes it keeps the page, which is exactly what the user wants
+    // waiting for them when they land back on the grid.
+    generationRef.current += 1;
+    continuationRef.current = null;
+    inFlightRef.current = false;
     modelRef.current.close();
     sync();
   }, [sync]);
@@ -89,8 +166,8 @@ export function ViewerProvider({ children }: { children: React.ReactNode }): Rea
   );
 
   const value = useMemo<ViewerContextValue>(
-    () => ({ sequence: snapshot, open, setIndex, close, takeReturnPosition }),
-    [snapshot, open, setIndex, close, takeReturnPosition],
+    () => ({ sequence: snapshot, open, requestMore, setIndex, close, takeReturnPosition }),
+    [snapshot, open, requestMore, setIndex, close, takeReturnPosition],
   );
 
   return <ViewerContext.Provider value={value}>{children}</ViewerContext.Provider>;

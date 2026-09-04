@@ -53,7 +53,10 @@ test('the media pipeline is untouched', () => {
   assert.match(PHOTOS, /usePagedList<MediaItem>/);
   assert.match(PHOTOS, /useMediaFilters\('image', PAGE_SIZE\)/);
   assert.match(PHOTOS, /<MediaGrid\b/);
-  assert.match(PHOTOS, /viewer\.open\(ownedSlides\(snapshot\.items\), item\.id, GALLERY_SCOPE\)/);
+  // The viewer still opens on this screen's own slides and scope. It now also
+  // receives a continuation, which is how it keeps swiping past a page
+  // boundary — but the paginator it asks is still this screen's.
+  assert.match(PHOTOS, /viewer\.open\(\s*ownedSlides\(snapshot\.items\),\s*item\.id,\s*GALLERY_SCOPE,/);
   assert.match(PHOTOS, /router\.push\(`\/media\/\$\{item\.id\}`\)/);
   assert.match(PHOTOS, /onLongPressItem=\{\(item\) => selectionState\.beginWith\(item\.id\)\}/);
   assert.match(PHOTOS, /<AddToAlbumSheet\b/);
