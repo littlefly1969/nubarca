@@ -1198,3 +1198,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   Play signs delivered APKs with its separate app-signing key. The key may never
   be shared with TV or replaced to fix a build. `docs/mobile-release.md` is the
   runbook.
+
+## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
+
+Known, scoped, deliberately NOT fixed by the portrait/rotation slice.
+
+The viewer receives only the media the gallery had already loaded when it
+opened, so reaching the end of that sequence does not fetch the next page.
+Observed on the acceptance build: a gallery holding two pages opens a viewer
+that reports `10 / 120` even though the library has 172 items. Returning to the
+gallery lets pagination continue normally, so nothing is lost — the sequence
+simply stops where the gallery had stopped.
+
+Keeping it out of the orientation slice was deliberate: orientation policy is a
+navigation decision, and this is a data-continuation one.
+
