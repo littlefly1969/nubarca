@@ -785,11 +785,6 @@ a {
 
 /* Public party landing (unauthenticated) */
 .party-page { min-height: 100vh; background: #0f1115; color: #f2f3f5; padding: 1.5rem; box-sizing: border-box; }
-.party-hub-actions { max-width: 68rem; margin: 0 auto 1.25rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .75rem; }
-.party-hub-action { min-height: 5.5rem; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: .25rem; padding: 1rem 1.15rem; border: 1px solid #343d50; border-radius: 16px; background: #1a202b; color: #fff; text-decoration: none; }
-.party-hub-action:hover, .party-hub-action:focus-visible { border-color: #70a8ff; outline: 3px solid rgb(75 142 255 / 28%); outline-offset: 2px; }
-.party-hub-action span { color: #b9c2d0; font-size: .9rem; }
-.party-hub-action-game { background: linear-gradient(135deg, #263d72, #53336d); border-color: #7a73c8; }
 .party-skeleton { border-radius: 16px; background: linear-gradient(100deg, #171c25 20%, #252d3b 40%, #171c25 60%); background-size: 220% 100%; animation: party-skeleton-pulse 1.4s ease-in-out infinite; }
 .party-skeleton-hero { max-width: 68rem; height: 18rem; margin: 0 auto 1rem; }
 .party-skeleton-row { max-width: 48rem; height: 10rem; margin: 0 auto 1rem; }
@@ -813,12 +808,11 @@ a {
 .party-challenge-copy button[aria-pressed="true"] { background: transparent; }
 @media (max-width: 480px) {
   .party-page { padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); }
-  .party-hub-actions { grid-template-columns: 1fr; }
   .party-challenge-card { grid-template-columns: 1fr; }
   .party-challenge-card img { height: 12rem; min-height: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .party-hub-action, .party-challenge-card { scroll-behavior: auto; transition: none; }
+  .party-challenge-card { scroll-behavior: auto; transition: none; }
   .party-skeleton { animation: none; }
 }
 .party-status { text-align: center; margin-top: 3rem; color: #b6bcc6; }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPage } from './PartyPage';
@@ -53,7 +53,7 @@ describe('PartyPage (public party landing)', () => {
     expect(await screen.findByRole('link', { name: /Condividi un momento/i }))
       .toHaveAttribute('href', '/party/upload-token/upload');
     expect(screen.getAllByRole('link', { name: /Condividi un momento/i })).toHaveLength(1);
-    expect(screen.getByRole('link', { name: /Vota le sfide/i }))
+    expect(screen.getByRole('link', { name: /Sfide e votazioni/i }))
       .toHaveAttribute('href', '/party/tok-1/challenges');
     expect(screen.getByTestId('party-hub-cover')).toHaveStyle({
       backgroundImage: 'url("/api/party/tok-1/media/f1/preview")',
@@ -91,9 +91,11 @@ describe('PartyPage (public party landing)', () => {
     // The album name is the heading; the cover art itself carries no semantics.
     expect(cover).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Beach Party');
-    // Live state: the dynamic item count next to a "Live" marker.
-    expect(screen.getByText(/1 elemento/)).toBeInTheDocument();
-    expect(screen.getByText('Live')).toBeInTheDocument();
+    // Live state: the dynamic item count next to a "Live" marker. Scoped to the
+    // hero — the challenges card carries its own LIVE badge.
+    const hero = cover.parentElement as HTMLElement;
+    expect(within(hero).getByText(/1 elemento/)).toBeInTheDocument();
+    expect(within(hero).getByText('Live')).toBeInTheDocument();
   });
 
   it('falls back to the branded NubArca cover when the album has none', async () => {
@@ -161,6 +163,82 @@ describe('PartyPage (public party landing)', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: /Riprova/i }));
     expect(await screen.findByTestId('party-grid')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Beach Party');
+  });
+
+  // --- Capability deck -----------------------------------------------------
+
+  function mockHub(overrides: Record<string, unknown> = {}) {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, ...overrides }),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+  }
+
+  it('offers the real capabilities under one "what would you like to do?" heading', async () => {
+    mockHub();
+    render(wrapper());
+    const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    expect(screen.getByRole('heading', { level: 2, name: /Cosa vuoi fare\?/i })).toBeInTheDocument();
+
+    // Every card is a real destination, so every card is a real link.
+    const cards = within(deck).getAllByRole('link');
+    expect(cards).toHaveLength(3);
+    expect(within(deck).getByRole('link', { name: /Trova le tue foto/i }))
+      .toHaveAttribute('href', '#party-face');
+    expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
+      .toHaveAttribute('href', '#party-photos');
+    expect(within(deck).getByRole('link', { name: /Sfide e votazioni/i }))
+      .toHaveAttribute('href', '/party/tok-1/challenges');
+  });
+
+  it('drops the challenges capability when the party game is off', async () => {
+    mockHub({ gameEnabled: false });
+    render(wrapper());
+    const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    expect(within(deck).queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
+    // The rest of the deck is unaffected.
+    expect(within(deck).getAllByRole('link')).toHaveLength(2);
+    expect(screen.getByTestId('party-capability-face')).toBeInTheDocument();
+    expect(screen.getByTestId('party-capability-album')).toBeInTheDocument();
+  });
+
+  it('never duplicates the hero CTA in the deck', async () => {
+    mockHub();
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    // Exactly one link to the contribution URL on the whole page, and it is the
+    // hero's, not a deck card.
+    const contributing = Array.from(
+      document.querySelectorAll('a[href="/party/upload-token/upload"]'),
+    );
+    expect(contributing).toHaveLength(1);
+    expect(contributing[0]).toHaveAttribute('data-testid', 'party-hub-cta');
+    const deck = screen.getByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    expect(within(deck).queryByRole('link', { name: /Condividi un momento/i })).not.toBeInTheDocument();
+  });
+
+  it('shows NO capability the product does not offer yet', async () => {
+    mockHub();
+    render(wrapper());
+    const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    // Dedication, song requests and printing are planned, not built: they must
+    // not appear at all — not even as a disabled "coming soon" card.
+    expect(deck.textContent).not.toMatch(/dedica|canzone|brano|stampa|ricordo/i);
+    expect(deck.querySelectorAll('[disabled], [aria-disabled="true"]')).toHaveLength(0);
+  });
+
+  it('keeps every PartyFaceSearch control reachable from the deck', async () => {
+    mockHub();
+    render(wrapper());
+    const user = userEvent.setup();
+    // The signature card points at the existing panel, which still opens into
+    // the unchanged selfie controls.
+    expect(await screen.findByTestId('party-capability-face')).toBeInTheDocument();
+    expect(document.querySelector('#party-face')).toBeInTheDocument();
+    await user.click(screen.getByTestId('party-face-open'));
+    expect(screen.getByTestId('party-face-input')).toBeInTheDocument();
+    expect(screen.getByTestId('party-face-submit')).toBeInTheDocument();
   });
 
   it('renders the album and opens a photo with a download link', async () => {
@@ -353,7 +431,6 @@ describe('PartyPage (public party landing)', () => {
     const dialog = await screen.findByRole('dialog');
     expect(screen.getByRole('link', { name: /Scarica/i }))
       .toHaveAttribute('href', '/api/party/tok-1/media/f2/download');
-    const { within } = await import('@testing-library/react');
     await user.click(within(dialog).getByRole('button', { name: /Chiudi/i }));
 
     // No TV endpoint was ever touched by completing the search.
