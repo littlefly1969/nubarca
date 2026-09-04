@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPage } from './PartyPage';
-import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
+import { errorResponse, installFetchMock, jsonResponse, setIntersecting } from '../test-utils';
 import { I18nProvider } from '../i18n';
 
 afterEach(() => {
@@ -756,6 +756,204 @@ describe('PartyPage (public party landing)', () => {
       expect(screen.queryByTestId('party-new-moments')).not.toBeInTheDocument();
       expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
         .toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // --- Capability gating ----------------------------------------------------
+  //
+  // The rule these guard: a card is rendered only when the capability is
+  // IMPLEMENTED and ENABLED for this party. Any capability added later needs
+  // its own enabled→present / disabled→absent pair here.
+
+  it('derives the visible deck from availability, not from the JSX', async () => {
+    mockHub({ gameEnabled: true });
+    render(wrapper());
+    const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    // Exactly the three capabilities that are real today, each stating its tier.
+    expect(Array.from(deck.querySelectorAll('[data-testid^="party-capability-"]'))
+      .map((el) => `${el.getAttribute('data-testid')}:${el.getAttribute('data-variant')}`))
+      .toEqual([
+        'party-capability-face:signature',
+        'party-capability-challenges:activity',
+        'party-capability-album:utility',
+      ]);
+  });
+
+  it('renders the challenges capability ONLY when the party game is enabled', async () => {
+    mockHub({ gameEnabled: true });
+    const on = render(wrapper());
+    expect(await screen.findByTestId('party-capability-challenges')).toBeInTheDocument();
+    // The route is unchanged by the gating rework.
+    expect(screen.getByRole('link', { name: /Sfide e votazioni/i }))
+      .toHaveAttribute('href', '/party/tok-1/challenges');
+    on.unmount();
+
+    mockHub({ gameEnabled: false });
+    render(wrapper());
+    await screen.findByTestId('party-capability-album');
+    expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps album and face search available on any valid party', async () => {
+    // Everything optional switched off: the two always-available capabilities
+    // remain, and the deck is still a whole composition.
+    mockHub({ gameEnabled: false, contributionUrl: null });
+    render(wrapper());
+    const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
+    expect(within(deck).getByRole('button', { name: /Trova le tue foto/i })).toBeInTheDocument();
+    expect(within(deck).getByRole('link', { name: /Esplora l’album/i })).toBeInTheDocument();
+    expect(deck.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(2);
+  });
+
+  it('renders no capability the product does not offer yet', async () => {
+    mockHub();
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    // Dedications, song requests and printing are planned, not built: no card,
+    // no placeholder, no disabled tile, and no stray copy anywhere on the page.
+    const page = document.body.textContent ?? '';
+    expect(page).not.toMatch(/dedica|canzone|brano|musica|stampa|ricordo da stampare/i);
+    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(3);
+    expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
+    expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
+  });
+
+  // --- Guest dock -----------------------------------------------------------
+
+  function hero() {
+    return document.querySelector('.party-guest-hub-hero') as HTMLElement;
+  }
+  function gallery() {
+    return document.getElementById('party-photos') as HTMLElement;
+  }
+
+  it('stays out of the first viewport and arrives once the cover is behind', async () => {
+    mockHub();
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+
+    // On the cover: no dock, and nothing of it reachable by Tab.
+    setIntersecting(hero(), true);
+    expect(screen.queryByTestId('party-dock')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: /Navigazione festa/i })).not.toBeInTheDocument();
+
+    // Scrolled past it: the dock appears.
+    setIntersecting(hero(), false);
+    const dock = screen.getByTestId('party-dock');
+    expect(dock).toBeInTheDocument();
+    expect(dock).toHaveAttribute('aria-label', 'Navigazione festa');
+    // Hidden earlier meant NOT RENDERED, so it was never a focus trap of its own.
+    expect(within(dock).getAllByRole('button')).toHaveLength(2);
+  });
+
+  it('tracks which section the guest is in', async () => {
+    mockHub();
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    setIntersecting(hero(), false);
+
+    // Past the cover but not yet at the album: Home is where they are.
+    expect(screen.getByTestId('party-dock-home')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('party-dock-album')).not.toHaveAttribute('aria-current');
+
+    setIntersecting(gallery(), true);
+    expect(screen.getByTestId('party-dock-album')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('party-dock-home')).not.toHaveAttribute('aria-current');
+  });
+
+  it('navigates by scrolling, and creates no route of its own', async () => {
+    mockHub();
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    setIntersecting(hero(), false);
+
+    const heroScroll = vi.fn();
+    const galleryScroll = vi.fn();
+    hero().scrollIntoView = heroScroll;
+    gallery().scrollIntoView = galleryScroll;
+    const before = window.location.href;
+
+    await user.click(screen.getByTestId('party-dock-album'));
+    expect(galleryScroll).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
+    await user.click(screen.getByTestId('party-dock-home'));
+    expect(heroScroll).toHaveBeenCalledWith(expect.objectContaining({ block: 'start' }));
+    // Scrolling, not routing: the dock adds no history entry and no URL of its
+    // own — the album stays an anchor on this page.
+    expect(window.location.href).toBe(before);
+    expect(screen.getByTestId('party-dock-home').tagName).toBe('BUTTON');
+  });
+
+  it('offers Share only when the party takes contributions, and recomposes without it', async () => {
+    mockHub();
+    const withShare = render(wrapper());
+    await screen.findByTestId('party-grid');
+    setIntersecting(hero(), false);
+    const share = screen.getByTestId('party-dock-share');
+    // The same URL the hero CTA uses — one contribution destination, not two.
+    expect(share).toHaveAttribute('href', '/party/upload-token/upload');
+    expect(screen.getByTestId('party-dock')).toHaveAttribute('data-share', 'yes');
+    withShare.unmount();
+
+    mockHub({ contributionUrl: null });
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    setIntersecting(hero(), false);
+    expect(screen.queryByTestId('party-dock-share')).not.toBeInTheDocument();
+    // The dock is still there, with the two items it does have.
+    const dock = screen.getByTestId('party-dock');
+    expect(dock).toHaveAttribute('data-share', 'no');
+    expect(within(dock).getAllByRole('button')).toHaveLength(2);
+    expect(within(dock).queryAllByRole('link')).toHaveLength(0);
+    // And no hero CTA either: the party accepts nothing, so nothing offers to.
+    expect(screen.queryByTestId('party-hub-cta')).not.toBeInTheDocument();
+  });
+
+  it('sits under the face-search sheet and under the viewer', async () => {
+    mockHub();
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    setIntersecting(hero(), false);
+    expect(screen.getByTestId('party-dock')).toBeInTheDocument();
+
+    // The sheet is a modal: it covers the dock rather than competing with it.
+    await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
+    const sheet = await screen.findByTestId('party-face');
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+    expect(sheet.contains(screen.getByTestId('party-dock'))).toBe(false);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
+
+    // Same for the viewer.
+    await user.click(screen.getAllByRole('button', { name: 'Apri foto' })[0]);
+    const viewer = await screen.findByRole('dialog', { name: 'Visualizzatore foto' });
+    expect(viewer.contains(screen.getByTestId('party-dock'))).toBe(false);
+  });
+
+  it('keeps its section state across a polling refresh', async () => {
+    let current = [media('f1'), media('f2')];
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: current.length }),
+      'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: current }),
+    });
+    vi.useFakeTimers();
+    try {
+      render(wrapper());
+      await settle();
+      setIntersecting(hero(), false);
+      setIntersecting(gallery(), true);
+      expect(screen.getByTestId('party-dock-album')).toHaveAttribute('aria-current', 'true');
+
+      current = [...current, media('f3')];
+      await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+      await settle();
+      // New moments arriving must not move the guest somewhere else.
+      expect(screen.getByTestId('party-dock-album')).toHaveAttribute('aria-current', 'true');
+      expect(screen.getByTestId('party-dock')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

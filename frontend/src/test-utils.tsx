@@ -28,6 +28,22 @@ export function triggerIntersection(): void {
   });
 }
 
+/**
+ * Move ONE observed element across the viewport boundary, in act().
+ *
+ * `triggerIntersection` fires every active observer together. The guest page
+ * watches its hero and its gallery separately — the dock appears when the hero
+ * leaves and highlights Album when the gallery arrives — so those two have to be
+ * movable one at a time.
+ */
+export function setIntersecting(target: Element, isIntersecting: boolean): void {
+  act(() => {
+    (globalThis as unknown as {
+      __fireIntersectionOn?: (t: Element, v: boolean) => void;
+    }).__fireIntersectionOn?.(target, isIntersecting);
+  });
+}
+
 export interface ObservedIntersection {
   root: IntersectionObserverInit['root'];
   rootMargin: IntersectionObserverInit['rootMargin'];
