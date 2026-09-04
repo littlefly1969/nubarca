@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   classifyPartyFile,
@@ -10,14 +10,62 @@ import {
   type PartyUploadSession,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { PRODUCT_NAME } from '../brand/brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyGuestMessageForm } from '../components/PartyGuestMessageForm';
+import {
+  CONTRIBUTION_MODE_PARAM, contributionModeFrom, type ContributionMode,
+} from './partyContributionMode';
+import './PartyContribution.css';
 
 // PUBLIC, unauthenticated party UPLOAD landing. Reached by scanning the "Upload
 // photos" QR on a paired TV. The :token here is the SEPARATE upload token. It
 // lets a guest add image(s) to the album without signing in — no login, no
 // owner identity, no library browsing. When party/upload is disabled or revoked
 // the API returns 404 and we show a friendly "unavailable".
+// The same wordmark and switcher the guest hub uses, so arriving here reads as
+// the same party rather than a different site. Byte-exact approved on-dark
+// asset: this surface is a fixed dark one, whatever theme the visitor resolved.
+const CONTRIBUTION_WORDMARK = {
+  src: '/brand/nubarca-wordmark-on-dark-480w.png',
+  width: 480,
+  height: 135,
+} as const;
+
+function ContributionBrandBar() {
+  return (
+    <div className="party-contribution-topbar">
+      <img
+        className="party-contribution-logo"
+        src={CONTRIBUTION_WORDMARK.src}
+        alt={PRODUCT_NAME}
+        width={CONTRIBUTION_WORDMARK.width}
+        height={CONTRIBUTION_WORDMARK.height}
+      />
+      <LanguageSwitcher className="language-switcher language-switcher-public" compact />
+    </div>
+  );
+}
+
+function PhotoVideoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="3.5" y="5.5" width="13" height="13" rx="2.5" />
+      <path d="m5.6 15.4 3.2-3.2a1.4 1.4 0 0 1 2 0l3.5 3.5" />
+      <circle cx="12.6" cy="9.6" r="1.3" />
+      <path d="m16.5 10.4 4-2.2v7.6l-4-2.2" />
+    </svg>
+  );
+}
+
+function HeartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 19.6C7.9 16.9 4.5 14.2 4.5 10.6A3.9 3.9 0 0 1 12 8.6a3.9 3.9 0 0 1 7.5 2c0 3.6-3.4 6.3-7.5 9Z" />
+    </svg>
+  );
+}
+
 type Phase =
   | { kind: 'loading' }
   | { kind: 'ready'; albumName: string }
@@ -137,7 +185,19 @@ export function PartyUploadPage() {
   // Which of the two contributions the guest is making. Media is the default:
   // a party is still mostly photographs, and the written channel is an addition
   // to that rather than a competitor for the same screen.
-  const [contribution, setContribution] = useState<'media' | 'message'>('media');
+  // The mode lives in the URL, so the guest hub can link straight to the
+  // composer and a reload keeps the guest where they were. Changing it REPLACES
+  // the entry: flipping between the two halves of one page is not a journey,
+  // and Back should leave the page rather than walk the tabs.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contribution = contributionModeFrom(searchParams.get(CONTRIBUTION_MODE_PARAM));
+  const setContribution = useCallback((mode: ContributionMode) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set(CONTRIBUTION_MODE_PARAM, mode);
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const inputRef = useRef<HTMLInputElement>(null);
   const uploadWakeLock = useUploadWakeLock();
 
@@ -281,25 +341,44 @@ export function PartyUploadPage() {
   };
 
   if (phase.kind === 'loading') {
-    return <main className="party-upload-page"><p>{t('common.loading')}</p></main>;
+    return (
+      <main className="party-contribution" aria-busy="true">
+        <div className="party-contribution-shell">
+          <ContributionBrandBar />
+          <div className="party-contribution-state"><p>{t('common.loading')}</p></div>
+        </div>
+      </main>
+    );
   }
   if (phase.kind === 'unavailable') {
     return (
-      <main className="party-upload-page">
-        <div className="party-upload-card">
-          <h1>{t('partyUpload.unavailableTitle')}</h1>
-          <p role="alert">{t('partyUpload.unavailableBody')}</p>
+      <main className="party-contribution">
+        <div className="party-contribution-shell">
+          <ContributionBrandBar />
+          <div className="party-contribution-state">
+            <h1>{t('partyUpload.unavailableTitle')}</h1>
+            <p role="alert">{t('partyUpload.unavailableBody')}</p>
+          </div>
         </div>
       </main>
     );
   }
   if (phase.kind === 'error') {
     return (
-      <main className="party-upload-page">
-        <div className="party-upload-card">
-          <h1>{t('partyUpload.errorTitle')}</h1>
-          <p role="alert">{t('partyUpload.errorBody')}</p>
-          <button type="button" onClick={() => probe()}>{t('common.tryAgain')}</button>
+      <main className="party-contribution">
+        <div className="party-contribution-shell">
+          <ContributionBrandBar />
+          <div className="party-contribution-state">
+            <h1>{t('partyUpload.errorTitle')}</h1>
+            <p role="alert">{t('partyUpload.errorBody')}</p>
+            <button
+              type="button"
+              className="party-contribution-secondary"
+              onClick={() => probe()}
+            >
+              {t('common.tryAgain')}
+            </button>
+          </div>
         </div>
       </main>
     );
@@ -330,51 +409,61 @@ export function PartyUploadPage() {
     : t(countKey, { remaining: String(remaining), max: String(max) }));
 
   return (
-    <main className="party-upload-page">
-      <div className="party-upload-card">
-        <div className="party-upload-top">
-          <h1>
+    <main className="party-contribution">
+      <div className="party-contribution-shell">
+        <ContributionBrandBar />
+        <header className="party-contribution-head">
+          <h1 className="party-contribution-title">
             {phase.albumName
               ? t('partyUpload.titleTo', { album: phase.albumName })
               : t('partyUpload.titleGeneric')}
           </h1>
-          <LanguageSwitcher className="language-switcher language-switcher-public" />
-        </div>
-        <div className="party-contribution-tabs" role="tablist">
+          <p className="party-contribution-help">{t('partyUpload.subtitle')}</p>
+        </header>
+
+        {/* Two buttons in a named group rather than a half-built tablist: the
+            previous markup announced tabs without aria-controls, panels or the
+            arrow-key behaviour a tablist promises. */}
+        <div className="party-contribution-modes" role="group" aria-label={t('partyUpload.modeLabel')}>
           <button
             type="button"
-            role="tab"
-            aria-selected={contribution === 'media'}
-            className={contribution === 'media' ? 'active' : undefined}
+            className="party-contribution-mode"
+            data-testid="party-mode-media"
+            aria-pressed={contribution === 'media'}
             onClick={() => setContribution('media')}
             disabled={busy}
           >
+            <PhotoVideoIcon />
             {t('partyMessage.tabMedia')}
           </button>
           <button
             type="button"
-            role="tab"
-            aria-selected={contribution === 'message'}
-            className={contribution === 'message' ? 'active' : undefined}
-            onClick={() => setContribution('message')}
+            className="party-contribution-mode"
+            data-testid="party-mode-message"
+            aria-pressed={contribution === 'message'}
             // Switching away mid-upload would leave the queue running behind a
             // hidden progress bar, so the choice is locked while media is
             // in flight.
+            onClick={() => setContribution('message')}
             disabled={busy}
           >
+            <HeartIcon />
             {t('partyMessage.tabMessage')}
           </button>
         </div>
 
         {contribution === 'message' && token && (
-          <PartyGuestMessageForm uploadToken={token} />
+          <PartyGuestMessageForm
+            uploadToken={token}
+            onShareMedia={() => setContribution('media')}
+          />
         )}
 
         {contribution === 'media' && (<>
-        <p className="muted">{t('partyUpload.intro')}</p>
+        <p className="party-contribution-intro">{t('partyUpload.intro')}</p>
 
         {session && (
-          <ul className="party-upload-quota" data-testid="upload-quota">
+          <ul className="party-contribution-quota" data-testid="upload-quota">
             <li>{quotaLine(
               session.remainingPhotos, session.maxPhotos,
               'partyUpload.photosUnlimited', 'partyUpload.photosRemaining')}
@@ -386,8 +475,14 @@ export function PartyUploadPage() {
           </ul>
         )}
 
+        {/* Visually hidden but still a real, focusable input, so the picker is a
+            thumb-sized surface for touch AND reachable from the keyboard. The
+            aria-label stays on the input: it is the control, and the label
+            beside it must not become a second accessible name for it. */}
         <input
           ref={inputRef}
+          id="party-media-input"
+          className="party-contribution-file-input"
           type="file"
           // Photos AND the video containers the party pipeline accepts. The
           // server re-checks every byte; this only shapes the picker.
@@ -397,52 +492,63 @@ export function PartyUploadPage() {
           onChange={(e) => onSelect(e.target.files)}
           disabled={busy}
         />
+        <label className="party-contribution-picker" htmlFor="party-media-input">
+          <span className="party-contribution-picker-icon" aria-hidden="true">
+            <PhotoVideoIcon />
+          </span>
+          <span className="party-contribution-picker-text">
+            <strong>{t('partyUpload.pickerTitle')}</strong>
+            <span>
+              {files.length > 0
+                ? tn(files.length, 'partyUpload.selected')
+                : t('partyUpload.pickerHelp')}
+            </span>
+          </span>
+        </label>
 
         {!busy && (overPhotoQuota || overVideoQuota || unsupported > 0) && (
-          <div className="party-upload-selection-warning" role="status">
+          <div className="party-contribution-notice" role="status">
             {overPhotoQuota && <p>{t('partyUpload.overPhotoQuota')}</p>}
             {overVideoQuota && <p>{t('partyUpload.overVideoQuota')}</p>}
             {unsupported > 0 && <p>{t('partyUpload.unsupportedSelected')}</p>}
           </div>
         )}
 
-        <div className="party-upload-actions">
+        <div className="party-contribution-actions">
           <button
             type="button"
+            className="party-contribution-primary"
             onClick={() => void handleUpload()}
             disabled={busy || files.length === 0}
           >
             {uploadLabel}
           </button>
-          {files.length > 0 && !busy && (
-            <span className="muted">{tn(files.length, 'partyUpload.selected')}</span>
-          )}
         </div>
 
         {busy && (
-          <div className="party-upload-progress" data-testid="upload-progress">
+          <div className="party-contribution-progress" data-testid="upload-progress">
             <div
-              className="party-upload-progressbar"
+              className="party-contribution-progressbar"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(progress * 100)}
             >
               <div
-                className="party-upload-progressbar-fill"
+                className="party-contribution-progressbar-fill"
                 style={{ width: `${Math.round(progress * 100)}%` }}
               />
             </div>
-            <p className="party-upload-progress-label" aria-live="polite">
+            <p className="party-contribution-progress-label" aria-live="polite">
               {progress >= 1
                 ? t('partyUpload.processing')
                 : t('partyUpload.uploadingPercent', { percent: Math.round(progress * 100) })}
             </p>
-            <p className="party-upload-warning" role="alert">{t('partyUpload.doNotClose')}</p>
+            <p className="party-contribution-progress-note" role="alert">{t('partyUpload.doNotClose')}</p>
           </div>
         )}
 
-        <div className="party-upload-status" aria-live="polite">
+        <div className="party-contribution-status" aria-live="polite">
           {result && (
             <div data-testid="upload-result">
               <p>

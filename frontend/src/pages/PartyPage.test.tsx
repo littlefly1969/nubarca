@@ -185,7 +185,7 @@ describe('PartyPage (public party landing)', () => {
 
     // A real destination is a real link; an action that opens something in
     // place is a real button. Never a clickable div either way.
-    expect(within(deck).getAllByRole('link')).toHaveLength(2);
+    expect(within(deck).getAllByRole('link')).toHaveLength(3);
     expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
       .toHaveAttribute('href', '#party-photos');
     expect(within(deck).getByRole('link', { name: /Sfide e votazioni/i }))
@@ -204,8 +204,9 @@ describe('PartyPage (public party landing)', () => {
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
     expect(within(deck).queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
-    // The rest of the deck is unaffected: the album link plus the face action.
-    expect(within(deck).getAllByRole('link')).toHaveLength(1);
+    // The rest of the deck is unaffected: dedication and album still link out,
+    // and the face action is still a button.
+    expect(within(deck).getAllByRole('link')).toHaveLength(2);
     expect(within(deck).getByRole('button', { name: /Trova le tue foto/i })).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-face')).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-album')).toBeInTheDocument();
@@ -232,7 +233,7 @@ describe('PartyPage (public party landing)', () => {
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
     // Dedication, song requests and printing are planned, not built: they must
     // not appear at all — not even as a disabled "coming soon" card.
-    expect(deck.textContent).not.toMatch(/dedica|canzone|brano|stampa|ricordo/i);
+    expect(deck.textContent).not.toMatch(/canzone|brano|musica|stampa|ricordo/i);
     expect(deck.querySelectorAll('[disabled], [aria-disabled="true"]')).toHaveLength(0);
   });
 
@@ -776,6 +777,7 @@ describe('PartyPage (public party landing)', () => {
       .map((el) => `${el.getAttribute('data-testid')}:${el.getAttribute('data-variant')}`))
       .toEqual([
         'party-capability-face:signature',
+        'party-capability-dedication:activity',
         'party-capability-challenges:activity',
         'party-capability-album:utility',
       ]);
@@ -812,13 +814,52 @@ describe('PartyPage (public party landing)', () => {
     mockHub();
     render(wrapper());
     await screen.findByTestId('party-grid');
-    // Dedications, song requests and printing are planned, not built: no card,
-    // no placeholder, no disabled tile, and no stray copy anywhere on the page.
+    // Song requests and printing are planned, not built: no card, no
+    // placeholder, no disabled tile, no stray copy. Dedications ARE built —
+    // they ride the same contribution enablement — so they are a real card,
+    // gated and asserted separately below.
     const page = document.body.textContent ?? '';
-    expect(page).not.toMatch(/dedica|canzone|brano|musica|stampa|ricordo da stampare/i);
-    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(3);
+    expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo da stampare/i);
+    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(4);
     expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
     expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
+  });
+
+  it('offers the dedication only where contributions are accepted', async () => {
+    mockHub();
+    const on = render(wrapper());
+    await screen.findByTestId('party-capability-dedication');
+    on.unmount();
+
+    // The backend ties written contributions to the SAME upload enablement, so
+    // a party that accepts nothing offers no dedication either — and there is
+    // no separate flag to consult.
+    mockHub({ contributionUrl: null });
+    render(wrapper());
+    await screen.findByTestId('party-capability-album');
+    expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Lascia una dedica/i })).not.toBeInTheDocument();
+  });
+
+  it('sends the dedication straight to the composer, and everything else to media', async () => {
+    mockHub();
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+
+    // All three go to the ONE contribution URL the backend returned; only the
+    // dedication asks for the composer.
+    expect(screen.getByRole('link', { name: /Lascia una dedica/i }))
+      .toHaveAttribute('href', '/party/upload-token/upload?mode=message');
+    expect(screen.getByTestId('party-hub-cta'))
+      .toHaveAttribute('href', '/party/upload-token/upload');
+
+    setIntersecting(document.querySelector('.party-guest-hub-hero') as HTMLElement, false);
+    expect(screen.getByTestId('party-dock-share'))
+      .toHaveAttribute('href', '/party/upload-token/upload');
+
+    // The general entrance is not a duplicate of the dedication: two of the
+    // three carry no mode at all.
+    expect(document.querySelectorAll('a[href*="mode=message"]')).toHaveLength(1);
   });
 
   // --- Guest dock -----------------------------------------------------------

@@ -109,7 +109,7 @@ describe('i18n foundation', () => {
   it('handles plurals and interpolation', () => {
     renderProbe();
     expect(screen.getByTestId('plural')).toHaveTextContent('3 elementi');
-    expect(screen.getByTestId('interp')).toHaveTextContent('Carica foto su “Festa”');
+    expect(screen.getByTestId('interp')).toHaveTextContent('Condividi con Festa');
   });
 
   it('has an English string for every Italian key that is user-facing', () => {

@@ -875,12 +875,6 @@ a {
 .party-upload-page { min-height: 100vh; background: #0f1115; color: #f2f3f5; display: flex; align-items: flex-start; justify-content: center; padding: 1.5rem; box-sizing: border-box; }
 .party-upload-card { max-width: 32rem; width: 100%; background: #171a21; border-radius: 12px; padding: 1.75rem; margin-top: 3rem; }
 .party-upload-card h1 { margin: 0 0 0.5rem; }
-.party-upload-actions { display: flex; gap: 0.75rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
-.party-upload-progress { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
-.party-upload-progressbar { width: 100%; height: 0.6rem; border-radius: 999px; background: rgb(255 255 255 / 12%); overflow: hidden; }
-.party-upload-progressbar-fill { height: 100%; min-width: 0.6rem; background: #4c8dff; border-radius: 999px; transition: width 120ms linear; }
-.party-upload-progress-label { margin: 0; font-weight: 600; }
-.party-upload-warning { margin: 0; padding: 0.6rem 0.8rem; border-radius: 8px; background: rgb(255 193 7 / 16%); border: 1px solid rgb(255 193 7 / 35%); color: #ffd873; font-weight: 600; }
 .party-upload-status { margin-top: 1rem; }
 .tv-party-qr {
   box-sizing: border-box;
