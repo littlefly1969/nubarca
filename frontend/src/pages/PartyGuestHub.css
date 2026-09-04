@@ -1,0 +1,446 @@
+/* Public party landing — the FIRST VIEWPORT of the guest hub.
+   Reached by scanning the QR at the party, so it is designed phone-first: the
+   event cover is the page, not a card resting on it, and the one action a guest
+   needs is a thumb-sized target inside the same composition.
+
+   Scope: shell, header, hero, event info, primary CTA and the loading/error
+   states. The gallery, face search and secondary capability cards below still
+   use their existing rules in styles.css and are untouched here. */
+
+.party-guest-hub {
+  /* Fixed dark surface: a party guest sees the same branded cover whatever
+     theme the visiting browser resolved. Values come from the brand tokens. */
+  --party-hub-text: var(--brand-cloud-white);
+  --party-hub-muted: rgb(245 247 251 / 72%);
+  --party-hub-border: rgb(245 247 251 / 14%);
+  --party-hub-surface: rgb(15 30 58 / 82%);
+  --party-hub-focus: var(--brand-cyan-glow);
+  /* The dark theme's approved --success, pinned: this surface stays dark even
+     when the visiting browser resolved the light theme. */
+  --party-hub-live: #3fd98c;
+
+  min-height: 100vh;
+  min-height: 100svh;
+  box-sizing: border-box;
+  /* Belt and braces against a phone-width horizontal scrollbar: nothing here
+     is wider than the viewport by construction, and `clip` keeps a stray
+     descendant (the legacy grid below the hero) from creating one either. */
+  overflow-x: clip;
+  background: var(--brand-midnight-navy);
+  color: var(--party-hub-text);
+  font-family: var(--font-ui);
+}
+
+/* Hero ------------------------------------------------------------------- */
+
+.party-guest-hub-hero {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.5rem;
+  /* ~46% of the first viewport on a phone, and never so short that the cover
+     stops reading as a cover. The plain min-height is the fallback for engines
+     without svh, which drop the whole `max()` declaration. */
+  min-height: 20rem;
+  min-height: max(20rem, 46svh);
+  padding:
+    max(0.85rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    1.25rem
+    max(1rem, env(safe-area-inset-left));
+}
+
+/* The cover itself. Decorative (the album name is the heading), so it is a
+   background image on an aria-hidden layer rather than an <img> with alt. */
+.party-guest-hub-hero-cover {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background-color: var(--brand-deep-blue);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+/* No cover set: an intentional NubArca composition, not an empty rectangle. */
+.party-guest-hub-hero-cover[data-cover='fallback'] {
+  background-image:
+    radial-gradient(120% 82% at 78% 6%, rgb(0 212 255 / 16%), transparent 62%),
+    radial-gradient(105% 78% at 14% 12%, rgb(21 101 255 / 46%), transparent 66%),
+    linear-gradient(168deg, var(--brand-deep-blue) 8%, var(--brand-midnight-navy) 82%);
+}
+
+/* Melts the cover into the page instead of ending it on a hard edge — this is
+   what keeps the hero from reading as a card dropped onto the background. */
+.party-guest-hub-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  /* A short scrim under the brand bar keeps the wordmark and the switcher
+     legible over a bright cover, then opens up across the photo's sweet spot
+     before deepening under the headline. */
+  background: linear-gradient(
+    180deg,
+    rgb(10 15 26 / 58%) 0%,
+    rgb(10 15 26 / 26%) 16%,
+    rgb(10 15 26 / 46%) 42%,
+    rgb(10 15 26 / 86%) 74%,
+    var(--brand-midnight-navy) 100%
+  );
+}
+
+.party-guest-hub-topbar,
+.party-guest-hub-headline {
+  width: min(100%, 68rem);
+  margin: 0 auto;
+}
+
+.party-guest-hub-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 3rem;
+}
+
+/* Approved wordmark, unfiltered and unrecoloured; the surrounding gap and the
+   hero padding provide the brand clear space. */
+.party-guest-hub-logo {
+  display: block;
+  width: clamp(8.5rem, 34vw, 11rem);
+  height: auto;
+  max-width: 100%;
+}
+
+.party-guest-hub-topbar .language-switcher-public {
+  flex: none;
+}
+
+/* The switcher is a shared app control, so its colours follow the VISITOR's
+   theme. This surface does not: pin it to the dark palette — including
+   color-scheme, the only lever we have over the OS-drawn option list — so a
+   light-theme visitor is not left with a near-invisible label on the cover. */
+.party-guest-hub .language-switcher-label {
+  color: var(--party-hub-muted);
+}
+
+.party-guest-hub .language-switcher select {
+  min-height: 3rem;
+  border-color: var(--party-hub-border);
+  background-color: rgb(10 15 26 / 78%);
+  color: var(--party-hub-text);
+  color-scheme: dark;
+}
+
+.party-guest-hub-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.party-guest-hub-eyebrow {
+  margin: 0;
+  color: var(--brand-cyan-glow);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.party-guest-hub-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(2rem, 9.5vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.04;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  /* A single long album name must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
+}
+
+.party-guest-hub-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--party-hub-muted);
+  font-size: 0.95rem;
+}
+
+.party-guest-hub-meta-sep {
+  color: rgb(245 247 251 / 38%);
+}
+
+.party-guest-hub-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--party-hub-text);
+  font-weight: 600;
+}
+
+.party-guest-hub-live-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--party-hub-live);
+  box-shadow: 0 0 0 3px rgb(63 217 140 / 18%);
+}
+
+/* Primary CTA ------------------------------------------------------------ */
+
+.party-guest-hub-cta {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 4rem;
+  margin-top: 0.35rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-card);
+  /* Electric Blue fill with a very light Cyan Glow tint across the top-left —
+     no neon, and white on it clears AA (the fill only gets lighter). */
+  background:
+    linear-gradient(135deg, rgb(0 212 255 / 20%), rgb(0 212 255 / 0%) 60%),
+    var(--brand-electric-blue);
+  box-shadow: 0 10px 28px rgb(21 101 255 / 28%);
+  color: var(--accent-contrast);
+  text-decoration: none;
+}
+
+.party-guest-hub-cta-icon {
+  flex: 0 0 2.6rem;
+  display: grid;
+  place-items: center;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 16%);
+}
+
+.party-guest-hub-cta-icon svg {
+  width: 1.4rem;
+  height: 1.4rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-guest-hub-cta-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.party-guest-hub-cta-text strong {
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.party-guest-hub-cta-text span {
+  color: rgb(255 255 255 / 82%);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.party-guest-hub-cta-chevron {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-left: auto;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Everything below the first viewport keeps its existing styling; this wrapper
+   only restores the page gutter the hero deliberately spends. */
+.party-guest-hub-body {
+  padding:
+    1.5rem
+    max(1rem, env(safe-area-inset-right))
+    max(1.5rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+}
+
+/* Loading ---------------------------------------------------------------- */
+
+/* The skeleton mirrors the real composition — hero, brand bar, title lines,
+   CTA — so the page settles into place instead of jumping. */
+.party-guest-hub-skeleton-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.5rem;
+  box-sizing: border-box;
+  min-height: 20rem;
+  min-height: max(20rem, 46svh);
+  padding:
+    max(0.85rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    1.25rem
+    max(1rem, env(safe-area-inset-left));
+  background:
+    linear-gradient(180deg, rgb(15 30 58 / 70%), var(--brand-midnight-navy)),
+    var(--brand-deep-blue);
+}
+
+.party-guest-hub-skeleton-top,
+.party-guest-hub-skeleton-lines {
+  width: min(100%, 68rem);
+  margin: 0 auto;
+}
+
+.party-guest-hub-skeleton-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.party-guest-hub-skeleton-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.party-guest-hub-shape {
+  border-radius: var(--radius-button);
+  background: linear-gradient(
+    100deg,
+    rgb(245 247 251 / 6%) 20%,
+    rgb(245 247 251 / 14%) 40%,
+    rgb(245 247 251 / 6%) 60%
+  );
+  background-size: 220% 100%;
+  animation: party-guest-hub-pulse 1.4s ease-in-out infinite;
+}
+
+.party-guest-hub-shape-logo { width: clamp(8.5rem, 34vw, 11rem); height: 2.1rem; }
+.party-guest-hub-shape-lang { width: 5.5rem; height: 2.1rem; }
+.party-guest-hub-shape-eyebrow { width: 7rem; height: 0.75rem; }
+.party-guest-hub-shape-title { width: min(100%, 18rem); height: 2.6rem; }
+.party-guest-hub-shape-meta { width: 11rem; height: 1rem; }
+.party-guest-hub-shape-cta { height: 4rem; margin-top: 0.35rem; border-radius: var(--radius-card); }
+
+@keyframes party-guest-hub-pulse {
+  to { background-position-x: -220%; }
+}
+
+/* Unavailable / error ---------------------------------------------------- */
+
+/* A revoked link is still a guest surface, not a technical error page: the
+   wordmark stays on a NubArca composition and the message arrives on a calm
+   card. */
+.party-guest-hub-state-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding:
+    max(0.85rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(2rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  background:
+    radial-gradient(120% 58% at 78% 0%, rgb(0 212 255 / 12%), transparent 60%),
+    radial-gradient(105% 62% at 12% 4%, rgb(21 101 255 / 34%), transparent 64%),
+    var(--brand-midnight-navy);
+}
+
+.party-guest-hub-state {
+  /* Auto block margins centre the card in the remaining column space. */
+  margin-block: auto;
+  width: min(100%, 34rem);
+  box-sizing: border-box;
+  margin-inline: auto;
+  padding: 1.5rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: var(--radius-card);
+  background: var(--party-hub-surface);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.party-guest-hub-state h1 {
+  margin: 0 0 0.6rem;
+  font-family: var(--font-heading);
+  font-size: 1.55rem;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.party-guest-hub-state p {
+  margin: 0;
+  color: var(--party-hub-muted);
+  line-height: 1.5;
+}
+
+.party-guest-hub-retry {
+  width: 100%;
+  min-height: 3rem;
+  margin-top: 1.25rem;
+  padding: 0.7rem 1.2rem;
+  border: 1px solid rgb(0 212 255 / 42%);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--party-hub-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Focus + motion --------------------------------------------------------- */
+
+/* Scoped to this slice's containers so the capability cards below keep their
+   existing focus ring until they are redesigned in turn. */
+.party-guest-hub-hero :focus-visible,
+.party-guest-hub-state-page :focus-visible {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .party-guest-hub-shape { animation: none; }
+}
+
+/* Tablet and up ---------------------------------------------------------- */
+
+@media (min-width: 48rem) {
+  .party-guest-hub-hero,
+  .party-guest-hub-skeleton-hero {
+    min-height: 24rem;
+    min-height: max(24rem, 54svh);
+    padding-inline: max(2rem, env(safe-area-inset-left)) max(2rem, env(safe-area-inset-right));
+    padding-bottom: 2rem;
+  }
+
+  .party-guest-hub-headline {
+    gap: 0.7rem;
+  }
+
+  .party-guest-hub-cta {
+    width: min(100%, 26rem);
+    margin-top: 0.65rem;
+  }
+
+  .party-guest-hub-body {
+    padding-inline: max(2rem, env(safe-area-inset-left)) max(2rem, env(safe-area-inset-right));
+  }
+}

@@ -36,26 +36,133 @@ const items = {
 };
 
 describe('PartyPage (public party landing)', () => {
+  const hub = {
+    albumName: 'Beach Party', itemCount: 1,
+    coverUrl: '/api/party/tok-1/media/f1/preview',
+    contributionUrl: '/party/upload-token/upload', gameEnabled: true,
+  };
+
   it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({
-        albumName: 'Beach Party', itemCount: 1,
-        coverUrl: '/api/party/tok-1/media/f1/preview',
-        contributionUrl: '/party/upload-token/upload', gameEnabled: true,
-      }),
+      'GET /api/party/tok-1': () => jsonResponse(hub),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
     render(wrapper());
-    expect(await screen.findByRole('link', { name: /Contribuisci alla festa/i }))
+    // Contributing is now the hero's primary call to action; it still points at
+    // the contribution URL the backend returned, and nothing else duplicates it.
+    expect(await screen.findByRole('link', { name: /Condividi un momento/i }))
       .toHaveAttribute('href', '/party/upload-token/upload');
+    expect(screen.getAllByRole('link', { name: /Condividi un momento/i })).toHaveLength(1);
     expect(screen.getByRole('link', { name: /Vota le sfide/i }))
       .toHaveAttribute('href', '/party/tok-1/challenges');
-    expect(document.querySelector('.party-hub-hero')).toHaveStyle({
+    expect(screen.getByTestId('party-hub-cover')).toHaveStyle({
       backgroundImage: 'url("/api/party/tok-1/media/f1/preview")',
     });
     expect(screen.getByTestId('party-face-open')).toBeInTheDocument();
     expect(screen.getByTestId('party-grid')).toBeInTheDocument();
   });
+
+  // --- Guest-hub first viewport -------------------------------------------
+
+  it('shows the OFFICIAL NubArca wordmark, never a text or restyled logo', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(hub),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(wrapper());
+    const logo = await screen.findByRole('img', { name: 'NubArca' });
+    // A byte-exact approved on-dark asset, at its own proportions: the guest hub
+    // is a fixed dark surface, so it never resolves the on-light artwork.
+    expect(logo).toHaveAttribute('src', '/brand/nubarca-wordmark-on-dark-480w.png');
+    expect(logo).toHaveAttribute('width', '480');
+    expect(logo).toHaveAttribute('height', '135');
+    expect(logo.getAttribute('style')).toBeNull();
+  });
+
+  it('makes the cover the hero and marks it decorative', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse(hub),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(wrapper());
+    const cover = await screen.findByTestId('party-hub-cover');
+    expect(cover).toHaveStyle({ backgroundImage: 'url("/api/party/tok-1/media/f1/preview")' });
+    expect(cover).toHaveAttribute('data-cover', 'photo');
+    // The album name is the heading; the cover art itself carries no semantics.
+    expect(cover).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Beach Party');
+    // Live state: the dynamic item count next to a "Live" marker.
+    expect(screen.getByText(/1 elemento/)).toBeInTheDocument();
+    expect(screen.getByText('Live')).toBeInTheDocument();
+  });
+
+  it('falls back to the branded NubArca cover when the album has none', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, coverUrl: null }),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(wrapper());
+    const cover = await screen.findByTestId('party-hub-cover');
+    // No inline background image: the fallback composition is the stylesheet's,
+    // selected by the data attribute.
+    expect(cover).toHaveAttribute('data-cover', 'fallback');
+    expect(cover.style.backgroundImage).toBe('');
+    // The hero is still branded and still leads to the same action.
+    expect(screen.getByRole('img', { name: 'NubArca' })).toBeInTheDocument();
+    expect(screen.getByTestId('party-hub-cta')).toHaveAttribute('href', '/party/upload-token/upload');
+  });
+
+  it('shows NO contribution CTA when the backend returns no contribution URL', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, contributionUrl: null }),
+      'GET /api/party/tok-1/items': () => jsonResponse(items),
+    });
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    // Never a dead or href-less action: the rest of the hub keeps working.
+    expect(screen.queryByTestId('party-hub-cta')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Condividi un momento/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Beach Party');
+  });
+
+  it('keeps the loading skeleton on the branded shell and shaped like the hero', async () => {
+    installFetchMock({
+      'GET /api/party/tok-1': () => new Promise<Response>(() => {}),
+      'GET /api/party/tok-1/items': () => new Promise<Response>(() => {}),
+    });
+    render(wrapper());
+    expect(document.querySelector('main.party-guest-hub')).toHaveAttribute('aria-busy', 'true');
+    const skeleton = screen.getByTestId('party-hub-skeleton');
+    // Hero-shaped: brand bar, title lines and the CTA are all reserved.
+    expect(skeleton.querySelector('.party-guest-hub-shape-logo')).toBeInTheDocument();
+    expect(skeleton.querySelector('.party-guest-hub-shape-title')).toBeInTheDocument();
+    expect(skeleton.querySelector('.party-guest-hub-shape-cta')).toBeInTheDocument();
+  });
+
+  it('keeps the error state branded and retryable', async () => {
+    let failing = true;
+    installFetchMock({
+      'GET /api/party/tok-1': () => (failing
+        ? errorResponse(500)
+        : jsonResponse(hub)),
+      'GET /api/party/tok-1/items': () => (failing
+        ? errorResponse(500)
+        : jsonResponse(items)),
+    });
+
+    render(wrapper());
+    expect(await screen.findByText(/Impossibile caricare questo album party/i)).toBeInTheDocument();
+    // Not a bare technical page: the official wordmark is part of the state.
+    expect(screen.getByRole('img', { name: 'NubArca' }))
+      .toHaveAttribute('src', '/brand/nubarca-wordmark-on-dark-480w.png');
+
+    // Retry re-runs the same load and recovers into the hub.
+    failing = false;
+    await userEvent.setup().click(screen.getByRole('button', { name: /Riprova/i }));
+    expect(await screen.findByTestId('party-grid')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Beach Party');
+  });
+
   it('renders the album and opens a photo with a download link', async () => {
     installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 1 }),
@@ -89,6 +196,9 @@ describe('PartyPage (public party landing)', () => {
 
     render(wrapper());
     expect(await screen.findByText(/non è più disponibile/i)).toBeInTheDocument();
+    // Still the guest experience, not a technical error page.
+    expect(screen.getByRole('img', { name: 'NubArca' }))
+      .toHaveAttribute('src', '/brand/nubarca-wordmark-on-dark-480w.png');
   });
 
   it('does not expose owner/metadata/upload surfaces', async () => {

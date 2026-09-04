@@ -9,6 +9,8 @@ import {
 import { useI18n } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
+import { PRODUCT_NAME } from '../brand/brand';
+import './PartyGuestHub.css';
 
 // PUBLIC, unauthenticated party album landing. Reached by scanning the QR shown
 // on a paired TV (or opening the shared link). View-only: it renders party-safe
@@ -28,6 +30,55 @@ type State =
 // without a manual reload. Same 10-20s band as the TV surfaces; each poll
 // re-checks the token server-side (revoked/disabled/expired → 404).
 const PARTY_POLL_MS = 15_000;
+
+// The guest hub is a FIXED dark surface — a party cover, not a themed app page —
+// so the approved ON-DARK wordmark is pinned here instead of resolved from the
+// visitor's theme (which is what <BrandMark> does, and would put the Midnight
+// Navy artwork on a Midnight Navy hero). Byte-exact approved asset, rendered at
+// its own proportions, unfiltered and unrecoloured; CSS only sets its width.
+const PARTY_WORDMARK = {
+  src: '/brand/nubarca-wordmark-on-dark-480w.png',
+  width: 480,
+  height: 135,
+} as const;
+
+// Brand names are not translated: the eyebrow is the product name, and the
+// stylesheet is what renders it in caps.
+const PARTY_EYEBROW = `${PRODUCT_NAME} Party`;
+
+function CameraIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M3.5 8.75A2.25 2.25 0 0 1 5.75 6.5h1.6l1.1-1.85A1.5 1.5 0 0 1 9.74 4h4.52a1.5 1.5 0 0 1 1.29.73l1.1 1.87h1.6a2.25 2.25 0 0 1 2.25 2.25v8A2.25 2.25 0 0 1 18.25 19H5.75a2.25 2.25 0 0 1-2.25-2.25Z" />
+      <circle cx="12" cy="12.5" r="3.4" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="m9.5 5.5 6.5 6.5-6.5 6.5" />
+    </svg>
+  );
+}
+
+// Wordmark + language switcher: the same top row on the hero and on the
+// unavailable/error states, so a guest always knows where they are.
+function PartyHubTopBar() {
+  return (
+    <div className="party-guest-hub-topbar">
+      <img
+        className="party-guest-hub-logo"
+        src={PARTY_WORDMARK.src}
+        alt={PRODUCT_NAME}
+        width={PARTY_WORDMARK.width}
+        height={PARTY_WORDMARK.height}
+      />
+      <LanguageSwitcher className="language-switcher language-switcher-public" />
+    </div>
+  );
+}
 
 function sameItemIds(a: PartyItem[], b: PartyItem[]): boolean {
   if (a.length !== b.length) return false;
@@ -109,31 +160,51 @@ export function PartyPage() {
   }, [lightbox]);
 
   if (state.kind === 'loading') {
-    return <main className="party-page" aria-busy="true">
-      <span className="visually-hidden">{t('common.loading')}</span>
-      <div className="party-skeleton party-skeleton-hero" />
-      <div className="party-skeleton-actions">
-        <div className="party-skeleton" /><div className="party-skeleton" /><div className="party-skeleton" />
-      </div>
-    </main>;
+    // Shaped like the finished hero — brand bar, title lines, CTA — so the real
+    // content lands where the skeleton already reserved room.
+    return (
+      <main className="party-guest-hub" aria-busy="true">
+        <span className="visually-hidden">{t('common.loading')}</span>
+        <div className="party-guest-hub-skeleton-hero" data-testid="party-hub-skeleton">
+          <div className="party-guest-hub-skeleton-top">
+            <div className="party-guest-hub-shape party-guest-hub-shape-logo" />
+            <div className="party-guest-hub-shape party-guest-hub-shape-lang" />
+          </div>
+          <div className="party-guest-hub-skeleton-lines">
+            <div className="party-guest-hub-shape party-guest-hub-shape-eyebrow" />
+            <div className="party-guest-hub-shape party-guest-hub-shape-title" />
+            <div className="party-guest-hub-shape party-guest-hub-shape-meta" />
+            <div className="party-guest-hub-shape party-guest-hub-shape-cta" />
+          </div>
+        </div>
+      </main>
+    );
   }
   if (state.kind === 'unavailable') {
     return (
-      <main className="party-page">
-        <div className="party-card">
-          <h1>{t('party.unavailableTitle')}</h1>
-          <p role="alert">{t('party.unavailableBody')}</p>
+      <main className="party-guest-hub">
+        <div className="party-guest-hub-state-page">
+          <PartyHubTopBar />
+          <div className="party-guest-hub-state">
+            <h1>{t('party.unavailableTitle')}</h1>
+            <p role="alert">{t('party.unavailableBody')}</p>
+          </div>
         </div>
       </main>
     );
   }
   if (state.kind === 'error') {
     return (
-      <main className="party-page">
-        <div className="party-card">
-          <h1>{t('party.errorTitle')}</h1>
-          <p role="alert">{t('party.errorBody')}</p>
-          <button type="button" onClick={() => load()}>{t('common.tryAgain')}</button>
+      <main className="party-guest-hub">
+        <div className="party-guest-hub-state-page">
+          <PartyHubTopBar />
+          <div className="party-guest-hub-state">
+            <h1>{t('party.errorTitle')}</h1>
+            <p role="alert">{t('party.errorBody')}</p>
+            <button className="party-guest-hub-retry" type="button" onClick={() => load()}>
+              {t('common.tryAgain')}
+            </button>
+          </div>
         </div>
       </main>
     );
@@ -149,29 +220,56 @@ export function PartyPage() {
       .filter((it): it is PartyItem => it !== undefined)
     : items;
   return (
-    <main className="party-page">
-      <header className="party-hub-hero" style={coverUrl ? { backgroundImage: `url("${coverUrl}")` } : undefined}>
-        <div className="party-hub-hero-shade">
-        <div className="party-header-top">
-          <h1>{albumName}</h1>
-          <LanguageSwitcher className="language-switcher language-switcher-public" />
-        </div>
-        <p className="party-subtitle">
-          {tn(items.length, 'party.itemCount')} · {t('party.subtitleSuffix')}
-        </p>
-        <p className="party-hub-brand">NubArca Party</p>
+    <main className="party-guest-hub">
+      {/* The event cover IS the first viewport: full-bleed, cropped naturally
+          and faded into the page, with the album name and the one action a
+          guest needs sitting inside it. */}
+      <header className="party-guest-hub-hero">
+        <div
+          className="party-guest-hub-hero-cover"
+          data-testid="party-hub-cover"
+          data-cover={coverUrl ? 'photo' : 'fallback'}
+          style={coverUrl ? { backgroundImage: `url("${coverUrl}")` } : undefined}
+          aria-hidden="true"
+        />
+        <PartyHubTopBar />
+        <div className="party-guest-hub-headline">
+          <p className="party-guest-hub-eyebrow">{PARTY_EYEBROW}</p>
+          <h1 className="party-guest-hub-title">{albumName}</h1>
+          <p className="party-guest-hub-meta">
+            <span>{tn(items.length, 'party.itemCount')}</span>
+            <span className="party-guest-hub-meta-sep" aria-hidden="true">·</span>
+            <span className="party-guest-hub-live">
+              <span className="party-guest-hub-live-dot" aria-hidden="true" />
+              {t('partyHub.live')}
+            </span>
+          </p>
+          {/* Only rendered when the backend actually returned a contribution
+              URL — an album with guest uploads closed shows no dead action. */}
+          {contributionUrl && (
+            <a
+              className="party-guest-hub-cta"
+              href={contributionUrl}
+              data-testid="party-hub-cta"
+            >
+              <span className="party-guest-hub-cta-icon">
+                <CameraIcon />
+              </span>
+              <span className="party-guest-hub-cta-text">
+                <strong>{t('partyHub.shareMoment')}</strong>
+                <span>{t('partyHub.shareMomentHelp')}</span>
+              </span>
+              <ChevronIcon className="party-guest-hub-cta-chevron" />
+            </a>
+          )}
         </div>
       </header>
 
+      <div className="party-guest-hub-body">
       <nav className="party-hub-actions" aria-label={t('partyHub.actions')}>
         <a className="party-hub-action" href="#party-photos">
           <strong>{t('partyHub.photos')}</strong><span>{t('partyHub.photosHelp')}</span>
         </a>
-        {contributionUrl && (
-          <a className="party-hub-action" href={contributionUrl}>
-            <strong>{t('partyHub.contribute')}</strong><span>{t('partyHub.contributeHelp')}</span>
-          </a>
-        )}
         <a className="party-hub-action" href="#party-face">
           <strong>{t('partyHub.face')}</strong><span>{t('partyHub.faceHelp')}</span>
         </a>
@@ -210,6 +308,7 @@ export function PartyPage() {
         </div>
       )}
       </section>
+      </div>
 
       {lightbox && (
         <div

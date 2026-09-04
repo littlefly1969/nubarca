@@ -785,10 +785,6 @@ a {
 
 /* Public party landing (unauthenticated) */
 .party-page { min-height: 100vh; background: #0f1115; color: #f2f3f5; padding: 1.5rem; box-sizing: border-box; }
-.party-hub-hero { max-width: 68rem; min-height: 18rem; margin: 0 auto 1rem; border-radius: 24px; overflow: hidden; background: radial-gradient(circle at 20% 10%, #315d9d, #121824 65%); background-size: cover; background-position: center; }
-.party-hub-hero-shade { min-height: 18rem; box-sizing: border-box; display: flex; flex-direction: column; justify-content: flex-end; padding: 1.5rem; background: linear-gradient(180deg, rgb(4 8 14 / 10%), rgb(4 8 14 / 92%)); }
-.party-hub-hero h1 { font-size: clamp(2rem, 8vw, 4rem); margin: 0; text-wrap: balance; }
-.party-hub-brand { margin: 1rem 0 0; color: #92bffc; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .75rem; }
 .party-hub-actions { max-width: 68rem; margin: 0 auto 1.25rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: .75rem; }
 .party-hub-action { min-height: 5.5rem; box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; gap: .25rem; padding: 1rem 1.15rem; border: 1px solid #343d50; border-radius: 16px; background: #1a202b; color: #fff; text-decoration: none; }
 .party-hub-action:hover, .party-hub-action:focus-visible { border-color: #70a8ff; outline: 3px solid rgb(75 142 255 / 28%); outline-offset: 2px; }
@@ -796,8 +792,6 @@ a {
 .party-hub-action-game { background: linear-gradient(135deg, #263d72, #53336d); border-color: #7a73c8; }
 .party-skeleton { border-radius: 16px; background: linear-gradient(100deg, #171c25 20%, #252d3b 40%, #171c25 60%); background-size: 220% 100%; animation: party-skeleton-pulse 1.4s ease-in-out infinite; }
 .party-skeleton-hero { max-width: 68rem; height: 18rem; margin: 0 auto 1rem; }
-.party-skeleton-actions { max-width: 68rem; margin: 0 auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
-.party-skeleton-actions .party-skeleton { height: 5.5rem; }
 .party-skeleton-row { max-width: 48rem; height: 10rem; margin: 0 auto 1rem; }
 @keyframes party-skeleton-pulse { to { background-position-x: -220%; } }
 .party-challenges-page { padding-bottom: max(2rem, env(safe-area-inset-bottom)); }
@@ -819,9 +813,7 @@ a {
 .party-challenge-copy button[aria-pressed="true"] { background: transparent; }
 @media (max-width: 480px) {
   .party-page { padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); }
-  .party-hub-hero, .party-hub-hero-shade { min-height: 15rem; }
   .party-hub-actions { grid-template-columns: 1fr; }
-  .party-skeleton-actions { grid-template-columns: 1fr; }
   .party-challenge-card { grid-template-columns: 1fr; }
   .party-challenge-card img { height: 12rem; min-height: 0; }
 }
@@ -833,7 +825,6 @@ a {
 .party-card { max-width: 30rem; margin: 4rem auto; background: #171a21; border-radius: 12px; padding: 2rem; text-align: center; }
 .party-header { max-width: 68rem; margin: 0 auto 1.25rem; }
 .party-header h1 { margin: 0 0 0.25rem; }
-.party-subtitle { color: #b6bcc6; margin: 0; }
 /* width: 100% + min-width: 0 make the grid's width DEFINITE in every context.
    Without it, placing this grid inside a column flexbox (e.g. the face-search
    result panel) left it shrink-to-fit with an indefinite width — the auto
@@ -1516,7 +1507,6 @@ select option {
   font-size: 0.8125rem;
 }
 /* Public surfaces float the switcher to the top-right of the header/card. */
-.party-header-top,
 .party-upload-top {
   display: flex;
   align-items: flex-start;
