@@ -13,6 +13,7 @@ import {
 import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
+import { PartyGuestDock } from '../components/PartyGuestDock';
 import { PRODUCT_NAME } from '../brand/brand';
 import './PartyGuestHub.css';
 
@@ -158,16 +159,42 @@ function PlayIcon() {
   );
 }
 
-// One capability = one card in the "what would you like to do?" deck.
-//
-// This is a list, not a framework: adding the dedication, song-request or print
-// capabilities later means appending an entry here plus the REAL condition that
-// makes it available. Nothing is rendered speculatively — a capability the
-// product does not offer yet has no placeholder and no disabled card.
+/* One capability = one card in the "what would you like to do?" deck.
+ *
+ * THE RULE, and it is the whole point of this file's shape:
+ *
+ *     a capability is rendered only when it is IMPLEMENTED and ENABLED
+ *     for THIS party — `available` says so, once, next to the definition.
+ *
+ * So there is no `{gameEnabled && …}` scattered through the JSX, and no
+ * placeholder, "coming soon", or disabled card anywhere: a capability the
+ * product does not offer, or that this party has switched off, has no entry in
+ * the rendered list at all.
+ *
+ * ADDING ONE LATER. Dedications, song requests and printing are planned. Each
+ * becomes one entry here plus the REAL signal that says it is on for this
+ * party — a field the backend adds when the feature ships, never a boolean
+ * invented in the frontend to hold its place. And each needs the pair of tests
+ * that keeps this rule honest:
+ *
+ *     enabled  → the card is present
+ *     disabled → the card is absent
+ *
+ * This is a list, deliberately: three cards do not need a registry service, a
+ * plugin system or a schema.
+ */
 type CapabilityTarget =
   | { kind: 'anchor'; href: string }   // somewhere on this page
   | { kind: 'route'; to: string }      // a real party route
   | { kind: 'action'; onSelect: () => void };  // opens something in place
+
+/**
+ * How loudly a capability speaks, stated per entry rather than derived from its
+ * position: 'signature' leads the deck, 'activity' is something to take part in,
+ * 'utility' recedes. A future capability declares its own tier — nothing is
+ * promoted to signature just for arriving first.
+ */
+type CapabilityVariant = 'signature' | 'activity' | 'utility';
 
 interface Capability {
   id: string;
@@ -175,8 +202,9 @@ interface Capability {
   descriptionKey: MessageKey;
   icon: ReactNode;
   target: CapabilityTarget;
-  /** 'signature' leads the deck; 'game' is the warm accent; 'neutral' recedes. */
-  variant: 'signature' | 'game' | 'neutral';
+  variant: CapabilityVariant;
+  /** Implemented AND on for this party. Nothing else gets rendered. */
+  available: boolean;
   badgeKey?: MessageKey;
 }
 
@@ -276,6 +304,35 @@ export function PartyPage() {
   // The face-search sheet is opened by its capability card and by nothing else.
   const [faceOpen, setFaceOpen] = useState(false);
   const galleryRef = useRef<HTMLElement>(null);
+  const heroRef = useRef<HTMLElement>(null);
+  // The dock appears once the cover is behind the guest, and says which of the
+  // two places they are in. Both come from IntersectionObserver rather than a
+  // scroll listener: the browser reports the crossings it already computes,
+  // instead of this page recomputing geometry on every frame of a scroll.
+  const [heroOnScreen, setHeroOnScreen] = useState(true);
+  const [galleryOnScreen, setGalleryOnScreen] = useState(false);
+
+  useEffect(() => {
+    const hero = heroRef.current;
+    const gallery = galleryRef.current;
+    if (!hero && !gallery) return;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === hero) setHeroOnScreen(entry.isIntersecting);
+        if (entry.target === gallery) setGalleryOnScreen(entry.isIntersecting);
+      }
+    });
+    if (hero) observer.observe(hero);
+    if (gallery) observer.observe(gallery);
+    return () => observer.disconnect();
+  }, [state.kind]);
+
+  const scrollTo = useCallback((el: HTMLElement | null) => {
+    if (!el) return;
+    const still = typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView?.({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+  }, []);
 
   // Discarding a search belongs to the page, which owns the filter: it drops the
   // local filter and the short-lived server-side search (and its stored face
@@ -288,8 +345,8 @@ export function PartyPage() {
   }, [token]);
 
   const showFaceResults = useCallback(() => {
-    galleryRef.current?.scrollIntoView?.({ block: 'start' });
-  }, []);
+    scrollTo(galleryRef.current);
+  }, [scrollTo]);
 
   // Which moments the guest has already been shown. Items arrive appended
   // (the server orders by AddedAt), so a new one lands at the BOTTOM of the
@@ -481,44 +538,52 @@ export function PartyPage() {
 
   // What this party actually offers right now. "Share a moment" is deliberately
   // absent: it is the hero's primary CTA and must not be duplicated here.
+  // What this party actually offers. Each entry states its own availability;
+  // the deck renders the ones that pass and never learns why.
   const capabilities: Capability[] = [
-    // The most distinctive NubArca capability, so it leads the deck. The anchor
-    // keeps the existing PartyFaceSearch launcher exactly as it is.
     {
+      // The most distinctive NubArca capability, so it leads the deck. The
+      // party surface publishes no availability flag for face search — it
+      // reports an `unavailable` status at search time instead — so the card is
+      // offered whenever the party itself is, exactly as before. When a real
+      // public signal exists, it belongs here and nowhere else.
       id: 'face',
       titleKey: 'partyHub.face',
       descriptionKey: 'partyHub.faceHelp',
       icon: <FaceFrameIcon />,
       target: { kind: 'action', onSelect: () => setFaceOpen(true) },
       variant: 'signature',
+      available: true,
     },
-    // Challenges exist only when the owner enabled the party game.
-    ...(gameEnabled && token
-      ? [{
-        id: 'challenges',
-        titleKey: 'partyHub.vote',
-        descriptionKey: 'partyHub.voteHelp',
-        icon: <TrophyIcon />,
-        target: { kind: 'route', to: `/party/${token}/challenges` },
-        variant: 'game',
-        badgeKey: 'partyHub.live',
-      } as const satisfies Capability]
-      : []),
     {
+      // Only when the owner turned the party game on.
+      id: 'challenges',
+      titleKey: 'partyHub.vote',
+      descriptionKey: 'partyHub.voteHelp',
+      icon: <TrophyIcon />,
+      target: { kind: 'route', to: `/party/${token ?? ''}/challenges` },
+      variant: 'activity',
+      badgeKey: 'partyHub.live',
+      available: gameEnabled && Boolean(token),
+    },
+    {
+      // The album is what a party landing IS: available whenever the page is.
       id: 'album',
       titleKey: 'partyHub.photos',
       descriptionKey: 'partyHub.photosHelp',
       icon: <PhotoStackIcon />,
       target: { kind: 'anchor', href: '#party-photos' },
-      variant: 'neutral',
+      variant: 'utility',
+      available: true,
     },
   ];
+  const visibleCapabilities = capabilities.filter((cap) => cap.available);
   return (
     <main className="party-guest-hub">
       {/* The event cover IS the first viewport: full-bleed, cropped naturally
           and faded into the page, with the album name and the one action a
           guest needs sitting inside it. */}
-      <header className="party-guest-hub-hero">
+      <header className="party-guest-hub-hero" ref={heroRef}>
         <div
           className="party-guest-hub-hero-cover"
           data-testid="party-hub-cover"
@@ -560,7 +625,7 @@ export function PartyPage() {
       </header>
 
       <div className="party-guest-hub-body">
-      <CapabilityDeck capabilities={capabilities} />
+      <CapabilityDeck capabilities={visibleCapabilities} />
 
       {/* While a search is applied the album is NOT the whole album, so the page
           says so and offers the way back — otherwise closing the sheet would
@@ -662,6 +727,17 @@ export function PartyPage() {
       )}
       </section>
       </div>
+
+      {/* Navigation, not a second deck. Hidden while the cover is still on
+          screen, so the first viewport stays the cover — and hidden means NOT
+          RENDERED, so nothing is reachable by Tab behind it. */}
+      <PartyGuestDock
+        visible={!heroOnScreen}
+        section={galleryOnScreen ? 'album' : 'home'}
+        contributionUrl={contributionUrl}
+        onHome={() => scrollTo(heroRef.current)}
+        onAlbum={() => scrollTo(galleryRef.current)}
+      />
 
       {token && (
         <PartyFaceSearch

@@ -62,6 +62,12 @@ class MockIntersectionObserver {
   fire(isIntersecting: boolean) {
     this.cb([...this.elements].map((target) => ({ isIntersecting, target })), this);
   }
+  watches(target: Element) {
+    return this.elements.has(target);
+  }
+  fireFor(target: Element, isIntersecting: boolean) {
+    this.cb([{ isIntersecting, target }], this);
+  }
 }
 
 globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
@@ -73,3 +79,15 @@ globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof 
   };
 (globalThis as unknown as { __activeIntersections: () => ObservedIntersection[] }).__activeIntersections =
   () => MockIntersectionObserver.active.map((observer) => observer.describe());
+// Fire ONE element's observers. `__fireIntersection` moves every sentinel at
+// once, which is right for a single infinite-scroll sentinel and wrong for a
+// page that watches two things independently: the guest dock appears when the
+// hero leaves the viewport and highlights Album when the gallery enters it, and
+// a test has to be able to move one without the other.
+(globalThis as unknown as {
+  __fireIntersectionOn: (target: Element, isIntersecting: boolean) => void;
+}).__fireIntersectionOn = (target, isIntersecting) => {
+  for (const observer of [...MockIntersectionObserver.active]) {
+    if (observer.watches(target)) observer.fireFor(target, isIntersecting);
+  }
+};
