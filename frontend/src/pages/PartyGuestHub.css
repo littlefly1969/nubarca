@@ -484,6 +484,64 @@
   }
 }
 
+/* Active face search ------------------------------------------------------- */
+
+/* The album below is filtered to one guest's photos. Saying so — with the way
+   back — is what keeps a filter applied from a closed sheet from becoming an
+   invisible state. */
+.party-guest-hub-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: min(100%, 68rem);
+  box-sizing: border-box;
+  margin: 0 auto 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(0 212 255 / 28%);
+  border-radius: var(--radius-card);
+  background:
+    linear-gradient(135deg, rgb(21 101 255 / 20%), rgb(0 212 255 / 6%) 70%),
+    rgb(15 30 58 / 62%);
+}
+
+.party-guest-hub-filter-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin: 0;
+}
+
+.party-guest-hub-filter-text strong {
+  font-size: 0.98rem;
+  font-weight: 600;
+}
+
+.party-guest-hub-filter-text span {
+  color: var(--party-hub-muted);
+  font-size: 0.83rem;
+}
+
+.party-guest-hub-filter-clear {
+  flex: none;
+  min-height: 3rem;
+  padding: 0.65rem 1.1rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: var(--radius-button);
+  background: rgb(10 15 26 / 45%);
+  color: var(--party-hub-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.party-guest-hub-filter :focus-visible {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 3px;
+}
+
 /* Everything below the first viewport keeps its existing styling; this wrapper
    only restores the page gutter the hero deliberately spends. */
 .party-guest-hub-body {

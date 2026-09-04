@@ -65,12 +65,27 @@ interface OverlayProps {
   // consumer rather than raising every overlay: an administration dialog has no
   // business above the media viewer.
   layer?: OverlayLayer;
+  // Extra class on the BACKDROP, so a consumer can restyle the whole surface
+  // (geometry and palette) from its own stylesheet without touching the shared
+  // administration look. The panel is reached through it as a descendant.
+  //
+  // It exists for the public party surfaces: those are portalled to
+  // document.body, outside the page element that carries their palette, and
+  // they are a fixed dark surface rather than a themed one.
+  className?: string;
+  // Focus the PANEL itself on open instead of hunting for the first field.
+  //
+  // The default is right for a form. It is wrong for a content-first surface
+  // whose first input is a visually hidden file picker: the panel's own title
+  // is what a screen reader should announce, and Tab then reaches the visible
+  // control that triggers the picker.
+  focusPanelOnOpen?: boolean;
 }
 
 export type OverlayLayer = 'app' | 'workspace';
 
 function useOverlayBehaviour(
-  onClose: () => void, dismissable: boolean, ownsKeyboard: boolean,
+  onClose: () => void, dismissable: boolean, ownsKeyboard: boolean, focusPanelOnOpen: boolean,
 ) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -99,12 +114,12 @@ function useOverlayBehaviour(
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const panel = panelRef.current;
-    const first = panel?.querySelector<HTMLElement>(
+    const first = focusPanelOnOpen ? null : panel?.querySelector<HTMLElement>(
       'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])',
     );
     (first ?? panel)?.focus();
     return () => opener?.focus?.();
-  }, []);
+  }, [focusPanelOnOpen]);
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -151,17 +166,22 @@ function useOverlayBehaviour(
 
 function OverlayShell({
   variant, title, subtitle, onClose, dismissable = true, children, footer, testId,
-  ownsKeyboard = false, layer = 'app',
+  ownsKeyboard = false, layer = 'app', className, focusPanelOnOpen = false,
 }: OverlayProps & { variant: 'modal' | 'sheet' }) {
   const { t } = useI18n();
   const titleId = useId();
-  const { panelRef, onKeyDown } = useOverlayBehaviour(onClose, dismissable, ownsKeyboard);
+  const { panelRef, onKeyDown } = useOverlayBehaviour(
+    onClose, dismissable, ownsKeyboard, focusPanelOnOpen,
+  );
 
   return createPortal(
     <div
-      className={
-        `overlay-backdrop overlay-backdrop--${variant} overlay-backdrop--layer-${layer}`
-      }
+      className={[
+        'overlay-backdrop',
+        `overlay-backdrop--${variant}`,
+        `overlay-backdrop--layer-${layer}`,
+        className,
+      ].filter(Boolean).join(' ')}
       data-testid={testId ? `${testId}-backdrop` : undefined}
       onMouseDown={(e) => {
         // mousedown, not click: a click whose press started INSIDE the panel
