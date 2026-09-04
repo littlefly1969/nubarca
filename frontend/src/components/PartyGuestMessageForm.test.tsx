@@ -30,7 +30,7 @@ describe('guest party message form', () => {
     renderForm();
     const user = userEvent.setup();
 
-    const send = screen.getByRole('button', { name: /invia messaggio/i });
+    const send = screen.getByRole('button', { name: /invia la dedica/i });
     expect(send).toBeDisabled();
 
     // Whitespace is not a message. The counter normalises before measuring, so
@@ -57,11 +57,11 @@ describe('guest party message form', () => {
     await user.clear(textarea);
     await user.type(textarea, 'a'.repeat(120));
     expect(screen.getByTestId('party-message-counter')).toHaveTextContent('0');
-    expect(screen.getByRole('button', { name: /invia messaggio/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /invia la dedica/i })).toBeEnabled();
 
     await user.type(textarea, 'b');
     expect(screen.getByTestId('party-message-counter')).toHaveTextContent(/superato/i);
-    expect(screen.getByRole('button', { name: /invia messaggio/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /invia la dedica/i })).toBeDisabled();
   });
 
   it('reports a published message as already on its way to the TV', async () => {
@@ -71,10 +71,14 @@ describe('guest party message form', () => {
 
     await user.type(screen.getByLabelText(/il tuo nome/i), 'Giulia');
     await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Serata fantastica!');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
 
     await screen.findByTestId('party-message-sent');
-    expect(screen.getByRole('status')).toHaveTextContent(/comparirà a breve sulla TV/i);
+    // Both outcomes share the headline and differ in the line that matters, so
+    // neither assertion can pass on the other's branch.
+    expect(screen.getByRole('status')).toHaveTextContent(/Dedica inviata/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/è entrato nella festa/i);
+    expect(screen.getByRole('status')).not.toHaveTextContent(/approvazione/i);
 
     const call = mock.calls.find((c) => c.url === URL);
     expect(call?.method).toBe('POST');
@@ -90,9 +94,12 @@ describe('guest party message form', () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Auguri!');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent(/in attesa di approvazione/i);
+    const banner = await screen.findByRole('status');
+    expect(banner).toHaveTextContent(/Dedica inviata/i);
+    expect(banner).toHaveTextContent(/dopo l’approvazione dell’organizzatore/i);
+    expect(banner).not.toHaveTextContent(/è entrato nella festa/i);
   });
 
   it('sends no name at all rather than an empty one', async () => {
@@ -101,7 +108,7 @@ describe('guest party message form', () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Auguri!');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
     await screen.findByTestId('party-message-sent');
 
     expect(JSON.parse(mock.calls.find((c) => c.url === URL)!.body!).displayName).toBeNull();
@@ -113,7 +120,7 @@ describe('guest party message form', () => {
     const user = userEvent.setup();
 
     await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Uno');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
     await screen.findByTestId('party-message-sent');
 
     await user.click(screen.getByRole('button', { name: /scrivi un altro/i }));
@@ -129,11 +136,11 @@ describe('guest party message form', () => {
     const textarea = screen.getByLabelText(/il tuo messaggio/i);
 
     await user.type(textarea, 'Auguri!');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/troppi messaggi/i);
 
     status = 400;
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent(/messaggio non valido/i));
 

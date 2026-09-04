@@ -27,6 +27,9 @@ interface Props {
   // Called after a successful send, so the host page can refresh anything it
   // shows about this guest's contributions. Optional.
   onSent?: () => void;
+  // Offered from the success state: the other half of contributing, on the same
+  // page. Absent when the host has no media mode to switch to.
+  onShareMedia?: () => void;
 }
 
 type Phase =
@@ -34,7 +37,7 @@ type Phase =
   | { kind: 'sending' }
   | { kind: 'sent'; pending: boolean };
 
-export function PartyGuestMessageForm({ uploadToken, onSent }: Props) {
+export function PartyGuestMessageForm({ uploadToken, onSent, onShareMedia }: Props) {
   const { t } = useI18n();
   const [displayName, setDisplayName] = useState('');
   const [text, setText] = useState('');
@@ -74,13 +77,33 @@ export function PartyGuestMessageForm({ uploadToken, onSent }: Props) {
 
   if (phase.kind === 'sent') {
     return (
-      <div className="party-message-form" data-testid="party-message-sent">
-        <p role="status" className="party-message-sent">
+      <div className="party-dedication-sent" data-testid="party-message-sent" role="status">
+        <span className="party-dedication-sent-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="m6.5 12.4 3.6 3.6 7.4-7.6" /></svg>
+        </span>
+        <p className="party-dedication-sent-title">{t('partyMessage.sentTitle')}</p>
+        <p className="party-dedication-sent-body">
           {phase.pending ? t('partyMessage.sentPending') : t('partyMessage.sentVisible')}
         </p>
-        <button type="button" onClick={() => setPhase({ kind: 'writing' })}>
-          {t('partyMessage.sendAnother')}
-        </button>
+        <div className="party-dedication-sent-actions">
+          <button
+            type="button"
+            className="party-contribution-primary"
+            onClick={() => setPhase({ kind: 'writing' })}
+          >
+            {t('partyMessage.sendAnother')}
+          </button>
+          {onShareMedia && (
+            <button
+              type="button"
+              className="party-contribution-secondary"
+              data-testid="party-message-share-media"
+              onClick={onShareMedia}
+            >
+              {t('partyMessage.shareMediaInstead')}
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -89,13 +112,14 @@ export function PartyGuestMessageForm({ uploadToken, onSent }: Props) {
 
   return (
     <form
-      className="party-message-form"
+      className="party-dedication"
       onSubmit={(e) => { e.preventDefault(); void send(); }}
     >
-      <p className="muted">{t('partyMessage.intro')}</p>
+      <h2 className="party-dedication-title">{t('partyMessage.headline')}</h2>
+      <p className="party-dedication-intro">{t('partyMessage.intro')}</p>
 
-      <label className="party-message-field">
-        <span>{t('partyMessage.nameLabel')}</span>
+      <label className="party-dedication-field">
+        <span className="party-dedication-label">{t('partyMessage.nameLabel')}</span>
         <input
           type="text"
           value={displayName}
@@ -109,24 +133,24 @@ export function PartyGuestMessageForm({ uploadToken, onSent }: Props) {
         />
       </label>
       {nameRemaining < 0 && (
-        <p className="inline-error" role="alert">
+        <p className="party-dedication-error" role="alert">
           {t('partyMessage.nameOverLimit', { max: String(PARTY_MESSAGE_LIMITS.displayName) })}
         </p>
       )}
 
-      <label className="party-message-field">
-        <span>{t('partyMessage.textLabel')}</span>
+      <label className="party-dedication-field party-dedication-field--text">
+        <span className="party-dedication-label">{t('partyMessage.textLabel')}</span>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={t('partyMessage.textPlaceholder')}
-          rows={3}
+          rows={5}
           disabled={busy}
         />
       </label>
 
       <p
-        className={remaining < 0 ? 'party-message-counter over' : 'party-message-counter'}
+        className={remaining < 0 ? 'party-dedication-counter over' : 'party-dedication-counter'}
         data-testid="party-message-counter"
         aria-live="polite"
       >
@@ -135,11 +159,15 @@ export function PartyGuestMessageForm({ uploadToken, onSent }: Props) {
           : t('partyMessage.overLimit', { max: String(PARTY_MESSAGE_LIMITS.text) })}
       </p>
 
-      <button type="submit" disabled={busy || !canSend}>
+      <button
+        type="submit"
+        className="party-contribution-primary party-dedication-submit"
+        disabled={busy || !canSend}
+      >
         {busy ? t('partyMessage.sending') : t('partyMessage.send')}
       </button>
 
-      {error && <p className="inline-error" role="alert">{error}</p>}
+      {error && <p className="party-dedication-error" role="alert">{error}</p>}
     </form>
   );
 }

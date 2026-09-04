@@ -14,6 +14,7 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PartyGuestDock } from '../components/PartyGuestDock';
+import { withContributionMode } from './partyContributionMode';
 import { PRODUCT_NAME } from '../brand/brand';
 import './PartyGuestHub.css';
 
@@ -149,6 +150,14 @@ export function galleryShapes(count: number): GalleryShape[] {
   // An odd number of cells means the last row holds one tile: widen it.
   if (cells % 2 === 1 && shapes.length > 0) shapes[shapes.length - 1] = 'featured';
   return shapes;
+}
+
+function HeartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 19.6C7.9 16.9 4.5 14.2 4.5 10.6A3.9 3.9 0 0 1 12 8.6a3.9 3.9 0 0 1 7.5 2c0 3.6-3.4 6.3-7.5 9Z" />
+    </svg>
+  );
 }
 
 function PlayIcon() {
@@ -554,6 +563,24 @@ export function PartyPage() {
       target: { kind: 'action', onSelect: () => setFaceOpen(true) },
       variant: 'signature',
       available: true,
+    },
+    {
+      // A written contribution, and the SAME enablement as any other: the
+      // backend ties messages to the upload token and to the one UploadEnabled
+      // switch, so a party that accepts contributions accepts dedications. That
+      // is the real signal — there is no separate flag to consult, and none was
+      // invented. The link is the backend's contribution URL with the composer
+      // asked for, never a second route or a rebuilt token.
+      id: 'dedication',
+      titleKey: 'partyHub.dedication',
+      descriptionKey: 'partyHub.dedicationHelp',
+      icon: <HeartIcon />,
+      target: {
+        kind: 'anchor',
+        href: contributionUrl ? withContributionMode(contributionUrl, 'message') : '',
+      },
+      variant: 'activity',
+      available: Boolean(contributionUrl),
     },
     {
       // Only when the owner turned the party game on.

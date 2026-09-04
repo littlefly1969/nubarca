@@ -82,10 +82,10 @@ function installWakeLock() {
   return { request, releases };
 }
 
-function wrapper(token = 'uptok-1') {
+function wrapper(token = 'uptok-1', search = '') {
   return (
     <I18nProvider>
-      <MemoryRouter initialEntries={[`/party/${token}/upload`]}>
+      <MemoryRouter initialEntries={[`/party/${token}/upload${search}`]}>
         <Routes>
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
         </Routes>
@@ -121,9 +121,10 @@ describe('PartyUploadPage (public anonymous upload)', () => {
 
     // Media is the default: a party is still mostly photographs.
     await screen.findByLabelText(/Scegli foto e video da caricare/i);
-    expect(screen.getByRole('tab', { name: /foto o video/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('party-mode-media')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('party-mode-message')).toHaveAttribute('aria-pressed', 'false');
 
-    await user.click(screen.getByRole('tab', { name: /^messaggio$/i }));
+    await user.click(screen.getByTestId('party-mode-message'));
 
     // The message form replaces the picker rather than sitting beside it, so
     // the guest is never looking at two "send" buttons.
@@ -131,12 +132,81 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     expect(screen.queryByLabelText(/Scegli foto e video da caricare/i)).toBeNull();
 
     await user.type(screen.getByLabelText(/il tuo messaggio/i), 'Auguri!');
-    await user.click(screen.getByRole('button', { name: /invia messaggio/i }));
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
     await screen.findByTestId('party-message-sent');
 
     // And going back to media leaves the upload path exactly as it was.
-    await user.click(screen.getByRole('tab', { name: /foto o video/i }));
+    await user.click(screen.getByTestId('party-mode-media'));
     expect(await screen.findByLabelText(/Scegli foto e video da caricare/i)).toBeInTheDocument();
+  });
+
+  // --- Contribution mode, carried by the URL --------------------------------
+
+  function mockGeneric() {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/messages': () =>
+        jsonResponse({ id: 'm1', status: 'visible', createdAt: '2026-01-01T20:00:00Z' }),
+    });
+  }
+
+  it('opens on media by default, and on the composer when the link asks for it', async () => {
+    mockGeneric();
+    const media = render(wrapper());
+    await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    expect(screen.getByTestId('party-mode-media')).toHaveAttribute('aria-pressed', 'true');
+    media.unmount();
+
+    // This is the link the guest hub's dedication card produces.
+    mockGeneric();
+    const message = render(wrapper('uptok-1', '?mode=message'));
+    expect(await screen.findByLabelText(/il tuo messaggio/i)).toBeInTheDocument();
+    expect(screen.getByTestId('party-mode-message')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByLabelText(/Scegli foto e video da caricare/i)).toBeNull();
+    message.unmount();
+
+    // An explicit media link, and anything the page does not recognise, both
+    // land on media rather than on nothing.
+    for (const search of ['?mode=media', '?mode=song', '?mode=', '?ref=tv']) {
+      mockGeneric();
+      const r = render(wrapper('uptok-1', search));
+      expect(await screen.findByLabelText(/Scegli foto e video da caricare/i)).toBeInTheDocument();
+      expect(screen.getByTestId('party-mode-media')).toHaveAttribute('aria-pressed', 'true');
+      r.unmount();
+    }
+  });
+
+  it('keeps the chosen mode in the URL, without stacking history entries', async () => {
+    mockGeneric();
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    const before = window.history.length;
+
+    await user.click(screen.getByTestId('party-mode-message'));
+    expect(await screen.findByLabelText(/il tuo messaggio/i)).toBeInTheDocument();
+    await user.click(screen.getByTestId('party-mode-media'));
+    await user.click(screen.getByTestId('party-mode-message'));
+
+    // Flipping between the two halves of one page is not a journey: Back should
+    // leave the page, not walk the guest back through every switch.
+    expect(window.history.length).toBe(before);
+  });
+
+  it('offers the other half of contributing from the sent state', async () => {
+    mockGeneric();
+    render(wrapper('uptok-1', '?mode=message'));
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText(/il tuo messaggio/i), 'Auguri!');
+    await user.click(screen.getByRole('button', { name: /invia la dedica/i }));
+    await screen.findByTestId('party-message-sent');
+
+    // Writing another stays in the composer; sharing media moves to the other
+    // mode on the same page, with the same token and session.
+    await user.click(screen.getByTestId('party-message-share-media'));
+    expect(await screen.findByLabelText(/Scegli foto e video da caricare/i)).toBeInTheDocument();
+    expect(screen.getByTestId('party-mode-media')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('locks the contribution choice while media is in flight', async () => {
@@ -151,11 +221,11 @@ describe('PartyUploadPage (public anonymous upload)', () => {
 
     // Switching away mid-upload would leave the queue running behind a hidden
     // progress bar, with nothing on screen saying not to close the tab.
-    expect(screen.getByRole('tab', { name: /^messaggio$/i })).toBeDisabled();
+    expect(screen.getByTestId('party-mode-message')).toBeDisabled();
 
     await act(async () => { MockXHR.last!.finish(); });
     await screen.findByTestId('upload-result');
-    expect(screen.getByRole('tab', { name: /^messaggio$/i })).toBeEnabled();
+    expect(screen.getByTestId('party-mode-message')).toBeEnabled();
   });
 
   it('shows progress + a do-not-close warning while uploading, then the result', async () => {
