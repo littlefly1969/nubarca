@@ -817,27 +817,6 @@ a {
 }
 .party-status { text-align: center; margin-top: 3rem; color: #b6bcc6; }
 .party-card { max-width: 30rem; margin: 4rem auto; background: #171a21; border-radius: 12px; padding: 2rem; text-align: center; }
-.party-header { max-width: 68rem; margin: 0 auto 1.25rem; }
-.party-header h1 { margin: 0 0 0.25rem; }
-/* width: 100% + min-width: 0 make the grid's width DEFINITE in every context.
-   Without it, placing this grid inside a column flexbox (e.g. the face-search
-   result panel) left it shrink-to-fit with an indefinite width — the auto
-   horizontal margins disable flex stretching — and the auto-fill repeat count
-   was then computed against max-width (68rem ≈ 6 tracks), rendering a fixed
-   ~940px grid that overflowed a phone viewport. With a definite width the
-   track count always derives from the real available width (2 columns on
-   narrow phones, 3+ only when they fit). */
-.party-grid { width: 100%; min-width: 0; max-width: 68rem; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.5rem; }
-.party-tile { position: relative; padding: 0; border: none; background: #22262e; border-radius: 8px; overflow: hidden; cursor: pointer; aspect-ratio: 1 / 1; }
-.party-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
-.party-tile-badge { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6); pointer-events: none; }
-.party-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem; }
-.party-lightbox-inner { max-width: 96vw; max-height: 96vh; min-height: 0; display: flex; flex-direction: column; gap: 0.75rem; }
-/* min-height:0 so a high-res preview shrinks to the cap instead of overflowing
-   (otherwise the phone download view shows an over-large, clipped image). */
-.party-lightbox-img { max-width: 96vw; max-height: 82vh; min-height: 0; object-fit: contain; border-radius: 6px; }
-.party-lightbox-bar { display: flex; gap: 0.75rem; justify-content: center; }
-.party-download { display: inline-block; padding: 0.5rem 1rem; background: #3b82f6; color: #fff; border-radius: 6px; text-decoration: none; }
 
 /* TV party QR codes (10-foot): pinned to the BOTTOM corners — view/download
    left, upload right — and faded with the rest of the chrome on idle. */

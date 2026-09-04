@@ -424,7 +424,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-tile')).toHaveLength(2);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(2);
 
     // Run a face search: only the matching photo stays visible; the full album
     // remains in state (the item count subtitle is unchanged).
@@ -435,7 +435,7 @@ describe('PartyPage (public party landing)', () => {
     );
     await user.click(screen.getByTestId('party-face-submit'));
     await screen.findByTestId('party-face-count');
-    const tiles = screen.getByTestId('party-grid').querySelectorAll('button.party-tile img');
+    const tiles = screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img');
     expect(tiles).toHaveLength(1);
     expect(tiles[0]).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
 
@@ -444,10 +444,10 @@ describe('PartyPage (public party landing)', () => {
     await user.click(screen.getByTestId('party-face-show-results'));
     await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
     expect(screen.getByTestId('party-face-filter')).toBeInTheDocument();
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-tile')).toHaveLength(1);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(1);
 
     // A matching photo can still be opened + downloaded.
-    await user.click(screen.getByTestId('party-grid').querySelector('button.party-tile')!);
+    await user.click(screen.getByTestId('party-grid').querySelector('button.party-guest-hub-tile')!);
     const dialog = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
     expect(screen.getByRole('link', { name: /Scarica/i }))
       .toHaveAttribute('href', '/api/party/tok-1/media/f2/download');
@@ -459,22 +459,221 @@ describe('PartyPage (public party landing)', () => {
     // Clearing it from the banner → server-side delete + full album restored.
     await user.click(screen.getByTestId('party-face-filter-clear'));
     await screen.findByTestId('party-grid');
-    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-tile')).toHaveLength(2);
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile')).toHaveLength(2);
     expect(screen.queryByTestId('party-face-filter')).not.toBeInTheDocument();
     expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/face-search/s1'))).toBe(true);
   });
 
-  it('the party grid CSS keeps a definite width so auto-fill columns derive from the viewport (mobile overflow regression)', async () => {
-    // jsdom performs no layout, so this guards the root-cause fix statically:
-    // .party-grid must declare width:100% (+ min-width:0). Without a definite
-    // width, the grid inside the column-flex face panel resolved auto-fill
-    // against max-width (68rem → 6 columns ≈ 940px) and overflowed phones.
+  // --- Gallery -------------------------------------------------------------
+
+  function media(id: string, mediaType: 'image' | 'video' = 'image') {
+    return {
+      id, mediaType,
+      thumbnailUrl: `/api/party/tok-1/media/${id}/thumbnail`,
+      previewUrl: `/api/party/tok-1/media/${id}/preview`,
+      // The party surface serves videos as a poster, with no download.
+      downloadUrl: mediaType === 'video' ? null : `/api/party/tok-1/media/${id}/download`,
+    };
+  }
+
+  function mockAlbum(list: ReturnType<typeof media>[], album: Record<string, unknown> = {}) {
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, ...album, itemCount: list.length }),
+      'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: list }),
+    });
+  }
+
+  it('presents the album as "moments from the party", live and counted', async () => {
+    mockAlbum([media('f1'), media('f2'), media('f3')]);
+    render(wrapper());
+    const gallery = await screen.findByRole('region', { name: /Momenti della festa/i });
+    expect(within(gallery).getByRole('heading', { level: 2, name: 'Momenti della festa' }))
+      .toBeInTheDocument();
+    expect(within(gallery).getByText('Si aggiorna mentre la festa continua')).toBeInTheDocument();
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi');
+  });
+
+  it('lays the tiles out in server order, with a deterministic editorial shape', async () => {
+    mockAlbum(['f1', 'f2', 'f3', 'f4', 'f5'].map((id) => media(id)));
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    const tiles = Array.from(
+      screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img'),
+    );
+    // DOM order IS the server's order — nothing reorders for looks.
+    expect(tiles.map((t) => t.getAttribute('src'))).toEqual([
+      '/api/party/tok-1/media/f1/thumbnail',
+      '/api/party/tok-1/media/f2/thumbnail',
+      '/api/party/tok-1/media/f3/thumbnail',
+      '/api/party/tok-1/media/f4/thumbnail',
+      '/api/party/tok-1/media/f5/thumbnail',
+    ]);
+    // The shapes come from the index, never from the images.
+    const shapes = Array.from(
+      screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'),
+    ).map((el) => el.getAttribute('data-shape'));
+    expect(shapes).toEqual(['featured', 'square', 'square', 'portrait', 'portrait']);
+  });
+
+  it('composes a whole grid for a one-photo and a two-photo album', async () => {
+    mockAlbum([media('f1')]);
+    const one = render(wrapper());
+    await screen.findByTestId('party-grid');
+    expect(Array.from(document.querySelectorAll('button.party-guest-hub-tile'))
+      .map((el) => el.getAttribute('data-shape'))).toEqual(['featured']);
+    one.unmount();
+
+    // Two photos: a lead tile plus one lonely half-row would look broken, so
+    // both take the full width instead.
+    mockAlbum([media('f1'), media('f2')]);
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    expect(Array.from(document.querySelectorAll('button.party-guest-hub-tile'))
+      .map((el) => el.getAttribute('data-shape'))).toEqual(['featured', 'featured']);
+  });
+
+  it('marks a video with a play indicator and invents no duration', async () => {
+    mockAlbum([media('f1'), media('f2', 'video')]);
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    const video = screen.getByRole('button', { name: 'Apri video' });
+    expect(video.querySelector('.party-guest-hub-tile-play')).toBeInTheDocument();
+    expect(video.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
+    // No made-up runtime: the party API returns none.
+    expect(video.textContent).not.toMatch(/\d+:\d\d/);
+    // And no player is embedded in the grid.
+    expect(document.querySelector('video')).toBeNull();
+  });
+
+  it('opens a video as the party-safe poster, with no download offered', async () => {
+    mockAlbum([media('f1', 'video')]);
+    render(wrapper());
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Apri video' }));
+    const viewer = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
+    // previewUrl for a video IS the poster; the party surface has no playback
+    // and no video download.
+    expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
+    expect(viewer.querySelector('video')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Scarica/i })).not.toBeInTheDocument();
+  });
+
+  it('returns focus to the tile the viewer was opened from', async () => {
+    mockAlbum([media('f1'), media('f2')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    const tiles = screen.getAllByRole('button', { name: 'Apri foto' });
+
+    await user.click(tiles[1]);
+    await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
+    await user.click(screen.getByTestId('party-viewer-close'));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /Visualizzatore foto/i })).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(tiles[1]);
+  });
+
+  it('counts MATCHES, not the album, while a face filter is applied', async () => {
+    const twoItems = [media('f1'), media('f2'), media('f3')];
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: 3 }),
+      'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: twoItems }),
+      'POST /api/party/tok-1/face-search': () => jsonResponse({
+        status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems[1]],
+      }),
+      'DELETE /api/party/tok-1/face-search/s1': () => jsonResponse(null, 204),
+    });
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi');
+
+    await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
+    await user.upload(
+      screen.getByTestId('party-face-input'),
+      new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
+    );
+    await user.click(screen.getByTestId('party-face-submit'));
+    await screen.findByTestId('party-face-count');
+    await user.click(screen.getByTestId('party-face-show-results'));
+    await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
+
+    // Filtered: the header states a MATCH count, never "3" dressed up as the
+    // album total, and the banner keeps the way back one tap away.
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('1 foto trovata');
+    expect(screen.getByTestId('party-gallery-count')).not.toHaveTextContent('3');
+    expect(screen.getByTestId('party-face-filter')).toBeInTheDocument();
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+      .toHaveLength(1);
+
+    // And back to the whole album.
+    await user.click(screen.getByTestId('party-face-filter-clear'));
+    await waitFor(() =>
+      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi'));
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+      .toHaveLength(3);
+  });
+
+  it('welcomes an empty album instead of stating a fact about it', async () => {
+    mockAlbum([]);
+    render(wrapper());
+    const empty = await screen.findByTestId('party-empty');
+    expect(empty).toHaveTextContent('Questo album non ha ancora foto.');
+    expect(empty).toHaveTextContent('Sii il primo a condividere un momento.');
+    // The nudge is text: the hero's CTA stays the single way to contribute.
+    expect(within(empty).queryByRole('link')).not.toBeInTheDocument();
+    expect(document.querySelectorAll('a[href="/party/upload-token/upload"]')).toHaveLength(1);
+  });
+
+  it('announces moments that arrive while the guest is on the page', async () => {
+    let current = [media('f1'), media('f2')];
+    installFetchMock({
+      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: current.length }),
+      'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: current }),
+    });
+    vi.useFakeTimers();
+    try {
+      render(wrapper());
+      await settle();
+      // Nothing is "new" on arrival.
+      expect(screen.queryByTestId('party-new-moments')).not.toBeInTheDocument();
+
+      // Two guests upload; the poll appends them at the bottom, where the pill
+      // is what makes them noticeable.
+      current = [...current, media('f3'), media('f4')];
+      await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+      await settle();
+      expect(screen.getByTestId('party-new-moments')).toHaveTextContent('2 nuovi momenti');
+      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('4 elementi');
+      // The existing photos are still there, in order, and nothing scrolled.
+      expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+        .toHaveLength(4);
+
+      // Acknowledging it clears the pill without touching the album.
+      await act(async () => { screen.getByTestId('party-new-moments').click(); });
+      expect(screen.queryByTestId('party-new-moments')).not.toBeInTheDocument();
+      expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
+        .toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('the gallery grid CSS keeps a definite width and a definite column count (mobile overflow regression)', async () => {
+    // jsdom performs no layout, so this guards the root cause statically. The
+    // original bug: an auto-fill grid with no definite width resolved its track
+    // count against max-width (68rem → 6 columns ≈ 940px) and overflowed
+    // phones. The replacement keeps the definite width AND states its columns
+    // outright, so the count can never be derived from the wrong box.
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
-    const rule = css.match(/\.party-grid\s*\{([^}]*)\}/)?.[1] ?? '';
+    const css = readFileSync(resolve(process.cwd(), 'src/pages/PartyGuestHub.css'), 'utf8');
+    const rule = css.match(/\.party-guest-hub-tiles\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(rule).toContain('width: 100%');
     expect(rule).toContain('min-width: 0');
-    expect(rule).toContain('grid-template-columns: repeat(auto-fill, minmax(150px, 1fr))');
+    expect(rule).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))');
+    // And the legacy grid it replaced is gone rather than left behind.
+    const legacy = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8');
+    expect(legacy).not.toContain('.party-grid');
+    expect(legacy).not.toContain('.party-lightbox');
   });
 });

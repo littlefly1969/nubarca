@@ -542,6 +542,288 @@
   outline-offset: 3px;
 }
 
+/* Gallery ------------------------------------------------------------------ */
+
+.party-guest-hub-gallery {
+  display: block;
+  width: min(100%, 68rem);
+  margin: 0 auto;
+}
+
+.party-guest-hub-gallery-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.party-guest-hub-gallery-heading {
+  min-width: 0;
+}
+
+.party-guest-hub-gallery-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.party-guest-hub-gallery-help {
+  margin: 0.15rem 0 0;
+  color: var(--party-hub-muted);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.party-guest-hub-gallery-count {
+  flex: none;
+  margin: 0;
+  color: var(--party-hub-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Moments that arrived while the guest was on the page. They are appended at
+   the bottom of the album, so without this nobody standing at the top would
+   know they were there. */
+.party-guest-hub-gallery-new {
+  display: block;
+  min-height: 2.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid rgb(0 212 255 / 34%);
+  border-radius: 999px;
+  background: rgb(0 212 255 / 10%);
+  color: var(--party-hub-text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* An editorial composition, not a contact sheet: two columns, a wide tile every
+   so often, and rows that alternate between portrait and square. The shapes are
+   decided by index in the page (see galleryShapes), so DOM order and visual
+   order are the same and no measurement of the real images is involved. */
+.party-guest-hub-tiles {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.party-guest-hub-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0.85rem;
+  /* Held before the photo arrives, so the grid never jumps as images load. */
+  background: rgb(15 30 58 / 62%);
+  cursor: pointer;
+}
+
+.party-guest-hub-tile[data-shape='featured'] {
+  grid-column: 1 / -1;
+  aspect-ratio: 16 / 10;
+}
+
+.party-guest-hub-tile[data-shape='portrait'] { aspect-ratio: 4 / 5; }
+.party-guest-hub-tile[data-shape='square'] { aspect-ratio: 1 / 1; }
+
+/* The photograph is the colour on this surface: no permanent tint over it. */
+.party-guest-hub-tile-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 220ms ease, opacity 220ms ease;
+}
+
+.party-guest-hub-tile:hover .party-guest-hub-tile-img {
+  transform: scale(1.03);
+}
+
+.party-guest-hub-tile:active .party-guest-hub-tile-img {
+  opacity: 0.86;
+}
+
+.party-guest-hub-tile:focus-visible {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 3px;
+}
+
+/* A video is a poster plus a play mark. The party surface serves no duration,
+   so none is shown. */
+.party-guest-hub-tile-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgb(245 247 251 / 30%);
+  border-radius: 999px;
+  background: rgb(10 15 26 / 52%);
+  color: var(--brand-cloud-white);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.party-guest-hub-tile-play svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  fill: currentcolor;
+  stroke: none;
+}
+
+/* Empty album ------------------------------------------------------------- */
+
+.party-guest-hub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2.5rem 1.25rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: var(--radius-card);
+  background: rgb(15 30 58 / 45%);
+  text-align: center;
+}
+
+.party-guest-hub-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 1.1rem;
+  background: rgb(21 101 255 / 18%);
+  color: var(--brand-cyan-glow);
+}
+
+.party-guest-hub-empty-icon svg {
+  width: 1.85rem;
+  height: 1.85rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-guest-hub-empty-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.party-guest-hub-empty-help {
+  margin: 0;
+  color: var(--party-hub-muted);
+  font-size: 0.9rem;
+}
+
+/* Viewer ------------------------------------------------------------------- */
+
+/* One photo, as large as the screen allows, on almost nothing. The medium
+   preview is what is shown and the metadata-stripped copy is what downloads —
+   the original never appears here. */
+.party-guest-hub-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    max(1rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  background: rgb(4 8 16 / 94%);
+}
+
+.party-guest-hub-viewer-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: min(100%, 60rem);
+  max-height: 100%;
+  min-height: 0;
+}
+
+/* Contain, never crop: the viewer shows the whole photo. */
+.party-guest-hub-viewer-img {
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 0.85rem;
+}
+
+.party-guest-hub-viewer-bar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.party-guest-hub-viewer-close,
+.party-guest-hub-viewer-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.party-guest-hub-viewer-close {
+  border: 1px solid var(--party-hub-border);
+  background: rgb(245 247 251 / 8%);
+  color: var(--party-hub-text);
+}
+
+.party-guest-hub-viewer-download {
+  border: 0;
+  background:
+    linear-gradient(135deg, rgb(0 212 255 / 20%), rgb(0 212 255 / 0%) 60%),
+    var(--brand-electric-blue);
+  color: var(--accent-contrast);
+}
+
+.party-guest-hub-viewer :focus-visible {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .party-guest-hub-tile-img {
+    transition: none;
+  }
+
+  .party-guest-hub-tile:hover .party-guest-hub-tile-img {
+    transform: none;
+  }
+}
+
 /* Everything below the first viewport keeps its existing styling; this wrapper
    only restores the page gutter the hero deliberately spends. */
 .party-guest-hub-body {
@@ -719,4 +1001,29 @@
     padding-inline: max(2rem, env(safe-area-inset-left)) max(2rem, env(safe-area-inset-right));
   }
 
+  /* From tablet up the editorial pattern is retired rather than stretched: a
+     wide tile spanning two of three columns cannot stay gap-free at every album
+     size, and a 68rem-wide "featured" photo is not editorial, it is enormous.
+     Uniform portrait tiles, three then four across. */
+  .party-guest-hub-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+
+  .party-guest-hub-tile[data-shape='featured'],
+  .party-guest-hub-tile[data-shape='portrait'],
+  .party-guest-hub-tile[data-shape='square'] {
+    grid-column: auto;
+    aspect-ratio: 4 / 5;
+  }
+
+  .party-guest-hub-gallery-title {
+    font-size: 1.4rem;
+  }
+}
+
+@media (min-width: 68rem) {
+  .party-guest-hub-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }

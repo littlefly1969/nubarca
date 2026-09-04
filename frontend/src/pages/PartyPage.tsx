@@ -98,6 +98,63 @@ function PhotoStackIcon() {
   );
 }
 
+/* Gallery composition.
+
+   An editorial 2-column grid rather than a uniform contact sheet, but a
+   DETERMINISTIC one: a tile's shape comes from its index, never from the
+   image's real dimensions, so nothing reflows once the photos load and the
+   visual order is exactly the DOM order (no masonry, no `columns`, no dense
+   packing).
+
+   Two rules keep the composition whole at any album size:
+
+     * a wide tile every FEATURE_EVERY items, which always starts a fresh row
+       because the six tiles between two of them fill exactly three rows —
+       so a wide tile can never leave a gap beside it;
+     * the two tiles sharing a row always share a shape, so a row never has one
+       short tile and one tall one with dead space under the short one.
+
+   The one thing that does depend on the total is the LAST tile: if it would sit
+   alone it widens to fill its row. That is a single tile at the very end, so a
+   photo arriving from the poll changes that row and nothing above it. */
+export type GalleryShape = 'featured' | 'portrait' | 'square';
+
+const FEATURE_EVERY = 7;
+
+export function galleryShapes(count: number): GalleryShape[] {
+  const shapes: GalleryShape[] = [];
+  let row = 0;
+  let col = 0;
+  let cells = 0;
+  for (let i = 0; i < count; i += 1) {
+    if (i % FEATURE_EVERY === 0) {
+      shapes.push('featured');
+      cells += 2;
+      row += 1;
+      col = 0;
+      continue;
+    }
+    shapes.push(row % 2 === 0 ? 'portrait' : 'square');
+    cells += 1;
+    col += 1;
+    if (col === 2) {
+      col = 0;
+      row += 1;
+    }
+  }
+  // An odd number of cells means the last row holds one tile: widen it.
+  if (cells % 2 === 1 && shapes.length > 0) shapes[shapes.length - 1] = 'featured';
+  return shapes;
+}
+
+function PlayIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M9.5 7.8 16.8 12l-7.3 4.2Z" />
+    </svg>
+  );
+}
+
 // One capability = one card in the "what would you like to do?" deck.
 //
 // This is a list, not a framework: adding the dedication, song-request or print
@@ -205,6 +262,8 @@ export function PartyPage() {
   const { t, tn } = useI18n();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [lightbox, setLightbox] = useState<PartyItem | null>(null);
+  // The tile the viewer was opened from, so focus goes back to it on close.
+  const viewerOpenerRef = useRef<HTMLElement | null>(null);
   // Phone-only face filter from a completed face search. The full album stays
   // in state (polling continues untouched); only the visible grid is narrowed.
   // The TV is NEVER affected by this — activation is a separate explicit action
@@ -226,6 +285,20 @@ export function PartyPage() {
 
   const showFaceResults = useCallback(() => {
     galleryRef.current?.scrollIntoView?.({ block: 'start' });
+  }, []);
+
+  // Which moments the guest has already been shown. Items arrive appended
+  // (the server orders by AddedAt), so a new one lands at the BOTTOM of the
+  // gallery, where nobody standing at the top would notice it — hence the
+  // count. Tracked by id rather than by length: an owner hiding one photo while
+  // a guest uploads another leaves the length unchanged, and that is still a new
+  // moment.
+  const seenIdsRef = useRef<Set<string> | null>(null);
+  const [newMoments, setNewMoments] = useState(0);
+
+  const openViewer = useCallback((item: PartyItem, trigger: HTMLElement) => {
+    viewerOpenerRef.current = trigger;
+    setLightbox(item);
   }, []);
 
   const load = useCallback((signal?: AbortSignal) => {
@@ -281,11 +354,39 @@ export function PartyPage() {
     return () => window.clearInterval(timer);
   }, [state.kind, token]);
 
+  const readyItems = state.kind === 'ready' ? state.items : null;
+  useEffect(() => {
+    if (!readyItems) return;
+    // First sight of the album: everything in it is already "seen".
+    if (!seenIdsRef.current) {
+      seenIdsRef.current = new Set(readyItems.map((i) => i.id));
+      return;
+    }
+    const seen = seenIdsRef.current;
+    setNewMoments(readyItems.reduce((n, i) => (seen.has(i.id) ? n : n + 1), 0));
+  }, [readyItems]);
+
+  const acknowledgeMoments = useCallback(() => {
+    if (readyItems) seenIdsRef.current = new Set(readyItems.map((i) => i.id));
+    setNewMoments(0);
+  }, [readyItems]);
+
+  // The viewer owns the screen while it is open: Escape closes it, the page
+  // behind it does not scroll, and focus goes back to the tile it came from.
   useEffect(() => {
     if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightbox(null); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const body = document.body;
+    const previousOverflow = body.style.overflow;
+    body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      body.style.overflow = previousOverflow;
+      const opener = viewerOpenerRef.current;
+      viewerOpenerRef.current = null;
+      opener?.focus?.();
+    };
   }, [lightbox]);
 
   if (state.kind === 'loading') {
@@ -348,6 +449,8 @@ export function PartyPage() {
       .map((id) => items.find((it) => it.id === id))
       .filter((it): it is PartyItem => it !== undefined)
     : items;
+
+  const shapes = galleryShapes(visibleItems.length);
 
   // What this party actually offers right now. "Share a moment" is deliberately
   // absent: it is the hero's primary CTA and must not be duplicated here.
@@ -452,24 +555,73 @@ export function PartyPage() {
         </div>
       )}
 
-      <section id="party-photos" ref={galleryRef}>
+      <section
+        id="party-photos"
+        className="party-guest-hub-gallery"
+        ref={galleryRef}
+        aria-labelledby="party-gallery-title"
+      >
+        <header className="party-guest-hub-gallery-head">
+          <div className="party-guest-hub-gallery-heading">
+            <h2 className="party-guest-hub-gallery-title" id="party-gallery-title">
+              {t('party.galleryTitle')}
+            </h2>
+            <p className="party-guest-hub-gallery-help">{t('party.galleryLiveHelp')}</p>
+          </div>
+          {/* Filtered, this is a match count and says so — never the album's
+              total dressed up as one. */}
+          <p className="party-guest-hub-gallery-count" data-testid="party-gallery-count">
+            {faceFilter
+              ? tn(visibleItems.length, 'partyFace.resultsTitle')
+              : tn(items.length, 'party.itemCount')}
+          </p>
+        </header>
+
+        {newMoments > 0 && !faceFilter && (
+          <button
+            type="button"
+            className="party-guest-hub-gallery-new"
+            data-testid="party-new-moments"
+            role="status"
+            onClick={acknowledgeMoments}
+          >
+            {tn(newMoments, 'party.newMoments')}
+          </button>
+        )}
+
       {visibleItems.length === 0 ? (
-        <p className="party-status" data-testid="party-empty">
-          {faceFilter ? t('partyFace.noMatches') : t('party.empty')}
-        </p>
+        <div className="party-guest-hub-empty" data-testid="party-empty">
+          <span className="party-guest-hub-empty-icon" aria-hidden="true"><PhotoStackIcon /></span>
+          <p className="party-guest-hub-empty-title">
+            {faceFilter ? t('partyFace.noMatches') : t('party.empty')}
+          </p>
+          {/* A nudge, not a second primary action: the hero's CTA is the one
+              way to contribute, and it is a thumb away above this. */}
+          {!faceFilter && contributionUrl && (
+            <p className="party-guest-hub-empty-help">{t('party.emptyBeFirst')}</p>
+          )}
+        </div>
       ) : (
-        <div className="party-grid" data-testid="party-grid">
-          {visibleItems.map((item) => (
+        <div className="party-guest-hub-tiles" data-testid="party-grid">
+          {visibleItems.map((item, index) => (
             <button
               key={item.id}
               type="button"
-              className="party-tile"
-              onClick={() => setLightbox(item)}
-              aria-label={t('party.openPhoto')}
+              className="party-guest-hub-tile"
+              data-shape={shapes[index]}
+              onClick={(e) => openViewer(item, e.currentTarget)}
+              aria-label={item.mediaType === 'video' ? t('party.openVideo') : t('party.openPhoto')}
             >
-              <img className="party-thumb" src={item.thumbnailUrl} alt="" loading="lazy" />
+              <img
+                className="party-guest-hub-tile-img"
+                src={item.thumbnailUrl}
+                alt=""
+                loading="lazy"
+              />
+              {/* The party surface serves a POSTER for a video and no duration,
+                  so the tile says "video" and invents nothing else. */}
               {item.mediaType === 'video' && (
-                <span className="party-tile-badge" aria-hidden="true">▶</span>
+                <span className="party-guest-hub-tile-play" aria-hidden="true"><PlayIcon /></span>
               )}
             </button>
           ))}
@@ -491,24 +643,35 @@ export function PartyPage() {
 
       {lightbox && (
         <div
-          className="party-lightbox"
+          className="party-guest-hub-viewer"
           role="dialog"
+          aria-modal="true"
           aria-label={t('party.photoViewer')}
           onClick={() => setLightbox(null)}
         >
-          <div className="party-lightbox-inner" onClick={(e) => e.stopPropagation()}>
-            <img className="party-lightbox-img" src={lightbox.previewUrl} alt="" />
-            <div className="party-lightbox-bar">
+          <div className="party-guest-hub-viewer-inner" onClick={(e) => e.stopPropagation()}>
+            {/* The medium PREVIEW, whole and uncropped — for a video this is the
+                poster the party surface serves; there is no playback here. */}
+            <img className="party-guest-hub-viewer-img" src={lightbox.previewUrl} alt="" />
+            <div className="party-guest-hub-viewer-bar">
+              <button
+                type="button"
+                className="party-guest-hub-viewer-close"
+                data-testid="party-viewer-close"
+                autoFocus
+                onClick={() => setLightbox(null)}
+              >
+                {t('common.close')}
+              </button>
               {lightbox.downloadUrl && (
                 <a
-                  className="party-download"
+                  className="party-guest-hub-viewer-download"
                   href={lightbox.downloadUrl}
                   download
                 >
                   {t('common.download')}
                 </a>
               )}
-              <button type="button" onClick={() => setLightbox(null)}>{t('common.close')}</button>
             </div>
           </div>
         </div>
