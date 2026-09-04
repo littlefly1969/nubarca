@@ -134,3 +134,74 @@ test('an account boundary keeps nothing at all', () => {
   assert.equal(model.takeReturnPosition('photos')?.focusedKey ?? null, null);
   assert.equal(model.snapshot(), null);
 });
+
+// UX-01.5: the sequence has to be able to GROW, because the gallery that
+// opened it keeps paginating while the user swipes.
+
+const seq = (n: number, from = 0): ViewerSlide[] =>
+  Array.from({ length: n }, (_, i) => slide(`item-${from + i}`));
+
+test('an append extends the sequence without moving the user', () => {
+  const model = new ViewerSequenceModel();
+  model.open(seq(60), 'item-55', 'photos');
+  model.setIndex(55);
+  assert.equal(model.appendSlides(seq(120)), true);
+  const after = model.snapshot()!;
+  assert.equal(after.slides.length, 120);
+  // The whole point: the counter grows, the reader does not move.
+  assert.equal(after.index, 55);
+  assert.equal(after.focusedKey, 'item-55');
+  assert.equal(after.openedKey, 'item-55');
+  assert.equal(after.scopeKey, 'photos');
+});
+
+test('an append keeps the slide objects that are already mounted', () => {
+  // Replacing them would remount every mounted slide — including the video
+  // playing on screen right now.
+  const model = new ViewerSequenceModel();
+  const first = seq(3);
+  model.open(first, 'item-0', 'photos');
+  const before = model.snapshot()!.slides[1];
+  model.appendSlides(seq(5));
+  assert.equal(model.snapshot()!.slides[1], before, 'slide 1 was rebuilt');
+});
+
+test('a page that brings nothing new changes nothing', () => {
+  const model = new ViewerSequenceModel();
+  model.open(seq(60), 'item-10', 'photos');
+  assert.equal(model.appendSlides(seq(60)), false, 'duplicates must not append');
+  assert.equal(model.snapshot()!.slides.length, 60);
+  // Answering false is what lets the provider leave React alone.
+});
+
+test('the continuation may hand back the WHOLE accumulated set', () => {
+  // §8: the gallery returns everything it has; only unseen keys are taken.
+  const model = new ViewerSequenceModel();
+  model.open(seq(60), 'item-0', 'photos');
+  model.appendSlides(seq(120));
+  model.appendSlides(seq(172));
+  const keys = model.snapshot()!.slides.map((s) => s.key);
+  assert.equal(keys.length, 172);
+  assert.equal(new Set(keys).size, 172, 'a key was appended twice');
+  assert.equal(keys[0], 'item-0');
+  assert.equal(keys[171], 'item-171');
+});
+
+test('a page landing after close does not resurrect the sequence', () => {
+  // The request the user left behind still completes. It must find nothing.
+  const model = new ViewerSequenceModel();
+  model.open(seq(60), 'item-0', 'photos');
+  model.close();
+  assert.equal(model.appendSlides(seq(120)), false);
+  assert.equal(model.snapshot(), null);
+  // And the return position the close recorded is untouched by the late page.
+  assert.equal(model.takeReturnPosition('photos')?.focusedKey, 'item-0');
+});
+
+test('a page landing after an account switch does not resurrect it either', () => {
+  const model = new ViewerSequenceModel();
+  model.open(seq(60), 'item-0', 'photos');
+  model.reset();
+  assert.equal(model.appendSlides(seq(120)), false);
+  assert.equal(model.snapshot(), null);
+});
