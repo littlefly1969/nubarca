@@ -52,7 +52,10 @@ if ! id "$user" >/dev/null 2>&1; then
   useradd --system --user-group --home-dir "$state_dir" --shell /usr/sbin/nologin "$user"
 fi
 install -d -o "$user" -g "$user" -m 0700 "$state_dir" "$state_dir/temp" "$state_dir/fake-output"
-install -d -o root -g "$user" -m 0750 "$config_dir"
+# The directory is shared by every instance. It contains no secrets and must
+# remain traversable after later installs; each JSON file below is still
+# readable only by root and its own instance group.
+install -d -o root -g root -m 0755 "$config_dir"
 
 umask 0077
 cat > "$config_path" <<EOF
