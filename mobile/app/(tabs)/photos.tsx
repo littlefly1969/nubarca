@@ -111,7 +111,21 @@ export default function Photos(): React.JSX.Element {
   };
 
   const openViewer = (item: MediaItem): void => {
-    viewer.open(ownedSlides(snapshot.items), item.id, GALLERY_SCOPE);
+    viewer.open(
+      ownedSlides(snapshot.items),
+      item.id,
+      GALLERY_SCOPE,
+      {
+        // ONE paginator. The viewer gets a way to ask THIS screen's loadMore —
+        // the one already carrying this query's cursor and filters — and never
+        // learns a cursor, a page size or an endpoint of its own.
+        hasMore: snapshot.hasMore,
+        loadMore: async () => {
+          const next = await loadMore();
+          return { slides: ownedSlides(next.items), hasMore: next.hasMore };
+        },
+      },
+    );
     router.push(`/media/${item.id}`);
   };
 

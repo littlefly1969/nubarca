@@ -169,7 +169,16 @@ export default function SharedAlbum(): React.JSX.Element {
 
   function openItem(item: SharedAlbumItem): void {
     // Slides carry the SERVER-PROVIDED album-scoped URLs as-is.
-    viewer.open(sharedSlides(snapshot.items), item.albumItemId, galleryScope);
+    viewer.open(sharedSlides(snapshot.items), item.albumItemId, galleryScope, {
+      hasMore: snapshot.hasMore,
+      // sharedSlides, NOT ownedSlides: pages arriving mid-swipe must keep the
+      // server-provided album-scoped URLs. Reconstructing an owner path here
+      // would hand a contributor authority the share never granted.
+      loadMore: async () => {
+        const next = await loadMore();
+        return { slides: sharedSlides(next.items), hasMore: next.hasMore };
+      },
+    });
     router.push(`/media/${item.albumItemId}`);
   }
 

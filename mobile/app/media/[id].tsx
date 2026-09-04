@@ -52,12 +52,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useI18n } from '../../src/i18n';
 import { media } from '../../src/ui/palette.ts';
 
+// How close to the end is close enough to ask for more. Slides, never pages:
+// far enough ahead to hide a round trip, small enough that opening in the
+// middle of a long library does not fetch for no reason.
+const VIEWER_PREFETCH_LEAD = 8;
+
 export default function MediaRoute(): React.JSX.Element {
   const session = useSession();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ id: string; kind?: string; name?: string }>();
-  const { sequence, setIndex: setViewerIndex, close: closeViewer } = useViewer();
+  const { sequence, setIndex: setViewerIndex, close: closeViewer, requestMore } = useViewer();
   const { width: initialWindowWidth } = useWindowDimensions();
 
   // ONE navigation path for both the hardware back and the chrome button. The
@@ -164,6 +169,21 @@ export default function MediaRoute(): React.JSX.Element {
 
   const safeIndex = safeViewerIndex(index, slides.length);
   const current = slides[safeIndex];
+
+  // Ask the originating gallery for its next page BEFORE the sequence runs
+  // out, so swiping crosses a page boundary without the user noticing there
+  // was one. The lead is expressed in slides, not pages: this route has no
+  // business knowing what a page is, and PAGE_SIZE could change without it.
+  //
+  // Runs on every focused index — including the first, so opening near the
+  // loaded end fetches immediately. requestMore itself refuses a duplicate
+  // request and stops once there is nothing left, which is why calling it this
+  // often is safe and why no timer is needed to space the calls out.
+  useEffect(() => {
+    if (slides.length === 0) return;
+    const remaining = slides.length - 1 - safeIndex;
+    if (remaining <= VIEWER_PREFETCH_LEAD) void requestMore();
+  }, [safeIndex, slides.length, requestMore]);
 
   useLayoutEffect(() => {
     const previousWidth = previousWidthRef.current;

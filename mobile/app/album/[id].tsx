@@ -290,7 +290,13 @@ export default function AlbumDetail(): React.JSX.Element {
             selecting={selectionState.selecting}
             selectedIds={selectionState.ids}
             onPressItem={(item) => {
-              viewer.open(ownedSlides(snapshot.items), item.id, galleryScope);
+              viewer.open(ownedSlides(snapshot.items), item.id, galleryScope, {
+                hasMore: snapshot.hasMore,
+                loadMore: async () => {
+                  const next = await loadMore();
+                  return { slides: ownedSlides(next.items), hasMore: next.hasMore };
+                },
+              });
               router.push(`/media/${item.id}`);
             }}
             onToggleSelect={selectionState.toggle}
