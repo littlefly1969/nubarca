@@ -156,6 +156,10 @@ const it = {
   'party.errorTitle': 'Qualcosa è andato storto',
   'party.errorBody': 'Impossibile caricare questo album party.',
   'party.subtitleSuffix': 'album condiviso in sola visualizzazione',
+  // The guest surface counts MOMENTS, not items; party.itemCount stays for the
+  // owner-facing surfaces that still speak of items.
+  'party.momentCount_one': '{count} momento',
+  'party.momentCount_other': '{count} momenti',
   'party.itemCount_one': '{count} elemento',
   'party.itemCount_other': '{count} elementi',
   'party.empty': 'Questo album non ha ancora foto.',
@@ -172,7 +176,7 @@ const it = {
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Trova le tue foto',
   'partyFace.intro': 'La foto viene usata solo per cercare corrispondenze in questo album party.',
-  'partyFace.notStored': 'La foto non viene salvata; solo un piccolo ritaglio del volto viene conservato finché la ricerca è attiva.',
+  'partyFace.notStored': 'Il selfie non viene salvato. Finché la ricerca resta attiva viene conservato temporaneamente solo un piccolo ritaglio del volto.',
   'partyFace.chooseSelfie': 'Scatta un selfie',
   'partyFace.change': 'Cambia selfie',
   'partyFace.search': 'Trova le mie foto',

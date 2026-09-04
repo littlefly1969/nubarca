@@ -9,6 +9,9 @@ import { I18nProvider } from '../i18n';
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  // The switcher persists the chosen language, so a test that changes it would
+  // otherwise leave every test after it running in English.
+  window.localStorage.clear();
 });
 
 function wrapper(token = 'tok-1') {
@@ -94,7 +97,7 @@ describe('PartyPage (public party landing)', () => {
     // Live state: the dynamic item count next to a "Live" marker. Scoped to the
     // hero — the challenges card carries its own LIVE badge.
     const hero = cover.parentElement as HTMLElement;
-    expect(within(hero).getByText(/1 elemento/)).toBeInTheDocument();
+    expect(within(hero).getByText(/1 momento/)).toBeInTheDocument();
     expect(within(hero).getByText('Live')).toBeInTheDocument();
   });
 
@@ -490,7 +493,7 @@ describe('PartyPage (public party landing)', () => {
     expect(within(gallery).getByRole('heading', { level: 2, name: 'Momenti della festa' }))
       .toBeInTheDocument();
     expect(within(gallery).getByText('Si aggiorna mentre la festa continua')).toBeInTheDocument();
-    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi');
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 momenti');
   });
 
   it('lays the tiles out in server order, with a deterministic editorial shape', async () => {
@@ -572,6 +575,39 @@ describe('PartyPage (public party landing)', () => {
     expect(document.activeElement).toBe(tiles[1]);
   });
 
+  it('counts MOMENTS on the guest surface, not items', async () => {
+    mockAlbum([media('f1'), media('f2'), media('f3')]);
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 momenti');
+    const hero = screen.getByTestId('party-hub-cover').parentElement as HTMLElement;
+    expect(within(hero).getByText('3 momenti')).toBeInTheDocument();
+    // "elementi" is the owner-facing word and has no place on this page.
+    expect(document.body.textContent).not.toMatch(/element[oi]/i);
+  });
+
+  it('keeps the language switcher a real, named, keyboard-operable control', async () => {
+    mockAlbum([media('f1')]);
+    render(wrapper());
+    await screen.findByTestId('party-grid');
+
+    // Compact paint, unchanged control: still a native select, still named, and
+    // its options still say the languages in full.
+    const select = screen.getByRole('combobox', { name: /Lingua/i });
+    expect(select.tagName).toBe('SELECT');
+    expect(select).toHaveValue('it');
+    expect(screen.getByRole('option', { name: 'Italiano' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'English' })).toBeInTheDocument();
+    // The visible code is decoration and is not announced twice.
+    const code = document.querySelector('.language-switcher-code');
+    expect(code).toHaveTextContent('IT');
+    expect(code).toHaveAttribute('aria-hidden', 'true');
+
+    await userEvent.setup().selectOptions(select, 'en');
+    expect(await screen.findByText('Moments from the party')).toBeInTheDocument();
+    expect(document.querySelector('.language-switcher-code')).toHaveTextContent('EN');
+  });
+
   it('names the viewer after what it is showing', async () => {
     mockAlbum([media('f1'), media('f2', 'video')]);
     render(wrapper());
@@ -641,7 +677,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
-    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi');
+    expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 momenti');
 
     await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
     await user.upload(
@@ -664,7 +700,7 @@ describe('PartyPage (public party landing)', () => {
     // And back to the whole album.
     await user.click(screen.getByTestId('party-face-filter-clear'));
     await waitFor(() =>
-      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 elementi'));
+      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('3 momenti'));
     expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
       .toHaveLength(3);
   });
@@ -708,7 +744,7 @@ describe('PartyPage (public party landing)', () => {
       expect(live).toHaveAttribute('role', 'status');
       expect(live).toContainElement(pill);
       expect(screen.getAllByText('2 nuovi momenti')).toHaveLength(1);
-      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('4 elementi');
+      expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('4 momenti');
       // The existing photos are still there, in order, and nothing scrolled.
       expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
         .toHaveLength(4);

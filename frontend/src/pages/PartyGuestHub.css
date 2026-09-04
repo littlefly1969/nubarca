@@ -124,16 +124,82 @@
    theme. This surface does not: pin it to the dark palette — including
    color-scheme, the only lever we have over the OS-drawn option list — so a
    light-theme visitor is not left with a near-invisible label on the cover. */
-.party-guest-hub .language-switcher-label {
-  color: var(--party-hub-muted);
+.party-guest-hub .language-switcher select {
+  color-scheme: dark;
 }
 
-.party-guest-hub .language-switcher select {
-  min-height: 3rem;
-  border-color: var(--party-hub-border);
-  background-color: rgb(10 15 26 / 78%);
+/* Compact: a globe, the language code and a chevron. The "Lingua" label is the
+   accessible name, not a visible one — the select carries it too. */
+.party-guest-hub .language-switcher--compact .language-switcher-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.party-guest-hub-topbar .language-switcher--compact {
+  display: inline-flex;
+  align-items: center;
+}
+
+.party-guest-hub .language-switcher-face {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 2.75rem;
+  padding: 0 0.7rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  background: rgb(10 15 26 / 55%);
   color: var(--party-hub-text);
-  color-scheme: dark;
+}
+
+.party-guest-hub .language-switcher-face svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-guest-hub .language-switcher-face svg:last-of-type {
+  width: 0.85rem;
+  height: 0.85rem;
+  opacity: 0.7;
+}
+
+.party-guest-hub .language-switcher-code {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* The real control, at full size over its own decoration: the native picker,
+   the keyboard behaviour and the accessible name are untouched — only the
+   painting is ours. */
+.party-guest-hub .language-switcher--compact select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* An invisible control cannot show a focus ring, so the decoration wears it. */
+.party-guest-hub .language-switcher-face:has(select:focus-visible) {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 3px;
 }
 
 .party-guest-hub-headline {

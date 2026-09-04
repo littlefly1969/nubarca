@@ -84,7 +84,13 @@ describe('PartyFaceSearch (public "find your photos")', () => {
       screen.getByText('La foto viene usata solo per cercare corrispondenze in questo album party.'),
     ).toBeInTheDocument();
     // Privacy is stated up front, in the words the backend actually guarantees.
-    expect(screen.getByText(/La foto non viene salvata/)).toBeInTheDocument();
+    // The selfie itself is validated in memory and never stored; only when TV
+    // activation is enabled is a small face crop kept, and then only while the
+    // search session lives. The copy claims exactly that and no more.
+    expect(screen.getByText(
+      'Il selfie non viene salvato. Finché la ricerca resta attiva viene conservato'
+      + ' temporaneamente solo un piccolo ritaglio del volto.',
+    )).toBeInTheDocument();
   });
 
   it('shows English copy when the language is English', () => {

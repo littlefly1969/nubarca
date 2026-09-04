@@ -247,7 +247,7 @@ function PartyHubTopBar() {
         width={PARTY_WORDMARK.width}
         height={PARTY_WORDMARK.height}
       />
-      <LanguageSwitcher className="language-switcher language-switcher-public" />
+      <LanguageSwitcher className="language-switcher language-switcher-public" compact />
     </div>
   );
 }
@@ -531,7 +531,7 @@ export function PartyPage() {
           <p className="party-guest-hub-eyebrow">{PARTY_EYEBROW}</p>
           <h1 className="party-guest-hub-title">{albumName}</h1>
           <p className="party-guest-hub-meta">
-            <span>{tn(items.length, 'party.itemCount')}</span>
+            <span>{tn(items.length, 'party.momentCount')}</span>
             <span className="party-guest-hub-meta-sep" aria-hidden="true">·</span>
             <span className="party-guest-hub-live">
               <span className="party-guest-hub-live-dot" aria-hidden="true" />
@@ -600,7 +600,7 @@ export function PartyPage() {
           <p className="party-guest-hub-gallery-count" data-testid="party-gallery-count">
             {faceFilter
               ? tn(visibleItems.length, 'partyFace.resultsTitle')
-              : tn(items.length, 'party.itemCount')}
+              : tn(items.length, 'party.momentCount')}
           </p>
         </header>
 
