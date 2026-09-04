@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   ApiError,
@@ -6,7 +6,7 @@ import {
   getPartyItems,
   type PartyItem,
 } from '@nubarca/api-client';
-import { useI18n } from '../i18n';
+import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PRODUCT_NAME } from '../brand/brand';
@@ -60,6 +60,106 @@ function ChevronIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="m9.5 5.5 6.5 6.5-6.5 6.5" />
     </svg>
+  );
+}
+
+// Deck iconography: one stroke language for the whole surface — same viewBox,
+// same weight, no fills, no emoji, no icon library. Decorative: the card's own
+// title is what a screen reader announces.
+function FaceFrameIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M15.5 4H18a2 2 0 0 1 2 2v2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5M8.5 20H6a2 2 0 0 1-2-2v-2.5" />
+      <circle cx="12" cy="10.6" r="2.6" />
+      <path d="M8.2 16.4a4.2 4.2 0 0 1 7.6 0" />
+    </svg>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7.5 4h9v5a4.5 4.5 0 0 1-9 0Z" />
+      <path d="M7.5 5.5H5.2a.7.7 0 0 0-.7.8c.2 2 1.4 3.4 3 3.6M16.5 5.5h2.3a.7.7 0 0 1 .7.8c-.2 2-1.4 3.4-3 3.6" />
+      <path d="M12 13.5V17M9 20h6M10 17h4" />
+    </svg>
+  );
+}
+
+function PhotoStackIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <rect x="7.5" y="3.5" width="13" height="13" rx="2.5" />
+      <path d="m9.5 13.2 3.1-3.1a1.4 1.4 0 0 1 2 0l3.4 3.4" />
+      <circle cx="16.3" cy="7.6" r="1.3" />
+      <path d="M16.5 20.5H6a2.5 2.5 0 0 1-2.5-2.5V7.5" />
+    </svg>
+  );
+}
+
+// One capability = one card in the "what would you like to do?" deck.
+//
+// This is a list, not a framework: adding the dedication, song-request or print
+// capabilities later means appending an entry here plus the REAL condition that
+// makes it available. Nothing is rendered speculatively — a capability the
+// product does not offer yet has no placeholder and no disabled card.
+type CapabilityTarget =
+  | { kind: 'anchor'; href: string }   // somewhere on this page
+  | { kind: 'route'; to: string };     // a real party route
+
+interface Capability {
+  id: string;
+  titleKey: MessageKey;
+  descriptionKey: MessageKey;
+  icon: ReactNode;
+  target: CapabilityTarget;
+  /** 'signature' leads the deck; 'game' is the warm accent; 'neutral' recedes. */
+  variant: 'signature' | 'game' | 'neutral';
+  badgeKey?: MessageKey;
+}
+
+// The capability deck. Every card is a real destination, so every card is a
+// real link — an anchor for somewhere on this page, a router Link for a route.
+function CapabilityDeck({ capabilities }: { capabilities: Capability[] }) {
+  const { t } = useI18n();
+  return (
+    <nav className="party-guest-hub-deck" aria-labelledby="party-deck-title">
+      <h2 className="party-guest-hub-deck-title" id="party-deck-title">
+        {t('partyHub.actions')}
+      </h2>
+      <ul className="party-guest-hub-deck-grid">
+        {capabilities.map((cap) => {
+          const body = (
+            <>
+              <span className="party-guest-hub-capability-icon" aria-hidden="true">
+                {cap.icon}
+              </span>
+              <span className="party-guest-hub-capability-text">
+                <strong className="party-guest-hub-capability-title">{t(cap.titleKey)}</strong>
+                <span className="party-guest-hub-capability-desc">{t(cap.descriptionKey)}</span>
+              </span>
+              {cap.badgeKey && (
+                <span className="party-guest-hub-capability-badge">{t(cap.badgeKey)}</span>
+              )}
+            </>
+          );
+          return (
+            <li
+              key={cap.id}
+              className="party-guest-hub-capability"
+              data-variant={cap.variant}
+              data-testid={`party-capability-${cap.id}`}
+            >
+              {cap.target.kind === 'route' ? (
+                <Link className="party-guest-hub-capability-link" to={cap.target.to}>{body}</Link>
+              ) : (
+                <a className="party-guest-hub-capability-link" href={cap.target.href}>{body}</a>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
   );
 }
 
@@ -219,6 +319,41 @@ export function PartyPage() {
       .map((id) => items.find((it) => it.id === id))
       .filter((it): it is PartyItem => it !== undefined)
     : items;
+
+  // What this party actually offers right now. "Share a moment" is deliberately
+  // absent: it is the hero's primary CTA and must not be duplicated here.
+  const capabilities: Capability[] = [
+    // The most distinctive NubArca capability, so it leads the deck. The anchor
+    // keeps the existing PartyFaceSearch launcher exactly as it is.
+    {
+      id: 'face',
+      titleKey: 'partyHub.face',
+      descriptionKey: 'partyHub.faceHelp',
+      icon: <FaceFrameIcon />,
+      target: { kind: 'anchor', href: '#party-face' },
+      variant: 'signature',
+    },
+    // Challenges exist only when the owner enabled the party game.
+    ...(gameEnabled && token
+      ? [{
+        id: 'challenges',
+        titleKey: 'partyHub.vote',
+        descriptionKey: 'partyHub.voteHelp',
+        icon: <TrophyIcon />,
+        target: { kind: 'route', to: `/party/${token}/challenges` },
+        variant: 'game',
+        badgeKey: 'partyHub.live',
+      } as const satisfies Capability]
+      : []),
+    {
+      id: 'album',
+      titleKey: 'partyHub.photos',
+      descriptionKey: 'partyHub.photosHelp',
+      icon: <PhotoStackIcon />,
+      target: { kind: 'anchor', href: '#party-photos' },
+      variant: 'neutral',
+    },
+  ];
   return (
     <main className="party-guest-hub">
       {/* The event cover IS the first viewport: full-bleed, cropped naturally
@@ -266,19 +401,7 @@ export function PartyPage() {
       </header>
 
       <div className="party-guest-hub-body">
-      <nav className="party-hub-actions" aria-label={t('partyHub.actions')}>
-        <a className="party-hub-action" href="#party-photos">
-          <strong>{t('partyHub.photos')}</strong><span>{t('partyHub.photosHelp')}</span>
-        </a>
-        <a className="party-hub-action" href="#party-face">
-          <strong>{t('partyHub.face')}</strong><span>{t('partyHub.faceHelp')}</span>
-        </a>
-        {gameEnabled && token && (
-          <Link className="party-hub-action party-hub-action-game" to={`/party/${token}/challenges`}>
-            <strong>{t('partyHub.vote')}</strong><span>{t('partyHub.voteHelp')}</span>
-          </Link>
-        )}
-      </nav>
+      <CapabilityDeck capabilities={capabilities} />
 
       <section id="party-face">
         {token && <PartyFaceSearch token={token} onFilterChange={setFaceFilter} />}
