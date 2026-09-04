@@ -159,7 +159,13 @@ const it = {
   'party.itemCount_one': '{count} elemento',
   'party.itemCount_other': '{count} elementi',
   'party.empty': 'Questo album non ha ancora foto.',
+  'party.galleryTitle': 'Momenti della festa',
+  'party.galleryLiveHelp': 'Si aggiorna mentre la festa continua',
+  'party.emptyBeFirst': 'Sii il primo a condividere un momento.',
+  'party.newMoments_one': '{count} nuovo momento',
+  'party.newMoments_other': '{count} nuovi momenti',
   'party.openPhoto': 'Apri foto',
+  'party.openVideo': 'Apri video',
   'party.photoViewer': 'Visualizzatore foto',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---

@@ -155,7 +155,13 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.itemCount_one': '{count} item',
   'party.itemCount_other': '{count} items',
   'party.empty': 'This album has no photos yet.',
+  'party.galleryTitle': 'Moments from the party',
+  'party.galleryLiveHelp': 'Updating as the party goes on',
+  'party.emptyBeFirst': 'Be the first to share a moment.',
+  'party.newMoments_one': '{count} new moment',
+  'party.newMoments_other': '{count} new moments',
   'party.openPhoto': 'Open photo',
+  'party.openVideo': 'Open video',
   'party.photoViewer': 'Photo viewer',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
