@@ -549,7 +549,7 @@ describe('PartyPage (public party landing)', () => {
     mockAlbum([media('f1', 'video')]);
     render(wrapper());
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Apri video' }));
-    const viewer = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
+    const viewer = await screen.findByRole('dialog', { name: 'Visualizzatore video' });
     // previewUrl for a video IS the poster; the party surface has no playback
     // and no video download.
     expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
@@ -570,6 +570,62 @@ describe('PartyPage (public party landing)', () => {
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /Visualizzatore foto/i })).not.toBeInTheDocument());
     expect(document.activeElement).toBe(tiles[1]);
+  });
+
+  it('names the viewer after what it is showing', async () => {
+    mockAlbum([media('f1'), media('f2', 'video')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+
+    await user.click(screen.getByRole('button', { name: 'Apri video' }));
+    // A video announced as a "photo viewer" is simply wrong.
+    expect(await screen.findByRole('dialog', { name: 'Visualizzatore video' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Visualizzatore foto' })).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('party-viewer-close'));
+
+    await user.click(screen.getByRole('button', { name: 'Apri foto' }));
+    expect(await screen.findByRole('dialog', { name: 'Visualizzatore foto' })).toBeInTheDocument();
+  });
+
+  it('keeps Tab inside the viewer, which claims the page behind it is inert', async () => {
+    mockAlbum([media('f1')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    await user.click(screen.getByRole('button', { name: 'Apri foto' }));
+    const viewer = await screen.findByRole('dialog', { name: 'Visualizzatore foto' });
+
+    const close = screen.getByTestId('party-viewer-close');
+    const download = screen.getByRole('link', { name: /Scarica/i });
+    expect(document.activeElement).toBe(close);
+
+    // Forwards from the last control wraps to the first, not out to the page.
+    await user.tab();
+    expect(document.activeElement).toBe(download);
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+    expect(viewer).toContainElement(document.activeElement as HTMLElement);
+
+    // And backwards from the first wraps to the last.
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(download);
+  });
+
+  it('keeps focus on Close for a video, which has nothing to download', async () => {
+    mockAlbum([media('f1', 'video')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    await user.click(screen.getByRole('button', { name: 'Apri video' }));
+    await screen.findByRole('dialog', { name: 'Visualizzatore video' });
+
+    const close = screen.getByTestId('party-viewer-close');
+    expect(document.activeElement).toBe(close);
+    await user.tab();
+    expect(document.activeElement).toBe(close);
+    await user.tab({ shift: true });
+    expect(document.activeElement).toBe(close);
   });
 
   it('counts MATCHES, not the album, while a face filter is applied', async () => {
@@ -642,14 +698,25 @@ describe('PartyPage (public party landing)', () => {
       current = [...current, media('f3'), media('f4')];
       await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
       await settle();
-      expect(screen.getByTestId('party-new-moments')).toHaveTextContent('2 nuovi momenti');
+      // A control, not a status: it stays reachable by its role.
+      const pill = screen.getByRole('button', { name: '2 nuovi momenti' });
+      expect(pill).toBe(screen.getByTestId('party-new-moments'));
+      expect(pill).not.toHaveAttribute('role');
+      // The announcement comes from the region AROUND it, which is always in the
+      // DOM, so the arrival is announced once and the text appears once.
+      const live = document.querySelector('.party-guest-hub-gallery-live');
+      expect(live).toHaveAttribute('role', 'status');
+      expect(live).toContainElement(pill);
+      expect(screen.getAllByText('2 nuovi momenti')).toHaveLength(1);
       expect(screen.getByTestId('party-gallery-count')).toHaveTextContent('4 elementi');
       // The existing photos are still there, in order, and nothing scrolled.
       expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
         .toHaveLength(4);
 
-      // Acknowledging it clears the pill without touching the album.
+      // Acknowledging it clears the pill without touching the album; the live
+      // region stays behind, ready for the next arrival.
       await act(async () => { screen.getByTestId('party-new-moments').click(); });
+      expect(document.querySelector('.party-guest-hub-gallery-live')).toBeInTheDocument();
       expect(screen.queryByTestId('party-new-moments')).not.toBeInTheDocument();
       expect(screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile'))
         .toHaveLength(4);

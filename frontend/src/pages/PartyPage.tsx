@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useCallback, useEffect, useRef, useState,
+  type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
+} from 'react';
 import { Link, useParams } from 'react-router';
 import {
   ApiError,
@@ -264,6 +267,7 @@ export function PartyPage() {
   const [lightbox, setLightbox] = useState<PartyItem | null>(null);
   // The tile the viewer was opened from, so focus goes back to it on close.
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
   // Phone-only face filter from a completed face search. The full album stays
   // in state (polling continues untouched); only the visible grid is narrowed.
   // The TV is NEVER affected by this — activation is a separate explicit action
@@ -299,6 +303,29 @@ export function PartyPage() {
   const openViewer = useCallback((item: PartyItem, trigger: HTMLElement) => {
     viewerOpenerRef.current = trigger;
     setLightbox(item);
+  }, []);
+
+  // `aria-modal` claims the rest of the page is inert, so Tab must not walk out
+  // of the viewer into it. The surface holds at most two controls — close, and
+  // download for a photo — so the trap is this, rather than a reason to move a
+  // full-bleed photo viewer onto a primitive built around a titled header.
+  // A video has no download, so Tab simply keeps close focused.
+  const trapViewerFocus = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Tab') return;
+    const focusable = Array.from(
+      viewerRef.current?.querySelectorAll<HTMLElement>('button, a[href]') ?? [],
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !viewerRef.current?.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }, []);
 
   const load = useCallback((signal?: AbortSignal) => {
@@ -577,17 +604,23 @@ export function PartyPage() {
           </p>
         </header>
 
-        {newMoments > 0 && !faceFilter && (
-          <button
-            type="button"
-            className="party-guest-hub-gallery-new"
-            data-testid="party-new-moments"
-            role="status"
-            onClick={acknowledgeMoments}
-          >
-            {tn(newMoments, 'party.newMoments')}
-          </button>
-        )}
+        {/* The live region is the WRAPPER, and it is always in the DOM: a status
+            role that appears together with its own content is announced
+            unreliably. The pill inside it stays an ordinary button — a control
+            is not a status — so the arrival is announced exactly once, by the
+            region, and the text is not duplicated anywhere. */}
+        <div className="party-guest-hub-gallery-live" role="status">
+          {newMoments > 0 && !faceFilter && (
+            <button
+              type="button"
+              className="party-guest-hub-gallery-new"
+              data-testid="party-new-moments"
+              onClick={acknowledgeMoments}
+            >
+              {tn(newMoments, 'party.newMoments')}
+            </button>
+          )}
+        </div>
 
       {visibleItems.length === 0 ? (
         <div className="party-guest-hub-empty" data-testid="party-empty">
@@ -646,8 +679,12 @@ export function PartyPage() {
           className="party-guest-hub-viewer"
           role="dialog"
           aria-modal="true"
-          aria-label={t('party.photoViewer')}
+          aria-label={lightbox.mediaType === 'video'
+            ? t('party.videoViewer')
+            : t('party.photoViewer')}
+          ref={viewerRef}
           onClick={() => setLightbox(null)}
+          onKeyDown={trapViewerFocus}
         >
           <div className="party-guest-hub-viewer-inner" onClick={(e) => e.stopPropagation()}>
             {/* The medium PREVIEW, whole and uncropped — for a video this is the
