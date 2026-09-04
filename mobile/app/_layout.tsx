@@ -99,14 +99,30 @@ function AppStack({ identityKey }: { identityKey: string }): React.JSX.Element {
         contentStyle: { backgroundColor: colors.canvas },
       }}
     >
-      <Stack.Screen name="(tabs)" />
+      {/* ORIENTATION IS A PRODUCT DECISION, and it is made here rather than
+          inside any gallery. Browsing surfaces are portrait; the viewer
+          rotates.
+
+          A rotation changes the column count, which relayouts and recycles
+          every cell, which changes each tile's image path, which empties the
+          tile until its fetch completes — so a landscape gallery pays a wave
+          of placeholders for two extra columns nobody asked for. The viewer is
+          where a landscape photograph is actually worth seeing, and it already
+          owns orientation-sensitive pager geometry.
+
+          Expressed as native stack options: no runtime controller, no
+          listeners, no locking effects, nothing to get out of step. */}
+      <Stack.Screen name="(tabs)" options={{ orientation: 'portrait' }} />
       <Stack.Screen name="login" options={{ animation: 'fade' }} />
-      <Stack.Screen name="album/[id]" />
+      <Stack.Screen name="album/[id]" options={{ orientation: 'portrait' }} />
+      {/* Declared only to carry this option — expo-router registers the file
+          route either way. */}
+      <Stack.Screen name="shared-album/[id]" options={{ orientation: 'portrait' }} />
       <Stack.Screen name="account" />
       <Stack.Screen name="sync" />
       <Stack.Screen
         name="media/[id]"
-        options={{ presentation: 'fullScreenModal', animation: 'fade' }}
+        options={{ presentation: 'fullScreenModal', animation: 'fade', orientation: 'all' }}
       />
     </Stack>
   );
