@@ -15,7 +15,15 @@ export function usePagedList<TItem>(
 ): {
   snapshot: PagedSnapshot<TItem>;
   refresh: () => Promise<void>;
-  loadMore: () => Promise<void>;
+  /**
+   * Appends one page and answers with the state that resulted.
+   *
+   * Returning the snapshot is what lets a caller that is NOT rendering this
+   * list — the viewer, mid-swipe — act on the newly loaded items without
+   * owning a cursor of its own. Existing callers keep writing
+   * `void loadMore()` and are unaffected.
+   */
+  loadMore: () => Promise<PagedSnapshot<TItem>>;
   retryFailed: () => Promise<void>;
   patchItem: (key: string, patch: (item: TItem) => TItem) => void;
   removeItems: (keys: ReadonlySet<string>) => void;
@@ -51,11 +59,16 @@ export function usePagedList<TItem>(
     sync();
   }, [list, fetcher, sync]);
 
-  const loadMore = useCallback(async () => {
+  const loadMore = useCallback(async (): Promise<PagedSnapshot<TItem>> => {
     const pending = list.loadMore(fetcher);
     sync();
     await pending;
+    // Read AFTER the operation settles, so the answer describes what actually
+    // happened — including a page that was refused because another was already
+    // in flight, or one that failed and left the cursor armed for a retry.
+    const settled = list.snapshot();
     sync();
+    return settled;
   }, [list, fetcher, sync]);
 
   // The footer's retry must repeat the operation that ACTUALLY failed:

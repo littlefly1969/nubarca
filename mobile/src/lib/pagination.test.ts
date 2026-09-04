@@ -7,6 +7,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PagedList, type FetchPage, type Page } from './pagination.ts';
+import { code } from '../testing/sourceText.ts';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 interface Row {
   id: string;
@@ -347,4 +350,52 @@ test('the pagination state machine never mutates its own item array', async () =
   assert.doesNotMatch(source, /this\.items\.push\(/, 'items are pushed into again');
   assert.doesNotMatch(source, /this\.items\[[^\]]+\]\s*=/, 'an item is assigned in place');
   assert.doesNotMatch(source, /this\.items\.(splice|sort|reverse|fill|copyWithin)\(/);
+});
+
+// UX-01.5: loadMore has to be able to ANSWER, because the viewer swipes on a
+// sequence it does not render and cannot read this list's React state.
+
+test('the state after an append describes 120 items and the real hasMore', async () => {
+  const { refresh, loadMore, list } = paged(172);
+  await refresh();
+  assert.equal(list.snapshot().items.length, 60);
+  await loadMore();
+  const after = list.snapshot();
+  assert.equal(after.items.length, 120);
+  assert.equal(after.hasMore, true, 'the library has 172, so a third page remains');
+});
+
+test('the state after the LAST append reports no more', async () => {
+  const { refresh, loadMore, list } = paged(172);
+  await refresh();
+  await loadMore();
+  await loadMore();
+  const after = list.snapshot();
+  assert.equal(after.items.length, 172);
+  assert.equal(after.hasMore, false, 'hasMore must go false or the viewer asks forever');
+});
+
+test('a refused concurrent append still describes the truth', async () => {
+  // Two callers can ask at once — the gallery on scroll and the viewer on
+  // approach. PagedList suppresses the second fetch; the snapshot each of them
+  // reads afterwards must still be the real one, never a fabricated "nothing
+  // happened".
+  const { refresh, loadMore, list } = paged(172);
+  await refresh();
+  const [, ] = await Promise.all([loadMore(), loadMore()]);
+  const after = list.snapshot();
+  assert.equal(after.items.length, 120, 'the suppressed call must not have appended twice');
+  assert.equal(after.hasMore, true);
+});
+
+test('the hook answers with the state that SETTLED, not the one it started with', () => {
+  // Reading before the await would describe the loading phase and the old item
+  // count — the viewer would then believe there was nothing new and stop at the
+  // page boundary, which is the defect this slice exists to close.
+  const hook = code(readFileSync(resolve(HERE, 'usePagedList.ts'), 'utf8'));
+  assert.match(hook, /loadMore: \(\) => Promise<PagedSnapshot<TItem>>/);
+  assert.match(
+    hook,
+    /await pending;\s*const settled = list\.snapshot\(\);\s*sync\(\);\s*return settled;/,
+  );
 });
