@@ -163,13 +163,12 @@ const it = {
   'party.photoViewer': 'Visualizzatore foto',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
-  'partyFace.open': 'Cerca il tuo volto',
-  'partyFace.title': 'Cerca il tuo volto',
+  'partyFace.title': 'Trova le tue foto',
   'partyFace.intro': 'La foto viene usata solo per cercare corrispondenze in questo album party.',
   'partyFace.notStored': 'La foto non viene salvata; solo un piccolo ritaglio del volto viene conservato finché la ricerca è attiva.',
-  'partyFace.chooseSelfie': 'Scatta o scegli un selfie',
-  'partyFace.change': 'Cambia foto',
-  'partyFace.search': 'Cerca',
+  'partyFace.chooseSelfie': 'Scatta un selfie',
+  'partyFace.change': 'Cambia selfie',
+  'partyFace.search': 'Trova le mie foto',
   'partyFace.cancelSearch': 'Annulla ricerca',
   'partyFace.showOnTv': 'Mostra queste foto sulla TV',
   'partyFace.showingOnTv': 'Ora sulla TV',
@@ -182,8 +181,10 @@ const it = {
   'partyFace.invalidImage': 'Immagine non valida. Prova con un’altra foto.',
   'partyFace.unavailable': 'La ricerca per volto non è ancora disponibile.',
   'partyFace.error': 'Impossibile completare la ricerca. Riprova.',
-  'partyFace.newSearch': 'Nuova ricerca',
+  'partyFace.newSearch': 'Prova con un’altra foto',
   'partyFace.showAll': 'Mostra tutte le foto',
+  'partyFace.seeMyPhotos': 'Vedi le mie foto',
+  'partyFace.filterActive': 'Stai vedendo le tue foto',
 
   // --- Public party upload (guest) ---
   'partyUpload.unavailableTitle': 'Caricamenti non disponibili',

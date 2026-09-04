@@ -1,0 +1,334 @@
+/* "Find your photos" — the guest face-search sheet.
+   Built on the shared Overlay primitive (portal, scroll lock, focus trap and
+   return, Escape, backdrop), restyled here into a party surface: a bottom sheet
+   on a phone, a compact centred dialog from tablet up.
+
+   The overlay is portalled to document.body, OUTSIDE the page element that
+   carries the guest palette, so the brand tokens are pinned again here. That is
+   the only thing this file duplicates — geometry and behaviour stay the
+   primitive's. */
+
+.overlay-backdrop.party-face-overlay {
+  --party-face-text: var(--brand-cloud-white);
+  --party-face-muted: rgb(245 247 251 / 72%);
+  --party-face-border: rgb(245 247 251 / 14%);
+  --party-face-focus: var(--brand-cyan-glow);
+
+  align-items: flex-end;
+  padding: 0;
+  background: rgb(4 8 16 / 72%);
+}
+
+/* Phone: a sheet that rises from the bottom edge, tall enough to be the whole
+   experience but never the whole screen — the cover stays visible above it.
+   `height: auto` undoes the primitive's phone rule, which makes a modal
+   full-screen; this surface is deliberately not. */
+.party-face-overlay .overlay-panel {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: 92vh;
+  max-height: min(92svh, 100%);
+  border: 1px solid var(--party-face-border);
+  border-bottom: 0;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--brand-deep-blue);
+  color: var(--party-face-text);
+}
+
+.party-face-overlay .overlay-panel:focus {
+  outline: none;
+}
+
+.party-face-overlay .overlay-head {
+  padding: 1.15rem 1.15rem 0.5rem;
+  border-bottom: 0;
+  background: transparent;
+}
+
+/* The grab handle, drawn on the header rather than added as an element: it is
+   decoration, and nothing should announce it. */
+.party-face-overlay .overlay-head::before {
+  content: '';
+  position: absolute;
+  top: 0.5rem;
+  left: 50%;
+  width: 2.25rem;
+  height: 0.25rem;
+  border-radius: 999px;
+  background: rgb(245 247 251 / 22%);
+  transform: translateX(-50%);
+}
+
+.party-face-overlay .overlay-head h2 {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.party-face-overlay .overlay-head .icon-button {
+  color: var(--party-face-muted);
+  background: rgb(245 247 251 / 8%);
+  border-radius: 999px;
+}
+
+.party-face-overlay .overlay-body {
+  padding: 0.25rem 1.15rem 1rem;
+}
+
+.party-face-overlay .overlay-foot {
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.5rem 1.15rem max(1.15rem, env(safe-area-inset-bottom));
+  border-top: 0;
+  background: transparent;
+}
+
+.party-face-overlay :focus-visible,
+.party-face-overlay .party-face-file-input:focus-visible + label {
+  outline: 3px solid var(--party-face-focus);
+  outline-offset: 3px;
+}
+
+/* Body ------------------------------------------------------------------- */
+
+.party-face-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.party-face-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  text-align: center;
+}
+
+.party-face-lede {
+  margin: 0;
+  color: var(--party-face-muted);
+  font-size: 0.95rem;
+  line-height: 1.45;
+  text-wrap: balance;
+}
+
+.party-face-hero-icon {
+  display: grid;
+  place-items: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(140deg, rgb(21 101 255 / 30%), rgb(0 212 255 / 10%) 72%),
+    rgb(10 15 26 / 45%);
+  color: var(--brand-cyan-glow);
+}
+
+.party-face-hero-icon svg,
+.party-face-pick-icon svg,
+.party-face-privacy-icon svg {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-face-hero-icon svg {
+  width: 2.75rem;
+  height: 2.75rem;
+}
+
+.party-face-hero-icon--found {
+  background:
+    linear-gradient(140deg, rgb(63 217 140 / 26%), rgb(0 212 255 / 8%) 72%),
+    rgb(10 15 26 / 45%);
+  color: #3fd98c;
+}
+
+/* Selfie preview: shown locally, uploaded only once the guest confirms. */
+.party-face-preview,
+.party-face-scanner {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  width: 9rem;
+  height: 11rem;
+  border: 1px solid var(--party-face-border);
+  border-radius: 1.35rem;
+  background: rgb(10 15 26 / 45%);
+  color: var(--brand-cyan-glow);
+}
+
+.party-face-preview-img,
+.party-face-scanner-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.party-face-preview-fallback svg,
+.party-face-scanner svg:not(.party-face-scanner-img) {
+  width: 2.75rem;
+  height: 2.75rem;
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 1.7;
+}
+
+/* A single line sweeping the selfie: the search is working, and the sweep says
+   nothing about how far along it is — there is no progress to report. */
+.party-face-scanner::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--brand-cyan-glow), transparent);
+  box-shadow: 0 0 12px rgb(0 212 255 / 45%);
+  animation: party-face-scan 1.9s ease-in-out infinite;
+}
+
+@keyframes party-face-scan {
+  0%, 100% { top: 12%; }
+  50% { top: 88%; }
+}
+
+.party-face-found {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Privacy: one compact line with the guarantee the backend actually makes. */
+.party-face-privacy {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--party-face-border);
+  border-radius: 1rem;
+  background: rgb(10 15 26 / 40%);
+  color: var(--party-face-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.party-face-privacy-icon {
+  flex: none;
+  color: var(--brand-cyan-glow);
+}
+
+.party-face-privacy-icon svg {
+  display: block;
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/* Actions ---------------------------------------------------------------- */
+
+.party-face-actions {
+  display: contents;
+}
+
+.party-face-primary,
+.party-face-secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-button);
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.party-face-primary {
+  border: 0;
+  background:
+    linear-gradient(135deg, rgb(0 212 255 / 20%), rgb(0 212 255 / 0%) 60%),
+    var(--brand-electric-blue);
+  color: var(--accent-contrast);
+}
+
+.party-face-secondary {
+  border: 1px solid var(--party-face-border);
+  background: transparent;
+  color: var(--party-face-text);
+}
+
+.party-face-pick-icon svg {
+  display: block;
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Focusable (so the label is reachable by keyboard) but out of the layout. */
+.party-face-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .party-face-scanner::after {
+    animation: none;
+    top: 50%;
+  }
+}
+
+/* Tablet and up: a compact centred dialog, not a full-width sheet. */
+@media (min-width: 40rem) {
+  .overlay-backdrop.party-face-overlay {
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+
+  .party-face-overlay .overlay-panel {
+    width: min(32rem, 100%);
+    max-height: 88vh;
+    max-height: min(88svh, 100%);
+    border-bottom: 1px solid var(--party-face-border);
+    border-radius: var(--radius-card);
+  }
+
+  .party-face-overlay .overlay-head::before {
+    content: none;
+  }
+
+  .party-face-overlay .overlay-head {
+    padding-top: 1.15rem;
+  }
+
+  .party-face-overlay .overlay-foot {
+    flex-direction: row;
+    padding-bottom: 1.15rem;
+  }
+
+  .party-face-primary,
+  .party-face-secondary {
+    width: auto;
+    min-width: 9rem;
+  }
+}

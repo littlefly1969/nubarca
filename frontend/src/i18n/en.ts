@@ -159,13 +159,12 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.photoViewer': 'Photo viewer',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
-  'partyFace.open': 'Find your face',
-  'partyFace.title': 'Find your face',
+  'partyFace.title': 'Find your photos',
   'partyFace.intro': 'This photo is used only to find matches in this party album.',
   'partyFace.notStored': 'The photo is not saved; only a small face crop is kept while the search is active.',
-  'partyFace.chooseSelfie': 'Take or choose a selfie',
-  'partyFace.change': 'Change photo',
-  'partyFace.search': 'Search',
+  'partyFace.chooseSelfie': 'Take a selfie',
+  'partyFace.change': 'Change selfie',
+  'partyFace.search': 'Find my photos',
   'partyFace.cancelSearch': 'Cancel search',
   'partyFace.showOnTv': 'Show these photos on TV',
   'partyFace.showingOnTv': 'Now on TV',
@@ -178,8 +177,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyFace.invalidImage': 'That image is not valid. Try another photo.',
   'partyFace.unavailable': 'Face search is not available yet.',
   'partyFace.error': 'The search could not be completed. Please try again.',
-  'partyFace.newSearch': 'New search',
+  'partyFace.newSearch': 'Try another photo',
   'partyFace.showAll': 'Show all photos',
+  'partyFace.seeMyPhotos': 'See my photos',
+  'partyFace.filterActive': 'You are seeing your photos',
 
   // --- Public party upload (guest) ---
   'partyUpload.unavailableTitle': 'Uploads unavailable',

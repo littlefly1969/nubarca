@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   ApiError,
+  deletePartyFaceSearch,
   getPartyAlbum,
   getPartyItems,
   type PartyItem,
@@ -105,7 +106,8 @@ function PhotoStackIcon() {
 // product does not offer yet has no placeholder and no disabled card.
 type CapabilityTarget =
   | { kind: 'anchor'; href: string }   // somewhere on this page
-  | { kind: 'route'; to: string };     // a real party route
+  | { kind: 'route'; to: string }      // a real party route
+  | { kind: 'action'; onSelect: () => void };  // opens something in place
 
 interface Capability {
   id: string;
@@ -150,10 +152,20 @@ function CapabilityDeck({ capabilities }: { capabilities: Capability[] }) {
               data-variant={cap.variant}
               data-testid={`party-capability-${cap.id}`}
             >
-              {cap.target.kind === 'route' ? (
+              {cap.target.kind === 'route' && (
                 <Link className="party-guest-hub-capability-link" to={cap.target.to}>{body}</Link>
-              ) : (
+              )}
+              {cap.target.kind === 'anchor' && (
                 <a className="party-guest-hub-capability-link" href={cap.target.href}>{body}</a>
+              )}
+              {cap.target.kind === 'action' && (
+                <button
+                  type="button"
+                  className="party-guest-hub-capability-link"
+                  onClick={cap.target.onSelect}
+                >
+                  {body}
+                </button>
               )}
             </li>
           );
@@ -198,6 +210,23 @@ export function PartyPage() {
   // The TV is NEVER affected by this — activation is a separate explicit action
   // inside PartyFaceSearch.
   const [faceFilter, setFaceFilter] = useState<PartyFaceFilter | null>(null);
+  // The face-search sheet is opened by its capability card and by nothing else.
+  const [faceOpen, setFaceOpen] = useState(false);
+  const galleryRef = useRef<HTMLElement>(null);
+
+  // Discarding a search belongs to the page, which owns the filter: it drops the
+  // local filter and the short-lived server-side search (and its stored face
+  // crop) together, from the sheet or from the banner over the gallery.
+  const cancelFaceSearch = useCallback((searchId: string | null) => {
+    if (token && searchId) {
+      void deletePartyFaceSearch(token, searchId).catch(() => { /* best effort */ });
+    }
+    setFaceFilter(null);
+  }, [token]);
+
+  const showFaceResults = useCallback(() => {
+    galleryRef.current?.scrollIntoView?.({ block: 'start' });
+  }, []);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) {
@@ -330,7 +359,7 @@ export function PartyPage() {
       titleKey: 'partyHub.face',
       descriptionKey: 'partyHub.faceHelp',
       icon: <FaceFrameIcon />,
-      target: { kind: 'anchor', href: '#party-face' },
+      target: { kind: 'action', onSelect: () => setFaceOpen(true) },
       variant: 'signature',
     },
     // Challenges exist only when the owner enabled the party game.
@@ -403,11 +432,27 @@ export function PartyPage() {
       <div className="party-guest-hub-body">
       <CapabilityDeck capabilities={capabilities} />
 
-      <section id="party-face">
-        {token && <PartyFaceSearch token={token} onFilterChange={setFaceFilter} />}
-      </section>
+      {/* While a search is applied the album is NOT the whole album, so the page
+          says so and offers the way back — otherwise closing the sheet would
+          leave a filtered gallery with nothing explaining it. */}
+      {faceFilter && (
+        <div className="party-guest-hub-filter" data-testid="party-face-filter">
+          <p className="party-guest-hub-filter-text">
+            <strong>{t('partyFace.filterActive')}</strong>
+            <span>{tn(visibleItems.length, 'partyFace.resultsTitle')}</span>
+          </p>
+          <button
+            type="button"
+            className="party-guest-hub-filter-clear"
+            data-testid="party-face-filter-clear"
+            onClick={() => cancelFaceSearch(faceFilter.searchId)}
+          >
+            {t('partyFace.showAll')}
+          </button>
+        </div>
+      )}
 
-      <section id="party-photos">
+      <section id="party-photos" ref={galleryRef}>
       {visibleItems.length === 0 ? (
         <p className="party-status" data-testid="party-empty">
           {faceFilter ? t('partyFace.noMatches') : t('party.empty')}
@@ -432,6 +477,17 @@ export function PartyPage() {
       )}
       </section>
       </div>
+
+      {token && (
+        <PartyFaceSearch
+          token={token}
+          open={faceOpen}
+          onOpenChange={setFaceOpen}
+          onFilterChange={setFaceFilter}
+          onCancelSearch={cancelFaceSearch}
+          onShowResults={showFaceResults}
+        />
+      )}
 
       {lightbox && (
         <div

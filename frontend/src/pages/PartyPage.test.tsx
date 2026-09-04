@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPage } from './PartyPage';
@@ -58,7 +58,7 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.getByTestId('party-hub-cover')).toHaveStyle({
       backgroundImage: 'url("/api/party/tok-1/media/f1/preview")',
     });
-    expect(screen.getByTestId('party-face-open')).toBeInTheDocument();
+    expect(screen.getByTestId('party-capability-face')).toBeInTheDocument();
     expect(screen.getByTestId('party-grid')).toBeInTheDocument();
   });
 
@@ -180,15 +180,19 @@ describe('PartyPage (public party landing)', () => {
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
     expect(screen.getByRole('heading', { level: 2, name: /Cosa vuoi fare\?/i })).toBeInTheDocument();
 
-    // Every card is a real destination, so every card is a real link.
-    const cards = within(deck).getAllByRole('link');
-    expect(cards).toHaveLength(3);
-    expect(within(deck).getByRole('link', { name: /Trova le tue foto/i }))
-      .toHaveAttribute('href', '#party-face');
+    // A real destination is a real link; an action that opens something in
+    // place is a real button. Never a clickable div either way.
+    expect(within(deck).getAllByRole('link')).toHaveLength(2);
     expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
       .toHaveAttribute('href', '#party-photos');
     expect(within(deck).getByRole('link', { name: /Sfide e votazioni/i }))
       .toHaveAttribute('href', '/party/tok-1/challenges');
+
+    const face = within(deck).getByRole('button', { name: /Trova le tue foto/i });
+    expect(face.tagName).toBe('BUTTON');
+    // The anchor it used to be — and the second launcher it led to — are gone.
+    expect(document.querySelector('a[href="#party-face"]')).toBeNull();
+    expect(screen.queryByTestId('party-face-open')).not.toBeInTheDocument();
   });
 
   it('drops the challenges capability when the party game is off', async () => {
@@ -197,8 +201,9 @@ describe('PartyPage (public party landing)', () => {
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
     expect(within(deck).queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
-    // The rest of the deck is unaffected.
-    expect(within(deck).getAllByRole('link')).toHaveLength(2);
+    // The rest of the deck is unaffected: the album link plus the face action.
+    expect(within(deck).getAllByRole('link')).toHaveLength(1);
+    expect(within(deck).getByRole('button', { name: /Trova le tue foto/i })).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-face')).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-album')).toBeInTheDocument();
   });
@@ -228,17 +233,25 @@ describe('PartyPage (public party landing)', () => {
     expect(deck.querySelectorAll('[disabled], [aria-disabled="true"]')).toHaveLength(0);
   });
 
-  it('keeps every PartyFaceSearch control reachable from the deck', async () => {
+  it('opens the face-search experience with ONE tap on its capability card', async () => {
     mockHub();
     render(wrapper());
     const user = userEvent.setup();
-    // The signature card points at the existing panel, which still opens into
-    // the unchanged selfie controls.
-    expect(await screen.findByTestId('party-capability-face')).toBeInTheDocument();
-    expect(document.querySelector('#party-face')).toBeInTheDocument();
-    await user.click(screen.getByTestId('party-face-open'));
+    await screen.findByTestId('party-capability-face');
+    const card = screen.getByRole('button', { name: /Trova le tue foto/i });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    // One tap — no scroll, no second launcher.
+    await user.click(card);
+    const sheet = await screen.findByTestId('party-face');
+    expect(sheet).toHaveAttribute('aria-modal', 'true');
+    expect(within(sheet).getByRole('heading', { name: 'Trova le tue foto' })).toBeInTheDocument();
     expect(screen.getByTestId('party-face-input')).toBeInTheDocument();
-    expect(screen.getByTestId('party-face-submit')).toBeInTheDocument();
+
+    // Escape closes it and hands focus back to the card that opened it.
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
+    expect(document.activeElement).toBe(card);
   });
 
   it('renders the album and opens a photo with a download link', async () => {
@@ -415,7 +428,7 @@ describe('PartyPage (public party landing)', () => {
 
     // Run a face search: only the matching photo stays visible; the full album
     // remains in state (the item count subtitle is unchanged).
-    await user.click(screen.getByTestId('party-face-open'));
+    await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
     await user.upload(
       screen.getByTestId('party-face-input'),
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
@@ -426,9 +439,16 @@ describe('PartyPage (public party landing)', () => {
     expect(tiles).toHaveLength(1);
     expect(tiles[0]).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
 
+    // "See my photos" closes the sheet and leaves the filter applied, with the
+    // page saying so — a filtered album is never an unexplained one.
+    await user.click(screen.getByTestId('party-face-show-results'));
+    await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
+    expect(screen.getByTestId('party-face-filter')).toBeInTheDocument();
+    expect(screen.getByTestId('party-grid').querySelectorAll('button.party-tile')).toHaveLength(1);
+
     // A matching photo can still be opened + downloaded.
     await user.click(screen.getByTestId('party-grid').querySelector('button.party-tile')!);
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', { name: /Visualizzatore foto/i });
     expect(screen.getByRole('link', { name: /Scarica/i }))
       .toHaveAttribute('href', '/api/party/tok-1/media/f2/download');
     await user.click(within(dialog).getByRole('button', { name: /Chiudi/i }));
@@ -436,10 +456,11 @@ describe('PartyPage (public party landing)', () => {
     // No TV endpoint was ever touched by completing the search.
     expect(mock.calls.some((c) => c.url.includes('/api/tv/') || c.url.includes('activate-tv'))).toBe(false);
 
-    // Cancel search → server-side delete + full album restored.
-    await user.click(screen.getByTestId('party-face-cancel'));
+    // Clearing it from the banner → server-side delete + full album restored.
+    await user.click(screen.getByTestId('party-face-filter-clear'));
     await screen.findByTestId('party-grid');
     expect(screen.getByTestId('party-grid').querySelectorAll('button.party-tile')).toHaveLength(2);
+    expect(screen.queryByTestId('party-face-filter')).not.toBeInTheDocument();
     expect(mock.calls.some((c) => c.method === 'DELETE' && c.url.includes('/face-search/s1'))).toBe(true);
   });
 
