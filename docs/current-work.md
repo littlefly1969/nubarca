@@ -13,7 +13,7 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.2.0`; Linux fake-agent systemd instances
+  packaged headless Print Agent `0.2.1`; Linux fake-agent systemd instances
   cover protocol acceptance while DNP DS620 still requires Windows hardware
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
@@ -22,7 +22,7 @@ is built is described by `ARCHITECTURE.md`.
   separate manual, `main`-only OTA workflow is the sole ordinary OTA signer and
   publishes a signed immutable GHCR bundle without contacting production. A
   third manual, `main`-only Print Agent workflow tests and emits self-contained
-  `win-x64` or `win-arm64` Windows Service bundles.
+  `win-x64`/`win-arm64` Windows Service or `linux-x64` fake-simulator bundles.
   Production pulls verified application/APK/OTA artifacts by digest; the guided
   `deploy/update-production.sh check|apply` path can back up and apply explicitly
   confirmed, policy-approved additive migrations and never builds on the server
@@ -1212,4 +1212,3 @@ simply stops where the gallery had stopped.
 
 Keeping it out of the orientation slice was deliberate: orientation policy is a
 navigation decision, and this is a data-continuation one.
-

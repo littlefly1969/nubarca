@@ -8,9 +8,11 @@ originating repository and is deliberately not reproduced here.
 
 ### Linux print-station simulator
 
-- Print Agent `0.2.0` adds self-contained `linux-x64` packaging and isolated,
+- Print Agent `0.2.1` adds self-contained `linux-x64` packaging and isolated,
   multi-instance systemd fake stations. Every instance has its own Unix account,
   credential, journal and fake-output directory for safe protocol development.
+- Linux enrollment and systemd startup explicitly load that instance's JSON
+  configuration, so neither path can fall back to Windows storage defaults.
 - `cups` is a reserved future adapter contract; no physical Linux printing is
   claimed until a real-device acceptance path exists.
 

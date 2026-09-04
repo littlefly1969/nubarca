@@ -81,7 +81,8 @@ printf '\n'
 
 cd "$install_dir"
 if ! printf '%s' "$token" | runuser -u "$user" -- env DOTNET_ENVIRONMENT=Production \
-  "$agent" enroll --server "${server%/}" --station "$station" --token-stdin; then
+  "$agent" enroll --server "${server%/}" --station "$station" --token-stdin \
+  --config "$config_path"; then
   unset token
   echo 'Enrollment failed; service was not enabled.' >&2
   exit 1

@@ -9,7 +9,7 @@ User=nubarca-print-%i
 Group=nubarca-print-%i
 WorkingDirectory=/opt/nubarca-print-agent
 Environment=DOTNET_ENVIRONMENT=Production
-ExecStart=/opt/nubarca-print-agent/NubArca.PrintAgent
+ExecStart=/opt/nubarca-print-agent/NubArca.PrintAgent --config /etc/nubarca-print-agent/%i.json
 Restart=on-failure
 RestartSec=5
 UMask=0077

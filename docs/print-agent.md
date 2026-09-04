@@ -41,9 +41,11 @@ sudo ./install-fake-instance.sh --instance sim-sala \
   --station 00000000-0000-0000-0000-000000000000
 ```
 
-The script prompts silently for the one-shot token. Each instance has a unique
-Unix account, mode-0700 state directory, mode-0600 credential, SQLite journal
-and output directory under `/var/lib/nubarca-print-agent/<instance>`. Repeat
+The script prompts silently for the one-shot token and passes that instance's
+JSON configuration explicitly to both enrollment and systemd runtime. Each
+instance has a unique Unix account, mode-0700 state directory, mode-0600
+credential, SQLite journal and output directory under
+`/var/lib/nubarca-print-agent/<instance>`. Repeat
 with `sim-lab` and `sim-test`. Check it with
 `systemctl status nubarca-print-agent@sim-sala`; its fake pages are in that
 instance's `fake-output` directory. `uninstall-instance.sh` retains state by

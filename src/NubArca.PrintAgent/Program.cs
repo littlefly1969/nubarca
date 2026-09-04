@@ -6,6 +6,7 @@ using NubArca.PrintAgent.Journal;
 using NubArca.PrintAgent.Security;
 
 var builder = Host.CreateApplicationBuilder(args);
+PrintAgentConfiguration.AddInstanceFile(builder.Configuration, args);
 var options = builder.Configuration.GetSection(PrintAgentOptions.SectionName).Get<PrintAgentOptions>()
     ?? new PrintAgentOptions();
 options.NormalizeAndValidate();
