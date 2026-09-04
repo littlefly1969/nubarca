@@ -152,6 +152,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.errorTitle': 'Something went wrong',
   'party.errorBody': 'Could not load this party album.',
   'party.subtitleSuffix': 'view-only shared album',
+  'party.momentCount_one': '{count} moment',
+  'party.momentCount_other': '{count} moments',
   'party.itemCount_one': '{count} item',
   'party.itemCount_other': '{count} items',
   'party.empty': 'This album has no photos yet.',
@@ -168,7 +170,7 @@ const en: Partial<Record<MessageKey, string>> = {
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Find your photos',
   'partyFace.intro': 'This photo is used only to find matches in this party album.',
-  'partyFace.notStored': 'The photo is not saved; only a small face crop is kept while the search is active.',
+  'partyFace.notStored': 'Your selfie is not saved. While the search stays active, only a small crop of your face is kept temporarily.',
   'partyFace.chooseSelfie': 'Take a selfie',
   'partyFace.change': 'Change selfie',
   'partyFace.search': 'Find my photos',
