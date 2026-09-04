@@ -586,6 +586,12 @@
   white-space: nowrap;
 }
 
+/* The live region is always present so the arrival of a moment is announced
+   reliably; with nothing to announce it takes no room. */
+.party-guest-hub-gallery-live:empty {
+  display: none;
+}
+
 /* Moments that arrived while the guest was on the page. They are appended at
    the bottom of the album, so without this nobody standing at the top would
    know they were there. */

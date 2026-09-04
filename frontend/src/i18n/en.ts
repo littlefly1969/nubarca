@@ -163,6 +163,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.openPhoto': 'Open photo',
   'party.openVideo': 'Open video',
   'party.photoViewer': 'Photo viewer',
+  'party.videoViewer': 'Video viewer',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Find your photos',

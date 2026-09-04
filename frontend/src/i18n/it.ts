@@ -167,6 +167,7 @@ const it = {
   'party.openPhoto': 'Apri foto',
   'party.openVideo': 'Apri video',
   'party.photoViewer': 'Visualizzatore foto',
+  'party.videoViewer': 'Visualizzatore video',
 
   // --- Public party FACE SEARCH ("find your face", guest) ---
   'partyFace.title': 'Trova le tue foto',
