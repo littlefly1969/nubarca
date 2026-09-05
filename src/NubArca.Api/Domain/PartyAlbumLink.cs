@@ -27,6 +27,14 @@ public class PartyAlbumLink
     // token never stored.
     public string? UploadTokenHash { get; set; }
 
+    // SHA-256 hex of the derived public PRINT token — a THIRD token for the same
+    // link, purpose-bound to physical printing. Separate from the view token by
+    // design: reading an album and putting paper through a printer are different
+    // powers, and the view token must never acquire the second. Nullable so the
+    // additive migration needs no backfill; set when print is first configured.
+    // Raw token never stored.
+    public string? PrintTokenHash { get; set; }
+
     // The party-mode on/off state for this link (the master switch). A disabled
     // or revoked link is rejected on every public request (live revocation).
     public bool Enabled { get; set; }

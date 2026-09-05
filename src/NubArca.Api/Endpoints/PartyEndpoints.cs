@@ -94,8 +94,17 @@ public static class PartyEndpoints
             var gameEnabled = await httpContext.RequestServices.GetRequiredService<AppDbContext>()
                 .PartyAlbumLinks.AsNoTracking()
                 .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.GameEnabled, cancellationToken);
+            // Printing is offered only when it would actually work right now. The
+            // resolver re-checks the whole chain — profile, station, printer
+            // format, budget — so a card never appears for a party that cannot
+            // print, and disappears the moment it stops being able to.
+            var printUrl = access.PartyAlbumLinkId is Guid printLinkId
+                ? await httpContext.RequestServices
+                    .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
+                    .GetAsync(printLinkId, access.AlbumId, cancellationToken)
+                : null;
             return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(
-                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled));
+                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled, printUrl));
         }).WithName("GetPartyAlbum").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/challenges", async (

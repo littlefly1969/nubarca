@@ -15,6 +15,7 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         // SHA-256 hex → 64 chars. Never the raw token.
         builder.Property(p => p.TokenHash).IsRequired().HasMaxLength(64);
         builder.Property(p => p.UploadTokenHash).HasMaxLength(64);
+        builder.Property(p => p.PrintTokenHash).HasMaxLength(64);
         builder.Property(p => p.Enabled).HasDefaultValue(false);
         builder.Property(p => p.UploadEnabled).HasDefaultValue(false);
         builder.Property(p => p.RequireUploadApproval).HasDefaultValue(false);
@@ -36,6 +37,11 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.HasIndex(p => p.UploadTokenHash)
             .IsUnique()
             .HasDatabaseName("ux_party_album_links_upload_token_hash");
+        // Print token lookup, same shape: unique, NULLs distinct, so a link with
+        // no printing configured never collides with another.
+        builder.HasIndex(p => p.PrintTokenHash)
+            .IsUnique()
+            .HasDatabaseName("ux_party_album_links_print_token_hash");
 
         // Fast owner-scoped + album-scoped status lookups.
         builder.HasIndex(p => new { p.OwnerUserId, p.AlbumId })

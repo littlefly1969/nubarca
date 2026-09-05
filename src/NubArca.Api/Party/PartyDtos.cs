@@ -112,7 +112,12 @@ public sealed record PartyAlbumDto(
     int ItemCount,
     string? CoverUrl = null,
     string? ContributionUrl = null,
-    bool GameEnabled = false);
+    bool GameEnabled = false,
+    // The print capability's own URL, non-null ONLY while printing is genuinely
+    // open: configured, enabled, on a live station whose printer does 10x15, and
+    // with budget left in at least one product. Null is how the guest hub knows
+    // there is no print card to show — never a disabled tile.
+    string? PrintUrl = null);
 
 public sealed record PartyItemDto(
     Guid Id,
