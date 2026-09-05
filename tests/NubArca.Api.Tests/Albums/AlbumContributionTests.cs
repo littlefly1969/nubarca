@@ -1002,6 +1002,14 @@ public sealed class AlbumContributionTests : IDisposable
         // The album owner's People model is untouched, and the contributed
         // media carries no person payload on any surface they can reach.
         Assert.Empty((await owner.GetFromJsonAsync<JsonElement>("/api/people")).EnumerateArray());
+        // The detector still bites: a planted leak is found, while an
+        // identifier that merely spells "face" in hexadecimal is not.
+        Assert.Contains("personId", PeopleVocabulary("{\"items\":[{\"personId\":\"x\"}]}"));
+        Assert.Contains("face", PeopleVocabulary("{\"items\":[{\"kind\":\"face\"}]}"));
+        Assert.DoesNotContain(
+            "075face6-ae71-486f-adef-0c0c0c0c0c0c",
+            PeopleVocabulary("{\"items\":[{\"id\":\"075face6-ae71-486f-adef-0c0c0c0c0c0c\"}]}"));
+
         foreach (var path in new[]
                  {
                      $"/api/albums/{albumId}/content",
@@ -1010,9 +1018,50 @@ public sealed class AlbumContributionTests : IDisposable
         {
             var body = await (await owner.GetAsync(path)).Content.ReadAsStringAsync();
             Assert.DoesNotContain(personName, body, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("person", body, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("face", body, StringComparison.OrdinalIgnoreCase);
+            // Field NAMES and text values, not the raw document: "face" is four
+            // hexadecimal digits, so scanning the whole body means a randomly
+            // generated GUID can fail this — and did, on `075face6ae71`.
+            foreach (var token in PeopleVocabulary(body))
+            {
+                Assert.DoesNotContain("person", token, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("face", token, StringComparison.OrdinalIgnoreCase);
+            }
         }
+    }
+
+    /// <summary>
+    /// Every field name and text value in a response, with GUID-shaped values
+    /// left out: those are identifiers, and their hexadecimal digits spell
+    /// words no one wrote.
+    /// </summary>
+    private static IEnumerable<string> PeopleVocabulary(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var stack = new Stack<JsonElement>();
+        stack.Push(document.RootElement);
+        var found = new List<string>();
+        while (stack.Count > 0)
+        {
+            var element = stack.Pop();
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                    foreach (var property in element.EnumerateObject())
+                    {
+                        found.Add(property.Name);
+                        stack.Push(property.Value);
+                    }
+                    break;
+                case JsonValueKind.Array:
+                    foreach (var item in element.EnumerateArray()) stack.Push(item);
+                    break;
+                case JsonValueKind.String:
+                    var value = element.GetString();
+                    if (value is not null && !Guid.TryParse(value, out _)) found.Add(value);
+                    break;
+            }
+        }
+        return found;
     }
 
     [Fact]
