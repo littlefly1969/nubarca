@@ -6,6 +6,35 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Party printed keepsakes
+
+- **Guests at a party can now print what they are in.** A print card appears on
+  the guest hub, and the studio behind it composes either a 10×15 photograph or
+  a strip of four different photographs — printed as **two identical strips on
+  one sheet**, so a single 10×15 yields one to keep and one to give away. Three
+  print styles are offered; only the party's name, the line the host configured
+  and the approved wordmark ever reach the paper.
+- **The two budgets are the host's, and they are separate.** Photo prints and
+  strips have their own limits, their own counters and their own "prints left" —
+  they are never added together, and a party out of one can still print the
+  other. Reserving a print and issuing the guest's queue number happen in one
+  atomic step, so two guests can neither overspend a budget nor be handed the
+  same number.
+- **A double tap cannot become a second sheet.** Every submission carries an
+  idempotency key minted for that composition, so retrying a failed send returns
+  the print already queued rather than starting another.
+- **Printing has its own capability token.** It composes and prints; it cannot
+  browse the album. Guests choose from the same metadata-stripped previews the
+  album serves, through the same serving boundary, while the server composes at
+  300dpi from its own copy — the browser never receives an original.
+- **The card is shown only when a sheet would really come out.** Configured,
+  enabled, on a live station whose printer does 10×15, with budget left: change
+  any of those and the offer withdraws on the guest's next load.
+- The owner panel gains a print section — station, printer, per-product switch
+  and budget, and the line to print — validating the printer when it is chosen
+  rather than leaving the first guest to discover it cannot do 10×15.
+
+
 ### Linux print-station simulator
 
 - Print Agent `0.2.2` adds self-contained `linux-x64` packaging and isolated,

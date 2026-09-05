@@ -14,6 +14,7 @@ import {
   type PartyPrintManifest,
   type PartyPrintPhoto,
   type PartyPrintProduct,
+  type PartyPrintSlot,
   type PartyPrintState,
   type PartyPrintTheme,
 } from '@nubarca/api-client';
@@ -137,12 +138,13 @@ function StripIcon() {
  * is what the paper gets.
  */
 function FramedPhoto({
-  photo, aspect, slotAspect, view,
+  photo, aspect, slotAspect, view, onAspect,
 }: {
   photo: PartyPrintPhoto | undefined;
   aspect: number;
   slotAspect: number;
   view: CropView;
+  onAspect?: (width: number, height: number) => void;
 }) {
   if (!photo) return null;
   const crop = cropFor(aspect, slotAspect, view);
@@ -151,6 +153,10 @@ function FramedPhoto({
       className="party-print-framed"
       src={photo.previewUrl}
       alt=""
+      // A single photograph's sheet is turned to match it, so the preview keeps
+      // learning shapes here too rather than only from the chooser's thumbnails.
+      onLoad={(event) => onAspect?.(
+        event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)}
       style={{
         width: `${100 / crop.cropWidth}%`,
         height: `${100 / crop.cropHeight}%`,
@@ -193,6 +199,7 @@ interface SheetProps {
   photoById: Map<string, PartyPrintPhoto>;
   aspectOf: (id: string) => number;
   views: Record<string, CropView>;
+  onAspect: (id: string, width: number, height: number) => void;
 }
 
 function pct(value: number): string {
@@ -200,7 +207,7 @@ function pct(value: number): string {
 }
 
 function SheetPreview(props: SheetProps) {
-  const { product, theme, chosen, photoById, aspectOf, views } = props;
+  const { product, theme, chosen, photoById, aspectOf, views, onAspect } = props;
   const viewOf = (id: string) => views[id] ?? DEFAULT_CROP_VIEW;
 
   if (product === 'photo') {
@@ -228,6 +235,7 @@ function SheetPreview(props: SheetProps) {
           <FramedPhoto
             photo={photoById.get(id)} aspect={aspect}
             slotAspect={slotAspect} view={viewOf(id)}
+            onAspect={(w, h) => onAspect(id, w, h)}
           />
         </div>
         <div
@@ -254,7 +262,15 @@ function SheetPreview(props: SheetProps) {
     >
       {/* TWO IDENTICAL STRIPS on one sheet: one to keep, one to give away. */}
       {Array.from({ length: STRIPS_PER_SHEET }, (_, strip) => (
-        <div key={strip} data-testid={`party-print-strip-${strip}`}>
+        <div
+          key={strip}
+          data-testid={`party-print-strip-${strip}`}
+          // The second strip is a copy of the first, so it is drawn but not
+          // announced: a screen reader would otherwise read the whole
+          // composition twice. The caption under the sheet is what says there
+          // are two of them.
+          aria-hidden={strip > 0 ? true : undefined}
+        >
           {Array.from({ length: SLOTS_PER_STRIP }, (_, index) => {
             const rect = stripSlot(strip, index);
             const id = chosen[index];
@@ -270,6 +286,7 @@ function SheetPreview(props: SheetProps) {
                 <FramedPhoto
                   photo={photoById.get(id)} aspect={aspectOf(id)}
                   slotAspect={slotAspect} view={viewOf(id)}
+                  onAspect={(w, h) => onAspect(id, w, h)}
                 />
               </div>
             );
@@ -409,11 +426,16 @@ export function PartyPrintPage() {
   const [submitError, setSubmitError] = useState<MessageKey | null>(null);
   const [sent, setSent] = useState<Sent | null>(null);
 
-  // Minted for ONE composition and reused for every retry of it, so a failed
-  // send that actually landed comes back as the same job rather than a second
-  // sheet. Changing anything about the composition earns a new key.
-  const keyRef = useRef<string | null>(null);
-  useEffect(() => { keyRef.current = null; }, [product, chosen, views, theme]);
+  // The sheet as it was first sent: its idempotency key AND the exact slots
+  // that key stands for, frozen together at the first attempt.
+  //
+  // Minting the key alone would leave "the same key" and "the same sheet" as
+  // two separate facts that merely tend to agree — a photograph whose real
+  // shape arrived between two attempts would change the crop under a key the
+  // server has already decided about. Freezing both makes it one fact. Changing
+  // the composition discards the pair and earns a new key.
+  const pendingRef = useRef<{ key: string; slots: PartyPrintSlot[] } | null>(null);
+  useEffect(() => { pendingRef.current = null; }, [product, chosen, views, theme]);
 
   useEffect(() => {
     if (!token) {
@@ -530,18 +552,19 @@ export function PartyPrintPage() {
 
   const submit = async () => {
     if (!token || !product) return;
-    keyRef.current ??= newIdempotencyKey();
+    pendingRef.current ??= {
+      key: newIdempotencyKey(),
+      slots: chosen.map((id) => {
+        const crop = cropFor(aspectOf(id), slotAspectFor(id), views[id] ?? DEFAULT_CROP_VIEW);
+        return { itemId: id, ...crop };
+      }),
+    };
+    const pending = pendingRef.current;
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const accepted = await submitPartyPrint(token, {
-        product,
-        theme,
-        slots: chosen.map((id) => {
-          const crop = cropFor(aspectOf(id), slotAspectFor(id), views[id] ?? DEFAULT_CROP_VIEW);
-          return { itemId: id, ...crop };
-        }),
-      }, keyRef.current);
+      const accepted = await submitPartyPrint(
+        token, { product, theme, slots: pending.slots }, pending.key);
       setSent({ accepted, state: 'preparing' });
     } catch (err: unknown) {
       setSubmitError(refusalKey(err));
@@ -874,6 +897,7 @@ export function PartyPrintPage() {
             photoById={photoById}
             aspectOf={aspectOf}
             views={views}
+            onAspect={noteAspect}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp')}</p>
           {product === 'strip4' && (
