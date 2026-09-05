@@ -407,7 +407,15 @@ public sealed class PartyLinkService : IPartyLinkService
     private string DeriveUploadToken(Guid linkId)
         => Derive([.. linkId.ToByteArray(), .. UploadContext]);
 
+    // print token = HMAC over linkId ++ "print" — a THIRD distinct value for the
+    // same link, purpose-bound to physical printing. Reading an album and
+    // putting paper through a printer are different powers; deriving printing
+    // from its own context is what keeps the view token from ever being one.
+    internal string DerivePrintToken(Guid linkId)
+        => Derive([.. linkId.ToByteArray(), .. PrintContext]);
+
     private static readonly byte[] UploadContext = Encoding.UTF8.GetBytes("upload");
+    private static readonly byte[] PrintContext = Encoding.UTF8.GetBytes("print");
 
     private string Derive(byte[] input)
     {
@@ -425,6 +433,8 @@ public sealed class PartyLinkService : IPartyLinkService
         var hash = SHA256.HashData(bytes);
         return Convert.ToHexStringLower(hash);
     }
+
+    internal static string BuildPrintUrl(string printToken) => $"/party/{printToken}/print";
 
     private static string BuildPartyUrl(string token) => $"/party/{token}";
     private static string BuildUploadUrl(string uploadToken) => $"/party/{uploadToken}/upload";
