@@ -106,3 +106,72 @@ public sealed class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class PartyPrintProfileConfiguration : IEntityTypeConfiguration<PartyPrintProfile>
+{
+    public void Configure(EntityTypeBuilder<PartyPrintProfile> builder)
+    {
+        builder.ToTable("party_print_profiles");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        // One profile per party album, enforced by the database rather than by
+        // whichever code path happens to create it.
+        builder.HasIndex(x => x.PartyAlbumId).IsUnique()
+            .HasDatabaseName("ux_party_print_profiles_album");
+        builder.HasIndex(x => x.OwnerUserId)
+            .HasDatabaseName("ix_party_print_profiles_owner");
+        builder.Property(x => x.FooterText).HasMaxLength(PartyPrintLimits.FooterMaxLength);
+        builder.Property(x => x.PublicSequenceNext).IsRequired();
+        builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
+        builder.HasOne<Album>().WithMany().HasForeignKey(x => x.PartyAlbumId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+        builder.HasOne<PrintStation>().WithMany().HasForeignKey(x => x.PrintStationId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasOne<PrinterDevice>().WithMany().HasForeignKey(x => x.PrinterDeviceId)
+            .OnDelete(DeleteBehavior.SetNull);
+    }
+}
+
+public sealed class PrintJobSourceConfiguration : IEntityTypeConfiguration<PrintJobSource>
+{
+    public void Configure(EntityTypeBuilder<PrintJobSource> builder)
+    {
+        builder.ToTable("print_job_sources");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        // One photograph per slot: the shape of a strip is a constraint, not a
+        // convention the writing code is trusted to keep.
+        builder.HasIndex(x => new { x.PrintJobId, x.SlotIndex }).IsUnique()
+            .HasDatabaseName("ux_print_job_sources_job_slot");
+        builder.HasOne<PrintJob>().WithMany().HasForeignKey(x => x.PrintJobId)
+            .OnDelete(DeleteBehavior.Cascade);
+        // Restrict, like the job's own source: a photograph that is part of a
+        // print cannot be deleted out from under it.
+        builder.HasOne<FileItem>().WithMany().HasForeignKey(x => x.FileItemId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class PartyPrintRequestConfiguration : IEntityTypeConfiguration<PartyPrintRequest>
+{
+    public void Configure(EntityTypeBuilder<PartyPrintRequest> builder)
+    {
+        builder.ToTable("party_print_requests");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.IdempotencyKeyHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.Product).IsRequired().HasMaxLength(16);
+        builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        // THE guarantee against a second physical print: one accepted request per
+        // key per party, refused by the database even when two requests race.
+        builder.HasIndex(x => new { x.PartyAlbumId, x.IdempotencyKeyHash }).IsUnique()
+            .HasDatabaseName("ux_party_print_requests_album_key");
+        builder.HasOne<Album>().WithMany().HasForeignKey(x => x.PartyAlbumId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne<PrintJob>().WithMany().HasForeignKey(x => x.PrintJobId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}

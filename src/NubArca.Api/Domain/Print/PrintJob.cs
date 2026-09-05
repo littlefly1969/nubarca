@@ -29,6 +29,14 @@ public static class PrintJobKinds
 {
     public const string Diagnostic = "diagnostic";
     public const string OwnerPhoto = "owner-photo";
+
+    // Guest prints from a party. Both compose a 10x15 sheet: the strip is a
+    // COMPOSITION, not a second paper size, so the printer requirement is
+    // unchanged and the agent has nothing new to understand.
+    public const string PartyPhoto = "party-photo";
+    public const string PartyStrip4 = "party-strip4";
+
+    public static bool IsParty(string value) => value is PartyPhoto or PartyStrip4;
 }
 
 public static class PrintFormats
