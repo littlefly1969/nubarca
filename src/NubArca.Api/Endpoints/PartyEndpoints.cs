@@ -1052,6 +1052,27 @@ public static class PartyEndpoints
     // medium. Videos: thumbnail/preview=poster (no playback/download). Every served
     // image is metadata-stripped (EXIF/GPS/IPTC/XMP/ICC removed) before it leaves
     // the server.
+    /// <summary>
+    /// Party-safe derived bytes for an ALREADY-RESOLVED party. Public so the
+    /// print capability can serve exactly the same media through its own token:
+    /// same sizes, same metadata stripping, same refusal to serve an original.
+    /// Duplicating this for a second token would be duplicating the privacy
+    /// guarantees with it.
+    /// </summary>
+    internal static Task<IResult> ServeResolvedPartyMediaAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        Guid fileId,
+        string variant,
+        HttpContext httpContext,
+        NubArca.Api.Party.IPartyMediaService partyMedia,
+        IFileThumbnailService thumbnails,
+        NubArca.Api.Metadata.IImageMetadataStripper stripper,
+        CancellationToken cancellationToken)
+        => ServeMediaCoreAsync(
+            ownerUserId, albumId, fileId, variant, httpContext,
+            partyMedia, thumbnails, stripper, cancellationToken);
+
     private static async Task<IResult> ServePartyMediaAsync(
         string token,
         Guid fileId,
@@ -1069,8 +1090,24 @@ public static class PartyEndpoints
             return Results.NotFound();
         }
 
+        return await ServeMediaCoreAsync(
+            access.OwnerUserId, access.AlbumId, fileId, variant, httpContext,
+            partyMedia, thumbnails, stripper, cancellationToken);
+    }
+
+    private static async Task<IResult> ServeMediaCoreAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        Guid fileId,
+        string variant,
+        HttpContext httpContext,
+        NubArca.Api.Party.IPartyMediaService partyMedia,
+        IFileThumbnailService thumbnails,
+        NubArca.Api.Metadata.IImageMetadataStripper stripper,
+        CancellationToken cancellationToken)
+    {
         var kind = await partyMedia.GetVisibleMediaKindAsync(
-            access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
+            ownerUserId, albumId, fileId, cancellationToken);
         if (kind is null)
         {
             return Results.NotFound();
@@ -1086,7 +1123,7 @@ public static class PartyEndpoints
             ? ThumbnailSizes.Poster
             : (variant == "thumbnail" ? ThumbnailSizes.Small : ThumbnailSizes.Medium);
 
-        var content = await thumbnails.EnsureAsync(fileId, access.OwnerUserId, size, cancellationToken);
+        var content = await thumbnails.EnsureAsync(fileId, ownerUserId, size, cancellationToken);
         if (content is null)
         {
             return Results.NotFound();

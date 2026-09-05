@@ -489,6 +489,19 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // Submitting a print is rate limited SEPARATELY and more tightly than
+    // reading: the budget bounds how much paper a party can spend, not how fast
+    // someone can ask, and every ask costs a render.
+    options.AddPolicy("party-print-submit", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 6,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
     options.AddPolicy(PartyPublicRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -775,6 +788,11 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
     builder.Services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
+    builder.Services.AddScoped<
+        NubArca.Api.Print.IPartyPrintSourceReader, NubArca.Api.Print.PartyPrintSourceReader>();
+    builder.Services.AddScoped<
+        NubArca.Api.Print.IPartyPrintSubmissionService, NubArca.Api.Print.PartyPrintSubmissionService>();
+    builder.Services.AddSingleton<NubArca.Api.Print.PartyPrintComposer>();
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyPrintUrlProvider, NubArca.Api.Party.PartyPrintUrlProvider>();
     builder.Services.AddScoped<
@@ -1396,6 +1414,7 @@ app.MapShareLinkEndpoints();
 // extracted as part of the modular-monolith cleanup. Same routes, same
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
+app.MapPartyPrintEndpoints();
 
 // Aesthetics Lab / Beauty Lab endpoints — the public TV "Beauty Lab" QR
 // mobile upload below, plus the owner-facing lab surface further down —
