@@ -17,7 +17,16 @@ public sealed record PartyPrintAccess(
     string PartyName,
     string? FooterText,
     PartyPrintProductState Photo,
-    PartyPrintProductState Strip);
+    PartyPrintProductState Strip)
+{
+    /// <summary>This party's state for one product, or null if there is no such product.</summary>
+    public PartyPrintProductState? Product(string product) => product switch
+    {
+        Domain.Print.PartyPrintProducts.Photo => Photo,
+        Domain.Print.PartyPrintProducts.Strip4 => Strip,
+        _ => null,
+    };
+}
 
 /// <summary>One product's live state, as the guest is allowed to see it.</summary>
 public sealed record PartyPrintProductState(bool Enabled, int Remaining)
