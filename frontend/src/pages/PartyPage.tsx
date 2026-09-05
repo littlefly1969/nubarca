@@ -16,6 +16,7 @@ import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSe
 import { PartyGuestDock } from '../components/PartyGuestDock';
 import { withContributionMode } from './partyContributionMode';
 import { PRODUCT_NAME } from '../brand/brand';
+import { rememberFaceFilter, rememberPartyHome } from './partyGuestMemo';
 import './PartyGuestHub.css';
 
 // PUBLIC, unauthenticated party album landing. Reached by scanning the QR shown
@@ -28,7 +29,7 @@ import './PartyGuestHub.css';
 type State =
   | { kind: 'loading' }
   | { kind: 'ready'; albumName: string; items: PartyItem[]; coverUrl: string | null;
-      contributionUrl: string | null; gameEnabled: boolean }
+      contributionUrl: string | null; gameEnabled: boolean; printUrl: string | null }
   | { kind: 'unavailable' }
   | { kind: 'error' };
 
@@ -88,6 +89,17 @@ function TrophyIcon() {
       <path d="M7.5 4h9v5a4.5 4.5 0 0 1-9 0Z" />
       <path d="M7.5 5.5H5.2a.7.7 0 0 0-.7.8c.2 2 1.4 3.4 3 3.6M16.5 5.5h2.3a.7.7 0 0 1 .7.8c-.2 2-1.4 3.4-3 3.6" />
       <path d="M12 13.5V17M9 20h6M10 17h4" />
+    </svg>
+  );
+}
+
+function PrinterIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M7 8.5V4.5h10v4" />
+      <path d="M7 17.5H5.5A1.5 1.5 0 0 1 4 16v-4.5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2V16a1.5 1.5 0 0 1-1.5 1.5H17" />
+      <rect x="7" y="14" width="10" height="6" rx="1.2" />
+      <path d="M16.8 12.2h.01" />
     </svg>
   );
 }
@@ -312,6 +324,17 @@ export function PartyPage() {
   const [faceFilter, setFaceFilter] = useState<PartyFaceFilter | null>(null);
   // The face-search sheet is opened by its capability card and by nothing else.
   const [faceOpen, setFaceOpen] = useState(false);
+  // The print studio opens on its own token and cannot see this state, so the
+  // guest's search result is left where that page can pick it up. Forgotten
+  // again the moment the filter is cleared.
+  useEffect(() => {
+    rememberFaceFilter(faceFilter ? faceFilter.itemIds : null);
+  }, [faceFilter]);
+  // The studio holds a print token and cannot address the album, so the hub
+  // leaves its own path behind for the back link there.
+  useEffect(() => {
+    if (token) rememberPartyHome(`/party/${token}`);
+  }, [token]);
   const galleryRef = useRef<HTMLElement>(null);
   const heroRef = useRef<HTMLElement>(null);
   // The dock appears once the cover is behind the guest, and says which of the
@@ -405,7 +428,7 @@ export function PartyPage() {
         setState({
           kind: 'ready', albumName: album.albumName, items: items.items,
           coverUrl: album.coverUrl, contributionUrl: album.contributionUrl,
-          gameEnabled: album.gameEnabled,
+          gameEnabled: album.gameEnabled, printUrl: album.printUrl,
         });
       })
       .catch((err: unknown) => {
@@ -533,7 +556,7 @@ export function PartyPage() {
     );
   }
 
-  const { albumName, items, coverUrl, contributionUrl, gameEnabled } = state;
+  const { albumName, items, coverUrl, contributionUrl, gameEnabled, printUrl } = state;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
   // to items still visible in the live album (a match hidden since the search
   // simply drops out on the next poll).
@@ -592,6 +615,20 @@ export function PartyPage() {
       variant: 'activity',
       badgeKey: 'partyHub.live',
       available: gameEnabled && Boolean(token),
+    },
+    {
+      // Printing is PHYSICAL, so this card appears only when a sheet would
+      // really come out: the server hands back a print URL exclusively while a
+      // live station, a 10x15 printer and a remaining budget all hold at once.
+      // There is nothing to derive here and nothing to guess — a null url is
+      // the whole answer.
+      id: 'print',
+      titleKey: 'partyHub.print',
+      descriptionKey: 'partyHub.printHelp',
+      icon: <PrinterIcon />,
+      target: { kind: 'route', to: printUrl ?? '' },
+      variant: 'activity',
+      available: Boolean(printUrl),
     },
     {
       // The album is what a party landing IS: available whenever the page is.

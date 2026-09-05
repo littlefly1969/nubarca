@@ -133,6 +133,101 @@ export interface PartyAlbum {
   coverUrl: string | null;
   contributionUrl: string | null;
   gameEnabled: boolean;
+  // Non-null ONLY while printing would actually work: configured, enabled, on a
+  // live station whose printer does 10x15, with budget left in at least one
+  // product. Null is how the guest hub knows there is no print card to show.
+  printUrl: string | null;
+}
+
+// --- Party print studio (anonymous, print-token scoped) ---
+
+export type PartyPrintProduct = 'photo' | 'strip4';
+export type PartyPrintTheme = 'pure' | 'midnight' | 'event';
+
+export interface PartyPrintFormat {
+  type: PartyPrintProduct;
+  enabled: boolean;
+  /** This product's OWN remaining count. The two are never summed. */
+  remaining: number;
+  requiredPhotos: number;
+}
+
+/** A choosable photograph: safe derived URLs only, never an original. */
+export interface PartyPrintPhoto {
+  id: string;
+  thumbnailUrl: string;
+  previewUrl: string;
+}
+
+export interface PartyPrintManifest {
+  partyName: string;
+  footerText: string | null;
+  formats: PartyPrintFormat[];
+  photos: PartyPrintPhoto[];
+}
+
+/** A crop, normalised to the auto-oriented source so the server reads it the same. */
+export interface PartyPrintSlot {
+  itemId: string;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+}
+
+export interface PartyPrintAccepted {
+  jobId: string;
+  publicSequence: number;
+  product: PartyPrintProduct;
+  remainingForProduct: number;
+}
+
+/** The pipeline's states, reduced to what a guest can act on. */
+export type PartyPrintState =
+  | 'preparing' | 'queued' | 'printing' | 'completed' | 'failed' | 'unknown';
+
+export interface PartyPrintStatus {
+  jobId: string;
+  state: PartyPrintState;
+  publicSequence: number;
+  product: PartyPrintProduct;
+}
+
+export function getPartyPrintManifest(
+  printToken: string, signal?: AbortSignal,
+): Promise<PartyPrintManifest> {
+  return api<PartyPrintManifest>(
+    `/api/party/${encodeURIComponent(printToken)}/print`, { signal });
+}
+
+/**
+ * Submit a composition.
+ *
+ * `idempotencyKey` is minted by the caller and REUSED for retries of the same
+ * submission: printing has a physical effect, so a double tap or a replayed
+ * request must return the first job rather than start a second sheet.
+ */
+export function submitPartyPrint(
+  printToken: string,
+  body: {
+    product: PartyPrintProduct;
+    theme: PartyPrintTheme;
+    slots: PartyPrintSlot[];
+  },
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<PartyPrintAccepted> {
+  return api<PartyPrintAccepted>(
+    `/api/party/${encodeURIComponent(printToken)}/print`,
+    { method: 'POST', json: body, headers: { 'Idempotency-Key': idempotencyKey }, signal });
+}
+
+export function getPartyPrintStatus(
+  printToken: string, jobId: string, signal?: AbortSignal,
+): Promise<PartyPrintStatus> {
+  return api<PartyPrintStatus>(
+    `/api/party/${encodeURIComponent(printToken)}/print/${encodeURIComponent(jobId)}`,
+    { signal });
 }
 
 export interface PartyItem {
