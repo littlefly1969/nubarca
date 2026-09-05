@@ -423,3 +423,39 @@ A Party Game PR is contract-compliant when all of the following hold.
 - [ ] `prefers-reduced-motion` leaves every screen comprehensible.
 - [ ] `npm run lint`, `npm run test:run`, `npm run build` and the backend suite
       pass.
+
+## 9. Addendum — the canonical activity card (SLICE 02)
+
+[`frontend/src/party/PartyChallengeCard.tsx`](../../frontend/src/party/PartyChallengeCard.tsx)
+is **the** renderer for a party activity. Everything that shows one to a person
+goes through it: the composer's preview, the television, the owner's control
+room.
+
+Its three modes are three presentations of ONE markup. The DOM does not branch
+on mode — only a `data-mode` attribute and the CSS behind it do — and a test
+asserts that, because a preview built from different markup predicts nothing.
+`preview` and `tv` additionally share the same sizing rule, expressed in
+container units, so the preview is a scale model of the screen.
+
+| Mode | Where | Sizing |
+| --- | --- | --- |
+| `preview` | composer step 3 | `aspect-ratio: 16/9`, `clamp(0.6rem, 2.1cqh, 1.6rem)` |
+| `tv` | the game stage | one viewport, `clamp(0.8rem, 2.1cqh, 2.4rem)`, 3.5% safe area |
+| `compact` | deck rows, "coming up next" | a row at the app's own type scale |
+
+Every dimension inside the card is `em` against that one font size, which is
+what lets a single set of rules fill both a 480px box and a 1920x1080 panel at
+the same proportions.
+
+The four activity kinds are told apart **by their name in words**; the accent
+(`--accent`, `--danger`, `--accent-secondary`, `--text-secondary`) reinforces
+and never replaces it. The same rule governs voting state.
+
+Nothing overflows: the title and body are line-clamped in CSS while the full
+text stays in the DOM for assistive technology, long words break, and the media
+column is a fixed fraction with `object-fit: cover` — so portrait, landscape and
+square photographs are all correct without the card ever measuring a bitmap.
+
+This closes the "no stepper/timer/duplicate-renderer" gap only for the renderer.
+`PartyChallengeManager` now uses it instead of its own copy of the composition,
+and `.party-game-tv-preview` is gone.
