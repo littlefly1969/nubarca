@@ -26,6 +26,16 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds only new owner-scoped Print station, enrollment, device, and job tables; the previous application does not read or write them."
+    },
+    "20260905074138_AddPartyPrintStudio": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only the three new party-print tables — profiles, idempotency requests, and the per-job source rows; the previous application neither reads nor writes them, and no existing table is altered."
+    },
+    "20260905080901_AddPartyPrintCapabilityToken": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds one nullable PrintTokenHash column to party_album_links and a unique index over it. The previous application leaves the column null, and PostgreSQL treats nulls as distinct in a unique index, so existing links keep working and rolling back to that application writes nothing the constraint could reject."
     }
   }
 }
