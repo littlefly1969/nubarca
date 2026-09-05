@@ -133,11 +133,39 @@ Party artifacts are rendered by the server from the owner's originals and are
 subject to the same bounded-artifact and retention rules as any other job; the
 agent stores no party state and holds no party token.
 
+## The simulator takes time, on purpose
+
+`FakeSheetSeconds` (default **10**) is how long the fake printer spends
+producing one sheet before it writes the file. A simulator that returns
+instantly is a poor model of the thing it stands for: a queue with depth in it,
+a guest told how many sheets are ahead of theirs, and a job observably in
+`submitting` rather than blinking through it all depend on a sheet taking time.
+Automated tests pass `0` and print instantly.
+
+Nothing is written until the sheet is finished, so a run stopped mid-print
+leaves no file claiming a print that never happened.
+
+### Connection reuse
+
+The agent talks in short bursts a few seconds apart, through whatever reverse
+proxy fronts the installation. A proxy closes an idle keep-alive connection on
+its own schedule, and a pooled socket can be dead before the next burst picks it
+up — the request then fails in under two milliseconds with "the response ended
+prematurely", far too fast to be a network round trip. On one installation that
+was ~370 failed cycles an hour, every hour, with a job left `claimed` each time
+the failure landed mid-cycle.
+
+`PooledConnectionIdleTimeout` is therefore two seconds: below any poll interval
+this agent uses, so a connection is either still warm from the burst it belongs
+to or freshly opened. The cost is one handshake per burst. The alternative is
+depending on a proxy's timeout being longer than ours, which is not ours to
+guarantee.
+
 ## Printer adapters and DS620
 
 | Path | Discovery | 10x15 capability | Submission | Validated here |
 |---|---|---|---|---|
-| `fake` | one deterministic virtual printer | yes | copies the artifact to a bounded local test directory | automated |
+| `fake` | one deterministic virtual printer | yes | waits `FakeSheetSeconds`, then copies the artifact to a bounded local test directory | automated |
 | `windows-spooler` | installed Windows queues, optionally restricted by exact printer name | derived from driver paper sizes near 4×6 inches | silent `PrintDocument` through the installed driver | contract/build only |
 | DNP DS620 via Windows spooler | queue name and driver supplied by the operator | requires the installed driver to expose 4×6 / 10×15 media | same generic spooler path | **manual hardware acceptance pending** |
 
