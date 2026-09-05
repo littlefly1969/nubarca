@@ -1,3 +1,4 @@
+using System.Net.Http;
 using NubArca.PrintAgent;
 using NubArca.PrintAgent.Adapters;
 using NubArca.PrintAgent.Api;
@@ -33,6 +34,25 @@ builder.Services.AddHttpClient<PrintAgentApiClient>(client =>
 {
     client.BaseAddress = new Uri(serverOrigin.ToString().TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+{
+    // Never REUSE a connection that has been sitting idle across a poll gap.
+    //
+    // This agent talks in short bursts a few seconds apart, through whatever
+    // reverse proxy fronts the installation. A proxy closes an idle keep-alive
+    // connection on its own schedule, and the pooled socket is dead before the
+    // next burst picks it up — the request then fails in under two milliseconds
+    // with "the response ended prematurely", far too fast to be a network trip.
+    // On one installation that was ~370 failed cycles an hour, every hour, and
+    // a job left claimed each time the failure landed mid-cycle.
+    //
+    // Two seconds is below any poll interval this agent uses, so a connection is
+    // either still warm from the burst it belongs to or freshly opened. The cost
+    // is one handshake per burst; the alternative is depending on a proxy's
+    // timeout being longer than ours, which is not ours to guarantee.
+    PooledConnectionIdleTimeout = TimeSpan.FromSeconds(2),
+    PooledConnectionLifetime = TimeSpan.FromMinutes(5),
 });
 builder.Services.AddSingleton<AgentExecutionCoordinator>();
 builder.Services.AddHostedService<PrintAgentWorker>();

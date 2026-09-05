@@ -57,7 +57,13 @@ public sealed class PrintAgentWorker : BackgroundService
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex)
             {
-                _logger.LogWarning("Print Agent cycle failed ({ExceptionType}); reconnecting.", ex.GetType().Name);
+                // The MESSAGE, not just the type. An operator reading
+                // "InvalidOperationException" in a journal learns nothing about
+                // which of a dozen causes it was; this line is the only thing
+                // they get, so it has to say something.
+                _logger.LogWarning(
+                    ex, "Print Agent cycle failed ({ExceptionType}: {Message}); reconnecting.",
+                    ex.GetType().Name, ex.Message);
                 await Task.Delay(TimeSpan.FromSeconds(backoff), stoppingToken);
                 backoff = Math.Min(Math.Max(2, backoff * 2), Math.Max(2, _options.MaxBackoffSeconds));
             }

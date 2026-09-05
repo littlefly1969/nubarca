@@ -73,7 +73,7 @@ public sealed class AdapterContractTests
         var output = Path.Combine(Path.GetTempPath(), $"nubarca-fake-{Guid.NewGuid():N}");
         try
         {
-            var adapter = new FakePrinterAdapter(output);
+            var adapter = new FakePrinterAdapter(output, TimeSpan.Zero);
             var printer = Assert.Single(await adapter.DiscoverAsync(default));
             Assert.Equal("fake", printer.AdapterKind);
             var capabilities = await adapter.GetCapabilitiesAsync(printer, default);
@@ -94,5 +94,59 @@ public sealed class AdapterContractTests
         options.NormalizeAndValidate();
         var error = Assert.Throws<NotSupportedException>(() => PrintAgentPlatform.CreatePrinterAdapter(options));
         Assert.Contains("not implemented", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task The_Fake_Printer_Takes_As_Long_As_A_Sheet_Takes()
+    {
+        // A simulator that returns instantly is a poor model of a printer: a
+        // queue with depth in it, a guest told how many sheets are ahead of
+        // theirs, and a job observably in `submitting` all depend on the sheet
+        // taking time. This is what makes those observable at all.
+        var output = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var artifact = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".jpg");
+        await File.WriteAllBytesAsync(artifact, [1, 2, 3]);
+        try
+        {
+            var adapter = new FakePrinterAdapter(output, TimeSpan.FromMilliseconds(250));
+            var started = DateTime.UtcNow;
+            var result = await adapter.SubmitAsync(
+                new PrintSubmission(Guid.NewGuid(), "fake-10x15", artifact, "image/jpeg", "10x15"), default);
+            var elapsed = DateTime.UtcNow - started;
+
+            Assert.True(result.Accepted);
+            Assert.True(elapsed >= TimeSpan.FromMilliseconds(200),
+                $"the sheet came out in {elapsed.TotalMilliseconds:F0}ms, which is not a printer");
+            Assert.Single(Directory.GetFiles(output));
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+            if (File.Exists(artifact)) File.Delete(artifact);
+        }
+    }
+
+    [Fact]
+    public async Task A_Cancelled_Sheet_Leaves_No_Output()
+    {
+        // Nothing is written until the sheet is finished, so a run stopped
+        // mid-print does not leave a file claiming a print that never happened.
+        var output = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
+        var artifact = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName() + ".jpg");
+        await File.WriteAllBytesAsync(artifact, [1, 2, 3]);
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+        try
+        {
+            var adapter = new FakePrinterAdapter(output, TimeSpan.FromSeconds(5));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => adapter.SubmitAsync(
+                new PrintSubmission(Guid.NewGuid(), "fake-10x15", artifact, "image/jpeg", "10x15"),
+                cancel.Token));
+            Assert.False(Directory.Exists(output) && Directory.GetFiles(output).Length > 0);
+        }
+        finally
+        {
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+            if (File.Exists(artifact)) File.Delete(artifact);
+        }
     }
 }
