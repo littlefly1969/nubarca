@@ -34,11 +34,20 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     {
         var ownerId = await _factory.SeedUserAsync($"o{Interlocked.Increment(ref _seeded)}@example.com");
         var albumId = Guid.NewGuid();
+        var linkId = Guid.NewGuid();
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         db.Albums.Add(new Album
         {
             Id = albumId, OwnerUserId = ownerId, Name = "Giulia & Matteo",
+            CreatedAt = DateTime.UtcNow,
+        });
+        // A real link, because a guest's participant session hangs off one and
+        // the foreign key is not decoration.
+        db.PartyAlbumLinks.Add(new NubArca.Api.Domain.PartyAlbumLink
+        {
+            Id = linkId, OwnerUserId = ownerId, AlbumId = albumId,
+            TokenHash = Guid.NewGuid().ToString("N"), Enabled = true,
             CreatedAt = DateTime.UtcNow,
         });
         db.PartyPrintProfiles.Add(new PartyPrintProfile
@@ -92,7 +101,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         await db.SaveChangesAsync();
 
         return (new PartyPrintAccess(
-            albumId, ownerId, stationId, deviceId,
+            linkId, albumId, ownerId, stationId, deviceId,
             "Giulia & Matteo", "Una notte da ricordare",
             new PartyPrintProductState(photoEnabled, photoMax),
             new PartyPrintProductState(stripEnabled, stripMax)), albumId);
@@ -105,17 +114,20 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             new FakeMedia(_photos, _videos),
             new FakeArtifacts(),
             new PartyPrintComposer(),
-            new FakeSources());
+            new FakeSources(),
+            scope.ServiceProvider
+                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>());
 
     private static PartyPrintSubmitRequest Request(string product, params Guid[] ids) =>
         new(product, "pure",
             ids.Select(id => new PartyPrintSlotRequest(id, 0, 0, 1, 1)).ToList());
 
     private async Task<PartyPrintSubmitResult> SubmitAsync(
-        PartyPrintAccess access, PartyPrintSubmitRequest request, string key)
+        PartyPrintAccess access, PartyPrintSubmitRequest request, string key,
+        Guid? participantId = null)
     {
         using var scope = _factory.Services.CreateScope();
-        return await Service(scope).SubmitAsync(access, request, key, default);
+        return await Service(scope).SubmitAsync(access, request, key, participantId, default);
     }
 
     private async Task<PartyPrintProfile> ProfileAsync(Guid albumId)
@@ -291,6 +303,108 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     }
 
     [Fact]
+    public async Task One_Guest_Is_Bounded_By_Their_Own_Share_Before_The_Party_Is()
+    {
+        // A party-wide budget alone is spent by whoever reaches the studio
+        // first. The per-guest ceiling is what makes the paper last the evening,
+        // so it is checked BEFORE the party's — a guest who has had their share
+        // must not consume one of the party's remaining sheets on the way to
+        // being told no.
+        var (access, albumId) = await SeedAsync(photoMax: 20);
+        var guest = await SeedGuestAsync(access.PartyAlbumLinkId);
+        var bounded = access with { Photo = access.Photo with { PerGuest = 2 } };
+
+        for (var i = 0; i < 2; i++)
+        {
+            var ok = await SubmitAsync(
+                bounded, Request(PartyPrintProducts.Photo, _photos[i]), $"k{i}", guest);
+            Assert.True(ok.Ok);
+        }
+
+        var refused = await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[2]), "k2", guest);
+        Assert.Equal(PartyPrintRefusal.GuestBudgetExhausted, refused.Refusal);
+
+        // The party still has paper — 18 of its 20 — so this is the guest's
+        // limit talking, not the party's.
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var profile = await db.PartyPrintProfiles.AsNoTracking()
+            .SingleAsync(p => p.PartyAlbumId == albumId);
+        Assert.Equal(2, profile.PhotoAcceptedCount);
+    }
+
+    [Fact]
+    public async Task Another_Guest_Has_Their_Own_Share()
+    {
+        var (access, _) = await SeedAsync(photoMax: 20);
+        var bounded = access with { Photo = access.Photo with { PerGuest = 1 } };
+        var first = await SeedGuestAsync(access.PartyAlbumLinkId);
+        var second = await SeedGuestAsync(access.PartyAlbumLinkId);
+
+        Assert.True((await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[0]), "a", first)).Ok);
+        Assert.Equal(PartyPrintRefusal.GuestBudgetExhausted, (await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[1]), "b", first)).Refusal);
+        // One guest reaching their limit says nothing about anybody else.
+        Assert.True((await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[2]), "c", second)).Ok);
+    }
+
+    [Fact]
+    public async Task A_Guest_Slot_Goes_Back_When_The_Party_Has_Run_Out()
+    {
+        // The guest's allowance must not be spent by the PARTY running out: the
+        // sheet never happened, so neither did their claim on it.
+        var (access, _) = await SeedAsync(photoMax: 1);
+        var bounded = access with { Photo = access.Photo with { PerGuest = 3 } };
+        var guest = await SeedGuestAsync(access.PartyAlbumLinkId);
+
+        Assert.True((await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[0]), "a", guest)).Ok);
+        Assert.Equal(PartyPrintRefusal.BudgetExhausted, (await SubmitAsync(
+            bounded, Request(PartyPrintProducts.Photo, _photos[1]), "b", guest)).Refusal);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var participant = await db.PartyParticipants.AsNoTracking().SingleAsync(p => p.Id == guest);
+        // One accepted print, one refusal that cost them nothing.
+        Assert.Equal(1, participant.AcceptedPhotoPrintCount);
+    }
+
+    [Fact]
+    public async Task Zero_Per_Guest_Means_No_Per_Guest_Limit()
+    {
+        // The same convention the upload quotas use: 0 is not a small number,
+        // it is the absence of a ceiling.
+        var (access, _) = await SeedAsync(photoMax: 20);
+        var guest = await SeedGuestAsync(access.PartyAlbumLinkId);
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True((await SubmitAsync(
+                access, Request(PartyPrintProducts.Photo, _photos[i]), $"n{i}", guest)).Ok);
+        }
+    }
+
+    /// <summary>A guest with a participant session on this link.</summary>
+    private async Task<Guid> SeedGuestAsync(Guid linkId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var id = Guid.NewGuid();
+        db.PartyParticipants.Add(new NubArca.Api.Domain.PartyParticipant
+        {
+            Id = id,
+            PartyAlbumLinkId = linkId,
+            TokenHash = Guid.NewGuid().ToString("N"),
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        return id;
+    }
+
+    [Fact]
     public async Task A_Render_Failure_Costs_Nothing()
     {
         var (access, albumId) = await SeedAsync();
@@ -300,10 +414,12 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             db, new PartyPrintBudget(db), new FakeMedia(_photos, _videos),
             new FakeArtifacts(), new PartyPrintComposer(),
             // Bytes that are not an image: composing them throws.
-            new BrokenSources());
+            new BrokenSources(),
+            scope.ServiceProvider
+                .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>());
 
         var result = await service.SubmitAsync(
-            access, Request(PartyPrintProducts.Photo, _photos[0]), "k", default);
+            access, Request(PartyPrintProducts.Photo, _photos[0]), "k", null, default);
 
         Assert.Equal(PartyPrintRefusal.RenderFailed, result.Refusal);
         // Nothing was accepted, so the unit went back.

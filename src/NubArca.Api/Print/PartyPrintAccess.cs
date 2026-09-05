@@ -10,6 +10,12 @@ namespace NubArca.Api.Print;
 /// to read anything beyond the party's own guest-visible photographs.
 /// </summary>
 public sealed record PartyPrintAccess(
+    /// <summary>
+    /// The link this capability rides on. Carried because a guest's identity is
+    /// LINK-scoped: the same participant cookie that counts their uploads counts
+    /// their prints, so one guest is one guest across both flows.
+    /// </summary>
+    Guid PartyAlbumLinkId,
     Guid PartyAlbumId,
     Guid OwnerUserId,
     Guid PrintStationId,
@@ -29,7 +35,7 @@ public sealed record PartyPrintAccess(
 }
 
 /// <summary>One product's live state, as the guest is allowed to see it.</summary>
-public sealed record PartyPrintProductState(bool Enabled, int Remaining)
+public sealed record PartyPrintProductState(bool Enabled, int Remaining, int PerGuest = 0)
 {
     /// <summary>Offerable when the host turned it on AND there is paper left for it.</summary>
     public bool Available => Enabled && Remaining > 0;

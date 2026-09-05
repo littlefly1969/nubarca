@@ -31,6 +31,16 @@ public interface IPartyParticipantService
     Task<PartyParticipantResolution> ResolveOrCreateAsync(
         Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default);
 
+    // ATOMIC per-guest print claim, on the same principle as the upload slot:
+    // one statement decides and records. `max` of 0 means the host set no
+    // per-guest limit, so the claim always succeeds and only counts.
+    Task<bool> TryClaimPrintAsync(
+        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default);
+
+    // Give a claimed slot back when the sheet never happened.
+    Task ReleasePrintAsync(
+        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default);
+
     Task<PartyQuotaSnapshot> GetQuotaAsync(
         Guid partyAlbumLinkId, Guid participantId, CancellationToken cancellationToken = default);
 

@@ -134,6 +134,8 @@ export interface PartyPrintProductSettings {
   /** Prints already accepted into the queue. History: never reset. */
   used: number;
   remaining: number;
+  /** What ONE guest may take. 0 means no per-guest limit. */
+  perGuest: number;
 }
 
 export interface PartyPrintSettings {
@@ -157,8 +159,10 @@ export interface PartyPrintSettingsPatch {
   printerDeviceId?: string;
   photoEnabled?: boolean;
   photoMaxPrints?: number;
+  photoPrintsPerGuest?: number;
   stripEnabled?: boolean;
   stripMaxPrints?: number;
+  stripPrintsPerGuest?: number;
   footerText?: string;
 }
 
@@ -233,6 +237,8 @@ export interface PartyPrintAccepted {
   publicSequence: number;
   product: PartyPrintProduct;
   remainingForProduct: number;
+  /** Sheets ahead of this one on the printer. Zero means it is next. */
+  queueAhead: number;
 }
 
 /** The pipeline's states, reduced to what a guest can act on. */

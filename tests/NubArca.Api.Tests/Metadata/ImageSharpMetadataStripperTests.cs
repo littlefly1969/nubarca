@@ -3,19 +3,66 @@ using Microsoft.Extensions.Options;
 using NubArca.Api.Files;
 using NubArca.Api.Metadata;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
+using SixLabors.ImageSharp.PixelFormats;
 using Xunit;
 
 namespace NubArca.Api.Tests.Metadata;
 
 // Pure unit tests for the slice-58 metadata stripper. No DB, no HTTP.
 // Verifies that the re-encoded bytes carry no EXIF / PNG textual chunks /
-// IPTC / XMP, while still decoding as the same format with the same
-// dimensions.
+// IPTC / XMP, while still decoding as the same format and LOOKING the same —
+// which for a rotated photograph means its pixels come back turned upright,
+// not with the same width and height it was stored with.
 public sealed class ImageSharpMetadataStripperTests
 {
     private static ImageSharpMetadataStripper CreateStripper()
         => new ImageSharpMetadataStripper(
             Options.Create(new ImageProcessingOptions()));
+
+    [Fact]
+    public async Task Stripping_Applies_The_Orientation_It_Is_About_To_Remove()
+    {
+        // A phone stores a portrait photograph as LANDSCAPE pixels plus EXIF
+        // Orientation 6, and every viewer turns it upright on the way to the
+        // screen. Dropping that tag without honouring it first does not remove
+        // information — it changes the picture, and the guest sees their
+        // photograph on its side.
+        using var stored = new Image<Rgb24>(40, 20);
+        var exif = new ExifProfile();
+        exif.SetValue(ExifTag.Orientation, (ushort)6);
+        stored.Metadata.ExifProfile = exif;
+        using var source = new MemoryStream();
+        await stored.SaveAsJpegAsync(source);
+
+        using var stripped = await CreateStripper()
+            .StripAsync(new MemoryStream(source.ToArray()), "image/jpeg");
+
+        using var result = Image.Load(stripped.ToArray());
+        // Turned upright: what was stored 40x20 is displayed 20x40.
+        Assert.Equal(20, result.Width);
+        Assert.Equal(40, result.Height);
+        // And the tag is gone, so nothing downstream can rotate it a second time.
+        Assert.Null(result.Metadata.ExifProfile);
+    }
+
+    [Fact]
+    public async Task Stripping_Leaves_An_Unrotated_Photograph_Exactly_As_It_Was()
+    {
+        // The counterpart: without an orientation tag there is nothing to apply,
+        // and the stripper must not turn a picture that was already upright.
+        using var stored = new Image<Rgb24>(40, 20);
+        using var source = new MemoryStream();
+        await stored.SaveAsJpegAsync(source);
+
+        using var stripped = await CreateStripper()
+            .StripAsync(new MemoryStream(source.ToArray()), "image/jpeg");
+
+        using var result = Image.Load(stripped.ToArray());
+        Assert.Equal(40, result.Width);
+        Assert.Equal(20, result.Height);
+    }
 
     [Theory]
     [InlineData("image/jpeg", true)]

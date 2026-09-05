@@ -3,6 +3,7 @@ using NubArca.Api.Files;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Processing;
 
 namespace NubArca.Api.Metadata;
 
@@ -109,6 +110,19 @@ public sealed class ImageSharpMetadataStripper : IImageMetadataStripper
 
             using (image)
             {
+                // APPLY the orientation before dropping the tag that carries it.
+                //
+                // A phone stores a portrait photograph as landscape pixels plus
+                // EXIF Orientation, and every viewer rotates it on the way to
+                // the screen. Clearing the profile without honouring it first
+                // does not remove information — it silently CHANGES the picture,
+                // and the guest sees their photograph on its side. Stripping
+                // metadata must never alter what the image looks like.
+                //
+                // AutoOrient rotates the pixels and resets the tag, so the strip
+                // below then has nothing left to lose.
+                image.Mutate(x => x.AutoOrient());
+
                 // Standard profile metadata: EXIF (camera/GPS/serials), IPTC
                 // (captions/keywords), XMP (Adobe descriptive XML), ICC
                 // (color profile). All carry potentially identifying

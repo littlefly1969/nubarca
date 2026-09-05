@@ -22,7 +22,11 @@ export const LANDSCAPE_HEIGHT = 1200;
 // --- Single photograph ------------------------------------------------------
 
 export const PHOTO_MARGIN_FRACTION = 0.055;
-export const PHOTO_FOOTER_FRACTION = 0.115;
+/**
+ * A fraction of the SHORT EDGE, like the margin — never of the height, which is
+ * what flips when the sheet follows a landscape photograph.
+ */
+export const PHOTO_FOOTER_FRACTION = 0.17;
 
 export interface Rect { x: number; y: number; width: number; height: number }
 
@@ -41,7 +45,7 @@ export function photoLayout(portrait: boolean): {
     ? [PORTRAIT_WIDTH, PORTRAIT_HEIGHT]
     : [LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT];
   const margin = PHOTO_MARGIN_FRACTION * Math.min(w, h);
-  const footerHeight = PHOTO_FOOTER_FRACTION * h;
+  const footerHeight = PHOTO_FOOTER_FRACTION * Math.min(w, h);
   const slot: Rect = {
     x: margin / w,
     y: margin / h,

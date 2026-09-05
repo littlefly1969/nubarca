@@ -36,6 +36,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one nullable PrintTokenHash column to party_album_links and a unique index over it. The previous application leaves the column null, and PostgreSQL treats nulls as distinct in a unique index, so existing links keep working and rolling back to that application writes nothing the constraint could reject."
+    },
+    "20260905191336_AddPartyPrintPerGuestBudget": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds four NOT NULL integer columns with defaultValue 0 — two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
     }
   }
 }

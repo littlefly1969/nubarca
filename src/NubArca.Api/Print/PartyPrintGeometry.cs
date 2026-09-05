@@ -29,8 +29,18 @@ public static class PartyPrintGeometry
     /// <summary>Border around the photograph, as a fraction of the short edge.</summary>
     public const double PhotoMarginFraction = 0.055;
 
-    /// <summary>Room under the photograph for the party line and the wordmark.</summary>
-    public const double PhotoFooterFraction = 0.115;
+    /// <summary>
+    /// Room under the photograph for the party line, the wordmark and the number.
+    ///
+    /// A fraction of the SHORT EDGE, like the margin beside it — never of the
+    /// height. The height is what flips when the sheet follows a landscape
+    /// photograph, and a footer measured against it came out a third shorter on
+    /// exactly the sheets that are widest: 11.7mm instead of 17.5mm, with the
+    /// type shrinking with the band, which is why a landscape print read as
+    /// having no party name at all. The short edge is 10cm on both, so this is
+    /// the same strip of paper whichever way the picture faces.
+    /// </summary>
+    public const double PhotoFooterFraction = 0.17;
 
     /// <summary>Aspect ratio the single-photo crop is locked to.</summary>
     public static double PhotoSlotAspect(bool portrait)
@@ -40,7 +50,7 @@ public static class PartyPrintGeometry
             : (LandscapeWidth, LandscapeHeight);
         var margin = PhotoMarginFraction * Math.Min(w, h);
         var slotW = w - (2 * margin);
-        var slotH = h - (2 * margin) - (PhotoFooterFraction * h);
+        var slotH = h - (2 * margin) - (PhotoFooterFraction * Math.Min(w, h));
         return slotW / slotH;
     }
 

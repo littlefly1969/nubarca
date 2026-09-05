@@ -36,7 +36,7 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
                 && l.Enabled
                 && l.RevokedAt == null
                 && (l.ExpiresAt == null || l.ExpiresAt > now))
-            .Select(l => new { l.AlbumId, l.OwnerUserId })
+            .Select(l => new { l.Id, l.AlbumId, l.OwnerUserId })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null) return null;
 
@@ -70,10 +70,12 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
 
         var photo = new PartyPrintProductState(
             profile.PhotoEnabled,
-            Math.Max(0, profile.PhotoMaxPrints - profile.PhotoAcceptedCount));
+            Math.Max(0, profile.PhotoMaxPrints - profile.PhotoAcceptedCount),
+            profile.PhotoPrintsPerGuest);
         var strip = new PartyPrintProductState(
             profile.StripEnabled,
-            Math.Max(0, profile.StripMaxPrints - profile.StripAcceptedCount));
+            Math.Max(0, profile.StripMaxPrints - profile.StripAcceptedCount),
+            profile.StripPrintsPerGuest);
 
         // Nothing left to offer is the same as printing being closed: the guest
         // hub must not show a card that leads to two exhausted products.
@@ -85,7 +87,7 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
         return new PartyPrintAccess(
-            link.AlbumId, link.OwnerUserId, station.Id, device.Id,
+            link.Id, link.AlbumId, link.OwnerUserId, station.Id, device.Id,
             partyName, profile.FooterText, photo, strip);
     }
 }

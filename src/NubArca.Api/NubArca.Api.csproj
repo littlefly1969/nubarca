@@ -67,8 +67,8 @@
     <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-dark-960w.png"
              Link="Assets\brand\nubarca-wordmark-on-dark-960w.png"
              CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-light.png"
-             Link="Assets\brand\nubarca-wordmark-on-light.png"
+    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-light-480w.png"
+             Link="Assets\brand\nubarca-wordmark-on-light-480w.png"
              CopyToOutputDirectory="PreserveNewest" />
     <!-- The approved product faces, from the manifested set whose hashes
          scripts/check-brand-invariants.py already verifies. -->

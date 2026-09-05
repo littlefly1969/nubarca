@@ -61,6 +61,7 @@ function manifest(overrides: Record<string, unknown> = {}) {
 
 const accepted = {
   jobId: 'job-1', publicSequence: 12, product: 'photo', remainingForProduct: 11,
+  queueAhead: 0,
 };
 
 function mount(body: unknown = manifest(), extra: Record<string, ReturnType<typeof jsonResponse> | (() => Response)> = {}) {
@@ -381,7 +382,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(within(sheet).getByText('Grazie di essere qui')).toBeInTheDocument();
     // The artwork, placed — never the product name set in a typeface.
     expect(within(sheet).getByRole('img', { name: 'NubArca' }))
-      .toHaveAttribute('src', '/brand/nubarca-wordmark-on-light.png');
+      .toHaveAttribute('src', '/brand/nubarca-wordmark-on-light-480w.png');
   });
 
   it('takes the ON-DARK wordmark when the paper is dark', async () => {
@@ -505,6 +506,30 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(within(sent).getByText('Restano 11 stampe di questo formato')).toBeInTheDocument();
   });
 
+  it('says how long the wait is, not just that there is one', async () => {
+    const user = setup();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () =>
+        jsonResponse({ ...accepted, queueAhead: 3 }, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    // A guest standing at the printer wants a number, not "in coda".
+    expect(await screen.findByText('Ci sono 3 stampe prima della tua.')).toBeInTheDocument();
+  });
+
+  it('says outright when nobody is ahead', async () => {
+    const user = setup();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    expect(await screen.findByText('Sei il prossimo.')).toBeInTheDocument();
+  });
+
   it('says plainly when that was the last print of the format', async () => {
     const user = setup();
     mount(manifest(), {
@@ -560,6 +585,22 @@ describe('PartyPrintPage (public print studio)', () => {
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Le stampe di questo formato sono appena finite.');
+  });
+
+  it('does not blame the party when it is the guest\u2019s own share that is spent', async () => {
+    const user = setup();
+    mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () =>
+        errorResponse(409, { error: 'guest_budget_exhausted' }),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    // Saying the party has run out is a lie the guest sees through the moment
+    // somebody else collects a print.
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Hai già stampato tutti i tuoi ricordi.');
+    expect(alert).not.toHaveTextContent(/festa/i);
   });
 
   it('never reveals a server reason it was not given', async () => {

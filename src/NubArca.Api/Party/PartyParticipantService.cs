@@ -72,6 +72,58 @@ public sealed class PartyParticipantService : IPartyParticipantService
         return affected == 1;
     }
 
+    /// <summary>
+    /// Claim one print slot for this guest, atomically.
+    ///
+    /// The same discipline as the upload quota: ONE statement decides and
+    /// records, so two taps from the same phone cannot both observe the guest's
+    /// last free slot. `max` of 0 means the host set no per-guest limit, and the
+    /// party-wide budget is then the only ceiling.
+    ///
+    /// The column name comes from a bool, never from caller input, so the
+    /// interpolation carries no injection surface.
+    /// </summary>
+    public async Task<bool> TryClaimPrintAsync(
+        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default)
+    {
+        if (max <= 0)
+        {
+            await TouchAsync(participantId, isStrip, cancellationToken);
+            return true;
+        }
+        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        var affected = await _db.Database.ExecuteSqlRawAsync(
+            $"UPDATE party_participants SET \"{column}\" = \"{column}\" + 1, "
+            + "\"LastSeenAt\" = {1} "
+            + $"WHERE \"Id\" = {{0}} AND \"{column}\" < {{2}}",
+            [participantId, _clock.GetUtcNow().UtcDateTime, max], cancellationToken);
+        return affected == 1;
+    }
+
+    /// <summary>Give a claimed print slot back when the sheet never happened.</summary>
+    public Task ReleasePrintAsync(
+        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default)
+    {
+        if (max <= 0) return Task.CompletedTask;
+        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        return _db.Database.ExecuteSqlRawAsync(
+            $"UPDATE party_participants SET \"{column}\" = "
+            + $"CASE WHEN \"{column}\" > 0 THEN \"{column}\" - 1 ELSE 0 END "
+            + "WHERE \"Id\" = {0}",
+            [participantId], cancellationToken);
+    }
+
+    /// <summary>Counting nothing still means the guest was here.</summary>
+    private Task TouchAsync(
+        Guid participantId, bool isStrip, CancellationToken cancellationToken)
+    {
+        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        return _db.Database.ExecuteSqlRawAsync(
+            $"UPDATE party_participants SET \"{column}\" = \"{column}\" + 1, "
+            + "\"LastSeenAt\" = {1} WHERE \"Id\" = {0}",
+            [participantId, _clock.GetUtcNow().UtcDateTime], cancellationToken);
+    }
+
     public Task ReleaseChallengeVoteAsync(
         Guid participantId, CancellationToken cancellationToken = default) =>
         _db.Database.ExecuteSqlRawAsync(

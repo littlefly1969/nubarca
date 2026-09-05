@@ -80,6 +80,7 @@ public static class PartyPrintEndpoints
             [FromBody] PartyPrintSubmitBody? body,
             [FromServices] IPartyPrintAccessResolver resolver,
             [FromServices] IPartyPrintSubmissionService submissions,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
@@ -96,6 +97,12 @@ public static class PartyPrintEndpoints
             var access = await resolver.ResolveAsync(printToken, cancellationToken);
             if (access is null) return Results.NotFound();
 
+            // Who is printing, by the same server-minted identity the rest of the
+            // party uses — never anything the client chose or a fingerprint.
+            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
+                httpContext, participants, access.PartyAlbumLinkId, printToken,
+                cancellationToken);
+
             var result = await submissions.SubmitAsync(
                 access,
                 new PartyPrintSubmitRequest(
@@ -104,6 +111,7 @@ public static class PartyPrintEndpoints
                     (body.Slots ?? []).Select(s => new PartyPrintSlotRequest(
                         s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList()),
                 key,
+                participantId,
                 cancellationToken);
 
             if (result.Ok)
@@ -111,7 +119,8 @@ public static class PartyPrintEndpoints
                 var accepted = result.Accepted!;
                 return Results.Accepted(value: new PartyPrintAcceptedDto(
                     accepted.JobId, accepted.PublicSequence,
-                    accepted.Product, accepted.RemainingForProduct));
+                    accepted.Product, accepted.RemainingForProduct,
+                    accepted.QueueAhead));
             }
 
             // Refusals carry a code the UI can speak, never a stack or an
@@ -120,6 +129,11 @@ public static class PartyPrintEndpoints
             {
                 PartyPrintRefusal.BudgetExhausted =>
                     Results.Conflict(new { error = "budget_exhausted" }),
+                // Distinct from the party running out: this guest has had their
+                // share, and telling them the party is out would be a lie they
+                // can see through the moment somebody else collects a print.
+                PartyPrintRefusal.GuestBudgetExhausted =>
+                    Results.Conflict(new { error = "guest_budget_exhausted" }),
                 PartyPrintRefusal.PrinterUnavailable =>
                     Results.Json(new { error = "printer_unavailable" }, statusCode: 503),
                 PartyPrintRefusal.Unavailable => Results.NotFound(),
@@ -230,7 +244,8 @@ public sealed record PartyPrintSlotBody(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);
 
 public sealed record PartyPrintAcceptedDto(
-    Guid JobId, long PublicSequence, string Product, int RemainingForProduct);
+    Guid JobId, long PublicSequence, string Product, int RemainingForProduct,
+    int QueueAhead);
 
 public sealed record PartyPrintStatusDto(
     Guid JobId, string State, long PublicSequence, string Product);

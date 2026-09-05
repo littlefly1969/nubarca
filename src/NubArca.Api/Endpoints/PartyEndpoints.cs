@@ -1288,7 +1288,12 @@ public static class PartyEndpoints
     // is set. The raw token exists for exactly one response; only its hash is
     // stored. Never reads a participant id from the request body or query — the
     // whole point is an identity the client did not choose.
-    private static async Task<Guid?> ResolvePartyParticipantAsync(
+    // Internal so the PRINT surface resolves its guest through the same policy
+    // rather than a second copy of it. The cookie stays scoped to the path of
+    // the token that minted it — deliberately narrow — so a print capability
+    // gets its own session on the same link rather than being handed the
+    // contribution one.
+    internal static async Task<Guid?> ResolvePartyParticipantAsync(
         HttpContext context,
         NubArca.Api.Party.IPartyParticipantService participants,
         Guid? partyAlbumLinkId,

@@ -1000,7 +1000,18 @@ while printing would actually work** — configured, enabled, on a live station
 whose printer does 10×15, with budget left in at least one product — which is
 what makes the guest card a real offer rather than a link to a refusal.
 
-The two budgets are **independent, and their counters are history**. Photo
+Budgets come in **two layers, and the per-guest one is the one that matters**.
+A party-wide budget alone is spent by whoever reaches the studio first, and the
+host discovers it when the fortieth guest finds nothing left; a per-guest ceiling
+is what makes the paper last the evening. Both apply — a print needs a free slot
+in the guest's allowance *and* in the party's — and the guest's is claimed first,
+so somebody who has had their share never consumes one of the party's remaining
+sheets on the way to being told no. A guest is the same server-minted,
+link-scoped `PartyParticipant` identity the uploads use, never a fingerprint and
+never anything the client chose; `0` means no per-guest limit, the same
+convention the upload quotas carry.
+
+The two party-wide budgets are **independent, and their counters are history**. Photo
 prints and strips cost different things and the host sets them separately, so
 they are never summed into one "prints left": a party out of photo prints can
 still print strips. The counters record what was *accepted into the queue*,
@@ -1027,9 +1038,14 @@ refusal to hand out an original cannot drift apart between the two capabilities
 — while the server composes at 300dpi from its own copy. Geometry lives in one
 place (`PartyPrintGeometry`) and is **mirrored** by the frontend preview with a
 parity test that reads the server's constants, because a preview that disagrees
-with the sheet is worse than no preview. Only three things ever reach the paper:
-the party's name, the one line the *host* configured, and the approved wordmark
-— a guest writes nothing on a physical print.
+with the sheet is worse than no preview. Only four things ever reach the paper:
+the party's name, the one line the *host* configured, the approved wordmark, and
+the guest's queue number as `#n` — a guest writes nothing on a physical print.
+The footer that carries them is a fraction of the sheet's **short edge**, never
+of its height: the height is what flips when the sheet follows a landscape
+photograph, and a footer measured against it came out a third shorter on exactly
+the widest sheets, which is how a landscape print came to read as having no party
+name at all.
 
 ### 14.7 Party face search privacy
 
