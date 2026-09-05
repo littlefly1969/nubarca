@@ -43,6 +43,7 @@
          no runtime cost unless a model is wired. No model weights are committed
          (see .gitignore). -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.24.1" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="2.1.7" />
     <!-- Loads the exact Hugging Face tokenizer.json shipped with SigLIP2.
          Semantic photo search must use the checkpoint tokenizer verbatim
          (lowercase + EOS + fixed 64-token padding/truncation); a hand-written
@@ -55,6 +56,28 @@
          DbMigrateAsync) so it can supply a SQLite-backed service provider
          instead of spinning a real Postgres for every assertion. -->
     <InternalsVisibleTo Include="NubArca.Api.Tests" />
+  </ItemGroup>
+
+
+  <!-- Brand material the print renderer draws with, LINKED to its canonical
+       source rather than copied: a copy is a second thing to keep in sync, and
+       the brand contract is that every served file is byte-identical to the
+       package it came from. Nothing here resizes, recolours or redraws. -->
+  <ItemGroup>
+    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-dark-960w.png"
+             Link="Assets\brand\nubarca-wordmark-on-dark-960w.png"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-light.png"
+             Link="Assets\brand\nubarca-wordmark-on-light.png"
+             CopyToOutputDirectory="PreserveNewest" />
+    <!-- The approved product faces, from the manifested set whose hashes
+         scripts/check-brand-invariants.py already verifies. -->
+    <Content Include="..\..\mobile\assets\fonts\SpaceGrotesk-Bold.ttf"
+             Link="Assets\fonts\SpaceGrotesk-Bold.ttf"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\mobile\assets\fonts\Exo2-Medium.ttf"
+             Link="Assets\fonts\Exo2-Medium.ttf"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
