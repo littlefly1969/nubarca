@@ -6,6 +6,21 @@ COPY src/NubArca.Api/NubArca.Api.csproj src/NubArca.Api/
 RUN dotnet restore src/NubArca.Api/NubArca.Api.csproj
 
 COPY src/NubArca.Api/ src/NubArca.Api/
+
+# The party-print renderer draws on the approved product faces and wordmarks,
+# and the csproj references them WHERE THEY LIVE rather than duplicating the
+# bytes — brand assets have one manifested home, checked by
+# scripts/check-brand-invariants.py, and a second copy is a second thing to keep
+# true. That home is outside this project's directory, so the build context has
+# to carry it: a `<Content Include="..\..\...">` the context omits builds
+# perfectly from a full checkout and fails only here, at image build.
+#
+# Directories, not the four individual files, so adding a fifth asset does not
+# break the image again. Both are small and this stage is discarded — only
+# /app/publish reaches the runtime layer.
+COPY assets/brand/nubarca/runtime/web/ assets/brand/nubarca/runtime/web/
+COPY mobile/assets/fonts/ mobile/assets/fonts/
+
 RUN dotnet publish src/NubArca.Api/NubArca.Api.csproj -c Release -o /app/publish /p:UseAppHost=false
 
 # ---- the product-help RAG domain, built from THIS source revision -------------
