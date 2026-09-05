@@ -213,6 +213,8 @@ public static class AuditActions
     // spends real consumables and puts the host's own line on paper — but never
     // the footer TEXT, which is content rather than a security decision.
     public const string PartyPrintConfigure = "party.print.configure";
+    public const string PartyGameStart = "party.game.start";
+    public const string PartyGameFinish = "party.game.finish";
     public const string PartyMessageSubmit = "party.message.submit";
     public const string PartyMessageApprove = "party.message.approve";
     public const string PartyMessageReject = "party.message.reject";

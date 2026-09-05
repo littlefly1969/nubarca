@@ -808,6 +808,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are
@@ -1416,6 +1417,7 @@ app.MapShareLinkEndpoints();
 // extracted as part of the modular-monolith cleanup. Same routes, same
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
+app.MapPartyGameEndpoints();
 app.MapPartyPrintEndpoints();
 app.MapPartyPrintOwnerEndpoints();
 
