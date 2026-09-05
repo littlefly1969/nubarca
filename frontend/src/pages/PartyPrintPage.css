@@ -1,0 +1,586 @@
+/* Public party PRINT STUDIO.
+
+   The studio sits on the same dark party surface as the hub (it reuses
+   `.party-guest-hub` for the shell), but its centre of gravity is different:
+   the guest is composing something physical, so the SHEET is the biggest thing
+   on the page and everything else is a control around it.
+
+   The `.party-print-sheet` rules below are a mirror of the server renderer, the
+   same way partyPrintGeometry.ts mirrors PartyPrintGeometry.cs. Every position
+   comes from that module as an inline percentage; what lives here is only what
+   the renderer expresses in colour and type — the three theme palettes, the
+   footer's bands, the cut ticks. If a palette changes in PartyPrintComposer.cs,
+   it changes here too, or the preview starts lying. */
+
+.party-print {
+  padding:
+    max(0.85rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(2.5rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+}
+
+.party-print-head,
+.party-print-step,
+.party-print > .party-guest-hub-topbar,
+.party-print-sent,
+.party-print > .party-print-back,
+.party-print > .party-print-note,
+.party-print > .party-print-hint,
+.party-print > .party-print-primary {
+  width: min(100%, 44rem);
+  margin-inline: auto;
+}
+
+.party-print-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-block: 1.5rem 1.75rem;
+}
+
+.party-print-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 6.5vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.party-print-step {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.party-print-heading {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.15rem, 4.5vw, 1.5rem);
+  font-weight: 600;
+}
+
+.party-print-note {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.party-print-hint,
+.party-print-count {
+  margin: 0;
+  color: var(--party-hub-muted);
+  font-size: 0.9rem;
+}
+
+.party-print-error {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid rgb(255 138 138 / 45%);
+  border-radius: 0.7rem;
+  background: rgb(120 20 20 / 35%);
+  font-size: 0.92rem;
+}
+
+/* Formats ---------------------------------------------------------------- */
+
+.party-print-formats,
+.party-print-gallery,
+.party-print-order {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.party-print-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.party-print-format {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 1rem;
+  background: var(--party-hub-surface);
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.party-print-format:hover:not(:disabled) {
+  border-color: rgb(0 212 255 / 45%);
+}
+
+.party-print-format:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.party-print-format-icon svg {
+  width: 1.75rem;
+  height: 1.75rem;
+  fill: none;
+  stroke: var(--brand-cyan-glow);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.party-print-format-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.party-print-format-text strong {
+  font-family: var(--font-heading);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.party-print-format-help {
+  color: var(--party-hub-muted);
+  font-size: 0.85rem;
+}
+
+.party-print-format-left {
+  flex: none;
+  padding: 0.3rem 0.6rem;
+  border-radius: 999px;
+  background: rgb(0 212 255 / 14%);
+  color: var(--brand-cyan-glow);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.party-print-format[data-exhausted] .party-print-format-left {
+  background: rgb(245 247 251 / 10%);
+  color: var(--party-hub-muted);
+}
+
+/* Choosing --------------------------------------------------------------- */
+
+.party-print-filter {
+  align-self: flex-start;
+  padding: 0.45rem 0.9rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.party-print-filter[aria-pressed='true'] {
+  border-color: var(--brand-cyan-glow);
+  background: rgb(0 212 255 / 16%);
+  color: var(--brand-cyan-glow);
+}
+
+.party-print-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+@media (width >= 40rem) {
+  .party-print-gallery {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.party-print-pick {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 0.7rem;
+  background: rgb(10 15 26 / 60%);
+  cursor: pointer;
+}
+
+.party-print-pick img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.party-print-pick[aria-pressed='true'] {
+  border-color: var(--brand-cyan-glow);
+}
+
+.party-print-pick[aria-pressed='true'] img {
+  opacity: 0.75;
+}
+
+.party-print-pick-badge {
+  position: absolute;
+  inset-block-start: 0.35rem;
+  inset-inline-start: 0.35rem;
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: var(--brand-cyan-glow);
+  color: var(--brand-midnight-navy);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+/* Order ------------------------------------------------------------------ */
+
+.party-print-order {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.party-print-order-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.8rem;
+  background: var(--party-hub-surface);
+}
+
+.party-print-order-index {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  background: rgb(0 212 255 / 16%);
+  color: var(--brand-cyan-glow);
+  font-weight: 700;
+}
+
+.party-print-order-row img {
+  width: 3.25rem;
+  height: 3.25rem;
+  object-fit: cover;
+  border-radius: 0.5rem;
+}
+
+.party-print-order-label {
+  flex: 1;
+  font-size: 0.9rem;
+}
+
+.party-print-order-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.party-print-order-buttons button {
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.party-print-order-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+/* Framing ---------------------------------------------------------------- */
+
+.party-print-crop {
+  position: relative;
+  align-self: center;
+  width: min(100%, 22rem);
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: rgb(10 15 26 / 70%);
+  touch-action: none;
+  cursor: grab;
+}
+
+.party-print-crop:active {
+  cursor: grabbing;
+}
+
+.party-print-framed {
+  position: absolute;
+  max-width: none;
+  object-fit: cover;
+  user-select: none;
+}
+
+.party-print-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.party-print-zoom input {
+  flex: 1;
+  accent-color: var(--brand-cyan-glow);
+}
+
+/* Themes ----------------------------------------------------------------- */
+
+.party-print-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.8rem;
+}
+
+.party-print-themes legend {
+  padding-inline: 0.35rem;
+  color: var(--party-hub-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.party-print-theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.party-print-theme:has(input:checked) {
+  border-color: var(--brand-cyan-glow);
+  background: rgb(0 212 255 / 14%);
+}
+
+.party-print-theme input {
+  accent-color: var(--brand-cyan-glow);
+}
+
+/* The sheet -------------------------------------------------------------- */
+
+.party-print-sheet {
+  position: relative;
+  align-self: center;
+  width: min(100%, 20rem);
+  overflow: hidden;
+  border-radius: 0.35rem;
+  /* Paper on a dark table, not a panel in the page. */
+  box-shadow: 0 1.5rem 3rem rgb(0 0 0 / 45%);
+  font-family: var(--font-ui);
+}
+
+/* The renderer's three palettes, value for value. */
+.party-print-sheet[data-theme='pure'] {
+  --sheet-bg: #f5f7fb;
+  --sheet-fg: #0a0f1a;
+  --sheet-muted: #5a6374;
+}
+
+.party-print-sheet[data-theme='midnight'] {
+  --sheet-bg: #0a0f1a;
+  --sheet-fg: #f5f7fb;
+  --sheet-muted: #a9b4c8;
+}
+
+.party-print-sheet[data-theme='event'] {
+  --sheet-bg: #0f1e3a;
+  --sheet-fg: #f5f7fb;
+  --sheet-muted: #a9b4c8;
+}
+
+.party-print-sheet {
+  background: var(--sheet-bg);
+  color: var(--sheet-fg);
+}
+
+.party-print-slot {
+  position: absolute;
+  overflow: hidden;
+}
+
+/* A hairline mount where a photograph meets dark paper — one thin edge per
+   picture, exactly as the renderer draws it. */
+.party-print-sheet[data-theme='midnight'] .party-print-slot {
+  outline: 1px solid rgb(0 212 255 / 40%);
+}
+
+.party-print-footer-band {
+  position: absolute;
+  /* The footer type is sized against the BAND, not the viewport, so a strip's
+     narrow footer and a photo's wide one each get type in proportion — the same
+     thing the renderer does by deriving its font sizes from the band. */
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1em;
+  overflow: hidden;
+  text-align: center;
+}
+
+.party-print-sheet-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  gap: 0.15em;
+}
+
+.party-print-sheet-name {
+  overflow: hidden;
+  font-family: var(--font-heading);
+  font-size: clamp(0.5rem, 3.2cqw, 0.85rem);
+  font-weight: 700;
+  line-height: 1.05;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.party-print-sheet-line {
+  overflow: hidden;
+  color: var(--sheet-muted);
+  font-size: clamp(0.4rem, 2.2cqw, 0.62rem);
+  line-height: 1.05;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* The wordmark is placed and scaled, never redrawn: no filter, no recolour,
+   and the on-dark artwork on dark paper. */
+.party-print-sheet-mark {
+  width: 42%;
+  min-width: 3rem;
+  height: auto;
+}
+
+.party-print-cut {
+  position: absolute;
+  inset-inline-start: 50%;
+  width: 1px;
+  background: var(--sheet-muted);
+}
+
+.party-print-cut-top { inset-block-start: 0; }
+.party-print-cut-bottom { inset-block-end: 0; }
+
+/* Sent ------------------------------------------------------------------- */
+
+.party-print-sent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.75rem 1.25rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 1.25rem;
+  background: var(--party-hub-surface);
+  text-align: center;
+}
+
+.party-print-sent-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.party-print-ticket-label {
+  margin: 0.6rem 0 0;
+  color: var(--party-hub-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.party-print-ticket {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(3rem, 18vw, 5rem);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--brand-cyan-glow);
+}
+
+.party-print-sent-state {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* Actions ---------------------------------------------------------------- */
+
+.party-print-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.party-print-primary,
+.party-print-secondary {
+  flex: 1;
+  min-height: 3rem;
+  padding: 0 1.1rem;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.party-print-primary {
+  border: none;
+  background: linear-gradient(135deg, var(--brand-cyan-glow), var(--brand-electric-blue));
+  color: var(--brand-midnight-navy);
+}
+
+.party-print-secondary {
+  border: 1px solid var(--party-hub-border);
+  background: transparent;
+  color: inherit;
+}
+
+.party-print-primary:disabled,
+.party-print-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.party-print-back {
+  margin: 1.5rem 0 0;
+  text-align: center;
+}
+
+.party-print-back a {
+  color: var(--party-hub-muted);
+  font-size: 0.9rem;
+}
+
+.party-print :is(button, a, input, [tabindex]):focus-visible {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 2px;
+}

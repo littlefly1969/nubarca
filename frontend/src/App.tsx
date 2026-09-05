@@ -39,6 +39,7 @@ import { TvPairApprovalPage } from './pages/TvPairApprovalPage';
 import { PartyPage } from './pages/PartyPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
+import { PartyPrintPage } from './pages/PartyPrintPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
 import { PartyMessagesPage } from './pages/PartyMessagesPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
@@ -63,6 +64,10 @@ export function App() {
           {/* PUBLIC, unauthenticated party UPLOAD landing (separate upload QR). */}
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
           <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />
+          {/* PUBLIC, unauthenticated party PRINT STUDIO. Its :token is a PRINT
+              token, not the view one: a separate capability, resolved on every
+              request, that can print but cannot browse the album. */}
+          <Route path="/party/:token/print" element={<PartyPrintPage />} />
           {/* PUBLIC, unauthenticated TV Beauty Lab mobile UPLOAD landing (QR target). */}
           <Route path="/beauty-lab-upload/:token" element={<BeautyLabUploadPage />} />
           <Route

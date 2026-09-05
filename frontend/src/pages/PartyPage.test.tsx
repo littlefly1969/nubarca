@@ -12,6 +12,8 @@ afterEach(() => {
   // The switcher persists the chosen language, so a test that changes it would
   // otherwise leave every test after it running in English.
   window.localStorage.clear();
+  // The hub now leaves a memo for the print studio; it must not outlive a test.
+  window.sessionStorage.clear();
 });
 
 function wrapper(token = 'tok-1') {
@@ -43,6 +45,8 @@ describe('PartyPage (public party landing)', () => {
     albumName: 'Beach Party', itemCount: 1,
     coverUrl: '/api/party/tok-1/media/f1/preview',
     contributionUrl: '/party/upload-token/upload', gameEnabled: true,
+    // Null unless printing would really work right now — the server decides.
+    printUrl: null,
   };
 
   it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
@@ -769,10 +773,11 @@ describe('PartyPage (public party landing)', () => {
   // its own enabled→present / disabled→absent pair here.
 
   it('derives the visible deck from availability, not from the JSX', async () => {
-    mockHub({ gameEnabled: true });
+    mockHub({ gameEnabled: true, printUrl: null });
     render(wrapper());
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
-    // Exactly the three capabilities that are real today, each stating its tier.
+    // Exactly the capabilities this party has, each stating its tier. Printing
+    // is built, but not offered here, so it is simply not in the deck.
     expect(Array.from(deck.querySelectorAll('[data-testid^="party-capability-"]'))
       .map((el) => `${el.getAttribute('data-testid')}:${el.getAttribute('data-variant')}`))
       .toEqual([
@@ -799,6 +804,33 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
   });
 
+  it('renders the print capability ONLY while the server offers a print URL', async () => {
+    // Printing is physical, and the server hands back a URL exclusively while a
+    // live station, a 10x15 printer and a remaining budget all hold at once.
+    // The hub derives nothing: a url is the card, a null is no card.
+    mockHub({ printUrl: '/party/print-tok/print' });
+    const on = render(wrapper());
+    expect(await screen.findByTestId('party-capability-print')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Crea il tuo ricordo/i }))
+      .toHaveAttribute('href', '/party/print-tok/print');
+    on.unmount();
+
+    mockHub({ printUrl: null });
+    render(wrapper());
+    await screen.findByTestId('party-capability-album');
+    expect(screen.queryByTestId('party-capability-print')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Crea il tuo ricordo/i })).not.toBeInTheDocument();
+  });
+
+  it('leaves its own path where the print studio can find it', async () => {
+    // The studio opens on a PRINT token and cannot address the album, so the
+    // hub — which legitimately holds the view token — leaves the way back.
+    mockHub({ printUrl: '/party/print-tok/print' });
+    render(wrapper());
+    await screen.findByTestId('party-capability-print');
+    expect(window.sessionStorage.getItem('nubarca.party.home')).toBe('/party/tok-1');
+  });
+
   it('keeps album and face search available on any valid party', async () => {
     // Everything optional switched off: the two always-available capabilities
     // remain, and the deck is still a whole composition.
@@ -814,12 +846,14 @@ describe('PartyPage (public party landing)', () => {
     mockHub();
     render(wrapper());
     await screen.findByTestId('party-grid');
-    // Song requests and printing are planned, not built: no card, no
-    // placeholder, no disabled tile, no stray copy. Dedications ARE built —
-    // they ride the same contribution enablement — so they are a real card,
-    // gated and asserted separately below.
+    // Song requests are planned, not built: no card, no placeholder, no
+    // disabled tile, no stray copy. Dedications and printing ARE built, and
+    // each is gated on its own signal — dedications ride contribution
+    // enablement and are a real card here; printing has no print URL on this
+    // party, which looks exactly like a feature that does not exist, because
+    // an unavailable capability is an absent one.
     const page = document.body.textContent ?? '';
-    expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo da stampare/i);
+    expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo/i);
     expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(4);
     expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
     expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
