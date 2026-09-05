@@ -3,7 +3,9 @@ import { act, cleanup, render, screen, waitFor, within } from '@testing-library/
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPage } from './PartyPage';
-import { errorResponse, installFetchMock, jsonResponse, setIntersecting } from '../test-utils';
+import {
+  activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
+} from '../test-utils';
 import { I18nProvider } from '../i18n';
 
 afterEach(() => {
@@ -887,7 +889,7 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.getByTestId('party-hub-cta'))
       .toHaveAttribute('href', '/party/upload-token/upload');
 
-    setIntersecting(document.querySelector('.party-guest-hub-hero') as HTMLElement, false);
+    await move(hero, false);
     expect(screen.getByTestId('party-dock-share'))
       .toHaveAttribute('href', '/party/upload-token/upload');
 
@@ -901,6 +903,24 @@ describe('PartyPage (public party landing)', () => {
   function hero() {
     return document.querySelector('.party-guest-hub-hero') as HTMLElement;
   }
+
+  /**
+   * Move an element across the viewport boundary, once it is actually observed.
+   *
+   * `setIntersecting` fires the observers REGISTERED FOR that element, so
+   * firing before the page's IntersectionObserver effect has run is a silent
+   * no-op: nothing happens, the dock never appears, and the assertion fails
+   * with an element that was never going to arrive. Waiting for the
+   * registration first is invisible on an idle machine and is the difference
+   * between a green suite and a CI run that reddens at random — this one did.
+   */
+  async function move(el: () => HTMLElement, isIntersecting: boolean) {
+    const target = el();
+    await waitFor(() => {
+      expect(activeIntersectionObservers().some((o) => o.elements.includes(target))).toBe(true);
+    });
+    setIntersecting(target, isIntersecting);
+  }
   function gallery() {
     return document.getElementById('party-photos') as HTMLElement;
   }
@@ -911,12 +931,12 @@ describe('PartyPage (public party landing)', () => {
     await screen.findByTestId('party-grid');
 
     // On the cover: no dock, and nothing of it reachable by Tab.
-    setIntersecting(hero(), true);
+    await move(hero, true);
     expect(screen.queryByTestId('party-dock')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: /Navigazione festa/i })).not.toBeInTheDocument();
 
     // Scrolled past it: the dock appears.
-    setIntersecting(hero(), false);
+    await move(hero, false);
     const dock = screen.getByTestId('party-dock');
     expect(dock).toBeInTheDocument();
     expect(dock).toHaveAttribute('aria-label', 'Navigazione festa');
@@ -928,13 +948,13 @@ describe('PartyPage (public party landing)', () => {
     mockHub();
     render(wrapper());
     await screen.findByTestId('party-grid');
-    setIntersecting(hero(), false);
+    await move(hero, false);
 
     // Past the cover but not yet at the album: Home is where they are.
     expect(screen.getByTestId('party-dock-home')).toHaveAttribute('aria-current', 'true');
     expect(screen.getByTestId('party-dock-album')).not.toHaveAttribute('aria-current');
 
-    setIntersecting(gallery(), true);
+    await move(gallery, true);
     expect(screen.getByTestId('party-dock-album')).toHaveAttribute('aria-current', 'true');
     expect(screen.getByTestId('party-dock-home')).not.toHaveAttribute('aria-current');
   });
@@ -944,7 +964,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
-    setIntersecting(hero(), false);
+    await move(hero, false);
 
     const heroScroll = vi.fn();
     const galleryScroll = vi.fn();
@@ -966,7 +986,7 @@ describe('PartyPage (public party landing)', () => {
     mockHub();
     const withShare = render(wrapper());
     await screen.findByTestId('party-grid');
-    setIntersecting(hero(), false);
+    await move(hero, false);
     const share = screen.getByTestId('party-dock-share');
     // The same URL the hero CTA uses — one contribution destination, not two.
     expect(share).toHaveAttribute('href', '/party/upload-token/upload');
@@ -976,7 +996,7 @@ describe('PartyPage (public party landing)', () => {
     mockHub({ contributionUrl: null });
     render(wrapper());
     await screen.findByTestId('party-grid');
-    setIntersecting(hero(), false);
+    await move(hero, false);
     expect(screen.queryByTestId('party-dock-share')).not.toBeInTheDocument();
     // The dock is still there, with the two items it does have.
     const dock = screen.getByTestId('party-dock');
@@ -992,7 +1012,7 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     const user = userEvent.setup();
     await screen.findByTestId('party-grid');
-    setIntersecting(hero(), false);
+    await move(hero, false);
     expect(screen.getByTestId('party-dock')).toBeInTheDocument();
 
     // The sheet is a modal: it covers the dock rather than competing with it.
@@ -1019,6 +1039,9 @@ describe('PartyPage (public party landing)', () => {
     try {
       render(wrapper());
       await settle();
+      // Fired directly, not through `move`: this test owns the clock, and
+      // Testing Library's waiting is built on the timers it has replaced.
+      // `settle` has already flushed the effect that registers the observers.
       setIntersecting(hero(), false);
       setIntersecting(gallery(), true);
       expect(screen.getByTestId('party-dock-album')).toHaveAttribute('aria-current', 'true');
