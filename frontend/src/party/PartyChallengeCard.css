@@ -1,0 +1,266 @@
+/* THE party activity card — one composition, three presentations.
+
+   The markup is identical in every mode (see PartyChallengeCard.tsx); this file
+   is the only thing that differs between the composer's preview and a
+   television. Two rules make that work and are worth stating before the
+   declarations:
+
+   1. THE STAGE IS A CONTAINER, AND EVERYTHING INSIDE IS `em`.
+      `.party-activity` declares `container-type: size` and sets ONE font size
+      from container units. Every dimension below — padding, gaps, radii, type —
+      is expressed in `em` against it. So the same rules that fill a 1920x1080
+      panel also fill a 480px preview box, at the same proportions, with no
+      second stylesheet and no breakpoint. Change the box, and the composition
+      scales; change a proportion, and it changes in both places at once.
+
+   2. NOTHING OVERFLOWS, EVER.
+      A television cannot scroll and a preview must not lie about what will fit.
+      The title and the body are line-clamped, long words break, and the media
+      column is a fixed fraction. A host who writes an essay sees it truncated in
+      the preview, which is the honest answer.
+
+   Colour, radius, shadow and type all come from the tokens in styles.css. The
+   only local variables are the two the kind accent needs. */
+
+.party-activity {
+  container-type: size;
+  position: relative;
+  box-sizing: border-box;
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+/* Which of the four activity kinds this is, said in words by the eyebrow and
+   reinforced — never replaced — by an accent. Four hues, all existing tokens. */
+.party-activity[data-kind='dare'] { --activity-accent: var(--accent); }
+.party-activity[data-kind='penalty'] { --activity-accent: var(--danger); }
+.party-activity[data-kind='guess'] { --activity-accent: var(--accent-secondary); }
+.party-activity[data-kind='custom'] { --activity-accent: var(--text-secondary); }
+
+.party-activity-card {
+  box-sizing: border-box;
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 0.8em;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
+}
+
+/* With a photograph the card is two columns; without one the copy takes the
+   whole card rather than leaving a hole where the picture would have been. */
+.party-activity[data-media='true'] .party-activity-card {
+  grid-template-columns: minmax(0, 42%) minmax(0, 1fr);
+}
+.party-activity[data-media='false'] .party-activity-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* One frame, every aspect ratio. `cover` in a frame the layout owns is what
+   makes portrait, landscape and square photographs all correct without the card
+   ever measuring the bitmap — so nothing reflows when the image arrives. */
+.party-activity-media {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--surface-subtle);
+}
+.party-activity-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.party-activity-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5em;
+  padding: 1.6em;
+}
+
+.party-activity-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6em;
+  margin: 0;
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.party-activity-kind { color: var(--activity-accent); }
+.party-activity-context { color: var(--text-muted); letter-spacing: 0.08em; }
+
+.party-activity-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 2.4em;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.party-activity-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 1.15em;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.party-activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0.35em 0 0;
+}
+.party-activity-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em 0.75em;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-size: 0.8em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* Voting state is carried by the word first; the tint only reinforces it. */
+.party-activity-voting[data-state='open'] {
+  border-color: color-mix(in srgb, var(--success) 55%, var(--border-strong));
+  color: var(--success);
+}
+.party-activity-voting[data-state='closed'] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+  color: var(--accent);
+}
+
+/* ---- tv ------------------------------------------------------------------
+   A television, at whatever resolution the panel reports. Everything is
+   proportional to the viewport height, so 1280x720 and 1920x1080 produce the
+   same physical type on the same-sized screen — which is the only definition of
+   "readable from the sofa" that survives two panels.
+
+   The safe area is 3.5% per edge, the same ratio the native TV app's overscan()
+   uses, because a television is allowed to crop the edges of its own picture. */
+.party-activity[data-mode='tv'] {
+  width: 100%;
+  height: 100dvh;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: max(3.5vh, 1rem) max(3.5vw, 1.5rem);
+  background: var(--brand-midnight-navy);
+  /* 1080p -> ~23px, 720p -> ~15px: the same angular size on both panels. */
+  font-size: clamp(0.8rem, 2.1cqh, 2.4rem);
+}
+.party-activity[data-mode='tv'] .party-activity-card {
+  width: 100%;
+  height: 100%;
+  max-width: 74em;
+  border: 0.08em solid var(--border-strong);
+  border-radius: 1.4em;
+}
+.party-activity[data-mode='tv'] .party-activity-copy { padding: 2.2em; gap: 0.7em; }
+.party-activity[data-mode='tv'] .party-activity-title { font-size: 2.6em; }
+.party-activity[data-mode='tv'] .party-activity-body { font-size: 1.55em; -webkit-line-clamp: 6; line-clamp: 6; }
+
+/* ---- preview -------------------------------------------------------------
+   The composer's TV preview: the SAME rules as `tv`, inside a 16:9 box.
+
+   One deliberate difference. Below roughly 500px wide a true scale model is too
+   small to read, so the clamp floor takes over and the preview stops being
+   exactly to scale. That is the right trade: a preview exists to be read, and
+   an illegible one answers no question a host is asking. */
+.party-activity[data-mode='preview'] {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  padding: 3.5%;
+  border-radius: var(--radius-card);
+  background: var(--brand-midnight-navy);
+  font-size: clamp(0.6rem, 2.1cqh, 1.6rem);
+}
+.party-activity[data-mode='preview'] .party-activity-card {
+  width: 100%;
+  height: 100%;
+  border: 0.08em solid var(--border-strong);
+  border-radius: 1.2em;
+}
+.party-activity[data-mode='preview'] .party-activity-copy { padding: 1.8em; }
+.party-activity[data-mode='preview'] .party-activity-title { font-size: 2.5em; }
+.party-activity[data-mode='preview'] .party-activity-body { font-size: 1.45em; }
+
+/* ---- compact -------------------------------------------------------------
+   An activity in a list, or "coming up next" beside the live one. A row, at the
+   app's own type scale — no container sizing, because a row's height should
+   follow its content rather than a stage. */
+.party-activity[data-mode='compact'] {
+  container-type: normal;
+  width: 100%;
+  font-size: 1rem;
+}
+.party-activity[data-mode='compact'] .party-activity-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+.party-activity[data-mode='compact'][data-media='true'] .party-activity-card {
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: stretch;
+}
+.party-activity[data-mode='compact'] .party-activity-media { min-height: 4.5rem; }
+.party-activity[data-mode='compact'] .party-activity-copy {
+  gap: 0.3rem;
+  padding: 0.75rem 0.9rem;
+}
+.party-activity[data-mode='compact'] .party-activity-eyebrow { font-size: 0.7rem; }
+.party-activity[data-mode='compact'] .party-activity-title {
+  font-size: 1rem;
+  font-weight: 600;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.party-activity[data-mode='compact'] .party-activity-body {
+  font-size: 0.875rem;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.party-activity[data-mode='compact'] .party-activity-chip { font-size: 0.75rem; }
+
+/* A phone holding a preview has no room for a two-column 16:9 card: the copy
+   would be a column of single words. Below the mobile breakpoint the preview
+   stacks, which is the one place the two modes genuinely diverge — a television
+   is never this narrow. */
+@media (max-width: 640px) {
+  .party-activity[data-mode='preview'] {
+    aspect-ratio: auto;
+    min-height: 18rem;
+    font-size: clamp(0.6rem, 3.4cqw, 1rem);
+  }
+  .party-activity[data-mode='preview'][data-media='true'] .party-activity-card {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 8rem minmax(0, 1fr);
+  }
+}
