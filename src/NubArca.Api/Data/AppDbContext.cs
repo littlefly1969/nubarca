@@ -100,6 +100,12 @@ public class AppDbContext : DbContext
     public DbSet<PartyChallengeSession> PartyChallengeSessions => Set<PartyChallengeSession>();
     public DbSet<PartyChallengeCompletion> PartyChallengeCompletions => Set<PartyChallengeCompletion>();
 
+    // The hosted Party Game runtime: one session per party link, one round per
+    // activity played. Separate from PartyChallengeSessions, which drives the
+    // older interval-based slideshow interruption.
+    public DbSet<PartyGameSession> PartyGameSessions => Set<PartyGameSession>();
+    public DbSet<PartyGameRound> PartyGameRounds => Set<PartyGameRound>();
+
     // Short-lived anonymous "find your face" searches within a party album, and
     // their ranked (visibility-re-derived) matches. No selfie/query vector stored.
     public DbSet<PartyFaceSearchSession> PartyFaceSearchSessions => Set<PartyFaceSearchSession>();
