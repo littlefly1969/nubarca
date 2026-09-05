@@ -15,6 +15,9 @@ public interface IPartyPrintSubmissionService
         PartyPrintAccess access,
         PartyPrintSubmitRequest request,
         string idempotencyKey,
+        // Null when the guest has no participant session — the per-guest
+        // ceiling then cannot apply, and only the party's budget bounds them.
+        Guid? participantId,
         CancellationToken cancellationToken);
 }
 
@@ -48,12 +51,15 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     private readonly IDerivedBlobStorage _artifacts;
     private readonly PartyPrintComposer _composer;
     private readonly IPartyPrintSourceReader _sources;
+    private readonly NubArca.Api.Party.IPartyParticipantService _participants;
 
     public PartyPrintSubmissionService(
         AppDbContext db, IPartyPrintBudget budget, IPartyMediaService media,
         IDerivedBlobStorage artifacts, PartyPrintComposer composer,
-        IPartyPrintSourceReader sources)
+        IPartyPrintSourceReader sources,
+        NubArca.Api.Party.IPartyParticipantService participants)
     {
+        _participants = participants;
         _db = db;
         _budget = budget;
         _media = media;
@@ -66,6 +72,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         PartyPrintAccess access,
         PartyPrintSubmitRequest request,
         string idempotencyKey,
+        Guid? participantId,
         CancellationToken cancellationToken)
     {
         // 1. Shape.
@@ -119,14 +126,44 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 .Select(j => j.PublicSequence)
                 .FirstOrDefaultAsync(cancellationToken);
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                existing.PrintJobId, seq ?? 0, request.Product, product.Remaining));
+                existing.PrintJobId, seq ?? 0, request.Product, product.Remaining,
+                await QueueAheadAsync(
+                    access.PrintStationId, existing.PrintJobId, cancellationToken)));
         }
 
-        // 4. One unit, atomically. Losing here means someone else took the last.
+        // 4a. The GUEST's own allowance first, atomically.
+        //
+        // Before the party's, deliberately: a guest who has had their share must
+        // not consume one of the party's remaining sheets on the way to being
+        // told no. Both ceilings apply, and this is the one that makes the paper
+        // last the evening.
+        var isStrip = request.Product == PartyPrintProducts.Strip4;
+        var perGuest = access.Product(request.Product)?.PerGuest ?? 0;
+        if (participantId is Guid guest && perGuest > 0)
+        {
+            if (!await _participants.TryClaimPrintAsync(
+                    guest, isStrip, perGuest, cancellationToken))
+            {
+                return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.GuestBudgetExhausted);
+            }
+        }
+
+        // 4b. One unit of the party's, atomically. Losing here means someone
+        // else took the last.
         var reservation = await _budget.TryReserveAsync(
             access.PartyAlbumId, request.Product, cancellationToken);
         if (reservation is null)
+        {
+            // The guest's slot was claimed a moment ago and this sheet will not
+            // happen, so it goes back: their allowance is not spent by the
+            // party running out.
+            if (participantId is Guid held && perGuest > 0)
+            {
+                await _participants.ReleasePrintAsync(
+                    held, isStrip, perGuest, CancellationToken.None);
+            }
             return PartyPrintSubmitResult.Refuse(PartyPrintRefusal.BudgetExhausted);
+        }
 
         var jobId = Guid.NewGuid();
         try
@@ -148,9 +185,13 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     bytes, slot.CropX, slot.CropY, slot.CropWidth, slot.CropHeight));
             }
 
+            // The number is reserved before the sheet is drawn, so it can be
+            // printed ON it: the guest reads the same number off their phone and
+            // off the paper.
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
                 request.Product, ParseTheme(request.Theme), photos,
-                access.PartyName, access.FooterText), cancellationToken);
+                access.PartyName, access.FooterText,
+                reservation.PublicSequence), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
             var stored = await _artifacts.WriteAsync(stream, cancellationToken);
@@ -214,7 +255,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
 
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
                 jobId, reservation.PublicSequence, request.Product,
-                Math.Max(0, reservation.RemainingAfter)));
+                Math.Max(0, reservation.RemainingAfter),
+                await QueueAheadAsync(access.PrintStationId, jobId, cancellationToken)));
         }
         catch (DbUpdateException)
         {
@@ -235,7 +277,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 .Where(j => j.Id == winner).Select(j => j.PublicSequence)
                 .FirstOrDefaultAsync(CancellationToken.None);
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
-                winner, seq ?? 0, request.Product, product.Remaining));
+                winner, seq ?? 0, request.Product, product.Remaining,
+                await QueueAheadAsync(access.PrintStationId, winner, CancellationToken.None)));
         }
         catch when (!cancellationToken.IsCancellationRequested)
         {
@@ -260,6 +303,24 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     /// </summary>
     internal static string HashKey(string key) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
+
+    /// <summary>
+    /// Sheets already accepted for this printer and not yet finished, excluding
+    /// one job.
+    ///
+    /// Counted for the STATION, not the party: the queue a guest waits in is the
+    /// machine's, and two parties sharing a printer share the wait. Terminal
+    /// states are not in it — a completed or failed sheet is nobody's wait.
+    /// </summary>
+    private async Task<int> QueueAheadAsync(
+        Guid printStationId, Guid excluding, CancellationToken cancellationToken)
+    {
+        return await _db.PrintJobs.AsNoTracking()
+            .Where(j => j.PrintStationId == printStationId
+                && j.Id != excluding
+                && !PrintJobStates.Terminal.Contains(j.State))
+            .CountAsync(cancellationToken);
+    }
 }
 
 /// <summary>

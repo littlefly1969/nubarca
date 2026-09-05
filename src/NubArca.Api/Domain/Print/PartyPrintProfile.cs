@@ -31,13 +31,28 @@ public sealed class PartyPrintProfile
     public Guid? PrinterDeviceId { get; set; }
 
     public bool PhotoEnabled { get; set; }
-    /// <summary>Maximum accepted photo prints. Only meaningful while enabled.</summary>
+    /// <summary>Maximum accepted photo prints for the whole party.</summary>
     public int PhotoMaxPrints { get; set; }
     public int PhotoAcceptedCount { get; set; }
+
+    /// <summary>
+    /// Maximum photo prints ONE GUEST may take. Zero means no per-guest limit,
+    /// the same convention the upload quotas use.
+    ///
+    /// This is the limit that matters at a party. A party-wide budget alone is
+    /// spent by whoever reaches the studio first, and the host discovers it when
+    /// the fortieth guest finds nothing left; a per-guest ceiling is what makes
+    /// the paper last the evening. Both apply: a print needs a free slot in the
+    /// guest's allowance AND in the party's.
+    /// </summary>
+    public int PhotoPrintsPerGuest { get; set; }
 
     public bool StripEnabled { get; set; }
     public int StripMaxPrints { get; set; }
     public int StripAcceptedCount { get; set; }
+
+    /// <summary>Maximum strips ONE GUEST may take. Zero means no per-guest limit.</summary>
+    public int StripPrintsPerGuest { get; set; }
 
     /// <summary>
     /// A line the HOST may put on the print. Guests never write on paper — see

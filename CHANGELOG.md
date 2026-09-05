@@ -6,6 +6,33 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Party print polish
+
+- **Photographs are no longer sideways in the guest album.** Stripping metadata
+  removed the EXIF orientation tag without first applying it, so a portrait
+  photograph shot on a phone was served as the landscape pixels it is stored as.
+  Stripping now turns the picture upright before dropping the tag that said to —
+  removing metadata must never change what an image looks like.
+- **A landscape 10x15 shows the party name again.** The footer was a fraction of
+  the sheet height, and the height is what flips when the sheet follows the
+  photograph: 11.7mm instead of 17.5mm, with the type shrinking inside it. It is
+  now measured against the short edge, which is 10cm whichever way the picture
+  faces.
+- **The wordmark is the same lockup on light and dark paper**, and a quieter one.
+  The light sheets were reaching for a different artwork entirely — 1516x1024
+  against 960x269 — so it rendered a visibly different size. It now sits
+  bottom-left, at half its former width.
+- **The guest's queue number is printed on the sheet** as `#n`, bottom-right, so
+  a stack of prints on the collection table can be matched to the people waiting
+  for them without reading a name off anybody's photograph.
+- **Prints can be limited per guest, not just per party.** Both ceilings apply
+  and the guest's is claimed first, so somebody who has had their share never
+  spends one of the party's remaining sheets on the way to being told no — and
+  they are told it is their own allowance, not the party's.
+- **Submitting a print says how long the wait is** — how many sheets are ahead of
+  it on that printer, rather than only that it is "in the queue".
+
+
 ### Party printed keepsakes
 
 - **Guests at a party can now print what they are in.** A print card appears on

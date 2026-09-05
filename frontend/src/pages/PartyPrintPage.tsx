@@ -47,7 +47,11 @@ import './PartyPrintPage.css';
    sent to the browser — the server composes at 300dpi from its own copy. */
 
 const PARTY_WORDMARK_DARK = '/brand/nubarca-wordmark-on-dark-480w.png';
-const PARTY_WORDMARK_LIGHT = '/brand/nubarca-wordmark-on-light.png';
+// The COMPACT light rendition, not the master. The brand manifest builds this
+// one so that "both themes share one visible geometry" — which is precisely
+// what a footer band needs, and what the renderer draws. The padded master
+// fitted into a tight band comes out visibly smaller than the on-dark artwork.
+const PARTY_WORDMARK_LIGHT = '/brand/nubarca-wordmark-on-light-480w.png';
 const PARTY_EYEBROW = `${PRODUCT_NAME} Party`;
 
 /** Themes, in the order they are offered. Same three the renderer knows. */
@@ -97,6 +101,10 @@ function refusalKey(err: unknown): MessageKey {
     : undefined;
   switch (code) {
     case 'budget_exhausted': return 'partyPrint.error.budget';
+    // Distinct from the party running out: telling a guest the party is out
+    // when it is their own share that is spent is a lie they can see through
+    // the moment somebody else collects a print.
+    case 'guest_budget_exhausted': return 'partyPrint.error.guestBudget';
     case 'printer_unavailable': return 'partyPrint.error.printer';
     case 'render_failed': return 'partyPrint.error.render';
     case 'invalid_source': return 'partyPrint.error.source';
@@ -178,14 +186,20 @@ function SheetFooter({
   const dark = DARK_THEMES.includes(theme);
   return (
     <div className="party-print-sheet-footer">
-      <span className="party-print-sheet-name">{partyName}</span>
-      {footerText && <span className="party-print-sheet-line">{footerText}</span>}
-      {/* The approved artwork, placed and scaled — never redrawn as text. */}
-      <img
-        className="party-print-sheet-mark"
-        src={dark ? PARTY_WORDMARK_DARK : PARTY_WORDMARK_LIGHT}
-        alt={PRODUCT_NAME}
-      />
+      <span className="party-print-sheet-text">
+        <span className="party-print-sheet-name">{partyName}</span>
+        {footerText && <span className="party-print-sheet-line">{footerText}</span>}
+      </span>
+      {/* Bottom-left, where the renderer puts it. The queue number that shares
+          this row on paper is deliberately absent: it does not exist until the
+          print is accepted, and a preview does not invent one. */}
+      <span className="party-print-sheet-sign">
+        <img
+          className="party-print-sheet-mark"
+          src={dark ? PARTY_WORDMARK_DARK : PARTY_WORDMARK_LIGHT}
+          alt={PRODUCT_NAME}
+        />
+      </span>
     </div>
   );
 }
@@ -600,6 +614,13 @@ export function PartyPrintPage() {
           <p className="party-print-ticket-label">{t('partyPrint.ticket')}</p>
           <p className="party-print-ticket">{sent.accepted.publicSequence}</p>
           <p className="party-print-sent-state">{t(STATE_LABEL[sent.state])}</p>
+          {/* How long the wait is. "In the queue" without a number answers
+              nothing to somebody standing at the printer. */}
+          <p className="party-print-hint">
+            {sent.accepted.queueAhead > 0
+              ? tn(sent.accepted.queueAhead, 'partyPrint.queueAhead')
+              : t('partyPrint.queueNext')}
+          </p>
           <p className="party-print-hint">{t('partyPrint.collect')}</p>
           <p className="party-print-hint">
             {left > 0 ? tn(left, 'partyPrint.leftAfter') : t('partyPrint.noneLeftAfter')}

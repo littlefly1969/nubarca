@@ -57,6 +57,13 @@ public static class PrintJobStates
     public const string Cancelled = "cancelled";
     public const string DeliveryUnknown = "delivery-unknown";
 
-    public static bool IsTerminal(string value) =>
-        value is Completed or Failed or Cancelled or DeliveryUnknown;
+    /// <summary>
+    /// The states a job never leaves. Held as a list as well as a predicate
+    /// because a database query cannot call the predicate — and the predicate
+    /// reads the list, so the two cannot drift apart.
+    /// </summary>
+    public static readonly string[] Terminal =
+        [Completed, Failed, Cancelled, DeliveryUnknown];
+
+    public static bool IsTerminal(string value) => Terminal.Contains(value);
 }

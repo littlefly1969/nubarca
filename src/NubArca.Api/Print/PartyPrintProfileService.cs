@@ -46,7 +46,9 @@ public sealed record PartyPrintProfileDto(
 
 /// <summary>One product's own switch, its own budget, and its own usage.</summary>
 public sealed record PartyPrintProductSettingsDto(
-    bool Enabled, int MaxPrints, int Used, int Remaining);
+    bool Enabled, int MaxPrints, int Used, int Remaining,
+    /// <summary>0 means the host set no per-guest limit.</summary>
+    int PerGuest);
 
 public sealed record PartyPrintProfileRequest(
     bool? Enabled,
@@ -54,8 +56,10 @@ public sealed record PartyPrintProfileRequest(
     Guid? PrinterDeviceId,
     bool? PhotoEnabled,
     int? PhotoMaxPrints,
+    int? PhotoPrintsPerGuest,
     bool? StripEnabled,
     int? StripMaxPrints,
+    int? StripPrintsPerGuest,
     string? FooterText);
 
 /// <summary>A saved profile, or the one reason it was refused.</summary>
@@ -126,8 +130,10 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
         var deviceId = request.PrinterDeviceId ?? profile.PrinterDeviceId;
         var photoEnabled = request.PhotoEnabled ?? profile.PhotoEnabled;
         var photoMax = request.PhotoMaxPrints ?? profile.PhotoMaxPrints;
+        var photoPerGuest = request.PhotoPrintsPerGuest ?? profile.PhotoPrintsPerGuest;
         var stripEnabled = request.StripEnabled ?? profile.StripEnabled;
         var stripMax = request.StripMaxPrints ?? profile.StripMaxPrints;
+        var stripPerGuest = request.StripPrintsPerGuest ?? profile.StripPrintsPerGuest;
 
         if (!PartyPrintText.TryNormaliseFooter(
                 request.FooterText, out var footer, out var footerError))
@@ -139,12 +145,14 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
 
         if (photoEnabled)
         {
-            var error = ValidateBudget(photoMax, profile.PhotoAcceptedCount, "photo");
+            var error = ValidateBudget(photoMax, profile.PhotoAcceptedCount, "photo")
+                ?? ValidatePerGuest(photoPerGuest, photoMax, "photo");
             if (error is not null) return PartyPrintProfileResult.Refused(error);
         }
         if (stripEnabled)
         {
-            var error = ValidateBudget(stripMax, profile.StripAcceptedCount, "strip");
+            var error = ValidateBudget(stripMax, profile.StripAcceptedCount, "strip")
+                ?? ValidatePerGuest(stripPerGuest, stripMax, "strip");
             if (error is not null) return PartyPrintProfileResult.Refused(error);
         }
 
@@ -199,13 +207,26 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
         profile.PrinterDeviceId = deviceId;
         profile.PhotoEnabled = photoEnabled;
         profile.PhotoMaxPrints = photoMax;
+        profile.PhotoPrintsPerGuest = photoPerGuest;
         profile.StripEnabled = stripEnabled;
         profile.StripMaxPrints = stripMax;
+        profile.StripPrintsPerGuest = stripPerGuest;
         profile.FooterText = footer;
         profile.UpdatedAt = now;
 
         await _db.SaveChangesAsync(cancellationToken);
         return PartyPrintProfileResult.Ok(Describe(profile));
+    }
+
+    /// <summary>
+    /// A per-guest ceiling above the party's own budget promises something the
+    /// party cannot pay: it would read as "10 each" on a party with 6 sheets.
+    /// Zero is not a small number here — it means no per-guest limit at all.
+    /// </summary>
+    private static string? ValidatePerGuest(int value, int partyMax, string product)
+    {
+        if (value < 0) return $"{product}_per_guest_range";
+        return value > partyMax ? $"{product}_per_guest_above_budget" : null;
     }
 
     private static string? ValidateBudget(int value, int alreadyUsed, string product)
@@ -229,12 +250,14 @@ public sealed class PartyPrintProfileService : IPartyPrintProfileService
                 profile?.PhotoEnabled ?? false,
                 profile?.PhotoMaxPrints ?? 0,
                 profile?.PhotoAcceptedCount ?? 0,
-                Math.Max(0, (profile?.PhotoMaxPrints ?? 0) - (profile?.PhotoAcceptedCount ?? 0))),
+                Math.Max(0, (profile?.PhotoMaxPrints ?? 0) - (profile?.PhotoAcceptedCount ?? 0)),
+                profile?.PhotoPrintsPerGuest ?? 0),
             new PartyPrintProductSettingsDto(
                 profile?.StripEnabled ?? false,
                 profile?.StripMaxPrints ?? 0,
                 profile?.StripAcceptedCount ?? 0,
-                Math.Max(0, (profile?.StripMaxPrints ?? 0) - (profile?.StripAcceptedCount ?? 0))),
+                Math.Max(0, (profile?.StripMaxPrints ?? 0) - (profile?.StripAcceptedCount ?? 0)),
+                profile?.StripPrintsPerGuest ?? 0),
             profile?.FooterText,
             PartyPrintLimits.FooterMaxLength,
             PartyPrintLimits.MinBudget,

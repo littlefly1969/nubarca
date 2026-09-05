@@ -12,6 +12,8 @@ public sealed record PartyPrintSlotRequest(
 /// <summary>Why a submission was refused, in terms the guest UI can speak.</summary>
 public enum PartyPrintRefusal
 {
+    /// <summary>This GUEST has taken their share; the party may still have paper.</summary>
+    GuestBudgetExhausted = 100,
     None,
     /// <summary>The capability no longer resolves: printing was turned off, revoked, expired.</summary>
     Unavailable,
@@ -32,7 +34,13 @@ public sealed record PartyPrintAccepted(
     Guid JobId,
     long PublicSequence,
     string Product,
-    int RemainingForProduct);
+    int RemainingForProduct,
+    /// <summary>
+    /// Sheets already accepted for this party's printer and not yet finished —
+    /// this one excluded. A guest standing at the printer wants to know how long
+    /// to wait, and "in the queue" without a number answers nothing.
+    /// </summary>
+    int QueueAhead);
 
 public sealed record PartyPrintSubmitResult(
     PartyPrintRefusal Refusal,

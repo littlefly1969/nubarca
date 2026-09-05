@@ -441,13 +441,32 @@
 }
 
 .party-print-sheet-footer {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  /* Two rows, exactly as the renderer divides the band: the party's name and
+     the host's line centred above, then the signature row. */
+  grid-template-rows: 1fr auto;
   align-items: center;
-  justify-content: center;
+  justify-items: center;
   width: 100%;
   height: 100%;
   gap: 0.15em;
+}
+
+.party-print-sheet-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The wordmark sits bottom-LEFT on the paper, so it sits bottom-left here. An
+   anteprima that centred it would be describing a sheet nobody prints. */
+.party-print-sheet-sign {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  width: 100%;
 }
 
 .party-print-sheet-name {
@@ -474,7 +493,7 @@
 /* The wordmark is placed and scaled, never redrawn: no filter, no recolour,
    and the on-dark artwork on dark paper. */
 .party-print-sheet-mark {
-  width: 42%;
+  width: 20%;
   min-width: 3rem;
   height: auto;
 }

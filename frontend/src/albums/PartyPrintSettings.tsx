@@ -29,8 +29,10 @@ interface Draft {
   deviceId: string;
   photoEnabled: boolean;
   photoMaxPrints: string;
+  photoPerGuest: string;
   stripEnabled: boolean;
   stripMaxPrints: string;
+  stripPerGuest: string;
   footerText: string;
 }
 
@@ -43,8 +45,10 @@ function toDraft(settings: Settings): Draft {
     // Budgets are edited as text and sent on save: a PATCH per keypress would
     // send the "1" on the way to "15", and every one is a real budget change.
     photoMaxPrints: String(settings.photo.maxPrints || ''),
+    photoPerGuest: String(settings.photo.perGuest || ''),
     stripEnabled: settings.strip.enabled,
     stripMaxPrints: String(settings.strip.maxPrints || ''),
+    stripPerGuest: String(settings.strip.perGuest || ''),
     footerText: settings.footerText ?? '',
   };
 }
@@ -56,6 +60,8 @@ function errorKey(code: string): MessageKey {
     'printer_required', 'product_required', 'printer_not_found', 'station_unavailable',
     'format_unsupported', 'photo_budget_range', 'strip_budget_range',
     'photo_budget_below_used', 'strip_budget_below_used', 'footer_too_long',
+    'photo_per_guest_above_budget', 'strip_per_guest_above_budget',
+    'photo_per_guest_range', 'strip_per_guest_range',
   ];
   return known.includes(code) ? key : 'partyPrintOwner.error.generic';
 }
@@ -105,8 +111,10 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
         ...(draft.deviceId ? { printerDeviceId: draft.deviceId } : {}),
         photoEnabled: draft.photoEnabled,
         photoMaxPrints: Number(draft.photoMaxPrints || 0),
+        photoPrintsPerGuest: Number(draft.photoPerGuest || 0),
         stripEnabled: draft.stripEnabled,
         stripMaxPrints: Number(draft.stripMaxPrints || 0),
+        stripPrintsPerGuest: Number(draft.stripPerGuest || 0),
         footerText: draft.footerText,
       });
       setSettings(saved);
@@ -125,8 +133,10 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     which: 'photo' | 'strip',
     enabled: boolean,
     max: string,
+    perGuest: string,
     onEnabled: (value: boolean) => void,
     onMax: (value: string) => void,
+    onPerGuest: (value: string) => void,
   ) => {
     const usage = which === 'photo' ? settings.photo : settings.strip;
     return (
@@ -150,6 +160,21 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
             disabled={!enabled}
             aria-label={`${t(`partyPrintOwner.${which}`)} — ${t('partyPrintOwner.budget')}`}
             onChange={(e) => onMax(e.target.value)}
+          />
+        </label>
+        {/* The limit that actually makes the paper last: a party-wide budget
+            alone is spent by whoever reaches the studio first. */}
+        <label className="album-party-number">
+          <span>{t('partyPrintOwner.perGuest')}</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={settings.maxBudget}
+            value={perGuest}
+            disabled={!enabled}
+            aria-label={`${t(`partyPrintOwner.${which}`)} — ${t('partyPrintOwner.perGuest')}`}
+            onChange={(e) => onPerGuest(e.target.value)}
           />
         </label>
         {/* What has already come out of the printer. Never reset, and never
@@ -221,10 +246,13 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
           )}
 
           <p className="muted">{t('partyPrintOwner.budgetHelp')}</p>
-          {product('photo', draft.photoEnabled, draft.photoMaxPrints,
-            (v) => update({ photoEnabled: v }), (v) => update({ photoMaxPrints: v }))}
-          {product('strip', draft.stripEnabled, draft.stripMaxPrints,
-            (v) => update({ stripEnabled: v }), (v) => update({ stripMaxPrints: v }))}
+          <p className="muted">{t('partyPrintOwner.perGuestHelp')}</p>
+          {product('photo', draft.photoEnabled, draft.photoMaxPrints, draft.photoPerGuest,
+            (v) => update({ photoEnabled: v }), (v) => update({ photoMaxPrints: v }),
+            (v) => update({ photoPerGuest: v }))}
+          {product('strip', draft.stripEnabled, draft.stripMaxPrints, draft.stripPerGuest,
+            (v) => update({ stripEnabled: v }), (v) => update({ stripMaxPrints: v }),
+            (v) => update({ stripPerGuest: v }))}
 
           <label className="album-party-number">
             <span>{t('partyPrintOwner.footer')}</span>

@@ -33,7 +33,13 @@ public sealed record PartyPrintComposition(
     PartyPrintTheme Theme,
     IReadOnlyList<PartyPrintPhoto> Photos,
     string PartyName,
-    string? FooterText);
+    string? FooterText,
+    /// <summary>
+    /// The guest's queue number, printed as #n so a sheet on the collection
+    /// table can be matched to the person holding that number on their phone.
+    /// Zero prints nothing, which is what a preview or a test page wants.
+    /// </summary>
+    long PublicSequence = 0);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -110,7 +116,9 @@ public sealed class PartyPrintComposer
         sheet.Mutate(x => x.Fill(palette.Background));
 
         var margin = (int)Math.Round(PartyPrintGeometry.PhotoMarginFraction * Math.Min(w, h));
-        var footer = (int)Math.Round(PartyPrintGeometry.PhotoFooterFraction * h);
+        // Short edge, not height: see PhotoFooterFraction. The sheet turns; the
+        // strip of paper under the photograph must not.
+        var footer = (int)Math.Round(PartyPrintGeometry.PhotoFooterFraction * Math.Min(w, h));
         var slot = new Rectangle(margin, margin, w - (2 * margin), h - (2 * margin) - footer);
 
         DrawFramed(sheet, source, photo, slot, composition.Theme, palette);
@@ -257,8 +265,13 @@ public sealed class PartyPrintComposer
                 footer, palette.Muted));
         }
 
-        DrawWordmark(sheet, palette, new Rectangle(
-            area.X, area.Y + (int)textBand, area.Width, (int)markBand));
+        // The signature row: wordmark left, the guest's number right, sharing a
+        // baseline so the foot of the sheet reads as one line rather than two
+        // things that happen to be near each other.
+        var markRow = new Rectangle(
+            area.X, area.Y + (int)textBand, area.Width, (int)markBand);
+        DrawWordmark(sheet, palette, markRow);
+        DrawSequence(sheet, palette, markRow, composition.PublicSequence);
     }
 
     /// <summary>
@@ -268,27 +281,65 @@ public sealed class PartyPrintComposer
     /// </summary>
     private void DrawWordmark(Image<Rgba32> sheet, ThemePalette palette, Rectangle area)
     {
+        // BOTH files are the same lockup at the same proportions. That matters:
+        // `nubarca-wordmark-on-light.png` is a DIFFERENT artwork — 1516x1024,
+        // aspect 1.48 against the 3.56 of every wordmark — so fitting it into a
+        // band made the light sheets render a visibly different size from the
+        // dark ones. The `-480w` variant is the true counterpart.
         var file = Path.Combine(_assetRoot, "Assets", "brand",
-            palette.DarkSurface ? "nubarca-wordmark-on-dark-960w.png" : "nubarca-wordmark-on-light.png");
-        if (!File.Exists(file)) return;
+            palette.DarkSurface
+                ? "nubarca-wordmark-on-dark-960w.png"
+                : "nubarca-wordmark-on-light-480w.png");
+        // A missing brand asset is a broken build, not a sheet to print without
+        // the mark: staying silent here is how the wrong artwork went unnoticed.
+        if (!File.Exists(file))
+        {
+            throw new FileNotFoundException(
+                "The approved wordmark is not published with the application; " +
+                "the print renderer cannot compose a sheet without it.", file);
+        }
 
         using var wordmark = Image.Load<Rgba32>(file);
         // Fit the band on BOTH axes and keep the artwork's proportions: sizing
         // by width alone put a 141px-tall lockup in a 47px band, and the sheet
         // edge cut it in half. The brand is never stretched to fit — it is
         // scaled until it fits.
-        // The brand's 120px minimum rendered width applies here too: below it the
-        // lockup stops being legible, and a print is looked at closely.
-        var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * 0.42);
+        //
+        // A quiet signature, not a headline. At 0.42 of the band it was the
+        // loudest thing on a keepsake whose subject is the photograph; the
+        // brand's 120px minimum rendered width is the floor it never goes below.
+        var maxWidth = Math.Max(BrandMinWordmarkWidth, area.Width * 0.20);
         var maxHeight = Math.Max(24, area.Height * 0.80);
         var scale = Math.Min(maxWidth / wordmark.Width, maxHeight / wordmark.Height);
         var targetWidth = Math.Max(1, (int)Math.Round(wordmark.Width * scale));
         var targetHeight = Math.Max(1, (int)Math.Round(wordmark.Height * scale));
         wordmark.Mutate(x => x.Resize(targetWidth, targetHeight));
 
-        var x0 = area.X + ((area.Width - targetWidth) / 2);
-        var y0 = area.Y + ((area.Height - targetHeight) / 2);
-        sheet.Mutate(x => x.DrawImage(wordmark, new Point(x0, Math.Max(area.Y, y0)), 1f));
+        // Bottom-left, on the same baseline the number sits on at the right.
+        var y0 = area.Y + area.Height - targetHeight;
+        sheet.Mutate(x => x.DrawImage(wordmark, new Point(area.X, Math.Max(area.Y, y0)), 1f));
+    }
+
+    /// <summary>
+    /// The guest's queue number, bottom-right, opposite the wordmark.
+    ///
+    /// This is the same number their phone showed when the print was accepted,
+    /// so a stack of sheets on the collection table can be matched to the people
+    /// waiting for them without anybody reading a name off the paper.
+    /// </summary>
+    private void DrawSequence(
+        Image<Rgba32> sheet, ThemePalette palette, Rectangle area, long sequence)
+    {
+        if (sequence <= 0) return;
+        var font = _display.CreateFont(Math.Max(10f, area.Height * 0.34f), FontStyle.Bold);
+        sheet.Mutate(x => x.DrawText(
+            new RichTextOptions(font)
+            {
+                Origin = new PointF(area.X + area.Width, area.Y + area.Height),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Bottom,
+            },
+            $"#{sequence}", palette.Muted));
     }
 
     /// <summary>

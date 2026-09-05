@@ -39,6 +39,65 @@ public sealed class PartyPrintComposerTests
         return ms.ToArray();
     }
 
+    [Fact]
+    public void The_Footer_Is_The_Same_Strip_Of_Paper_Whichever_Way_The_Sheet_Faces()
+    {
+        // A landscape print came back reading as if it had no party name. The
+        // footer was a fraction of the sheet HEIGHT, and the height is exactly
+        // what flips when the sheet follows the photograph — so the band came
+        // out a third shorter on the widest sheets, with the type shrinking
+        // inside it. Both sheets are 10cm on the short edge; the strip of paper
+        // under the picture must be the same on both.
+        var portrait = PartyPrintGeometry.PhotoFooterFraction
+            * Math.Min(PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight);
+        var landscape = PartyPrintGeometry.PhotoFooterFraction
+            * Math.Min(PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        Assert.Equal(portrait, landscape);
+        // And large enough to hold three things legibly: ~17mm at 300dpi.
+        Assert.InRange(portrait, 190, 220);
+    }
+
+    [Fact]
+    public void Both_Wordmarks_Are_The_Same_Lockup()
+    {
+        // The light sheets rendered a visibly different size from the dark ones
+        // because `nubarca-wordmark-on-light.png` is a DIFFERENT artwork —
+        // 1516x1024 against the 960x269 of the wordmark — and fitting a squarer
+        // image into a wide band leaves it bounded by height instead of width.
+        // The two files the renderer reaches for must be the same lockup.
+        var root = AppContext.BaseDirectory;
+        using var dark = Image.Load<Rgba32>(
+            Path.Combine(root, "Assets", "brand", "nubarca-wordmark-on-dark-960w.png"));
+        using var light = Image.Load<Rgba32>(
+            Path.Combine(root, "Assets", "brand", "nubarca-wordmark-on-light-480w.png"));
+
+        var darkAspect = (double)dark.Width / dark.Height;
+        var lightAspect = (double)light.Width / light.Height;
+        // Within a couple of percent: the exported PNGs round their pixel
+        // dimensions slightly differently, and this is hunting for a different
+        // ARTWORK (1.48 against 3.56), not for that rounding.
+        Assert.InRange(lightAspect / darkAspect, 0.98, 1.02);
+    }
+
+    [Fact]
+    public async Task The_Guests_Number_Is_Printed_On_The_Sheet_And_Nothing_Is_Printed_Without_One()
+    {
+        // The number on the paper is the number their phone showed, so a stack
+        // of sheets can be matched to the people waiting without reading a name
+        // off anybody's print.
+        var composer = new PartyPrintComposer();
+        var numbered = await composer.RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Photo, PartyPrintTheme.Pure,
+            [new PartyPrintPhoto(Fixture(0), 0, 0, 1, 1)], "Festa", null, 41), default);
+        var unnumbered = await composer.RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Photo, PartyPrintTheme.Pure,
+            [new PartyPrintPhoto(Fixture(0), 0, 0, 1, 1)], "Festa", null, 0), default);
+
+        // A preview or a test page has no queue number, and prints none rather
+        // than a misleading "#0".
+        Assert.NotEqual(numbered.Length, unnumbered.Length);
+    }
+
     private static PartyPrintComposition Composition(
         string product, PartyPrintTheme theme, int photos, string? footer = "Una notte da ricordare")
         => new(product, theme,

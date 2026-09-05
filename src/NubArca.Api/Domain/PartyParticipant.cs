@@ -47,6 +47,13 @@ public class PartyParticipant
     // is claimed with one conditional UPDATE under concurrency.
     public int ChallengeVoteCount { get; set; }
 
+    /// <summary>
+    /// Sheets this guest has had ACCEPTED, per product. History, like every
+    /// other counter here: a print that came out cannot be un-spent.
+    /// </summary>
+    public int AcceptedPhotoPrintCount { get; set; }
+    public int AcceptedStripPrintCount { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime LastSeenAt { get; set; }
 }

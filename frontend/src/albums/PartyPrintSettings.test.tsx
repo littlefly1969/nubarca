@@ -17,8 +17,8 @@ function settings(overrides: Record<string, unknown> = {}) {
     enabled: false,
     printStationId: null,
     printerDeviceId: null,
-    photo: { enabled: false, maxPrints: 0, used: 0, remaining: 0 },
-    strip: { enabled: false, maxPrints: 0, used: 0, remaining: 0 },
+    photo: { enabled: false, maxPrints: 0, used: 0, remaining: 0, perGuest: 0 },
+    strip: { enabled: false, maxPrints: 0, used: 0, remaining: 0, perGuest: 0 },
     footerText: null,
     footerMaxLength: 60,
     minBudget: 1,
@@ -73,8 +73,8 @@ describe('PartyPrintSettings (owner panel)', () => {
   it('offers each product its OWN budget, never a shared total', async () => {
     mount(settings({
       enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
-      photo: { enabled: true, maxPrints: 40, used: 12, remaining: 28 },
-      strip: { enabled: true, maxPrints: 10, used: 9, remaining: 1 },
+      photo: { enabled: true, maxPrints: 40, used: 12, remaining: 28, perGuest: 2 },
+      strip: { enabled: true, maxPrints: 10, used: 9, remaining: 1, perGuest: 1 },
     }));
     view();
     // 40 photos and 10 strips are two budgets. Nothing here may show 50.
@@ -124,8 +124,8 @@ describe('PartyPrintSettings (owner panel)', () => {
   it('saves the whole draft to the print endpoint, and to nothing else', async () => {
     const saved = settings({
       enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
-      photo: { enabled: true, maxPrints: 25, used: 0, remaining: 25 },
-      strip: { enabled: false, maxPrints: 0, used: 0, remaining: 0 },
+      photo: { enabled: true, maxPrints: 25, used: 0, remaining: 25, perGuest: 3 },
+      strip: { enabled: false, maxPrints: 0, used: 0, remaining: 0, perGuest: 0 },
       footerText: 'Auguri Anna',
     });
     const mock = mount(settings(), [station()], () => jsonResponse(saved));
@@ -151,11 +151,37 @@ describe('PartyPrintSettings (owner panel)', () => {
     expect(mock.calls.some((c) => c.url.includes('/party-settings'))).toBe(false);
   });
 
+  it('offers a per-guest ceiling beside the party-wide budget', async () => {
+    mount(settings({
+      enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
+      photo: { enabled: true, maxPrints: 40, used: 0, remaining: 40, perGuest: 2 },
+    }));
+    view();
+    // A party budget alone is spent by whoever reaches the studio first; this
+    // is the number that makes the paper last the evening.
+    expect(await screen.findByLabelText(/Foto 10×15 — Stampe per ospite/))
+      .toHaveValue(2);
+    expect(screen.getByLabelText(/Foto 10×15 — Stampe massime/)).toHaveValue(40);
+  });
+
+  it('refuses to promise each guest more than the party has', async () => {
+    mount(
+      settings({ enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1' }),
+      [station()],
+      () => errorResponse(400, { error: 'photo_per_guest_above_budget' }),
+    );
+    const user = userEvent.setup();
+    view();
+    await user.click(await screen.findByRole('button', { name: 'Salva impostazioni stampa' }));
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('Non puoi promettere a ogni ospite più foto di quante ne ha la festa.');
+  });
+
   it('says why the server refused, in the host’s own words', async () => {
     const mock = mount(
       settings({
         enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
-        photo: { enabled: true, maxPrints: 40, used: 12, remaining: 28 },
+        photo: { enabled: true, maxPrints: 40, used: 12, remaining: 28, perGuest: 0 },
       }),
       [station()],
       () => errorResponse(400, { error: 'photo_budget_below_used' }),
