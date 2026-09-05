@@ -1204,6 +1204,28 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   be shared with TV or replaced to fix a build. `docs/mobile-release.md` is the
   runbook.
 
+- **The Party Game runtime is a hosted session, and a read of it never writes.**
+  `PartyGameSession` / `PartyGameRound` are the owner-conducted game: one
+  session per party link, one round per activity, one phase the server owns.
+  They are deliberately NOT `PartyChallengeSession`, which is the older
+  timer-driven slideshow interruption where the room's votes choose what happens
+  next and nobody conducts — merging them would make one row mean two things.
+  Three things are easy to undo by accident. A game that has not started has no
+  row: the snapshot is synthesized in the lobby at `version = 0` and `start`
+  quotes 0, because a television polling a party that has not begun must not
+  begin it (the older session type materialises a row on read, on purpose, since
+  its deadline has to start ticking somewhere). Every command quotes
+  `expectedVersion`, and a refusal returns `409` carrying the CURRENT snapshot
+  rather than a bare error — which is what stops a double tap becoming a double
+  advance, since the second request is refused *and* re-renders the caller. And
+  the transition matrix lives in the pure `PartyGameStateMachine`: the service
+  applies transitions and never decides one, so the owner snapshot's
+  `availableCommands` can tell a control room what is legal without a second
+  copy of the machine in TypeScript. There is no realtime transport, on purpose
+  — nothing in this repository has one; clients poll and compare `version`.
+  See [docs/party-game/runtime.md](party-game/runtime.md) and
+  [docs/party-game/ux-integration-contract.md](party-game/ux-integration-contract.md).
+
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
 Known, scoped, deliberately NOT fixed by the portrait/rotation slice.

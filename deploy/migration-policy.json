@@ -41,6 +41,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds four NOT NULL integer columns with defaultValue 0 — two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
+    },
+    "20260905231112_AddPartyGameRuntime": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only the two new party game runtime tables with their indexes and check constraints; the previous application neither reads nor writes them, and no existing table, column or constraint changes."
     }
   }
 }

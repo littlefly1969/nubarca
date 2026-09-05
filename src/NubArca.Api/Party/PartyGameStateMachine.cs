@@ -1,0 +1,151 @@
+using NubArca.Api.Domain;
+
+namespace NubArca.Api.Party;
+
+/// <summary>
+/// What a round transition does to the round it leaves and the round it enters.
+/// </summary>
+[Flags]
+public enum PartyGameRoundEffect
+{
+    None = 0,
+
+    /// The current round is resolved: the room played it and saw the outcome.
+    CompleteRound = 1,
+
+    /// The current round ends without an outcome — skipped, or the game was
+    /// finished while it was still running.
+    AbandonRound = 2,
+
+    /// The next activity in the deck becomes the current round.
+    StartRound = 4,
+}
+
+public sealed record PartyGameTransition(
+    string Phase, string Status, PartyGameRoundEffect Effect);
+
+/// <summary>
+/// The Party Game transition matrix, as a pure function.
+///
+/// The whole machine lives here so it can be exhausted by tests without a
+/// database, a clock or an HTTP request — the same reason
+/// <see cref="PartyChallengePolicy"/> is pure. The service applies transitions;
+/// it never decides one.
+///
+/// LOBBY → CHALLENGE_REVEAL → CHALLENGE_ACTIVE → VOTING_OPEN → VOTING_CLOSED
+///       → RESULT → CHALLENGE_REVEAL → … → FINISHED
+///
+/// One naming note against the programme brief. "Reveal challenge" is not a
+/// separate command: revealing IS the transition into CHALLENGE_REVEAL, and it
+/// is performed by <c>start</c> (from the lobby) and by <c>next_challenge</c>
+/// (from a result). Giving it a third name would have produced a command that
+/// is never legal anywhere, and an owner UI with a primary action that does
+/// nothing. The control room's six primary commands map one-to-one onto the six
+/// non-terminal phases.
+/// </summary>
+public static class PartyGameStateMachine
+{
+    /// <summary>
+    /// The transition for a command, or null when the command is illegal in this
+    /// phase. <paramref name="hasNextChallenge"/> decides whether leaving a round
+    /// starts another one or ends the game; it never makes a legal command
+    /// illegal, except for <c>start</c>, because a game with nothing to play is
+    /// not a game.
+    /// </summary>
+    public static PartyGameTransition? Resolve(string phase, string command, bool hasNextChallenge) =>
+        (phase, command) switch
+        {
+            (PartyGamePhases.Lobby, PartyGameCommands.Start) => hasNextChallenge
+                ? new(PartyGamePhases.ChallengeReveal, PartyGameStatuses.Live, PartyGameRoundEffect.StartRound)
+                : null,
+
+            (PartyGamePhases.ChallengeReveal, PartyGameCommands.StartChallenge) =>
+                new(PartyGamePhases.ChallengeActive, PartyGameStatuses.Live, PartyGameRoundEffect.None),
+
+            (PartyGamePhases.ChallengeActive, PartyGameCommands.OpenVoting) =>
+                new(PartyGamePhases.VotingOpen, PartyGameStatuses.Live, PartyGameRoundEffect.None),
+
+            (PartyGamePhases.VotingOpen, PartyGameCommands.CloseVoting) =>
+                new(PartyGamePhases.VotingClosed, PartyGameStatuses.Live, PartyGameRoundEffect.None),
+
+            (PartyGamePhases.VotingClosed, PartyGameCommands.RevealResult) =>
+                new(PartyGamePhases.Result, PartyGameStatuses.Live, PartyGameRoundEffect.None),
+
+            // The round is resolved. Another activity continues the game; no
+            // more activities ends it, which is the ONLY way a game finishes by
+            // itself.
+            (PartyGamePhases.Result, PartyGameCommands.NextChallenge) => hasNextChallenge
+                ? new(PartyGamePhases.ChallengeReveal, PartyGameStatuses.Live,
+                    PartyGameRoundEffect.CompleteRound | PartyGameRoundEffect.StartRound)
+                : new(PartyGamePhases.Finished, PartyGameStatuses.Finished,
+                    PartyGameRoundEffect.CompleteRound),
+
+            // Skip abandons an unresolved round. Legal for as long as the round
+            // is unresolved, which is every phase up to and including
+            // VOTING_CLOSED — a host who has lost the room should not have to
+            // reveal a result first.
+            (PartyGamePhases.ChallengeReveal or PartyGamePhases.ChallengeActive
+                or PartyGamePhases.VotingOpen or PartyGamePhases.VotingClosed,
+                PartyGameCommands.SkipChallenge) => hasNextChallenge
+                ? new(PartyGamePhases.ChallengeReveal, PartyGameStatuses.Live,
+                    PartyGameRoundEffect.AbandonRound | PartyGameRoundEffect.StartRound)
+                : new(PartyGamePhases.Finished, PartyGameStatuses.Finished,
+                    PartyGameRoundEffect.AbandonRound),
+
+            // Finishing is legal from anywhere the game is not already over. It
+            // resolves the current round if the room saw its outcome and
+            // abandons it otherwise.
+            (PartyGamePhases.Lobby, PartyGameCommands.Finish) =>
+                new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.None),
+            (PartyGamePhases.Result, PartyGameCommands.Finish) =>
+                new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.CompleteRound),
+            (PartyGamePhases.ChallengeReveal or PartyGamePhases.ChallengeActive
+                or PartyGamePhases.VotingOpen or PartyGamePhases.VotingClosed,
+                PartyGameCommands.Finish) =>
+                new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.AbandonRound),
+
+            _ => null,
+        };
+
+    /// <summary>
+    /// Every command that is legal right now, in the order a control room should
+    /// offer them: the phase-advancing command first, then the secondary ones.
+    ///
+    /// The server answering this is what lets the owner UI keep an illegal
+    /// command ABSENT rather than disabled without re-implementing the matrix in
+    /// TypeScript — and the server still validates, because a client is never an
+    /// authority.
+    /// </summary>
+    public static IReadOnlyList<string> LegalCommands(string phase, bool hasNextChallenge)
+    {
+        var ordered = new[]
+        {
+            PrimaryCommand(phase),
+            PartyGameCommands.SkipChallenge,
+            PartyGameCommands.Finish,
+        };
+        var legal = new List<string>(3);
+        foreach (var command in ordered)
+        {
+            if (command is null || legal.Contains(command)) continue;
+            if (Resolve(phase, command, hasNextChallenge) is not null) legal.Add(command);
+        }
+        return legal;
+    }
+
+    /// <summary>
+    /// The one command that advances this phase — the control room's single
+    /// primary action. Null in a phase that has none (finished), and it is not
+    /// necessarily legal: <c>start</c> needs an activity to play.
+    /// </summary>
+    public static string? PrimaryCommand(string phase) => phase switch
+    {
+        PartyGamePhases.Lobby => PartyGameCommands.Start,
+        PartyGamePhases.ChallengeReveal => PartyGameCommands.StartChallenge,
+        PartyGamePhases.ChallengeActive => PartyGameCommands.OpenVoting,
+        PartyGamePhases.VotingOpen => PartyGameCommands.CloseVoting,
+        PartyGamePhases.VotingClosed => PartyGameCommands.RevealResult,
+        PartyGamePhases.Result => PartyGameCommands.NextChallenge,
+        _ => null,
+    };
+}

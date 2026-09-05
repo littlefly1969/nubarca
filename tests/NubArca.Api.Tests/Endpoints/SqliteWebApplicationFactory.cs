@@ -279,6 +279,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
             services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
             services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
+            services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
             services.AddScoped<StorageReconciliationService>();
             // Slice 97: refcount audit/repair.
             services.AddScoped<BlobReferenceAuditService>();

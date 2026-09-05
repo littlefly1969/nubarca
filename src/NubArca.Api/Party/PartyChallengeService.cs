@@ -89,6 +89,11 @@ public sealed class PartyChallengeService : IPartyChallengeService
         // A challenge currently held is immutable until NEXT; deleting it
         // underneath a TV would violate reconnect-safe presentation.
         if (await _db.PartyChallengeSessions.AnyAsync(x => x.ActiveChallengeId == challengeId, ct)) return false;
+        // The same reason, for the hosted game: a round is the record of what a
+        // room was shown. Deleting its activity would rewrite the evening, and
+        // the round's restricting foreign key would refuse anyway — this turns
+        // that into a clean answer instead of a DbUpdateException.
+        if (await _db.PartyGameRounds.AnyAsync(x => x.PartyChallengeId == challengeId, ct)) return false;
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         await ReleaseVotesForChallengeAsync(challengeId, ct);
         await _db.PartyChallengeCompletions.Where(x => x.PartyChallengeId == challengeId).ExecuteDeleteAsync(ct);
