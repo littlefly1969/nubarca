@@ -5,6 +5,7 @@ import {
   type AlbumItemSummary, type PartyChallenge, type PartyChallengeKind,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { PartyChallengeCard } from '../party/PartyChallengeCard';
 
 const EMPTY = {
   title: '', body: '', kind: 'dare' as PartyChallengeKind,
@@ -94,15 +95,20 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
         {(draft.title.trim() || draft.body.trim()) && (
           <div className="party-game-preview-wrap">
             <strong>{t('partyGame.preview')}</strong>
-            <div className="party-game-tv-preview" data-testid="party-game-tv-preview">
-              {selectedMedia?.thumbnailUrl && <img src={selectedMedia.thumbnailUrl} alt="" />}
-              <div>
-                <span>{t(`partyChallenges.kind.${draft.kind}`)}</span>
-                <h5>{draft.title || t('partyGame.challengeTitle')}</h5>
-                <p>{draft.body}</p>
-                <small>{t('partyGame.continueHint')}</small>
-              </div>
-            </div>
+            {/* THE renderer, in preview mode. This used to be a second copy of
+                the television's composition, which is exactly how a preview
+                stops predicting anything. */}
+            <PartyChallengeCard
+              mode="preview"
+              testId="party-game-tv-preview"
+              titlePlaceholder={t('partyGame.challengeTitle')}
+              challenge={{
+                kind: draft.kind,
+                title: draft.title,
+                body: draft.body,
+                mediaUrl: selectedMedia?.thumbnailUrl ?? null,
+              }}
+            />
           </div>
         )}
       </div>

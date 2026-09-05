@@ -151,6 +151,16 @@ const it = {
   'partyChallenges.kind.penalty': 'Penitenza',
   'partyChallenges.kind.guess': 'Indovina',
   'partyChallenges.kind.custom': 'Attività',
+  // The canonical activity card (PartyChallengeCard). One set of strings for
+  // the composer preview, the television and the owner's control room, because
+  // there is one renderer.
+  'partyActivity.round': 'Attività {round} di {total}',
+  'partyActivity.durationSeconds_one': '{count} secondo',
+  'partyActivity.durationSeconds_other': '{count} secondi',
+  'partyActivity.durationMinutes_one': '{count} minuto',
+  'partyActivity.durationMinutes_other': '{count} minuti',
+  'partyActivity.votingOpen': 'Votazione aperta',
+  'partyActivity.votingClosed': 'Votazione chiusa',
   'partyGame.title': 'Il festeggiato deve…',
   'partyGame.help': 'Le sfide compaiono a sorpresa tra due contenuti e restano sul TV fino ad Avanti.',
   'partyGame.enable': 'Attiva il gioco',
@@ -176,7 +186,6 @@ const it = {
   'partyGame.empty': 'Nessuna sfida preparata.',
   'partyGame.votes': 'voti',
   'partyGame.preview': 'Anteprima TV',
-  'partyGame.continueHint': 'Premi Avanti sul telecomando per continuare',
   'partyGame.on': 'attiva',
   'partyGame.off': 'disattivata',
   'partyGame.moveUp': 'Sposta su',
