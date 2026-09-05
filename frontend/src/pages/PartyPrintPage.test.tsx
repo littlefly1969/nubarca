@@ -339,6 +339,10 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByTestId('party-print-strip-1')).toBeInTheDocument();
     expect(container.querySelectorAll('.party-print-cut')).toHaveLength(2);
     expect(screen.getByText(/Due strisce identiche/)).toBeInTheDocument();
+    // Drawn twice, announced once: the caption is what says there are two,
+    // rather than a screen reader reading the whole composition again.
+    expect(screen.getByTestId('party-print-strip-1')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('party-print-strip-0')).not.toHaveAttribute('aria-hidden');
   });
 
   it('turns the sheet to follow a landscape photograph', async () => {
@@ -422,6 +426,33 @@ describe('PartyPrintPage (public print studio)', () => {
     // Printing is physical: a retry of the SAME sheet must never be able to
     // become a second sheet, so it carries the first attempt's key.
     expect(keyOf(posts[1])).toBe(keyOf(posts[0]));
+  });
+
+  it('retries the SAME sheet, not just the same key', async () => {
+    const user = userEvent.setup();
+    let attempt = 0;
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => {
+        attempt += 1;
+        return attempt === 1 ? errorResponse(503, { error: 'printer_unavailable' })
+          : jsonResponse(accepted, 202);
+      },
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await screen.findByRole('alert');
+
+    // The photograph's real shape arrives between the two attempts. The server
+    // has already decided about this key, so the second attempt must not be
+    // asking it to print something else under it.
+    const sheet = screen.getByTestId('party-print-sheet');
+    setNatural(within(sheet).getAllByRole('presentation', { hidden: true })[0], 4000, 3000);
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await screen.findByText('La tua stampa è in coda');
+
+    const posts = mock.calls.filter((c) => c.method === 'POST');
+    expect(JSON.parse(posts[1].body!).slots).toEqual(JSON.parse(posts[0].body!).slots);
   });
 
   it('mints a NEW key once the composition changes', async () => {

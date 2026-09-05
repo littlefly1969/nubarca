@@ -982,7 +982,56 @@ The TV consumes messages through a **separate projection** (`GET /api/tv/albums/
 
 The postponed advance is an explicit **ledger** (`BoundaryDebt` in `tv/src/lib/partyMessages.ts`), not something inferred from a card being on screen, and `settleBoundary` is the only function that can spend it. That is what makes two guarantees structural rather than remembered. A finished video can raise no further boundary, so a card withdrawn early — hidden, demoted, or its party revoked — still settles the debt instead of stranding the wall on a last frame; and a card timing out in the same tick the poll withdraws it advances once, because the second caller finds nothing owed. A merely *paused* wall keeps the debt and settles it on resume, while a change of viewing intent (a face filter, manual navigation, leaving the slideshow) discards it, since the index then belongs to whoever just chose it. A Hero raised at a video's **cap** also withholds the controlled play intent for its duration, so the clip does not keep running — audio included — behind an opaque card.
 
-### 14.6 Party face search privacy
+### 14.6 Party printed keepsakes
+
+Printing is the only guest capability with a **physical** result: a sheet comes
+out of a machine and a guest walks away holding it. Two products compose onto
+the same 10×15 paper — one photograph, or a strip of four different photographs
+printed **twice side by side** so a single sheet yields two keepsakes. The strip
+is a composition, not a second paper size: the printer requirement never
+changes.
+
+The capability travels on its **own token**, derived like the others as
+`HMAC-SHA256(secret, linkId ++ "print")`. A print token composes and prints; it
+cannot browse the album, and it is re-resolved on every request, so a host who
+turns printing off, revokes the station, changes the printer or spends the last
+sheet stops new prints immediately. The guest hub publishes a print URL **only
+while printing would actually work** — configured, enabled, on a live station
+whose printer does 10×15, with budget left in at least one product — which is
+what makes the guest card a real offer rather than a link to a refusal.
+
+The two budgets are **independent, and their counters are history**. Photo
+prints and strips cost different things and the host sets them separately, so
+they are never summed into one "prints left": a party out of photo prints can
+still print strips. The counters record what was *accepted into the queue*,
+which is the moment a print becomes real, and they are never reset — disabling a
+product and re-enabling it resumes from the same spent count, because the paper
+already used did not come back. That is also why a budget cannot be lowered
+below what has already been printed. Reservation is a **single conditional
+UPDATE** that increments the product's accepted count and the per-party
+`PublicSequenceNext` together, returning the guest's queue number, so two
+concurrent guests can neither overspend a budget nor be handed the same number.
+
+Submission is **idempotent by contract**: the client mints an `Idempotency-Key`
+for one composition and reuses it for that composition's retries, and the server
+records it against the accepted job. Without one the request is refused, because
+a double tap on a physical action is not a retry the server may guess at. The
+four source photographs of a strip live in a **child table**
+(`PrintJobSource`) with their normalized crops, not as ids inside a JSON blob,
+so the sheet's inputs are queryable and referentially real.
+
+The browser never receives an original. A guest composes against the same
+metadata-stripped previews the album serves — through the **same serving
+boundary** as the view token, so stripping, derived-size selection and the
+refusal to hand out an original cannot drift apart between the two capabilities
+— while the server composes at 300dpi from its own copy. Geometry lives in one
+place (`PartyPrintGeometry`) and is **mirrored** by the frontend preview with a
+parity test that reads the server's constants, because a preview that disagrees
+with the sheet is worse than no preview. Only three things ever reach the paper:
+the party's name, the one line the *host* configured, and the approved wordmark
+— a guest writes nothing on a physical print.
+
+### 14.7 Party face search privacy
 
 The public client uploads a temporary selfie. The service detects/embeds it, compares only against faces belonging to the currently visible Party album, persists a short-lived search session and ranked file references, and discards query material. The database does not store the selfie bytes or query vector. Sessions expire and can be deleted.
 

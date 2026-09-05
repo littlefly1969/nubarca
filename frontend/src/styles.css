@@ -841,6 +841,13 @@ a {
 .tv-party-corner-right { right: max(1rem, env(safe-area-inset-right)); }
 .album-party-upload { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border, #e5e5e5); }
 .album-party-game { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border, #e5e5e5); }
+/* Printed keepsakes. Each product gets its own row because the two budgets are
+   independent — they are never added together, and the layout says so. */
+.album-party-print { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border, #e5e5e5); }
+.album-party-print > label, .album-party-print > .album-party-number { margin-bottom: .5rem; }
+.album-party-print-product { display: grid; gap: .35rem; margin: .65rem 0; padding: .65rem .75rem; border-radius: 10px; background: rgb(127 127 127 / 8%); }
+.album-party-print-product .album-party-number { display: grid; gap: .3rem; }
+.album-party-print-product input[type='number'] { max-width: 8rem; }
 .party-game-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin: .75rem 0; }
 .party-game-settings-grid label, .party-game-editor > label { display: grid; gap: .3rem; }
 .party-game-editor { display: grid; gap: .65rem; padding: .85rem; border-radius: 10px; background: rgb(127 127 127 / 8%); }

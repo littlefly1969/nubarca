@@ -104,6 +104,35 @@ journal entry are retained; older unreferenced files are reclaimed. Operational
 messages contain job short identifiers and error classes, not credentials,
 enrollment tokens or image bytes.
 
+## Party guest prints
+
+A party guest's keepsake is an ordinary print job to this agent. It arrives with
+the same `10x15` format, the same claim lease, the same artifact download and
+the same terminal report as an owner test page; the agent neither knows nor
+needs to know that a guest composed it. Everything party-specific — which
+capability token was held, which photographs were chosen, how they were cropped,
+which budget the sheet was charged to — is resolved and spent **server-side
+before the job becomes claimable**, so no agent-side change was needed to
+support the feature and none is needed to secure it.
+
+Two job kinds distinguish the compositions:
+
+| Kind | Sheet | What comes out |
+|---|---|---|
+| `party-photo` | 10×15, following the photograph's own orientation | one framed photograph with the party footer |
+| `party-strip4` | 10×15 portrait | four different photographs, printed as **two identical strips** side by side, with cut ticks at the ends of the gutter |
+
+Both are one sheet of the same paper: the strip is a composition, not a second
+media size, so a station qualified for 10×15 is qualified for both. Operators
+sizing consumables should note that the products carry **separate budgets** on
+the server — a party out of photo prints can still be printing strips — and that
+each accepted job is numbered per party, which is the number a guest is shown
+and reads out at the desk.
+
+Party artifacts are rendered by the server from the owner's originals and are
+subject to the same bounded-artifact and retention rules as any other job; the
+agent stores no party state and holds no party token.
+
 ## Printer adapters and DS620
 
 | Path | Discovery | 10x15 capability | Submission | Validated here |

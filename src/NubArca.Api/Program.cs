@@ -797,6 +797,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
         NubArca.Api.Party.IPartyPrintUrlProvider, NubArca.Api.Party.PartyPrintUrlProvider>();
     builder.Services.AddScoped<
         NubArca.Api.Print.IPartyPrintAccessResolver, NubArca.Api.Print.PartyPrintAccessResolver>();
+    builder.Services.AddScoped<
+        NubArca.Api.Print.IPartyPrintProfileService, NubArca.Api.Print.PartyPrintProfileService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyParticipantService, NubArca.Api.Party.PartyParticipantService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();
@@ -1415,6 +1417,7 @@ app.MapShareLinkEndpoints();
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
 app.MapPartyPrintEndpoints();
+app.MapPartyPrintOwnerEndpoints();
 
 // Aesthetics Lab / Beauty Lab endpoints — the public TV "Beauty Lab" QR
 // mobile upload below, plus the owner-facing lab surface further down —

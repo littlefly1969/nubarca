@@ -125,6 +125,59 @@ export function moderatePartyUpload(
   );
 }
 
+// --- Owner-side party PRINT settings (normal user auth) ---
+
+/** One product's own switch, its own budget, and its own usage. */
+export interface PartyPrintProductSettings {
+  enabled: boolean;
+  maxPrints: number;
+  /** Prints already accepted into the queue. History: never reset. */
+  used: number;
+  remaining: number;
+}
+
+export interface PartyPrintSettings {
+  enabled: boolean;
+  printStationId: string | null;
+  printerDeviceId: string | null;
+  // Photo and strip are NEVER summed: they cost different things and the host
+  // set them separately.
+  photo: PartyPrintProductSettings;
+  strip: PartyPrintProductSettings;
+  footerText: string | null;
+  footerMaxLength: number;
+  minBudget: number;
+  maxBudget: number;
+}
+
+/** Every field optional: an omitted one keeps its value rather than clearing it. */
+export interface PartyPrintSettingsPatch {
+  enabled?: boolean;
+  printStationId?: string;
+  printerDeviceId?: string;
+  photoEnabled?: boolean;
+  photoMaxPrints?: number;
+  stripEnabled?: boolean;
+  stripMaxPrints?: number;
+  footerText?: string;
+}
+
+export function getPartyPrintSettings(
+  albumId: string, signal?: AbortSignal,
+): Promise<PartyPrintSettings> {
+  return api<PartyPrintSettings>(`/api/albums/${albumId}/party-print-settings`, { signal });
+}
+
+// A separate endpoint from party-settings on purpose: saving a print budget
+// must not be able to rotate a token, flip party mode, or change moderation.
+export function setPartyPrintSettings(
+  albumId: string, patch: PartyPrintSettingsPatch, signal?: AbortSignal,
+): Promise<PartyPrintSettings> {
+  return api<PartyPrintSettings>(`/api/albums/${albumId}/party-print-settings`, {
+    method: 'PATCH', json: patch, signal,
+  });
+}
+
 // --- Public party landing (anonymous, token-scoped) ---
 
 export interface PartyAlbum {

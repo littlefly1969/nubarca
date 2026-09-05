@@ -208,6 +208,11 @@ public static class AuditActions
     // the actor and the timestamps — NEVER the body, the guest's typed name, the
     // party token/hash, or the participant id. "What was said" is not a
     // security question; "who changed its state, and from what to what" is.
+    // The HOST's physical-print settings for a party: the switch, the chosen
+    // station and printer, and each product's budget. Recorded because printing
+    // spends real consumables and puts the host's own line on paper — but never
+    // the footer TEXT, which is content rather than a security decision.
+    public const string PartyPrintConfigure = "party.print.configure";
     public const string PartyMessageSubmit = "party.message.submit";
     public const string PartyMessageApprove = "party.message.approve";
     public const string PartyMessageReject = "party.message.reject";

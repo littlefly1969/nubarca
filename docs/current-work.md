@@ -15,6 +15,11 @@ is built is described by `ARCHITECTURE.md`.
 - Print foundation: server-owned stations/devices/jobs plus a separately
   packaged headless Print Agent `0.2.2`; Linux fake-agent systemd instances
   cover protocol acceptance while DNP DS620 still requires Windows hardware
+- Party printing: guests compose a 10x15 photo or a four-photo strip (printed as
+  two twin strips on one sheet) on their own print-capability token. Per-product
+  budgets are independent and server-authoritative, reservation and per-party
+  numbering are one atomic update, and submission is idempotent by contract. To
+  the Print Agent these are ordinary `10x15` jobs
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the

@@ -17,6 +17,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
 import { PartyChallengeManager } from './PartyChallengeManager';
+import { PartyPrintSettings } from './PartyPrintSettings';
 
 // Slice 5: the album's rename / description / Show-on-TV / Party (view link,
 // guest upload, upload-management) / delete controls, moved out of the content
@@ -414,6 +415,11 @@ export function AlbumSettingsPanel({
               {gameDraft.gameEnabled && <PartyChallengeManager albumId={albumId} />}
             </div>
           )}
+
+          {/* Printing is a guest capability like the others, so it is configured
+              here beside them — but on its own endpoint, so saving a budget can
+              never rotate a token or change moderation as a side effect. */}
+          {party?.partyMode && <PartyPrintSettings albumId={albumId} />}
         </fieldset>
 
         <fieldset className="ws-filter-section">
