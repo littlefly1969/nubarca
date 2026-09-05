@@ -16,6 +16,16 @@ afterEach(() => {
 
 const TOKEN = 'print-tok';
 
+/**
+ * userEvent with its inter-event delay removed.
+ *
+ * Composing a strip is eight clicks — four photographs, plus the taps that
+ * prove a fifth is refused — and with the default delay that walk sat right at
+ * the 5s test timeout, so a loaded machine turned it red for no reason. The
+ * delay buys nothing here: nothing in the studio is debounced or on a timer.
+ */
+const setup = () => userEvent.setup({ delay: null });
+
 function wrapper(token = TOKEN) {
   return (
     <I18nProvider>
@@ -166,7 +176,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- Choosing -----------------------------------------------------------
 
   it('requires FOUR DIFFERENT photos for a strip and will not take a fifth', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
@@ -180,7 +190,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('numbers the chosen photographs in the order they were chosen', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
@@ -192,7 +202,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('renumbers the rest when a photograph is taken back out', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
@@ -207,7 +217,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- Order --------------------------------------------------------------
 
   it('reorders a strip with BUTTONS, not only by dragging', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -229,7 +239,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('cannot move the first photograph up or the last one down', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
@@ -242,7 +252,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- Framing ------------------------------------------------------------
 
   it('sends the whole photograph when the guest frames nothing', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -256,7 +266,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('narrows the crop when the guest zooms in, and restores it on reset', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -282,7 +292,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('pans with the arrow keys, not only with a finger', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -304,7 +314,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('never lets framing walk off the edge of the photograph', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -329,7 +339,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- The sheet ----------------------------------------------------------
 
   it('previews TWO identical strips on one sheet, with the cut marks', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     const { container } = render(wrapper());
     await compose(user, 'strip4');
@@ -346,7 +356,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('turns the sheet to follow a landscape photograph', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'photo');
@@ -362,7 +372,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('puts the party name, the host line and the APPROVED wordmark on the sheet', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await compose(user, 'photo');
@@ -375,7 +385,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('takes the ON-DARK wordmark when the paper is dark', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await compose(user, 'photo');
@@ -387,7 +397,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('sends the theme the guest chose', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -402,7 +412,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- Sending ------------------------------------------------------------
 
   it('sends an Idempotency-Key, and REUSES it when the same sheet is retried', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     let attempt = 0;
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => {
@@ -429,7 +439,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('retries the SAME sheet, not just the same key', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     let attempt = 0;
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => {
@@ -456,7 +466,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('mints a NEW key once the composition changes', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => errorResponse(503, { error: 'render_failed' }),
     });
@@ -482,7 +492,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('gives the guest their queue number and what is left of that budget', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -496,7 +506,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('says plainly when that was the last print of the format', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () =>
         jsonResponse({ ...accepted, remainingForProduct: 0 }, 202),
@@ -541,7 +551,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('says which refusal it was, in words a guest can act on', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => errorResponse(409, { error: 'budget_exhausted' }),
     });
@@ -553,7 +563,7 @@ describe('PartyPrintPage (public print studio)', () => {
   });
 
   it('never reveals a server reason it was not given', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () =>
         errorResponse(500, { error: 'Npgsql.PostgresException: relation does not exist' }),
@@ -569,7 +579,7 @@ describe('PartyPrintPage (public print studio)', () => {
   // --- What the studio may reach -----------------------------------------
 
   it('asks for derived media only, never an original or a download', async () => {
-    const user = userEvent.setup();
+    const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
     });
@@ -590,7 +600,7 @@ describe('PartyPrintPage (public print studio)', () => {
 
   it('offers the guest their own photographs when they searched on the hub', async () => {
     window.sessionStorage.setItem('nubarca.party.faceFilter', JSON.stringify(['f2', 'f4']));
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'photo');
@@ -602,7 +612,7 @@ describe('PartyPrintPage (public print studio)', () => {
   it('ignores a face search left behind by a different party', async () => {
     window.sessionStorage.setItem(
       'nubarca.party.faceFilter', JSON.stringify(['other-1', 'other-2']));
-    const user = userEvent.setup();
+    const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'photo');
