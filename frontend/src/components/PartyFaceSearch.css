@@ -181,22 +181,51 @@
   stroke-width: 1.7;
 }
 
-/* A single line sweeping the selfie: the search is working, and the sweep says
-   nothing about how far along it is — there is no progress to report. */
-.party-face-scanner::after {
-  content: '';
+/* Once the face is located the tile frames the FACE, not the whole selfie: the
+   same image, pushed and scaled so the face fills it. A crop, never a second
+   frame and never a box drawn over the picture. */
+.party-face-scanner[data-framed='face'] .party-face-scanner-img {
+  position: absolute;
+  max-width: none;
+  object-fit: cover;
+  transition: width 320ms ease, height 320ms ease, left 320ms ease, top 320ms ease;
+}
+
+/* A single line sweeping the face: the search is working, and the sweep says
+   nothing about how far along it is — there is no progress to report, and a
+   percentage would be a number nobody could stand behind. The DURATION comes
+   from the component, so "three passes" means three of these and cannot drift
+   from the wait the code enforces. */
+.party-face-scanline {
   position: absolute;
   left: 0;
   right: 0;
+  top: 0;
   height: 2px;
   background: linear-gradient(90deg, transparent, var(--brand-cyan-glow), transparent);
   box-shadow: 0 0 12px rgb(0 212 255 / 45%);
-  animation: party-face-scan 1.9s ease-in-out infinite;
+  animation-name: party-face-scan;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
 }
 
 @keyframes party-face-scan {
-  0%, 100% { top: 12%; }
-  50% { top: 88%; }
+  from { top: 6%; }
+  to { top: 94%; }
+}
+
+/* Asked not to be animated at: the line holds still across the face rather than
+   sweeping. The component drops its minimum wait to match — holding a result
+   back for an animation that is not playing would just be a pause. */
+@media (prefers-reduced-motion: reduce) {
+  .party-face-scanline {
+    animation: none;
+    top: 50%;
+  }
+
+  .party-face-scanner[data-framed='face'] .party-face-scanner-img {
+    transition: none;
+  }
 }
 
 .party-face-found {

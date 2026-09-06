@@ -116,11 +116,29 @@ public sealed record PartyFaceSearchActivationResult(
 // Safe outcome of a face search POST. `Status` is a PartyFaceSearchStatuses code.
 // `SearchId` is set only when a ready session was recorded. `FileItemIds` are the
 // live-visible matches in internal rank order (never a score/vector/face id).
+/// <summary>
+/// Where the detected face sits, as FRACTIONS of the analysed image.
+///
+/// Fractions rather than pixels on purpose: the phone downscales the selfie
+/// before uploading, so a pixel box would be in the wrong units the moment the
+/// client drew it on what it holds. A fraction survives any scale.
+///
+/// Both sides also agree on ORIENTATION without arranging it: the browser
+/// decodes with `imageOrientation: 'from-image'` and the detector auto-orients,
+/// so "upright" means the same thing in both places, in both the downscaled and
+/// the fall-back original-file paths.
+///
+/// This is the whole of what the client needs to crop, and deliberately the
+/// whole of what it gets: no landmarks, no descriptor, no score.
+/// </summary>
+public sealed record PartyFaceBox(double X, double Y, double Width, double Height);
+
 public sealed record PartyFaceSearchOutcome(
     string Status,
     Guid? SearchId,
     int ResultCount,
-    IReadOnlyList<Guid> FileItemIds)
+    IReadOnlyList<Guid> FileItemIds,
+    PartyFaceBox? Face = null)
 {
     public static PartyFaceSearchOutcome State(string status) =>
         new(status, null, 0, Array.Empty<Guid>());

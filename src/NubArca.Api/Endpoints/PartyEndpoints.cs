@@ -482,7 +482,11 @@ public static class PartyEndpoints
 
             var dto = new NubArca.Api.Party.PartyFaceSearchResponseDto(
                 outcome.Status, outcome.SearchId, outcome.ResultCount,
-                PartyImageItems(token, outcome.FileItemIds));
+                PartyImageItems(token, outcome.FileItemIds),
+                outcome.Face is { } box
+                    ? new NubArca.Api.Party.PartyFaceBoxDto(
+                        box.X, box.Y, box.Width, box.Height)
+                    : null);
 
             return outcome.Status switch
             {

@@ -1,9 +1,34 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  act, cleanup, fireEvent, render, screen, waitFor, within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PartyFaceSearch, downscaleSelfie, type PartyFaceFilter } from './PartyFaceSearch';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
+import { SCAN_MIN_PASSES, SCAN_PASS_MS } from './useFaceScan';
 import { I18nProvider } from '../i18n';
+
+/**
+ * Ask for no motion.
+ *
+ * This stills the sweep; it does NOT skip the wait, which applies to everyone.
+ * These tests still sit through it — see `submitSelfie` — because that is what
+ * a guest does.
+ */
+function stillnessPlease() {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+  }));
+}
+
+beforeEach(stillnessPlease);
 
 afterEach(() => {
   cleanup();
@@ -44,6 +69,9 @@ const readyBody = {
   status: 'ready',
   searchId: 's1',
   resultCount: 1,
+  // Where the face is in the selfie, in fractions — the only thing the tile
+  // needs to frame what the phone already holds.
+  face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
   items: [
     {
       id: 'f1', mediaType: 'image',
@@ -58,13 +86,37 @@ function selfie() {
   return new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' });
 }
 
-async function submitSelfie() {
+/**
+ * Choose a selfie, search, and wait out the scan.
+ *
+ * The sheet holds its answer until the tile has swept the face three times, so
+ * these tests wait exactly as a guest does. That is the honest way to test it:
+ * the alternative is a seam that shortens the wait for tests and leaves the
+ * thing everybody else experiences uncovered.
+ */
+/** Start a search and leave it running — for tests about the wait itself. */
+async function beginSearch() {
   const user = userEvent.setup();
   await user.upload(screen.getByTestId('party-face-input'), selfie());
   await user.click(screen.getByTestId('party-face-submit'));
 }
 
+async function submitSelfie() {
+  await beginSearch();
+  // Absent, not "removed": a search that fails outright never sweeps at all,
+  // and one whose sheet is closed mid-flight takes the tile with it. Both are
+  // legitimate ends to a scan, and neither is a removal to wait for.
+  await waitFor(
+    () => expect(screen.queryByTestId('party-face-scanline')).toBeNull(),
+    { timeout: SCAN_PASS_MS * (SCAN_MIN_PASSES + 2) },
+  );
+}
+
 describe('PartyFaceSearch (public "find your photos")', () => {
+  // Every search sits through three sweeps by design, so a five-second default
+  // is not enough room for a test that then goes on to assert something.
+  vi.setConfig({ testTimeout: 20_000 });
+
   it('is an accessible dialog named by its title, with no launcher of its own', () => {
     installFetchMock({});
     renderSheet();
@@ -297,7 +349,9 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const onFilterChange = vi.fn();
     const onCancelSearch = vi.fn();
     renderSheet({ onFilterChange, onCancelSearch });
-    await submitSelfie();
+    // Deliberately not waiting the scan out: this is about what happens WHILE
+    // it runs, and the answer this search is waiting on never comes.
+    await beginSearch();
     expect(await screen.findByText('Ricerca in corso…')).toBeInTheDocument();
 
     // The guest gives up mid-search and closes the sheet.
@@ -334,5 +388,107 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     for (const needle of ['score', 'similarity', 'person', 'vector', 'embedding', 'faceId']) {
       expect(text.toLowerCase()).not.toContain(needle);
     }
+  });
+
+  // --- the scan and its minimum -------------------------------------------
+  //
+  // These are the only tests that let the animation run. Everything above asks
+  // for stillness, because it is asserting what a search DOES; this is about
+  // the wait itself, which exists so a backend answering in 80ms does not flash
+  // the whole effect past before anyone can read it.
+  describe('the scan and its minimum', () => {
+    beforeEach(() => {
+      // Motion allowed here, and the clock is ours.
+      vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        onchange: null,
+        dispatchEvent: () => false,
+      }));
+      vi.useFakeTimers();
+    });
+    afterEach(() => vi.useRealTimers());
+
+    // Testing Library's own waiting is built on the timers these tests replace,
+    // so every step is advanced explicitly.
+    const tick = async (ms = 1) => {
+      await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+    };
+
+    async function startSearch() {
+      fireEvent.change(screen.getByTestId('party-face-input'), {
+        target: { files: [selfie()] },
+      });
+      await tick();
+      fireEvent.click(screen.getByTestId('party-face-submit'));
+      await tick();
+    }
+
+    it('holds an instant answer until the face has been swept three times', async () => {
+      installFetchMock({ 'POST /api/party/tok-1/face-search': () => jsonResponse(readyBody) });
+      renderSheet();
+      await startSearch();
+
+      // The answer is already in — and the face is already framed, because
+      // watching the tile snap onto your own face is the point of the effect.
+      expect(screen.getByTestId('party-face-scanner'))
+        .toHaveAttribute('data-framed', 'face');
+      expect(screen.getByTestId('party-face-scanline')).toBeInTheDocument();
+      expect(screen.queryByText(/Ecco le tue foto|1 foto/)).not.toBeInTheDocument();
+
+      // Two sweeps in, still scanning. Not a percentage anywhere.
+      await tick(SCAN_PASS_MS * 2);
+      expect(screen.getByTestId('party-face-scanline')).toBeInTheDocument();
+      expect(document.body.textContent).not.toMatch(/\d+\s*%/);
+
+      // The third completes it.
+      await tick(SCAN_PASS_MS + 50);
+      expect(screen.queryByTestId('party-face-scanline')).not.toBeInTheDocument();
+      expect(screen.getByTestId('party-face-count')).toBeInTheDocument();
+    });
+
+    it('keeps sweeping past three when the answer is slow', async () => {
+      let release: ((r: Response) => void) | null = null;
+      installFetchMock({
+        'POST /api/party/tok-1/face-search': () =>
+          new Promise<Response>((resolve) => { release = resolve; }),
+      });
+      renderSheet();
+      await startSearch();
+
+      // Well past the minimum, and still scanning: the gate is BOTH conditions,
+      // not whichever comes first.
+      await tick(SCAN_PASS_MS * 6);
+      expect(screen.getByTestId('party-face-scanline')).toBeInTheDocument();
+      expect(screen.queryByTestId('party-face-count')).not.toBeInTheDocument();
+
+      release!(jsonResponse(readyBody));
+      await tick(20);
+      expect(screen.getByTestId('party-face-count')).toBeInTheDocument();
+    });
+
+    // Retaking the selfie mid-scan is not reachable from here: the input is off
+    // screen while the tile is sweeping. That path is driven by the effect that
+    // watches the chosen file, and is tested in useFaceScan.test.ts where it can
+    // be exercised honestly rather than through a control nobody can click.
+    it('forgets a scan when the guest cancels mid-sweep', async () => {
+      installFetchMock({ 'POST /api/party/tok-1/face-search': () => jsonResponse(readyBody) });
+      renderSheet();
+      await startSearch();
+      await tick(SCAN_PASS_MS);
+
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+      await tick();
+
+      // Nothing left in flight: a result arriving after the guest walked away
+      // would filter an album they went back to browsing unfiltered.
+      await tick(SCAN_PASS_MS * 5);
+      expect(screen.queryByTestId('party-face-scanline')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('party-face-count')).not.toBeInTheDocument();
+    });
   });
 });

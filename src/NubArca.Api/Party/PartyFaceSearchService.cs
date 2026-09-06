@@ -306,8 +306,15 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
             throw;
         }
 
+        // The box the detector already produced, in the fractions it already
+        // produced it in. Nothing is computed, stored or measured for this: it
+        // is the same face this search was run on, handed to the phone that
+        // took the picture so it can frame what it already holds. The
+        // landmarks beside it are NOT included — a five-point geometry is
+        // biometric detail the crop does not need.
         return new PartyFaceSearchOutcome(
-            PartyFaceSearchStatuses.Ready, session.Id, ranked.Count, ranked);
+            PartyFaceSearchStatuses.Ready, session.Id, ranked.Count, ranked,
+            new PartyFaceBox(largest.X, largest.Y, largest.Width, largest.Height));
     }
 
     public async Task<PartyFaceSearchView?> GetAsync(
