@@ -36,9 +36,20 @@ public sealed class PartyGameSession
     public int CurrentRoundNumber { get; set; }
 
     /// <summary>
-    /// Monotonic, incremented by every command that changes anything. It is the
-    /// optimistic-concurrency token an owner command must quote, and the value a
-    /// polling client compares to decide whether it has to re-render.
+    /// The OWNER COMMAND version: monotonic, incremented by every owner command
+    /// that moves the game, and the optimistic-concurrency token the next
+    /// command must quote.
+    ///
+    /// <para>It is deliberately NOT a revision of everything a snapshot can
+    /// say. A guest voting changes what the snapshot reports — participation,
+    /// and eventually the result — without touching this, because it is not the
+    /// guest's place to invalidate the host's command token. If a vote bumped
+    /// it, every vote cast during a round would make the host's next command
+    /// fail as stale.</para>
+    ///
+    /// <para>So a polling client must NOT use it to decide whether a response is
+    /// worth consuming: every successful poll carries the current truth, whether
+    /// or not this number moved.</para>
     /// </summary>
     public int Version { get; set; } = 1;
 

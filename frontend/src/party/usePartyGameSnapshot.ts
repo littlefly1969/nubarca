@@ -12,6 +12,11 @@ import {
 // recover the same way: read the snapshot again. Nothing is replayed, nothing is
 // reconciled, and no client holds state the server cannot reproduce.
 //
+// Every successful poll is consumed. Nothing here compares `version` to decide
+// whether a response is worth rendering, and nothing should: `version` is the
+// owner's command token and does not move when a guest votes, so a client that
+// skipped an unchanged one would sit on a stale vote count for the whole round.
+//
 // Two details make that true in practice rather than in principle.
 //
 // A hidden tab stops polling and refetches the moment it comes back, so a phone
@@ -62,7 +67,7 @@ export function usePartyGameSnapshot(
   const [snapshot, setSnapshot] = useState<PartyGamePublicSnapshot | null>(null);
   const [connection, setConnection] = useState<PartyGameConnection>('loading');
   const [stale, setStale] = useState(false);
-  // The join is one deliberate act per mount, never a side effect of polling.
+  // The join is one deliberate act per token, never a side effect of polling.
   const joined = useRef(false);
   const hasSnapshot = useRef(false);
   const [tick, setTick] = useState(0);
@@ -86,15 +91,30 @@ export function usePartyGameSnapshot(
   useEffect(() => {
     if (!token) { setConnection('unavailable'); return; }
     let cancelled = false;
+    // ONE request at a time, and it lives with this effect so a token change
+    // resets it rather than inheriting a guard the previous token raised.
+    //
+    // Without it the interval is a request generator: a join that has not
+    // answered within the poll period is joined again, and again — a phone on a
+    // slow network mints a participant per tick, each one counted in the room
+    // and each one able to vote. Waking from a hidden tab makes it worse,
+    // because visibility, focus and online can all fire at once.
+    let reading = false;
     const controller = new AbortController();
 
     const read = async () => {
+      if (reading) return;
+      reading = true;
+      // Decided BEFORE the await, so two overlapping calls could never both see
+      // "not joined yet" — though the guard above means there is only ever one.
+      const shouldJoin = join && !joined.current;
       try {
-        const shouldJoin = join && !joined.current;
         const next = shouldJoin
           ? await joinPartyGame(token, controller.signal)
           : await getPartyGamePublicSnapshot(token, controller.signal, asDisplay);
         if (cancelled) return;
+        // Only a join that ACTUALLY succeeded stops the next read from joining,
+        // so a failure is retried rather than silently downgraded to a poll.
         if (shouldJoin) joined.current = true;
         hasSnapshot.current = true;
         setSnapshot(next);
@@ -110,6 +130,8 @@ export function usePartyGameSnapshot(
         }
         if (hasSnapshot.current) setStale(true);
         else setConnection('error');
+      } finally {
+        reading = false;
       }
     };
 

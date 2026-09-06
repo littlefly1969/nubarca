@@ -142,10 +142,15 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
+                "PartyGameRead", "PartyGameVote",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
                 builder.UseSetting($"RateLimits:{policy}:PermitLimit", "100000");
+                // The Party Game policies also carry an address-scoped ceiling
+                // for callers with no participant cookie (a television). Setting
+                // it here is harmless for the policies that have no such key.
+                builder.UseSetting($"RateLimits:{policy}:AddressPermitLimit", "100000");
             }
         }
 
