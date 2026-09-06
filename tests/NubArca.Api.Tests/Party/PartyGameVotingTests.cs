@@ -314,6 +314,44 @@ public sealed class PartyGameVotingTests : IDisposable
             Assert.False(snapshot.TryGetProperty(forbidden, out _), forbidden);
     }
 
+    [Fact]
+    public async Task The_public_snapshot_is_exactly_these_fields_and_no_more()
+    {
+        // An allow-list rather than a deny-list. A deny-list only ever catches
+        // the leak somebody already thought of; this fails the moment ANY new
+        // field reaches the token boundary, which is the only way a
+        // guest-visible contract stays a decision rather than an accident.
+        string[] allowed =
+        [
+            "albumName", "status", "phase", "version", "roundNumber",
+            "totalChallenges", "phaseEndsAt", "challenge", "roundId", "voting", "myVote",
+        ];
+        string[] allowedChallenge =
+        [
+            "id", "title", "body", "kind", "mediaUrl",
+            "durationSeconds", "votingMode", "voteQuestion",
+        ];
+        string[] allowedVoting = ["received", "eligible", "yes", "no", "passed"];
+
+        var party = await OpenVotingAsync();
+        var guest = _factory.CreateClient();
+        var snapshot = await PublicSnapshotAsync(guest, party.Token);
+
+        Assert.Equal(allowed.Order(), Names(snapshot).Order());
+        Assert.Equal(allowedChallenge.Order(), Names(snapshot.GetProperty("challenge")).Order());
+        Assert.Equal(allowedVoting.Order(), Names(snapshot.GetProperty("voting")).Order());
+
+        // And the same after the host reveals, when the snapshot says the most
+        // it will ever say.
+        await CommandAsync(party.Owner, party.Album, "close_voting", 3);
+        await CommandAsync(party.Owner, party.Album, "reveal_result", 4);
+        var revealed = await PublicSnapshotAsync(guest, party.Token);
+        Assert.Equal(allowed.Order(), Names(revealed).Order());
+    }
+
+    private static IEnumerable<string> Names(JsonElement element) =>
+        element.EnumerateObject().Select(p => p.Name);
+
     // --- helpers -----------------------------------------------------------
 
     private sealed record Party(HttpClient Owner, Guid Album, string Token);

@@ -82,8 +82,10 @@ public sealed record PartyGameSnapshotDto(
 /// no round history, no command vocabulary, and the activity only in the phases
 /// that put it on screen.
 ///
-/// <c>Version</c> is carried because a display needs to know that something
-/// changed; it is an opaque counter and grants nothing.
+/// <c>Version</c> is carried as context, not as a change feed: it is the
+/// owner's command token, so it moves when the host moves the game and stays
+/// put when a guest votes. A display renders every successful poll rather than
+/// waiting for the number to change. It is opaque and grants nothing.
 /// </summary>
 public sealed record PartyGamePublicSnapshotDto(
     string AlbumName,

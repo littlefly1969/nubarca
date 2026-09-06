@@ -217,6 +217,146 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
         }
     }
 
+    // --- the vote/close boundary ------------------------------------------
+    //
+    // These are the tests the boundary exists for, and they are races rather
+    // than sequences: in each one an operation is genuinely in flight, holding
+    // the session row, while the other blocks on it. The interleaving is forced
+    // by holding a real transaction open, so the outcome is deterministic while
+    // the contention is not simulated.
+
+    [Fact]
+    public async Task A_vote_that_arrives_while_the_close_is_committing_is_refused_and_writes_nothing()
+    {
+        var (participantId, roundId) = await OpenVotingAsync();
+        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+
+        await using var closeDb = CreateContext();
+        await using var voteDb = CreateContext();
+
+        // The close is IN FLIGHT: its update to the session row is written and
+        // its transaction is still open, so the row's write lock is held.
+        await using var closeTx = await closeDb.Database.BeginTransactionAsync();
+        var closed = await Service(closeDb).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.CloseVoting, 3);
+        Assert.Null(closed.Error);
+
+        // The vote starts from a snapshot that still says voting_open — the
+        // stale read the whole fix is about — and blocks on the session row.
+        var voteTask = Task.Run(() =>
+            Service(voteDb).VoteAsync(access, participantId, roundId, PartyGameVoteValues.Yes));
+        await WaitUntilBlockedAsync(voteTask);
+
+        await closeTx.CommitAsync();
+        var vote = await voteTask;
+
+        // It re-evaluated against the row the close left behind.
+        Assert.Equal(PartyGameVoteError.VotingClosed, vote.Error);
+        await using var verify = CreateContext();
+        Assert.Empty(await verify.PartyGameVotes.ToListAsync());
+        Assert.Equal(PartyGamePhases.VotingClosed,
+            (await verify.PartyGameSessions.SingleAsync()).Phase);
+    }
+
+    [Fact]
+    public async Task A_vote_that_is_committing_holds_the_close_and_then_both_stand()
+    {
+        var (participantId, roundId) = await OpenVotingAsync();
+        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+
+        await using var voteDb = CreateContext();
+        await using var closeDb = CreateContext();
+
+        // The other ordering, with the same shape: the VOTE is in flight and
+        // holding the row, and the close blocks on it.
+        await using var voteTx = await voteDb.Database.BeginTransactionAsync();
+        var vote = await Service(voteDb).VoteAsync(
+            access, participantId, roundId, PartyGameVoteValues.Yes);
+        Assert.Null(vote.Error);
+
+        var closeTask = Task.Run(() => Service(closeDb).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.CloseVoting, 3));
+        await WaitUntilBlockedAsync(closeTask);
+
+        await voteTx.CommitAsync();
+        var closed = await closeTask;
+
+        // The close still succeeds, because the vote did not touch Version —
+        // if it had, every vote in a round would defeat the host's next command.
+        Assert.Null(closed.Error);
+        Assert.Equal(PartyGamePhases.VotingClosed, closed.Snapshot!.Phase);
+        Assert.Equal(1, closed.Snapshot.Voting!.Yes);
+
+        await using var verify = CreateContext();
+        var stored = await verify.PartyGameVotes.SingleAsync();
+        Assert.Equal(roundId, stored.PartyGameRoundId);
+        Assert.Equal(4, (await verify.PartyGameSessions.SingleAsync()).Version);
+    }
+
+    [Fact]
+    public async Task A_vote_never_moves_the_owner_command_version()
+    {
+        var (participantId, roundId) = await OpenVotingAsync();
+        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+
+        await using (var voteDb = CreateContext())
+        {
+            var service = Service(voteDb);
+            await service.VoteAsync(access, participantId, roundId, PartyGameVoteValues.Yes);
+            await service.VoteAsync(access, participantId, roundId, PartyGameVoteValues.No);
+            await service.VoteAsync(access, participantId, roundId, PartyGameVoteValues.No);
+        }
+
+        await using var verify = CreateContext();
+        // Three taps, one answer, and a command token the host can still quote.
+        Assert.Equal(3, (await verify.PartyGameSessions.SingleAsync()).Version);
+        Assert.Single(await verify.PartyGameVotes.ToListAsync());
+
+        await using var closeDb = CreateContext();
+        Assert.Null((await Service(closeDb).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.CloseVoting, 3)).Error);
+    }
+
+    /// Reach voting_open through the real commands, with one seeded guest.
+    private async Task<(Guid ParticipantId, Guid RoundId)> OpenVotingAsync()
+    {
+        await using (var host = CreateContext())
+        {
+            var service = Service(host);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.Start, 0);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.StartChallenge, 1);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.OpenVoting, 2);
+        }
+
+        var participantId = Guid.NewGuid();
+        await using var seed = CreateContext();
+        await seed.Database.OpenConnectionAsync();
+        await seed.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF");
+        seed.PartyParticipants.Add(new PartyParticipant
+        {
+            Id = participantId,
+            PartyAlbumLinkId = _linkId,
+            TokenHash = new string('c', 64),
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        });
+        await seed.SaveChangesAsync();
+        var roundId = (await seed.PartyGameSessions.AsNoTracking().SingleAsync()).CurrentRoundId!.Value;
+        return (participantId, roundId);
+    }
+
+    /// <summary>
+    /// Give the racing operation time to actually reach the lock it is going to
+    /// block on. It must NOT have completed — a task that finished before the
+    /// other side committed would mean the two never contended, and the test
+    /// would be a sequence wearing a race's clothes.
+    /// </summary>
+    private static async Task WaitUntilBlockedAsync(Task task)
+    {
+        var settled = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(2)));
+        Assert.NotSame(task, settled);
+    }
+
     private AppDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()

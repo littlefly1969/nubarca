@@ -337,6 +337,22 @@ var partyMessagePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:P
 var partyMessageWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyMessage:WindowSeconds") ?? 60;
 // Anonymous party FACE SEARCH runs face detection + embedding per request, the
 // most expensive public party operation, so it gets the tightest per-IP window.
+// The live game is CONTINUOUS traffic on one Wi-Fi network, so it is limited
+// per guest rather than per address — see PartyGameRateLimits for why the
+// generic party buckets are the wrong shape for it. Both policies keep an
+// address-scoped fallback for televisions and for first visits.
+var partyGameReadGuestPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyGameRead:PermitLimit")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultReadPermitsPerGuest;
+var partyGameReadAddressPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyGameRead:AddressPermitLimit")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultReadPermitsPerAddress;
+var partyGameReadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyGameRead:WindowSeconds")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultWindowSeconds;
+var partyGameVoteGuestPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyGameVote:PermitLimit")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultVotePermitsPerGuest;
+var partyGameVoteAddressPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyGameVote:AddressPermitLimit")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultVotePermitsPerAddress;
+var partyGameVoteWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyGameVote:WindowSeconds")
+    ?? NubArca.Api.Party.PartyGameRateLimits.DefaultWindowSeconds;
 var partyFaceSearchPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyFaceSearch:PermitLimit") ?? 15;
 var partyFaceSearchWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyFaceSearch:WindowSeconds") ?? 60;
 // Authenticated semantic search runs the large text tower; bound bursts so one
@@ -512,6 +528,40 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = partyPublicQueueLimit,
                 AutoReplenishment = true,
             }));
+
+    // Reads: every phone and every television on the party polls this. The
+    // partition is the guest when one identified itself, the address otherwise.
+    options.AddPolicy(NubArca.Api.Party.PartyGameRateLimits.ReadPolicy, httpContext =>
+    {
+        var key = NubArca.Api.Party.PartyGameRateLimits.Partition(httpContext);
+        var perGuest = NubArca.Api.Party.PartyGameRateLimits.IsGuest(key);
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: key,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = perGuest ? partyGameReadGuestPermitLimit : partyGameReadAddressPermitLimit,
+                Window = TimeSpan.FromSeconds(partyGameReadWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            });
+    });
+
+    // Votes are writes, so the guest allowance is tighter than the read one —
+    // enough to change your mind freely, not enough to hammer the row.
+    options.AddPolicy(NubArca.Api.Party.PartyGameRateLimits.VotePolicy, httpContext =>
+    {
+        var key = NubArca.Api.Party.PartyGameRateLimits.Partition(httpContext);
+        var perGuest = NubArca.Api.Party.PartyGameRateLimits.IsGuest(key);
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: key,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = perGuest ? partyGameVoteGuestPermitLimit : partyGameVoteAddressPermitLimit,
+                Window = TimeSpan.FromSeconds(partyGameVoteWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            });
+    });
 
     options.AddPolicy(PartyPublicMediaRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(

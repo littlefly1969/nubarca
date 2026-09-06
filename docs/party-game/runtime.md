@@ -109,10 +109,30 @@ skip-against-advance case.
 There is none, and that is the design. NubArca has no SignalR, no WebSocket and
 no SSE anywhere in application code: the paired television, the TV browser, the
 pairing screen and the public party page all poll a snapshot. The game does the
-same. A client learns that something changed by seeing a higher `version`, and
-recovers from a refresh, a backgrounded tab or a dropped network by reading the
-snapshot again — which is the entire reconnection story, and needs no
+same. Every successful poll IS the current truth and is rendered as such, and a
+refresh, a backgrounded tab or a dropped network all recover the same way — by
+reading it again. That is the entire reconnection story, and it needs no
 reconnection code.
+
+### `version` is not a change feed
+
+It is the **owner's optimistic-concurrency token**, and only that.
+
+- Surfaces poll the authoritative snapshot; **every successful poll is
+  consumable**, whether or not `version` moved.
+- `version` changes when an owner runtime command changes command-authoritative
+  game state.
+- A guest's vote changes participation — and, at `result`, the outcome — **without
+  changing `version`**, because bumping it would make the host's next command
+  fail as stale for no reason other than that somebody voted. That is not a
+  detail: it is what lets a vote and a `close_voting` contend on the session row
+  without a vote spuriously defeating the close.
+- Refresh and reconnect recovery still come from fetching the full snapshot, not
+  from comparing numbers.
+
+A client that skipped a response because `version` had not changed would sit on
+a stale vote count for a whole round. Nothing in this repository does that, and
+nothing should start.
 
 ## Voting
 
@@ -177,6 +197,33 @@ server-side — rather than a timestamp, because a control room on a laptop with
 drifting clock would otherwise decide for itself that the television died an
 hour ago. `partyGameDisplayState()` turns it into connected (≤15s) / stalled
 (≤120s) / gone.
+
+### The close boundary is the session row
+
+A vote and `close_voting` must be ordered, never interleaved, and the ordering
+authority is the database.
+
+A vote opens a transaction whose **first statement** is a conditional update of
+the session row:
+
+```sql
+UPDATE party_game_sessions SET "UpdatedAt" = "UpdatedAt"
+ WHERE "Id" = @session AND "Phase" = 'voting_open' AND "CurrentRoundId" = @round
+```
+
+It changes nothing — it assigns a column to itself — and exists to take that
+row's write lock and have its predicate evaluated under it. The vote is written
+inside the same transaction.
+
+- If `close_voting` is committing, this statement **blocks**. When the close
+  commits, the predicate is re-evaluated against the row the close left behind,
+  matches nothing, and the vote is refused with **no row written**.
+- If the vote commits first, the close's own update then finds the session
+  exactly as it expected — because the vote did not touch `Version`.
+
+Checking the phase again *after* writing would not do: by then the row exists.
+And the transaction opens with a write rather than a read, so it never upgrades
+a shared lock to an exclusive one — the shape SQLite refuses to wait on.
 
 ### A television is not a voter
 
@@ -246,6 +293,27 @@ sentinel, exactly as the guest challenge list does.
   activity that carries a `DurationSeconds`. Only the activity phase gets one: a
   reveal, a vote and a result each last exactly as long as the host leaves them
   on screen.
+
+`party_album_links`
+
+- `LastDisplaySeenAt` — when a screen last read this party's game. On the link
+  rather than the session, because a television is watching before there is a
+  game to watch.
+
+### Migrations
+
+The Party Game stack is **four** migrations, every one additive and every one
+classified in `deploy/migration-policy.json`:
+
+| Migration | What it adds |
+| --- | --- |
+| `20260905231112_AddPartyGameRuntime` | `party_game_sessions`, `party_game_rounds` |
+| `20260906000059_AddPartyActivityRules` | `DurationSeconds`, `VotingMode`, `VoteQuestion` on `party_challenges` |
+| `20260906001707_AddPartyGameVotes` | `party_game_votes` |
+| `20260906004257_AddPartyDisplayHeartbeat` | `LastDisplaySeenAt` on `party_album_links` |
+
+No migration exists for the vote/close boundary: it is a locking discipline over
+columns that were already there, not schema.
 
 An activity a round has played can no longer be deleted — the restricting
 foreign key would refuse anyway, and `PartyChallengeService.DeleteAsync` turns
