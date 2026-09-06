@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   PartyGameConflict, partyGameYesPercent, submitPartyGameVote,
-  type PartyGamePublicSnapshot, type PartyGameVoteValue,
+  type PartyGamePublicSnapshot, type PartyGameVoteCode, type PartyGameVoteValue,
 } from '@nubarca/api-client';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
@@ -63,7 +63,14 @@ export function PartyGamePage() {
     } catch (error) {
       // A refusal carries the state it was measured against, so a phone that
       // fell behind ends the tap CORRECT rather than merely told off.
-      if (error instanceof PartyGameConflict && error.snapshot) adopt(error.snapshot);
+      //
+      // `not_joined` is the exception: the scene it hands back is right, but
+      // this phone holds no identity this party issued, so silently adopting it
+      // would leave a tap that did nothing and said nothing. It gets the
+      // existing "your vote did not arrive" line instead.
+      const recoverable = error instanceof PartyGameConflict
+        && error.snapshot !== null && error.code !== 'not_joined';
+      if (recoverable) adopt((error as PartyGameConflict<PartyGameVoteCode, typeof snapshot>).snapshot!);
       else { setVoteError(true); refresh(); }
     } finally {
       setSending(null);

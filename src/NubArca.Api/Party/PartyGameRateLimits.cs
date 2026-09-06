@@ -21,15 +21,20 @@ namespace NubArca.Api.Party;
 /// identity for quotas and votes. Each guest gets their own allowance, and the
 /// room's size stops mattering.</para>
 ///
-/// <para><b>What this bounds and what it does not.</b> The cookie is presented
-/// by the client, so it is an identity claim rather than a proof. A caller that
-/// invents a well-formed value gets its own partition — which is why the shape
-/// check below exists (junk falls back to the address bucket), and why the
-/// damage is bounded elsewhere rather than here: a minted participant may cast
-/// exactly one vote per round, held by a unique index, so vote spam cannot move
-/// a result; the address fallback still catches every cookie-less request; and
-/// idle partitions are reclaimed by the runtime. This is a fairness mechanism
-/// for a party, not an authentication boundary.</para>
+/// <para><b>THIS IS NOT AN AUTHORIZATION BOUNDARY.</b> The cookie is presented
+/// by the client, so it is an identity claim rather than a proof, and a caller
+/// that invents a well-formed value may well get a provisional partition of its
+/// own — the middleware cannot afford to verify it, and the shape check below
+/// only removes the trivial case. That is deliberately harmless, because a
+/// partition buys nothing: the right to change a party's result comes from a
+/// participant this party ISSUED at join and the vote endpoint resolves
+/// server-side, never from a cookie's existence. An invented identity is
+/// refused before a row of any kind is written, so the worst a rotating caller
+/// achieves is its own bucket in which to be told no.</para>
+///
+/// <para>What this IS, then, is a fairness mechanism: it stops one guest's
+/// phone from spending the room's allowance, and stops the room's size from
+/// being the thing that breaks the evening.</para>
 ///
 /// <para>The partition key is a SHA-256 of the token. Nothing here is logged or
 /// returned, and hashing means a partition key can never become a way to read a

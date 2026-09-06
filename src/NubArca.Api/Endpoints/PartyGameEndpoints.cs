@@ -156,6 +156,13 @@ public static class PartyGameEndpoints
         // One tap. The body says which round it is answering and what it says;
         // everything else — who is voting, whether voting is open, whether this
         // activity is even voted on — is decided here from persisted state.
+        //
+        // JOIN MINTS IDENTITY. VOTE NEVER DOES. This endpoint resolves an
+        // EXISTING participant and refuses when there is none: presenting a
+        // cookie is a claim, and a claim the server never issued must not become
+        // a vote. Minting here — which it used to — meant a fresh cookie was a
+        // fresh voter, so the right to change a party's result was available to
+        // anyone who could set a header.
         app.MapPost("/api/party/{token}/game/vote", async (
             string token, HttpContext httpContext,
             [FromServices] IPartyLinkService party,
@@ -168,12 +175,15 @@ public static class PartyGameEndpoints
             if (body is null) return Results.BadRequest();
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
-            if (participantId is null) return Results.NotFound();
+
+            // The same resolve-only path the snapshot read uses, scoped to THIS
+            // link: a session minted at another party hashes fine and matches no
+            // row here. Nothing is created, and no cookie is issued.
+            var participantId = await ResolveExistingGuestAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await game.VoteAsync(
-                access, participantId.Value, body.RoundId, body.Value, cancellationToken);
+                access, participantId, body.RoundId, body.Value, cancellationToken);
             if (result.Error is PartyGameVoteError error)
             {
                 return error switch
@@ -226,6 +236,7 @@ public static class PartyGameEndpoints
     {
         PartyGameVoteError.VotingClosed => "voting_closed",
         PartyGameVoteError.StaleRound => "stale_round",
+        PartyGameVoteError.NotJoined => "not_joined",
         _ => "conflict",
     };
 
