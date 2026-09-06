@@ -34,6 +34,13 @@ public interface IPartyParticipantService
     Task<PartyParticipantResolution> ResolveOrCreateAsync(
         Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default);
 
+    // Resolve an EXISTING session without minting one, refreshing its presence.
+    // The party game's snapshot endpoint is polled by televisions as well as
+    // phones: minting there would turn every display into a participant and
+    // inflate the count of who is in the room.
+    Task<Guid?> ResolveAsync(
+        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default);
+
     // ATOMIC per-guest print claim, on the same principle as the upload slot:
     // one statement decides and records. `max` of 0 means the host set no
     // per-guest limit, so the claim always succeeds and only counts.

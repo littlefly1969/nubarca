@@ -51,6 +51,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds two nullable columns and one NOT NULL text column with defaultValue 'binary' to party_challenges, plus check constraints the default and the nulls both satisfy. Existing rows take values the previous application never reads or writes, so it keeps creating and editing activities exactly as before against the upgraded schema."
+    },
+    "20260906001707_AddPartyGameVotes": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only the new party_game_votes table with its unique and lookup indexes and a value check constraint; the previous application neither reads nor writes it, and no existing table, column or constraint changes."
     }
   }
 }

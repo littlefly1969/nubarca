@@ -178,7 +178,7 @@ public sealed class PartyGameService : IPartyGameService
     }
 
     public async Task<PartyGamePublicSnapshotDto?> GetPublicSnapshotAsync(
-        PartyAccess access, CancellationToken cancellationToken = default)
+        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default)
     {
         if (access.PartyAlbumLinkId is not Guid linkId) return null;
         var context = await _db.PartyAlbumLinks.AsNoTracking()
@@ -196,6 +196,8 @@ public sealed class PartyGameService : IPartyGameService
 
         PartyChallengePresentationDto? challenge = null;
         DateTime? phaseEndsAt = null;
+        string? myVote = null;
+        PartyGameVotingDto? voting = null;
         if (PartyGamePhases.ShowsChallenge(session.Phase) && session.CurrentRoundId is Guid roundId)
         {
             var row = await _db.PartyGameRounds.AsNoTracking()
@@ -215,11 +217,131 @@ public sealed class PartyGameService : IPartyGameService
                     // caller's own token, exactly as the guest challenge list does.
                     row.MediaFileItemId is null ? null : $"/api/party/challenge-media/{row.Id}",
                     row.DurationSeconds, row.VotingMode, row.VoteQuestion);
+
+                if (PartyChallengeVotingModes.CollectsVotes(row.VotingMode))
+                {
+                    // A television and a guest learn the RESULT only once it has
+                    // been revealed. Between closing and revealing the owner
+                    // knows and the room does not, which is the whole point of
+                    // having a host.
+                    voting = await VotingAsync(session, roundId,
+                        includeResult: session.Phase == PartyGamePhases.Result, cancellationToken);
+                    if (participantId is Guid guest)
+                        myVote = await _db.PartyGameVotes.AsNoTracking()
+                            .Where(x => x.PartyGameRoundId == roundId && x.PartyParticipantId == guest)
+                            .Select(x => x.Value).FirstOrDefaultAsync(cancellationToken);
+                }
             }
         }
 
         return new PartyGamePublicSnapshotDto(context.Name, session.Status, session.Phase,
-            session.Version, session.CurrentRoundNumber, total, phaseEndsAt, challenge);
+            session.Version, session.CurrentRoundNumber, total, phaseEndsAt, challenge,
+            PartyGamePhases.ShowsChallenge(session.Phase) ? session.CurrentRoundId : null,
+            voting, myVote);
+    }
+
+    public async Task<PartyGameVoteResult> VoteAsync(
+        PartyAccess access, Guid participantId, Guid? roundId, string? value,
+        CancellationToken cancellationToken = default)
+    {
+        if (!PartyGameVoteValues.IsKnown(value))
+            return PartyGameVoteResult.Fail(PartyGameVoteError.UnknownValue);
+        if (access.PartyAlbumLinkId is not Guid linkId)
+            return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
+
+        var session = await _db.PartyGameSessions.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId, cancellationToken);
+        var current = await GetPublicSnapshotAsync(access, participantId, cancellationToken);
+        if (current is null) return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
+
+        // Nothing about this decision comes from the client. The phase, the
+        // round being played and the activity's own voting mode are re-read on
+        // every tap — which is also what makes the instant after the host closed
+        // voting a clean refusal rather than a late vote.
+        if (session is null || session.Phase != PartyGamePhases.VotingOpen
+            || session.CurrentRoundId is not Guid activeRound)
+            return PartyGameVoteResult.Fail(PartyGameVoteError.VotingClosed, current);
+        if (roundId is null || roundId != activeRound)
+            return PartyGameVoteResult.Fail(PartyGameVoteError.StaleRound, current);
+
+        var challenge = await CurrentChallengeAsync(session, cancellationToken);
+        if (!PartyChallengeVotingModes.CollectsVotes(challenge?.VotingMode))
+            return PartyGameVoteResult.Fail(PartyGameVoteError.VotingClosed, current);
+
+        var now = Now;
+        var existing = await _db.PartyGameVotes.FirstOrDefaultAsync(
+            x => x.PartyGameRoundId == activeRound && x.PartyParticipantId == participantId,
+            cancellationToken);
+        if (existing is null)
+        {
+            _db.PartyGameVotes.Add(new PartyGameVote
+            {
+                Id = Guid.NewGuid(),
+                PartyGameSessionId = session.Id,
+                PartyGameRoundId = activeRound,
+                PartyParticipantId = participantId,
+                Value = value!,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else if (existing.Value != value)
+        {
+            // Changing your mind while voting is open replaces the answer; there
+            // is no history of what somebody thought thirty seconds ago.
+            existing.Value = value!;
+            existing.UpdatedAt = now;
+        }
+        else
+        {
+            // The same tap twice. Nothing to write, and nothing to complain
+            // about: the guest already said this.
+            return PartyGameVoteResult.Ok(
+                (await GetPublicSnapshotAsync(access, participantId, cancellationToken))!);
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // Two taps arrived together and the unique index elected one. The
+            // guest's answer is recorded either way, so this is not an error —
+            // re-read and report what the row actually says.
+            _db.ChangeTracker.Clear();
+        }
+
+        return PartyGameVoteResult.Ok(
+            (await GetPublicSnapshotAsync(access, participantId, cancellationToken))!);
+    }
+
+    /// <summary>
+    /// How much of the room has answered, and — only when the caller is allowed
+    /// to know — what it answered.
+    /// </summary>
+    private async Task<PartyGameVotingDto> VotingAsync(
+        PartyGameSession session, Guid roundId, bool includeResult, CancellationToken ct)
+    {
+        var tallies = await _db.PartyGameVotes.AsNoTracking()
+            .Where(x => x.PartyGameRoundId == roundId)
+            .GroupBy(x => x.Value)
+            .Select(g => new { Value = g.Key, Count = g.Count() })
+            .ToListAsync(ct);
+        var yes = tallies.FirstOrDefault(x => x.Value == PartyGameVoteValues.Yes)?.Count ?? 0;
+        var no = tallies.FirstOrDefault(x => x.Value == PartyGameVoteValues.No)?.Count ?? 0;
+        var received = yes + no;
+
+        var since = Now.AddSeconds(-PartyGamePresence.WindowSeconds);
+        var present = await _db.PartyParticipants.AsNoTracking()
+            .CountAsync(x => x.PartyAlbumLinkId == session.PartyAlbumLinkId && x.LastSeenAt >= since, ct);
+
+        // Whoever voted is in the room, whatever their last heartbeat says.
+        var eligible = Math.Max(present, received);
+
+        return includeResult
+            ? new PartyGameVotingDto(received, eligible, yes, no, yes > no)
+            : new PartyGameVotingDto(received, eligible);
     }
 
     // --- internals ---------------------------------------------------------
@@ -294,13 +416,26 @@ public sealed class PartyGameService : IPartyGameService
             .CountAsync(x => x.PartyGameSessionId == session.Id
                 && x.Status != PartyGameRoundStatuses.Active, ct);
 
+        // The host may see the result from the moment voting closes, because the
+        // host is the one who decides when to reveal it. Nothing else may.
+        PartyGameVotingDto? voting = null;
+        if (session.CurrentRoundId is Guid votingRound && current is not null
+            && PartyChallengeVotingModes.CollectsVotes(current.VotingMode)
+            && PartyGamePhases.ShowsChallenge(session.Phase))
+        {
+            voting = await VotingAsync(session, votingRound,
+                includeResult: session.Phase is PartyGamePhases.VotingClosed or PartyGamePhases.Result,
+                ct);
+        }
+
         return new PartyGameSnapshotDto(albumId, session.Id, session.Status, session.Phase,
             session.Version, session.CurrentRoundNumber, total, played,
             session.StartedAt, session.FinishedAt, phaseStartedAt, phaseEndsAt,
             current, Challenge(next),
             PartyGameStateMachine.LegalCommands(
                 session.Phase, next is not null,
-                current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode)));
+                current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode)),
+            voting);
     }
 
     private static PartyGameChallengeDto? Challenge(PartyChallenge? row) => row is null ? null

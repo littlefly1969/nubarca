@@ -145,3 +145,62 @@ public static class PartyGameCommands
 
     public static bool IsKnown(string? value) => value is not null && All.Contains(value);
 }
+
+/// <summary>
+/// One guest's answer for one round.
+///
+/// The row is the vote: there is no separate "ballot" and no history of what
+/// somebody chose before. A guest who changes their mind while voting is open
+/// UPDATES this row, because the question is what the room thinks now, not what
+/// it thought thirty seconds ago.
+///
+/// Identity is the anonymous <see cref="PartyParticipant"/> — a server-issued
+/// cookie, never an IP, a fingerprint or anything the client chose. The row
+/// carries no name and no device information; it is an answer with a key.
+/// </summary>
+public sealed class PartyGameVote
+{
+    public Guid Id { get; set; }
+
+    // The round is what a vote is ABOUT, and the session is carried beside it so
+    // an aggregate for a whole game needs no join through rounds.
+    public Guid PartyGameSessionId { get; set; }
+    public Guid PartyGameRoundId { get; set; }
+    public Guid PartyParticipantId { get; set; }
+
+    public string Value { get; set; } = PartyGameVoteValues.Yes;
+
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// The binary verdict. Two values, because the only voting mode the runtime can
+/// run is `binary`; rating and multiple choice will bring their own columns
+/// rather than overloading this one with a stringly-typed number.
+/// </summary>
+public static class PartyGameVoteValues
+{
+    public const string Yes = "yes";
+    public const string No = "no";
+
+    public static readonly IReadOnlySet<string> All =
+        new HashSet<string>([Yes, No], StringComparer.Ordinal);
+
+    public static bool IsKnown(string? value) => value is not null && All.Contains(value);
+}
+
+public static class PartyGamePresence
+{
+    /// <summary>
+    /// How recently a guest must have been seen to count as "in the room".
+    ///
+    /// A phone on the voting screen polls every few seconds, so this is
+    /// generous enough to survive a locked screen and a walk to the kitchen,
+    /// and short enough that somebody who left an hour ago is not still being
+    /// counted in "8 of 12 have voted". It is a soft signal about a party, not
+    /// an attendance register, and the count is floored at the number of votes
+    /// actually received — whoever voted is by definition present.
+    /// </summary>
+    public const int WindowSeconds = 180;
+}
