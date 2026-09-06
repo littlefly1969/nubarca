@@ -13,18 +13,25 @@ namespace NubArca.Api.Endpoints;
 /// There is no realtime transport here and that is deliberate. NubArca has no
 /// SignalR, WebSocket or SSE anywhere in application code — the paired
 /// television, the TV browser, the pairing screen and the party page all poll a
-/// snapshot — so the game polls the same way. A client is notified that
-/// something changed by seeing a higher <c>version</c>, and it recovers from a
-/// refresh, a backgrounded tab or a lost network by reading the snapshot again.
-/// That is the whole reconnection story, and it needs no reconnection code.
+/// snapshot — so the game polls the same way. Every successful poll IS the
+/// current truth and is consumed as such; a client recovers from a refresh, a
+/// backgrounded tab or a lost network by reading it again. That is the whole
+/// reconnection story, and it needs no reconnection code.
+///
+/// <para><c>version</c> is not a change feed. It is the owner's
+/// optimistic-concurrency token, and it moves when an owner command moves the
+/// game — never because somebody voted, which would make the host's next
+/// command fail as stale. A client that skipped a response because the number
+/// had not changed would sit on a stale vote count.</para>
 /// </summary>
 public static class PartyGameEndpoints
 {
-    private const string PartyPublicRateLimitPolicy = "party-public";
-
-    // A vote is a write from a phone at a party, so it is limited on the same
-    // policy as a guest greeting rather than on the read policy.
-    private const string PartyMessageRateLimitPolicy = "party-message";
+    // The live game has its own two policies, partitioned by the guest rather
+    // than by the address. The generic party buckets are per-IP, and a party is
+    // one Wi-Fi network: on those, the room's own size is what breaks it. See
+    // PartyGameRateLimits.
+    private const string ReadPolicy = PartyGameRateLimits.ReadPolicy;
+    private const string VotePolicy = PartyGameRateLimits.VotePolicy;
 
     public static IEndpointRouteBuilder MapPartyGameEndpoints(this IEndpointRouteBuilder app)
     {
@@ -122,7 +129,7 @@ public static class PartyGameEndpoints
             if (snapshot is null) return Results.NotFound();
 
             return Results.Ok(WithTokenMedia(snapshot, token));
-        }).WithName("GetPartyGamePublicSnapshot").RequireRateLimiting(PartyPublicRateLimitPolicy);
+        }).WithName("GetPartyGamePublicSnapshot").RequireRateLimiting(ReadPolicy);
 
         // Joining is the guest saying "I am here". It is what mints the
         // participant cookie, so a phone is counted in the room from the moment
@@ -144,7 +151,7 @@ public static class PartyGameEndpoints
             if (participantId is null) return Results.NotFound();
             var snapshot = await game.GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
             return snapshot is null ? Results.NotFound() : Results.Ok(WithTokenMedia(snapshot, token));
-        }).WithName("JoinPartyGame").RequireRateLimiting(PartyPublicRateLimitPolicy);
+        }).WithName("JoinPartyGame").RequireRateLimiting(ReadPolicy);
 
         // One tap. The body says which round it is answering and what it says;
         // everything else — who is voting, whether voting is open, whether this
@@ -183,7 +190,7 @@ public static class PartyGameEndpoints
                 };
             }
             return Results.Ok(WithTokenMedia(result.Snapshot!, token));
-        }).WithName("SubmitPartyGameVote").RequireRateLimiting(PartyMessageRateLimitPolicy);
+        }).WithName("SubmitPartyGameVote").RequireRateLimiting(VotePolicy);
 
         return app;
     }

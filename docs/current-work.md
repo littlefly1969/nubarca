@@ -1222,7 +1222,14 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   applies transitions and never decides one, so the owner snapshot's
   `availableCommands` can tell a control room what is legal without a second
   copy of the machine in TypeScript. There is no realtime transport, on purpose
-  — nothing in this repository has one; clients poll and compare `version`.
+  — nothing in this repository has one; clients poll and consume EVERY
+  successful snapshot. `Version` is the owner's command token, not a change
+  feed: a guest's vote changes what a snapshot says without touching it, which
+  is exactly what lets a vote and a `close_voting` contend on the session row
+  without the vote defeating the close. The vote/close boundary is that row: a
+  vote's transaction opens with a conditional no-op update of the session whose
+  WHERE clause is the whole authority, so a late vote blocks, re-evaluates
+  against the closed row, and writes nothing.
   Voting has the same shape: the integrity constraint is a unique index on
   `(round, participant)` rather than a code path, a vote names the ROUND it
   answers (stable for a whole round, unlike the version, so a lagging poll never

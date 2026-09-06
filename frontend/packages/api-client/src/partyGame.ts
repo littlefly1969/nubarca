@@ -4,10 +4,17 @@ import type { PartyChallengeKind, PartyChallengeVotingMode } from './party';
 // The live Party Game, as the three surfaces that watch it see it.
 //
 // There is no realtime transport here and there is none anywhere in NubArca:
-// every live surface polls a snapshot and compares `version`. A client learns
-// that something changed by seeing a higher one, and recovers from a refresh, a
-// backgrounded tab or a dropped network by reading the snapshot again — which is
+// every live surface polls the authoritative snapshot. Every successful poll is
+// the current truth and is rendered as such, and a refresh, a backgrounded tab
+// or a dropped network all recover the same way — by reading it again. That is
 // the entire reconnection story.
+//
+// `version` is NOT a change feed, and a client must never skip a response
+// because it did not move. It is the OWNER's optimistic-concurrency token: it
+// changes when an owner command changes command-authoritative game state, and
+// deliberately not when a guest votes — a vote changes participation and,
+// later, the result, but bumping the token would make the host's next command
+// fail as stale.
 
 export type PartyGameStatus = 'lobby' | 'live' | 'finished';
 
@@ -62,7 +69,11 @@ export interface PartyGameSnapshot {
   sessionId: string | null;
   status: PartyGameStatus;
   phase: PartyGamePhase;
-  /** The optimistic-concurrency token every command must quote. 0 = not started. */
+  /**
+   * The optimistic-concurrency token every owner command must quote. 0 = not
+   * started. Not a revision of the snapshot: votes change what this object says
+   * without changing this number.
+   */
   version: number;
   roundNumber: number;
   totalChallenges: number;

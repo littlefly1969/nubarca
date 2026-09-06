@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 
@@ -317,10 +318,9 @@ public sealed class PartyGameService : IPartyGameService
             PartyGameVoteResult.Fail(error,
                 await GetPublicSnapshotAsync(access, participantId, false, cancellationToken));
 
-        // Nothing about this decision comes from the client. The phase, the
-        // round being played and the activity's own voting mode are re-read on
-        // every tap — which is also what makes the instant after the host closed
-        // voting a clean refusal rather than a late vote.
+        // These reads are a FAST PATH, not the authority. They answer the
+        // ordinary refusals without opening a transaction; the boundary itself
+        // is decided below, by the database.
         if (session is null || session.Phase != PartyGamePhases.VotingOpen
             || session.CurrentRoundId is not Guid activeRound)
             return await RefuseAsync(PartyGameVoteError.VotingClosed);
@@ -331,49 +331,8 @@ public sealed class PartyGameService : IPartyGameService
         if (!PartyChallengeVotingModes.CollectsVotes(challenge?.VotingMode))
             return await RefuseAsync(PartyGameVoteError.VotingClosed);
 
-        var now = Now;
-        var existing = await _db.PartyGameVotes.FirstOrDefaultAsync(
-            x => x.PartyGameRoundId == activeRound && x.PartyParticipantId == participantId,
-            cancellationToken);
-        if (existing is null)
-        {
-            _db.PartyGameVotes.Add(new PartyGameVote
-            {
-                Id = Guid.NewGuid(),
-                PartyGameSessionId = session.Id,
-                PartyGameRoundId = activeRound,
-                PartyParticipantId = participantId,
-                Value = value!,
-                CreatedAt = now,
-                UpdatedAt = now,
-            });
-        }
-        else if (existing.Value != value)
-        {
-            // Changing your mind while voting is open replaces the answer; there
-            // is no history of what somebody thought thirty seconds ago.
-            existing.Value = value!;
-            existing.UpdatedAt = now;
-        }
-        else
-        {
-            // The same tap twice. Nothing to write, and nothing to complain
-            // about: the guest already said this.
-            return PartyGameVoteResult.Ok(
-                (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);
-        }
-
-        try
-        {
-            await _db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException)
-        {
-            // Two taps arrived together and the unique index elected one. The
-            // guest's answer is recorded either way, so this is not an error —
-            // re-read and report what the row actually says.
-            _db.ChangeTracker.Clear();
-        }
+        var accepted = await TryRecordAsync(session.Id, activeRound, participantId, value!, cancellationToken);
+        if (!accepted) return await RefuseAsync(PartyGameVoteError.VotingClosed);
 
         // A vote is worth a line — voting is where a party's load is — but the
         // line carries the round and nothing about the person or their answer.
@@ -382,6 +341,121 @@ public sealed class PartyGameService : IPartyGameService
 
         return PartyGameVoteResult.Ok(
             (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);
+    }
+
+    /// <summary>
+    /// Records one answer, or reports that the host closed voting first.
+    ///
+    /// <para>THE BOUNDARY IS THE SESSION ROW. The transaction's FIRST statement
+    /// is a conditional update of that row whose WHERE clause is the whole
+    /// authority: "this session is still in voting_open, on this round". The
+    /// statement changes nothing — it assigns <c>UpdatedAt</c> to itself — and
+    /// exists to take the row's write lock and to have its predicate evaluated
+    /// under it. The vote is written inside the same transaction, so a vote and
+    /// a close can only be ordered, never interleaved.</para>
+    ///
+    /// <para>That is what makes the dangerous ordering impossible. If
+    /// <c>close_voting</c> is committing, this statement BLOCKS on its lock;
+    /// when the close commits, the predicate is re-evaluated against the row the
+    /// close left behind, matches nothing, and the vote is refused with no row
+    /// written. If this commits first, the close's own update then finds the
+    /// session exactly as it expected. Checking the phase again after writing
+    /// would not do: by then the row exists.</para>
+    ///
+    /// <para>It deliberately does NOT touch <c>Version</c>. That is the owner's
+    /// optimistic-concurrency token; bumping it here would make every vote
+    /// during a round reject the host's next command.</para>
+    ///
+    /// <para>The transaction opens with a WRITE, before any read, so it never
+    /// upgrades a shared lock to an exclusive one — the shape SQLite refuses to
+    /// wait on, and the one that would turn a busy database into an error
+    /// instead of a queue.</para>
+    ///
+    /// <para>It PARTICIPATES in a caller's transaction when there is one, rather
+    /// than demanding its own — the same shape as the participant quota claim,
+    /// so a vote can be one step of a larger unit of work. A caller that owns
+    /// the transaction owns the recovery with it: the duplicate-insert race is
+    /// swallowed only on the path that can roll back to a clean point.</para>
+    /// </summary>
+    private async Task<bool> TryRecordAsync(
+        Guid sessionId, Guid roundId, Guid participantId, string value, CancellationToken ct)
+    {
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(ct) : null;
+        try
+        {
+            return await RecordInsideTransactionAsync(
+                sessionId, roundId, participantId, value, owned, tx, ct);
+        }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
+    }
+
+    private async Task<bool> RecordInsideTransactionAsync(
+        Guid sessionId, Guid roundId, Guid participantId, string value,
+        bool owned, IDbContextTransaction? tx, CancellationToken ct)
+    {
+        var open = await _db.PartyGameSessions
+            .Where(x => x.Id == sessionId
+                && x.Phase == PartyGamePhases.VotingOpen
+                && x.CurrentRoundId == roundId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.UpdatedAt, x => x.UpdatedAt), ct);
+        if (open == 0)
+        {
+            if (owned) await tx!.RollbackAsync(ct);
+            return false;
+        }
+
+        var now = Now;
+        var existing = await _db.PartyGameVotes.FirstOrDefaultAsync(
+            x => x.PartyGameRoundId == roundId && x.PartyParticipantId == participantId, ct);
+        if (existing is null)
+        {
+            _db.PartyGameVotes.Add(new PartyGameVote
+            {
+                Id = Guid.NewGuid(),
+                PartyGameSessionId = sessionId,
+                PartyGameRoundId = roundId,
+                PartyParticipantId = participantId,
+                Value = value,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+        else if (existing.Value != value)
+        {
+            // Changing your mind while voting is open replaces the answer; there
+            // is no history of what somebody thought thirty seconds ago.
+            existing.Value = value;
+            existing.UpdatedAt = now;
+        }
+        else
+        {
+            // The same tap twice. Nothing to write, and nothing to complain
+            // about: the guest already said this.
+            if (owned) await tx!.CommitAsync(ct);
+            return true;
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            if (owned) await tx!.CommitAsync(ct);
+        }
+        catch (DbUpdateException) when (owned)
+        {
+            // Two taps arrived together and the unique index elected one. The
+            // guest's answer is recorded either way, so this is not an error —
+            // roll back and let the caller report what the row actually says.
+            // Only swallowed on the path that owns the transaction: rolling back
+            // somebody else's unit of work would be a worse answer than the
+            // exception.
+            await tx!.RollbackAsync(ct);
+            _db.ChangeTracker.Clear();
+        }
+        return true;
     }
 
     /// <summary>

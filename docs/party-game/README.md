@@ -26,7 +26,8 @@ Everything in this feature follows from these, and each is asserted somewhere.
 
 1. **The server is the only authority.** No client holds game state the server
    cannot reproduce, so refresh, reconnect and reload are all the same act:
-   read the snapshot again.
+   read the snapshot again — and every successful poll is consumed, because
+   `version` is the owner's command token and not a change feed.
 2. **A read never writes.** A game that has not started has no row; the lobby is
    synthesized at version 0. A television polling a party must not begin it.
 3. **A refusal carries the truth.** Every `409` returns the state it was
@@ -37,7 +38,8 @@ Everything in this feature follows from these, and each is asserted somewhere.
    sends, so an illegal command is absent rather than disabled.
 5. **Nobody learns the result early.** Participation is safe at any moment; the
    split reaches the host when voting closes, and the room only when the host
-   reveals it.
+   reveals it — and the boundary between "voting" and "closed" is held by the
+   database, not by a check the vote path performs and then hopes still holds.
 
 ## Running it
 
