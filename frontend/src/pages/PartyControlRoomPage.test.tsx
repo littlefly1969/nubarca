@@ -167,9 +167,10 @@ describe('the control room', () => {
     });
     mount();
     const room = await screen.findByTestId('party-control-room-state');
-    expect(room).toHaveTextContent('12');
+    expect(within(room).getByTestId('party-control-guests')).toHaveTextContent('12');
     expect(room).toHaveTextContent(/invitati collegati/i);
-    expect(room).toHaveTextContent(/2/);
+    expect(within(room).getByTestId('party-control-played')).toHaveTextContent('2');
+    expect(room).toHaveTextContent(/attività su 4/i);
     expect(screen.getByTestId('party-control-tv')).toHaveTextContent(/schermo collegato/i);
     expect(screen.getByRole('link', { name: /apri lo schermo/i }))
       .toHaveAttribute('href', '/party/tok-1/tv');

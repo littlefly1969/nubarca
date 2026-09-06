@@ -91,7 +91,6 @@ export function PartyTvStagePage() {
       className="party-stage"
       data-scene={intro ? 'intro' : scene}
       data-testid="party-tv-stage"
-      aria-live="polite"
     >
       {stale && <p className="party-stage-stale">{t('partyStage.reconnecting')}</p>}
 

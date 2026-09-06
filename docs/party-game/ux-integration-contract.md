@@ -623,3 +623,52 @@ for the host to act on and the announcement belongs on the television.
 
 Responsive: two columns above 900px (now / next), one column below, and the
 sticky command row below 640px.
+
+## 14. Addendum — hardening (SLICE 08)
+
+### The evening, proved twice
+
+[`PartyGameEndToEndTests`](../../tests/NubArca.Api.Tests/Party/PartyGameEndToEndTests.cs)
+runs a whole party through the real HTTP surface with four independent clients —
+one owner, one television, two guests — because separate `HttpClient`s mean
+separate cookie jars, so a guest there is as anonymous to the server as a guest
+at a real party. It covers the eighteen steps plus what actually goes wrong: a
+host who presses twice, a command built from a snapshot that arrived late, a tap
+that left a phone before the host closed voting and landed after, a phone two
+activities behind, a television unplugged and switched back on, six guests
+answering at once, and an evening mixing a voted activity, an unvoted one and an
+excluded one.
+
+Two of those tests send their requests one after another rather than in
+parallel, and say so: the test host is backed by a single shared SQLite
+connection, so simultaneity there would be testing the harness. The genuine
+two-connection races live in
+[`PartyGameConcurrencyTests`](../../tests/NubArca.Api.Tests/Party/PartyGameConcurrencyTests.cs).
+
+[`tests/e2e/specs/party-game.spec.ts`](../../tests/e2e/specs/party-game.spec.ts)
+does the same evening in real browsers, with four contexts open at once. The
+television gets a 16:9 viewport and the phones get a phone one whatever project
+is running, because that is what those surfaces *are*; the project's own
+viewport drives the control room, which is the surface that genuinely changes
+shape between desktop and mobile. It ends by asserting the television never grew
+a single button, link or input at any point in the evening.
+
+### Telemetry
+
+No new provider, and no new system. The existing structured log gains
+`party.game.command` (accepted), `party.game.refused` (with the reason) and
+`party.game.voted`; `party.game.start` and `party.game.finish` are audit
+actions, because they bound a party. Refusals are the interesting half — a burst
+of version conflicts is two owner surfaces fighting, and an illegal transition
+is a client that has drifted from the machine. Every line names the album and
+never a person: a vote's line carries the round and neither the guest nor their
+answer.
+
+### Polish
+
+The one substantive change: the answer being sent on a guest's phone holds its
+pressed shape at full strength rather than dimming with the other, because a
+control that only reacts when the response lands reads as a control that did not
+work. The television's `aria-live` came off — a display with no controls has
+nobody navigating it, and a region that re-announces a whole screen every scene
+is noise rather than access.

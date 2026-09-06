@@ -170,6 +170,10 @@ export function PartyGamePage() {
                   data-value={value}
                   data-testid={`party-game-vote-${value}`}
                   aria-pressed={snapshot.myVote === value}
+                  // Which answer is in flight, so the tap has an effect before
+                  // the network answers. A control that only reacts when the
+                  // response lands reads as a control that did not work.
+                  data-pending={sending === value ? 'true' : undefined}
                   disabled={sending !== null}
                   onClick={() => void vote(value)}
                 >

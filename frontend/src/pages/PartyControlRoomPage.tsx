@@ -126,7 +126,7 @@ export function PartyControlRoomPage() {
           evening they cannot see. */}
       <div className="party-control-room" data-testid="party-control-room-state">
         <p className="party-control-stat">
-          <strong>{snapshot.guestsPresent}</strong>
+          <strong data-testid="party-control-guests">{snapshot.guestsPresent}</strong>
           <span>{t('partyControl.guests')}</span>
         </p>
         <p className="party-control-stat">
@@ -145,7 +145,7 @@ export function PartyControlRoomPage() {
           )}
         </p>
         <p className="party-control-stat">
-          <strong>{snapshot.playedRounds}</strong>
+          <strong data-testid="party-control-played">{snapshot.playedRounds}</strong>
           <span>{t('partyControl.played', { total: snapshot.totalChallenges })}</span>
         </p>
       </div>
