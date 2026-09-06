@@ -12,6 +12,9 @@ public sealed class PartyChallengeConfiguration : IEntityTypeConfiguration<Party
         {
             t.HasCheckConstraint("ck_party_challenges_kind", "\"Kind\" IN ('dare','penalty','guess','custom')");
             t.HasCheckConstraint("ck_party_challenges_sort_order", "\"SortOrder\" >= 0");
+            t.HasCheckConstraint("ck_party_challenges_voting_mode", "\"VotingMode\" IN ('none','binary')");
+            t.HasCheckConstraint("ck_party_challenges_duration",
+                "\"DurationSeconds\" IS NULL OR (\"DurationSeconds\" >= 5 AND \"DurationSeconds\" <= 3600)");
         });
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).ValueGeneratedNever();
@@ -19,6 +22,12 @@ public sealed class PartyChallengeConfiguration : IEntityTypeConfiguration<Party
         b.Property(x => x.Body).IsRequired().HasMaxLength(PartyChallengeLimits.MaxBodyLength);
         b.Property(x => x.Kind).IsRequired().HasMaxLength(20);
         b.Property(x => x.IsEnabled).HasDefaultValue(true);
+        // Existing activities become ordinary voted ones: a pass/fail verdict is
+        // the game's normal shape, so the default is what a host would have
+        // chosen anyway.
+        b.Property(x => x.VotingMode).IsRequired().HasMaxLength(20)
+            .HasDefaultValue(PartyChallengeVotingModes.Binary);
+        b.Property(x => x.VoteQuestion).HasMaxLength(PartyChallengeLimits.MaxVoteQuestionLength);
         b.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
         b.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
         b.HasIndex(x => new { x.AlbumId, x.SortOrder, x.Id }).HasDatabaseName("ix_party_challenges_album_order");

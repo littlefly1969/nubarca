@@ -46,6 +46,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Creates only the two new party game runtime tables with their indexes and check constraints; the previous application neither reads nor writes them, and no existing table, column or constraint changes."
+    },
+    "20260906000059_AddPartyActivityRules": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds two nullable columns and one NOT NULL text column with defaultValue 'binary' to party_challenges, plus check constraints the default and the nulls both satisfy. Existing rows take values the previous application never reads or writes, so it keeps creating and editing activities exactly as before against the upgraded schema."
     }
   }
 }

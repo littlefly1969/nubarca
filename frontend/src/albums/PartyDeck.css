@@ -1,0 +1,285 @@
+/* The activity deck and its composer.
+
+   Both surfaces are built from the shared vocabulary — `.form-grid` / `.field`
+   for the form, `Modal` for the overlay, `.media-kind-tabs` for the segmented
+   choices, `.status-badge` for state, `.btn-danger` for destruction — so what
+   lives here is only the four things that vocabulary does not already have: a
+   deck row, a stepper, a photo picker and a pair of choice grids.
+
+   Every value is a token. The rules this file replaced carried nine hardcoded
+   colours. */
+
+/* ---- Deck ---------------------------------------------------------------- */
+
+.party-deck-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.party-deck-head h4 { margin: 0; }
+.party-deck-head p { margin: 0.2rem 0 0; }
+
+.party-deck-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.party-deck-list > li {
+  display: grid;
+  gap: 0.5rem;
+}
+/* An activity excluded from the game reads quieter, but its badge is what SAYS
+   so — the dimming is a reinforcement, never the message. */
+.party-deck-list > li.is-off .party-activity { opacity: 0.55; }
+
+.party-deck-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.party-deck-row-actions button {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.party-deck-row-actions button:hover:not(:disabled) { border-color: var(--border-strong); }
+.party-deck-row-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+.party-deck-row-actions button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.party-deck-row-actions .btn-danger { min-height: 2.25rem; }
+/* The reorder arrows sit together, ahead of the two commands. */
+.party-deck-row-actions .status-badge { margin-right: auto; }
+
+/* ---- Composer ------------------------------------------------------------ */
+
+/* The step rail, extending the import wizard's pattern rather than inventing a
+   second one. The steps are buttons because they are reachable: a host who has
+   filled in step 1 may look at the preview and come back. */
+.party-composer-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+  counter-reset: party-step;
+}
+.party-composer-steps li { counter-increment: party-step; }
+.party-composer-steps button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0.3rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+.party-composer-steps button::before {
+  content: counter(party-step);
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.party-composer-steps button:disabled { opacity: 0.45; cursor: not-allowed; }
+.party-composer-steps button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* Fill, border AND weight, so the current step is never carried by colour. */
+.party-composer-steps li.is-active button {
+  border-color: var(--border-strong);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.party-composer-steps li.is-active button::before {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.party-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.party-composer-actions button {
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.party-composer-actions button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+/* The one filled control on the surface. There is exactly one primary action
+   per step, and this is it. */
+.party-composer-primary {
+  min-height: 2.75rem;
+  padding: 0.5rem 1.1rem;
+  border: 1px solid var(--accent-strong) !important;
+  border-radius: var(--radius-button);
+  background: var(--accent-strong) !important;
+  color: var(--accent-contrast) !important;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.party-composer-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.party-composer-primary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* Losing unsaved work is not an error state, so it does not look like one: a
+   question, in place, with the destructive answer marked as destructive. */
+.party-composer-discard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+}
+.party-composer-discard p { margin: 0; color: var(--text-secondary); font-size: 0.875rem; }
+
+/* ---- Photo picker -------------------------------------------------------- */
+
+/* The album's own photographs, at a size a host can recognise. Choosing a
+   picture from a <select> of filenames was the previous answer. */
+.party-photo-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  gap: 0.5rem;
+  max-height: 15rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+}
+.party-photo-choice,
+.party-photo-none {
+  width: 100%;
+  aspect-ratio: 1;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--radius-button);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.party-photo-choice img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.party-photo-choice:focus-visible,
+.party-photo-none:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* Ring AND a check mark: selection never rests on the border colour alone. */
+.party-photo-choice.is-selected,
+.party-photo-none.is-selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-subtle);
+  color: var(--accent);
+  font-weight: 600;
+}
+.party-photo-choice.is-selected { position: relative; }
+.party-photo-choice.is-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 0.15rem;
+  right: 0.25rem;
+  color: var(--accent-contrast);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 65%);
+  font-weight: 700;
+}
+
+/* ---- Rule choices -------------------------------------------------------- */
+
+.party-composer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.party-composer-presets button {
+  min-height: 2.5rem;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border-default);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+.party-composer-presets button.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.party-composer-presets button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* Two cards, not a <select>: a host is choosing what the room does, and the
+   consequence of each choice belongs beside its name. */
+.party-composer-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.6rem;
+}
+.party-composer-choices button {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.party-composer-choices button span { color: var(--text-muted); font-size: 0.8125rem; }
+.party-composer-choices button.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  box-shadow: var(--shadow-sm);
+}
+.party-composer-choices button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.party-composer-toggle {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.party-composer-toggle input { width: auto; min-height: 0; margin-top: 0.2rem; }
+.party-composer-toggle > span { display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* On a phone the composer is the whole screen (Overlay already does that), and
+   its controls become full-width so nothing needs a precise tap. */
+@media (max-width: 640px) {
+  .party-composer-actions { justify-content: stretch; }
+  .party-composer-actions button,
+  .party-composer-primary { flex: 1 1 8rem; min-height: 3rem; }
+  .party-deck-row-actions button { min-height: 2.75rem; }
+}
