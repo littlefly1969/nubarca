@@ -150,6 +150,72 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
             await verify.PartyGameRounds.Select(x => x.PartyChallengeId).Distinct().CountAsync());
     }
 
+    [Fact]
+    public async Task Two_taps_from_one_guest_leave_exactly_one_answer()
+    {
+        // Reach a live vote through the real commands, so the row shapes are the
+        // ones the runtime actually writes.
+        await using (var host = CreateContext())
+        {
+            var service = Service(host);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.Start, 0);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.StartChallenge, 1);
+            await service.ExecuteAsync(_ownerId, _albumId, PartyGameCommands.OpenVoting, 2);
+        }
+
+        var participantId = Guid.NewGuid();
+        Guid roundId;
+        await using (var seed = CreateContext())
+        {
+            await seed.Database.OpenConnectionAsync();
+            await seed.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF");
+            seed.PartyParticipants.Add(new PartyParticipant
+            {
+                Id = participantId,
+                PartyAlbumLinkId = _linkId,
+                TokenHash = new string('b', 64),
+                CreatedAt = DateTime.UtcNow,
+                LastSeenAt = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+            roundId = (await seed.PartyGameSessions.AsNoTracking().SingleAsync()).CurrentRoundId!.Value;
+        }
+
+        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+        await using var firstDb = CreateContext();
+        await using var secondDb = CreateContext();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await Task.WhenAll(
+            VoteAfterStartAsync(firstDb, access, participantId, roundId, PartyGameVoteValues.Yes, start.Task),
+            VoteAfterStartAsync(secondDb, access, participantId, roundId, PartyGameVoteValues.No, start.Task, start));
+
+        // The unique index is the authority: one guest, one round, one answer —
+        // whichever of the two taps the database elected.
+        await using var verify = CreateContext();
+        var vote = await verify.PartyGameVotes.SingleAsync();
+        Assert.Equal(roundId, vote.PartyGameRoundId);
+        Assert.Contains(vote.Value, PartyGameVoteValues.All);
+    }
+
+    private static async Task VoteAfterStartAsync(
+        AppDbContext db, PartyAccess access, Guid participantId, Guid roundId, string value,
+        Task start, TaskCompletionSource? release = null)
+    {
+        release?.SetResult();
+        await start;
+        try
+        {
+            await Service(db).VoteAsync(access, participantId, roundId, value);
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            // SQLite serialises writers with a whole-database lock. A loser that
+            // surfaces as "database is locked" still wrote nothing, which is the
+            // property under test.
+        }
+    }
+
     private AppDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<AppDbContext>()

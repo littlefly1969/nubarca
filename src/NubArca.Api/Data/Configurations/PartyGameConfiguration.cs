@@ -80,3 +80,33 @@ public sealed class PartyGameRoundConfiguration : IEntityTypeConfiguration<Party
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public sealed class PartyGameVoteConfiguration : IEntityTypeConfiguration<PartyGameVote>
+{
+    public void Configure(EntityTypeBuilder<PartyGameVote> b)
+    {
+        b.ToTable("party_game_votes", t =>
+            t.HasCheckConstraint("ck_party_game_votes_value", "\"Value\" IN ('yes','no')"));
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).ValueGeneratedNever();
+        b.Property(x => x.Value).IsRequired().HasMaxLength(10);
+        b.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        b.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
+
+        // THE integrity constraint. One current choice per guest per round, held
+        // by the database rather than by whichever code path remembered to
+        // check: two taps arriving together cannot both insert, and a guest who
+        // changes their mind updates the row they already have.
+        b.HasIndex(x => new { x.PartyGameRoundId, x.PartyParticipantId }).IsUnique()
+            .HasDatabaseName("ux_party_game_votes_round_participant");
+        b.HasIndex(x => new { x.PartyGameRoundId, x.Value })
+            .HasDatabaseName("ix_party_game_votes_round_value");
+
+        b.HasOne<PartyGameSession>().WithMany().HasForeignKey(x => x.PartyGameSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.HasOne<PartyGameRound>().WithMany().HasForeignKey(x => x.PartyGameRoundId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.HasOne<PartyParticipant>().WithMany().HasForeignKey(x => x.PartyParticipantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

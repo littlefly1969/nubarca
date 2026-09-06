@@ -1286,7 +1286,7 @@ public static class PartyEndpoints
     // by path, and neither party can see or spend the other's allowance. Scoping
     // by name instead would have meant either leaking a link id into the cookie
     // name or overwriting the first party's session on arrival at the second.
-    private const string PartyParticipantCookieName = "NubArca.PartyGuest";
+    internal const string PartyParticipantCookieName = "NubArca.PartyGuest";
 
     // Resolve (or mint) the guest's participant session and make sure the cookie
     // is set. The raw token exists for exactly one response; only its hash is

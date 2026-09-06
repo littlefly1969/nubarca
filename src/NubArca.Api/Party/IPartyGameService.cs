@@ -32,6 +32,22 @@ public interface IPartyGameService
     /// no game. The activity is included only in the phases that put it on
     /// screen; its media URL is a token-less sentinel the endpoint rewrites.
     /// </summary>
+    /// <param name="participantId">
+    /// The caller's own guest identity, when it already has one. A television
+    /// passes null and is never given one: a display must not become a voter,
+    /// and counting it would inflate "8 of 12 have voted".
+    /// </param>
     Task<PartyGamePublicSnapshotDto?> GetPublicSnapshotAsync(
-        PartyAccess access, CancellationToken cancellationToken = default);
+        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records one guest's answer for one round, or refuses it.
+    ///
+    /// The client never decides whether a vote is valid. The participant, the
+    /// session, the round being played, the phase and the activity's own voting
+    /// mode are all re-read here, on every tap.
+    /// </summary>
+    Task<PartyGameVoteResult> VoteAsync(
+        PartyAccess access, Guid participantId, Guid? roundId, string? value,
+        CancellationToken cancellationToken = default);
 }
