@@ -79,6 +79,21 @@ public class PartyAlbumLink
     public int MaxVideoUploadsPerParticipant { get; set; }
 
     public bool GameEnabled { get; set; }
+
+    /// <summary>
+    /// When a DISPLAY last read this party's game.
+    ///
+    /// It lives on the link rather than on the game session because a
+    /// television is watching before there is a game to watch, and because a
+    /// read of game state must never create game state.
+    ///
+    /// Only a client that SAYS it is a display stamps this — the stage sends
+    /// `?display=1` — rather than the server guessing from the absence of a
+    /// guest cookie, which a guest who has not joined would also satisfy.
+    /// Claiming it is a television is not a capability: it grants nothing, and
+    /// it is the only way the answer can be honest.
+    /// </summary>
+    public DateTime? LastDisplaySeenAt { get; set; }
     public int MinChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MinIntervalSeconds;
     public int MaxChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MaxIntervalSeconds;
     public int VotesPerGuest { get; set; } = PartyChallengeDefaults.VotesPerGuest;

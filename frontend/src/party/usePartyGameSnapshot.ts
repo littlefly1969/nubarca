@@ -45,12 +45,19 @@ export interface PartyGameFeedOptions {
    * inflates the very count it is showing.
    */
   join?: boolean;
+  /**
+   * Announce this client as a television. It stamps the party's display
+   * heartbeat, which is the only honest source for the control room's "a screen
+   * is showing the game" — a server guessing from the absence of a guest cookie
+   * would count a guest who has not joined.
+   */
+  asDisplay?: boolean;
   pollMs?: number;
 }
 
 export function usePartyGameSnapshot(
   token: string | undefined,
-  { join = false, pollMs = POLL_MS }: PartyGameFeedOptions = {},
+  { join = false, asDisplay = false, pollMs = POLL_MS }: PartyGameFeedOptions = {},
 ): PartyGameFeed {
   const [snapshot, setSnapshot] = useState<PartyGamePublicSnapshot | null>(null);
   const [connection, setConnection] = useState<PartyGameConnection>('loading');
@@ -86,7 +93,7 @@ export function usePartyGameSnapshot(
         const shouldJoin = join && !joined.current;
         const next = shouldJoin
           ? await joinPartyGame(token, controller.signal)
-          : await getPartyGamePublicSnapshot(token, controller.signal);
+          : await getPartyGamePublicSnapshot(token, controller.signal, asDisplay);
         if (cancelled) return;
         if (shouldJoin) joined.current = true;
         hasSnapshot.current = true;
@@ -136,7 +143,7 @@ export function usePartyGameSnapshot(
       window.removeEventListener('focus', onVisibility);
       window.removeEventListener('online', onVisibility);
     };
-  }, [token, join, pollMs, tick]);
+  }, [token, join, asDisplay, pollMs, tick]);
 
   return { snapshot, connection, stale, refresh, adopt };
 }

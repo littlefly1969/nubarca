@@ -158,6 +158,26 @@ with exactly one answer. (It does not.)
 received — whoever voted is by definition in the room. It is a soft signal about
 a party, not an attendance register.
 
+### Is a screen showing this?
+
+The control room has to answer that honestly, and the server cannot infer it: a
+guest who has not joined also polls without a cookie. So a client **says** it is
+a display — the stage sends `?display=1` — and the server stamps
+`PartyAlbumLink.LastDisplaySeenAt`. Claiming to be a television is not a
+capability: it grants nothing, and it is the only way the answer can be true.
+
+The heartbeat lives on the LINK rather than the session, because a screen is
+watching before there is a game to watch and because a read of game state must
+never create game state. It is written with a single-column `ExecuteUpdate`
+outside the change tracker, so a display polling every couple of seconds can
+never contend with an owner command for the session's concurrency token.
+
+The owner snapshot carries `displaySeenSecondsAgo` — the elapsed time, computed
+server-side — rather than a timestamp, because a control room on a laptop with a
+drifting clock would otherwise decide for itself that the television died an
+hour ago. `partyGameDisplayState()` turns it into connected (≤15s) / stalled
+(≤120s) / gone.
+
 ### A television is not a voter
 
 `GET /api/party/{token}/game` resolves an existing guest session but **never

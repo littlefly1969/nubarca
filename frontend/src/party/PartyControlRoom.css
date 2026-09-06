@@ -1,0 +1,197 @@
+/* The control room.
+
+   Built entirely from the shared owner vocabulary — `.page-container`,
+   `.admin-page__head`, `.status-badge`, `.empty-state`, `.inline-error`,
+   `.btn-danger`, `Modal` — so it is a NubArca page and not a second dashboard.
+   What lives here is the layout of a live evening: the room, what is running,
+   what is next, and the one command that moves it.
+
+   Two rules the layout enforces rather than merely encourages:
+
+   THERE IS EXACTLY ONE FILLED BUTTON. The primary action is the only accent
+   fill on the page; skipping and finishing are outline and destructive
+   respectively. A host glancing down mid-sentence should not have to read.
+
+   THE COMMAND IS ALWAYS REACHABLE. On a phone the command row is sticky at the
+   bottom of the viewport, because the thing a host needs is the thing that
+   moves the party on, and it must never be below the fold. */
+
+.party-control { gap: 1.25rem; }
+
+/* ---- The room ------------------------------------------------------------ */
+
+.party-control-room {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.75rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+.party-control-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+.party-control-stat strong {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* A screen that has stopped polling is a different fact from one that never
+   started, and the badge says which in words before it says it in colour. */
+.party-control-link {
+  color: var(--accent);
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+/* ---- Now, and next ------------------------------------------------------- */
+
+.party-control-now {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 18rem);
+  gap: 1.25rem;
+  align-items: start;
+}
+.party-control-current { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+.party-control-eyebrow {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.party-control-votes {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+.party-control-votes strong {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  color: var(--text-primary);
+}
+/* The split reaches the host from the moment voting closes, because the host
+   decides when to reveal it. It is deliberately quiet: it is a fact to act on,
+   not the announcement — that belongs on the television. */
+.party-control-split { color: var(--text-muted); }
+
+.party-control-next {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-subtle);
+}
+.party-control-next h3 {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.party-control-qr {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.party-control-qr > div {
+  flex: 0 0 auto;
+  width: 5.5rem;
+  padding: 0.25rem;
+  border-radius: var(--radius-button);
+  background: var(--brand-cloud-white);
+}
+.party-control-qr svg { display: block; width: 100%; height: auto; }
+.party-control-qr p { margin: 0; font-size: 0.8125rem; }
+
+/* ---- Commands ------------------------------------------------------------ */
+
+.party-control-commands {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+/* THE one filled control on the page. */
+.party-control-primary {
+  min-height: 3rem;
+  padding: 0.65rem 1.5rem;
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-button);
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.party-control-primary:disabled { opacity: 0.55; cursor: progress; }
+.party-control-primary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.party-control-secondary {
+  min-height: 3rem;
+  padding: 0.65rem 1.1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+.party-control-secondary:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-strong); }
+.party-control-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+.party-control-secondary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.party-control-commands .btn-danger { min-height: 3rem; }
+
+.party-control-inline {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- Responsive ---------------------------------------------------------- */
+
+/* Tablet and below: one column, ordered status → now → next → command. */
+@media (max-width: 900px) {
+  .party-control-now { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  /* The command row is the one thing that must never be below the fold: a host
+     is holding this phone and the room is waiting. */
+  .party-control-commands {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin: 0 calc(-1 * var(--app-main-gutter, 1rem));
+    padding: 0.75rem var(--app-main-gutter, 1rem)
+      max(0.75rem, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border-default);
+    background: var(--surface-canvas);
+  }
+  .party-control-primary { flex: 1 1 100%; min-height: 3.25rem; }
+  .party-control-secondary,
+  .party-control-commands .btn-danger { flex: 1 1 8rem; }
+  .party-control-qr > div { width: 4.5rem; }
+}

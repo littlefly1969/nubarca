@@ -47,9 +47,12 @@ export function stageScene(snapshot: PartyGamePublicSnapshot | null): StageScene
 export function PartyTvStagePage() {
   const { token } = useParams<{ token: string }>();
   const { t } = useI18n();
-  // A television never joins: a display that mints a participant inflates the
-  // very count it is showing.
-  const { snapshot, connection, stale } = usePartyGameSnapshot(token, { join: false });
+  // A television never joins — a display that mints a participant inflates the
+  // very count it is showing — but it does SAY it is a display, which is what
+  // lets the control room answer "is a screen showing this".
+  const { snapshot, connection, stale } = usePartyGameSnapshot(token, {
+    join: false, asDisplay: true,
+  });
   const scene = stageScene(snapshot);
   const intro = useRoundIntro(snapshot?.roundId ?? null, scene, snapshot !== null);
   const remaining = useCountdown(scene === 'active' ? snapshot?.phaseEndsAt : null);

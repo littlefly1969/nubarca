@@ -25,6 +25,7 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.Property(p => p.VotesPerGuest).HasDefaultValue(PartyChallengeDefaults.VotesPerGuest);
         builder.Property(p => p.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.UpdatedAt).HasColumnType("timestamp with time zone");
+        builder.Property(p => p.LastDisplaySeenAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.RevokedAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.ExpiresAt).HasColumnType("timestamp with time zone");
 
