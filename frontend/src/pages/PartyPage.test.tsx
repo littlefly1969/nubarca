@@ -7,16 +7,16 @@ import {
   activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
 } from '../test-utils';
 import { I18nProvider } from '../i18n';
+import { SCAN_MIN_PASSES, SCAN_PASS_MS } from '../components/useFaceScan';
 
 /**
  * Ask for no motion.
  *
- * The face-search sheet holds a result back until its scan has swept the face
- * three times, so a backend answering instantly does not flash the effect past
- * before anyone can read it. These tests are about what a completed search does
- * to the GRID — the filter, the counts, the TV — not about that choreography,
- * which is tested where it lives. Reduced motion is a real configuration, and
- * under it there are no sweeps to wait for.
+ * This stills the sweep; it does NOT skip the wait. The sheet holds a result
+ * back until the face has been swept three times — for everyone — so the two
+ * tests below that complete a search sit through it exactly as a guest does.
+ * They are about what a completed search does to the GRID; the choreography
+ * itself is tested where it lives.
  */
 beforeEach(() => {
   vi.stubGlobal('matchMedia', (query: string) => ({
@@ -65,7 +65,14 @@ const items = {
   ],
 };
 
+/** Room for the three sweeps, plus slack for a loaded runner. */
+const SCAN_WAIT_MS = SCAN_PASS_MS * (SCAN_MIN_PASSES + 2);
+
 describe('PartyPage (public party landing)', () => {
+  // Two tests here complete a face search and therefore sit through the scan;
+  // a five-second default leaves no room for what they do afterwards.
+  vi.setConfig({ testTimeout: 20_000 });
+
   const hub = {
     albumName: 'Beach Party', itemCount: 1,
     coverUrl: '/api/party/tok-1/media/f1/preview',
@@ -467,7 +474,9 @@ describe('PartyPage (public party landing)', () => {
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
     await user.click(screen.getByTestId('party-face-submit'));
-    await screen.findByTestId('party-face-count');
+    // The sheet sweeps the face three times before it answers, so this waits
+    // as long as a guest does.
+    await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
     const tiles = screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img');
     expect(tiles).toHaveLength(1);
     expect(tiles[0]).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
@@ -715,7 +724,7 @@ describe('PartyPage (public party landing)', () => {
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
     await user.click(screen.getByTestId('party-face-submit'));
-    await screen.findByTestId('party-face-count');
+    await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
     await user.click(screen.getByTestId('party-face-show-results'));
     await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
 
