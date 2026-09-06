@@ -40,6 +40,7 @@ import { PartyPage } from './pages/PartyPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
+import { PartyTvStagePage } from './pages/PartyTvStagePage';
 import { PartyPrintPage } from './pages/PartyPrintPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
 import { PartyMessagesPage } from './pages/PartyMessagesPage';
@@ -66,6 +67,7 @@ export function App() {
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
           <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />
           <Route path="/party/:token/game" element={<PartyGamePage />} />
+          <Route path="/party/:token/tv" element={<PartyTvStagePage />} />
           {/* PUBLIC, unauthenticated party PRINT STUDIO. Its :token is a PRINT
               token, not the view one: a separate capability, resolved on every
               request, that can print but cannot browse the album. */}
