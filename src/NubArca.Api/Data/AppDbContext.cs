@@ -105,6 +105,7 @@ public class AppDbContext : DbContext
     // older interval-based slideshow interruption.
     public DbSet<PartyGameSession> PartyGameSessions => Set<PartyGameSession>();
     public DbSet<PartyGameRound> PartyGameRounds => Set<PartyGameRound>();
+    public DbSet<PartyGameVote> PartyGameVotes => Set<PartyGameVote>();
 
     // Short-lived anonymous "find your face" searches within a party album, and
     // their ranked (visibility-re-derived) matches. No selfie/query vector stored.

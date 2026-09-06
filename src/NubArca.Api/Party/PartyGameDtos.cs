@@ -28,6 +28,28 @@ public sealed record PartyGameChallengeDto(
 /// now", so the control room can omit illegal actions instead of disabling
 /// them. It is advisory: every command is validated again on arrival.</para>
 /// </summary>
+/// <summary>
+/// What the room has said, and how much of the room has said it.
+///
+/// <para><c>Received</c> and <c>Eligible</c> are safe at any moment: they say
+/// how many people have answered, never what they answered. <c>Yes</c>,
+/// <c>No</c> and <c>Passed</c> are the result, and they are null until the
+/// audience being served is allowed to know it — the owner from the moment
+/// voting closes, because the host decides when to reveal; a television or a
+/// guest only once it IS revealed.</para>
+///
+/// <para>Counts rather than a percentage: a percentage is presentation, and
+/// two surfaces rounding it differently would show a party two different
+/// results. <c>Passed</c> is on the server for the same reason — whether a tie
+/// counts as passing is a product rule with exactly one answer.</para>
+/// </summary>
+public sealed record PartyGameVotingDto(
+    int Received,
+    int Eligible,
+    int? Yes = null,
+    int? No = null,
+    bool? Passed = null);
+
 public sealed record PartyGameSnapshotDto(
     Guid AlbumId,
     Guid? SessionId,
@@ -43,7 +65,8 @@ public sealed record PartyGameSnapshotDto(
     DateTime? PhaseEndsAt,
     PartyGameChallengeDto? CurrentChallenge,
     PartyGameChallengeDto? NextChallenge,
-    IReadOnlyList<string> AvailableCommands);
+    IReadOnlyList<string> AvailableCommands,
+    PartyGameVotingDto? Voting = null);
 
 /// <summary>
 /// What a guest phone or a television is told. A strict subset: no session id,
@@ -61,7 +84,48 @@ public sealed record PartyGamePublicSnapshotDto(
     int RoundNumber,
     int TotalChallenges,
     DateTime? PhaseEndsAt,
-    PartyChallengePresentationDto? Challenge);
+    PartyChallengePresentationDto? Challenge,
+    // The identity of what a vote would be ABOUT. A guest quotes it, so a phone
+    // that fell behind cannot land last round's answer on this round's activity
+    // — and unlike the version, it is stable for the whole round, so an
+    // ordinary lagging poll does not cost somebody their vote.
+    Guid? RoundId = null,
+    PartyGameVotingDto? Voting = null,
+    // This caller's own current answer, when this caller has one. Null for a
+    // television, which holds no participant cookie and is never given one.
+    string? MyVote = null);
+
+public enum PartyGameVoteError
+{
+    /// The token, the album, the party or the game switch does not resolve.
+    NotFound,
+
+    /// There is no vote to cast: no game, no round, or a phase that is not
+    /// collecting answers — including the instant after the host closed it.
+    VotingClosed,
+
+    /// The guest is answering a round that is no longer the one being played.
+    StaleRound,
+
+    /// Not `yes` or `no`.
+    UnknownValue,
+}
+
+/// <summary>
+/// The outcome of one tap. A refusal still carries the current public snapshot
+/// wherever one exists, for the same reason an owner command does: the guest is
+/// holding a phone at a party, and the useful answer is the state of the game.
+/// </summary>
+public sealed record PartyGameVoteResult(
+    PartyGamePublicSnapshotDto? Snapshot,
+    PartyGameVoteError? Error)
+{
+    public static PartyGameVoteResult Ok(PartyGamePublicSnapshotDto snapshot) => new(snapshot, null);
+    public static PartyGameVoteResult Fail(
+        PartyGameVoteError error, PartyGamePublicSnapshotDto? current = null) => new(current, error);
+}
+
+public sealed record PartyGameVoteRequest(Guid? RoundId, string? Value);
 
 public enum PartyGameCommandError
 {

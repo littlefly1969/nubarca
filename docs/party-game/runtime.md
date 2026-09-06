@@ -114,6 +114,62 @@ recovers from a refresh, a backgrounded tab or a dropped network by reading the
 snapshot again — which is the entire reconnection story, and needs no
 reconnection code.
 
+## Voting
+
+The room answers one question per round: did they do it? `yes` or `no`, one
+current answer per guest, replaced rather than appended when somebody changes
+their mind while voting is open.
+
+**The integrity constraint is the database's**, not a code path's: a unique
+index on `(round, participant)`. Two taps arriving together cannot both insert,
+and the loser is not an error — the guest's answer is recorded either way, so
+the service re-reads and reports what the row says.
+
+**The client never decides whether a vote is valid.** The participant, the
+session, the round being played, the phase and the activity's own voting mode
+are all re-read on every tap. That is also what makes the exact close boundary
+clean: a vote that left a phone while voting was open and landed after the host
+closed it is refused with `voting_closed`, and nothing is written.
+
+**A vote names the round it answers.** A phone whose poll fell behind must not
+land last round's verdict on this round's activity, so the request quotes
+`roundId` and a mismatch is `stale_round`. The round id is deliberately used
+rather than the version: it is stable for a whole round, so an ordinary lagging
+poll never costs somebody their vote, whereas the version moves on every phase
+change.
+
+### Who may know the result, and when
+
+| | during `voting_open` | at `voting_closed` | at `result` |
+| --- | --- | --- | --- |
+| received / eligible | yes | yes | yes |
+| yes / no / passed | **no** | **owner only** | yes |
+
+Participation is safe at any moment: it says how many people have answered,
+never what they answered. The split is the result, and the host decides when the
+room sees it — which is the whole point of having a host. Counts rather than a
+percentage, because a percentage is presentation and two surfaces rounding it
+differently would show a party two different answers; `passed` is on the server
+for the same reason, since whether a tie counts as passing is a product rule
+with exactly one answer. (It does not.)
+
+**Eligible** is participants on this link seen within
+`PartyGamePresence.WindowSeconds` (180s), floored at the number of votes
+received — whoever voted is by definition in the room. It is a soft signal about
+a party, not an attendance register.
+
+### A television is not a voter
+
+`GET /api/party/{token}/game` resolves an existing guest session but **never
+mints one**, because a display polls it too and minting there would inflate the
+very count the scene is showing. Refreshing an existing session's presence IS a
+write, deliberately: it is what keeps a guest holding the voting screen open
+counted as being in the room.
+
+`POST /api/party/{token}/game/join` is the guest saying "I am here" — it mints
+the participant cookie, and it is a POST precisely so a polling television can
+never do it by accident.
+
 ## API
 
 | Method | Route | Caller |
@@ -121,6 +177,8 @@ reconnection code.
 | `GET` | `/api/albums/{albumId}/party-game` | owner cookie |
 | `POST` | `/api/albums/{albumId}/party-game/commands` | owner cookie |
 | `GET` | `/api/party/{token}/game` | anonymous, view token |
+| `POST` | `/api/party/{token}/game/join` | anonymous, view token |
+| `POST` | `/api/party/{token}/game/vote` | anonymous, view token |
 
 The owner snapshot carries `availableCommands` — the server's own answer to
 "what may I do now" — so a control room can omit an illegal command rather than
@@ -133,11 +191,13 @@ off all collapse to `404`, as everywhere else in Party.
 ### What crosses the token boundary
 
 The public snapshot is a strict subset: album name, status, phase, version,
-round number, total activities, the phase deadline, and the activity itself —
-the last only in the phases that put it on a screen. No session id, no round
-history, no command vocabulary, no next activity, no vote data. The activity's
-media URL is built by the endpoint against the caller's own token; the service
-returns a token-less sentinel, exactly as the guest challenge list does.
+round number, total activities, the phase deadline, the activity itself, the
+round id, the participation counts and this caller's own answer — the last
+three only where they apply, and the activity only in the phases that put it on
+a screen. No session id, no round history, no command vocabulary, no next
+activity, and no result until it is revealed. The activity's media URL is built
+by the endpoint against the caller's own token; the service returns a token-less
+sentinel, exactly as the guest challenge list does.
 
 ## Schema
 
@@ -148,6 +208,12 @@ returns a token-less sentinel, exactly as the guest challenge list does.
   mints a new link, so a new party genuinely is a new game.
 - `Version` defaults to 1 and is the concurrency token.
 - Check constraints pin `Status` and `Phase` to the vocabulary above.
+
+`party_game_votes`
+
+- unique on `(round, participant)` — one current answer per guest per round,
+  held by the database rather than by whichever code path remembered to check.
+- `Value` is `yes` or `no`, pinned by a check constraint.
 
 `party_game_rounds`
 

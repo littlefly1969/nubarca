@@ -61,6 +61,23 @@ public sealed class PartyParticipantService : IPartyParticipantService
         return new PartyParticipantResolution(participant.Id, newToken);
     }
 
+    public async Task<Guid?> ResolveAsync(
+        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken)) return null;
+        var hash = PartyLinkService.HashToken(rawToken);
+        var existing = await _db.PartyParticipants
+            .FirstOrDefaultAsync(
+                p => p.PartyAlbumLinkId == partyAlbumLinkId && p.TokenHash == hash,
+                cancellationToken);
+        if (existing is null) return null;
+        // A presence heartbeat, not game state: it is what keeps a guest holding
+        // the voting screen open counted as being in the room.
+        existing.LastSeenAt = _clock.GetUtcNow().UtcDateTime;
+        await _db.SaveChangesAsync(cancellationToken);
+        return existing.Id;
+    }
+
     public async Task<bool> TryClaimChallengeVoteAsync(
         Guid participantId, int max, CancellationToken cancellationToken = default)
     {
