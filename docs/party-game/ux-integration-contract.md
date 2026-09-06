@@ -459,3 +459,40 @@ square photographs are all correct without the card ever measuring a bitmap.
 This closes the "no stepper/timer/duplicate-renderer" gap only for the renderer.
 `PartyChallengeManager` now uses it instead of its own copy of the composition,
 and `.party-game-tv-preview` is gone.
+
+## 10. Addendum — the composer (SLICE 03)
+
+Preparing an activity is three steps in a `Modal`, opened from the deck inside
+the album settings sheet. The page it lives on is unchanged.
+
+| Step | What it decides |
+| --- | --- |
+| Activity | kind, title, instructions, photograph |
+| Rules | duration, how the room decides, the question |
+| Preview | the real renderer, included/excluded, where it will be played |
+
+Gaps this closes, from §7:
+
+- **`window.confirm` for deletion** — gone. Deleting an activity is a `Modal`
+  that names what is being lost, which a browser dialog could never do.
+- **`<select>` as a media picker** — gone. The picker is a grid of the album's
+  own photographs; the previous answer asked a host to remember what
+  `IMG_4821.jpg` looks like.
+- **No stepper pattern** — `.party-composer-steps` extends the import wizard's
+  numbered `li` + `.is-active` rather than inventing a second stepper.
+
+Unsaved work is never lost to a stray keystroke: while the draft is dirty the
+overlay stops being dismissable (`dismissable={!dirty}` plus `ownsKeyboard`, so
+Escape cannot reach the settings sheet underneath either), and closing
+deliberately asks once, in place, with the destructive answer marked
+destructive.
+
+Ordering stays in the deck, where it already worked. Step 3 states the position
+as a fact and feeds it to the card's `context`, so the preview shows the
+"Activity 4 of 6" line the television will show.
+
+Everything is built from the shared vocabulary — `.form-grid`, `.field`,
+`.media-kind-tabs`, `.status-badge`, `.btn-danger`, `Modal` — and
+`PartyDeck.css` holds only the four things that vocabulary lacks: a deck row, a
+stepper, a photo picker and two choice grids. The rules it replaced carried nine
+colour literals.

@@ -51,6 +51,9 @@ public sealed class PartyChallengeService : IPartyChallengeService
             Id = Guid.NewGuid(), AlbumId = albumId, Title = request.Title!.Trim(),
             Body = request.Body!.Trim(), Kind = request.Kind!, MediaFileItemId = request.MediaFileItemId,
             IsEnabled = request.IsEnabled, SortOrder = order, CreatedAt = now, UpdatedAt = now,
+            DurationSeconds = request.DurationSeconds,
+            VotingMode = request.VotingMode ?? PartyChallengeVotingModes.Binary,
+            VoteQuestion = NormalizeVoteQuestion(request.VoteQuestion),
         };
         _db.PartyChallenges.Add(row);
         await _db.SaveChangesAsync(ct);
@@ -71,6 +74,11 @@ public sealed class PartyChallengeService : IPartyChallengeService
         row.Kind = request.Kind!;
         row.MediaFileItemId = request.MediaFileItemId;
         row.IsEnabled = request.IsEnabled;
+        row.DurationSeconds = request.DurationSeconds;
+        // An omitted mode keeps whatever the activity already had, so a caller
+        // that predates the composer cannot silently reset one.
+        row.VotingMode = request.VotingMode ?? row.VotingMode;
+        row.VoteQuestion = NormalizeVoteQuestion(request.VoteQuestion);
         row.UpdatedAt = Now;
         if (!row.IsEnabled) await ReleaseVotesForChallengeAsync(row.Id, ct);
         await _db.SaveChangesAsync(ct);
@@ -360,7 +368,11 @@ public sealed class PartyChallengeService : IPartyChallengeService
         if (session.ActiveChallengeId is Guid id)
         {
             var row = await _db.PartyChallenges.AsNoTracking().Where(x => x.Id == id)
-                .Select(x => new { x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId, x.AlbumId })
+                .Select(x => new
+                {
+                    x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId, x.AlbumId,
+                    x.DurationSeconds, x.VotingMode, x.VoteQuestion,
+                })
                 .FirstOrDefaultAsync(ct);
             if (row is not null)
             {
@@ -369,7 +381,8 @@ public sealed class PartyChallengeService : IPartyChallengeService
                         .AnyAsync(x => x.AlbumId == row.AlbumId && x.FileItemId == mediaId, ct);
                 active = new PartyChallengePresentationDto(
                     row.Id, row.Title, row.Body, row.Kind,
-                    mediaOk ? $"/api/tv/media/{row.MediaFileItemId}/preview" : null);
+                    mediaOk ? $"/api/tv/media/{row.MediaFileItemId}/preview" : null,
+                    row.DurationSeconds, row.VotingMode, row.VoteQuestion);
             }
         }
         return new PartyPlaybackSnapshotDto(session.Mode, active, session.NextChallengeAt, session.CompletedCount);
@@ -410,12 +423,24 @@ public sealed class PartyChallengeService : IPartyChallengeService
     private static bool Valid(PartyChallengeWriteRequest r) =>
         !string.IsNullOrWhiteSpace(r.Title) && r.Title.Trim().Length <= PartyChallengeLimits.MaxTitleLength
         && !string.IsNullOrWhiteSpace(r.Body) && r.Body.Trim().Length <= PartyChallengeLimits.MaxBodyLength
-        && PartyChallengeKinds.IsKnown(r.Kind);
+        && PartyChallengeKinds.IsKnown(r.Kind)
+        && PartyChallengeLimits.IsValidDuration(r.DurationSeconds)
+        // Null means "keep the default", so only a value that is present has to
+        // be a mode the runtime can actually run.
+        && (r.VotingMode is null || PartyChallengeVotingModes.IsKnown(r.VotingMode))
+        && (r.VoteQuestion is null
+            || r.VoteQuestion.Trim().Length <= PartyChallengeLimits.MaxVoteQuestionLength);
+
+    // A blank question is no question: the room gets the localized default
+    // rather than an empty line where one was expected.
+    private static string? NormalizeVoteQuestion(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static PartyChallengeDto OwnerDto(PartyChallenge x, int votes) =>
         new(x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId,
             x.MediaFileItemId is Guid id ? $"/api/files/{id}/thumbnail?size=medium" : null,
-            x.IsEnabled, x.SortOrder, votes, x.CreatedAt, x.UpdatedAt);
+            x.IsEnabled, x.SortOrder, votes, x.CreatedAt, x.UpdatedAt,
+            x.DurationSeconds, x.VotingMode, x.VoteQuestion);
 
     private async Task ReleaseVotesForChallengeAsync(Guid challengeId, CancellationToken ct)
     {

@@ -1,26 +1,35 @@
 import { useEffect, useState } from 'react';
 import {
-  createPartyChallenge, deletePartyChallenge, listAlbumItems, listPartyChallenges,
-  reorderPartyChallenges, updatePartyChallenge,
-  type AlbumItemSummary, type PartyChallenge, type PartyChallengeKind,
+  deletePartyChallenge, listAlbumItems, listPartyChallenges, reorderPartyChallenges,
+  type AlbumItemSummary, type PartyChallenge,
 } from '@nubarca/api-client';
-import { useI18n } from '../i18n';
+import { Modal } from '../components/Overlay';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
+import { useI18n } from '../i18n';
+import { PartyChallengeComposer } from './PartyChallengeComposer';
+import './PartyDeck.css';
 
-const EMPTY = {
-  title: '', body: '', kind: 'dare' as PartyChallengeKind,
-  mediaFileItemId: null as string | null, isEnabled: true,
-};
+// The deck: what the host has prepared, in the order the game will play it.
+//
+// This surface used to be an editor AND a list in one column, which meant the
+// form was always on screen whether or not anybody was writing anything. Editing
+// one activity is now its own overlay (PartyChallengeComposer) and what remains
+// here is the deck itself: read it, reorder it, and open one.
+//
+// The rows render the canonical card in `compact`, so an activity looks like
+// itself everywhere — the list, the preview and the television are the same
+// component at three sizes.
+
+type Editing = { challenge: PartyChallenge | null } | null;
 
 export function PartyChallengeManager({ albumId }: { albumId: string }) {
   const { t } = useI18n();
   const [items, setItems] = useState<PartyChallenge[]>([]);
   const [media, setMedia] = useState<AlbumItemSummary[]>([]);
-  const [draft, setDraft] = useState(EMPTY);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Editing>(null);
+  const [deleting, setDeleting] = useState<PartyChallenge | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  const selectedMedia = media.find((x) => x.fileItemId === draft.mediaFileItemId);
 
   const refresh = async () => {
     const [deck, members] = await Promise.all([listPartyChallenges(albumId), listAlbumItems(albumId)]);
@@ -29,29 +38,16 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
   };
   useEffect(() => { void refresh().catch(() => setError(true)); }, [albumId]);
 
-  const edit = (item: PartyChallenge) => {
-    setEditing(item.id);
-    setDraft({
-      title: item.title, body: item.body, kind: item.kind,
-      mediaFileItemId: item.mediaFileItemId, isEnabled: item.isEnabled,
-    });
-  };
-  const reset = () => { setEditing(null); setDraft(EMPTY); };
-  const save = async () => {
-    if (!draft.title.trim() || !draft.body.trim()) return;
-    setBusy(true); setError(false);
+  const remove = async () => {
+    if (!deleting) return;
+    setBusy(true);
     try {
-      if (editing) await updatePartyChallenge(albumId, editing, draft);
-      else await createPartyChallenge(albumId, draft);
-      reset(); await refresh();
+      await deletePartyChallenge(albumId, deleting.id);
+      setDeleting(null);
+      await refresh();
     } catch { setError(true); } finally { setBusy(false); }
   };
-  const remove = async (id: string) => {
-    if (!window.confirm(t('partyGame.deleteConfirm'))) return;
-    setBusy(true);
-    try { await deletePartyChallenge(albumId, id); await refresh(); }
-    catch { setError(true); } finally { setBusy(false); }
-  };
+
   const move = async (at: number, delta: -1 | 1) => {
     const next = [...items];
     const to = at + delta;
@@ -64,71 +60,96 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
 
   return (
     <section className="party-game-manager" data-testid="party-challenge-manager">
-      <h4>{t('partyGame.deckTitle')}</h4>
-      <p className="muted">{t('partyGame.deckHelp')}</p>
-      <div className="party-game-editor">
-        <label>{t('partyGame.challengeTitle')}<input maxLength={100} value={draft.title}
-          onChange={(e) => setDraft((x) => ({ ...x, title: e.target.value }))} /></label>
-        <label>{t('partyGame.challengeBody')}<textarea maxLength={500} value={draft.body}
-          onChange={(e) => setDraft((x) => ({ ...x, body: e.target.value }))} /></label>
-        <label>{t('partyGame.kind')}<select value={draft.kind}
-          onChange={(e) => setDraft((x) => ({ ...x, kind: e.target.value as PartyChallengeKind }))}>
-          <option value="dare">{t('partyChallenges.kind.dare')}</option>
-          <option value="penalty">{t('partyChallenges.kind.penalty')}</option>
-          <option value="guess">{t('partyChallenges.kind.guess')}</option>
-          <option value="custom">{t('partyChallenges.kind.custom')}</option>
-        </select></label>
-        <label>{t('partyGame.photo')}<select value={draft.mediaFileItemId ?? ''}
-          onChange={(e) => setDraft((x) => ({ ...x, mediaFileItemId: e.target.value || null }))}>
-          <option value="">{t('partyGame.noPhoto')}</option>
-          {media.map((x) => <option key={x.fileItemId} value={x.fileItemId}>{x.name}</option>)}
-        </select></label>
-        <label className="album-tv-label"><input type="checkbox" checked={draft.isEnabled}
-          onChange={(e) => setDraft((x) => ({ ...x, isEnabled: e.target.checked }))} />
-          <span>{t('partyGame.enabled')}</span></label>
-        <div className="party-game-editor-actions">
-          <button type="button" disabled={busy || !draft.title.trim() || !draft.body.trim()} onClick={() => void save()}>
-            {editing ? t('partyGame.update') : t('partyGame.add')}
-          </button>
-          {editing && <button type="button" onClick={reset}>{t('common.cancel')}</button>}
+      <div className="party-deck-head">
+        <div>
+          <h4>{t('partyGame.deckTitle')}</h4>
+          <p className="muted">{t('partyGame.deckHelp')}</p>
         </div>
-        {(draft.title.trim() || draft.body.trim()) && (
-          <div className="party-game-preview-wrap">
-            <strong>{t('partyGame.preview')}</strong>
-            {/* THE renderer, in preview mode. This used to be a second copy of
-                the television's composition, which is exactly how a preview
-                stops predicting anything. */}
-            <PartyChallengeCard
-              mode="preview"
-              testId="party-game-tv-preview"
-              titlePlaceholder={t('partyGame.challengeTitle')}
-              challenge={{
-                kind: draft.kind,
-                title: draft.title,
-                body: draft.body,
-                mediaUrl: selectedMedia?.thumbnailUrl ?? null,
-              }}
-            />
-          </div>
-        )}
+        <button
+          type="button"
+          className="party-composer-primary"
+          data-testid="party-deck-add"
+          onClick={() => setEditing({ challenge: null })}
+        >
+          {t('partyComposer.createTitle')}
+        </button>
       </div>
+
       {error && <p className="inline-error" role="alert">{t('partyGame.error')}</p>}
-      {items.length === 0 ? <p className="muted">{t('partyGame.empty')}</p> : (
-        <ol className="party-game-owner-list">
+
+      {items.length === 0 ? <p className="empty-state">{t('partyGame.empty')}</p> : (
+        <ol className="party-deck-list">
           {items.map((item, at) => (
-            <li key={item.id}>
-              {item.mediaUrl && <img src={item.mediaUrl} alt="" />}
-              <div><strong>{item.title}</strong><p>{item.body}</p>
-                <small>{item.voteCount} {t('partyGame.votes')} · {item.isEnabled ? t('partyGame.on') : t('partyGame.off')}</small></div>
-              <div className="party-game-row-actions">
-                <button type="button" aria-label={t('partyGame.moveUp')} disabled={at === 0 || busy} onClick={() => void move(at, -1)}>↑</button>
-                <button type="button" aria-label={t('partyGame.moveDown')} disabled={at === items.length - 1 || busy} onClick={() => void move(at, 1)}>↓</button>
-                <button type="button" disabled={busy} onClick={() => edit(item)}>{t('partyGame.edit')}</button>
-                <button type="button" disabled={busy} onClick={() => void remove(item.id)}>{t('common.delete')}</button>
+            <li key={item.id} className={item.isEnabled ? undefined : 'is-off'}>
+              <PartyChallengeCard
+                mode="compact"
+                challenge={{
+                  kind: item.kind,
+                  title: item.title,
+                  body: item.body,
+                  mediaUrl: item.mediaUrl,
+                  durationSeconds: item.durationSeconds,
+                }}
+                context={{ round: at + 1, total: items.length }}
+                testId={`party-deck-item-${item.id}`}
+              />
+              <div className="party-deck-row-actions">
+                {/* An activity that is off is stated, not merely dimmed. */}
+                <span className={`status-badge status-badge--${item.isEnabled ? 'on' : 'off'}`}>
+                  {item.isEnabled ? t('partyGame.on') : t('partyGame.off')}
+                </span>
+                <button type="button" aria-label={t('partyGame.moveUp')}
+                  disabled={at === 0 || busy} onClick={() => void move(at, -1)}>↑</button>
+                <button type="button" aria-label={t('partyGame.moveDown')}
+                  disabled={at === items.length - 1 || busy} onClick={() => void move(at, 1)}>↓</button>
+                <button type="button" disabled={busy}
+                  onClick={() => setEditing({ challenge: item })}>{t('partyGame.edit')}</button>
+                <button type="button" className="btn-danger" disabled={busy}
+                  onClick={() => setDeleting(item)}>{t('common.delete')}</button>
               </div>
             </li>
           ))}
         </ol>
+      )}
+
+      {editing && (
+        <PartyChallengeComposer
+          albumId={albumId}
+          media={media}
+          challenge={editing.challenge}
+          position={editing.challenge
+            ? items.findIndex((x) => x.id === editing.challenge!.id) + 1
+            : items.length + 1}
+          total={editing.challenge ? items.length : items.length + 1}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void refresh().catch(() => setError(true)); }}
+        />
+      )}
+
+      {deleting && (
+        // Deleting an activity used to be window.confirm, which is a browser
+        // dialog with no product in it and no way to say what is being lost.
+        <Modal
+          title={t('partyDeck.deleteTitle')}
+          onClose={() => setDeleting(null)}
+          dismissable={!busy}
+          ownsKeyboard
+          layer="workspace"
+          testId="party-deck-delete"
+          footer={(
+            <div className="party-composer-actions">
+              <button type="button" disabled={busy} onClick={() => setDeleting(null)}>
+                {t('common.cancel')}
+              </button>
+              <button type="button" className="btn-danger" data-testid="party-deck-delete-confirm"
+                disabled={busy} onClick={() => void remove()}>
+                {t('common.delete')}
+              </button>
+            </div>
+          )}
+        >
+          <p>{t('partyDeck.deleteBody', { title: deleting.title })}</p>
+        </Modal>
       )}
     </section>
   );
