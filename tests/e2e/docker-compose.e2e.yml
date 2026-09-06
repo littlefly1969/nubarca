@@ -150,8 +150,14 @@ services:
   # the suite through the Vite dev proxy.
   web:
     build:
-      context: ../../frontend
-      dockerfile: Dockerfile
+      # The REPOSITORY ROOT, not frontend/. The frontend typechecks the
+      # source-shared @nubarca/contracts package through ../packages/contracts,
+      # so its Dockerfile copies both and the production build
+      # (build-production-images.yml) has used the root context since. This file
+      # kept pointing at frontend/ and the web image stopped building at all —
+      # a gate that cannot start its own stack certifies nothing.
+      context: ../..
+      dockerfile: frontend/Dockerfile
       labels:
         nubarca.e2e.source-fingerprint: "${E2E_SOURCE_FINGERPRINT:-unset}"
     image: nubarca-e2e-web:local
