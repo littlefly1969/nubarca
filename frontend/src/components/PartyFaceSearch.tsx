@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { frameFace, type FaceBox } from './faceScanCrop';
+import { SCAN_PASS_MS, useFaceScan } from './useFaceScan';
 import {
   ApiError,
   activatePartyFaceSearchTv,
@@ -132,6 +134,12 @@ export function PartyFaceSearch({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [state, setState] = useState<FaceState>({ kind: 'idle' });
   const [tvState, setTvState] = useState<TvState>('idle');
+  // Where the face is in THIS selfie, so the scanner tile can frame it. Held
+  // in component state and nowhere else: it dies with the selfie it describes.
+  const [faceBox, setFaceBox] = useState<FaceBox | null>(null);
+  // The selfie's own shape, learned when the preview decodes. Needed because a
+  // square crop in pixels is not a square crop in fractions.
+  const [selfieAspect, setSelfieAspect] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   // The in-flight search, so closing or cancelling can stop it. Without this a
   // response arriving after the guest walked away re-applied a filter to an
@@ -143,12 +151,25 @@ export function PartyFaceSearch({
     requestRef.current = null;
   }, []);
 
+  // Releasing a result is the scan's job, not the request's: it hands the
+  // answer over once its passes are done, which may be after the answer landed.
+  const scan = useFaceScan<PartyFaceSearchResponse>(useCallback((res) => {
+    setState({ kind: 'done', res });
+    // A successful search filters ONLY this phone; the TV is untouched.
+    if (res.status === 'ready' && res.searchId && res.items.length > 0) {
+      onFilterChange({ searchId: res.searchId, itemIds: res.items.map((i) => i.id) });
+    }
+  }, [onFilterChange]));
+
   const reset = useCallback(() => {
     setFile(null);
     setState({ kind: 'idle' });
     setTvState('idle');
+    setFaceBox(null);
+    setSelfieAspect(0);
+    scan.reset();
     if (inputRef.current) inputRef.current.value = '';
-  }, []);
+  }, [scan]);
 
   // Local preview of the chosen selfie. Nothing is uploaded until the guest
   // confirms the search; the object URL is released as soon as it is replaced.
@@ -159,9 +180,17 @@ export function PartyFaceSearch({
     }
     const url = URL.createObjectURL(file);
     setPreviewUrl(url);
+    // A different selfie means the box from the last one describes a face that
+    // is no longer on screen. Drop it, and stop any scan still sweeping over it.
+    setFaceBox(null);
+    setSelfieAspect(0);
+    scan.reset();
     return () => {
       if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url);
     };
+    // `scan` is stable; listing it would re-run this on every render and
+    // revoke a preview URL the guest is still looking at.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
   useEffect(() => abortInFlight, [abortInFlight]);
@@ -180,6 +209,8 @@ export function PartyFaceSearch({
     const ctrl = new AbortController();
     requestRef.current = ctrl;
     setState({ kind: 'searching' });
+    setFaceBox(null);
+    scan.begin();
     setTvState('idle');
     onFilterChange(null);
     downscaleSelfie(file)
@@ -189,15 +220,20 @@ export function PartyFaceSearch({
         // has moved on, so this answer changes nothing.
         if (ctrl.signal.aborted) return;
         requestRef.current = null;
-        setState({ kind: 'done', res });
-        // A successful search filters ONLY this phone; the TV is untouched.
-        if (res.status === 'ready' && res.searchId && res.items.length > 0) {
-          onFilterChange({ searchId: res.searchId, itemIds: res.items.map((i) => i.id) });
-        }
+        // The FACE lands now, the RESULT waits. Two different things arrive in
+        // the same response and they are shown at different moments on purpose:
+        // the guest watches the tile snap onto their own face and the line keep
+        // sweeping over it, which is the whole point of the effect. Showing the
+        // matches at the same instant would throw that away, and an answer in
+        // 80ms would flash the lot past before anyone could read it.
+        setFaceBox(res.face ?? null);
+        scan.settle(res);
       })
       .catch((err: unknown) => {
         if (ctrl.signal.aborted) return;
         requestRef.current = null;
+        // A failure is not a scan to sit through.
+        scan.reset();
         // A 404 (party revoked mid-search) or any unexpected error → generic error.
         if (err instanceof ApiError) {
           setState({ kind: 'error' });
@@ -205,7 +241,7 @@ export function PartyFaceSearch({
         }
         setState({ kind: 'error' });
       });
-  }, [file, token, onFilterChange, abortInFlight]);
+  }, [file, token, abortInFlight, scan]);
 
   const showOnTv = useCallback(() => {
     if (state.kind !== 'done' || !state.res.searchId || state.res.items.length === 0) return;
@@ -272,10 +308,46 @@ export function PartyFaceSearch({
     if (searching) {
       return (
         <div className="party-face-stage party-face-stage--searching">
-          <span className="party-face-scanner" aria-hidden="true">
+          {/* The tile that was already here. Once the server says where the
+              face is, the same image is pushed and scaled so that face fills
+              it — a crop, not a second frame, and not a box drawn on top. The
+              bytes never leave the phone: this is CSS on an image it already
+              decoded. */}
+          <span
+            className="party-face-scanner"
+            data-testid="party-face-scanner"
+            data-framed={faceBox ? 'face' : 'selfie'}
+            aria-hidden="true"
+          >
             {previewUrl
-              ? <img className="party-face-scanner-img" src={previewUrl} alt="" />
+              ? (
+                <img
+                  className="party-face-scanner-img"
+                  data-testid="party-face-scanner-img"
+                  src={previewUrl}
+                  alt=""
+                  style={faceBox ? frameFace(faceBox, selfieAspect) : undefined}
+                  onLoad={(e) => {
+                    const { naturalWidth, naturalHeight } = e.currentTarget;
+                    if (naturalWidth > 0 && naturalHeight > 0) {
+                      setSelfieAspect(naturalWidth / naturalHeight);
+                    }
+                  }}
+                />
+              )
               : <FaceFrameIcon />}
+            {/* Sweeps while the search runs. Not a progress bar: there is no
+                progress to report, and pretending otherwise would be inventing
+                a number. */}
+            {scan.scanning && (
+              <span
+                className="party-face-scanline"
+                data-testid="party-face-scanline"
+                // From the constant the gate counts in, so the sweeps a guest
+                // watches and the sweeps the code waits for are the same thing.
+                style={{ animationDuration: `${SCAN_PASS_MS}ms` }}
+              />
+            )}
           </span>
           <p className="party-face-lede" role="status">{t('partyFace.searching')}</p>
         </div>

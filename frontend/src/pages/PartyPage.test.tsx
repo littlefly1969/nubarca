@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -7,6 +7,29 @@ import {
   activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
 } from '../test-utils';
 import { I18nProvider } from '../i18n';
+
+/**
+ * Ask for no motion.
+ *
+ * The face-search sheet holds a result back until its scan has swept the face
+ * three times, so a backend answering instantly does not flash the effect past
+ * before anyone can read it. These tests are about what a completed search does
+ * to the GRID — the filter, the counts, the TV — not about that choreography,
+ * which is tested where it lives. Reduced motion is a real configuration, and
+ * under it there are no sweeps to wait for.
+ */
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+  }));
+});
 
 afterEach(() => {
   cleanup();

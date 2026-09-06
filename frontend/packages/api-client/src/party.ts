@@ -508,6 +508,22 @@ export function uploadToPartyWithProgress(
 // / vector is ever returned.
 export type PartyFaceSearchStatus = 'ready' | 'no_face' | 'invalid_image' | 'unavailable';
 
+/**
+ * Where the detected face is, as FRACTIONS of the analysed image.
+ *
+ * Fractions because the phone downscales the selfie before uploading — a pixel
+ * box would be in the wrong units the moment it was drawn on what the phone
+ * holds. And orientation agrees without arranging it: the browser decodes with
+ * `imageOrientation: 'from-image'` and the server auto-orients, so "upright"
+ * means the same thing at both ends.
+ */
+export interface PartyFaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface PartyFaceSearchResponse {
   status: PartyFaceSearchStatus;
   // Present only for a ready search (so the guest/TV can re-fetch it).
@@ -515,6 +531,9 @@ export interface PartyFaceSearchResponse {
   resultCount: number;
   // Party-safe media items (same metadata-stripped derived URLs as the grid).
   items: PartyItem[];
+  // Only on a completed search, and only enough to frame the selfie the phone
+  // already has — no landmarks, no descriptor, no score.
+  face?: PartyFaceBox | null;
 }
 
 // Upload one selfie and search THIS party album for matching photos. The server
