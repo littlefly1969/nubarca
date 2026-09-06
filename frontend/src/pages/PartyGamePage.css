@@ -132,6 +132,13 @@
 .party-game-answer:active:not(:disabled) { transform: scale(0.97); }
 .party-game-answer:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 3px; }
 .party-game-answer:disabled { opacity: 0.6; }
+/* The answer being sent stays at full strength and holds its pressed shape:
+   the tap is acknowledged by the button itself, not by waiting for the server. */
+.party-game-answer[data-pending='true'] {
+  opacity: 1;
+  border-color: var(--brand-cyan-glow);
+  transform: scale(0.97);
+}
 /* The chosen answer is filled AND checked: state never rests on colour. */
 .party-game-answer[aria-pressed='true'] {
   border-color: var(--brand-cyan-glow);
