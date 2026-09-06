@@ -79,6 +79,8 @@ describe('PartyPage (public party landing)', () => {
     contributionUrl: '/party/upload-token/upload', gameEnabled: true,
     // Null unless printing would really work right now — the server decides.
     printUrl: null,
+    // Same rule for the hosted game: a url is the card, a null is no card.
+    gameUrl: null,
   };
 
   it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
@@ -807,7 +809,7 @@ describe('PartyPage (public party landing)', () => {
   // its own enabled→present / disabled→absent pair here.
 
   it('derives the visible deck from availability, not from the JSX', async () => {
-    mockHub({ gameEnabled: true, printUrl: null });
+    mockHub({ gameEnabled: true, printUrl: null, gameUrl: '/party/tok-1/game' });
     render(wrapper());
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
     // Exactly the capabilities this party has, each stating its tier. Printing
@@ -817,9 +819,27 @@ describe('PartyPage (public party landing)', () => {
       .toEqual([
         'party-capability-face:signature',
         'party-capability-dedication:activity',
+        'party-capability-game:activity',
         'party-capability-challenges:activity',
         'party-capability-album:utility',
       ]);
+  });
+
+  it('renders the live game ONLY while the server offers a game URL', async () => {
+    // The hosted game follows the print rule exactly: the server states where
+    // the capability lives, and the hub derives no route from a boolean.
+    mockHub({ gameUrl: '/party/tok-1/game' });
+    const on = render(wrapper());
+    expect(await screen.findByTestId('party-capability-game')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Il gioco dal vivo/i }))
+      .toHaveAttribute('href', '/party/tok-1/game');
+    on.unmount();
+
+    mockHub({ gameUrl: null });
+    render(wrapper());
+    await screen.findByTestId('party-capability-album');
+    expect(screen.queryByTestId('party-capability-game')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Il gioco dal vivo/i })).not.toBeInTheDocument();
   });
 
   it('renders the challenges capability ONLY when the party game is enabled', async () => {

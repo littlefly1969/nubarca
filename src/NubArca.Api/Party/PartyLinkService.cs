@@ -436,6 +436,8 @@ public sealed class PartyLinkService : IPartyLinkService
 
     internal static string BuildPrintUrl(string printToken) => $"/party/{printToken}/print";
 
+    internal static string BuildGameUrl(string viewToken) => $"/party/{viewToken}/game";
+
     private static string BuildPartyUrl(string token) => $"/party/{token}";
     private static string BuildUploadUrl(string uploadToken) => $"/party/{uploadToken}/upload";
 }

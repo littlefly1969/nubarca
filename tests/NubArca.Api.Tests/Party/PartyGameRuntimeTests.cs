@@ -323,6 +323,25 @@ public sealed class PartyGameRuntimeTests : IDisposable
             $"/api/albums/{album}/party-challenges/{playing}")).StatusCode);
     }
 
+    [Fact]
+    public async Task The_guest_hub_is_told_where_the_game_lives_or_nothing_at_all()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await SetUpGameAsync(owner, challenges: 1);
+        var token = await ViewTokenAsync(owner, album);
+
+        var hub = await (await _factory.CreateClient().GetAsync($"/api/party/{token}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal($"/party/{token}/game", hub.GetProperty("gameUrl").GetString());
+
+        // Turning the game off removes the capability rather than disabling it:
+        // a null url is the whole answer, exactly as printing works.
+        await SetGameEnabledAsync(owner, album, enabled: false);
+        var without = await (await _factory.CreateClient().GetAsync($"/api/party/{token}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(JsonValueKind.Null, without.GetProperty("gameUrl").ValueKind);
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private async Task<Guid> SetUpGameAsync(HttpClient owner, int challenges, string name = "Festa")

@@ -496,3 +496,40 @@ Everything is built from the shared vocabulary — `.form-grid`, `.field`,
 `PartyDeck.css` holds only the four things that vocabulary lacks: a deck row, a
 stepper, a photo picker and two choice grids. The rules it replaced carried nine
 colour literals.
+
+## 11. Addendum — the guest live game (SLICE 05)
+
+`/party/:token/game`, on the `.party-guest-hub` surface, reached from a capability
+card the server offers by URL (`gameUrl`) exactly as it offers printing — the hub
+builds no route from a boolean and shows no disabled tile.
+
+**There is no second state machine.** `guestScene()` is a pure projection of the
+server's phase onto the one thing the guest is being asked to do
+(lobby / watch / vote / waiting / result / finished), and it is tested as such. A
+phone that spent two activities in somebody's pocket shows the current scene the
+moment it wakes, because it renders the last snapshot rather than replaying what
+it missed.
+
+**Reconnection is the absence of a feature.**
+[`usePartyGameSnapshot`](../../frontend/src/party/usePartyGameSnapshot.ts) polls
+every 2.5s, stops while the tab is hidden, and reads immediately on
+`visibilitychange`, `focus` and `online`. A failed poll is not an error state:
+the scene stays and a quiet status line says it may be a moment behind. Only a
+request that has never succeeded produces a visible failure, and a `404` — this
+party has no game — is a different, permanent fact.
+
+**A refusal is the truth, not an error.** A vote refused because the host closed
+voting between the tap and its arrival carries the state it was measured
+against, so the phone moves to the waiting scene rather than showing an alert
+and staying wrong.
+
+Mobile rules, all enforced by the stylesheet rather than by discipline: the
+stage owns the remaining viewport height and nothing scrolls during a vote; the
+two answers are 4.5rem tall and pinned to the bottom of that space, so the thumb
+travels the shortest distance to the decision and the question is never pushed
+off screen; there is no hover dependency (the pressed state carries the
+feedback); the chosen answer is filled **and** check-marked, so state never rests
+on colour; and every edge respects `env(safe-area-inset-*)`.
+
+There is no owner control on the page, and a test asserts the only two buttons
+in the stage are the two answers.
