@@ -1,0 +1,197 @@
+/* The guest's live game.
+
+   Built on `.party-guest-hub`, so it is the same fixed dark party surface as
+   every other guest screen and does not change with the visiting browser's
+   theme. Its own job is one rule: whatever the guest is being asked to do fits
+   one viewport, with the answer under a thumb.
+
+   The stage is a flex column that OWNS the remaining height. Nothing here
+   scrolls during a vote — a party guest holding a phone in one hand at arm's
+   length should never have to find a button. */
+
+.party-game {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding:
+    max(0.75rem, env(safe-area-inset-top))
+    max(1rem, env(safe-area-inset-right))
+    max(1.25rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+}
+
+.party-game-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 0 0 auto;
+}
+.party-game-back {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--party-hub-muted);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.party-game-back:focus-visible { outline: 2px solid var(--party-hub-focus); outline-offset: 2px; }
+
+/* Losing the network is not losing the party. The scene stays exactly as it
+   was and this line says, quietly, that it may be a moment behind. */
+.party-game-stale {
+  flex: 0 0 auto;
+  margin: 0.25rem 0 0;
+  color: var(--party-hub-muted);
+  font-size: 0.8125rem;
+  text-align: center;
+}
+
+/* All the height the header did not take. */
+.party-game-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.party-game-message,
+.party-game-vote {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  width: 100%;
+  max-width: 32rem;
+  margin-inline: auto;
+}
+.party-game-message { text-align: center; }
+.party-game-message h1,
+.party-game-question {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 7.5vw, 2.4rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.party-game-message p { margin: 0; color: var(--party-hub-muted); }
+.party-game-eyebrow {
+  margin: 0;
+  color: var(--party-hub-muted) !important;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ---- Voting -------------------------------------------------------------- */
+
+/* The question at the top of the remaining space, the two answers at the
+   bottom of it: the thumb travels the shortest distance to the thing it is
+   deciding, and the question is never pushed off screen by them. */
+.party-game-vote {
+  flex: 1 1 auto;
+  min-height: 0;
+  justify-content: space-between;
+  padding-block: 1.5rem;
+  text-align: center;
+}
+.party-game-question { color: var(--party-hub-text); }
+
+.party-game-confirmed {
+  margin: 0;
+  color: var(--party-hub-live);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.party-game-answers {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+/* Deliberately large. This is the one control on the page, it is used once per
+   activity by somebody who is also holding a drink, and the geometry token's
+   48px minimum is a floor rather than a target. */
+.party-game-answer {
+  min-height: 4.5rem;
+  padding: 1rem 1.25rem;
+  border: 2px solid var(--party-hub-border);
+  border-radius: var(--radius-card);
+  background: var(--party-hub-surface);
+  color: var(--party-hub-text);
+  font-family: var(--font-heading);
+  font-size: clamp(1.15rem, 5.5vw, 1.5rem);
+  font-weight: 700;
+  cursor: pointer;
+  /* No hover dependency: a phone has no hover, and the pressed state is what
+     carries the feedback. */
+  transition: transform 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.party-game-answer:active:not(:disabled) { transform: scale(0.97); }
+.party-game-answer:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 3px; }
+.party-game-answer:disabled { opacity: 0.6; }
+/* The chosen answer is filled AND checked: state never rests on colour. */
+.party-game-answer[aria-pressed='true'] {
+  border-color: var(--brand-cyan-glow);
+  background: var(--brand-electric-blue);
+}
+.party-game-answer[aria-pressed='true']::after {
+  content: " ✓";
+  font-weight: 700;
+}
+
+/* ---- Result -------------------------------------------------------------- */
+
+.party-game-percent {
+  margin: 0;
+  color: var(--party-hub-text) !important;
+  font-family: var(--font-heading);
+  font-size: clamp(3.5rem, 22vw, 6rem);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Notices ------------------------------------------------------------- */
+
+.party-game-notice {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+.party-game-notice h1 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.4rem, 6vw, 2rem);
+}
+.party-game-notice p { margin: 0; color: var(--party-hub-muted); }
+
+.party-game-retry {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.65rem 1.4rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  background: var(--party-hub-surface);
+  color: var(--party-hub-text);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.party-game-retry:focus-visible { outline: 2px solid var(--party-hub-focus); outline-offset: 2px; }
+
+/* The activity summary while the room is watching the television: present, but
+   deliberately not the point. The phone is not where the party is. */
+.party-game .party-activity[data-mode='compact'] { text-align: left; }
+
+@media (prefers-reduced-motion: reduce) {
+  .party-game-answer { transition: none; }
+}
