@@ -100,6 +100,18 @@ public sealed class PartyParticipantService : IPartyParticipantService
         return affected == 1;
     }
 
+    public async Task<PartyPrintQuotaSnapshot> GetPrintQuotaAsync(
+        Guid participantId, CancellationToken cancellationToken = default)
+    {
+        var row = await _db.PartyParticipants.AsNoTracking()
+            .Where(p => p.Id == participantId)
+            .Select(p => new { p.AcceptedPhotoPrintCount, p.AcceptedStripPrintCount })
+            .FirstOrDefaultAsync(cancellationToken);
+        return row is null
+            ? new PartyPrintQuotaSnapshot(0, 0)
+            : new PartyPrintQuotaSnapshot(row.AcceptedPhotoPrintCount, row.AcceptedStripPrintCount);
+    }
+
     /// <summary>Give a claimed print slot back when the sheet never happened.</summary>
     public Task ReleasePrintAsync(
         Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default)

@@ -200,13 +200,20 @@ export interface PartyAlbum {
 
 export type PartyPrintProduct = 'photo' | 'strip4';
 export type PartyPrintTheme = 'pure' | 'midnight' | 'event';
+/** Absent means the sheet follows the photograph, which is the default. */
+export type PartyPrintOrientation = 'portrait' | 'landscape';
 
 export interface PartyPrintFormat {
   type: PartyPrintProduct;
   enabled: boolean;
-  /** This product's OWN remaining count. The two are never summed. */
+  /** This product's OWN remaining count for the party. The two are never summed. */
   remaining: number;
   requiredPhotos: number;
+  /**
+   * What is left of THIS guest's allowance, or null when the host set no
+   * per-guest limit. Null is not zero — it means the ceiling does not exist.
+   */
+  remainingForYou: number | null;
 }
 
 /** A choosable photograph: safe derived URLs only, never an original. */
@@ -272,6 +279,7 @@ export function submitPartyPrint(
     product: PartyPrintProduct;
     theme: PartyPrintTheme;
     slots: PartyPrintSlot[];
+    orientation?: PartyPrintOrientation;
   },
   idempotencyKey: string,
   signal?: AbortSignal,
