@@ -29,7 +29,8 @@ import './PartyGuestHub.css';
 type State =
   | { kind: 'loading' }
   | { kind: 'ready'; albumName: string; items: PartyItem[]; coverUrl: string | null;
-      contributionUrl: string | null; gameEnabled: boolean; printUrl: string | null }
+      contributionUrl: string | null; gameEnabled: boolean; printUrl: string | null;
+      gameUrl: string | null }
   | { kind: 'unavailable' }
   | { kind: 'error' };
 
@@ -428,7 +429,7 @@ export function PartyPage() {
         setState({
           kind: 'ready', albumName: album.albumName, items: items.items,
           coverUrl: album.coverUrl, contributionUrl: album.contributionUrl,
-          gameEnabled: album.gameEnabled, printUrl: album.printUrl,
+          gameEnabled: album.gameEnabled, printUrl: album.printUrl, gameUrl: album.gameUrl,
         });
       })
       .catch((err: unknown) => {
@@ -556,7 +557,7 @@ export function PartyPage() {
     );
   }
 
-  const { albumName, items, coverUrl, contributionUrl, gameEnabled, printUrl } = state;
+  const { albumName, items, coverUrl, contributionUrl, gameEnabled, printUrl, gameUrl } = state;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
   // to items still visible in the live album (a match hidden since the search
   // simply drops out on the next poll).
@@ -604,6 +605,19 @@ export function PartyPage() {
       },
       variant: 'activity',
       available: Boolean(contributionUrl),
+    },
+    {
+      // The hosted game. Like printing, the server states where it lives and a
+      // null url is the whole answer — there is no route built here from a
+      // boolean, and no disabled tile.
+      id: 'game',
+      titleKey: 'partyHub.game',
+      descriptionKey: 'partyHub.gameHelp',
+      icon: <TrophyIcon />,
+      target: { kind: 'route', to: gameUrl ?? '' },
+      variant: 'activity',
+      badgeKey: 'partyHub.live',
+      available: Boolean(gameUrl),
     },
     {
       // Only when the owner turned the party game on.

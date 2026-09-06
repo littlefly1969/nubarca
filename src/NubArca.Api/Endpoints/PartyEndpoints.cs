@@ -104,7 +104,10 @@ public static class PartyEndpoints
                     .GetAsync(printLinkId, access.AlbumId, cancellationToken)
                 : null;
             return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(
-                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled, printUrl));
+                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled, printUrl,
+                // Same rule as printing: the capability states where it lives,
+                // and its absence is the whole answer.
+                gameEnabled ? NubArca.Api.Party.PartyLinkService.BuildGameUrl(token) : null));
         }).WithName("GetPartyAlbum").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/challenges", async (

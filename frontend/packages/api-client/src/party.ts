@@ -194,6 +194,10 @@ export interface PartyAlbum {
   // live station whose printer does 10x15, with budget left in at least one
   // product. Null is how the guest hub knows there is no print card to show.
   printUrl: string | null;
+  // Where the live game lives, non-null exactly while this party has one. The
+  // hub builds no route of its own from gameEnabled: a capability states where
+  // it is, or it is absent.
+  gameUrl: string | null;
 }
 
 // --- Party print studio (anonymous, print-token scoped) ---

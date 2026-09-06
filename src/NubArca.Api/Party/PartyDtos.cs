@@ -117,7 +117,11 @@ public sealed record PartyAlbumDto(
     // open: configured, enabled, on a live station whose printer does 10x15, and
     // with budget left in at least one product. Null is how the guest hub knows
     // there is no print card to show — never a disabled tile.
-    string? PrintUrl = null);
+    string? PrintUrl = null,
+    // The live game's own URL, on the same principle: non-null exactly while
+    // this party has a hosted game to walk into. The hub builds no route of its
+    // own from GameEnabled — a capability says where it lives, or it is absent.
+    string? GameUrl = null);
 
 public sealed record PartyItemDto(
     Guid Id,
