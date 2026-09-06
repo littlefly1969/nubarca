@@ -94,9 +94,13 @@ public sealed class PartyGameService : IPartyGameService
         // an owner says "I believe nobody has started this game".
         var currentVersion = session?.Version ?? 0;
         if (expectedVersion != currentVersion)
+        {
+            Refused(albumId, command, session?.Phase ?? PartyGamePhases.Lobby,
+                PartyGameCommandError.VersionConflict);
             return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
                 await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
                     await RoomAsync(link, cancellationToken)));
+        }
 
         var phase = session?.Phase ?? PartyGamePhases.Lobby;
         var playedIds = session is null
@@ -114,6 +118,7 @@ public sealed class PartyGameService : IPartyGameService
             var error = command == PartyGameCommands.Start && phase == PartyGamePhases.Lobby
                 ? PartyGameCommandError.NoChallenges
                 : PartyGameCommandError.IllegalTransition;
+            Refused(albumId, command, phase, error);
             return PartyGameCommandResult.Fail(error,
                 await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
                     await RoomAsync(link, cancellationToken)));
@@ -192,6 +197,7 @@ public sealed class PartyGameService : IPartyGameService
             // both tried to create it. The database elected one; the loser is
             // told it was stale and handed the winner's state.
             _db.ChangeTracker.Clear();
+            Refused(albumId, command, phase, PartyGameCommandError.VersionConflict);
             var current = await _db.PartyGameSessions.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, cancellationToken);
             return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
@@ -293,10 +299,23 @@ public sealed class PartyGameService : IPartyGameService
         if (access.PartyAlbumLinkId is not Guid linkId)
             return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
 
+        // The game switch is re-read on every tap, so turning it off closes
+        // voting on the next request rather than on the next deploy. One cheap
+        // existence check, ahead of anything that builds a snapshot.
+        var open = await _db.PartyAlbumLinks.AsNoTracking().AnyAsync(
+            x => x.Id == linkId && x.AlbumId == access.AlbumId && x.Enabled && x.GameEnabled,
+            cancellationToken);
+        if (!open) return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
+
         var session = await _db.PartyGameSessions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId, cancellationToken);
-        var current = await GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
-        if (current is null) return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
+
+        // The snapshot a refusal carries is built ON the refusal path, not
+        // before the checks: a successful tap would otherwise pay for two of
+        // them, and voting is exactly where a party's load arrives.
+        async Task<PartyGameVoteResult> RefuseAsync(PartyGameVoteError error) =>
+            PartyGameVoteResult.Fail(error,
+                await GetPublicSnapshotAsync(access, participantId, false, cancellationToken));
 
         // Nothing about this decision comes from the client. The phase, the
         // round being played and the activity's own voting mode are re-read on
@@ -304,13 +323,13 @@ public sealed class PartyGameService : IPartyGameService
         // voting a clean refusal rather than a late vote.
         if (session is null || session.Phase != PartyGamePhases.VotingOpen
             || session.CurrentRoundId is not Guid activeRound)
-            return PartyGameVoteResult.Fail(PartyGameVoteError.VotingClosed, current);
+            return await RefuseAsync(PartyGameVoteError.VotingClosed);
         if (roundId is null || roundId != activeRound)
-            return PartyGameVoteResult.Fail(PartyGameVoteError.StaleRound, current);
+            return await RefuseAsync(PartyGameVoteError.StaleRound);
 
         var challenge = await CurrentChallengeAsync(session, cancellationToken);
         if (!PartyChallengeVotingModes.CollectsVotes(challenge?.VotingMode))
-            return PartyGameVoteResult.Fail(PartyGameVoteError.VotingClosed, current);
+            return await RefuseAsync(PartyGameVoteError.VotingClosed);
 
         var now = Now;
         var existing = await _db.PartyGameVotes.FirstOrDefaultAsync(
@@ -356,6 +375,11 @@ public sealed class PartyGameService : IPartyGameService
             _db.ChangeTracker.Clear();
         }
 
+        // A vote is worth a line — voting is where a party's load is — but the
+        // line carries the round and nothing about the person or their answer.
+        _logger.LogInformation(
+            "party.game.voted AlbumId={AlbumId} RoundId={RoundId}", access.AlbumId, activeRound);
+
         return PartyGameVoteResult.Ok(
             (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);
     }
@@ -387,6 +411,19 @@ public sealed class PartyGameService : IPartyGameService
             ? new PartyGameVotingDto(received, eligible, yes, no, yes > no)
             : new PartyGameVotingDto(received, eligible);
     }
+
+    /// <summary>
+    /// A refused command, on the same structured line as an accepted one.
+    ///
+    /// Refusals are the interesting half of an evening's telemetry: a burst of
+    /// version conflicts is two owner surfaces fighting, and an illegal
+    /// transition is a client that has drifted from the machine. The line names
+    /// the album, never a guest — nothing here identifies a person.
+    /// </summary>
+    private void Refused(Guid albumId, string? command, string phase, PartyGameCommandError error) =>
+        _logger.LogInformation(
+            "party.game.refused AlbumId={AlbumId} Command={Command} Phase={Phase} Reason={Reason}",
+            albumId, command, phase, error);
 
     // --- internals ---------------------------------------------------------
 

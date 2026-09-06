@@ -6,6 +6,55 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Party Game
+
+- **A party now has a hosted game.** The owner conducts it from a control room,
+  the room follows a television, and guests answer on their phones. The server
+  owns every bit of it: `PartyGameSession` and `PartyGameRound` are the
+  performance, `PartyChallenge` stays the content, and no client holds state the
+  server cannot reproduce — so a refresh, a locked phone, a walk out of Wi-Fi
+  range and a television somebody unplugged all recover the same way, by reading
+  the snapshot again.
+- **A read of the game never starts one.** A game that has not begun has no row
+  at all; the lobby is synthesized at version 0. A television polling a party
+  before the host arrives must not begin it for them.
+- **Every command quotes the version on screen, and a refusal hands back the
+  truth.** A stale command gets a `409` carrying the current state, so a second
+  tab, a second device or an impatient thumb produces one advance plus a correct
+  re-render — never a duplicate, and never a follow-up fetch somebody has to
+  remember to make.
+- **The control room offers exactly what is legal.** The transition matrix is a
+  pure function on the server, and the owner snapshot carries its answer, so an
+  illegal command is ABSENT rather than present-and-disabled — and adding a
+  phase changes that screen without a line of TypeScript.
+- **One answer per guest per round, held by the database.** A unique index on
+  `(round, participant)` means two taps arriving together cannot both count, and
+  changing your mind while voting is open replaces your answer rather than
+  adding one. A vote names the round it answers, so a phone that fell behind
+  cannot land last round's verdict on this round's activity.
+- **Nobody learns the result early.** How many have answered is safe at any
+  moment; the yes/no split reaches the host the instant voting closes, because
+  the host decides when to reveal it, and the room only once it is revealed.
+- **An activity is prepared, not administered.** The composer is three steps —
+  what it is, how it is played, how it will look — with a photo picker showing
+  the album's own pictures instead of a list of filenames, and a preview drawn
+  by the same renderer the television uses. Its rules are columns: a duration,
+  a voting mode and an optional question, never text smuggled into the
+  instructions. Existing activities keep their title, body, kind and photograph
+  and become ordinary voted ones.
+- **An activity nobody votes on takes the shortcut it should.** With
+  `votingMode: none` the host goes straight from running it to showing the
+  result, and "open voting" is not offered at all.
+- **One renderer draws an activity everywhere.** The composer preview, the
+  television and the control room are the same component in three modes,
+  emitting the same markup — so a preview predicts what the room will see, and
+  720p and 1080p produce the same physical type on the same panel.
+- **The television is a display.** Not one button, link or focusable element,
+  at any point in the evening; it only reads. It says it is a screen, which is
+  what lets the control room honestly report whether one is showing the game.
+- **Deleting an activity asks in the product**, naming what is being lost, and
+  unsaved work in the composer survives a stray Escape.
+
 ### Party print polish
 
 - **Photographs are no longer sideways in the guest album.** Stripping metadata

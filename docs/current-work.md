@@ -1223,7 +1223,20 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `availableCommands` can tell a control room what is legal without a second
   copy of the machine in TypeScript. There is no realtime transport, on purpose
   — nothing in this repository has one; clients poll and compare `version`.
-  See [docs/party-game/runtime.md](party-game/runtime.md) and
+  Voting has the same shape: the integrity constraint is a unique index on
+  `(round, participant)` rather than a code path, a vote names the ROUND it
+  answers (stable for a whole round, unlike the version, so a lagging poll never
+  costs somebody their vote), and who may know the result is a table — how many
+  answered is safe always, the split reaches the owner when voting closes and
+  the room only when it is revealed. A television reads the public snapshot but
+  never mints a participant, because a display that joined would inflate the
+  very count it shows; it SAYS it is a display (`?display=1`) so the control
+  room can honestly report whether a screen is on, since the server cannot
+  infer that from a missing cookie. And the four surfaces — deck, control room,
+  television stage, guest phone — draw an activity with ONE renderer in three
+  modes, emitting identical markup, so a preview predicts what the room sees.
+  See [docs/party-game/README.md](party-game/README.md),
+  [docs/party-game/runtime.md](party-game/runtime.md) and
   [docs/party-game/ux-integration-contract.md](party-game/ux-integration-contract.md).
 
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation

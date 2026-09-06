@@ -146,6 +146,27 @@ public sealed class PartyGameVotingTests : IDisposable
     }
 
     [Fact]
+    public async Task Turning_the_game_off_closes_voting_on_the_next_tap()
+    {
+        var party = await OpenVotingAsync();
+        var guest = _factory.CreateClient();
+        var round = await RoundIdAsync(guest, party.Token);
+
+        (await party.Owner.PatchAsJsonAsync($"/api/albums/{party.Album}/party-game-settings", new
+        {
+            gameEnabled = false, minChallengeIntervalSeconds = 30,
+            maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
+            maxChallengesPerSession = (int?)null,
+        })).EnsureSuccessStatusCode();
+
+        // Not a conflict: there is no game here any more, which is the same
+        // answer a stranger's token gets.
+        var response = await guest.PostAsJsonAsync($"/api/party/{party.Token}/game/vote",
+            new { roundId = round, value = "yes" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Only_yes_or_no_is_an_answer()
     {
         var party = await OpenVotingAsync();

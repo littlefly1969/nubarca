@@ -100,6 +100,19 @@ export async function put<T>(session: Session, path: string, body: unknown): Pro
   return (text ? JSON.parse(text) : null) as T;
 }
 
+export async function patch<T>(session: Session, path: string, body: unknown): Promise<T> {
+  const response = await expectOk(
+    await fetch(`${API_URL}${path}`, {
+      method: 'PATCH',
+      headers: { ...json, cookie: session.cookie },
+      body: JSON.stringify(body),
+    }),
+    `PATCH ${path}`,
+  );
+  const text = await response.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
 export async function del(session: Session, path: string): Promise<void> {
   await expectOk(
     await fetch(`${API_URL}${path}`, { method: 'DELETE', headers: { cookie: session.cookie } }),
