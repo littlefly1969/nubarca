@@ -163,9 +163,13 @@
    The safe area is 3.5% per edge, the same ratio the native TV app's overscan()
    uses, because a television is allowed to crop the edges of its own picture. */
 .party-activity[data-mode='tv'] {
+  /* It FILLS the box it is given rather than claiming the viewport, so the
+     television stage can put chrome inside the same safe area. Its parent owns
+     the height; `container-type: size` needs a definite one, and a caller that
+     gives it none gets a card with no height, which is the loud failure. */
   width: 100%;
-  height: 100dvh;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   display: grid;
   place-items: center;
   padding: max(3.5vh, 1rem) max(3.5vw, 1.5rem);

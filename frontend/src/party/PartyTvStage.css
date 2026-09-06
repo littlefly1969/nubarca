@@ -1,0 +1,199 @@
+/* The party show.
+
+   A television, not a page that happens to be large. Three rules govern the
+   whole file:
+
+   1. EVERYTHING IS PROPORTIONAL TO THE VIEWPORT. Type is sized in `vh`, so
+      1280x720 and 1920x1080 produce the same physical letters on the same
+      panel — which is the only definition of "readable from the sofa" that
+      survives two resolutions. Nothing here is tuned for one of them.
+
+   2. NOTHING TOUCHES THE EDGES. A television is allowed to crop its own
+      picture, so every scene sits inside a 3.5% safe area on each side — the
+      same ratio the native TV app's overscan() uses.
+
+   3. NOTHING IS INTERACTIVE. There is no button, no link and no focus style in
+      this file, because there is nothing on this screen to press.
+
+   Colour, type and motion come from the same tokens as the rest of NubArca. The
+   surface is pinned to the brand's dark ground rather than resolved from the
+   visiting browser's theme: a party in a lit room gets the same picture whatever
+   the television's browser decided. */
+
+.party-stage {
+  --stage-inset-x: max(3.5vw, 1.5rem);
+  --stage-inset-y: max(3.5vh, 1rem);
+
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  height: 100vh;
+  overflow: hidden;
+  padding: var(--stage-inset-y) var(--stage-inset-x);
+  background: var(--brand-midnight-navy);
+  color: var(--brand-cloud-white);
+  font-family: var(--font-ui);
+  /* A 16:9 panel never needs to scroll, and a scrollbar on a television is a
+     defect. Anything that does not fit is a layout to fix, not to scroll. */
+  overscroll-behavior: none;
+}
+
+/* The card fills the whole safe area; the chrome rides ON it. */
+.party-stage-card { width: 100%; height: 100%; }
+
+.party-stage-centre {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2vh;
+  text-align: center;
+}
+
+.party-stage-eyebrow {
+  margin: 0;
+  color: var(--accent-glow);
+  font-size: clamp(1rem, 2.4vh, 2.2rem);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.party-stage-headline {
+  margin: 0;
+  max-width: 22ch;
+  font-family: var(--font-heading);
+  font-size: clamp(2rem, 8vh, 7rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.party-stage-sub {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--text-secondary);
+  font-size: clamp(1.1rem, 3.2vh, 2.6rem);
+  line-height: 1.25;
+}
+
+/* "VOTA ORA" is the loudest thing the screen ever says, because it is the one
+   moment the room has to do something. */
+.party-stage-call {
+  color: var(--accent-glow);
+  font-size: clamp(2.5rem, 12vh, 10rem);
+  letter-spacing: 0.02em;
+}
+
+/* How many have answered. Never what they answered — the split does not exist
+   in this scene's markup at all, so it cannot leak into it. */
+.party-stage-tally {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: clamp(1.2rem, 4vh, 3.2rem);
+  font-variant-numeric: tabular-nums;
+}
+.party-stage-tally strong {
+  color: var(--brand-cloud-white);
+  font-family: var(--font-heading);
+  font-size: 1.5em;
+  font-weight: 700;
+}
+
+/* ---- Result ------------------------------------------------------------- */
+
+.party-stage-percent {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(4rem, 26vh, 22rem);
+  font-weight: 700;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.party-stage-verdict {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 7vh, 6rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* The verdict is a word first. Colour is a second, agreeing signal. */
+.party-stage-verdict[data-passed='true'] { color: var(--success); }
+.party-stage-verdict[data-passed='false'] { color: var(--danger); }
+
+/* The reveal is sequenced: the headline lands, then the number, then the
+   verdict. Each step is short and each is a fade-and-rise, never a bounce. */
+.party-stage-result .party-stage-verdict-intro,
+.party-stage-result .party-stage-percent,
+.party-stage-result .party-stage-verdict {
+  animation: party-stage-rise 320ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+.party-stage-result .party-stage-percent { animation-delay: 700ms; }
+.party-stage-result .party-stage-verdict { animation-delay: 1300ms; }
+
+@keyframes party-stage-rise {
+  from { opacity: 0; transform: translateY(0.4em); }
+  to { opacity: 1; transform: none; }
+}
+
+.party-stage-intro { animation: party-stage-rise 240ms cubic-bezier(0.2, 0, 0, 1) both; }
+
+/* ---- Chrome ------------------------------------------------------------- */
+
+/* The activity clock, inside the safe area and over the card. Tabular figures,
+   so it does not shuffle sideways as the seconds tick. */
+.party-stage-timer {
+  position: absolute;
+  top: var(--stage-inset-y);
+  right: var(--stage-inset-x);
+  z-index: 2;
+  margin: 0;
+  padding: 0.3em 0.7em;
+  border-radius: 999px;
+  background: rgb(10 15 26 / 72%);
+  color: var(--brand-cloud-white);
+  font-family: var(--font-heading);
+  font-size: clamp(1.4rem, 5vh, 4rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(8px);
+}
+
+.party-stage-qr {
+  width: clamp(8rem, 22vh, 18rem);
+  aspect-ratio: 1;
+  padding: 0.8vh;
+  border-radius: var(--radius-card);
+  background: var(--brand-cloud-white);
+}
+.party-stage-qr svg { display: block; width: 100%; height: 100%; }
+
+/* A television that lost the network keeps showing the scene it was on. This
+   says so without taking the screen. */
+.party-stage-stale {
+  position: absolute;
+  top: var(--stage-inset-y);
+  left: var(--stage-inset-x);
+  z-index: 2;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: clamp(0.9rem, 2vh, 1.6rem);
+}
+
+/* An animation that carries meaning must still be COMPREHENSIBLE when it does
+   not play. The global reduced-motion rule collapses durations but leaves
+   delays alone, which would hold the number and the verdict off screen for a
+   second and a half — so the delays are zeroed here explicitly. */
+@media (prefers-reduced-motion: reduce) {
+  .party-stage-result .party-stage-verdict-intro,
+  .party-stage-result .party-stage-percent,
+  .party-stage-result .party-stage-verdict,
+  .party-stage-intro {
+    animation-delay: 0s !important;
+  }
+}
