@@ -37,8 +37,14 @@ public interface IPartyGameService
     /// passes null and is never given one: a display must not become a voter,
     /// and counting it would inflate "8 of 12 have voted".
     /// </param>
+    /// <param name="isDisplay">
+    /// True when the caller says it is a television. It stamps the party's
+    /// display heartbeat, which is the only way the control room can honestly
+    /// say whether a screen is showing the game. Saying so grants nothing.
+    /// </param>
     Task<PartyGamePublicSnapshotDto?> GetPublicSnapshotAsync(
-        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default);
+        PartyAccess access, Guid? participantId = null, bool isDisplay = false,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records one guest's answer for one round, or refuses it.

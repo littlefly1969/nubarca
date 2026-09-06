@@ -342,6 +342,68 @@ public sealed class PartyGameRuntimeTests : IDisposable
         Assert.Equal(JsonValueKind.Null, without.GetProperty("gameUrl").ValueKind);
     }
 
+    [Fact]
+    public async Task The_control_room_is_told_about_the_room()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await SetUpGameAsync(owner, challenges: 2);
+        var token = await ViewTokenAsync(owner, album);
+
+        var quiet = await SnapshotAsync(owner, album);
+        Assert.Equal(0, quiet.GetProperty("guestsPresent").GetInt32());
+        // Never seen is not "seen a long time ago": it is null.
+        Assert.Equal(JsonValueKind.Null, quiet.GetProperty("displaySeenSecondsAgo").ValueKind);
+        Assert.Equal($"/party/{token}/tv", quiet.GetProperty("tvUrl").GetString());
+        Assert.Equal($"/party/{token}/game", quiet.GetProperty("guestUrl").GetString());
+
+        // A guest joining is a guest in the room.
+        var guest = _factory.CreateClient();
+        (await guest.PostAsync($"/api/party/{token}/game/join", null)).EnsureSuccessStatusCode();
+        Assert.Equal(1, (await SnapshotAsync(owner, album)).GetProperty("guestsPresent").GetInt32());
+    }
+
+    [Fact]
+    public async Task Only_a_client_that_says_it_is_a_screen_counts_as_one()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await SetUpGameAsync(owner, challenges: 1);
+        var token = await ViewTokenAsync(owner, album);
+
+        // A guest polling the same endpoint is not a television, and the server
+        // does not infer one from the absence of a cookie.
+        var guest = _factory.CreateClient();
+        (await guest.PostAsync($"/api/party/{token}/game/join", null)).EnsureSuccessStatusCode();
+        (await guest.GetAsync($"/api/party/{token}/game")).EnsureSuccessStatusCode();
+        Assert.Equal(JsonValueKind.Null,
+            (await SnapshotAsync(owner, album)).GetProperty("displaySeenSecondsAgo").ValueKind);
+
+        var tv = _factory.CreateClient();
+        (await tv.GetAsync($"/api/party/{token}/game?display=1")).EnsureSuccessStatusCode();
+        var seen = (await SnapshotAsync(owner, album)).GetProperty("displaySeenSecondsAgo");
+        Assert.Equal(JsonValueKind.Number, seen.ValueKind);
+        Assert.InRange(seen.GetInt32(), 0, 30);
+    }
+
+    [Fact]
+    public async Task A_screen_polling_never_contends_with_a_command()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await SetUpGameAsync(owner, challenges: 2);
+        var token = await ViewTokenAsync(owner, album);
+        var tv = _factory.CreateClient();
+
+        // The heartbeat writes one column on the LINK, outside the session's
+        // concurrency token, so a television polling every couple of seconds
+        // cannot cost an owner a command.
+        var version = 0;
+        foreach (var command in new[] { "start", "start_challenge", "open_voting" })
+        {
+            (await tv.GetAsync($"/api/party/{token}/game?display=1")).EnsureSuccessStatusCode();
+            version = (await CommandAsync(owner, album, command, version)).GetProperty("version").GetInt32();
+        }
+        Assert.Equal(3, version);
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private async Task<Guid> SetUpGameAsync(HttpClient owner, int challenges, string name = "Festa")

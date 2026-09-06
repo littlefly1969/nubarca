@@ -80,6 +80,33 @@ export interface PartyGameSnapshot {
    */
   availableCommands: PartyGameCommand[];
   voting: PartyGameVoting | null;
+  /** Guests seen recently on this party link. */
+  guestsPresent: number;
+  /**
+   * How long ago a screen last read the game, in seconds; null if none ever has.
+   * Server-computed on purpose — a control room on a laptop with a drifting
+   * clock must not decide for itself that the television has been dead an hour.
+   */
+  displaySeenSecondsAgo: number | null;
+  tvUrl: string | null;
+  guestUrl: string | null;
+}
+
+export type PartyGameDisplayState = 'connected' | 'stale' | 'disconnected';
+
+/**
+ * Whether a screen is showing this game.
+ *
+ * Pure, and here rather than in the page, because "connected" is a product
+ * judgement about a polling interval: the stage reads every 2.5s, so a gap of
+ * more than a few of those is a screen that has stopped, and a gap of minutes is
+ * one that has gone.
+ */
+export function partyGameDisplayState(secondsAgo: number | null): PartyGameDisplayState {
+  if (secondsAgo === null) return 'disconnected';
+  if (secondsAgo <= 15) return 'connected';
+  if (secondsAgo <= 120) return 'stale';
+  return 'disconnected';
 }
 
 /** What a guest phone or a television is told. A strict subset. */
@@ -145,11 +172,15 @@ export async function sendPartyGameCommand(
 
 // --- Guest / television ---------------------------------------------------
 
+/**
+ * @param asDisplay a television saying so, which is what lets the control room
+ * answer "is a screen showing this" honestly. It grants nothing.
+ */
 export function getPartyGamePublicSnapshot(
-  token: string, signal?: AbortSignal,
+  token: string, signal?: AbortSignal, asDisplay = false,
 ): Promise<PartyGamePublicSnapshot> {
   return api<PartyGamePublicSnapshot>(
-    `/api/party/${encodeURIComponent(token)}/game`, { signal });
+    `/api/party/${encodeURIComponent(token)}/game${asDisplay ? '?display=1' : ''}`, { signal });
 }
 
 /**

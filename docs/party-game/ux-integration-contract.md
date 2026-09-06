@@ -583,3 +583,43 @@ less motion.
 
 `PartyChallengeCard`'s `tv` mode now fills the box it is given rather than
 claiming the viewport, so the stage can put chrome inside the same safe area.
+
+## 13. Addendum — the control room (SLICE 07)
+
+`/albums/:albumId/party-game`, inside the authenticated app shell, reached from
+the album settings panel where the game is switched on. Preparing and conducting
+are different jobs, so they are different surfaces: the deck stays in settings,
+the evening is run from here.
+
+**The state machine is quoted, not re-implemented.** The page renders
+`snapshot.availableCommands` in the order the server sent it — the
+phase-advancing command first — so an illegal command is **absent**, never
+present-and-disabled, and a test asserts there is no disabled button on the page
+at all. Adding a phase or an edge to the server changes this screen without a
+line of TypeScript.
+
+**Exactly one filled button.** The primary action carries `--accent-strong`;
+skip is outline, finish is `.btn-danger` behind a `Modal` confirmation. On a
+phone the command row is sticky to the bottom of the viewport, because a host is
+holding the device while a room waits and the thing that moves the party on must
+never be below the fold.
+
+**Nothing is optimistic.** The phase on screen is always one the server has
+committed to — a control room that shows "voting open" before the server agrees
+lies to a host who is about to speak. A poll landing while a command is in
+flight is dropped, so a pre-command snapshot cannot come back and re-arm a
+version the server has already spent.
+
+**A refusal is the recovery.** `409` carries the state it was measured against,
+so a second tab, a second device or a double tap ends with this screen correct
+*and* told what happened — one advance, one re-render, no follow-up fetch. A
+test asserts no extra read is issued.
+
+The room strip is always visible: guests connected, whether a screen is showing
+the game (§ runtime — a display says so, the server does not guess), how far the
+evening has got, and a QR for guests. The vote count is shown throughout; the
+yes/no split appears only from `voting_closed`, quietly, because it is a fact
+for the host to act on and the announcement belongs on the television.
+
+Responsive: two columns above 900px (now / next), one column below, and the
+sticky command row below 640px.

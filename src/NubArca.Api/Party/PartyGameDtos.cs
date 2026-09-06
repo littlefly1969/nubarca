@@ -66,7 +66,16 @@ public sealed record PartyGameSnapshotDto(
     PartyGameChallengeDto? CurrentChallenge,
     PartyGameChallengeDto? NextChallenge,
     IReadOnlyList<string> AvailableCommands,
-    PartyGameVotingDto? Voting = null);
+    PartyGameVotingDto? Voting = null,
+    // --- What the room looks like from the control room ---
+    // How many guests are in it, whether a screen is showing the game, and
+    // where the two surfaces live. All owner-facing, none of it derivable
+    // client-side: a browser cannot know how long ago a television polled, and
+    // a clock-skewed one cannot be trusted to subtract two timestamps.
+    int GuestsPresent = 0,
+    int? DisplaySeenSecondsAgo = null,
+    string? TvUrl = null,
+    string? GuestUrl = null);
 
 /// <summary>
 /// What a guest phone or a television is told. A strict subset: no session id,
@@ -165,3 +174,13 @@ public sealed record PartyGameCommandResult(
 }
 
 public sealed record PartyGameCommandRequest(string? Command, int? ExpectedVersion);
+
+/// <summary>
+/// The room around the game: how many guests are in it, how long ago a screen
+/// last looked at it, and where the two public surfaces live.
+///
+/// Internal to the service layer — it exists so the snapshot builder can be
+/// handed one resolved answer instead of querying for it four times.
+/// </summary>
+internal sealed record PartyGameRoomDto(
+    int GuestsPresent, int? DisplaySeenSecondsAgo, string TvUrl, string GuestUrl);
