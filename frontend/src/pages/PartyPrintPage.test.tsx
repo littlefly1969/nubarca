@@ -51,8 +51,8 @@ function manifest(overrides: Record<string, unknown> = {}) {
     partyName: 'Beach Party',
     footerText: 'Grazie di essere qui',
     formats: [
-      { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1 },
-      { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 4 },
+      { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
+      { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 4, remainingForYou: null },
     ],
     photos: ['f1', 'f2', 'f3', 'f4', 'f5'].map(photo),
     ...overrides,
@@ -123,8 +123,8 @@ describe('PartyPrintPage (public print studio)', () => {
   it('does not render a product the host has turned off', async () => {
     mount(manifest({
       formats: [
-        { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1 },
-        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 4 },
+        { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1, remainingForYou: null },
+        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 4, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -137,8 +137,8 @@ describe('PartyPrintPage (public print studio)', () => {
   it('shows an enabled product whose budget ran out, and refuses to start it', async () => {
     mount(manifest({
       formats: [
-        { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1 },
-        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4 },
+        { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -152,8 +152,8 @@ describe('PartyPrintPage (public print studio)', () => {
   it('says printing is finished when every product is spent', async () => {
     mount(manifest({
       formats: [
-        { type: 'photo', enabled: true, remaining: 0, requiredPhotos: 1 },
-        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4 },
+        { type: 'photo', enabled: true, remaining: 0, requiredPhotos: 1, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -585,6 +585,130 @@ describe('PartyPrintPage (public print studio)', () => {
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Le stampe di questo formato sono appena finite.');
+  });
+
+  it('shows the guest THEIR remaining prints, not the party\u2019s', async () => {
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 2 },
+        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+      ],
+    }));
+    render(wrapper());
+    // Telling somebody allowed two that there are forty hides the rule from the
+    // only person it applies to, and lets them find it out by being refused.
+    const photo = await screen.findByTestId('party-print-format-photo');
+    expect(photo).toHaveTextContent('2 stampe tue rimaste');
+    expect(photo).not.toHaveTextContent('40');
+  });
+
+  it('still shows the party\u2019s number when it is the smaller one', async () => {
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 1, requiredPhotos: 1, remainingForYou: 5 },
+      ],
+    }));
+    render(wrapper());
+    // Two ceilings apply and the smaller one is the truth.
+    expect(await screen.findByTestId('party-print-format-photo'))
+      .toHaveTextContent('1 stampa disponibile');
+  });
+
+  it('says whose allowance ran out, per format', async () => {
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 0 },
+        { type: 'strip4', enabled: true, remaining: 4, requiredPhotos: 4, remainingForYou: null },
+      ],
+    }));
+    render(wrapper());
+    // The party has 40 photo prints left; it is this guest who is done. Saying
+    // "esaurito" would be a lie they see through when somebody else collects.
+    expect(await screen.findByTestId('party-print-format-photo'))
+      .toHaveTextContent('Hai finito le tue');
+    expect(screen.getByTestId('party-print-format-strip4'))
+      .toHaveTextContent('4 stampe disponibili');
+  });
+
+  it('does not tell a guest the party is finished when it is their own share', async () => {
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 0 },
+        { type: 'strip4', enabled: true, remaining: 9, requiredPhotos: 4, remainingForYou: 0 },
+      ],
+    }));
+    render(wrapper());
+    // Both formats are closed to THIS guest while the party has plenty. The
+    // wrong wording here sends them to complain to the host about a limit the
+    // host set on purpose.
+    expect(await screen.findByText('Hai stampato tutti i tuoi ricordi.')).toBeInTheDocument();
+    expect(screen.queryByText(/Le stampe di questa festa sono finite/))
+      .not.toBeInTheDocument();
+  });
+
+  it('does say the party is finished when it actually is', async () => {
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 0, requiredPhotos: 1, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+      ],
+    }));
+    render(wrapper());
+    expect(await screen.findByText('Le stampe di questa festa sono finite.')).toBeInTheDocument();
+  });
+
+  it('defaults the sheet to the photograph\u2019s own orientation, and lets it be turned', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await chooseFormat(user, 'photo');
+    const picks = screen.getAllByRole('button', { name: /Scegli questa foto/ });
+    setNatural(within(picks[0]).getByRole('presentation', { hidden: true }), 4000, 3000);
+    await user.click(picks[0]);
+    await user.click(next());
+    await user.click(next());
+
+    // A wide photograph starts on a landscape sheet, chosen for the guest.
+    expect(screen.getByRole('radio', { name: 'Orizzontale' })).toBeChecked();
+    expect(screen.getByTestId('party-print-sheet'))
+      .toHaveAttribute('data-orientation', 'landscape');
+
+    // And they can turn it: a portrait subject in a landscape frame is a choice
+    // somebody may want, and the crop editor is what makes it work.
+    await user.click(screen.getByRole('radio', { name: 'Verticale' }));
+    expect(screen.getByTestId('party-print-sheet'))
+      .toHaveAttribute('data-orientation', 'portrait');
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls).orientation).toBe('portrait');
+  });
+
+  it('sends no orientation at all when the guest left the default', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    // Absent, not "portrait": the server follows the photograph exactly as it
+    // did before this choice existed.
+    expect(lastPost(mock.calls)).not.toHaveProperty('orientation');
+  });
+
+  it('does not offer to turn a strip, because that is not a sheet it can turn', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await compose(user, 'strip4');
+    // Two strips side by side IS the product; turning the sheet would destroy
+    // it rather than reorient a picture.
+    expect(screen.queryByRole('radio', { name: 'Orizzontale' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeInTheDocument();
   });
 
   it('does not blame the party when it is the guest\u2019s own share that is spent', async () => {

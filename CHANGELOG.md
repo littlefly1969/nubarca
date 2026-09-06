@@ -6,6 +6,21 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Print orientation, and a guest who can see their own share
+
+- **A photo can be printed portrait or landscape**, defaulting to the
+  photograph's own orientation. Following the picture is a good default rather
+  than a rule — a portrait subject in a landscape frame is a choice somebody may
+  want, and the crop editor is what makes it work. The four-photo strip takes no
+  such choice: two strips side by side on a portrait sheet *is* the product.
+- **The studio shows a guest their OWN remaining prints.** Somebody allowed two
+  on a party of forty was being told forty, and discovered their limit only by
+  being refused. The smaller of the two ceilings is now what they see, and when
+  it is their own share that is spent the page says so rather than claiming the
+  party has run out — which it can see through the moment somebody else collects
+  a print.
+
+
 ### Party print polish
 
 - **Photographs are no longer sideways in the guest album.** Stripping metadata

@@ -11,7 +11,9 @@ import {
   getPartyPrintStatus,
   submitPartyPrint,
   type PartyPrintAccepted,
+  type PartyPrintFormat,
   type PartyPrintManifest,
+  type PartyPrintOrientation,
   type PartyPrintPhoto,
   type PartyPrintProduct,
   type PartyPrintSlot,
@@ -214,6 +216,8 @@ interface SheetProps {
   aspectOf: (id: string) => number;
   views: Record<string, CropView>;
   onAspect: (id: string, width: number, height: number) => void;
+  /** Null follows the photograph, which is the default. */
+  orientation: PartyPrintOrientation | null;
 }
 
 function pct(value: number): string {
@@ -221,14 +225,15 @@ function pct(value: number): string {
 }
 
 function SheetPreview(props: SheetProps) {
-  const { product, theme, chosen, photoById, aspectOf, views, onAspect } = props;
+  const { product, theme, chosen, photoById, aspectOf, views, onAspect, orientation } = props;
   const viewOf = (id: string) => views[id] ?? DEFAULT_CROP_VIEW;
 
   if (product === 'photo') {
     const id = chosen[0];
     const aspect = aspectOf(id);
-    // The sheet follows the photograph, exactly as the renderer decides it.
-    const portrait = aspect <= 1;
+    // The sheet follows the photograph unless the guest turned it — exactly the
+    // decision the renderer makes, made here from the same inputs.
+    const portrait = orientation === null ? aspect <= 1 : orientation === 'portrait';
     const { sheetWidth, sheetHeight, slot, footer } = photoLayout(portrait);
     const slotAspect = photoSlotAspect(portrait);
     return (
@@ -435,6 +440,9 @@ export function PartyPrintPage() {
   const [theme, setTheme] = useState<PartyPrintTheme>('pure');
   const [cropIndex, setCropIndex] = useState(0);
   const [onlyMine, setOnlyMine] = useState(false);
+  // Null is not "unset waiting for a value" — it IS the default: follow the
+  // photograph. Only a guest who deliberately turns the sheet leaves it.
+  const [orientation, setOrientation] = useState<PartyPrintOrientation | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<MessageKey | null>(null);
@@ -449,7 +457,9 @@ export function PartyPrintPage() {
   // server has already decided about. Freezing both makes it one fact. Changing
   // the composition discards the pair and earns a new key.
   const pendingRef = useRef<{ key: string; slots: PartyPrintSlot[] } | null>(null);
-  useEffect(() => { pendingRef.current = null; }, [product, chosen, views, theme]);
+  useEffect(() => {
+    pendingRef.current = null;
+  }, [product, chosen, views, theme, orientation]);
 
   useEffect(() => {
     if (!token) {
@@ -506,10 +516,25 @@ export function PartyPrintPage() {
     return (manifest?.photos ?? []).filter((photo) => remembered.has(photo.id));
   }, [manifest]);
 
+  /**
+   * What actually bounds this guest for a product.
+   *
+   * Two ceilings apply and the smaller one is the truth. Showing the party's
+   * forty to somebody allowed two was hiding the rule from the only person it
+   * applies to — and letting them find it out by being refused.
+   */
+  const leftFor = useCallback((f: PartyPrintFormat) => (
+    f.remainingForYou === null ? f.remaining : Math.min(f.remaining, f.remainingForYou)
+  ), []);
+  /** True when it is the guest's own allowance that has run out, not the party's. */
+  const yoursIsBinding = useCallback((f: PartyPrintFormat) => (
+    f.remainingForYou !== null && f.remainingForYou <= f.remaining
+  ), []);
+
   const format = manifest?.formats.find((f) => f.type === product) ?? null;
   const required = format?.requiredPhotos ?? 1;
   const printable = manifest?.formats.filter((f) => f.enabled) ?? [];
-  const anyLeft = printable.some((f) => f.remaining > 0);
+  const anyLeft = printable.some((f) => leftFor(f) > 0);
 
   const gallery = onlyMine && mine.length > 0 ? mine : (manifest?.photos ?? []);
 
@@ -521,9 +546,14 @@ export function PartyPrintPage() {
     setAspects((prev) => (prev[id] ? prev : { ...prev, [id]: width / height }));
   }, []);
 
+  /** Portrait unless the guest turned the sheet, or the photograph is wide. */
+  const portraitFor = useCallback((id: string) => (
+    orientation === null ? aspectOf(id) <= 1 : orientation === 'portrait'
+  ), [orientation, aspectOf]);
+
   const slotAspectFor = useCallback((id: string) => (
-    product === 'strip4' ? stripSlotAspect() : photoSlotAspect(aspectOf(id) <= 1)
-  ), [product, aspectOf]);
+    product === 'strip4' ? stripSlotAspect() : photoSlotAspect(portraitFor(id))
+  ), [product, portraitFor]);
 
   const toggle = (id: string) => {
     setChosen((prev) => {
@@ -554,6 +584,7 @@ export function PartyPrintPage() {
     setChosen([]);
     setViews({});
     setCropIndex(0);
+    setOrientation(null);
     setStep('format');
     // The budgets moved while this guest was composing, so re-read them rather
     // than offering a count that is already out of date.
@@ -578,7 +609,16 @@ export function PartyPrintPage() {
     setSubmitError(null);
     try {
       const accepted = await submitPartyPrint(
-        token, { product, theme, slots: pending.slots }, pending.key);
+        token,
+        {
+          product,
+          theme,
+          slots: pending.slots,
+          // Omitted when the guest left the default: the server follows the
+          // photograph, which is what it did before this choice existed.
+          ...(product === 'photo' && orientation ? { orientation } : {}),
+        },
+        pending.key);
       setSent({ accepted, state: 'preparing' });
     } catch (err: unknown) {
       setSubmitError(refusalKey(err));
@@ -639,10 +679,19 @@ export function PartyPrintPage() {
   // Nothing left to print. Said plainly rather than shown as a dead button:
   // budgets move while a guest is deciding, and this is a real state.
   if (printable.length === 0 || !anyLeft) {
+    // WHOSE paper ran out matters. Telling a guest the party is finished while
+    // it still has forty sheets is a lie they see through the moment somebody
+    // else collects a print — and it sends them to complain to the host about
+    // a limit the host set on purpose.
+    const mine = printable.length > 0 && printable.every(yoursIsBinding);
     return (
       <PrintShell title={phase.manifest.partyName}>
-        <p className="party-print-note">{t('partyPrint.allExhausted')}</p>
-        <p className="party-print-hint">{t('partyPrint.allExhaustedHelp')}</p>
+        <p className="party-print-note">
+          {t(mine ? 'partyPrint.yoursAllDone' : 'partyPrint.allExhausted')}
+        </p>
+        <p className="party-print-hint">
+          {t(mine ? 'partyPrint.yoursAllDoneHelp' : 'partyPrint.allExhaustedHelp')}
+        </p>
         <BackLink />
       </PrintShell>
     );
@@ -657,7 +706,8 @@ export function PartyPrintPage() {
           </h2>
           <ul className="party-print-formats">
             {printable.map((option) => {
-              const out = option.remaining <= 0;
+              const left = leftFor(option);
+              const out = left <= 0;
               return (
                 <li key={option.type}>
                   <button
@@ -688,7 +738,13 @@ export function PartyPrintPage() {
                       </span>
                     </span>
                     <span className="party-print-format-left">
-                      {out ? t('partyPrint.exhausted') : tn(option.remaining, 'partyPrint.remaining')}
+                      {out
+                        ? t(yoursIsBinding(option)
+                          ? 'partyPrint.yoursDone'
+                          : 'partyPrint.exhausted')
+                        : yoursIsBinding(option)
+                          ? tn(left, 'partyPrint.yoursLeft')
+                          : tn(left, 'partyPrint.remaining')}
                     </span>
                   </button>
                 </li>
@@ -919,10 +975,32 @@ export function PartyPrintPage() {
             aspectOf={aspectOf}
             views={views}
             onAspect={noteAspect}
+            orientation={orientation}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp')}</p>
           {product === 'strip4' && (
             <p className="party-print-hint">{t('partyPrint.twinStrips')}</p>
+          )}
+          {/* Only for a single photograph: the four-photo strip is two strips
+              side by side on a portrait sheet, and turning that sheet would not
+              turn a picture, it would destroy the product. */}
+          {product === 'photo' && (
+            <fieldset className="party-print-themes">
+              <legend>{t('partyPrint.orientation')}</legend>
+              {(['portrait', 'landscape'] as const).map((option) => (
+                <label key={option} className="party-print-theme">
+                  <input
+                    type="radio"
+                    name="party-print-orientation"
+                    value={option}
+                    checked={(orientation ?? (aspectOf(chosen[0]) <= 1 ? 'portrait' : 'landscape'))
+                      === option}
+                    onChange={() => setOrientation(option)}
+                  />
+                  <span>{t(`partyPrint.orientation.${option}`)}</span>
+                </label>
+              ))}
+            </fieldset>
           )}
           <fieldset className="party-print-themes">
             <legend>{t('partyPrint.theme')}</legend>

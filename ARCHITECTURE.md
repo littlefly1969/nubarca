@@ -1000,6 +1000,14 @@ while printing would actually work** — configured, enabled, on a live station
 whose printer does 10×15, with budget left in at least one product — which is
 what makes the guest card a real offer rather than a link to a refusal.
 
+For a single photograph the sheet **follows the photograph unless the guest turns
+it**: a landscape picture goes on a landscape sheet rather than a portrait one
+with white bars beside it, but following is a good default rather than a rule,
+and the crop editor is what makes a deliberate turn work. The four-photo strip
+takes no such choice — two strips side by side on a portrait sheet *is* the
+product, so turning that sheet would not reorient a picture, it would destroy
+what a strip is.
+
 Budgets come in **two layers, and the per-guest one is the one that matters**.
 A party-wide budget alone is spent by whoever reaches the studio first, and the
 host discovers it when the fortieth guest finds nothing left; a per-guest ceiling
@@ -1010,6 +1018,12 @@ sheets on the way to being told no. A guest is the same server-minted,
 link-scoped `PartyParticipant` identity the uploads use, never a fingerprint and
 never anything the client chose; `0` means no per-guest limit, the same
 convention the upload quotas carry.
+
+Both numbers reach the guest. The studio shows whichever ceiling is **smaller**,
+and says which one it is: telling somebody their share is spent while the party
+has forty sheets left is a different sentence from telling them the party is
+finished, and getting it wrong sends them to complain to the host about a limit
+the host set deliberately.
 
 The two party-wide budgets are **independent, and their counters are history**. Photo
 prints and strips cost different things and the host sets them separately, so

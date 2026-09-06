@@ -27,6 +27,15 @@ public enum PartyPrintTheme
 public sealed record PartyPrintPhoto(
     byte[] Bytes, double CropX, double CropY, double CropWidth, double CropHeight);
 
+/// <summary>Which way round the sheet goes for a single photograph.</summary>
+public enum PartyPrintOrientation
+{
+    /// <summary>The sheet follows the photograph — the default, and usually right.</summary>
+    FollowPhoto = 0,
+    Portrait = 1,
+    Landscape = 2,
+}
+
 /// <summary>Everything the composer needs, and nothing about who asked.</summary>
 public sealed record PartyPrintComposition(
     string Product,
@@ -39,7 +48,14 @@ public sealed record PartyPrintComposition(
     /// table can be matched to the person holding that number on their phone.
     /// Zero prints nothing, which is what a preview or a test page wants.
     /// </summary>
-    long PublicSequence = 0);
+    long PublicSequence = 0,
+    /// <summary>
+    /// Only meaningful for a single photograph. The four-photo strip is a fixed
+    /// composition on a portrait sheet — two strips side by side is what makes
+    /// it a strip — so turning that sheet would not turn a picture, it would
+    /// destroy the product.
+    /// </summary>
+    PartyPrintOrientation Orientation = PartyPrintOrientation.FollowPhoto);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -104,9 +120,17 @@ public sealed class PartyPrintComposer
     {
         var photo = composition.Photos[0];
         using var source = LoadOriented(photo.Bytes);
-        // The sheet follows the photograph: a landscape picture on a landscape
-        // sheet, rather than a portrait sheet with white bars beside it.
-        var portrait = source.Height >= source.Width;
+        // The sheet follows the photograph unless the guest said otherwise: a
+        // landscape picture goes on a landscape sheet rather than a portrait one
+        // with white bars beside it. But following is a good DEFAULT, not a
+        // rule — a portrait subject in a landscape frame is a choice somebody
+        // may want, and the crop editor is what makes it work.
+        var portrait = composition.Orientation switch
+        {
+            PartyPrintOrientation.Portrait => true,
+            PartyPrintOrientation.Landscape => false,
+            _ => source.Height >= source.Width,
+        };
         var (w, h) = portrait
             ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
             : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);

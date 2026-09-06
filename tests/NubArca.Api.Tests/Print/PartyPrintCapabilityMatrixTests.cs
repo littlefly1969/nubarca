@@ -104,6 +104,41 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Manifest_Tells_A_Guest_THEIR_Remaining_Prints()
+    {
+        // A guest bounded to two on a party of forty was being told forty, and
+        // discovered their own limit only by being refused: the studio was
+        // hiding the rule from the one person it applies to.
+        var party = await SeedPartyAsync();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var profile = await db.PartyPrintProfiles
+                .SingleAsync(p => p.PartyAlbumId == party.AlbumId);
+            profile.PhotoMaxPrints = 40;
+            profile.PhotoPrintsPerGuest = 2;
+            await db.SaveChangesAsync();
+        }
+
+        var anon = _factory.CreateClient();
+        var manifest = await anon.GetFromJsonAsync<JsonElement>(
+            $"/api/party/{party.PrintToken}/print");
+        var photo = manifest.GetProperty("formats").EnumerateArray()
+            .Single(f => f.GetProperty("type").GetString() == "photo");
+
+        // The party's number is still reported; the guest's is reported beside
+        // it, and the client shows whichever is smaller.
+        Assert.Equal(40, photo.GetProperty("remaining").GetInt32());
+        Assert.Equal(2, photo.GetProperty("remainingForYou").GetInt32());
+
+        // With no per-guest ceiling it is null, which is NOT zero: it means the
+        // limit does not exist.
+        var strip = manifest.GetProperty("formats").EnumerateArray()
+            .Single(f => f.GetProperty("type").GetString() == "strip4");
+        Assert.Equal(JsonValueKind.Null, strip.GetProperty("remainingForYou").ValueKind);
+    }
+
+    [Fact]
     public async Task A_Print_Token_May_Read_Derived_Media_And_Nothing_Else()
     {
         var party = await SeedPartyAsync();

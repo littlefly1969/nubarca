@@ -4,7 +4,13 @@ namespace NubArca.Api.Print;
 public sealed record PartyPrintSubmitRequest(
     string Product,
     string Theme,
-    IReadOnlyList<PartyPrintSlotRequest> Slots);
+    IReadOnlyList<PartyPrintSlotRequest> Slots,
+    /// <summary>
+    /// "portrait", "landscape", or absent to follow the photograph. Anything
+    /// else follows the photograph too: an unreadable preference is not worth
+    /// refusing a print over.
+    /// </summary>
+    string? Orientation = null);
 
 public sealed record PartyPrintSlotRequest(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);

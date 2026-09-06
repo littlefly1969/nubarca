@@ -191,7 +191,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
                 request.Product, ParseTheme(request.Theme), photos,
                 access.PartyName, access.FooterText,
-                reservation.PublicSequence), cancellationToken);
+                reservation.PublicSequence,
+                ParseOrientation(request.Orientation)), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
             var stored = await _artifacts.WriteAsync(stream, cancellationToken);
@@ -295,6 +296,15 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
         "midnight" => PartyPrintTheme.Midnight,
         "event" => PartyPrintTheme.Event,
         _ => PartyPrintTheme.Pure,
+    };
+
+    private static PartyPrintOrientation ParseOrientation(string? value) => value switch
+    {
+        "portrait" => PartyPrintOrientation.Portrait,
+        "landscape" => PartyPrintOrientation.Landscape,
+        // Absent, misspelled, or from a client that predates the choice: follow
+        // the photograph, which is what everybody got before and is still right.
+        _ => PartyPrintOrientation.FollowPhoto,
     };
 
     /// <summary>
