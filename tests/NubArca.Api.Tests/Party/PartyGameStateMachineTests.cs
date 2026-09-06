@@ -97,6 +97,54 @@ public sealed class PartyGameStateMachineTests
     }
 
     [Fact]
+    public void An_unvoted_activity_changes_exactly_two_edges_and_nothing_else()
+    {
+        // The whole difference a voting mode makes: CHALLENGE_ACTIVE stops
+        // offering a vote and starts offering the result. Every other cell of
+        // the matrix is identical, and this asserts that rather than trusting it.
+        foreach (var phase in PartyGamePhases.All)
+        foreach (var command in PartyGameCommands.All)
+        foreach (var hasNext in new[] { true, false })
+        {
+            var voted = PartyGameStateMachine.Resolve(phase, command, hasNext, true);
+            var unvoted = PartyGameStateMachine.Resolve(phase, command, hasNext, false);
+
+            if (phase == PartyGamePhases.ChallengeActive && command == PartyGameCommands.OpenVoting)
+            {
+                Assert.NotNull(voted);
+                Assert.Null(unvoted);
+            }
+            else if (phase == PartyGamePhases.ChallengeActive && command == PartyGameCommands.RevealResult)
+            {
+                Assert.Null(voted);
+                Assert.Equal(PartyGamePhases.Result, unvoted!.Phase);
+                Assert.Equal(PartyGameStatuses.Live, unvoted.Status);
+                Assert.Equal(PartyGameRoundEffect.None, unvoted.Effect);
+            }
+            else
+            {
+                Assert.Equal(voted, unvoted);
+            }
+        }
+    }
+
+    [Fact]
+    public void An_unvoted_activity_offers_the_result_as_its_primary_action()
+    {
+        Assert.Equal(PartyGameCommands.RevealResult,
+            PartyGameStateMachine.PrimaryCommand(PartyGamePhases.ChallengeActive, currentActivityVotes: false));
+        Assert.Equal(PartyGameCommands.OpenVoting,
+            PartyGameStateMachine.PrimaryCommand(PartyGamePhases.ChallengeActive, currentActivityVotes: true));
+
+        // And the vote is ABSENT from what the control room may offer, not
+        // present-but-refused.
+        var legal = PartyGameStateMachine.LegalCommands(
+            PartyGamePhases.ChallengeActive, hasNextChallenge: true, currentActivityVotes: false);
+        Assert.Equal(PartyGameCommands.RevealResult, legal[0]);
+        Assert.DoesNotContain(PartyGameCommands.OpenVoting, legal);
+    }
+
+    [Fact]
     public void A_finished_game_accepts_nothing()
     {
         foreach (var command in PartyGameCommands.All)

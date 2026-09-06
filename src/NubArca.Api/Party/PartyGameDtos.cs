@@ -1,3 +1,5 @@
+using NubArca.Api.Domain;
+
 namespace NubArca.Api.Party;
 
 /// <summary>
@@ -5,7 +7,13 @@ namespace NubArca.Api.Party;
 /// is the owner-authorized thumbnail, never a storage key.
 /// </summary>
 public sealed record PartyGameChallengeDto(
-    Guid Id, string Title, string Body, string Kind, string? MediaUrl);
+    Guid Id, string Title, string Body, string Kind, string? MediaUrl,
+    // How the activity is PLAYED, carried beside what it says. A control room
+    // that had to read the instructions to learn whether there is a vote would
+    // be guessing at exactly the moment it must not.
+    int? DurationSeconds = null,
+    string VotingMode = PartyChallengeVotingModes.Binary,
+    string? VoteQuestion = null);
 
 /// <summary>
 /// The complete owner-facing state of a party game. Everything a control room

@@ -74,8 +74,10 @@ public sealed class PartyGameService : IPartyGameService
                 .Where(x => x.PartyGameSessionId == session.Id)
                 .Select(x => x.PartyChallengeId).ToListAsync(cancellationToken);
         var next = await NextChallengeAsync(albumId, playedIds, cancellationToken);
+        var currentChallenge = await CurrentChallengeAsync(session, cancellationToken);
 
-        var transition = PartyGameStateMachine.Resolve(phase, command!, next is not null);
+        var transition = PartyGameStateMachine.Resolve(
+            phase, command!, next is not null, Votes(currentChallenge));
         if (transition is null)
         {
             var error = command == PartyGameCommands.Start && phase == PartyGamePhases.Lobby
@@ -119,6 +121,7 @@ public sealed class PartyGameService : IPartyGameService
                 StartedAt = now,
                 PhaseStartedAt = now,
             };
+            currentChallenge = next;
             _db.PartyGameRounds.Add(started);
             session.CurrentRoundId = started.Id;
             session.CurrentRoundNumber = started.Sequence;
@@ -130,9 +133,14 @@ public sealed class PartyGameService : IPartyGameService
         else if (round is not null)
         {
             // An ordinary phase change inside the same round restarts the phase
-            // clock. PhaseEndsAt stays null until activities carry a duration.
+            // clock. Only the activity phase carries the host's time limit: a
+            // reveal, a vote and a result each last exactly as long as the host
+            // leaves them on screen.
             round.PhaseStartedAt = now;
-            round.PhaseEndsAt = null;
+            round.PhaseEndsAt = command == PartyGameCommands.StartChallenge
+                && currentChallenge?.DurationSeconds is int seconds
+                ? now.AddSeconds(seconds)
+                : null;
         }
 
         if (session.StartedAt is null && transition.Status == PartyGameStatuses.Live) session.StartedAt = now;
@@ -193,7 +201,11 @@ public sealed class PartyGameService : IPartyGameService
             var row = await _db.PartyGameRounds.AsNoTracking()
                 .Where(x => x.Id == roundId)
                 .Join(_db.PartyChallenges.AsNoTracking(), r => r.PartyChallengeId, c => c.Id,
-                    (r, c) => new { r.PhaseEndsAt, c.Id, c.Title, c.Body, c.Kind, c.MediaFileItemId })
+                    (r, c) => new
+                    {
+                        r.PhaseEndsAt, c.Id, c.Title, c.Body, c.Kind, c.MediaFileItemId,
+                        c.DurationSeconds, c.VotingMode, c.VoteQuestion,
+                    })
                 .FirstOrDefaultAsync(cancellationToken);
             if (row is not null)
             {
@@ -201,7 +213,8 @@ public sealed class PartyGameService : IPartyGameService
                 challenge = new PartyChallengePresentationDto(row.Id, row.Title, row.Body, row.Kind,
                     // Token-less sentinel; the endpoint rewrites it against the
                     // caller's own token, exactly as the guest challenge list does.
-                    row.MediaFileItemId is null ? null : $"/api/party/challenge-media/{row.Id}");
+                    row.MediaFileItemId is null ? null : $"/api/party/challenge-media/{row.Id}",
+                    row.DurationSeconds, row.VotingMode, row.VoteQuestion);
             }
         }
 
@@ -285,10 +298,29 @@ public sealed class PartyGameService : IPartyGameService
             session.Version, session.CurrentRoundNumber, total, played,
             session.StartedAt, session.FinishedAt, phaseStartedAt, phaseEndsAt,
             current, Challenge(next),
-            PartyGameStateMachine.LegalCommands(session.Phase, next is not null));
+            PartyGameStateMachine.LegalCommands(
+                session.Phase, next is not null,
+                current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode)));
     }
 
     private static PartyGameChallengeDto? Challenge(PartyChallenge? row) => row is null ? null
         : new PartyGameChallengeDto(row.Id, row.Title, row.Body, row.Kind,
-            row.MediaFileItemId is Guid id ? $"/api/files/{id}/thumbnail?size=medium" : null);
+            row.MediaFileItemId is Guid id ? $"/api/files/{id}/thumbnail?size=medium" : null,
+            row.DurationSeconds, row.VotingMode, row.VoteQuestion);
+
+    /// Whether the running activity is one the room votes on. No activity at all
+    /// (the lobby) answers true, so the lobby's own commands are unaffected.
+    private static bool Votes(PartyChallenge? challenge) =>
+        challenge is null || PartyChallengeVotingModes.CollectsVotes(challenge.VotingMode);
+
+    private async Task<PartyChallenge?> CurrentChallengeAsync(
+        PartyGameSession? session, CancellationToken ct)
+    {
+        if (session?.CurrentRoundId is not Guid roundId) return null;
+        return await _db.PartyGameRounds.AsNoTracking()
+            .Where(x => x.Id == roundId)
+            .Join(_db.PartyChallenges.AsNoTracking(), r => r.PartyChallengeId, c => c.Id,
+                (r, c) => c)
+            .FirstOrDefaultAsync(ct);
+    }
 }

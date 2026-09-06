@@ -236,16 +236,28 @@ public sealed record TvPartyMessageDto(
 public sealed record TvPartyMessagesDto(IReadOnlyList<TvPartyMessageDto> Messages);
 
 // --- PARTY CHALLENGES ---
+// The owner's view of one prepared activity. The three rule fields are optional
+// on the wire with the domain defaults, so a client written before the composer
+// still parses one and a client written after it still reads a legacy row.
 public sealed record PartyChallengeDto(
     Guid Id, string Title, string Body, string Kind, Guid? MediaFileItemId,
     string? MediaUrl, bool IsEnabled, int SortOrder, int VoteCount,
-    DateTime CreatedAt, DateTime UpdatedAt);
+    DateTime CreatedAt, DateTime UpdatedAt,
+    int? DurationSeconds = null,
+    string VotingMode = PartyChallengeVotingModes.Binary,
+    string? VoteQuestion = null);
 
 public sealed record PartyChallengeListDto(Guid AlbumId, IReadOnlyList<PartyChallengeDto> Items);
 
+// A write from the composer. The rule fields default to the domain defaults, so
+// a caller that only knows about title/body/kind/media — the settings panel
+// before the composer existed — writes a valid activity without sending them.
 public sealed record PartyChallengeWriteRequest(
     string? Title, string? Body, string? Kind, Guid? MediaFileItemId,
-    bool IsEnabled = true);
+    bool IsEnabled = true,
+    int? DurationSeconds = null,
+    string? VotingMode = null,
+    string? VoteQuestion = null);
 
 public sealed record PartyChallengeReorderRequest(IReadOnlyList<Guid>? ChallengeIds);
 
@@ -263,7 +275,10 @@ public sealed record PartyGuestChallengesDto(
 public sealed record PartyVoteResultDto(bool Voted, int VotesUsed, int VotesRemaining);
 
 public sealed record PartyChallengePresentationDto(
-    Guid Id, string Title, string Body, string Kind, string? MediaUrl);
+    Guid Id, string Title, string Body, string Kind, string? MediaUrl,
+    int? DurationSeconds = null,
+    string VotingMode = PartyChallengeVotingModes.Binary,
+    string? VoteQuestion = null);
 
 public sealed record PartyPlaybackSnapshotDto(
     string Mode, PartyChallengePresentationDto? ActiveChallenge,

@@ -312,7 +312,23 @@ export function getPartyItems(token: string, signal?: AbortSignal): Promise<Part
 }
 
 export type PartyChallengeKind = 'dare' | 'penalty' | 'guess' | 'custom';
-export interface PartyChallenge {
+
+// How the room decides. The set is designed to grow — rating, multiple choice,
+// quiz — so this stays a string union whose members the server also knows;
+// nothing here is an index into an ordering.
+export type PartyChallengeVotingMode = 'none' | 'binary';
+
+// The activity's rules, as fields rather than as prose inside `body`. Optional
+// on the wire so a response from a server that predates them still parses.
+export interface PartyChallengeRules {
+  /** null = as long as it takes. */
+  durationSeconds?: number | null;
+  votingMode?: PartyChallengeVotingMode;
+  /** null = the localized default question. */
+  voteQuestion?: string | null;
+}
+
+export interface PartyChallenge extends PartyChallengeRules {
   id: string;
   title: string;
   body: string;
@@ -326,7 +342,7 @@ export interface PartyChallenge {
   updatedAt: string;
 }
 export interface PartyChallengeList { albumId: string; items: PartyChallenge[]; }
-export interface PartyChallengeWrite {
+export interface PartyChallengeWrite extends PartyChallengeRules {
   title: string; body: string; kind: PartyChallengeKind;
   mediaFileItemId: string | null; isEnabled: boolean;
 }

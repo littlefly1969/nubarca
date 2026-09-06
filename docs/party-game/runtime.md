@@ -42,6 +42,13 @@ LOBBY --start--> CHALLENGE_REVEAL --start_challenge--> CHALLENGE_ACTIVE
 voting_open, voting_closed — for the next activity, or for FINISHED when there
 is none. `finish` is legal from every phase except FINISHED.
 
+**An activity nobody votes on takes one shortcut.** When the running activity's
+`VotingMode` is `none`, `CHALLENGE_ACTIVE` goes straight to `RESULT` and
+`open_voting` is not offered at all — the alternative is a control room whose
+primary action opens a vote that can never receive one. That is the *only* cell
+of the matrix a voting mode changes, and a test asserts every other cell is
+identical.
+
 The matrix lives in [`PartyGameStateMachine`](../../src/NubArca.Api/Party/PartyGameStateMachine.cs)
 as a pure function and is exhausted by
 [`PartyGameStateMachineTests`](../../tests/NubArca.Api.Tests/Party/PartyGameStateMachineTests.cs)
@@ -61,7 +68,7 @@ one-to-one onto six primary commands:
 | --- | --- |
 | `lobby` | `start` |
 | `challenge_reveal` | `start_challenge` |
-| `challenge_active` | `open_voting` |
+| `challenge_active` | `open_voting`, or `reveal_result` when the activity is unvoted |
 | `voting_open` | `close_voting` |
 | `voting_closed` | `reveal_result` |
 | `result` | `next_challenge` |
@@ -149,8 +156,10 @@ returns a token-less sentinel, exactly as the guest challenge list does.
   game, as a database fact rather than a query somebody remembers to write.
 - `Status` is `active`, `completed` or `abandoned`. Abandoned is deliberately
   distinct: it is the difference between "the room decided" and "we moved on".
-- `PhaseEndsAt` is the phase deadline. It is always null today; activity
-  durations arrive with the composer.
+- `PhaseEndsAt` is the phase deadline, set when `start_challenge` runs on an
+  activity that carries a `DurationSeconds`. Only the activity phase gets one: a
+  reveal, a vote and a result each last exactly as long as the host leaves them
+  on screen.
 
 An activity a round has played can no longer be deleted — the restricting
 foreign key would refuse anyway, and `PartyChallengeService.DeleteAsync` turns

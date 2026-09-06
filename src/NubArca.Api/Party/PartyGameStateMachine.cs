@@ -47,12 +47,22 @@ public static class PartyGameStateMachine
 {
     /// <summary>
     /// The transition for a command, or null when the command is illegal in this
-    /// phase. <paramref name="hasNextChallenge"/> decides whether leaving a round
+    /// phase.
+    ///
+    /// <para><paramref name="hasNextChallenge"/> decides whether leaving a round
     /// starts another one or ends the game; it never makes a legal command
     /// illegal, except for <c>start</c>, because a game with nothing to play is
-    /// not a game.
+    /// not a game.</para>
+    ///
+    /// <para><paramref name="currentActivityVotes"/> is the running activity's
+    /// own voting mode. An activity nobody votes on goes straight from being
+    /// performed to its result, and <c>open_voting</c> is not offered at all —
+    /// the alternative is a control room whose primary action opens a vote that
+    /// can never receive one. It defaults to true, which is both the domain
+    /// default and what every activity written before the composer meant.</para>
     /// </summary>
-    public static PartyGameTransition? Resolve(string phase, string command, bool hasNextChallenge) =>
+    public static PartyGameTransition? Resolve(
+        string phase, string command, bool hasNextChallenge, bool currentActivityVotes = true) =>
         (phase, command) switch
         {
             (PartyGamePhases.Lobby, PartyGameCommands.Start) => hasNextChallenge
@@ -62,8 +72,16 @@ public static class PartyGameStateMachine
             (PartyGamePhases.ChallengeReveal, PartyGameCommands.StartChallenge) =>
                 new(PartyGamePhases.ChallengeActive, PartyGameStatuses.Live, PartyGameRoundEffect.None),
 
-            (PartyGamePhases.ChallengeActive, PartyGameCommands.OpenVoting) =>
-                new(PartyGamePhases.VotingOpen, PartyGameStatuses.Live, PartyGameRoundEffect.None),
+            (PartyGamePhases.ChallengeActive, PartyGameCommands.OpenVoting) => currentActivityVotes
+                ? new(PartyGamePhases.VotingOpen, PartyGameStatuses.Live, PartyGameRoundEffect.None)
+                : null,
+
+            // The unvoted activity's whole shortcut: performed, then shown. It
+            // never enters VOTING_OPEN, so it never reaches VOTING_CLOSED
+            // either, and RESULT is where the host says how it went.
+            (PartyGamePhases.ChallengeActive, PartyGameCommands.RevealResult) => currentActivityVotes
+                ? null
+                : new(PartyGamePhases.Result, PartyGameStatuses.Live, PartyGameRoundEffect.None),
 
             (PartyGamePhases.VotingOpen, PartyGameCommands.CloseVoting) =>
                 new(PartyGamePhases.VotingClosed, PartyGameStatuses.Live, PartyGameRoundEffect.None),
@@ -116,11 +134,12 @@ public static class PartyGameStateMachine
     /// TypeScript — and the server still validates, because a client is never an
     /// authority.
     /// </summary>
-    public static IReadOnlyList<string> LegalCommands(string phase, bool hasNextChallenge)
+    public static IReadOnlyList<string> LegalCommands(
+        string phase, bool hasNextChallenge, bool currentActivityVotes = true)
     {
         var ordered = new[]
         {
-            PrimaryCommand(phase),
+            PrimaryCommand(phase, currentActivityVotes),
             PartyGameCommands.SkipChallenge,
             PartyGameCommands.Finish,
         };
@@ -128,7 +147,8 @@ public static class PartyGameStateMachine
         foreach (var command in ordered)
         {
             if (command is null || legal.Contains(command)) continue;
-            if (Resolve(phase, command, hasNextChallenge) is not null) legal.Add(command);
+            if (Resolve(phase, command, hasNextChallenge, currentActivityVotes) is not null)
+                legal.Add(command);
         }
         return legal;
     }
@@ -138,11 +158,12 @@ public static class PartyGameStateMachine
     /// primary action. Null in a phase that has none (finished), and it is not
     /// necessarily legal: <c>start</c> needs an activity to play.
     /// </summary>
-    public static string? PrimaryCommand(string phase) => phase switch
+    public static string? PrimaryCommand(string phase, bool currentActivityVotes = true) => phase switch
     {
         PartyGamePhases.Lobby => PartyGameCommands.Start,
         PartyGamePhases.ChallengeReveal => PartyGameCommands.StartChallenge,
-        PartyGamePhases.ChallengeActive => PartyGameCommands.OpenVoting,
+        PartyGamePhases.ChallengeActive => currentActivityVotes
+            ? PartyGameCommands.OpenVoting : PartyGameCommands.RevealResult,
         PartyGamePhases.VotingOpen => PartyGameCommands.CloseVoting,
         PartyGamePhases.VotingClosed => PartyGameCommands.RevealResult,
         PartyGamePhases.Result => PartyGameCommands.NextChallenge,
