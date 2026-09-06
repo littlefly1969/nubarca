@@ -140,7 +140,14 @@ export interface PartyGamePublicSnapshot {
 export type PartyGameCommandCode =
   | 'game_disabled' | 'version_conflict' | 'illegal_transition' | 'no_challenges' | 'conflict';
 
-export type PartyGameVoteCode = 'voting_closed' | 'stale_round' | 'conflict';
+export type PartyGameVoteCode =
+  | 'voting_closed'
+  | 'stale_round'
+  // The caller holds no identity this party issued. A vote never mints one —
+  // only `joinPartyGame` does — so this is a tap from a phone whose participant
+  // session is gone, and it is recoverable by joining again.
+  | 'not_joined'
+  | 'conflict';
 
 /**
  * A refusal carries the state it was measured against, so a caller that fell

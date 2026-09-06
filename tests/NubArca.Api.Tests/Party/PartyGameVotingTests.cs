@@ -58,7 +58,10 @@ public sealed class PartyGameVotingTests : IDisposable
         var party = await OpenVotingAsync();
         var a = _factory.CreateClient();
         var b = _factory.CreateClient();
+        // Each guest joins for themselves: an identity is per phone, and a vote
+        // never mints one.
         var round = await RoundIdAsync(a, party.Token);
+        Assert.Equal(round, await RoundIdAsync(b, party.Token));
 
         await VoteAsync(a, party.Token, round, "yes");
         var second = await VoteAsync(b, party.Token, round, "no");
@@ -188,6 +191,8 @@ public sealed class PartyGameVotingTests : IDisposable
         var b = _factory.CreateClient();
         var c = _factory.CreateClient();
         var round = await RoundIdAsync(a, party.Token);
+        await RoundIdAsync(b, party.Token);
+        await RoundIdAsync(c, party.Token);
         await VoteAsync(a, party.Token, round, "yes");
         await VoteAsync(b, party.Token, round, "yes");
         await VoteAsync(c, party.Token, round, "no");
@@ -221,6 +226,7 @@ public sealed class PartyGameVotingTests : IDisposable
         var a = _factory.CreateClient();
         var b = _factory.CreateClient();
         var round = await RoundIdAsync(a, party.Token);
+        await RoundIdAsync(b, party.Token);
         await VoteAsync(a, party.Token, round, "yes");
         await VoteAsync(b, party.Token, round, "no");
 
@@ -264,24 +270,47 @@ public sealed class PartyGameVotingTests : IDisposable
     }
 
     [Fact]
-    public async Task A_guest_at_another_party_cannot_vote_here()
+    public async Task An_identity_issued_by_one_party_cannot_vote_at_another()
     {
-        var mine = await OpenVotingAsync();
         var theirs = await OpenVotingAsync(name: "Altra festa");
-        var guest = _factory.CreateClient();
+        var mine = await OpenVotingAsync();
 
-        // The cookie is path-scoped to the token that minted it, so a session
-        // from one party never even reaches the other's endpoints.
-        await guest.PostAsync($"/api/party/{theirs.Token}/game/join", null);
-        var round = await RoundIdAsync(guest, mine.Token);
-        var response = await VoteAsync(guest, mine.Token, round, "yes");
+        // A real join at THEIR party, and the cookie it issued.
+        var guest = _factory.CreateClient();
+        var joined = await guest.PostAsync($"/api/party/{theirs.Token}/game/join", null);
+        joined.EnsureSuccessStatusCode();
+        var cookie = ParticipantCookie(joined);
+        var round = (await PublicSnapshotAsync(_factory.CreateClient(), mine.Token))
+            .GetProperty("roundId").GetGuid();
+
+        // A browser would never send it here — it is path-scoped to the token
+        // that minted it — so the attack is to send it deliberately. It hashes
+        // fine and matches no row on THIS link.
+        var attacker = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, $"/api/party/{mine.Token}/game/vote")
+        {
+            Content = JsonContent.Create(new { roundId = round, value = "yes" }),
+        };
+        request.Headers.Add("Cookie", cookie);
+        var response = await attacker.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("not_joined",
+            (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // Two rows, one per party: no allowance and no identity crosses over.
-        Assert.Equal(2, await db.PartyParticipants.CountAsync());
-        Assert.Equal("yes", response.GetProperty("myVote").GetString());
+        // Exactly the one participant their own join created. Nothing was
+        // minted at my party, and nothing was voted.
+        Assert.Single(await db.PartyParticipants.ToListAsync());
+        Assert.Empty(await db.PartyGameVotes.ToListAsync());
     }
+
+    /// The `name=value` pair from a join response, as a browser would store it.
+    private static string ParticipantCookie(HttpResponseMessage response) =>
+        response.Headers.GetValues("Set-Cookie")
+            .Single(x => x.StartsWith("NubArca.PartyGuest=", StringComparison.Ordinal))
+            .Split(';', 2)[0];
 
     [Fact]
     public async Task Voting_is_scoped_to_its_own_round()
@@ -391,8 +420,20 @@ public sealed class PartyGameVotingTests : IDisposable
         return party;
     }
 
-    private static async Task<Guid> RoundIdAsync(HttpClient guest, string token) =>
-        (await PublicSnapshotAsync(guest, token)).GetProperty("roundId").GetGuid();
+    /// <summary>
+    /// A guest arriving: join, then read the round they are about to answer.
+    ///
+    /// It JOINS rather than reading, because joining is the only thing that
+    /// makes a voter — the vote endpoint resolves an identity and never mints
+    /// one. This is exactly what the guest page does on mount.
+    /// </summary>
+    private static async Task<Guid> RoundIdAsync(HttpClient guest, string token)
+    {
+        var response = await guest.PostAsync($"/api/party/{token}/game/join", null);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("roundId").GetGuid();
+    }
 
     private static async Task<JsonElement> PublicSnapshotAsync(HttpClient client, string token)
     {

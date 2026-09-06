@@ -111,6 +111,16 @@ public enum PartyGameVoteError
     /// The token, the album, the party or the game switch does not resolve.
     NotFound,
 
+    /// <summary>
+    /// The caller holds no participant identity this party ever issued.
+    ///
+    /// A vote requires an identity the server minted at join and resolved
+    /// server-side; a cookie is a claim, not a credential. It is a conflict
+    /// rather than a denial because it is a state the caller can leave — by
+    /// joining — and the refusal carries the snapshot so they can.
+    /// </summary>
+    NotJoined,
+
     /// There is no vote to cast: no game, no round, or a phase that is not
     /// collecting answers — including the instant after the host closed it.
     VotingClosed,

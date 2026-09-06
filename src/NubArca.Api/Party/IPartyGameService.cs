@@ -53,7 +53,12 @@ public interface IPartyGameService
     /// session, the round being played, the phase and the activity's own voting
     /// mode are all re-read here, on every tap.
     /// </summary>
+    /// <param name="participantId">
+    /// An identity this party ISSUED and the caller resolved server-side, or
+    /// null. Null is refused: a vote may never mint a voter, so the only way to
+    /// acquire the right to change a result is a successful join.
+    /// </param>
     Task<PartyGameVoteResult> VoteAsync(
-        PartyAccess access, Guid participantId, Guid? roundId, string? value,
+        PartyAccess access, Guid? participantId, Guid? roundId, string? value,
         CancellationToken cancellationToken = default);
 }
