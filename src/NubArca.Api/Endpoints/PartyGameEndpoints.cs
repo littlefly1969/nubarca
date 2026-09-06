@@ -105,6 +105,7 @@ public static class PartyGameEndpoints
             [FromServices] IPartyLinkService party,
             [FromServices] IPartyParticipantService participants,
             [FromServices] IPartyGameService game,
+            [FromQuery] int? display,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
@@ -112,7 +113,12 @@ public static class PartyGameEndpoints
             if (access is null) return Results.NotFound();
             var participantId = await ResolveExistingGuestAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
-            var snapshot = await game.GetPublicSnapshotAsync(access, participantId, cancellationToken);
+            // A caller SAYS it is a television; the server does not guess from
+            // the absence of a guest cookie, which a guest who has not joined
+            // would also satisfy. Saying so grants nothing — it only lets the
+            // control room answer "is a screen showing this" honestly.
+            var snapshot = await game.GetPublicSnapshotAsync(
+                access, participantId, display == 1, cancellationToken);
             if (snapshot is null) return Results.NotFound();
 
             return Results.Ok(WithTokenMedia(snapshot, token));
@@ -136,7 +142,7 @@ public static class PartyGameEndpoints
             var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
                 httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
             if (participantId is null) return Results.NotFound();
-            var snapshot = await game.GetPublicSnapshotAsync(access, participantId, cancellationToken);
+            var snapshot = await game.GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
             return snapshot is null ? Results.NotFound() : Results.Ok(WithTokenMedia(snapshot, token));
         }).WithName("JoinPartyGame").RequireRateLimiting(PartyPublicRateLimitPolicy);
 

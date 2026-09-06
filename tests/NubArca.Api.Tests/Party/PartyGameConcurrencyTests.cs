@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -225,7 +226,9 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     }
 
     private static PartyGameService Service(AppDbContext db) =>
-        new(db, TimeProvider.System, NullLogger<PartyGameService>.Instance);
+        new(db, TimeProvider.System,
+            new PartyLinkService(db, TimeProvider.System, new ConfigurationBuilder().Build()),
+            NullLogger<PartyGameService>.Instance);
 
     private async Task<PartyGameCommandResult> CommandAfterStartAsync(
         AppDbContext db, string command, int expectedVersion, Task start,

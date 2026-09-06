@@ -26,12 +26,16 @@ public sealed class PartyGameService : IPartyGameService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPartyLinkService _links;
     private readonly ILogger<PartyGameService> _logger;
 
-    public PartyGameService(AppDbContext db, TimeProvider clock, ILogger<PartyGameService> logger)
+    public PartyGameService(
+        AppDbContext db, TimeProvider clock, IPartyLinkService links,
+        ILogger<PartyGameService> logger)
     {
         _db = db;
         _clock = clock;
+        _links = links;
         _logger = logger;
     }
 
@@ -44,7 +48,33 @@ public sealed class PartyGameService : IPartyGameService
         if (link is null || !link.GameEnabled) return null;
         var session = await _db.PartyGameSessions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, cancellationToken);
-        return await BuildOwnerSnapshotAsync(albumId, session, cancellationToken);
+        return await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
+            await RoomAsync(link, cancellationToken));
+    }
+
+    /// <summary>
+    /// The room, as only the server can describe it: how many guests are in it,
+    /// how long ago a screen last looked, and where both surfaces live.
+    ///
+    /// The elapsed time is computed HERE rather than sent as a timestamp,
+    /// because a control room open on a laptop with a drifting clock would
+    /// otherwise decide for itself that the television has been dead for an hour.
+    /// </summary>
+    private async Task<PartyGameRoomDto> RoomAsync(PartyAlbumLink link, CancellationToken ct)
+    {
+        var now = Now;
+        var since = now.AddSeconds(-PartyGamePresence.WindowSeconds);
+        var guests = await _db.PartyParticipants.AsNoTracking()
+            .CountAsync(x => x.PartyAlbumLinkId == link.Id && x.LastSeenAt >= since, ct);
+        var displayAge = link.LastDisplaySeenAt is DateTime seen
+            ? (int?)Math.Max(0, (int)Math.Round((now - seen).TotalSeconds))
+            : null;
+        // The owner is authorized to hold this party's tokens — that is what the
+        // settings panel already shows them — so the two surfaces are named as
+        // URLs rather than left for the client to assemble.
+        var token = _links.DeriveViewToken(link.Id);
+        return new PartyGameRoomDto(guests, displayAge,
+            PartyLinkService.BuildTvStageUrl(token), PartyLinkService.BuildGameUrl(token));
     }
 
     public async Task<PartyGameCommandResult> ExecuteAsync(
@@ -65,7 +95,8 @@ public sealed class PartyGameService : IPartyGameService
         var currentVersion = session?.Version ?? 0;
         if (expectedVersion != currentVersion)
             return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
-                await BuildOwnerSnapshotAsync(albumId, session, cancellationToken));
+                await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
+                    await RoomAsync(link, cancellationToken)));
 
         var phase = session?.Phase ?? PartyGamePhases.Lobby;
         var playedIds = session is null
@@ -84,7 +115,8 @@ public sealed class PartyGameService : IPartyGameService
                 ? PartyGameCommandError.NoChallenges
                 : PartyGameCommandError.IllegalTransition;
             return PartyGameCommandResult.Fail(error,
-                await BuildOwnerSnapshotAsync(albumId, session, cancellationToken));
+                await BuildOwnerSnapshotAsync(albumId, session, cancellationToken,
+                    await RoomAsync(link, cancellationToken)));
         }
 
         var now = Now;
@@ -163,7 +195,8 @@ public sealed class PartyGameService : IPartyGameService
             var current = await _db.PartyGameSessions.AsNoTracking()
                 .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, cancellationToken);
             return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
-                await BuildOwnerSnapshotAsync(albumId, current, cancellationToken));
+                await BuildOwnerSnapshotAsync(albumId, current, cancellationToken,
+                    await RoomAsync(link, cancellationToken)));
         }
 
         _logger.LogInformation(
@@ -173,12 +206,14 @@ public sealed class PartyGameService : IPartyGameService
         _db.ChangeTracker.Clear();
         var snapshot = await BuildOwnerSnapshotAsync(albumId,
             await _db.PartyGameSessions.AsNoTracking()
-                .FirstAsync(x => x.Id == session.Id, cancellationToken), cancellationToken);
+                .FirstAsync(x => x.Id == session.Id, cancellationToken), cancellationToken,
+            await RoomAsync(link, cancellationToken));
         return PartyGameCommandResult.Ok(snapshot!);
     }
 
     public async Task<PartyGamePublicSnapshotDto?> GetPublicSnapshotAsync(
-        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default)
+        PartyAccess access, Guid? participantId = null, bool isDisplay = false,
+        CancellationToken cancellationToken = default)
     {
         if (access.PartyAlbumLinkId is not Guid linkId) return null;
         var context = await _db.PartyAlbumLinks.AsNoTracking()
@@ -186,6 +221,15 @@ public sealed class PartyGameService : IPartyGameService
             .Join(_db.Albums.AsNoTracking(), x => x.AlbumId, a => a.Id, (x, a) => new { a.Name })
             .FirstOrDefaultAsync(cancellationToken);
         if (context is null) return null;
+
+        if (isDisplay)
+        {
+            // One column, by id, outside the change tracker: a television polling
+            // every couple of seconds must never contend with an owner command
+            // for the session's concurrency token.
+            await _db.PartyAlbumLinks.Where(x => x.Id == linkId)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.LastDisplaySeenAt, Now), cancellationToken);
+        }
 
         var session = await _db.PartyGameSessions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId, cancellationToken);
@@ -251,7 +295,7 @@ public sealed class PartyGameService : IPartyGameService
 
         var session = await _db.PartyGameSessions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId, cancellationToken);
-        var current = await GetPublicSnapshotAsync(access, participantId, cancellationToken);
+        var current = await GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
         if (current is null) return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
 
         // Nothing about this decision comes from the client. The phase, the
@@ -297,7 +341,7 @@ public sealed class PartyGameService : IPartyGameService
             // The same tap twice. Nothing to write, and nothing to complain
             // about: the guest already said this.
             return PartyGameVoteResult.Ok(
-                (await GetPublicSnapshotAsync(access, participantId, cancellationToken))!);
+                (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);
         }
 
         try
@@ -313,7 +357,7 @@ public sealed class PartyGameService : IPartyGameService
         }
 
         return PartyGameVoteResult.Ok(
-            (await GetPublicSnapshotAsync(access, participantId, cancellationToken))!);
+            (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);
     }
 
     /// <summary>
@@ -379,7 +423,8 @@ public sealed class PartyGameService : IPartyGameService
             .FirstOrDefaultAsync(ct);
 
     private async Task<PartyGameSnapshotDto?> BuildOwnerSnapshotAsync(
-        Guid albumId, PartyGameSession? session, CancellationToken ct)
+        Guid albumId, PartyGameSession? session, CancellationToken ct,
+        PartyGameRoomDto? room = null)
     {
         var total = await EnabledChallengeCountAsync(albumId, ct);
         var playedIds = session is null
@@ -392,7 +437,9 @@ public sealed class PartyGameService : IPartyGameService
         if (session is null)
             return new PartyGameSnapshotDto(albumId, null, PartyGameStatuses.Lobby, PartyGamePhases.Lobby,
                 0, 0, total, 0, null, null, null, null, null, Challenge(next),
-                PartyGameStateMachine.LegalCommands(PartyGamePhases.Lobby, next is not null));
+                PartyGameStateMachine.LegalCommands(PartyGamePhases.Lobby, next is not null),
+                null, room?.GuestsPresent ?? 0, room?.DisplaySeenSecondsAgo,
+                room?.TvUrl, room?.GuestUrl);
 
         PartyGameChallengeDto? current = null;
         DateTime? phaseStartedAt = null;
@@ -435,7 +482,8 @@ public sealed class PartyGameService : IPartyGameService
             PartyGameStateMachine.LegalCommands(
                 session.Phase, next is not null,
                 current is null || PartyChallengeVotingModes.CollectsVotes(current.VotingMode)),
-            voting);
+            voting, room?.GuestsPresent ?? 0, room?.DisplaySeenSecondsAgo,
+            room?.TvUrl, room?.GuestUrl);
     }
 
     private static PartyGameChallengeDto? Challenge(PartyChallenge? row) => row is null ? null

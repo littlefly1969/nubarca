@@ -67,6 +67,13 @@ public interface IPartyLinkService
         int votesPerGuest, int? maxChallengesPerSession,
         CancellationToken cancellationToken = default);
 
+    // Reproduces the public VIEW token for a link, which is what lets an
+    // owner-authorized surface name a guest or television URL without the raw
+    // token ever having been stored. The CALLER is responsible for having
+    // established that this link is the caller's — this method authorizes
+    // nothing on its own.
+    string DeriveViewToken(Guid linkId);
+
     Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default);
 

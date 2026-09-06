@@ -412,7 +412,17 @@ export function AlbumSettingsPanel({
               </button>
               {gameStatus === 'saved' && <p role="status" className="muted">{t('partyGame.saved')}</p>}
               {gameStatus === 'failed' && <p role="alert" className="inline-error">{t('partyGame.error')}</p>}
-              {gameDraft.gameEnabled && <PartyChallengeManager albumId={albumId} />}
+              {gameDraft.gameEnabled && (
+                <>
+                  {/* Preparing and conducting are different jobs, so they are
+                      different surfaces: the deck lives here, the evening is run
+                      from its own page. */}
+                  <Link className="album-party-manage" to={`/albums/${albumId}/party-game`}>
+                    {t('partyGame.controlRoom')}
+                  </Link>
+                  <PartyChallengeManager albumId={albumId} />
+                </>
+              )}
             </div>
           )}
 

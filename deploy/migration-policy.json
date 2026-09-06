@@ -56,6 +56,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Creates only the new party_game_votes table with its unique and lookup indexes and a value check constraint; the previous application neither reads nor writes it, and no existing table, column or constraint changes."
+    },
+    "20260906004257_AddPartyDisplayHeartbeat": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds one nullable timestamp column to party_album_links. Existing rows take null, which reads as 'no display has been seen'; the previous application neither reads nor writes it, so rolling back to it leaves the column at a value the new schema also accepts."
     }
   }
 }

@@ -401,6 +401,8 @@ public sealed class PartyLinkService : IPartyLinkService
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.
     private string DeriveToken(Guid linkId) => Derive(linkId.ToByteArray());
 
+    public string DeriveViewToken(Guid linkId) => DeriveToken(linkId);
+
     // upload token = HMAC over linkId ++ "upload" — a DISTINCT high-entropy value
     // from the view token for the same link, so the two are independently
     // matchable and revocable.
@@ -437,6 +439,8 @@ public sealed class PartyLinkService : IPartyLinkService
     internal static string BuildPrintUrl(string printToken) => $"/party/{printToken}/print";
 
     internal static string BuildGameUrl(string viewToken) => $"/party/{viewToken}/game";
+
+    internal static string BuildTvStageUrl(string viewToken) => $"/party/{viewToken}/tv";
 
     private static string BuildPartyUrl(string token) => $"/party/{token}";
     private static string BuildUploadUrl(string uploadToken) => $"/party/{uploadToken}/upload";
