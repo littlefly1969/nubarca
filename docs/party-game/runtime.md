@@ -225,6 +225,28 @@ Checking the phase again *after* writing would not do: by then the row exists.
 And the transaction opens with a write rather than a read, so it never upgrades
 a shared lock to an exclusive one — the shape SQLite refuses to wait on.
 
+### Join mints identity; vote never does
+
+`POST /api/party/{token}/game/join` is the only Party Game endpoint that creates
+a `PartyParticipant`. The vote endpoint resolves an **existing** one, scoped to
+this link, and refuses with `not_joined` when there is none — writing no
+participant and no vote on the way to saying so.
+
+That is the whole of it: presenting a cookie is a claim, not a credential. A
+value the server never issued resolves to nothing, so the only sequence that
+creates a voter is
+
+```
+successful join → persisted participant → later resolve-only vote
+```
+
+The rate limiter is not part of this. It cannot afford to verify a cookie, so an
+invented one may get a provisional partition of its own — which buys nothing,
+because a partition is not an identity. Sizing the game's limits around
+addresses would have been the wrong answer to the wrong question: the hole was
+never how MANY votes an address could send, it was that a vote could mint the
+voter casting it.
+
 ### A television is not a voter
 
 `GET /api/party/{token}/game` resolves an existing guest session but **never
@@ -235,7 +257,8 @@ counted as being in the room.
 
 `POST /api/party/{token}/game/join` is the guest saying "I am here" — it mints
 the participant cookie, and it is a POST precisely so a polling television can
-never do it by accident.
+never do it by accident. It is also the ONLY endpoint that mints one: see
+above.
 
 ## API
 

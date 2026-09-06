@@ -174,6 +174,25 @@ describe('the guest live game', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('says so when a tap arrives without an identity this party issued', async () => {
+    // A vote never mints a voter, so a phone whose participant session is gone
+    // is refused. Adopting the snapshot silently would leave a tap that did
+    // nothing and said nothing.
+    installFetchMock({
+      [`POST ${JOIN}`]: () => jsonResponse(snapshot()),
+      [`GET ${READ}`]: () => jsonResponse(snapshot()),
+      [`POST ${VOTE}`]: () => errorResponse(409, {
+        code: 'not_joined', snapshot: snapshot(),
+      }),
+    });
+    mount();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(await screen.findByTestId('party-game-vote-yes'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/il voto non è arrivato/i);
+    expect(screen.getByTestId('party-game-page')).toHaveAttribute('data-scene', 'vote');
+  });
+
   it('never shows a result before it is revealed', async () => {
     installFetchMock({
       [`POST ${JOIN}`]: () => jsonResponse(snapshot({ phase: 'voting_closed', myVote: 'yes' })),

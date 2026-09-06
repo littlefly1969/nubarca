@@ -292,7 +292,7 @@ public sealed class PartyGameService : IPartyGameService
     }
 
     public async Task<PartyGameVoteResult> VoteAsync(
-        PartyAccess access, Guid participantId, Guid? roundId, string? value,
+        PartyAccess access, Guid? participantId, Guid? roundId, string? value,
         CancellationToken cancellationToken = default)
     {
         if (!PartyGameVoteValues.IsKnown(value))
@@ -318,6 +318,12 @@ public sealed class PartyGameService : IPartyGameService
             PartyGameVoteResult.Fail(error,
                 await GetPublicSnapshotAsync(access, participantId, false, cancellationToken));
 
+        // No identity, no vote — and nothing written on the way to saying so.
+        // The caller resolved this against THIS link and did not create it; a
+        // cookie the server never issued resolves to nothing and stops here,
+        // before any row of any kind is touched.
+        if (participantId is not Guid voter) return await RefuseAsync(PartyGameVoteError.NotJoined);
+
         // These reads are a FAST PATH, not the authority. They answer the
         // ordinary refusals without opening a transaction; the boundary itself
         // is decided below, by the database.
@@ -331,7 +337,7 @@ public sealed class PartyGameService : IPartyGameService
         if (!PartyChallengeVotingModes.CollectsVotes(challenge?.VotingMode))
             return await RefuseAsync(PartyGameVoteError.VotingClosed);
 
-        var accepted = await TryRecordAsync(session.Id, activeRound, participantId, value!, cancellationToken);
+        var accepted = await TryRecordAsync(session.Id, activeRound, voter, value!, cancellationToken);
         if (!accepted) return await RefuseAsync(PartyGameVoteError.VotingClosed);
 
         // A vote is worth a line — voting is where a party's load is — but the
