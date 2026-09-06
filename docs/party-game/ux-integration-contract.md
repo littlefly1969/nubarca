@@ -533,3 +533,53 @@ on colour; and every edge respects `env(safe-area-inset-*)`.
 
 There is no owner control on the page, and a test asserts the only two buttons
 in the stage are the two answers.
+
+## 12. Addendum — the television stage (SLICE 06)
+
+`/party/:token/tv` — the same public token family, so a host reaches a screen by
+opening a URL rather than by pairing a device, building an APK or publishing an
+OTA. §5 explains why the stage is a web surface; the native TV app is untouched.
+
+**It is a display.** There is not one button, link or focusable element on the
+page, and a test asserts that across every scene. It only ever issues `GET`
+requests, and it never joins — a display that minted a participant would inflate
+the very count it is showing.
+
+Scenes, all derived from the server's phase by the pure `stageScene()`:
+
+| Scene | Phase | What it shows |
+| --- | --- | --- |
+| Lobby | `lobby` | the album, and a QR to join |
+| Next activity | *(a beat)* | "Prossima attività" |
+| Reveal | `challenge_reveal` | the canonical card, `mode="tv"` |
+| Active | `challenge_active` | the same card plus the clock |
+| Vote now | `voting_open` | "VOTA ORA", the question, `8 / 12 hanno votato` |
+| Voting closed | `voting_closed` | participation, and nothing else |
+| Result | `result` | "Il pubblico ha deciso" → `82%` → the verdict |
+| Final | `finished` | a closing card |
+
+**The between-rounds beat is presentation, not state.** It fires only on an
+*observed* change of round, never on the first snapshot after mount — so a
+television switched back on mid-reveal lands straight on the current scene
+instead of replaying a flourish the room has already seen — and the snapshot
+always wins: the moment the host moves past the reveal, the beat is over whether
+or not its timer has run.
+
+**No result exists in the vote scene's markup**, so it cannot leak into it. The
+split reaches this screen only at `result`, which is what the server already
+enforces.
+
+Readability rules: every size is in `vh`, so 720p and 1080p produce the same
+physical letters on the same panel; every scene sits inside a 3.5% safe area,
+the same ratio the native app's `overscan()` uses; the verdict is a word, with
+colour agreeing rather than carrying; and the clock uses tabular figures so it
+does not shuffle as the seconds tick.
+
+The result reveal is sequenced — headline, number, verdict — and the reduced
+motion block zeroes the **delays** explicitly. The global reduced-motion rule
+collapses durations but leaves delays alone, which would otherwise hold the
+number off screen for a second and a half for exactly the people who asked for
+less motion.
+
+`PartyChallengeCard`'s `tv` mode now fills the box it is given rather than
+claiming the viewport, so the stage can put chrome inside the same safe area.
