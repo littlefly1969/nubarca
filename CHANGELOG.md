@@ -79,6 +79,9 @@ originating repository and is deliberately not reproduced here.
 
 ### Linux print-station simulator
 
+- Print Agent `0.2.3` keeps one authenticated API client across heartbeat,
+  claim, artifact download and result acknowledgement. A claimed job can no
+  longer reach the execution coordinator through a second, unenrolled client.
 - Print Agent `0.2.2` adds self-contained `linux-x64` packaging and isolated,
   multi-instance systemd fake stations. Every instance has its own Unix account,
   credential, journal and fake-output directory for safe protocol development.

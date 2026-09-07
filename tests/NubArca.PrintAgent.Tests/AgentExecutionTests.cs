@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NubArca.PrintAgent;
 using NubArca.PrintAgent.Adapters;
@@ -14,6 +15,21 @@ public sealed class AgentExecutionTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), $"nubarca-print-agent-{Guid.NewGuid():N}");
     public AgentExecutionTests() => Directory.CreateDirectory(_root);
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+
+    [Fact]
+    public void Runtime_Uses_One_Api_Client_For_Credential_And_Execution()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient<PrintAgentApiClient>(nameof(PrintAgentApiClient));
+        services.AddSharedPrintAgentApiClient();
+        using var provider = services.BuildServiceProvider();
+
+        var workerClient = provider.GetRequiredService<PrintAgentApiClient>();
+        workerClient.SetCredential("station.credential");
+        var executionClient = provider.GetRequiredService<PrintAgentApiClient>();
+
+        Assert.Same(workerClient, executionClient);
+    }
 
     [Fact]
     public async Task Fake_Adapter_Produces_Deterministic_Copy()
