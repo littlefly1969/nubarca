@@ -22,6 +22,8 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
     private readonly Guid _linkId = Guid.NewGuid();
     private readonly Guid _albumId = Guid.NewGuid();
     private readonly Guid _ownerId = Guid.NewGuid();
+    private readonly Guid _challengeOne = Guid.NewGuid();
+    private readonly Guid _challengeTwo = Guid.NewGuid();
 
     public async Task InitializeAsync()
     {
@@ -49,8 +51,21 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
             MaxMessagesPerParticipant = 1,
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
+        // Real challenges too: a legacy guest's votes are seeded as ROWS, not as
+        // a bare counter, because the fold now recomputes the vote budget from
+        // the rows that actually exist. A counter with no rows behind it is not
+        // a state the product can produce — the claim and the insert share one
+        // transaction — so seeding one would test a fiction.
+        db.PartyChallenges.AddRange(
+            NewChallenge(_challengeOne, "Uno"), NewChallenge(_challengeTwo, "Due"));
         await db.SaveChangesAsync();
     }
+
+    private PartyChallenge NewChallenge(Guid id, string title) => new()
+    {
+        Id = id, AlbumId = _albumId, Title = title, Body = "…",
+        CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+    };
 
     public Task DisposeAsync()
     {
@@ -123,7 +138,8 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
         var legacyA = FakeToken();
         var legacyB = FakeToken();
         var idA = await SeedLegacyAsync(legacyA, photos: 4, messages: 2);
-        var idB = await SeedLegacyAsync(legacyB, votes: 3, photoPrints: 1);
+        var idB = await SeedLegacyAsync(
+            legacyB, photoPrints: 1, votedOn: [_challengeOne, _challengeTwo]);
 
         await using var firstDb = CreateContext();
         await using var secondDb = CreateContext();
@@ -146,11 +162,27 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
         Assert.Equal(new[] { idA, idB }.Order(), retired.Select(p => p.Id).Order());
         Assert.All(results, r => Assert.Equal(canonical.Id, r!.ParticipantId));
 
-        // Every counter summed EXACTLY once — not twice, and none lost.
+        // Every counter landed EXACTLY once — not twice, and none lost.
         Assert.Equal(4, canonical.AcceptedPhotoCount);
         Assert.Equal(2, canonical.SubmittedMessageCount);
-        Assert.Equal(3, canonical.ChallengeVoteCount);
         Assert.Equal(1, canonical.AcceptedPhotoPrintCount);
+
+        // And the votes came WITH their counter. Two rows, both now cast by the
+        // canonical guest, and a budget that says two — which is the same fact
+        // recorded twice and has to agree.
+        var votes = await verify.PartyChallengeVotes.ToListAsync();
+        Assert.Equal(2, votes.Count);
+        Assert.All(votes, v => Assert.Equal(canonical.Id, v.PartyParticipantId));
+        Assert.Equal(2, canonical.ChallengeVoteCount);
+
+        // Nothing is left on either alias — neither activity nor allowance.
+        Assert.All(retired, p =>
+        {
+            Assert.Equal(0, p.AcceptedPhotoCount);
+            Assert.Equal(0, p.SubmittedMessageCount);
+            Assert.Equal(0, p.ChallengeVoteCount);
+            Assert.Equal(0, p.AcceptedPhotoPrintCount);
+        });
     }
 
     [Fact]
@@ -251,7 +283,8 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
     /// A participant exactly as the pre-migration code wrote one: keyed by a
     /// plain hash of a capability-scoped token.
     private async Task<Guid> SeedLegacyAsync(
-        string token, int photos = 0, int messages = 0, int votes = 0, int photoPrints = 0)
+        string token, int photos = 0, int messages = 0, int photoPrints = 0,
+        Guid[]? votedOn = null)
     {
         var id = Guid.NewGuid();
         await using var db = CreateContext();
@@ -264,11 +297,22 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
             TokenHash = Identity().LegacyIdentityHash(token),
             AcceptedPhotoCount = photos,
             SubmittedMessageCount = messages,
-            ChallengeVoteCount = votes,
+            // The budget is the number of votes it holds, because that is the
+            // only state the vote path can leave behind.
+            ChallengeVoteCount = votedOn?.Length ?? 0,
             AcceptedPhotoPrintCount = photoPrints,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
         });
+        foreach (var challengeId in votedOn ?? [])
+        {
+            db.PartyChallengeVotes.Add(new PartyChallengeVote
+            {
+                Id = Guid.NewGuid(), PartyAlbumLinkId = _linkId,
+                PartyParticipantId = id, PartyChallengeId = challengeId,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
         await db.SaveChangesAsync();
         return id;
     }

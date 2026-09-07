@@ -65,8 +65,13 @@ public sealed class PartyGameService : IPartyGameService
     {
         var now = Now;
         var since = now.AddSeconds(-PartyGamePresence.WindowSeconds);
+        // Retired aliases are excluded, and that is not tidiness. A guest whose
+        // pre-upgrade row was folded would otherwise be counted TWICE in the
+        // room — the split this identity exists to end, showing up in the one
+        // number a host reads out loud.
         var guests = await _db.PartyParticipants.AsNoTracking()
-            .CountAsync(x => x.PartyAlbumLinkId == link.Id && x.LastSeenAt >= since, ct);
+            .CountAsync(x => x.PartyAlbumLinkId == link.Id
+                && x.RetiredAt == null && x.LastSeenAt >= since, ct);
         var displayAge = link.LastDisplaySeenAt is DateTime seen
             ? (int?)Math.Max(0, (int)Math.Round((now - seen).TotalSeconds))
             : null;
@@ -482,7 +487,8 @@ public sealed class PartyGameService : IPartyGameService
 
         var since = Now.AddSeconds(-PartyGamePresence.WindowSeconds);
         var present = await _db.PartyParticipants.AsNoTracking()
-            .CountAsync(x => x.PartyAlbumLinkId == session.PartyAlbumLinkId && x.LastSeenAt >= since, ct);
+            .CountAsync(x => x.PartyAlbumLinkId == session.PartyAlbumLinkId
+                && x.RetiredAt == null && x.LastSeenAt >= since, ct);
 
         // Whoever voted is in the room, whatever their last heartbeat says.
         var eligible = Math.Max(present, received);
