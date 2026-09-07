@@ -849,6 +849,9 @@ if (!string.IsNullOrWhiteSpace(connectionString))
         NubArca.Api.Print.IPartyPrintAccessResolver, NubArca.Api.Print.PartyPrintAccessResolver>();
     builder.Services.AddScoped<
         NubArca.Api.Print.IPartyPrintProfileService, NubArca.Api.Print.PartyPrintProfileService>();
+    // One anonymous guest per browser per party link, shared by every
+    // capability. Singleton: it holds derivation key material and no state.
+    builder.Services.AddSingleton<NubArca.Api.Party.IPartyGuestIdentity, NubArca.Api.Party.PartyGuestIdentity>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyParticipantService, NubArca.Api.Party.PartyParticipantService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();

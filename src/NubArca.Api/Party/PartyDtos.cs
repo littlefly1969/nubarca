@@ -22,6 +22,7 @@ public sealed record AlbumPartyStatusDto(
     int MaxVideoSlideSeconds = PartySlideshowDefaults.MaxVideoSeconds,
     int MaxPhotoUploadsPerParticipant = 0,
     int MaxVideoUploadsPerParticipant = 0,
+    int MaxMessagesPerParticipant = 0,
     // When true, new guest MESSAGES wait for approval before reaching the TV.
     // Independent of RequireUploadApproval, and owner-only to change.
     bool RequireMessageApproval = false,
@@ -73,7 +74,12 @@ public sealed record PartyUploadSessionDto(
     int UsedPhotos,
     int UsedVideos,
     int? RemainingPhotos,
-    int? RemainingVideos);
+    int? RemainingVideos,
+    // Greetings, reported the same way as media: null max and null remaining
+    // mean the host set no limit.
+    int? MaxMessages = null,
+    int UsedMessages = 0,
+    int? RemainingMessages = null);
 
 // Result of enabling party mode: the same status plus a convenience flag that
 // the frontend can use to surface the (re)generated link.
@@ -99,7 +105,10 @@ public sealed record PartyAccess(
     // The link's message-approval mode, carried for the same reason: the
     // message submission path must not re-query the link it was just resolved
     // from to learn whether the greeting starts pending or live.
-    bool RequireMessageApproval = false);
+    bool RequireMessageApproval = false,
+    // Greetings one guest may send, on the same principle and with the same
+    // 0 = unlimited convention as the media quotas above.
+    int MaxMessagesPerParticipant = 0);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,
@@ -187,7 +196,11 @@ public sealed record PartyUploadListDto(
 public sealed record PartyMessageSubmissionDto(
     Guid Id,
     string Status, // "visible" | "pending"
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    // What the guest has left, so a page can say so without a second request.
+    // Null when the host set no limit — never 0, which a client would read as
+    // "none left" rather than "no limit".
+    int? MessagesRemaining = null);
 
 // Why a submission was refused. The HTTP layer maps these to a status code and
 // a message; the service never formats copy of its own.
@@ -198,6 +211,12 @@ public enum PartyMessageSubmissionError
 
     // Present but longer than the name limit after normalisation.
     InvalidDisplayName,
+
+    // This guest has spent the greetings the host allowed them. A PRODUCT
+    // limit, deliberately distinct from rate limiting: one says the party has a
+    // budget, the other says the requests are coming too fast. They get
+    // different status codes because a client must be able to tell them apart.
+    LimitReached,
 }
 
 public sealed record PartyMessageSubmissionResult(

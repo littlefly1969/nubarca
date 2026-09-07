@@ -59,6 +59,7 @@ public interface IPartyLinkService
         int? maxVideoSlideSeconds,
         int? maxPhotoUploadsPerParticipant,
         int? maxVideoUploadsPerParticipant,
+        int? maxMessagesPerParticipant,
         CancellationToken cancellationToken = default);
 
     Task<bool> UpdateGameSettingsAsync(

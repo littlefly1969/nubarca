@@ -112,7 +112,7 @@ public sealed class PartyGameVoterIdentityTests : IDisposable
         joined.EnsureSuccessStatusCode();
         // Joining is what issues the identity, and it says so on the wire.
         Assert.Contains(joined.Headers.GetValues("Set-Cookie"),
-            x => x.StartsWith("NubArca.PartyGuest=", StringComparison.Ordinal));
+            x => x.StartsWith("NubArca.PartyBrowser=", StringComparison.Ordinal));
 
         var first = await guest.PostAsJsonAsync($"/api/party/{party.Token}/game/vote",
             new { roundId = party.RoundId, value = "yes" });
@@ -178,7 +178,7 @@ public sealed class PartyGameVoterIdentityTests : IDisposable
     private sealed record Party(HttpClient Owner, Guid Album, string Token, Guid RoundId);
 
     /// 32 CSPRNG bytes as unpadded base64url — byte-for-byte the shape
-    /// PartyParticipantService issues, and no more real for it.
+    /// PartyGuestIdentity issues, and no more real for it.
     private static string FakeToken() =>
         Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -190,7 +190,7 @@ public sealed class PartyGameVoterIdentityTests : IDisposable
         {
             Content = JsonContent.Create(new { roundId, value }),
         };
-        request.Headers.Add("Cookie", $"NubArca.PartyGuest={cookie}");
+        request.Headers.Add("Cookie", $"NubArca.PartyBrowser={cookie}");
         return _factory.CreateClient().SendAsync(request);
     }
 

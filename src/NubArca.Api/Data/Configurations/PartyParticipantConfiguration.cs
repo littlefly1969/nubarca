@@ -16,6 +16,7 @@ public class PartyParticipantConfiguration : IEntityTypeConfiguration<PartyParti
         builder.Property(p => p.TokenHash).IsRequired().HasMaxLength(64);
         builder.Property(p => p.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(p => p.LastSeenAt).HasColumnType("timestamp with time zone");
+        builder.Property(p => p.RetiredAt).HasColumnType("timestamp with time zone");
 
         // The resolve path is (link, token hash), and it must be UNIQUE: two rows
         // for one token would silently split a participant's counters and hand

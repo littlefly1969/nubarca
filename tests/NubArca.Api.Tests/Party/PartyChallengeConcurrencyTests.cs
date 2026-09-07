@@ -44,8 +44,8 @@ public sealed class PartyChallengeConcurrencyTests : IAsyncLifetime
 
         await using var firstDb = CreateContext();
         await using var secondDb = CreateContext();
-        var first = new PartyParticipantService(firstDb, TimeProvider.System);
-        var second = new PartyParticipantService(secondDb, TimeProvider.System);
+        var first = new PartyParticipantService(firstDb, TimeProvider.System, Identity());
+        var second = new PartyParticipantService(secondDb, TimeProvider.System, Identity());
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var claims = await Task.WhenAll(
@@ -98,6 +98,9 @@ public sealed class PartyChallengeConcurrencyTests : IAsyncLifetime
         Assert.Equal(1, session.CompletedCount);
         Assert.Equal(8, session.Version);
     }
+
+    private static PartyGuestIdentity Identity() =>
+        new(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
 
     private AppDbContext CreateContext()
     {

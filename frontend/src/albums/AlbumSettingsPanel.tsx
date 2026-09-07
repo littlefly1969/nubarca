@@ -54,6 +54,7 @@ export function AlbumSettingsPanel({
   const [slideshowDraft, setSlideshowDraft] = useState({
     photoSlideSeconds: '', maxVideoSlideSeconds: '',
     maxPhotoUploadsPerParticipant: '', maxVideoUploadsPerParticipant: '',
+    maxMessagesPerParticipant: '',
   });
   const [slideshowStatus, setSlideshowStatus] = useState<'idle' | 'saved' | 'invalid' | 'failed'>('idle');
   const [gameDraft, setGameDraft] = useState({
@@ -70,9 +71,11 @@ export function AlbumSettingsPanel({
       maxVideoSlideSeconds: String(party.maxVideoSlideSeconds),
       maxPhotoUploadsPerParticipant: String(party.maxPhotoUploadsPerParticipant),
       maxVideoUploadsPerParticipant: String(party.maxVideoUploadsPerParticipant),
+      maxMessagesPerParticipant: String(party.maxMessagesPerParticipant ?? 0),
     });
   }, [party?.albumId, party?.photoSlideSeconds, party?.maxVideoSlideSeconds,
-    party?.maxPhotoUploadsPerParticipant, party?.maxVideoUploadsPerParticipant]);
+    party?.maxPhotoUploadsPerParticipant, party?.maxVideoUploadsPerParticipant,
+    party?.maxMessagesPerParticipant]);
 
   useEffect(() => {
     if (!party) return;
@@ -95,7 +98,8 @@ export function AlbumSettingsPanel({
     inRange(slideshowDraft.photoSlideSeconds, PARTY_SLIDESHOW_RANGES.photoSeconds)
     && inRange(slideshowDraft.maxVideoSlideSeconds, PARTY_SLIDESHOW_RANGES.maxVideoSeconds)
     && inRange(slideshowDraft.maxPhotoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
-    && inRange(slideshowDraft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
+    && inRange(slideshowDraft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
+    && inRange(slideshowDraft.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
 
   const gameMin = Number(gameDraft.minChallengeIntervalSeconds);
   const gameMax = Number(gameDraft.maxChallengeIntervalSeconds);
@@ -118,6 +122,7 @@ export function AlbumSettingsPanel({
         maxVideoSlideSeconds: Number(slideshowDraft.maxVideoSlideSeconds),
         maxPhotoUploadsPerParticipant: Number(slideshowDraft.maxPhotoUploadsPerParticipant),
         maxVideoUploadsPerParticipant: Number(slideshowDraft.maxVideoUploadsPerParticipant),
+        maxMessagesPerParticipant: Number(slideshowDraft.maxMessagesPerParticipant),
       }));
       setSlideshowStatus('saved');
     } catch {
@@ -367,6 +372,24 @@ export function AlbumSettingsPanel({
                   disabled={partySaving}
                   aria-label={t('party.maxVideosPerParticipant')}
                   onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxVideoUploadsPerParticipant: e.target.value }))}
+                />
+                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
+              </label>
+
+              {/* Greetings are a guest allowance like the two above, so the host
+                  sets it in the same place and on the same 0-is-unlimited
+                  scale — not in a settings area of its own. */}
+              <label className="album-party-number">
+                <span>{t('party.maxMessagesPerParticipant')}</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={PARTY_SLIDESHOW_RANGES.quota.min}
+                  max={PARTY_SLIDESHOW_RANGES.quota.max}
+                  value={slideshowDraft.maxMessagesPerParticipant}
+                  disabled={partySaving}
+                  aria-label={t('party.maxMessagesPerParticipant')}
+                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxMessagesPerParticipant: e.target.value }))}
                 />
                 <span className="muted">{t('party.zeroMeansUnlimited')}</span>
               </label>

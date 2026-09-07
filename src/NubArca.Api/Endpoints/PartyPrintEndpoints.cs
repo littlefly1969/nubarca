@@ -48,9 +48,15 @@ public static class PartyPrintEndpoints
             // forty was being told forty, and discovered their own limit only
             // by being refused — the studio was hiding the rule from the one
             // person it applies to.
-            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, printToken,
-                cancellationToken);
+            //
+            // The identity is the party's ONE anonymous guest, not a participant
+            // scoped to this print token's path. That makes the number truer
+            // rather than merely different: "what is left of your share" now
+            // means the share of the guest who has been uploading and voting all
+            // evening, not of a separate identity the print studio minted the
+            // first time somebody opened it.
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             var used = participantId is Guid guest
                 ? await participants.GetPrintQuotaAsync(guest, cancellationToken)
                 : new NubArca.Api.Party.PartyPrintQuotaSnapshot(0, 0);
@@ -114,9 +120,8 @@ public static class PartyPrintEndpoints
 
             // Who is printing, by the same server-minted identity the rest of the
             // party uses — never anything the client chose or a fingerprint.
-            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, printToken,
-                cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await submissions.SubmitAsync(
                 access,
