@@ -210,6 +210,10 @@ adapter proves protocol semantics only; it is not evidence for these rows.
   offline status, printers, queue depth, current job and the last bounded error.
 - A missing printer in the latest heartbeat is marked offline rather than
   preserving an old ready observation.
+- `Agent is not enrolled` after a successful heartbeat/claim means the runtime
+  resolved two API-client instances and only one received the station
+  credential. Print Agent `0.2.3` makes that client process-wide; do not work
+  around this error by renewing enrollment or deleting a credential.
 - Do not delete `journal.db` to solve a stuck delivery: it is the evidence that
   prevents duplicate physical prints. Revoke/re-enroll only when intentionally
   replacing the station credential.

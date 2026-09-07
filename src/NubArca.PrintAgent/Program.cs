@@ -30,7 +30,7 @@ builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<ICredentialStore>(_ => PrintAgentPlatform.CreateCredentialStore(options.CredentialPath));
 builder.Services.AddSingleton(_ => new ExecutionJournal(options.JournalPath));
 builder.Services.AddSingleton<IPrinterAdapter>(_ => PrintAgentPlatform.CreatePrinterAdapter(options));
-builder.Services.AddHttpClient<PrintAgentApiClient>(client =>
+builder.Services.AddHttpClient<PrintAgentApiClient>(nameof(PrintAgentApiClient), client =>
 {
     client.BaseAddress = new Uri(serverOrigin.ToString().TrimEnd('/') + "/");
     client.Timeout = TimeSpan.FromSeconds(30);
@@ -54,6 +54,7 @@ builder.Services.AddHttpClient<PrintAgentApiClient>(client =>
     PooledConnectionIdleTimeout = TimeSpan.FromSeconds(2),
     PooledConnectionLifetime = TimeSpan.FromMinutes(5),
 });
+builder.Services.AddSharedPrintAgentApiClient();
 builder.Services.AddSingleton<AgentExecutionCoordinator>();
 builder.Services.AddHostedService<PrintAgentWorker>();
 await builder.Build().RunAsync();
