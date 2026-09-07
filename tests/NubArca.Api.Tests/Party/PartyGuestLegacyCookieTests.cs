@@ -48,13 +48,19 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        // ONE guest: the old row was taken over, not left beside a new one.
-        var participant = await db.PartyParticipants.SingleAsync();
-        Assert.Equal(3, participant.SubmittedMessageCount);
-        Assert.Null(participant.RetiredAt);
-        // And it is now reachable by the derived key, so the browser cookie the
-        // response issued is what finds it from here on.
-        Assert.NotEqual(Sha256Hex(legacyToken), participant.TokenHash);
+        // ONE live guest, keyed by the derivation, carrying what the old row had
+        // spent. The old row survives as a retired alias rather than being
+        // rewritten: rewriting a key cannot be made safe when two capabilities
+        // of one browser arrive together, so the counters move instead.
+        var live = await db.PartyParticipants.SingleAsync(p => p.RetiredAt == null);
+        Assert.Equal(3, live.SubmittedMessageCount);
+        Assert.NotEqual(Sha256Hex(legacyToken), live.TokenHash);
+
+        var retired = await db.PartyParticipants.SingleAsync(p => p.RetiredAt != null);
+        Assert.Equal(Sha256Hex(legacyToken), retired.TokenHash);
+        // Retired, not emptied: it is history, and the counters it is holding
+        // have already been added to the live guest.
+        Assert.NotEqual(live.Id, retired.Id);
     }
 
     [Fact]
@@ -89,10 +95,11 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
         Assert.Equal(4, live.AcceptedPhotoCount);
         Assert.Equal(3, live.ChallengeVoteCount);
 
-        // The folded row is retired rather than deleted: uploads and votes point
-        // at it, and the evening it describes really happened.
-        var retired = await db.PartyParticipants.Where(p => p.RetiredAt != null).SingleAsync();
-        Assert.NotEqual(live.Id, retired.Id);
+        // Both old rows are retired aliases rather than deletions: uploads and
+        // votes point at them, and the evening they describe really happened.
+        var retired = await db.PartyParticipants.Where(p => p.RetiredAt != null).ToListAsync();
+        Assert.Equal(2, retired.Count);
+        Assert.DoesNotContain(live.Id, retired.Select(p => p.Id));
     }
 
     [Fact]
