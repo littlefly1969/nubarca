@@ -44,9 +44,11 @@ public sealed class PartyParticipantService : IPartyParticipantService
         // reached by find-or-create and the counters move by atomic increment.
         //
         // Each capability contributes its old row EXACTLY ONCE, on its first
-        // request after the upgrade. Because a capability only ever incremented
-        // its own counters, the non-zero counters of two old rows are disjoint
-        // and summing them is exact rather than generous.
+        // request after the upgrade, and contributes ALL of it: the guest's
+        // votes, greetings and photographs are re-parented onto the canonical
+        // identity alongside the counters, because a counter on one row and the
+        // history on another is still two guests as far as every feature that
+        // asks "has this guest already voted" is concerned.
         var legacy = await FindLegacyAsync(partyAlbumLinkId, legacyParticipantToken, cancellationToken);
         var folded = legacy is not null && legacy.Id != canonical.Id
             && await FoldAsync(legacy, canonical.Id, cancellationToken);
@@ -56,15 +58,42 @@ public sealed class PartyParticipantService : IPartyParticipantService
     }
 
     /// <summary>
-    /// Moves one pre-migration row's counters onto the canonical guest, exactly
-    /// once, and retires it.
+    /// Moves one pre-migration row ONTO the canonical guest — its activity as
+    /// well as its counters — exactly once, and retires it.
+    ///
+    /// <para>The contract is that <c>PartyParticipantId</c> means "the guest who
+    /// did this", so after a fold no feature may still observe the alias as a
+    /// second guest. Moving only the counters would leave the history pointing
+    /// at an identity nothing can reach: a challenge already voted would look
+    /// unvoted to the canonical guest, who could then vote it AGAIN — one
+    /// browser, two votes, which is precisely what an anonymous identity exists
+    /// to prevent.</para>
+    ///
+    /// <para>Four foreign keys reference a participant, and they need two
+    /// different treatments. <see cref="PartyChallengeVote"/> and
+    /// <see cref="PartyGameVote"/> are CURRENT STATE with a uniqueness rule —
+    /// one vote per guest per challenge, one per guest per round — so a
+    /// collision is possible and must be reconciled before the re-parent, not
+    /// left to the index. <see cref="PartyMessage"/> and
+    /// <see cref="PartyUploadItem"/> are history with no participant
+    /// uniqueness, so they simply move. Print has no participant row of its own;
+    /// it reads the counters, which is why they must land here correctly.</para>
+    ///
+    /// <para>WHERE THEY COLLIDE, THE CANONICAL VOTE WINS. It was cast after the
+    /// new session was established, so it is the guest's more recent answer, and
+    /// keeping it means the fold never overwrites something the guest did with
+    /// something they did earlier. The alias's copy is deleted.</para>
     ///
     /// <para>THE RETIREMENT IS THE CLAIM. A conditional update sets
     /// <c>RetiredAt</c> only while it is still null, so of any number of
     /// requests looking at the same old row exactly one is told it affected a
-    /// row — and only that one adds the counters. Both statements are in one
-    /// transaction, so a fold cannot retire a row and then lose what it was
-    /// carrying.</para>
+    /// row — and only that one moves anything. It also LOCKS that row for the
+    /// rest of the transaction, which is what lets the counters be read from the
+    /// row itself rather than from an entity loaded before the fold began.</para>
+    ///
+    /// <para>All of it is one transaction, so a failure anywhere leaves the alias
+    /// live and unfolded rather than half-moved: retired with its votes still on
+    /// it, or re-parented with its counters lost.</para>
     ///
     /// <para>The transaction opens with a write, before any read, so it never
     /// upgrades a shared lock to an exclusive one — the shape SQLite refuses to
@@ -74,6 +103,7 @@ public sealed class PartyParticipantService : IPartyParticipantService
         PartyParticipant legacy, Guid canonicalId, CancellationToken ct)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
+        var linkId = legacy.PartyAlbumLinkId;
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
         var claimed = await _db.Database.ExecuteSqlRawAsync(
@@ -83,29 +113,107 @@ public sealed class PartyParticipantService : IPartyParticipantService
         if (claimed != 1)
         {
             // Somebody else already folded this row. Not an error, and not a
-            // reason to add its counters a second time.
+            // reason to move its activity or its counters a second time.
             await tx.RollbackAsync(ct);
             return false;
         }
 
+        // --- Challenge votes: reconcile, then re-parent ----------------------
+        //
+        // Deleting the alias's colliding copy FIRST is what keeps the unique
+        // index a safety net rather than a mechanism: the update that follows
+        // cannot violate it, because every row that would have collided is gone.
+        await _db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM party_challenge_votes WHERE \"PartyParticipantId\" = {0} AND EXISTS ("
+            + "SELECT 1 FROM party_challenge_votes mine "
+            + "WHERE mine.\"PartyParticipantId\" = {1} "
+            + "AND mine.\"PartyAlbumLinkId\" = party_challenge_votes.\"PartyAlbumLinkId\" "
+            + "AND mine.\"PartyChallengeId\" = party_challenge_votes.\"PartyChallengeId\")",
+            [legacy.Id, canonicalId], ct);
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_challenge_votes SET \"PartyParticipantId\" = {1} "
+            + "WHERE \"PartyParticipantId\" = {0}",
+            [legacy.Id, canonicalId], ct);
+
+        // --- Game votes: the same, per round ---------------------------------
+        await _db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM party_game_votes WHERE \"PartyParticipantId\" = {0} AND EXISTS ("
+            + "SELECT 1 FROM party_game_votes mine "
+            + "WHERE mine.\"PartyParticipantId\" = {1} "
+            + "AND mine.\"PartyGameRoundId\" = party_game_votes.\"PartyGameRoundId\")",
+            [legacy.Id, canonicalId], ct);
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_game_votes SET \"PartyParticipantId\" = {1} "
+            + "WHERE \"PartyParticipantId\" = {0}",
+            [legacy.Id, canonicalId], ct);
+
+        // --- History: nothing to reconcile, so it just moves -----------------
+        //
+        // Neither table constrains the participant, so no collision exists. They
+        // move anyway, because "who sent this greeting" and "who took this
+        // photograph" must name a guest the party can still reach.
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_messages SET \"PartyParticipantId\" = {1} "
+            + "WHERE \"PartyParticipantId\" = {0}",
+            [legacy.Id, canonicalId], ct);
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_upload_items SET \"PartyParticipantId\" = {1} "
+            + "WHERE \"PartyParticipantId\" = {0}",
+            [legacy.Id, canonicalId], ct);
+
+        // --- Counters --------------------------------------------------------
+        //
         // Increments rather than assignments: two capabilities folding two
-        // different old rows onto the same canonical guest must both land, and
-        // a read-modify-write would let the later one erase the earlier.
+        // different old rows onto the same canonical guest must both land, and a
+        // read-modify-write would let the later one erase the earlier.
+        //
+        // The amounts are read from the alias ROW, inside the transaction that
+        // locked it, rather than from the entity loaded before the fold started
+        // — so a request still holding the old identity cannot slip an increment
+        // in between the read and the move.
+        //
+        // These five are exact sums because each capability only ever
+        // incremented its own row, so their non-zero counters are disjoint, and
+        // because none of them was reduced by the reconciliation above.
         await _db.Database.ExecuteSqlRawAsync(
             "UPDATE party_participants SET "
-            + "\"AcceptedPhotoCount\" = \"AcceptedPhotoCount\" + {1}, "
-            + "\"AcceptedVideoCount\" = \"AcceptedVideoCount\" + {2}, "
-            + "\"ChallengeVoteCount\" = \"ChallengeVoteCount\" + {3}, "
-            + "\"AcceptedPhotoPrintCount\" = \"AcceptedPhotoPrintCount\" + {4}, "
-            + "\"AcceptedStripPrintCount\" = \"AcceptedStripPrintCount\" + {5}, "
-            + "\"SubmittedMessageCount\" = \"SubmittedMessageCount\" + {6} "
+            + "\"AcceptedPhotoCount\" = \"AcceptedPhotoCount\" + "
+            + "(SELECT old.\"AcceptedPhotoCount\" FROM party_participants old WHERE old.\"Id\" = {1}), "
+            + "\"AcceptedVideoCount\" = \"AcceptedVideoCount\" + "
+            + "(SELECT old.\"AcceptedVideoCount\" FROM party_participants old WHERE old.\"Id\" = {1}), "
+            + "\"AcceptedPhotoPrintCount\" = \"AcceptedPhotoPrintCount\" + "
+            + "(SELECT old.\"AcceptedPhotoPrintCount\" FROM party_participants old WHERE old.\"Id\" = {1}), "
+            + "\"AcceptedStripPrintCount\" = \"AcceptedStripPrintCount\" + "
+            + "(SELECT old.\"AcceptedStripPrintCount\" FROM party_participants old WHERE old.\"Id\" = {1}), "
+            + "\"SubmittedMessageCount\" = \"SubmittedMessageCount\" + "
+            + "(SELECT old.\"SubmittedMessageCount\" FROM party_participants old WHERE old.\"Id\" = {1}) "
             + "WHERE \"Id\" = {0}",
-            [
-                canonicalId,
-                legacy.AcceptedPhotoCount, legacy.AcceptedVideoCount, legacy.ChallengeVoteCount,
-                legacy.AcceptedPhotoPrintCount, legacy.AcceptedStripPrintCount,
-                legacy.SubmittedMessageCount,
-            ], ct);
+            [canonicalId, legacy.Id], ct);
+
+        // The vote budget is the ONE counter that cannot be summed. Reconciling
+        // a collision removed a vote, so the sum would leave the guest paying
+        // for a vote they no longer hold — and the counter is a budget, so an
+        // inflated one silently costs them a vote later in the evening. Counted
+        // from the rows that now exist, it is exact by construction, and it stays
+        // exact whichever order two folds arrive in.
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET \"ChallengeVoteCount\" = "
+            + "(SELECT COUNT(*) FROM party_challenge_votes v "
+            + "WHERE v.\"PartyParticipantId\" = {0} AND v.\"PartyAlbumLinkId\" = {1}) "
+            + "WHERE \"Id\" = {0}",
+            [canonicalId, linkId], ct);
+
+        // The alias keeps nothing. Its counters have moved, so leaving copies
+        // behind would make every aggregate over the table double-count, and
+        // would leave "no second allowance" resting on a WHERE clause instead of
+        // on the data.
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET "
+            + "\"AcceptedPhotoCount\" = 0, \"AcceptedVideoCount\" = 0, "
+            + "\"ChallengeVoteCount\" = 0, \"AcceptedPhotoPrintCount\" = 0, "
+            + "\"AcceptedStripPrintCount\" = 0, \"SubmittedMessageCount\" = 0 "
+            + "WHERE \"Id\" = {0}",
+            [legacy.Id], ct);
 
         await tx.CommitAsync(ct);
         _db.ChangeTracker.Clear();

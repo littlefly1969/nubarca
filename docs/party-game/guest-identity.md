@@ -111,6 +111,15 @@ the actor's foreign key.
 The exception is a genuinely different actor. If something is not "an anonymous
 guest at this party", it should not be a `PartyParticipant`.
 
+**A new foreign key must be added to the fold.** While legacy rows can still
+arrive, anything pointing at a participant has to move when that participant is
+folded, or the new feature will be the one that sees a guest as two. If the
+record has a uniqueness rule involving the participant, reconcile before
+re-parenting and state which side wins; if it does not, re-parent it. The list
+lives in `PartyParticipantService.FoldAsync` and the invariant is checked by
+`PartyGuestFoldActorTests`, which asserts one record per referencing table so it
+cannot pass by finding nothing.
+
 ### Face search is deliberately not attached
 
 `PartyFaceSearchSession` carries no `PartyParticipantId`, and should not acquire
@@ -132,13 +141,65 @@ canonical guest, which is always the row keyed by the derivation:
 
 1. find-or-create the canonical row for `(link, derived key)`;
 2. if the request also presents an old cookie whose row is not that one, fold it:
-   **retire it, then add its counters**.
+   **retire it, move its activity onto the canonical guest, then move its
+   counters**.
+
+### A fold moves the ACTOR, not just the allowance
+
+`PartyParticipantId` means *the guest who did this*. Moving only the counters
+would satisfy the letter of "one identity per browser" and break the point of
+it: a challenge the guest had already voted would look **unvoted** to the
+identity that now represents them, so they could vote it again. One browser, two
+votes — exactly what an anonymous identity exists to prevent, reintroduced by
+the migration meant to end it.
+
+Four foreign keys name a participant, and they need two treatments:
+
+| Record | Participant uniqueness | Treatment |
+| --- | --- | --- |
+| `PartyChallengeVote` | `(link, participant, challenge)` | reconcile, then re-parent |
+| `PartyGameVote` | `(round, participant)` | reconcile, then re-parent |
+| `PartyMessage` | none | re-parent |
+| `PartyUploadItem` | `FileItemId` only | re-parent |
+
+Print holds **no** participant row of its own — it reads the counters — which is
+why those have to land correctly rather than being the whole job.
+
+**Where two identities answered the same question, the canonical answer wins.**
+It was given after the new session existed, so it is the guest's later answer,
+and a fold must never overwrite what a guest did with what they did earlier. The
+alias's copy is deleted. Reconciling *before* the re-parent is what keeps the
+unique index a safety net rather than a mechanism: by the time the update runs,
+no row that would collide is still there.
+
+**The vote budget is recomputed, not summed.** `ChallengeVoteCount` is a budget,
+and reconciliation can remove a vote — so summing would charge a guest twice for
+a vote they hold once, and quietly cost them a vote later in the evening.
+Counted from the rows that now exist, it is exact by construction and stays
+exact whichever order two folds arrive in. The other five counters are summed,
+because nothing above reduces them.
+
+**Presence excludes retired rows.** The room count and the voting `eligible`
+figure are *current guest* questions, so an alias must not answer them: a folded
+guest would otherwise be counted twice in the number a host reads out loud.
+
+**The alias keeps nothing.** Its counters are zeroed once they have moved, so
+"no second allowance" rests on the data rather than on a `WHERE` clause, and no
+aggregate over the table can double-count. It is retired rather than deleted
+because it is evidence a guest was here — but nothing points at it any more, so
+there is no alias→canonical lookup to provide and none is needed.
 
 **The retirement is the claim.** A conditional update sets `RetiredAt` only
 while it is still null, so of any number of requests looking at the same old row
 exactly one is told it affected a row — and only that one adds the counters.
-Both statements are one transaction, so a fold cannot retire a row and then lose
-what it was carrying. The counters move by atomic increment, never by
+It also **locks** that row for the rest of the transaction, which is what lets
+the counters be read from the row itself rather than from an entity loaded
+before the fold began.
+
+All of it — claim, reconciliation, re-parenting, counters — is **one
+transaction**, so a failure anywhere leaves the alias live and unfolded rather
+than half-moved: retired with its votes still on it, or re-parented with its
+counters lost. The counters move by atomic increment, never by
 read-modify-write, so two capabilities folding two different old rows onto the
 same guest both land.
 
@@ -149,18 +210,23 @@ guest as a `500`. The index stays as a safety net — the create path treats a
 violation as the expected race *only* when the elected row is then findable, and
 re-throws otherwise, so a real database fault never hides behind a retry.
 
-Summing is exact rather than generous, because a capability only ever
-incremented its own counters: the non-zero counters of two old rows are
-disjoint. A retired row is invisible to every lookup, so it can never be counted
-twice, and it is retired rather than deleted because uploads, messages and votes
-point at it — the evening it describes really happened.
+Summing the other five is exact rather than generous, because a capability only
+ever incremented its own counters: the non-zero counters of two old rows are
+disjoint. A retired row is invisible to every lookup, so it can never be folded
+twice.
 
 **The one case that cannot be reconciled** is a capability the browser never
 returns to after the upgrade. Its old row keeps its counters and is never
 folded in, because the browser only ever presents the cookie for the path it is
 requesting — the server cannot prove the others exist. Nothing is duplicated and
 nothing the guest is *using* is reset; a capability they abandon simply keeps a
-row nobody reads. Adoption also belongs to session-establishing operations only,
+row nobody reads, with its own activity still on it.
+
+A second, narrower one: a request that resolved the old identity *before* the
+fold and writes *after* it commits has its increment applied to a row that is
+now retired and zeroed, so that one write is lost. It requires a request
+in flight across the exact instant of a guest's first post-upgrade request, and
+it costs at most one counted action. Adoption also belongs to session-establishing operations only,
 so a legacy cookie can never turn a vote into a voter.
 
 
