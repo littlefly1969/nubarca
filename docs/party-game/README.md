@@ -7,6 +7,7 @@ watches a television, and the guests answer on theirs.
 | --- | --- |
 | [ux-integration-contract.md](ux-integration-contract.md) | Which existing NubArca components, class families and tokens every surface is built from — and the gaps that were real |
 | [runtime.md](runtime.md) | The server-authoritative state machine, concurrency, voting, and what crosses the token boundary |
+| [guest-identity.md](guest-identity.md) | One anonymous guest per party link, and why capability, identity, activity, quota and rate limiting are five different things |
 
 ## The four surfaces
 

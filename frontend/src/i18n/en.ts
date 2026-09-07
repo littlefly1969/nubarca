@@ -464,6 +464,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.maxPhotosPerParticipant': 'Maximum photos per participant',
   'party.maxVideosPerParticipant': 'Maximum videos per participant',
   'party.secondsSuffix': 'seconds',
+  'party.maxMessagesPerParticipant': 'Messages per guest',
   'party.zeroMeansUnlimited': '0 = unlimited',
   'party.slideshowSettingsTitle': 'Slideshow and per-participant limits',
   'party.saveSettings': 'Save settings',

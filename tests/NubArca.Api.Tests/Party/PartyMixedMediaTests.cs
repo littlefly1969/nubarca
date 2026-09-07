@@ -447,6 +447,14 @@ public sealed class PartyMixedMediaTests : IDisposable
         await AssertLastSlotIsClaimedOnceAsync(isVideo: true);
     }
 
+    /// A browser identity, as the endpoints would have issued one. Identity is
+    /// no longer a function of which capability was used, so the test supplies
+    /// the browser rather than a capability token.
+    private static string BrowserToken() =>
+        new NubArca.Api.Party.PartyGuestIdentity(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build())
+            .NewBrowserToken();
+
     private async Task AssertLastSlotIsClaimedOnceAsync(bool isVideo)
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
@@ -463,7 +471,7 @@ public sealed class PartyMixedMediaTests : IDisposable
         using var setupScope = _factory.Services.CreateScope();
         var setupParticipants = setupScope.ServiceProvider
             .GetRequiredService<IPartyParticipantService>();
-        var participantId = (await setupParticipants.ResolveOrCreateAsync(linkId, null)).ParticipantId;
+        var participantId = (await setupParticipants.ResolveOrCreateAsync(linkId, BrowserToken())).ParticipantId;
 
         // ONE free slot, eight racers. A COUNT-then-INSERT implementation lets
         // several of them observe the same free slot; the conditional UPDATE
@@ -496,7 +504,7 @@ public sealed class PartyMixedMediaTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var participants = scope.ServiceProvider.GetRequiredService<IPartyParticipantService>();
         var linkId = await db.PartyAlbumLinks.Select(p => p.Id).SingleAsync();
-        var bounded = (await participants.ResolveOrCreateAsync(linkId, null)).ParticipantId;
+        var bounded = (await participants.ResolveOrCreateAsync(linkId, BrowserToken())).ParticipantId;
 
         Assert.True(await participants.TryClaimSlotAsync(bounded, isVideo: false, max: 2));
         Assert.True(await participants.TryClaimSlotAsync(bounded, isVideo: false, max: 2));

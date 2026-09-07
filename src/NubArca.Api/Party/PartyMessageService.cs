@@ -9,13 +9,16 @@ public sealed class PartyMessageService : IPartyMessageService
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IPartyMessageAccessResolver _access;
+    private readonly IPartyParticipantService _participants;
 
     public PartyMessageService(
-        AppDbContext db, TimeProvider clock, IPartyMessageAccessResolver access)
+        AppDbContext db, TimeProvider clock, IPartyMessageAccessResolver access,
+        IPartyParticipantService participants)
     {
         _db = db;
         _clock = clock;
         _access = access;
+        _participants = participants;
     }
 
     public async Task<PartyMessageSubmissionResult> SubmitAsync(
@@ -63,11 +66,58 @@ public sealed class PartyMessageService : IPartyMessageService
             CreatedAt = now,
             UpdatedAt = now,
         };
-        _db.PartyMessages.Add(message);
-        await _db.SaveChangesAsync(cancellationToken);
 
-        return PartyMessageSubmissionResult.Ok(
-            new PartyMessageSubmissionDto(message.Id, message.Status, message.CreatedAt));
+        // THE CLAIM AND THE MESSAGE ARE ONE ACT.
+        //
+        // The slot is taken by a conditional UPDATE — one statement that decides
+        // and records under the row's own lock, so two greetings racing for the
+        // last slot cannot both read "one left". The message is inserted inside
+        // the same transaction, so a claim whose insert fails rolls back with
+        // it: a guest never loses an allowance to a message nobody ever sees.
+        //
+        // Everything that can refuse the greeting has already refused it above,
+        // before the claim exists — an empty body and an over-long name cost
+        // nothing. What a claim does NOT come back from is moderation: hiding or
+        // rejecting a message later is a judgement about the message, not a
+        // refund, or a host declining something would be handing the guest
+        // another go at sending it.
+        if (participantId is not Guid guest)
+        {
+            // No guest identity, no budget to spend. Only reachable through a
+            // hand-built access; the endpoints always resolve one first.
+            _db.PartyMessages.Add(message);
+            await _db.SaveChangesAsync(cancellationToken);
+            return PartyMessageSubmissionResult.Ok(
+                new PartyMessageSubmissionDto(message.Id, message.Status, message.CreatedAt));
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        if (!await _participants.TryClaimMessageAsync(
+                guest, access.MaxMessagesPerParticipant, cancellationToken))
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return PartyMessageSubmissionResult.Fail(PartyMessageSubmissionError.LimitReached);
+        }
+
+        _db.PartyMessages.Add(message);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _db.ChangeTracker.Clear();
+            throw;
+        }
+
+        var used = await _participants.MessageCountAsync(guest, cancellationToken);
+        return PartyMessageSubmissionResult.Ok(new PartyMessageSubmissionDto(
+            message.Id, message.Status, message.CreatedAt,
+            access.MaxMessagesPerParticipant > 0
+                ? Math.Max(0, access.MaxMessagesPerParticipant - used)
+                : null));
     }
 
     public async Task<PartyMessageListDto?> ListForManagerAsync(

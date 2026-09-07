@@ -118,7 +118,7 @@ public static class PartyGameEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await ResolveExistingGuestAsync(
+            var participantId = await PartyGuestSession.ResolveAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             // A caller SAYS it is a television; the server does not guess from
             // the absence of a guest cookie, which a guest who has not joined
@@ -146,8 +146,8 @@ public static class PartyGameEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
             var snapshot = await game.GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
             return snapshot is null ? Results.NotFound() : Results.Ok(WithTokenMedia(snapshot, token));
@@ -179,7 +179,7 @@ public static class PartyGameEndpoints
             // The same resolve-only path the snapshot read uses, scoped to THIS
             // link: a session minted at another party hashes fine and matches no
             // row here. Nothing is created, and no cookie is issued.
-            var participantId = await ResolveExistingGuestAsync(
+            var participantId = await PartyGuestSession.ResolveAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await game.VoteAsync(
@@ -220,16 +220,6 @@ public static class PartyGameEndpoints
                 MediaUrl = $"/api/party/{enc}/challenges/{snapshot.Challenge.Id}/media",
             },
         };
-    }
-
-    private static async Task<Guid?> ResolveExistingGuestAsync(
-        HttpContext context, IPartyParticipantService participants,
-        Guid? partyAlbumLinkId, CancellationToken cancellationToken)
-    {
-        if (partyAlbumLinkId is not Guid linkId) return null;
-        return context.Request.Cookies.TryGetValue(PartyEndpoints.PartyParticipantCookieName, out var raw)
-            ? await participants.ResolveAsync(linkId, raw, cancellationToken)
-            : null;
     }
 
     private static string VoteCode(PartyGameVoteError error) => error switch

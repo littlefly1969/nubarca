@@ -20,6 +20,9 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.Property(p => p.UploadEnabled).HasDefaultValue(false);
         builder.Property(p => p.RequireUploadApproval).HasDefaultValue(false);
         builder.Property(p => p.GameEnabled).HasDefaultValue(false);
+        // 0 is unlimited, and it is the migration default: no existing party
+        // acquires a message limit it never had.
+        builder.Property(p => p.MaxMessagesPerParticipant).HasDefaultValue(0);
         builder.Property(p => p.MinChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MinIntervalSeconds);
         builder.Property(p => p.MaxChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MaxIntervalSeconds);
         builder.Property(p => p.VotesPerGuest).HasDefaultValue(PartyChallengeDefaults.VotesPerGuest);

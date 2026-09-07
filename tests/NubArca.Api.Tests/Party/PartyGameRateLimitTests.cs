@@ -173,7 +173,7 @@ public sealed class PartyGameRateLimitTests
         var context = new DefaultHttpContext();
         context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse(address);
         if (cookie is not null)
-            context.Request.Headers.Cookie = $"NubArca.PartyGuest={cookie}";
+            context.Request.Headers.Cookie = $"NubArca.PartyBrowser={cookie}";
         return PartyGameRateLimits.Partition(context);
     }
 

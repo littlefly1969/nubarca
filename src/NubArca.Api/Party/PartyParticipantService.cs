@@ -7,75 +7,123 @@ namespace NubArca.Api.Party;
 
 public sealed class PartyParticipantService : IPartyParticipantService
 {
-    // 32 bytes of CSPRNG output, base64url — the same order of entropy as the
-    // party tokens themselves. Generated server-side so the value is never
-    // something a client chose for itself.
-    private const int TokenBytes = 32;
-
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPartyGuestIdentity _identity;
 
-    public PartyParticipantService(AppDbContext db, TimeProvider clock)
+    public PartyParticipantService(
+        AppDbContext db, TimeProvider clock, IPartyGuestIdentity identity)
     {
         _db = db;
         _clock = clock;
+        _identity = identity;
     }
 
     public async Task<PartyParticipantResolution> ResolveOrCreateAsync(
-        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default)
+        Guid partyAlbumLinkId, string browserToken, string? legacyParticipantToken = null,
+        CancellationToken cancellationToken = default)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
+        var hash = _identity.LinkIdentityHash(browserToken, partyAlbumLinkId);
+        var current = await FindAsync(partyAlbumLinkId, hash, cancellationToken);
+        var legacy = await FindLegacyAsync(partyAlbumLinkId, legacyParticipantToken, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(rawToken))
+        // --- Legacy migration ------------------------------------------------
+        //
+        // Before this, the participant cookie was scoped to the path of the
+        // capability token that minted it, so one browser at one party could
+        // hold a separate guest — and a separate allowance — per capability.
+        // A party that is running right now must not notice the change: the
+        // guest keeps their counters, and nothing is duplicated or zeroed.
+        //
+        // Each capability contributes its old row EXACTLY ONCE, on the first
+        // request it makes after the upgrade. The first such request has no
+        // derived row yet and ADOPTS the old one; later ones find the derived
+        // row and FOLD the old one into it. Because a capability only ever
+        // incremented its own counters, the non-zero counters of two old rows
+        // are disjoint and summing them is exact rather than generous.
+        if (legacy is not null && current is null)
         {
-            var hash = PartyLinkService.HashToken(rawToken);
-            // Scoped to the LINK: a token minted at another party hashes fine but
-            // matches no row here, so it silently yields a fresh session rather
-            // than leaking one party's allowance into another.
-            var existing = await _db.PartyParticipants
-                .FirstOrDefaultAsync(
-                    p => p.PartyAlbumLinkId == partyAlbumLinkId && p.TokenHash == hash,
-                    cancellationToken);
-            if (existing is not null)
-            {
-                existing.LastSeenAt = now;
-                await _db.SaveChangesAsync(cancellationToken);
-                return new PartyParticipantResolution(existing.Id, null);
-            }
+            legacy.TokenHash = hash;
+            legacy.LastSeenAt = now;
+            await _db.SaveChangesAsync(cancellationToken);
+            return new PartyParticipantResolution(legacy.Id, AdoptedLegacy: true);
         }
 
-        var newToken = GenerateToken();
+        if (legacy is not null && current is not null && legacy.Id != current.Id)
+        {
+            current.AcceptedPhotoCount += legacy.AcceptedPhotoCount;
+            current.AcceptedVideoCount += legacy.AcceptedVideoCount;
+            current.ChallengeVoteCount += legacy.ChallengeVoteCount;
+            current.AcceptedPhotoPrintCount += legacy.AcceptedPhotoPrintCount;
+            current.AcceptedStripPrintCount += legacy.AcceptedStripPrintCount;
+            current.SubmittedMessageCount += legacy.SubmittedMessageCount;
+            // Retired, not deleted: uploads, messages and votes point at it, and
+            // the evening they describe really happened.
+            legacy.RetiredAt = now;
+            current.LastSeenAt = now;
+            await _db.SaveChangesAsync(cancellationToken);
+            return new PartyParticipantResolution(current.Id, AdoptedLegacy: true);
+        }
+
+        if (current is not null)
+        {
+            current.LastSeenAt = now;
+            await _db.SaveChangesAsync(cancellationToken);
+            return new PartyParticipantResolution(current.Id);
+        }
+
         var participant = new PartyParticipant
         {
             Id = Guid.NewGuid(),
             PartyAlbumLinkId = partyAlbumLinkId,
-            TokenHash = PartyLinkService.HashToken(newToken),
-            AcceptedPhotoCount = 0,
-            AcceptedVideoCount = 0,
-            ChallengeVoteCount = 0,
+            TokenHash = hash,
             CreatedAt = now,
             LastSeenAt = now,
         };
         _db.PartyParticipants.Add(participant);
-        await _db.SaveChangesAsync(cancellationToken);
-        return new PartyParticipantResolution(participant.Id, newToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            return new PartyParticipantResolution(participant.Id);
+        }
+        catch (DbUpdateException)
+        {
+            // Two capabilities of the same browser arrived together and the
+            // unique (link, key) index elected one. The loser adopts it rather
+            // than becoming a second guest with a second allowance.
+            _db.ChangeTracker.Clear();
+            var elected = await FindAsync(partyAlbumLinkId, hash, cancellationToken);
+            if (elected is null) throw;
+            return new PartyParticipantResolution(elected.Id);
+        }
     }
 
     public async Task<Guid?> ResolveAsync(
-        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default)
+        Guid partyAlbumLinkId, string? browserToken, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(rawToken)) return null;
-        var hash = PartyLinkService.HashToken(rawToken);
-        var existing = await _db.PartyParticipants
-            .FirstOrDefaultAsync(
-                p => p.PartyAlbumLinkId == partyAlbumLinkId && p.TokenHash == hash,
-                cancellationToken);
+        if (!_identity.LooksIssued(browserToken)) return null;
+        var hash = _identity.LinkIdentityHash(browserToken!, partyAlbumLinkId);
+        var existing = await FindAsync(partyAlbumLinkId, hash, cancellationToken);
         if (existing is null) return null;
         // A presence heartbeat, not game state: it is what keeps a guest holding
         // the voting screen open counted as being in the room.
         existing.LastSeenAt = _clock.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(cancellationToken);
         return existing.Id;
+    }
+
+    // Retired rows are invisible to every lookup: their counters already live on
+    // the surviving guest, so finding one would hand out a second allowance.
+    private Task<PartyParticipant?> FindAsync(Guid linkId, string hash, CancellationToken ct) =>
+        _db.PartyParticipants.FirstOrDefaultAsync(
+            p => p.PartyAlbumLinkId == linkId && p.TokenHash == hash && p.RetiredAt == null, ct);
+
+    private Task<PartyParticipant?> FindLegacyAsync(
+        Guid linkId, string? legacyToken, CancellationToken ct)
+    {
+        if (!_identity.LooksIssued(legacyToken)) return Task.FromResult<PartyParticipant?>(null);
+        return FindAsync(linkId, _identity.LegacyIdentityHash(legacyToken!), ct);
     }
 
     public async Task<bool> TryClaimChallengeVoteAsync(
@@ -207,12 +255,25 @@ public sealed class PartyParticipantService : IPartyParticipantService
         return affected == 1;
     }
 
-    private static string GenerateToken()
+    public async Task<bool> TryClaimMessageAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default)
     {
-        var bytes = RandomNumberGenerator.GetBytes(TokenBytes);
-        return Convert.ToBase64String(bytes)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        // ONE statement decides and records, exactly like the upload slot: a
+        // COUNT followed by an INSERT would let two simultaneous greetings both
+        // read "one slot left" and both take it.
+        var affected = await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants "
+            + "SET \"SubmittedMessageCount\" = \"SubmittedMessageCount\" + 1, \"LastSeenAt\" = {1} "
+            + "WHERE \"Id\" = {0} AND ({2} = 0 OR \"SubmittedMessageCount\" < {2})",
+            [participantId, _clock.GetUtcNow().UtcDateTime, max],
+            cancellationToken);
+        return affected == 1;
     }
+
+    public async Task<int> MessageCountAsync(
+        Guid participantId, CancellationToken cancellationToken = default) =>
+        await _db.PartyParticipants.AsNoTracking()
+            .Where(p => p.Id == participantId)
+            .Select(p => p.SubmittedMessageCount)
+            .FirstOrDefaultAsync(cancellationToken);
 }

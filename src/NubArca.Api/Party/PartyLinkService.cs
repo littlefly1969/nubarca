@@ -173,6 +173,7 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.RequireMessageApproval,
                 p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+                p.MaxMessagesPerParticipant,
                 p.GameEnabled, p.MinChallengeIntervalSeconds,
                 p.MaxChallengeIntervalSeconds, p.VotesPerGuest,
                 p.MaxChallengesPerSession,
@@ -193,6 +194,7 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.MaxVideoSlideSeconds ?? PartySlideshowDefaults.MaxVideoSeconds,
             active?.MaxPhotoUploadsPerParticipant ?? 0,
             active?.MaxVideoUploadsPerParticipant ?? 0,
+            active?.MaxMessagesPerParticipant ?? 0,
             // Same rule as the upload approval flag: an inert link cannot be
             // holding a party to an approval mode.
             partyMode && active!.RequireMessageApproval,
@@ -210,6 +212,7 @@ public sealed class PartyLinkService : IPartyLinkService
         int? maxVideoSlideSeconds,
         int? maxPhotoUploadsPerParticipant,
         int? maxVideoUploadsPerParticipant,
+        int? maxMessagesPerParticipant,
         CancellationToken cancellationToken = default)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
@@ -235,6 +238,7 @@ public sealed class PartyLinkService : IPartyLinkService
         if (maxVideoSlideSeconds is int video) link.MaxVideoSlideSeconds = video;
         if (maxPhotoUploadsPerParticipant is int maxPhotos) link.MaxPhotoUploadsPerParticipant = maxPhotos;
         if (maxVideoUploadsPerParticipant is int maxVideos) link.MaxVideoUploadsPerParticipant = maxVideos;
+        if (maxMessagesPerParticipant is int maxMessages) link.MaxMessagesPerParticipant = maxMessages;
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
         return true;
@@ -378,7 +382,7 @@ public sealed class PartyLinkService : IPartyLinkService
             {
                 p.Id, p.OwnerUserId, p.AlbumId, p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
-                p.RequireMessageApproval,
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant,
             })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null)
@@ -394,7 +398,7 @@ public sealed class PartyLinkService : IPartyLinkService
             ? new PartyAccess(
                 link.OwnerUserId, link.AlbumId, link.Id, link.RequireUploadApproval,
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
-                link.RequireMessageApproval)
+                link.RequireMessageApproval, link.MaxMessagesPerParticipant)
             : null;
     }
 
