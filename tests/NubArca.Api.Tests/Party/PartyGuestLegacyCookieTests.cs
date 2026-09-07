@@ -72,7 +72,12 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
         var uploadLegacy = FakeToken();
         var viewLegacy = FakeToken();
         await SeedLegacyAsync(party.LinkId, uploadLegacy, messages: 2, photos: 4);
-        await SeedLegacyAsync(party.LinkId, viewLegacy, votes: 3);
+        // Votes are seeded as ROWS, not as a bare counter. A fold recomputes the
+        // vote budget from the votes that actually exist, and a counter with
+        // nothing behind it is not a state the product can reach — the claim and
+        // the insert share one transaction.
+        await SeedLegacyAsync(party.LinkId, viewLegacy,
+            votedOn: await SeedChallengesAsync(party.Album, 3));
 
         // First post-change request: the upload row is adopted.
         var browser = _factory.CreateClient();
@@ -94,9 +99,13 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
         Assert.Equal(2, live.SubmittedMessageCount);
         Assert.Equal(4, live.AcceptedPhotoCount);
         Assert.Equal(3, live.ChallengeVoteCount);
+        // And the votes themselves came with it: a budget on one row and the
+        // votes on another would still be two guests.
+        Assert.All(await db.PartyChallengeVotes.ToListAsync(),
+            v => Assert.Equal(live.Id, v.PartyParticipantId));
 
-        // Both old rows are retired aliases rather than deletions: uploads and
-        // votes point at them, and the evening they describe really happened.
+        // Both old rows are retired aliases rather than deletions: they are
+        // evidence a guest was here. Nothing points at them any more.
         var retired = await db.PartyParticipants.Where(p => p.RetiredAt != null).ToListAsync();
         Assert.Equal(2, retired.Count);
         Assert.DoesNotContain(live.Id, retired.Select(p => p.Id));
@@ -190,22 +199,55 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
     /// A participant exactly as the pre-change code wrote one: keyed by a plain
     /// hash of a capability-scoped token.
     private async Task SeedLegacyAsync(
-        Guid linkId, string token, int messages = 0, int photos = 0, int votes = 0)
+        Guid linkId, string token, int messages = 0, int photos = 0,
+        Guid[]? votedOn = null)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var guestId = Guid.NewGuid();
         db.PartyParticipants.Add(new PartyParticipant
         {
-            Id = Guid.NewGuid(),
+            Id = guestId,
             PartyAlbumLinkId = linkId,
             TokenHash = Sha256Hex(token),
             SubmittedMessageCount = messages,
             AcceptedPhotoCount = photos,
-            ChallengeVoteCount = votes,
+            // The budget is the number of votes it holds, because that is the
+            // only state the vote path can leave behind.
+            ChallengeVoteCount = votedOn?.Length ?? 0,
             CreatedAt = DateTime.UtcNow,
             LastSeenAt = DateTime.UtcNow,
         });
+        foreach (var challengeId in votedOn ?? [])
+        {
+            db.PartyChallengeVotes.Add(new PartyChallengeVote
+            {
+                Id = Guid.NewGuid(), PartyAlbumLinkId = linkId,
+                PartyParticipantId = guestId, PartyChallengeId = challengeId,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
         await db.SaveChangesAsync();
+    }
+
+    private async Task<Guid[]> SeedChallengesAsync(Guid albumId, int count)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var ids = new Guid[count];
+        for (var i = 0; i < count; i++)
+        {
+            ids[i] = Guid.NewGuid();
+            db.PartyChallenges.Add(new PartyChallenge
+            {
+                Id = ids[i], AlbumId = albumId, Title = $"Prova {i}", Body = "…",
+                Kind = PartyChallengeKinds.Dare, IsEnabled = true, SortOrder = i,
+                VotingMode = PartyChallengeVotingModes.Binary,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+        }
+        await db.SaveChangesAsync();
+        return ids;
     }
 
     private Task<HttpResponseMessage> WithLegacyAsync(
