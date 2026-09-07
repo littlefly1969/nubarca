@@ -119,7 +119,16 @@ public sealed class PartyChallengeTests : IDisposable
         await EnableGameAsync(owner, a, 3);
         await EnableGameAsync(owner, b, 3);
         var foreign = await CreateChallengeAsync(owner, b, "Solo B");
-        Assert.Equal(HttpStatusCode.NotFound, (await _factory.CreateClient().PutAsync(
+
+        // Establish a real guest session on party A first: a vote never mints an
+        // identity, so without this the refusal would be `not_joined` and the
+        // test would be asserting the wrong thing entirely.
+        var guest = _factory.CreateClient();
+        (await guest.GetAsync($"/api/party/{ViewToken(aStatus)}/challenges"))
+            .EnsureSuccessStatusCode();
+
+        // A guest of A, properly identified, still cannot reach B's challenge.
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.PutAsync(
             $"/api/party/{ViewToken(aStatus)}/challenges/{foreign}/vote", null)).StatusCode);
     }
 

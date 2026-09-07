@@ -146,9 +146,22 @@ public static class PartyEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+            // VOTE NEVER MINTS IDENTITY — the same rule as the hosted game, and
+            // for the same reason: a cookie is a claim, and a claim the server
+            // never issued must not become a vote. This is resolve-only, so a
+            // caller with no guest session is refused before a participant, a
+            // vote or a budget counter exists. The ordinary flow establishes the
+            // session on GET /challenges, which is how a guest arrives anyway.
+            var participantId = await PartyGuestSession.ResolveAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
-            if (participantId is null) return Results.NotFound();
+            if (participantId is null)
+            {
+                // A conflict rather than a denial: it is a state the caller can
+                // leave, by opening the party surface. `error` rather than
+                // `code` keeps the shape the legacy challenge API already uses.
+                return Results.Json(
+                    new { error = "not_joined" }, statusCode: StatusCodes.Status409Conflict);
+            }
             var result = await challenges.VoteAsync(access, participantId.Value, challengeId, true, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("VotePartyChallenge").RequireRateLimiting(PartyMessageRateLimitPolicy);
@@ -163,9 +176,22 @@ public static class PartyEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+            // VOTE NEVER MINTS IDENTITY — the same rule as the hosted game, and
+            // for the same reason: a cookie is a claim, and a claim the server
+            // never issued must not become a vote. This is resolve-only, so a
+            // caller with no guest session is refused before a participant, a
+            // vote or a budget counter exists. The ordinary flow establishes the
+            // session on GET /challenges, which is how a guest arrives anyway.
+            var participantId = await PartyGuestSession.ResolveAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
-            if (participantId is null) return Results.NotFound();
+            if (participantId is null)
+            {
+                // A conflict rather than a denial: it is a state the caller can
+                // leave, by opening the party surface. `error` rather than
+                // `code` keeps the shape the legacy challenge API already uses.
+                return Results.Json(
+                    new { error = "not_joined" }, statusCode: StatusCodes.Status409Conflict);
+            }
             var result = await challenges.VoteAsync(access, participantId.Value, challengeId, false, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("UnvotePartyChallenge").RequireRateLimiting(PartyMessageRateLimitPolicy);

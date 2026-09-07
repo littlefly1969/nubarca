@@ -23,56 +23,99 @@ public sealed class PartyParticipantService : IPartyParticipantService
         Guid partyAlbumLinkId, string browserToken, string? legacyParticipantToken = null,
         CancellationToken cancellationToken = default)
     {
-        var now = _clock.GetUtcNow().UtcDateTime;
         var hash = _identity.LinkIdentityHash(browserToken, partyAlbumLinkId);
-        var current = await FindAsync(partyAlbumLinkId, hash, cancellationToken);
-        var legacy = await FindLegacyAsync(partyAlbumLinkId, legacyParticipantToken, cancellationToken);
+        var canonical = await FindAsync(partyAlbumLinkId, hash, cancellationToken)
+            ?? await CreateAsync(partyAlbumLinkId, hash, cancellationToken);
 
         // --- Legacy migration ------------------------------------------------
         //
         // Before this, the participant cookie was scoped to the path of the
         // capability token that minted it, so one browser at one party could
-        // hold a separate guest — and a separate allowance — per capability.
-        // A party that is running right now must not notice the change: the
-        // guest keeps their counters, and nothing is duplicated or zeroed.
+        // hold a separate guest — and a separate allowance — per capability. A
+        // party that is running right now must not notice the change: the guest
+        // keeps their counters, and nothing is duplicated or zeroed.
         //
-        // Each capability contributes its old row EXACTLY ONCE, on the first
-        // request it makes after the upgrade. The first such request has no
-        // derived row yet and ADOPTS the old one; later ones find the derived
-        // row and FOLD the old one into it. Because a capability only ever
-        // incremented its own counters, the non-zero counters of two old rows
-        // are disjoint and summing them is exact rather than generous.
-        if (legacy is not null && current is null)
+        // Every old row is FOLDED into the canonical one, which is always the
+        // row keyed by the derivation. Adopting — rewriting an old row's key —
+        // was the obvious alternative and is not safe: two capabilities of one
+        // browser arriving together would both rewrite their own row to the same
+        // key, and the unique index would surface that ordinary race to a guest
+        // as a 500. Folding has no such contention, because the canonical row is
+        // reached by find-or-create and the counters move by atomic increment.
+        //
+        // Each capability contributes its old row EXACTLY ONCE, on its first
+        // request after the upgrade. Because a capability only ever incremented
+        // its own counters, the non-zero counters of two old rows are disjoint
+        // and summing them is exact rather than generous.
+        var legacy = await FindLegacyAsync(partyAlbumLinkId, legacyParticipantToken, cancellationToken);
+        var folded = legacy is not null && legacy.Id != canonical.Id
+            && await FoldAsync(legacy, canonical.Id, cancellationToken);
+
+        await TouchAsync(canonical.Id, cancellationToken);
+        return new PartyParticipantResolution(canonical.Id, folded);
+    }
+
+    /// <summary>
+    /// Moves one pre-migration row's counters onto the canonical guest, exactly
+    /// once, and retires it.
+    ///
+    /// <para>THE RETIREMENT IS THE CLAIM. A conditional update sets
+    /// <c>RetiredAt</c> only while it is still null, so of any number of
+    /// requests looking at the same old row exactly one is told it affected a
+    /// row — and only that one adds the counters. Both statements are in one
+    /// transaction, so a fold cannot retire a row and then lose what it was
+    /// carrying.</para>
+    ///
+    /// <para>The transaction opens with a write, before any read, so it never
+    /// upgrades a shared lock to an exclusive one — the shape SQLite refuses to
+    /// wait on.</para>
+    /// </summary>
+    private async Task<bool> FoldAsync(
+        PartyParticipant legacy, Guid canonicalId, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var claimed = await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET \"RetiredAt\" = {1} "
+            + "WHERE \"Id\" = {0} AND \"RetiredAt\" IS NULL",
+            [legacy.Id, now], ct);
+        if (claimed != 1)
         {
-            legacy.TokenHash = hash;
-            legacy.LastSeenAt = now;
-            await _db.SaveChangesAsync(cancellationToken);
-            return new PartyParticipantResolution(legacy.Id, AdoptedLegacy: true);
+            // Somebody else already folded this row. Not an error, and not a
+            // reason to add its counters a second time.
+            await tx.RollbackAsync(ct);
+            return false;
         }
 
-        if (legacy is not null && current is not null && legacy.Id != current.Id)
-        {
-            current.AcceptedPhotoCount += legacy.AcceptedPhotoCount;
-            current.AcceptedVideoCount += legacy.AcceptedVideoCount;
-            current.ChallengeVoteCount += legacy.ChallengeVoteCount;
-            current.AcceptedPhotoPrintCount += legacy.AcceptedPhotoPrintCount;
-            current.AcceptedStripPrintCount += legacy.AcceptedStripPrintCount;
-            current.SubmittedMessageCount += legacy.SubmittedMessageCount;
-            // Retired, not deleted: uploads, messages and votes point at it, and
-            // the evening they describe really happened.
-            legacy.RetiredAt = now;
-            current.LastSeenAt = now;
-            await _db.SaveChangesAsync(cancellationToken);
-            return new PartyParticipantResolution(current.Id, AdoptedLegacy: true);
-        }
+        // Increments rather than assignments: two capabilities folding two
+        // different old rows onto the same canonical guest must both land, and
+        // a read-modify-write would let the later one erase the earlier.
+        await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET "
+            + "\"AcceptedPhotoCount\" = \"AcceptedPhotoCount\" + {1}, "
+            + "\"AcceptedVideoCount\" = \"AcceptedVideoCount\" + {2}, "
+            + "\"ChallengeVoteCount\" = \"ChallengeVoteCount\" + {3}, "
+            + "\"AcceptedPhotoPrintCount\" = \"AcceptedPhotoPrintCount\" + {4}, "
+            + "\"AcceptedStripPrintCount\" = \"AcceptedStripPrintCount\" + {5}, "
+            + "\"SubmittedMessageCount\" = \"SubmittedMessageCount\" + {6} "
+            + "WHERE \"Id\" = {0}",
+            [
+                canonicalId,
+                legacy.AcceptedPhotoCount, legacy.AcceptedVideoCount, legacy.ChallengeVoteCount,
+                legacy.AcceptedPhotoPrintCount, legacy.AcceptedStripPrintCount,
+                legacy.SubmittedMessageCount,
+            ], ct);
 
-        if (current is not null)
-        {
-            current.LastSeenAt = now;
-            await _db.SaveChangesAsync(cancellationToken);
-            return new PartyParticipantResolution(current.Id);
-        }
+        await tx.CommitAsync(ct);
+        _db.ChangeTracker.Clear();
+        return true;
+    }
 
+    private async Task<PartyParticipant> CreateAsync(
+        Guid partyAlbumLinkId, string hash, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
         var participant = new PartyParticipant
         {
             Id = Guid.NewGuid(),
@@ -84,20 +127,27 @@ public sealed class PartyParticipantService : IPartyParticipantService
         _db.PartyParticipants.Add(participant);
         try
         {
-            await _db.SaveChangesAsync(cancellationToken);
-            return new PartyParticipantResolution(participant.Id);
+            await _db.SaveChangesAsync(ct);
+            return participant;
         }
         catch (DbUpdateException)
         {
             // Two capabilities of the same browser arrived together and the
-            // unique (link, key) index elected one. The loser adopts it rather
-            // than becoming a second guest with a second allowance.
+            // unique (link, key) index elected one. Narrow on purpose: the ONLY
+            // outcome accepted here is that the elected row is now findable. A
+            // failure that is not this race re-throws unchanged, so a real
+            // database problem never hides behind a retry.
             _db.ChangeTracker.Clear();
-            var elected = await FindAsync(partyAlbumLinkId, hash, cancellationToken);
+            var elected = await FindAsync(partyAlbumLinkId, hash, ct);
             if (elected is null) throw;
-            return new PartyParticipantResolution(elected.Id);
+            return elected;
         }
     }
+
+    private Task TouchAsync(Guid participantId, CancellationToken ct) =>
+        _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants SET \"LastSeenAt\" = {1} WHERE \"Id\" = {0}",
+            [participantId, _clock.GetUtcNow().UtcDateTime], ct);
 
     public async Task<Guid?> ResolveAsync(
         Guid partyAlbumLinkId, string? browserToken, CancellationToken cancellationToken = default)

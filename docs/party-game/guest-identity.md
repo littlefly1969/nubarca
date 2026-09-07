@@ -65,13 +65,25 @@ owner-visible beyond the name a guest chose to type on a greeting.
 | --- | --- |
 | Opening a party surface, contributing, sending a greeting, joining the game, submitting a print | yes — a guest is arriving |
 | Reading the game snapshot | no — a television polls it, and a display must not become a voter |
-| **Casting a game vote** | **no** — resolve-only |
+| **Casting a vote** — hosted game *or* challenge deck | **no** — resolve-only |
 
-The vote endpoint is the load-bearing case. It used to resolve-or-create, so a
-fresh cookie was a fresh voter and the right to change a result was available to
-anyone who could set a header. Rate limiting does not fix that: a limiter bounds
-how many requests an identity may make, and has no opinion on whether something
-should have been an identity.
+**VOTE NEVER MINTS IDENTITY**, and that does not belong to one voting system.
+Both the hosted game's vote and the older challenge vote/unvote are
+resolve-only; a caller with no guest session gets a machine-readable conflict
+(`not_joined` — `code` in the game's envelope, `error` in the challenge API's)
+and nothing is written: no participant, no vote, no budget counter, no cookie.
+
+The ordinary flow is unchanged, because it was always how a guest arrives:
+
+```
+GET /challenges  →  guest session established  →  PUT/DELETE vote
+```
+
+Both endpoints used to resolve-or-create, so a fresh cookie was a fresh voter
+and the right to spend a budget and move a ranking was available to anyone who
+could set a header. Rate limiting does not fix that: a limiter bounds how many
+requests an identity may make, and has no opinion on whether something should
+have been an identity.
 
 Everything goes through
 [`PartyGuestSession`](../../src/NubArca.Api/Endpoints/PartyGuestSession.cs) and
@@ -115,12 +127,27 @@ browser therefore sent a *different* cookie to each capability, and each
 capability quietly grew its own participant with its own counters.
 
 A party that is running right now must not notice the change, so the old cookie
-is still read — never written — and carried over:
+is still read — never written — and every old row is **folded** into the
+canonical guest, which is always the row keyed by the derivation:
 
-- the **first** post-change request from a capability finds no derived row and
-  **adopts** the old one, counters intact;
-- **later** ones find the derived row and **fold** the old one into it, summing
-  the counters and retiring the old row.
+1. find-or-create the canonical row for `(link, derived key)`;
+2. if the request also presents an old cookie whose row is not that one, fold it:
+   **retire it, then add its counters**.
+
+**The retirement is the claim.** A conditional update sets `RetiredAt` only
+while it is still null, so of any number of requests looking at the same old row
+exactly one is told it affected a row — and only that one adds the counters.
+Both statements are one transaction, so a fold cannot retire a row and then lose
+what it was carrying. The counters move by atomic increment, never by
+read-modify-write, so two capabilities folding two different old rows onto the
+same guest both land.
+
+**Adopting was the obvious alternative and is not safe.** Rewriting an old row's
+key to the derived value means two capabilities of one browser arriving together
+both claim the same key, and the unique index surfaces an ordinary race to a
+guest as a `500`. The index stays as a safety net — the create path treats a
+violation as the expected race *only* when the elected row is then findable, and
+re-throws otherwise, so a real database fault never hides behind a retry.
 
 Summing is exact rather than generous, because a capability only ever
 incremented its own counters: the non-zero counters of two old rows are
@@ -135,3 +162,31 @@ requesting — the server cannot prove the others exist. Nothing is duplicated a
 nothing the guest is *using* is reset; a capability they abandon simply keeps a
 row nobody reads. Adoption also belongs to session-establishing operations only,
 so a legacy cookie can never turn a vote into a voter.
+
+
+## Integrating with the Print work on `main`
+
+This stack is based on `6be5b64`; `main` has since gained the per-guest print
+share (`38cb7e5` onward). Those changes must survive integration intact — the
+merge replaces **only** the participant resolver.
+
+`main`'s `PartyPrintEndpoints` resolves a guest in **two** places:
+
+| Endpoint | On `main` | After integration |
+| --- | --- | --- |
+| `GET /api/party/{printToken}/print` — the manifest that computes `RemainingForYou` | `PartyEndpoints.ResolvePartyParticipantAsync` | `PartyGuestSession.ResolveOrCreateAsync` |
+| `POST /api/party/{printToken}/print` — the submission | `PartyEndpoints.ResolvePartyParticipantAsync` | `PartyGuestSession.ResolveOrCreateAsync` |
+
+Reading the manifest is a guest arriving, and `RemainingForYou` is meaningless
+without an identity, so both are session-establishing. Nothing else in the print
+stack changes: **per-guest print remaining, sheet orientation, idempotency,
+print capability security and the existing Print tests all stay exactly as they
+are.**
+
+One behavioural improvement falls out rather than being added: on `main` the
+print guest was a *different* guest from the upload and message guest, so
+`RemainingForYou` described a per-capability identity. Afterwards it describes
+the party-wide one, which is what a guest means by "my share". For a party
+mid-flight across the upgrade the fold carries `AcceptedPhotoPrintCount` and
+`AcceptedStripPrintCount` over with everything else, so nobody's remaining
+share is duplicated or reset.
