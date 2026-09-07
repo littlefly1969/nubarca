@@ -120,8 +120,8 @@ public static class PartyEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
             var result = await challenges.ListGuestAsync(access, participantId.Value, cancellationToken);
             if (result is null) return Results.NotFound();
@@ -146,8 +146,8 @@ public static class PartyEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
             var result = await challenges.VoteAsync(access, participantId.Value, challengeId, true, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
@@ -163,8 +163,8 @@ public static class PartyEndpoints
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
-            var participantId = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
             var result = await challenges.VoteAsync(access, participantId.Value, challengeId, false, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
@@ -307,8 +307,8 @@ public static class PartyEndpoints
             // the request body: a client-supplied id would be a quota the client
             // can reset. Works even when the page never called /upload-session —
             // the session is created here instead.
-            var participant = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participant = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var acceptedPhotos = 0;
             var acceptedVideos = 0;
@@ -399,21 +399,27 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
-            var participantId = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is not Guid id)
             {
                 return Results.NotFound();
             }
 
             var quota = await participants.GetQuotaAsync(linkId, id, cancellationToken);
+            // Greetings are a guest allowance like the media ones, so they are
+            // reported beside them rather than through a surface of their own.
+            var usedMessages = await participants.MessageCountAsync(id, cancellationToken);
             return Results.Ok(new NubArca.Api.Party.PartyUploadSessionDto(
                 Unlimited(quota.MaxPhotos),
                 Unlimited(quota.MaxVideos),
                 quota.UsedPhotos,
                 quota.UsedVideos,
                 Remaining(quota.MaxPhotos, quota.UsedPhotos),
-                Remaining(quota.MaxVideos, quota.UsedVideos)));
+                Remaining(quota.MaxVideos, quota.UsedVideos),
+                Unlimited(access.MaxMessagesPerParticipant),
+                usedMessages,
+                Remaining(access.MaxMessagesPerParticipant, usedMessages)));
         }).WithName("PartyUploadSession").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
 
         // PUBLIC party FACE SEARCH (anonymous, VIEW-token scoped). A guest uploads one
@@ -786,11 +792,16 @@ public static class PartyEndpoints
             {
                 return Results.BadRequest(new { error = "maxVideoUploadsPerParticipant out of range." });
             }
+            if (body.MaxMessagesPerParticipant is int maxMessages && !PartySlideshowDefaults.IsValidQuota(maxMessages))
+            {
+                return Results.BadRequest(new { error = "maxMessagesPerParticipant out of range." });
+            }
 
             var ok = await party.UpdateSlideshowSettingsAsync(
                 ownerUserId, id,
                 body.PhotoSlideSeconds, body.MaxVideoSlideSeconds,
                 body.MaxPhotoUploadsPerParticipant, body.MaxVideoUploadsPerParticipant,
+                body.MaxMessagesPerParticipant,
                 cancellationToken);
             if (!ok)
             {
@@ -918,11 +929,25 @@ public static class PartyEndpoints
 
             // Provenance for an abuse investigation, never for display. A guest who
             // has not uploaded yet gets their participant session minted here.
-            var participantId = await ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, token, cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await messages.SubmitAsync(
                 access, body.DisplayName, body.Text, participantId, cancellationToken);
+
+            // A QUOTA IS NOT A RATE LIMIT, and they get different codes because a
+            // client has to tell them apart: 409 says the host allowed this guest
+            // so many greetings and they have sent them, which no amount of
+            // waiting changes; 429 says the requests are arriving too fast, which
+            // waiting does change.
+            if (result.Error is NubArca.Api.Party.PartyMessageSubmissionError.LimitReached)
+            {
+                return Results.Json(new
+                {
+                    error = "guest_message_limit_reached",
+                    maxMessages = access.MaxMessagesPerParticipant,
+                }, statusCode: StatusCodes.Status409Conflict);
+            }
 
             if (result.Error is NubArca.Api.Party.PartyMessageSubmissionError error)
             {
@@ -1279,55 +1304,6 @@ public static class PartyEndpoints
     // Duplicated from Program.cs's local `SetNoStore` / `SetPrivateDerivativeCache`
     // helpers (used by dozens of other still-inline endpoints there, so they stay
     // put) — same logic.
-    // Cookie name for the anonymous guest's participant session. ONE name for
-    // every party: the cookie is PATH-scoped to this upload token's API prefix,
-    // so a guest attending two parties holds two cookies the browser keeps apart
-    // by path, and neither party can see or spend the other's allowance. Scoping
-    // by name instead would have meant either leaking a link id into the cookie
-    // name or overwriting the first party's session on arrival at the second.
-    internal const string PartyParticipantCookieName = "NubArca.PartyGuest";
-
-    // Resolve (or mint) the guest's participant session and make sure the cookie
-    // is set. The raw token exists for exactly one response; only its hash is
-    // stored. Never reads a participant id from the request body or query — the
-    // whole point is an identity the client did not choose.
-    // Internal so the PRINT surface resolves its guest through the same policy
-    // rather than a second copy of it. The cookie stays scoped to the path of
-    // the token that minted it — deliberately narrow — so a print capability
-    // gets its own session on the same link rather than being handed the
-    // contribution one.
-    internal static async Task<Guid?> ResolvePartyParticipantAsync(
-        HttpContext context,
-        NubArca.Api.Party.IPartyParticipantService participants,
-        Guid? partyAlbumLinkId,
-        string uploadToken,
-        CancellationToken cancellationToken)
-    {
-        if (partyAlbumLinkId is not Guid linkId)
-        {
-            return null;
-        }
-
-        context.Request.Cookies.TryGetValue(PartyParticipantCookieName, out var existing);
-        var resolution = await participants.ResolveOrCreateAsync(linkId, existing, cancellationToken);
-        if (resolution.NewRawToken is string issued)
-        {
-            context.Response.Cookies.Append(PartyParticipantCookieName, issued, new CookieOptions
-            {
-                HttpOnly = true,
-                // Secure only over HTTPS: a party is often demoed over plain
-                // http on a LAN, and an unconditional Secure flag would silently
-                // drop the cookie there, handing every upload a fresh quota.
-                Secure = context.Request.IsHttps,
-                SameSite = SameSiteMode.Lax,
-                // Narrowest path that still covers this link's upload calls.
-                Path = $"/api/party/{uploadToken}",
-                Expires = DateTimeOffset.UtcNow.AddDays(30),
-                IsEssential = true,
-            });
-        }
-        return resolution.ParticipantId;
-    }
 
     // Domain 0 means unlimited; the public DTO says null so a client cannot read
     // "no limit" as "no slots left".
@@ -1368,4 +1344,6 @@ public sealed record SetPartySlideshowSettingsRequest(
     int? PhotoSlideSeconds = null,
     int? MaxVideoSlideSeconds = null,
     int? MaxPhotoUploadsPerParticipant = null,
-    int? MaxVideoUploadsPerParticipant = null);
+    int? MaxVideoUploadsPerParticipant = null,
+    // Greetings per guest, on the same 0 = unlimited scale as the media quotas.
+    int? MaxMessagesPerParticipant = null);

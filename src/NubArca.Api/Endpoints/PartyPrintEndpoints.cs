@@ -99,9 +99,8 @@ public static class PartyPrintEndpoints
 
             // Who is printing, by the same server-minted identity the rest of the
             // party uses — never anything the client chose or a fingerprint.
-            var participantId = await PartyEndpoints.ResolvePartyParticipantAsync(
-                httpContext, participants, access.PartyAlbumLinkId, printToken,
-                cancellationToken);
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
 
             var result = await submissions.SubmitAsync(
                 access,

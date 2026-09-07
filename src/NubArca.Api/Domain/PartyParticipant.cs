@@ -54,6 +54,25 @@ public class PartyParticipant
     public int AcceptedPhotoPrintCount { get; set; }
     public int AcceptedStripPrintCount { get; set; }
 
+    /// <summary>
+    /// Greetings this guest has SUBMITTED. History, like every counter here: a
+    /// message the host later hides or rejects has still been sent, so the slot
+    /// stays spent. Moderation is not a way to reset somebody's budget.
+    /// </summary>
+    public int SubmittedMessageCount { get; set; }
+
+    /// <summary>
+    /// Set when this row was folded into the browser's single identity for this
+    /// party during the legacy-cookie migration, and is therefore no longer
+    /// reachable by any lookup.
+    ///
+    /// It is retired rather than deleted because rows point at it — uploads,
+    /// messages, votes — and the evening they describe really did happen. Its
+    /// counters have already been added to the surviving row, so a retired row
+    /// is history, never an allowance.
+    /// </summary>
+    public DateTime? RetiredAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime LastSeenAt { get; set; }
 }

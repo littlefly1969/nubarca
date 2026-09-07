@@ -307,9 +307,10 @@ public sealed class PartyGameVotingTests : IDisposable
     }
 
     /// The `name=value` pair from a join response, as a browser would store it.
+    /// One cookie for the whole party surface — see PartyGuestSession.
     private static string ParticipantCookie(HttpResponseMessage response) =>
         response.Headers.GetValues("Set-Cookie")
-            .Single(x => x.StartsWith("NubArca.PartyGuest=", StringComparison.Ordinal))
+            .Single(x => x.StartsWith("NubArca.PartyBrowser=", StringComparison.Ordinal))
             .Split(';', 2)[0];
 
     [Fact]

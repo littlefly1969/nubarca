@@ -41,6 +41,8 @@ export interface AlbumPartyStatus {
   /** 0 means unlimited. */
   maxPhotoUploadsPerParticipant: number;
   maxVideoUploadsPerParticipant: number;
+  /** 0 means unlimited. Optional for a backend that predates the quota. */
+  maxMessagesPerParticipant?: number;
   // Optional for rolling compatibility with a pre-game backend.
   gameEnabled?: boolean;
   minChallengeIntervalSeconds?: number;
@@ -82,6 +84,8 @@ export interface PartySlideshowSettings {
   maxVideoSlideSeconds: number;
   maxPhotoUploadsPerParticipant: number;
   maxVideoUploadsPerParticipant: number;
+  /** Greetings one guest may send. 0 is unlimited, like the media quotas. */
+  maxMessagesPerParticipant: number;
 }
 
 /** Every field that is out of range, so a form can mark them all at once
@@ -99,6 +103,9 @@ export function invalidSlideshowFields(s: PartySlideshowSettings): string[] {
   }
   if (!isWithinRange(s.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)) {
     bad.push('maxVideoUploadsPerParticipant');
+  }
+  if (!isWithinRange(s.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota)) {
+    bad.push('maxMessagesPerParticipant');
   }
   return bad;
 }
@@ -222,6 +229,9 @@ export function slideshowSettingsFromStatus(status: AlbumPartyStatus): PartySlid
     maxVideoSlideSeconds: status.maxVideoSlideSeconds,
     maxPhotoUploadsPerParticipant: status.maxPhotoUploadsPerParticipant,
     maxVideoUploadsPerParticipant: status.maxVideoUploadsPerParticipant,
+    // A backend that predates the quota reports nothing, which reads as the
+    // unlimited it in fact was.
+    maxMessagesPerParticipant: status.maxMessagesPerParticipant ?? 0,
   };
 }
 

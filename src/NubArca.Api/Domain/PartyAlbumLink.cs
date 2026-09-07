@@ -78,6 +78,17 @@ public class PartyAlbumLink
     public int MaxPhotoUploadsPerParticipant { get; set; }
     public int MaxVideoUploadsPerParticipant { get; set; }
 
+    /// <summary>
+    /// Greetings ONE guest may submit through this link. 0 is unlimited, which
+    /// is the default and what every party before this column meant.
+    ///
+    /// A submitted greeting spends a slot whether it lands visible or pending,
+    /// and moderation never gives one back: hiding or rejecting a message is a
+    /// judgement about the message, not a refund. Otherwise a host who declines
+    /// something would be handing the guest another go at sending it.
+    /// </summary>
+    public int MaxMessagesPerParticipant { get; set; }
+
     public bool GameEnabled { get; set; }
 
     /// <summary>

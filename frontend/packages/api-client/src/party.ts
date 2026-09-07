@@ -65,6 +65,7 @@ export function setPartySlideshowSettings(
     maxVideoSlideSeconds?: number;
     maxPhotoUploadsPerParticipant?: number;
     maxVideoUploadsPerParticipant?: number;
+    maxMessagesPerParticipant?: number;
   },
   signal?: AbortSignal,
 ): Promise<AlbumPartyStatus> {
@@ -415,6 +416,11 @@ export interface PartyUploadSession {
   usedVideos: number;
   remainingPhotos: number | null;
   remainingVideos: number | null;
+  // Greetings, reported the same way: null max and null remaining are the
+  // host having set no limit, never "none left".
+  maxMessages?: number | null;
+  usedMessages?: number;
+  remainingMessages?: number | null;
 }
 
 // Idempotent. Safe to call on every page load: it mints a session the first

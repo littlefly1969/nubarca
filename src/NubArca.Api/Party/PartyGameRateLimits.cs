@@ -77,7 +77,7 @@ public static class PartyGameRateLimits
     /// </summary>
     public static string Partition(HttpContext context)
     {
-        var raw = context.Request.Cookies[PartyEndpoints.PartyParticipantCookieName];
+        var raw = context.Request.Cookies[PartyGuestSession.BrowserCookieName];
         return LooksServerIssued(raw)
             ? GuestPrefix + Fingerprint(raw!)
             : AddressPrefix + (context.Connection.RemoteIpAddress?.ToString() ?? "unknown");

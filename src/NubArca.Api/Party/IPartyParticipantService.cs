@@ -1,10 +1,12 @@
 namespace NubArca.Api.Party;
 
 // Resolution of an anonymous guest's participant session on one party link.
-// `NewRawToken` is non-null ONLY when a session was just minted, which is the
-// single moment the raw token exists — the endpoint writes it to the guest's
-// cookie and nothing else ever sees it again (the row stores only its hash).
-public sealed record PartyParticipantResolution(Guid ParticipantId, string? NewRawToken);
+//
+// `AdoptedLegacy` reports that a pre-migration, capability-scoped session was
+// carried into the browser's single identity for this party — either taken over
+// or folded in. It exists so the migration is observable in a test rather than
+// inferred from counters that happen to look right.
+public sealed record PartyParticipantResolution(Guid ParticipantId, bool AdoptedLegacy = false);
 
 // What one participant has used and may still use on one link. `max` values of
 // 0 mean unlimited in the DOMAIN; the public DTO translates that to null so a
@@ -25,18 +27,36 @@ public sealed record PartyQuotaSnapshot(
 // client-supplied ids were all rejected.
 public interface IPartyParticipantService
 {
-    // Idempotent: returns the existing session for `rawToken` when it resolves
-    // on THIS link, otherwise mints a new one. A token from another party never
-    // resolves here, so each link keeps independent counters.
+    // Idempotent: the guest this browser IS on this link, created if this is the
+    // first time. The browser token is the same one for every capability, and
+    // the stored key is derived per link — so view, upload, print, messages and
+    // the game all resolve one guest, and two parties never share a counter.
+    //
+    // `legacyParticipantToken` is the pre-migration, capability-scoped cookie
+    // when the browser still holds one. It is adopted or folded in here, so a
+    // party that is running right now keeps its guests and their allowances.
+    // Session-ESTABLISHING operations pass it; nothing else does.
     Task<PartyParticipantResolution> ResolveOrCreateAsync(
-        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default);
+        Guid partyAlbumLinkId, string browserToken, string? legacyParticipantToken = null,
+        CancellationToken cancellationToken = default);
 
-    // Resolve an EXISTING session without minting one, refreshing its presence.
-    // The party game's snapshot endpoint is polled by televisions as well as
-    // phones: minting there would turn every display into a participant and
-    // inflate the count of who is in the room.
+    // Resolve an EXISTING guest without creating one, refreshing their presence.
+    // Two things depend on this being the whole of it: a television polling the
+    // game must not become a participant, and a privileged action must never
+    // manufacture the identity that authorises it.
     Task<Guid?> ResolveAsync(
-        Guid partyAlbumLinkId, string? rawToken, CancellationToken cancellationToken = default);
+        Guid partyAlbumLinkId, string? browserToken, CancellationToken cancellationToken = default);
+
+    // ATOMIC per-guest greeting claim, on the same principle as the upload slot.
+    // `max` of 0 means the host set no limit, so the claim always succeeds and
+    // only counts. Must be called inside the caller's transaction: a claim whose
+    // message then fails to insert has to roll back with it, or a guest loses a
+    // slot to a message nobody ever sees.
+    Task<bool> TryClaimMessageAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default);
+
+    // What this guest has spent on greetings, for the surfaces that show it.
+    Task<int> MessageCountAsync(Guid participantId, CancellationToken cancellationToken = default);
 
     // ATOMIC per-guest print claim, on the same principle as the upload slot:
     // one statement decides and records. `max` of 0 means the host set no

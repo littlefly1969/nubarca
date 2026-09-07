@@ -469,6 +469,7 @@ const it = {
   'party.maxPhotosPerParticipant': 'Massimo foto per partecipante',
   'party.maxVideosPerParticipant': 'Massimo video per partecipante',
   'party.secondsSuffix': 'secondi',
+  'party.maxMessagesPerParticipant': 'Messaggi per invitato',
   'party.zeroMeansUnlimited': '0 = illimitato',
   'party.slideshowSettingsTitle': 'Slideshow e limiti per partecipante',
   'party.saveSettings': 'Salva impostazioni',
