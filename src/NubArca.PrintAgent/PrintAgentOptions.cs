@@ -12,6 +12,13 @@ public sealed class PrintAgentOptions
     public string FakeOutputPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\fake-output";
     public int IdlePollSeconds { get; set; } = 5;
     public int MaxBackoffSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// Seconds the FAKE printer spends producing one sheet. Zero prints
+    /// instantly, which is what an automated test wants and what a simulator
+    /// standing in for a real printer is not.
+    /// </summary>
+    public int FakeSheetSeconds { get; set; } = 10;
     public long MaxArtifactBytes { get; set; } = 32 * 1024 * 1024;
     public long MaxTemporaryBytes { get; set; } = 128 * 1024 * 1024;
 
@@ -24,6 +31,8 @@ public sealed class PrintAgentOptions
         Adapter = Adapter.Trim().ToLowerInvariant();
         if (Adapter is not ("fake" or "windows-spooler" or "cups"))
             throw new InvalidOperationException("PrintAgent:Adapter must be fake, windows-spooler, or cups.");
+        if (FakeSheetSeconds < 0) throw new InvalidOperationException(
+            "Print Agent bounds are invalid.");
         if (IdlePollSeconds < 1 || MaxBackoffSeconds < 2 || MaxArtifactBytes < 1
             || MaxTemporaryBytes < MaxArtifactBytes)
             throw new InvalidOperationException("Print Agent bounds are invalid.");

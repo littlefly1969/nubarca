@@ -6,6 +6,20 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Print orientation, and a guest who can see their own share
+
+- **A photo can be printed portrait or landscape**, defaulting to the
+  photograph's own orientation. Following the picture is a good default rather
+  than a rule — a portrait subject in a landscape frame is a choice somebody may
+  want, and the crop editor is what makes it work. The four-photo strip takes no
+  such choice: two strips side by side on a portrait sheet *is* the product.
+- **The studio shows a guest their OWN remaining prints.** Somebody allowed two
+  on a party of forty was being told forty, and discovered their limit only by
+  being refused. The smaller of the two ceilings is now what they see, and when
+  it is their own share that is spent the page says so rather than claiming the
+  party has run out — which it can see through the moment somebody else collects
+  a print.
+
 ### Party Game
 
 - **A party now has a hosted game.** The owner conducts it from a control room,
@@ -54,6 +68,39 @@ originating repository and is deliberately not reproduced here.
   what lets the control room honestly report whether one is showing the game.
 - **Deleting an activity asks in the product**, naming what is being lost, and
   unsaved work in the composer survives a stray Escape.
+
+### One anonymous guest per party
+
+- **A browser is one guest at a party, not one guest per link.** The cookie used
+  to be scoped to the path of whichever capability minted it, so the same phone
+  became a separate participant — with a separate allowance — for uploading,
+  viewing, printing and playing. There is now one identity, derived per link
+  from a browser secret so two parties can never share a counter, and the raw
+  token is never stored: a stolen database cannot impersonate a guest.
+- **Joining mints an identity. Voting never does.** Both voting systems now
+  resolve an existing guest and refuse without one, because presenting a cookie
+  is a claim and a claim the server never issued must not become a vote.
+  Minting there meant a fresh cookie was a fresh voter, so the right to change a
+  party's result was available to anyone who could set a header.
+- **A guest carried across the upgrade keeps everything, once.** An old row is
+  folded into the canonical guest — its votes, greetings, photographs and
+  counters all move — and the retirement is the claim, so however many requests
+  see the same old row, exactly one moves it. Nothing is duplicated and nothing
+  is zeroed in the middle of somebody's evening.
+- **A folded guest is one guest everywhere.** Their already-cast votes come with
+  them, so a challenge they voted stays voted rather than becoming votable
+  again, and the room count stops seeing them twice.
+- **The host can bound greetings per guest**, claimed atomically like every
+  other party quota, so two simultaneous messages cannot both take the last slot.
+  A refusal says the guest has had their share rather than that the party is
+  closed.
+- **The print studio's "your share" now means your share of the party.** It was
+  counting a print-scoped identity, so a guest who had been uploading and
+  playing all evening met a different self at the printer. The number is the
+  same rule; it is now about the right person.
+- **Face search is deliberately NOT attached to this identity.** It is a
+  privacy-sensitive domain, and uniformity is not a reason to link a face to
+  everything else a guest did.
 
 ### Party print polish
 
@@ -113,6 +160,9 @@ originating repository and is deliberately not reproduced here.
 
 ### Linux print-station simulator
 
+- Print Agent `0.2.3` keeps one authenticated API client across heartbeat,
+  claim, artifact download and result acknowledgement. A claimed job can no
+  longer reach the execution coordinator through a second, unenrolled client.
 - Print Agent `0.2.2` adds self-contained `linux-x64` packaging and isolated,
   multi-instance systemd fake stations. Every instance has its own Unix account,
   credential, journal and fake-output directory for safe protocol development.

@@ -205,13 +205,20 @@ export interface PartyAlbum {
 
 export type PartyPrintProduct = 'photo' | 'strip4';
 export type PartyPrintTheme = 'pure' | 'midnight' | 'event';
+/** Absent means the sheet follows the photograph, which is the default. */
+export type PartyPrintOrientation = 'portrait' | 'landscape';
 
 export interface PartyPrintFormat {
   type: PartyPrintProduct;
   enabled: boolean;
-  /** This product's OWN remaining count. The two are never summed. */
+  /** This product's OWN remaining count for the party. The two are never summed. */
   remaining: number;
   requiredPhotos: number;
+  /**
+   * What is left of THIS guest's allowance, or null when the host set no
+   * per-guest limit. Null is not zero — it means the ceiling does not exist.
+   */
+  remainingForYou: number | null;
 }
 
 /** A choosable photograph: safe derived URLs only, never an original. */
@@ -277,6 +284,7 @@ export function submitPartyPrint(
     product: PartyPrintProduct;
     theme: PartyPrintTheme;
     slots: PartyPrintSlot[];
+    orientation?: PartyPrintOrientation;
   },
   idempotencyKey: string,
   signal?: AbortSignal,
@@ -526,6 +534,22 @@ export function uploadToPartyWithProgress(
 // / vector is ever returned.
 export type PartyFaceSearchStatus = 'ready' | 'no_face' | 'invalid_image' | 'unavailable';
 
+/**
+ * Where the detected face is, as FRACTIONS of the analysed image.
+ *
+ * Fractions because the phone downscales the selfie before uploading — a pixel
+ * box would be in the wrong units the moment it was drawn on what the phone
+ * holds. And orientation agrees without arranging it: the browser decodes with
+ * `imageOrientation: 'from-image'` and the server auto-orients, so "upright"
+ * means the same thing at both ends.
+ */
+export interface PartyFaceBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface PartyFaceSearchResponse {
   status: PartyFaceSearchStatus;
   // Present only for a ready search (so the guest/TV can re-fetch it).
@@ -533,6 +557,9 @@ export interface PartyFaceSearchResponse {
   resultCount: number;
   // Party-safe media items (same metadata-stripped derived URLs as the grid).
   items: PartyItem[];
+  // Only on a completed search, and only enough to frame the selfie the phone
+  // already has — no landmarks, no descriptor, no score.
+  face?: PartyFaceBox | null;
 }
 
 // Upload one selfie and search THIS party album for matching photos. The server

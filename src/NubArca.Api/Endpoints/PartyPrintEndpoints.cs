@@ -36,11 +36,30 @@ public static class PartyPrintEndpoints
             HttpContext httpContext,
             [FromServices] IPartyPrintAccessResolver resolver,
             [FromServices] IPartyMediaService media,
+            [FromServices] NubArca.Api.Party.IPartyParticipantService participants,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
             var access = await resolver.ResolveAsync(printToken, cancellationToken);
             if (access is null) return Results.NotFound();
+
+            // Who is asking, so the studio can show THEIR remaining prints
+            // rather than the party's. A guest bounded to two on a party of
+            // forty was being told forty, and discovered their own limit only
+            // by being refused — the studio was hiding the rule from the one
+            // person it applies to.
+            //
+            // The identity is now the party's ONE anonymous guest rather than a
+            // participant scoped to this print token's path, which is the only
+            // thing this merge changes here. It makes the number truer than it
+            // was: "what is left of your share" now means the share of the guest
+            // who has been uploading and voting all evening, not of a separate
+            // identity the print studio minted the first time they opened it.
+            var participantId = await PartyGuestSession.ResolveOrCreateAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
+            var used = participantId is Guid guest
+                ? await participants.GetPrintQuotaAsync(guest, cancellationToken)
+                : new NubArca.Api.Party.PartyPrintQuotaSnapshot(0, 0);
 
             var items = await media.ListItemsAsync(
                 access.OwnerUserId, access.PartyAlbumId, cancellationToken);
@@ -64,11 +83,13 @@ public static class PartyPrintEndpoints
                     new PartyPrintFormatDto(
                         PartyPrintProducts.Photo, access.Photo.Enabled,
                         access.Photo.Remaining,
-                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Photo)),
+                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Photo),
+                        YoursLeft(access.Photo.PerGuest, used.UsedPhotos)),
                     new PartyPrintFormatDto(
                         PartyPrintProducts.Strip4, access.Strip.Enabled,
                         access.Strip.Remaining,
-                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Strip4)),
+                        PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Strip4),
+                        YoursLeft(access.Strip.PerGuest, used.UsedStrips)),
                 ],
                 photos));
         }).WithName("GetPartyPrintManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
@@ -108,7 +129,8 @@ public static class PartyPrintEndpoints
                     body.Product ?? string.Empty,
                     body.Theme ?? "pure",
                     (body.Slots ?? []).Select(s => new PartyPrintSlotRequest(
-                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList()),
+                        s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList(),
+                    body.Orientation),
                 key,
                 participantId,
                 cancellationToken);
@@ -220,6 +242,10 @@ public static class PartyPrintEndpoints
         _ => "preparing",
     };
 
+    /// <summary>Null when the host set no per-guest limit; never negative.</summary>
+    private static int? YoursLeft(int perGuest, int used) =>
+        perGuest > 0 ? Math.Max(0, perGuest - used) : null;
+
     private static void SetNoStore(HttpContext httpContext) =>
         httpContext.Response.Headers.CacheControl = "no-store";
 }
@@ -231,13 +257,20 @@ public sealed record PartyPrintManifestDto(
     IReadOnlyList<PartyPrintPhotoDto> Photos);
 
 public sealed record PartyPrintFormatDto(
-    string Type, bool Enabled, int Remaining, int RequiredPhotos);
+    string Type, bool Enabled, int Remaining, int RequiredPhotos,
+    /// <summary>
+    /// What is left of THIS guest's own allowance, or null when the host set no
+    /// per-guest limit. Null is not zero: it means the ceiling does not exist,
+    /// and the party's budget is the only thing bounding them.
+    /// </summary>
+    int? RemainingForYou);
 
 /// <summary>A choosable photograph: safe derived URLs only, never an original.</summary>
 public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl);
 
 public sealed record PartyPrintSubmitBody(
-    string? Product, string? Theme, List<PartyPrintSlotBody>? Slots);
+    string? Product, string? Theme, List<PartyPrintSlotBody>? Slots,
+    string? Orientation = null);
 
 public sealed record PartyPrintSlotBody(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);

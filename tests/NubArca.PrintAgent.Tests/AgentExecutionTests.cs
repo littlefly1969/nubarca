@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NubArca.PrintAgent;
 using NubArca.PrintAgent.Adapters;
@@ -16,11 +17,26 @@ public sealed class AgentExecutionTests : IDisposable
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
 
     [Fact]
+    public void Runtime_Uses_One_Api_Client_For_Credential_And_Execution()
+    {
+        var services = new ServiceCollection();
+        services.AddHttpClient<PrintAgentApiClient>(nameof(PrintAgentApiClient));
+        services.AddSharedPrintAgentApiClient();
+        using var provider = services.BuildServiceProvider();
+
+        var workerClient = provider.GetRequiredService<PrintAgentApiClient>();
+        workerClient.SetCredential("station.credential");
+        var executionClient = provider.GetRequiredService<PrintAgentApiClient>();
+
+        Assert.Same(workerClient, executionClient);
+    }
+
+    [Fact]
     public async Task Fake_Adapter_Produces_Deterministic_Copy()
     {
         var source = Path.Combine(_root, "source.png");
         await File.WriteAllBytesAsync(source, [1, 2, 3, 4]);
-        var adapter = new FakePrinterAdapter(Path.Combine(_root, "out"));
+        var adapter = new FakePrinterAdapter(Path.Combine(_root, "out"), TimeSpan.Zero);
         var result = await adapter.SubmitAsync(new(Guid.Parse("11111111-1111-1111-1111-111111111111"),
             "fake-10x15", source, "image/png", "10x15"), default);
         Assert.True(result.Accepted);
@@ -101,7 +117,7 @@ public sealed class AgentExecutionTests : IDisposable
         await journal.InitializeAsync(default);
         var api = new PrintAgentApiClient(new HttpClient(handler) { BaseAddress = new Uri("https://example.invalid/") });
         api.SetCredential("station.credential");
-        var adapter = new FakePrinterAdapter(Path.Combine(_root, "out"));
+        var adapter = new FakePrinterAdapter(Path.Combine(_root, "out"), TimeSpan.Zero);
         var coordinator = new AgentExecutionCoordinator(api, adapter, journal, options,
             NullLogger<AgentExecutionCoordinator>.Instance);
         return (coordinator, journal, adapter, api);

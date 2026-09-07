@@ -98,6 +98,50 @@ public sealed class PartyPrintComposerTests
         Assert.NotEqual(numbered.Length, unnumbered.Length);
     }
 
+    [Fact]
+    public async Task The_Sheet_Follows_The_Photograph_Unless_The_Guest_Turns_It()
+    {
+        var composer = new PartyPrintComposer();
+
+        // Default: a wide picture gets a wide sheet, rather than a portrait one
+        // with white bars beside it.
+        var followed = await composer.RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Photo, PartyPrintTheme.Pure,
+            [new PartyPrintPhoto(Fixture(0, 1600, 1000), 0, 0, 1, 1)],
+            "Festa", null), default);
+        using (var image = Image.Load(followed))
+        {
+            Assert.True(image.Width > image.Height);
+        }
+
+        // Turned: the guest asked for the other one, and the crop editor is what
+        // makes a portrait subject work in a landscape frame.
+        var turned = await composer.RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Photo, PartyPrintTheme.Pure,
+            [new PartyPrintPhoto(Fixture(0, 1600, 1000), 0, 0, 1, 1)],
+            "Festa", null, 0, PartyPrintOrientation.Portrait), default);
+        using (var image = Image.Load(turned))
+        {
+            Assert.True(image.Height > image.Width);
+        }
+    }
+
+    [Fact]
+    public async Task Turning_The_Sheet_Does_Nothing_To_A_Strip()
+    {
+        // Two strips side by side IS the product. Honouring an orientation here
+        // would not turn a picture, it would destroy what a strip is.
+        var composer = new PartyPrintComposer();
+        var photos = Enumerable.Range(0, 4)
+            .Select(i => new PartyPrintPhoto(Fixture(i), 0, 0, 1, 1)).ToList();
+        var asked = await composer.RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Strip4, PartyPrintTheme.Pure, photos,
+            "Festa", null, 0, PartyPrintOrientation.Landscape), default);
+        using var sheet = Image.Load(asked);
+        Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
+        Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
+    }
+
     private static PartyPrintComposition Composition(
         string product, PartyPrintTheme theme, int photos, string? footer = "Una notte da ricordare")
         => new(product, theme,

@@ -17,6 +17,9 @@ public sealed record PartyQuotaSnapshot(
     int UsedPhotos,
     int UsedVideos);
 
+// Sheets one guest has had accepted, per product.
+public sealed record PartyPrintQuotaSnapshot(int UsedPhotos, int UsedStrips);
+
 // Server-issued, link-scoped identity for anonymous party guests, and the
 // atomic quota claim built on it.
 //
@@ -67,6 +70,11 @@ public interface IPartyParticipantService
     // Give a claimed slot back when the sheet never happened.
     Task ReleasePrintAsync(
         Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default);
+
+    // What this guest has already had PRINTED, per product. Read-only: the
+    // atomic claim above is what spends it.
+    Task<PartyPrintQuotaSnapshot> GetPrintQuotaAsync(
+        Guid participantId, CancellationToken cancellationToken = default);
 
     Task<PartyQuotaSnapshot> GetQuotaAsync(
         Guid partyAlbumLinkId, Guid participantId, CancellationToken cancellationToken = default);

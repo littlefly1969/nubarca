@@ -151,7 +151,17 @@ public sealed record PartyFaceSearchResponseDto(
     string Status,
     Guid? SearchId,
     int ResultCount,
-    IReadOnlyList<PartyItemDto> Items);
+    IReadOnlyList<PartyItemDto> Items,
+    /// <summary>
+    /// Where the face is in the selfie the guest just took, as fractions — so
+    /// their phone can frame what it already holds. Null on every status but a
+    /// completed search, and null when a stored search is re-read later: by then
+    /// the selfie is long gone from the phone and there is nothing to frame.
+    /// </summary>
+    PartyFaceBoxDto? Face = null);
+
+/// <summary>The detected face, in fractions of the analysed image.</summary>
+public sealed record PartyFaceBoxDto(double X, double Y, double Width, double Height);
 
 // Result of explicitly activating a search as the album's TV face filter. The
 // version is the server-assigned monotonic activation order (an opaque counter

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -7,6 +7,29 @@ import {
   activeIntersectionObservers, errorResponse, installFetchMock, jsonResponse, setIntersecting,
 } from '../test-utils';
 import { I18nProvider } from '../i18n';
+import { SCAN_MIN_PASSES, SCAN_PASS_MS } from '../components/useFaceScan';
+
+/**
+ * Ask for no motion.
+ *
+ * This stills the sweep; it does NOT skip the wait. The sheet holds a result
+ * back until the face has been swept three times — for everyone — so the two
+ * tests below that complete a search sit through it exactly as a guest does.
+ * They are about what a completed search does to the GRID; the choreography
+ * itself is tested where it lives.
+ */
+beforeEach(() => {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    onchange: null,
+    dispatchEvent: () => false,
+  }));
+});
 
 afterEach(() => {
   cleanup();
@@ -42,7 +65,14 @@ const items = {
   ],
 };
 
+/** Room for the three sweeps, plus slack for a loaded runner. */
+const SCAN_WAIT_MS = SCAN_PASS_MS * (SCAN_MIN_PASSES + 2);
+
 describe('PartyPage (public party landing)', () => {
+  // Two tests here complete a face search and therefore sit through the scan;
+  // a five-second default leaves no room for what they do afterwards.
+  vi.setConfig({ testTimeout: 20_000 });
+
   const hub = {
     albumName: 'Beach Party', itemCount: 1,
     coverUrl: '/api/party/tok-1/media/f1/preview',
@@ -446,7 +476,9 @@ describe('PartyPage (public party landing)', () => {
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
     await user.click(screen.getByTestId('party-face-submit'));
-    await screen.findByTestId('party-face-count');
+    // The sheet sweeps the face three times before it answers, so this waits
+    // as long as a guest does.
+    await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
     const tiles = screen.getByTestId('party-grid').querySelectorAll('button.party-guest-hub-tile img');
     expect(tiles).toHaveLength(1);
     expect(tiles[0]).toHaveAttribute('src', '/api/party/tok-1/media/f2/thumbnail');
@@ -694,7 +726,7 @@ describe('PartyPage (public party landing)', () => {
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
     await user.click(screen.getByTestId('party-face-submit'));
-    await screen.findByTestId('party-face-count');
+    await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
     await user.click(screen.getByTestId('party-face-show-results'));
     await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
 
