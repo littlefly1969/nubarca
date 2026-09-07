@@ -107,6 +107,79 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
         Assert.Single(settled);
     }
 
+    [Fact]
+    public async Task Two_legacy_capabilities_of_one_browser_arriving_together_fold_exactly_once()
+    {
+        // THE case adoption could not survive. Before, each request rewrote its
+        // OWN old row's key to the derived value, so two capabilities of one
+        // browser arriving together both tried to claim the same key and the
+        // unique index surfaced an ordinary race to a guest as a 500.
+        //
+        // Now the canonical row is reached by find-or-create and the old rows
+        // are folded into it by atomic increment, with the retirement as the
+        // exactly-once claim. Both requests complete, and the counters land once.
+        var identity = Identity();
+        var browserToken = identity.NewBrowserToken();
+        var legacyA = FakeToken();
+        var legacyB = FakeToken();
+        var idA = await SeedLegacyAsync(legacyA, photos: 4, messages: 2);
+        var idB = await SeedLegacyAsync(legacyB, votes: 3, photoPrints: 1);
+
+        await using var firstDb = CreateContext();
+        await using var secondDb = CreateContext();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var results = await Task.WhenAll(
+            ResolveAfterStartAsync(firstDb, browserToken, start.Task, legacyToken: legacyA),
+            ResolveAfterStartAsync(secondDb, browserToken, start.Task, start, legacyToken: legacyB));
+
+        // BOTH complete. Neither is allowed to be the price of the other.
+        Assert.All(results, r => Assert.NotNull(r));
+
+        await using var verify = CreateContext();
+        var live = await verify.PartyParticipants.Where(p => p.RetiredAt == null).ToListAsync();
+        var retired = await verify.PartyParticipants.Where(p => p.RetiredAt != null).ToListAsync();
+
+        // One canonical guest, and both old rows retired as aliases of it.
+        var canonical = Assert.Single(live);
+        Assert.Equal(2, retired.Count);
+        Assert.Equal(new[] { idA, idB }.Order(), retired.Select(p => p.Id).Order());
+        Assert.All(results, r => Assert.Equal(canonical.Id, r!.ParticipantId));
+
+        // Every counter summed EXACTLY once — not twice, and none lost.
+        Assert.Equal(4, canonical.AcceptedPhotoCount);
+        Assert.Equal(2, canonical.SubmittedMessageCount);
+        Assert.Equal(3, canonical.ChallengeVoteCount);
+        Assert.Equal(1, canonical.AcceptedPhotoPrintCount);
+    }
+
+    [Fact]
+    public async Task An_old_row_seen_again_and_again_is_folded_once()
+    {
+        var identity = Identity();
+        var browserToken = identity.NewBrowserToken();
+        var legacy = FakeToken();
+        await SeedLegacyAsync(legacy, messages: 5);
+
+        // Four requests all presenting the SAME old cookie, two of them at once.
+        await using var firstDb = CreateContext();
+        await using var secondDb = CreateContext();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await Task.WhenAll(
+            ResolveAfterStartAsync(firstDb, browserToken, start.Task, legacyToken: legacy),
+            ResolveAfterStartAsync(secondDb, browserToken, start.Task, start, legacyToken: legacy));
+        await using (var third = CreateContext())
+            await Service(third).ResolveOrCreateAsync(_linkId, browserToken, legacy);
+        await using (var fourth = CreateContext())
+            await Service(fourth).ResolveOrCreateAsync(_linkId, browserToken, legacy);
+
+        await using var verify = CreateContext();
+        var canonical = await verify.PartyParticipants.SingleAsync(p => p.RetiredAt == null);
+        // Five, not ten or twenty: the retirement is the claim, and a retired
+        // row is invisible to every lookup afterwards.
+        Assert.Equal(5, canonical.SubmittedMessageCount);
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private async Task<Guid> SeedGuestAsync()
@@ -153,19 +226,51 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
     }
 
     private async Task<PartyParticipantResolution?> ResolveAfterStartAsync(
-        AppDbContext db, string browserToken, Task start, TaskCompletionSource? release = null)
+        AppDbContext db, string browserToken, Task start, TaskCompletionSource? release = null,
+        string? legacyToken = null)
     {
         release?.SetResult();
         await start;
         try
         {
-            return await new PartyParticipantService(db, TimeProvider.System, Identity())
-                .ResolveOrCreateAsync(_linkId, browserToken);
+            return await Service(db).ResolveOrCreateAsync(_linkId, browserToken, legacyToken);
         }
         catch (Microsoft.Data.Sqlite.SqliteException)
         {
             return null;
         }
+    }
+
+    private static PartyParticipantService Service(AppDbContext db) =>
+        new(db, TimeProvider.System, Identity());
+
+    private static string FakeToken() =>
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+
+    /// A participant exactly as the pre-migration code wrote one: keyed by a
+    /// plain hash of a capability-scoped token.
+    private async Task<Guid> SeedLegacyAsync(
+        string token, int photos = 0, int messages = 0, int votes = 0, int photoPrints = 0)
+    {
+        var id = Guid.NewGuid();
+        await using var db = CreateContext();
+        await db.Database.OpenConnectionAsync();
+        await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF");
+        db.PartyParticipants.Add(new PartyParticipant
+        {
+            Id = id,
+            PartyAlbumLinkId = _linkId,
+            TokenHash = Identity().LegacyIdentityHash(token),
+            AcceptedPhotoCount = photos,
+            SubmittedMessageCount = messages,
+            ChallengeVoteCount = votes,
+            AcceptedPhotoPrintCount = photoPrints,
+            CreatedAt = DateTime.UtcNow,
+            LastSeenAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        return id;
     }
 
     private AppDbContext CreateContext()
