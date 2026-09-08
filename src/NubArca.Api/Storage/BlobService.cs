@@ -52,15 +52,54 @@ public sealed class BlobService : IBlobService
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        var write = await target.WriteAsync(content, cancellationToken);
+        // Stage first, OUTSIDE any transaction. Reading and hashing the source
+        // can take minutes for a large upload and must never hold a database
+        // connection, let alone a lock. The staged bytes are not yet visible
+        // under their content-addressed key, so nothing can adopt them and
+        // nothing can purge them.
+        var staged = await target.StageAsync(content, cancellationToken);
+        await using var _ = staged.ConfigureAwait(false);
 
         var blobDbStart = Stopwatch.GetTimestamp();
-        var blob = await PersistBlobAsync(write, cancellationToken);
+        // Now the identity is known, so the publish/reuse decision and the
+        // ownership commit can be taken together under a shared lock.
+        var (blob, write) = await PublishAndPersistAsync(target, staged, cancellationToken);
         var blobDbMillis = (long)Stopwatch.GetElapsedTime(blobDbStart).TotalMilliseconds;
 
         return new BlobStoreResult(
             blob,
             new BlobIngestTimings(write.ReadMillis, write.HashMillis, write.WriteMillis, blobDbMillis));
+    }
+
+    // The protected critical section: shared StorageMutationLock on the content
+    // identity, then the publish/reuse decision, then the ownership commit —
+    // all in ONE transaction, so an exclusive purge of this content can be
+    // neither between the decision and the commit nor between the commit and
+    // the bytes becoming reachable.
+    //
+    // Joins an ambient transaction when the caller already opened one (the lock
+    // then lives until that outer transaction ends, which is strictly safer);
+    // otherwise opens its own.
+    private async Task<(BlobObject Blob, BlobWriteResult Write)> PublishAndPersistAsync(
+        IBlobStorage target, StagedBlobWrite staged, CancellationToken cancellationToken)
+    {
+        if (_db.Database.CurrentTransaction is not null)
+        {
+            await StorageMutationLock.AcquireSharedAsync(_db, staged.Sha256, cancellationToken);
+            var joinedWrite = await target.PublishAsync(staged, cancellationToken);
+            return (await PersistBlobAsync(joinedWrite, cancellationToken), joinedWrite);
+        }
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            await StorageMutationLock.AcquireSharedAsync(_db, staged.Sha256, cancellationToken);
+            var write = await target.PublishAsync(staged, cancellationToken);
+            var blob = await PersistBlobAsync(write, cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return (blob, write);
+        });
     }
 
     // Slice 95: NO explicit transaction. Every statement here is individually
@@ -101,6 +140,18 @@ public sealed class BlobService : IBlobService
         };
         _db.BlobObjects.Add(fresh);
 
+        // Shared locks do not exclude each other, so two writers of the SAME
+        // content still race here — by design; they are both publishing the
+        // identical bytes. A savepoint keeps that ordinary race recoverable now
+        // that this runs inside a transaction: without it PostgreSQL would mark
+        // the whole transaction aborted and the increment retry could not run.
+        var transaction = _db.Database.CurrentTransaction;
+        const string savepoint = "blob_insert";
+        if (transaction is not null)
+        {
+            await transaction.CreateSavepointAsync(savepoint, cancellationToken);
+        }
+
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -111,6 +162,10 @@ public sealed class BlobService : IBlobService
             // Concurrent same-SHA insert won the unique index — retry as an
             // atomic increment of the winner's row.
             _db.Entry(fresh).State = EntityState.Detached;
+            if (transaction is not null)
+            {
+                await transaction.RollbackToSavepointAsync(savepoint, cancellationToken);
+            }
             return await IncrementExistingAsync(write.Sha256, cancellationToken);
         }
     }
@@ -258,19 +313,32 @@ public sealed class BlobService : IBlobService
             return false;
         }
 
-        if (await _derivedStorage.ExistsAsync(blob.StorageKey, cancellationToken))
-        {
-            return true; // raced: someone else already restored it
-        }
+        // Byte-placement repair for ownership that ALREADY exists and is
+        // durable, so nothing new is committed here. It still runs under the
+        // shared lock: a purge of this same content must not unlink the source
+        // (or the copy) while we are re-placing it.
+        return await StoragePublish.RepairPlacementAsync(
+            _db,
+            blob.Sha256,
+            async ct =>
+            {
+                if (await _derivedStorage.ExistsAsync(blob.StorageKey, ct))
+                {
+                    return true; // raced: someone else already restored it
+                }
 
-        if (!await _storage.ExistsAsync(blob.StorageKey, cancellationToken))
-        {
-            return false; // missing from both roots — only regeneration helps
-        }
+                if (!await _storage.ExistsAsync(blob.StorageKey, ct))
+                {
+                    return false; // missing from both roots — only regeneration helps
+                }
 
-        await using var source = await _storage.OpenReadAsync(blob.StorageKey, cancellationToken);
-        var write = await _derivedStorage.WriteAsync(source, cancellationToken);
-        return string.Equals(write.StorageKey, blob.StorageKey, StringComparison.Ordinal);
+                await using var source = await _storage.OpenReadAsync(blob.StorageKey, ct);
+                var staged = await _derivedStorage.StageAsync(source, ct);
+                await using var stagedScope = staged.ConfigureAwait(false);
+                var write = await _derivedStorage.PublishAsync(staged, ct);
+                return string.Equals(write.StorageKey, blob.StorageKey, StringComparison.Ordinal);
+            },
+            cancellationToken);
     }
 
     private Task<BlobObject> ReadByShaAsync(string sha256, CancellationToken cancellationToken)

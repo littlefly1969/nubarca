@@ -212,9 +212,27 @@ public sealed class MediaDerivativeBytesService
     // idempotent when a concurrent request already restored the same key.
     private async Task<bool> CopyToDerivedRootAsync(string storageKey, CancellationToken cancellationToken)
     {
-        await using var source = await _storage.OpenReadAsync(storageKey, cancellationToken);
-        var write = await _derivedStorage.WriteAsync(source, cancellationToken);
-        return string.Equals(write.StorageKey, storageKey, StringComparison.Ordinal);
+        // Placement repair for already-durable ownership: no new owner is
+        // recorded, but the copy must not race a purge of the same content, so
+        // it runs under the shared storage lock like every other writer.
+        var identity = StorageMutationLock.ContentIdentityOf(storageKey);
+        if (identity is null)
+        {
+            return false;
+        }
+
+        return await StoragePublish.RepairPlacementAsync(
+            _db,
+            identity,
+            async ct =>
+            {
+                await using var source = await _storage.OpenReadAsync(storageKey, ct);
+                var staged = await _derivedStorage.StageAsync(source, ct);
+                await using var stagedScope = staged.ConfigureAwait(false);
+                var write = await _derivedStorage.PublishAsync(staged, ct);
+                return string.Equals(write.StorageKey, storageKey, StringComparison.Ordinal);
+            },
+            cancellationToken);
     }
 
     // Explicit --regenerate-missing only: same pattern as the poster

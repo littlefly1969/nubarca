@@ -219,14 +219,25 @@ public sealed class PrintStationService
                 shortCode: job.Id.ToString("N")[..8],
                 cancellationToken: cancellationToken);
             await using var source = new MemoryStream(bytes, writable: false);
-            var stored = await _artifacts.WriteAsync(source, cancellationToken);
-            job.ArtifactStorageKey = stored.StorageKey;
-            job.ArtifactContentType = "image/png";
-            job.ArtifactByteLength = stored.SizeBytes;
-            job.RenderedAt = Now;
-            PrintJobStateMachine.EnsureTransition(job.State, PrintJobStates.Ready);
-            job.State = PrintJobStates.Ready;
-            await _db.SaveChangesAsync(cancellationToken);
+            // Stage outside the lock, then publish and claim the artifact in one
+            // protected step: the job's ArtifactStorageKey is this object's ONLY
+            // owner, so it must become durable before a purge of the same
+            // content can look at it.
+            var staged = await _artifacts.StageAsync(source, cancellationToken);
+            await using var stagedScope = staged.ConfigureAwait(false);
+            await StoragePublish.PublishOwnedAsync(
+                _db, _artifacts, staged,
+                async (stored, ct) =>
+                {
+                    job.ArtifactStorageKey = stored.StorageKey;
+                    job.ArtifactContentType = "image/png";
+                    job.ArtifactByteLength = stored.SizeBytes;
+                    job.RenderedAt = Now;
+                    PrintJobStateMachine.EnsureTransition(job.State, PrintJobStates.Ready);
+                    job.State = PrintJobStates.Ready;
+                    await _db.SaveChangesAsync(ct);
+                },
+                cancellationToken);
         }
         catch when (!cancellationToken.IsCancellationRequested)
         {

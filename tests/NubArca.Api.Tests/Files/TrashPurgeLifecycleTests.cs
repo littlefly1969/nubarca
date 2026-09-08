@@ -84,6 +84,11 @@ public sealed class TrashPurgeLifecycleTests : IDisposable
     {
         public Task<BlobWriteResult> WriteAsync(Stream c, CancellationToken ct = default) =>
             inner.WriteAsync(c, ct);
+        public Task<StagedBlobWrite> StageAsync(Stream c, CancellationToken ct = default) =>
+            inner.StageAsync(c, ct);
+        public Task<BlobWriteResult> PublishAsync(
+            StagedBlobWrite staged, CancellationToken ct = default) =>
+            inner.PublishAsync(staged, ct);
         public Task<Stream> OpenReadAsync(string k, CancellationToken ct = default) =>
             inner.OpenReadAsync(k, ct);
         public Task<bool> ExistsAsync(string k, CancellationToken ct = default) =>

@@ -214,19 +214,36 @@ public sealed class VideoHlsGenerationService
                 return DerivativeOutcome.Failed;
             }
 
-            if (force)
-            {
-                // Regeneration replaces the published ladder; without this the
-                // publish would defer to the existing directory.
-                _hls.Delete(blob.Sha256);
-            }
-            _hls.Publish(blob.Sha256, staging);
+            // The ladder lives in a namespace keyed by the SAME content
+            // identity as the blob, and BlobJanitor deletes it by that sha. So
+            // publishing it and marking the row Ready happen together under the
+            // shared storage lock: otherwise a purge landing in between leaves
+            // blob_hls_derivatives claiming a ladder whose files are gone. The
+            // transcode above — the slow part — ran outside the lock.
+            await StoragePublish.UnderSharedLockAsync(
+                _db,
+                blob.Sha256,
+                async ct =>
+                {
+                    if (force)
+                    {
+                        // Regeneration replaces the published ladder; without
+                        // this the publish would defer to the existing
+                        // directory. Safe here: the exclusive purge cannot be
+                        // running, so this only ever removes our own stale
+                        // ladder, never one a live reader needs.
+                        _hls.Delete(blob.Sha256);
+                    }
+                    _hls.Publish(blob.Sha256, staging);
 
-            row.Status = VideoHlsStatuses.Ready;
-            row.ErrorCode = null;
-            row.Version = FfmpegVideoHlsTranscoder.Version;
-            row.ReadyAt = _clock.GetUtcNow().UtcDateTime;
-            await _db.SaveChangesAsync(CancellationToken.None);
+                    row.Status = VideoHlsStatuses.Ready;
+                    row.ErrorCode = null;
+                    row.Version = FfmpegVideoHlsTranscoder.Version;
+                    row.ReadyAt = _clock.GetUtcNow().UtcDateTime;
+                    await _db.SaveChangesAsync(ct);
+                    return true;
+                },
+                CancellationToken.None);
             return DerivativeOutcome.Generated;
         }
         catch (OperationCanceledException)

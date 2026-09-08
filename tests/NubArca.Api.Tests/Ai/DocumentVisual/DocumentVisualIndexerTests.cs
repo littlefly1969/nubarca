@@ -468,6 +468,11 @@ public sealed class DocumentVisualIndexerTests : IDisposable
 
         public Task<BlobWriteResult> WriteAsync(Stream content, CancellationToken ct = default)
             => throw new NotSupportedException();
+        public Task<StagedBlobWrite> StageAsync(Stream content, CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<BlobWriteResult> PublishAsync(
+            StagedBlobWrite staged, CancellationToken ct = default)
+            => throw new NotSupportedException();
         public Task<bool> ExistsAsync(string storageKey, CancellationToken ct = default)
             => Task.FromResult(false);
         public Task DeleteAsync(string storageKey, CancellationToken ct = default)

@@ -484,10 +484,26 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         public async Task<BlobWriteResult> WriteAsync(
             Stream content, CancellationToken c = default)
         {
+            var staged = await StageAsync(content, c);
+            return await PublishAsync(staged, c);
+        }
+        public async Task<StagedBlobWrite> StageAsync(
+            Stream content, CancellationToken c = default)
+        {
             using var ms = new MemoryStream();
             await content.CopyToAsync(ms, c);
-            return new BlobWriteResult(
-                new string('a', 64), $"party-print/{Guid.NewGuid():N}", ms.Length, false);
+            var sha = new string('a', 64);
+            return new StagedBlobWrite(
+                sha, $"objects/{sha[..2]}/{sha[2..4]}/{sha}", ms.Length,
+                stagedPath: string.Empty,
+                discard: static _ => ValueTask.CompletedTask);
+        }
+        public Task<BlobWriteResult> PublishAsync(
+            StagedBlobWrite staged, CancellationToken c = default)
+        {
+            staged.MarkConsumed();
+            return Task.FromResult(new BlobWriteResult(
+                staged.Sha256, staged.StorageKey, staged.SizeBytes, false));
         }
         public Task<Stream> OpenReadAsync(string key, CancellationToken c = default) =>
             Task.FromResult<Stream>(new MemoryStream());
