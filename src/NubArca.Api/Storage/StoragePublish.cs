@@ -75,6 +75,18 @@ public static class StoragePublish
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(work);
 
+        // The transaction below exists ONLY to scope the advisory lock. Where
+        // the provider has no advisory locks there is nothing to scope, and
+        // opening one anyway is not merely wasteful: several scoped contexts
+        // can share one SQLite connection, each sees its own CurrentTransaction
+        // as null, and the second BeginTransaction fails with "does not support
+        // nested transactions". Nothing is committed here, so skipping the
+        // transaction loses no guarantee.
+        if (!db.Database.IsNpgsql())
+        {
+            return await work(cancellationToken);
+        }
+
         if (db.Database.CurrentTransaction is not null)
         {
             await StorageMutationLock.AcquireSharedAsync(db, sha256, cancellationToken);
@@ -107,6 +119,18 @@ public static class StoragePublish
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(ensure);
+
+        // The transaction below exists ONLY to scope the advisory lock. Where
+        // the provider has no advisory locks there is nothing to scope, and
+        // opening one anyway is not merely wasteful: several scoped contexts
+        // can share one SQLite connection, each sees its own CurrentTransaction
+        // as null, and the second BeginTransaction fails with "does not support
+        // nested transactions". Nothing is committed here, so skipping the
+        // transaction loses no guarantee.
+        if (!db.Database.IsNpgsql())
+        {
+            return await ensure(cancellationToken);
+        }
 
         if (db.Database.CurrentTransaction is not null)
         {
