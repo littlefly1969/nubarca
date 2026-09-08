@@ -9,6 +9,8 @@ interface Props {
   onChoosePersonal: () => void;
   onChooseBeautyLab: () => void;
   onChooseUpdates: () => void;
+  // SPIKE ONLY.
+  onChooseSpike: () => void;
   // e.g. "The PIN was changed. Enter the new PIN." after a stale-grant lock.
   notice?: string | null;
   // What the owner has this television set to. Displayed and nothing more: the
@@ -25,8 +27,8 @@ interface Props {
 // glyph because it needs no PIN, and it must not take the initial focus away
 // from Party, which is what this TV is normally opened for.
 export function ModeSelectScreen({
-  onChooseParty, onChoosePersonal, onChooseBeautyLab, onChooseUpdates, notice = null,
-  assignment = null,
+  onChooseParty, onChoosePersonal, onChooseBeautyLab, onChooseUpdates, onChooseSpike,
+  notice = null, assignment = null,
 }: Props) {
   const { t } = useI18n();
   // A television the owner pointed at a party says so. It is a LINE, not a
@@ -47,6 +49,7 @@ export function ModeSelectScreen({
         <FocusableButton label={t('mode.personal')} onPress={onChoosePersonal} />
         <FocusableButton label={t('mode.beautyLab')} onPress={onChooseBeautyLab} />
         <FocusableButton label={t('mode.updates')} onPress={onChooseUpdates} />
+        <FocusableButton label="WebView spike" onPress={onChooseSpike} />
       </View>
     </View>
   );

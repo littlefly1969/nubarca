@@ -73,6 +73,8 @@ export type TvFlowState =
   | { name: 'mode'; notice: ModeNotice }
   | { name: 'party' }
   | { name: 'updates' }
+  // SPIKE ONLY — a plain mode like `updates`: no PIN, no grant, no owner API.
+  | { name: 'webviewSpike' }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
   | { name: 'personalLibrary'; home: PersonalHomeInfo }
@@ -89,6 +91,8 @@ export type TvFlowEvent =
   | { type: 'CHOOSE_BEAUTY_LAB' }
   | { type: 'CHOOSE_UPDATES' }
   | { type: 'UPDATES_BACK' }
+  | { type: 'CHOOSE_SPIKE' }
+  | { type: 'SPIKE_BACK' }
   | { type: 'PIN_CANCELLED' }
   | { type: 'UNLOCKED'; home: PersonalHomeInfo }
   | { type: 'OPEN_LIBRARY' }
@@ -130,6 +134,10 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
       return state.name === 'mode' ? { name: 'updates' } : state;
     case 'UPDATES_BACK':
       return state.name === 'updates' ? { name: 'mode', notice: null } : state;
+    case 'CHOOSE_SPIKE':
+      return state.name === 'mode' ? { name: 'webviewSpike' } : state;
+    case 'SPIKE_BACK':
+      return state.name === 'webviewSpike' ? { name: 'mode', notice: null } : state;
     case 'CHOOSE_PERSONAL':
       return state.name === 'mode' ? { name: 'pin', target: 'personal' } : state;
     case 'CHOOSE_BEAUTY_LAB':

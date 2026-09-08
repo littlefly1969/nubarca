@@ -37,7 +37,8 @@
     "expo-video": "~56.1.4",
     "qrcode-generator": "^1.4.4",
     "react": "19.2.3",
-    "react-native": "npm:react-native-tvos@0.85-stable"
+    "react-native": "npm:react-native-tvos@0.85-stable",
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",

@@ -38,6 +38,7 @@ import { PersonalLibraryScreen } from './src/screens/PersonalLibraryScreen';
 import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
+import { WebViewSpikeScreen } from './src/screens/WebViewSpikeScreen';
 import { exitTvApp } from './src/lib/tvPlatform';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
@@ -313,8 +314,15 @@ function AppInner(): React.JSX.Element {
           onChoosePersonal={() => rawDispatch({ type: 'CHOOSE_PERSONAL' })}
           onChooseBeautyLab={() => rawDispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
           onChooseUpdates={() => rawDispatch({ type: 'CHOOSE_UPDATES' })}
+          onChooseSpike={() => rawDispatch({ type: 'CHOOSE_SPIKE' })}
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
           assignment={assignment}
+        />
+      )}
+      {flow.name === 'webviewSpike' && (
+        <WebViewSpikeScreen
+          baseUrl={resolveBaseUrl()}
+          onBack={() => rawDispatch({ type: 'SPIKE_BACK' })}
         />
       )}
       {flow.name === 'updates' && (
