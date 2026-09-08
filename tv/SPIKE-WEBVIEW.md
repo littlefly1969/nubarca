@@ -40,6 +40,25 @@ application and **does not disturb a paired television**. It also bundles its JS
 Both are build-time settings on the generated, gitignored `android/` project —
 `tv/release-contract.json` is untouched and the identity contract stays green.
 
+## A third constraint, found while building
+
+A JS-bundled TV APK is bundled in PRODUCTION mode whatever the Gradle variant,
+because `expo export:embed` sets `NODE_ENV=production` itself. `app.config.js` is
+then fail-closed and demands the operator's own build inputs —
+`NUBARCA_PUBLIC_ORIGIN` (https, no path) and `NUBARCA_TV_OTA_CERTIFICATE`. That
+is correct and deliberate: it is the rule that stops a perfectly signed APK from
+shipping unable to reach any server. It also means **a spike APK cannot be built
+by anyone who does not hold those inputs**.
+
+Two ways out, answering different parts of the protocol:
+
+- **`NODE_ENV=development`** — needs no operator input at all. The offline
+  *replica*, *stress* and *unreachable* probes work fully, which covers checks
+  1-5, 7, 8, 11, 12 and 14 — including both checks that decide the architecture.
+  Only *Live origin* is meaningless, because the base URL falls back to the dev
+  default.
+- **The operator's own inputs** — the full protocol, *Live origin* included.
+
 ## Building and installing
 
 ```bash
@@ -57,8 +76,14 @@ s = s.replace('        debug {\n            signingConfig signingConfigs.debug',
 p.write_text(s)
 EOF
 
-(cd android && ./gradlew :app:assembleDebug \
+# offline probes only — no operator inputs required
+(cd android && NODE_ENV=development ./gradlew :app:assembleDebug \
    -PreactNativeArchitectures=armeabi-v7a,arm64-v8a)
+
+# …or the full protocol, with the operator's own build inputs:
+# (cd android && NUBARCA_PUBLIC_ORIGIN=https://<origin> \
+#    NUBARCA_TV_OTA_CERTIFICATE=<path> ./gradlew :app:assembleDebug \
+#    -PreactNativeArchitectures=armeabi-v7a,arm64-v8a)
 ```
 
 The APK lands at `android/app/build/outputs/apk/debug/app-debug.apk`. Put it
