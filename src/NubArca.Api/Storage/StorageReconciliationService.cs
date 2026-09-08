@@ -14,7 +14,15 @@ namespace NubArca.Api.Storage;
 // blob_objects — a rendered print artifact is owned by
 // PrintJob.ArtifactStorageKey alone — and such an object must never be counted
 // as an orphan or deleted. Any future owner of that shape belongs in the same
-// set, beside the print artifacts.
+// set, beside the print artifacts, AND in the revalidation below.
+//
+// Destructive mode is a mark-and-sweep whose correctness is the exclusive
+// StorageMutationLock, not a timing window: the scan only marks, and each
+// deletion revalidates ownership and unlinks inside one transaction holding
+// that lock. Writers hold the shared lock across their publish/reuse decision
+// and their ownership commit, so a writer and a purge of the same content
+// cannot interleave. MinimumOrphanAge is a conservative policy on top of that,
+// not the thing that makes it safe.
 public sealed class StorageReconciliationService
 {
     private readonly AppDbContext _db;
@@ -53,6 +61,50 @@ public sealed class StorageReconciliationService
 
         return await _db.PrintJobs.AsNoTracking()
             .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken);
+    }
+
+    // Revalidate-and-unlink as ONE indivisible step.
+    //
+    // The exclusive lock is taken first and released only when the transaction
+    // ends, which is after the bytes are gone. A writer of this same content
+    // holds the shared lock from before its publish/reuse decision until its
+    // ownership commit, so it either finishes first (and we see its owner here)
+    // or waits for us (and then publishes the bytes itself). Returns true when
+    // the object was deleted, false when a live owner was found and it was
+    // spared.
+    private async Task<bool> DeleteUnderExclusiveLockAsync(
+        string contentIdentity,
+        string storageKey,
+        bool splitRoots,
+        CancellationToken cancellationToken)
+    {
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            await StorageMutationLock.AcquireExclusiveAsync(_db, contentIdentity, cancellationToken);
+
+            // Final ownership revalidation, INSIDE the lock. Everything the
+            // model recognises as an owner: BlobObject rows and the non-blob
+            // owners (PrintJob.ArtifactStorageKey).
+            if (await IsOwnedAsync(storageKey, cancellationToken))
+            {
+                await tx.CommitAsync(cancellationToken);
+                return false;
+            }
+
+            // Still unowned, and nothing can claim it while we hold the lock.
+            // Delete from both roots (idempotent for a missing file) so an
+            // orphan is removed wherever it physically lives.
+            await _storage.DeleteAsync(storageKey, cancellationToken);
+            if (splitRoots)
+            {
+                await _derivedStorage.DeleteAsync(storageKey, cancellationToken);
+            }
+
+            await tx.CommitAsync(cancellationToken);
+            return true;
+        });
     }
 
     public async Task<StorageReconciliationResult> RunAsync(
@@ -147,24 +199,20 @@ public sealed class StorageReconciliationService
 
         // SWEEP — the only place this tool deletes anything.
         //
-        // Two independent conditions must BOTH hold, because each covers a race
-        // the other cannot:
+        // Correctness rests on ONE mechanism: the exclusive StorageMutationLock
+        // on the object's content identity, held from BEFORE the final
+        // ownership revalidation until AFTER the bytes are unlinked. Writers
+        // hold the SHARED lock across their publish/reuse decision and their
+        // ownership commit, so the two can never interleave: either we observe
+        // their committed owner and spare the object, or they wait and then
+        // publish the bytes themselves. There is no window between the
+        // revalidation and the unlink for an owner to appear in.
         //
-        //   A. the object has been unowned for at least MinimumOrphanAge. This
-        //      is what protects a WRITE-BEFORE-COMMIT object: a writer stages
-        //      bytes and commits its owning row moments later, and between
-        //      those two steps the object is real on disk and absent from every
-        //      owner table. Age is the only thing that distinguishes it from a
-        //      genuine leftover, because the database simply has no record of
-        //      it yet.
-        //
-        //   B. ownership is revalidated immediately before deletion. Age alone
-        //      is NOT sufficient: an ancient unowned object can gain an owner at
-        //      any moment, because a re-upload of identical bytes finds the file
-        //      already present, skips the write (so the age never refreshes) and
-        //      then inserts the BlobObject row. Only a fresh read can see that.
-        //
-        // An unknown age counts as brand new. Never delete what you cannot date.
+        // MinimumOrphanAge is NOT a correctness guard. It is a conservative
+        // POLICY: do not reclaim something that only just appeared, because an
+        // object younger than the window is far more likely to be live work
+        // than a leftover, and reclaiming it buys nothing. Correctness would
+        // hold at age zero; the window only makes the tool less eager.
         var recentSkipped = 0;
         var ownedAtRevalidation = 0;
         var orphansDeleted = 0;
@@ -184,9 +232,11 @@ public sealed class StorageReconciliationService
                     break;
                 }
 
-                // (A) Age gate. Ask each store that could hold the object and
-                // keep the NEWEST answer, so an object present in both roots is
-                // judged by its most recent materialisation.
+                // Policy filter, applied before taking any lock so an unowned
+                // but recent object costs nothing. Ask each store that could
+                // hold the object and keep the NEWEST answer, so one present in
+                // both roots is judged by its most recent materialisation. An
+                // undeterminable age counts as brand new.
                 var writtenAt = await _storage.GetLastWriteTimeUtcAsync(key, cancellationToken);
                 if (splitRoots)
                 {
@@ -205,24 +255,25 @@ public sealed class StorageReconciliationService
                     continue;
                 }
 
-                // (B) Final ownership revalidation against LIVE state, covering
-                // every owner established for this store: BlobObject rows and
-                // the non-blob owners (PrintJob.ArtifactStorageKey). Anything
-                // that gained an owner since the snapshot survives.
-                if (await IsOwnedAsync(key, cancellationToken))
+                // A key this tool cannot resolve to a content identity cannot be
+                // locked, and what cannot be locked must not be deleted.
+                var identity = StorageMutationLock.ContentIdentityOf(key);
+                if (identity is null)
                 {
-                    ownedAtRevalidation++;
+                    recentSkipped++;
                     continue;
                 }
 
-                // Delete from both roots (idempotent for a missing file) so an
-                // orphan is removed wherever it physically lives.
-                await _storage.DeleteAsync(key, cancellationToken);
-                if (splitRoots)
+                var deleted = await DeleteUnderExclusiveLockAsync(
+                    identity, key, splitRoots, cancellationToken);
+                if (deleted)
                 {
-                    await _derivedStorage.DeleteAsync(key, cancellationToken);
+                    orphansDeleted++;
                 }
-                orphansDeleted++;
+                else
+                {
+                    ownedAtRevalidation++;
+                }
             }
         }
 
@@ -275,15 +326,16 @@ public sealed record StorageReconciliationOptions
     public bool DeleteOrphans { get; init; }
     public int? Limit { get; init; }
 
-    // How long an object must have been on disk before the sweep may delete it.
-    // Covers the window in which a writer has staged bytes but not yet committed
-    // the row that owns them: during it the object is genuinely unowned in the
-    // database and indistinguishable from a leftover except by age.
+    // How long an object must have been on disk before the sweep will consider
+    // deleting it.
     //
-    // Default 24h — deliberately far larger than any real write-to-commit gap,
-    // because the cost of waiting a day to reclaim a stale object is nothing and
-    // the cost of deleting a live one is data loss. Reclamation of properly
-    // owned content is the janitor's job, not this tool's.
+    // POLICY, not a correctness guard. Safety against a writer publishing or
+    // reusing these bytes comes from the exclusive StorageMutationLock held
+    // across revalidation and unlink; this would be correct at zero. The window
+    // exists because an object that appeared minutes ago is far more likely to
+    // be live work than a leftover, and reclaiming it early buys nothing —
+    // waiting a day costs nothing, and reclaiming properly owned content is the
+    // janitor's job, not this tool's.
     public TimeSpan MinimumOrphanAge { get; init; } = TimeSpan.FromHours(24);
 }
 
@@ -298,12 +350,11 @@ public sealed record StorageReconciliationResult(
     // non-blob reference (today: PrintJob.ArtifactStorageKey). Reported so the
     // orphan count is explainable; these are never deleted by this tool.
     int ProtectedNonBlobObjects = 0,
-    // Orphan candidates left alone because they are younger than
-    // MinimumOrphanAge (or their age could not be determined). These are the
-    // possibly-in-flight objects: bytes on disk whose owning row may still be
-    // uncommitted. Only counted during a destructive run.
+    // Orphan candidates left alone by the MinimumOrphanAge policy: too recent,
+    // of undeterminable age, or not resolvable to a lockable content identity.
+    // Only counted during a destructive run.
     int RecentPhysicalObjectsSkipped = 0,
     // Orphan candidates that were old enough but had gained an owner by the
-    // time the sweep revalidated them, and so were spared. Nonzero means the
-    // snapshot genuinely went stale — the revalidation earned its keep.
+    // time the sweep revalidated them under the exclusive lock, and so were
+    // spared. Nonzero means the scan snapshot genuinely went stale.
     int OrphansOwnedAtRevalidation = 0);

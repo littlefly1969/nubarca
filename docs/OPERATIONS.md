@@ -119,14 +119,22 @@ no blob row by design, so reconcile counts those separately as
 be added to the same set — and to the pre-delete revalidation — or
 `--delete-orphans` would remove live data.
 
-`--delete-orphans` is a conservative mark-and-sweep. An object is removed only
-when it has been unowned for at least 24h **and** is still unowned when
-re-checked immediately before deletion. Both conditions are load-bearing: bytes
-reach the store before the row that owns them commits, so a just-written object
-is indistinguishable from a leftover except by age; and an old unowned object can
-gain an owner at any moment, because re-uploading identical bytes finds the file
-already present, skips the write, and then inserts the row. The report breaks
-this out as `too-recent` and `owned-at-recheck`; both are normal on a busy
+`--delete-orphans` is a mark-and-sweep. The scan only marks; each deletion then
+revalidates ownership and unlinks inside one transaction holding the **exclusive
+`StorageMutationLock`** for that content — the same lock every writer holds
+(shared) across its publish/reuse decision and its ownership commit. That is what
+makes the sweep safe: a writer and a purge of the same content cannot interleave,
+so there is no window between "nobody owns this" and the unlink for an owner to
+appear in. Either the sweep sees the writer's committed owner and spares the
+bytes, or the writer waits and then publishes the bytes itself.
+
+On top of that, `MinimumOrphanAge` (24h) is a **conservative policy, not a safety
+mechanism**: an object that appeared minutes ago is far more likely to be live
+work than a leftover, and reclaiming it early buys nothing. The sweep would be
+correct at zero; the window only makes it less eager.
+
+The report breaks these out as `too-recent` (skipped by policy) and
+`owned-at-recheck` (an owner appeared after the scan). Both are normal on a busy
 system, and a persistently high `too-recent` simply means the store is active.
 
 ## Background jobs (opt-in)
