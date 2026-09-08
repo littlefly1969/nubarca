@@ -195,64 +195,75 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 ParseOrientation(request.Orientation)), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
-            var stored = await _artifacts.WriteAsync(stream, cancellationToken);
-
-            // 6. Accept: the job, its sources and the idempotency record together.
-            // The unique index on (party, key) is what makes a racing duplicate
-            // fail here rather than reach the printer.
-            var now = DateTime.UtcNow;
-            _db.PrintJobs.Add(new PrintJob
-            {
-                Id = jobId,
-                OwnerUserId = access.OwnerUserId,
-                PrintStationId = access.PrintStationId,
-                PrinterDeviceId = access.PrinterDeviceId,
-                // The composition's first photograph, so the job still has the
-                // single FK the pipeline expects; all of them are in the child
-                // table below.
-                FileItemId = request.Slots[0].ItemId,
-                Kind = request.Product == PartyPrintProducts.Strip4
-                    ? PrintJobKinds.PartyStrip4
-                    : PrintJobKinds.PartyPhoto,
-                Format = PrintFormats.Photo10x15,
-                State = PrintJobStates.Ready,
-                PublicSequence = reservation.PublicSequence,
-                RenderSpecificationJson = JsonSerializer.Serialize(new
+            // Stage outside the lock; publish and claim in one protected step.
+            // A party print artifact is owned ONLY by PrintJob.ArtifactStorageKey,
+            // so the bytes and that column have to become durable together or a
+            // purge of identical content could unlink them in between.
+            var staged = await _artifacts.StageAsync(stream, cancellationToken);
+            await using var stagedScope = staged.ConfigureAwait(false);
+            await StoragePublish.PublishOwnedAsync(
+                _db, _artifacts, staged,
+                async (stored, ct) =>
                 {
-                    product = request.Product,
-                    theme = ParseTheme(request.Theme).ToString().ToLowerInvariant(),
-                }),
-                ArtifactStorageKey = stored.StorageKey,
-                ArtifactContentType = "image/jpeg",
-                ArtifactByteLength = stored.SizeBytes,
-                CreatedAt = now,
-                RenderedAt = now,
-            });
-            for (var i = 0; i < request.Slots.Count; i++)
-            {
-                var slot = request.Slots[i];
-                _db.PrintJobSources.Add(new PrintJobSource
+
+                // 6. Accept: the job, its sources and the idempotency record together.
+                // The unique index on (party, key) is what makes a racing duplicate
+                // fail here rather than reach the printer.
+                var now = DateTime.UtcNow;
+                _db.PrintJobs.Add(new PrintJob
+                {
+                    Id = jobId,
+                    OwnerUserId = access.OwnerUserId,
+                    PrintStationId = access.PrintStationId,
+                    PrinterDeviceId = access.PrinterDeviceId,
+                    // The composition's first photograph, so the job still has the
+                    // single FK the pipeline expects; all of them are in the child
+                    // table below.
+                    FileItemId = request.Slots[0].ItemId,
+                    Kind = request.Product == PartyPrintProducts.Strip4
+                        ? PrintJobKinds.PartyStrip4
+                        : PrintJobKinds.PartyPhoto,
+                    Format = PrintFormats.Photo10x15,
+                    State = PrintJobStates.Ready,
+                    PublicSequence = reservation.PublicSequence,
+                    RenderSpecificationJson = JsonSerializer.Serialize(new
+                    {
+                        product = request.Product,
+                        theme = ParseTheme(request.Theme).ToString().ToLowerInvariant(),
+                    }),
+                    ArtifactStorageKey = stored.StorageKey,
+                    ArtifactContentType = "image/jpeg",
+                    ArtifactByteLength = stored.SizeBytes,
+                    CreatedAt = now,
+                    RenderedAt = now,
+                });
+                for (var i = 0; i < request.Slots.Count; i++)
+                {
+                    var slot = request.Slots[i];
+                    _db.PrintJobSources.Add(new PrintJobSource
+                    {
+                        Id = Guid.NewGuid(),
+                        PrintJobId = jobId,
+                        SlotIndex = i,
+                        FileItemId = slot.ItemId,
+                        CropX = slot.CropX,
+                        CropY = slot.CropY,
+                        CropWidth = slot.CropWidth,
+                        CropHeight = slot.CropHeight,
+                    });
+                }
+                _db.PartyPrintRequests.Add(new PartyPrintRequest
                 {
                     Id = Guid.NewGuid(),
+                    PartyAlbumId = access.PartyAlbumId,
+                    IdempotencyKeyHash = keyHash,
+                    Product = request.Product,
                     PrintJobId = jobId,
-                    SlotIndex = i,
-                    FileItemId = slot.ItemId,
-                    CropX = slot.CropX,
-                    CropY = slot.CropY,
-                    CropWidth = slot.CropWidth,
-                    CropHeight = slot.CropHeight,
+                    CreatedAt = now,
                 });
-            }
-            _db.PartyPrintRequests.Add(new PartyPrintRequest
-            {
-                Id = Guid.NewGuid(),
-                PartyAlbumId = access.PartyAlbumId,
-                IdempotencyKeyHash = keyHash,
-                Product = request.Product,
-                PrintJobId = jobId,
-                CreatedAt = now,
-            });
-            await _db.SaveChangesAsync(cancellationToken);
+                await _db.SaveChangesAsync(ct);
+                },
+                cancellationToken);
 
             return PartyPrintSubmitResult.Accept(new PartyPrintAccepted(
                 jobId, reservation.PublicSequence, request.Product,

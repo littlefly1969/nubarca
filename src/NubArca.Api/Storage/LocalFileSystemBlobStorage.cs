@@ -43,7 +43,7 @@ public partial class LocalFileSystemBlobStorage : IBlobStorage
         Directory.CreateDirectory(_tempRoot);
     }
 
-    public async Task<BlobWriteResult> WriteAsync(Stream content, CancellationToken cancellationToken = default)
+    public async Task<StagedBlobWrite> StageAsync(Stream content, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(content);
 
@@ -116,36 +116,80 @@ public partial class LocalFileSystemBlobStorage : IBlobStorage
 
             var hash = Convert.ToHexStringLower(hasher.GetHashAndReset());
             var storageKey = $"objects/{hash[..2]}/{hash[2..4]}/{hash}";
-            var finalPath = Path.Combine(_objectsRoot, hash[..2], hash[2..4], hash);
 
-            Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
-
-            BlobWriteResult Result(bool existed) =>
-                new(hash, storageKey, size, existed, ToMs(readTicks), ToMs(hashTicks), ToMs(writeTicks));
-
-            if (File.Exists(finalPath))
-            {
-                TryDelete(tempPath);
-                return Result(existed: true);
-            }
-
-            try
-            {
-                var tMove = Stopwatch.GetTimestamp();
-                File.Move(tempPath, finalPath, overwrite: false);
-                writeTicks += Stopwatch.GetTimestamp() - tMove;
-                return Result(existed: false);
-            }
-            catch (IOException) when (File.Exists(finalPath))
-            {
-                TryDelete(tempPath);
-                return Result(existed: true);
-            }
+            // STOP HERE. The bytes are complete and their identity is known,
+            // but they are NOT yet under their content-addressed key. The
+            // publish/reuse decision belongs to PublishAsync, which the caller
+            // makes under a shared StorageMutationLock in the same transaction
+            // that commits ownership.
+            return new StagedBlobWrite(
+                hash,
+                storageKey,
+                size,
+                tempPath,
+                static staged =>
+                {
+                    TryDelete(staged.StagedPath);
+                    return ValueTask.CompletedTask;
+                },
+                ToMs(readTicks),
+                ToMs(hashTicks),
+                ToMs(writeTicks));
         }
         catch
         {
             TryDelete(tempPath);
             throw;
+        }
+    }
+
+    public Task<BlobWriteResult> PublishAsync(
+        StagedBlobWrite staged, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(staged);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var hash = staged.Sha256;
+        var finalPath = Path.Combine(_objectsRoot, hash[..2], hash[2..4], hash);
+        Directory.CreateDirectory(Path.GetDirectoryName(finalPath)!);
+
+        BlobWriteResult Result(bool existed)
+        {
+            staged.MarkConsumed();
+            return new BlobWriteResult(
+                hash, staged.StorageKey, staged.SizeBytes, existed,
+                staged.ReadMillis, staged.HashMillis, staged.WriteMillis);
+        }
+
+        // The reuse decision. Only sound because the caller holds a shared
+        // StorageMutationLock on this content: an exclusive purge cannot be
+        // between this check and the caller's ownership commit.
+        if (File.Exists(finalPath))
+        {
+            TryDelete(staged.StagedPath);
+            return Task.FromResult(Result(existed: true));
+        }
+
+        try
+        {
+            File.Move(staged.StagedPath, finalPath, overwrite: false);
+            return Task.FromResult(Result(existed: false));
+        }
+        catch (IOException) when (File.Exists(finalPath))
+        {
+            // Another writer published the same content first. Same outcome.
+            TryDelete(staged.StagedPath);
+            return Task.FromResult(Result(existed: true));
+        }
+    }
+
+    public async Task<BlobWriteResult> WriteAsync(
+        Stream content, CancellationToken cancellationToken = default)
+    {
+        var staged = await StageAsync(content, cancellationToken);
+        await using (staged.ConfigureAwait(false))
+        {
+            return await PublishAsync(staged, cancellationToken);
         }
     }
 

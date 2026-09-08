@@ -309,15 +309,44 @@ public sealed class BlobJanitor : BackgroundService
         }
     }
 
-    // Finishes ONE already-decided physical purge: unlink the bytes from every
-    // store that may hold them, then drop the PendingBlobPurge record.
+    // Is this physical identity owned RIGHT NOW, by anything the model
+    // recognises? Read fresh, under the exclusive lock, never from an earlier
+    // scan — a PendingBlobPurge is an intent from an OLD ownership epoch, not
+    // standing permission to delete that content forever.
     //
-    // Idempotent by construction. Every DeleteAsync treats a missing file as
-    // success, so a retry after a partial unlink — or after the bytes were
-    // removed out of band — converges on the same end state and clears the
-    // record. Returns true when the bytes are gone and the record is cleared;
-    // false when the unlink failed and the record was deliberately KEPT for a
-    // later retry.
+    // Checked by BOTH storage key and sha256: the key addresses the object and
+    // the sha addresses its HLS ladder, and a blob row can be re-created for
+    // the same content under a NEW id, so matching on the original BlobObjectId
+    // would miss it entirely.
+    private static async Task<bool> IsContentOwnedAsync(
+        AppDbContext db, string storageKey, string sha256, CancellationToken cancellationToken)
+    {
+        if (await db.BlobObjects.AsNoTracking()
+                .AnyAsync(b => b.StorageKey == storageKey || b.Sha256 == sha256, cancellationToken))
+        {
+            return true;
+        }
+
+        // Print artifacts share the content-addressed layout but are owned by a
+        // plain column, with no BlobObject row of their own.
+        return await db.PrintJobs.AsNoTracking()
+            .AnyAsync(j => j.ArtifactStorageKey == storageKey, cancellationToken);
+    }
+
+    // Finishes ONE already-decided physical purge, or abandons it because the
+    // content came back to life.
+    //
+    // The whole body runs inside a transaction holding the EXCLUSIVE
+    // StorageMutationLock for this content, so no writer can publish or reuse
+    // these bytes between the revalidation and the unlink. Writers hold the
+    // shared lock from before their publish/reuse decision until their
+    // ownership commit, so the two orderings are the only possibilities:
+    // either we see their owner and spare the bytes, or they wait and then
+    // publish the bytes themselves.
+    //
+    // Idempotent: a missing file is success, so a retry after a partial unlink
+    // converges. Returns true when the record was cleared (deleted or retired),
+    // false when the unlink failed and the record was KEPT for a later retry.
     private async Task<bool> TryCompletePendingPurgeAsync(
         AppDbContext db,
         IBlobStorage storage,
@@ -328,33 +357,52 @@ public sealed class BlobJanitor : BackgroundService
         string sha256,
         CancellationToken cancellationToken)
     {
-        try
+        var strategy = db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            // Slice 72: a reclaimed blob may be an original or a derived
-            // artifact and we don't track purpose on the row, so delete from
-            // BOTH stores. Both calls are no-ops for a missing file, and when
-            // the roots are the same the second is harmless.
-            await storage.DeleteAsync(storageKey, cancellationToken);
-            if (derivedStorage is not null)
+            await using var tx = await db.Database.BeginTransactionAsync(cancellationToken);
+            await StorageMutationLock.AcquireExclusiveAsync(db, sha256, cancellationToken);
+
+            if (await IsContentOwnedAsync(db, storageKey, sha256, cancellationToken))
             {
-                await derivedStorage.DeleteAsync(storageKey, cancellationToken);
+                // Live again. The old intent is obsolete: retire it, or it
+                // would attack the new owner on every future tick.
+                await db.PendingBlobPurges
+                    .Where(p => p.BlobObjectId == blobObjectId)
+                    .ExecuteDeleteAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+                _logger.LogInformation(
+                    "BlobJanitor retired an obsolete pending purge: the content is owned again.");
+                return true;
             }
-            // Video-hls: remove the (regenerable) HLS ladder for this content.
-            // Idempotent; the blob_hls_derivatives row is already gone via the
-            // FK cascade on the blob delete.
-            hlsStorage?.Delete(sha256);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Keep the record. This is the whole point: the storage key stays
-            // durable so the next tick can retry instead of leaking bytes with
-            // no record that they exist.
+
             try
             {
+                // Slice 72: a reclaimed blob may be an original or a derived
+                // artifact and we don't track purpose on the row, so delete from
+                // BOTH stores. Both calls are no-ops for a missing file, and when
+                // the roots are the same the second is harmless.
+                await storage.DeleteAsync(storageKey, cancellationToken);
+                if (derivedStorage is not null)
+                {
+                    await derivedStorage.DeleteAsync(storageKey, cancellationToken);
+                }
+                // Video-hls: remove the (regenerable) HLS ladder for this
+                // content. Idempotent; the blob_hls_derivatives row is already
+                // gone via the FK cascade on the blob delete.
+                hlsStorage?.Delete(sha256);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // Keep the record. This is the whole point: the storage key
+                // stays durable so the next tick can retry instead of leaking
+                // bytes with no record that they exist. Commit the attempt
+                // bookkeeping rather than rolling back, so a persistently
+                // failing key is visible.
                 await db.PendingBlobPurges
                     .Where(p => p.BlobObjectId == blobObjectId)
                     .ExecuteUpdateAsync(
@@ -364,27 +412,18 @@ public sealed class BlobJanitor : BackgroundService
                                 p => p.LastAttemptAt,
                                 _ => (DateTime?)_clock.GetUtcNow().UtcDateTime),
                         cancellationToken);
-            }
-            catch (Exception bookkeepingEx) when (bookkeepingEx is not OperationCanceledException)
-            {
-                // Attempt bookkeeping is diagnostics only; never let it mask
-                // the retry itself.
-                _logger.LogDebug(
-                    bookkeepingEx,
-                    "Could not record purge attempt for blob {BlobId}.",
-                    blobObjectId);
+                await tx.CommitAsync(cancellationToken);
+                _logger.LogWarning(ex, "Physical blob delete failed; kept for retry.");
+                return false;
             }
 
-            _logger.LogWarning(
-                ex,
-                "Physical blob delete failed for {BlobId}; kept for retry.",
-                blobObjectId);
-            return false;
-        }
-
-        await db.PendingBlobPurges
-            .Where(p => p.BlobObjectId == blobObjectId)
-            .ExecuteDeleteAsync(cancellationToken);
-        return true;
+            // Bytes are gone. Clear the record inside the SAME locked
+            // transaction so the intent never outlives the deletion.
+            await db.PendingBlobPurges
+                .Where(p => p.BlobObjectId == blobObjectId)
+                .ExecuteDeleteAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+            return true;
+        });
     }
 }

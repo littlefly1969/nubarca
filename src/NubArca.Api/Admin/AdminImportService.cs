@@ -1571,6 +1571,10 @@ public sealed class AdminImportService : IAdminImportService
         string MimeType,
         string Sha256,
         string StorageKey,
+        // Absolute source path, kept so the persist phase can re-stage the
+        // bytes under the storage lock if they vanished between staging and
+        // commit. Never logged or surfaced.
+        string SourcePath,
         long SizeBytes,
         int? Width,
         int? Height,
@@ -1634,7 +1638,7 @@ public sealed class AdminImportService : IAdminImportService
 
             return new StagedFile(
                 item, folderId, name, mime,
-                write.Sha256, write.StorageKey, write.SizeBytes,
+                write.Sha256, write.StorageKey, absolute, write.SizeBytes,
                 facts.Width, facts.Height, facts.Format, facts.ContentType,
                 facts.IsImage, facts.IsVideo);
         }
@@ -1891,6 +1895,46 @@ public sealed class AdminImportService : IAdminImportService
         {
             await using var tx = await _db.Database.BeginTransactionAsync(CancellationToken.None);
             await TreeMutationLock.AcquireAsync(_db, owner, CancellationToken.None);
+
+            // Staging published these bytes WITHOUT any owner, possibly long
+            // ago — a large import batch can span hours. Nothing protected them
+            // in the meantime, so before committing ownership take the shared
+            // storage lock for every content identity in the batch and prove
+            // the bytes are still there, re-staging from the source when they
+            // are not. Sorted so two concurrent batches always take overlapping
+            // locks in the same order.
+            //
+            // This is why import correctness does not depend on any grace
+            // period: a batch may take longer than one and still cannot commit
+            // a blob row onto bytes a purge removed.
+            foreach (var sha in shas.OrderBy(x => x, StringComparer.Ordinal))
+            {
+                await StorageMutationLock.AcquireSharedAsync(_db, sha, CancellationToken.None);
+            }
+
+            foreach (var group in batch.GroupBy(f => f.Sha256, StringComparer.Ordinal))
+            {
+                var representative = group.First();
+                if (await _blobStorage!.ExistsAsync(representative.StorageKey, CancellationToken.None))
+                {
+                    continue;
+                }
+
+                // Gone between staging and now. Put it back while protected;
+                // failing here drops the batch into the per-file fallback,
+                // which re-runs the fully protected CreateAsync path.
+                await using var source = new FileStream(
+                    representative.SourcePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                    bufferSize: 81920, options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+                var restaged = await _blobStorage.StageAsync(source, CancellationToken.None);
+                await using var restagedScope = restaged.ConfigureAwait(false);
+                if (!string.Equals(restaged.Sha256, representative.Sha256, StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "admin-import: staged content changed on disk before commit.");
+                }
+                await _blobStorage.PublishAsync(restaged, CancellationToken.None);
+            }
 
             // Quota cutoff in staged order — outcome identical to processing
             // the files one by one under the per-file quota check.

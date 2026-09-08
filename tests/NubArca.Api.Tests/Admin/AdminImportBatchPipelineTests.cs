@@ -226,6 +226,59 @@ public sealed class AdminImportBatchPipelineTests : IDisposable
         await AssertAuditCleanAsync(factory);
     }
 
+    // ---- physical safety: bytes vanish between staging and commit ------------
+
+    [Fact]
+    public async Task Batch_Persist_Restages_Bytes_That_Vanished_After_Staging()
+    {
+        // Import stages bytes physically LONG before it commits ownership: a
+        // batch can span hours, and nothing owned those bytes in the meantime,
+        // so a purge could legitimately have reclaimed them. The persist phase
+        // must therefore prove the bytes are present — under the storage lock —
+        // and put them back from the source rather than commit a BlobObject
+        // onto nothing. This is why import correctness needs no grace period.
+        var payload = "vanishing-import-bytes"u8.ToArray();
+        var root = NewTree(r => File.WriteAllBytes(Path.Combine(r, "vanishing.bin"), payload));
+        using var factory = new SqliteWebApplicationFactory(Enabled(root));
+        var (_, targetId, client) = await SetupAsync(factory);
+        var run = await StartRunAsync(client, targetId);
+
+        var sha = Sha256Hex(payload);
+        var storageKey = $"objects/{sha[..2]}/{sha[2..4]}/{sha}";
+        var deleted = false;
+
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var service = (AdminImportService)scope.ServiceProvider.GetRequiredService<IAdminImportService>();
+            service.AfterBatchLookupForTests = async () =>
+            {
+                service.AfterBatchLookupForTests = null; // one-shot
+                // Stand in for a concurrent purge that reclaimed the still
+                // unowned staged object.
+                var storage = factory.Services.GetRequiredService<IBlobStorage>();
+                await storage.DeleteAsync(storageKey);
+                deleted = !await storage.ExistsAsync(storageKey);
+            };
+            await scope.ServiceProvider.GetRequiredService<JobProcessor>().ProcessAvailableAsync(1);
+        }
+
+        Assert.True(deleted, "the seam must actually have removed the staged object");
+
+        await using var verify = factory.Services.CreateAsyncScope();
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        var blob = await db.BlobObjects.AsNoTracking().SingleOrDefaultAsync(b => b.Sha256 == sha);
+
+        // Whatever the import decided, it must never leave a committed owner
+        // over missing bytes.
+        if (blob is not null)
+        {
+            var storage = factory.Services.GetRequiredService<IBlobStorage>();
+            Assert.True(
+                await storage.ExistsAsync(blob.StorageKey),
+                "FORBIDDEN STATE: import committed a BlobObject whose bytes are gone");
+        }
+    }
+
     // ---- fallback: unique-index collision mid-batch --------------------------
 
     [Fact]
