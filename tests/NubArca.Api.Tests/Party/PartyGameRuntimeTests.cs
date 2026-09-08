@@ -97,9 +97,10 @@ public sealed class PartyGameRuntimeTests : IDisposable
         Assert.Equal(1, finished.GetProperty("playedRounds").GetInt32());
         Assert.Equal(JsonValueKind.Null, finished.GetProperty("currentChallenge").ValueKind);
         Assert.NotEqual(JsonValueKind.Null, finished.GetProperty("finishedAt").ValueKind);
-        Assert.Empty(Commands(finished));
+        // The only thing left to do with the evening is another one.
+        Assert.Equal(["restart_game"], Commands(finished));
 
-        // And a finished game accepts nothing, at any version.
+        // And a finished game accepts nothing else, at any version.
         var refused = await RawCommandAsync(owner, album, "start", finished.GetProperty("version").GetInt32());
         Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
         Assert.Equal("illegal_transition", await CodeAsync(refused));

@@ -140,6 +140,34 @@ public sealed class PartyGameService : IPartyGameService
             ? await _db.PartyGameRounds.FirstOrDefaultAsync(x => x.Id == roundId, cancellationToken)
             : null;
 
+        // Playing the same party again. The rows the finished match wrote go;
+        // the session, its link and its version stay, so a command written for
+        // the game that just ended is stale for ever rather than for a while.
+        if (transition.Effect.HasFlag(PartyGameRoundEffect.ResetGame))
+        {
+            var restarted = await RestartAsync(session, currentVersion, now, cancellationToken);
+            if (!restarted)
+            {
+                _db.ChangeTracker.Clear();
+                Refused(albumId, command, phase, PartyGameCommandError.VersionConflict);
+                var winner = await _db.PartyGameSessions.AsNoTracking()
+                    .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, cancellationToken);
+                return PartyGameCommandResult.Fail(PartyGameCommandError.VersionConflict,
+                    await BuildOwnerSnapshotAsync(albumId, winner, cancellationToken,
+                        await RoomAsync(link, cancellationToken)));
+            }
+
+            _logger.LogInformation(
+                "party.game.command AlbumId={AlbumId} Command={Command} Phase={Phase} Round={Round} Version={Version}",
+                albumId, command, session.Phase, session.CurrentRoundNumber, session.Version);
+
+            _db.ChangeTracker.Clear();
+            return PartyGameCommandResult.Ok((await BuildOwnerSnapshotAsync(albumId,
+                await _db.PartyGameSessions.AsNoTracking()
+                    .FirstAsync(x => x.Id == session.Id, cancellationToken), cancellationToken,
+                await RoomAsync(link, cancellationToken)))!);
+        }
+
         if (round is not null && transition.Effect.HasFlag(PartyGameRoundEffect.CompleteRound))
         {
             round.Status = PartyGameRoundStatuses.Completed;
@@ -467,6 +495,88 @@ public sealed class PartyGameService : IPartyGameService
             _db.ChangeTracker.Clear();
         }
         return true;
+    }
+
+    /// <summary>
+    /// Plays the same party again: discards what the finished match wrote and
+    /// leaves the session in its own lobby.
+    ///
+    /// <para>THE SESSION ROW SURVIVES, and that is the whole design. Deleting it
+    /// and letting the next <c>start</c> create another would reset the version
+    /// to 0, and a command the host's other tab wrote during the previous game
+    /// would become quotable again — the exact thing the concurrency token
+    /// exists to prevent. Keeping the row keeps <c>Version</c> monotonic across
+    /// the restart, so version 27 is spent for ever.</para>
+    ///
+    /// <para>THE BOUNDARY IS THE SESSION ROW, the same authority the vote path
+    /// uses. The transaction's first statement is a conditional update whose
+    /// WHERE clause is the whole check — "still finished, still at the version
+    /// this caller quoted" — and it takes the row's write lock before a single
+    /// round is deleted. Two restarts racing on one version therefore cannot
+    /// both delete: the loser blocks, re-evaluates against the row the winner
+    /// left behind, matches nothing, and returns false having written nothing.
+    /// Deleting first and checking afterwards would mean the loser had already
+    /// destroyed the winner's fresh lobby.</para>
+    ///
+    /// <para>Votes go before rounds because a vote names the round it answers.
+    /// Nothing outside the game is touched: the party link and its token, the
+    /// participants, their photographs, greetings and prints, the display
+    /// heartbeat and the deck of activities all belong to the party rather than
+    /// to the match, and a host restarting a game is not asking to lose any of
+    /// them.</para>
+    /// </summary>
+    private async Task<bool> RestartAsync(
+        PartyGameSession session, int expectedVersion, DateTime now, CancellationToken ct)
+    {
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(ct) : null;
+        try
+        {
+            var claimed = await _db.PartyGameSessions
+                .Where(x => x.Id == session.Id
+                    && x.Version == expectedVersion
+                    && x.Phase == PartyGamePhases.Finished)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.UpdatedAt, x => x.UpdatedAt), ct);
+            if (claimed == 0)
+            {
+                if (owned) await tx!.RollbackAsync(ct);
+                return false;
+            }
+
+            await _db.PartyGameVotes.Where(x => x.PartyGameSessionId == session.Id)
+                .ExecuteDeleteAsync(ct);
+            await _db.PartyGameRounds.Where(x => x.PartyGameSessionId == session.Id)
+                .ExecuteDeleteAsync(ct);
+
+            // The lobby this session started in, at the next version. The two
+            // match timestamps are cleared because they bounded a game that no
+            // longer exists; CreatedAt is not, because the session was created
+            // once and the party has not changed.
+            session.Phase = PartyGamePhases.Lobby;
+            session.Status = PartyGameStatuses.Lobby;
+            session.CurrentRoundId = null;
+            session.CurrentRoundNumber = 0;
+            session.StartedAt = null;
+            session.FinishedAt = null;
+            session.Version = expectedVersion + 1;
+            session.UpdatedAt = now;
+            await _db.SaveChangesAsync(ct);
+            if (owned) await tx!.CommitAsync(ct);
+            return true;
+        }
+        catch (Exception ex) when (owned && ex is DbUpdateConcurrencyException or DbUpdateException)
+        {
+            // The concurrency token disagreed after the predicate matched. Only
+            // recoverable on the path that owns the transaction; rolling back
+            // somebody else's unit of work would be a worse answer than the
+            // exception.
+            await tx!.RollbackAsync(ct);
+            return false;
+        }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
     }
 
     /// <summary>

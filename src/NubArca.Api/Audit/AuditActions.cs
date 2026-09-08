@@ -215,6 +215,12 @@ public static class AuditActions
     public const string PartyPrintConfigure = "party.print.configure";
     public const string PartyGameStart = "party.game.start";
     public const string PartyGameFinish = "party.game.finish";
+    // Playing the same party again. Recorded beside start and finish because it
+    // BOUNDS a game like they do — and because it is the one owner command that
+    // destroys rows: the finished match's rounds and its guests' votes. The line
+    // carries the album and how many rounds were discarded, never a participant
+    // or an answer.
+    public const string PartyGameRestart = "party.game.restart";
     public const string PartyMessageSubmit = "party.message.submit";
     public const string PartyMessageApprove = "party.message.approve";
     public const string PartyMessageReject = "party.message.reject";

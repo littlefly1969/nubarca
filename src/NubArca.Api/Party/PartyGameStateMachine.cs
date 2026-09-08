@@ -19,6 +19,19 @@ public enum PartyGameRoundEffect
 
     /// The next activity in the deck becomes the current round.
     StartRound = 4,
+
+    /// <summary>
+    /// Everything the finished game played is discarded and the session returns
+    /// to the lobby it started from: its rounds, the votes hanging off them, the
+    /// round counter and the two timestamps that bounded the match.
+    ///
+    /// It is the only effect that removes rows rather than resolving them, and
+    /// it deliberately does NOT touch the session's identity or its version —
+    /// the row, the party link it belongs to and the monotonic command token all
+    /// survive a restart, which is what keeps a command written for the previous
+    /// game stale forever.
+    /// </summary>
+    ResetGame = 8,
 }
 
 public sealed record PartyGameTransition(
@@ -35,13 +48,18 @@ public sealed record PartyGameTransition(
 /// LOBBY → CHALLENGE_REVEAL → CHALLENGE_ACTIVE → VOTING_OPEN → VOTING_CLOSED
 ///       → RESULT → CHALLENGE_REVEAL → … → FINISHED
 ///
+/// FINISHED → LOBBY is the one backwards edge, and it belongs to
+/// <c>restart_game</c>: the same party plays again on the same link, with the
+/// previous match's rounds and votes discarded. Every other edge moves forward.
+///
 /// One naming note against the programme brief. "Reveal challenge" is not a
 /// separate command: revealing IS the transition into CHALLENGE_REVEAL, and it
 /// is performed by <c>start</c> (from the lobby) and by <c>next_challenge</c>
 /// (from a result). Giving it a third name would have produced a command that
 /// is never legal anywhere, and an owner UI with a primary action that does
 /// nothing. The control room's six primary commands map one-to-one onto the six
-/// non-terminal phases.
+/// non-terminal phases — and FINISHED has one too, <c>restart_game</c>, so no
+/// phase leaves a host holding a screen with nothing on it to press.
 /// </summary>
 public static class PartyGameStateMachine
 {
@@ -122,12 +140,27 @@ public static class PartyGameStateMachine
                 PartyGameCommands.Finish) =>
                 new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.AbandonRound),
 
+            // The one edge that leads OUT of the terminal phase, and the only
+            // one that runs backwards: the evening ended, and the host wants to
+            // play the same party again.
+            //
+            // It ignores hasNextChallenge on purpose. At `finished` there is by
+            // definition no unplayed activity left in the ordinary case — that
+            // is usually WHY the game ended — and the whole point of the restart
+            // is that discarding the rounds makes the deck playable again. Only
+            // the `start` that follows needs an activity, and it is the command
+            // that checks for one.
+            (PartyGamePhases.Finished, PartyGameCommands.RestartGame) =>
+                new(PartyGamePhases.Lobby, PartyGameStatuses.Lobby, PartyGameRoundEffect.ResetGame),
+
             _ => null,
         };
 
     /// <summary>
     /// Every command that is legal right now, in the order a control room should
     /// offer them: the phase-advancing command first, then the secondary ones.
+    /// At <c>finished</c> the leading command is <c>restart_game</c>, which is
+    /// the only one there is.
     ///
     /// The server answering this is what lets the owner UI keep an illegal
     /// command ABSENT rather than disabled without re-implementing the matrix in
@@ -167,6 +200,10 @@ public static class PartyGameStateMachine
         PartyGamePhases.VotingOpen => PartyGameCommands.CloseVoting,
         PartyGamePhases.VotingClosed => PartyGameCommands.RevealResult,
         PartyGamePhases.Result => PartyGameCommands.NextChallenge,
+        // Finished is terminal for the MATCH, not for the party: its one action
+        // is to play again, so the control room still has a single primary
+        // button rather than a dead end.
+        PartyGamePhases.Finished => PartyGameCommands.RestartGame,
         _ => null,
     };
 }

@@ -50,6 +50,15 @@ public sealed class PartyGameStateMachineTests
             (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.CompleteRound),
         [(PartyGamePhases.Result, PartyGameCommands.Finish, false)] =
             (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.CompleteRound),
+
+        // The one backwards edge. Stated for BOTH answers to "is there another
+        // activity", because the ordinary way to reach `finished` is to run out
+        // of them — a restart that needed an unplayed activity would be illegal
+        // exactly when a host wants it.
+        [(PartyGamePhases.Finished, PartyGameCommands.RestartGame, true)] =
+            (PartyGamePhases.Lobby, PartyGameStatuses.Lobby, PartyGameRoundEffect.ResetGame),
+        [(PartyGamePhases.Finished, PartyGameCommands.RestartGame, false)] =
+            (PartyGamePhases.Lobby, PartyGameStatuses.Lobby, PartyGameRoundEffect.ResetGame),
     };
 
     static PartyGameStateMachineTests()
@@ -145,11 +154,32 @@ public sealed class PartyGameStateMachineTests
     }
 
     [Fact]
-    public void A_finished_game_accepts_nothing()
+    public void A_finished_game_accepts_nothing_but_playing_again()
     {
-        foreach (var command in PartyGameCommands.All)
+        foreach (var command in PartyGameCommands.All.Where(x => x != PartyGameCommands.RestartGame))
         foreach (var hasNext in new[] { true, false })
             Assert.Null(PartyGameStateMachine.Resolve(PartyGamePhases.Finished, command, hasNext));
+    }
+
+    [Fact]
+    public void Restarting_is_legal_only_from_finished_and_only_ever_lands_in_the_lobby()
+    {
+        foreach (var phase in PartyGamePhases.All.Where(x => x != PartyGamePhases.Finished))
+        foreach (var hasNext in new[] { true, false })
+            Assert.Null(PartyGameStateMachine.Resolve(phase, PartyGameCommands.RestartGame, hasNext));
+
+        foreach (var hasNext in new[] { true, false })
+        foreach (var votes in new[] { true, false })
+        {
+            var restart = PartyGameStateMachine.Resolve(
+                PartyGamePhases.Finished, PartyGameCommands.RestartGame, hasNext, votes);
+            Assert.NotNull(restart);
+            Assert.Equal(PartyGamePhases.Lobby, restart!.Phase);
+            Assert.Equal(PartyGameStatuses.Lobby, restart.Status);
+            // Nothing is completed or abandoned on the way out: the rounds are
+            // discarded, not resolved.
+            Assert.Equal(PartyGameRoundEffect.ResetGame, restart.Effect);
+        }
     }
 
     [Fact]
@@ -167,15 +197,18 @@ public sealed class PartyGameStateMachineTests
     }
 
     [Fact]
-    public void Each_non_terminal_phase_has_exactly_one_primary_command()
+    public void Every_phase_has_exactly_one_primary_command()
     {
-        foreach (var phase in PartyGamePhases.All.Where(x => x != PartyGamePhases.Finished))
+        foreach (var phase in PartyGamePhases.All)
         {
             var primary = PartyGameStateMachine.PrimaryCommand(phase);
             Assert.NotNull(primary);
             Assert.NotNull(PartyGameStateMachine.Resolve(phase, primary!, hasNextChallenge: true));
         }
-        Assert.Null(PartyGameStateMachine.PrimaryCommand(PartyGamePhases.Finished));
+        // Including the terminal one: a host looking at a finished game is not
+        // looking at a screen with nothing on it to press.
+        Assert.Equal(PartyGameCommands.RestartGame,
+            PartyGameStateMachine.PrimaryCommand(PartyGamePhases.Finished));
     }
 
     [Fact]
@@ -203,10 +236,14 @@ public sealed class PartyGameStateMachineTests
     }
 
     [Fact]
-    public void A_finished_game_offers_no_command_at_all()
+    public void A_finished_game_offers_exactly_one_command_playing_it_again()
     {
-        Assert.Empty(PartyGameStateMachine.LegalCommands(PartyGamePhases.Finished, true));
-        Assert.Empty(PartyGameStateMachine.LegalCommands(PartyGamePhases.Finished, false));
+        // Not skip, not finish: the evening is over, and the only thing left to
+        // do with it is another one.
+        Assert.Equal([PartyGameCommands.RestartGame],
+            PartyGameStateMachine.LegalCommands(PartyGamePhases.Finished, true));
+        Assert.Equal([PartyGameCommands.RestartGame],
+            PartyGameStateMachine.LegalCommands(PartyGamePhases.Finished, false));
     }
 
     [Fact]

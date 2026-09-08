@@ -65,6 +65,11 @@ public static class PartyGameEndpoints
             SetNoStore(httpContext);
             if (body?.Command is null || body.ExpectedVersion is null) return Results.BadRequest();
             var ownerId = httpContext.GetCurrentUserId()!.Value;
+            // Read before the command only for the one command that erases what
+            // would have been read after it.
+            var discarded = body.Command == PartyGameCommands.RestartGame
+                ? (await game.GetOwnerSnapshotAsync(ownerId, albumId, cancellationToken))?.PlayedRounds ?? 0
+                : 0;
             var result = await game.ExecuteAsync(
                 ownerId, albumId, body.Command, body.ExpectedVersion.Value, cancellationToken);
 
@@ -79,18 +84,27 @@ public static class PartyGameEndpoints
                 };
             }
 
-            // Only the two commands that BOUND a party are audited. A round-by
-            // round trail would be a log of an evening, not a security record.
-            if (body.Command is PartyGameCommands.Start or PartyGameCommands.Finish)
+            // Only the commands that BOUND a game are audited. A round-by-round
+            // trail would be a log of an evening, not a security record.
+            // `restart_game` is here because it bounds one from the other side
+            // and is the only owner command that DELETES: the finished match's
+            // rounds, and with them the room's votes.
+            if (AuditedCommand(body.Command) is string auditedAction)
             {
                 await audit.LogAsync(
                     userId: ownerId,
-                    action: body.Command == PartyGameCommands.Start
-                        ? AuditActions.PartyGameStart : AuditActions.PartyGameFinish,
+                    action: auditedAction,
                     entityType: AuditEntityTypes.PartyAlbum,
                     entityId: albumId,
                     ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                    metadata: new { rounds = result.Snapshot!.PlayedRounds },
+                    // A restart's own snapshot is an empty lobby, so the count it
+                    // carries is the one taken BEFORE the command: how many rounds
+                    // the restart discarded, which is the fact worth recording.
+                    metadata: new
+                    {
+                        rounds = body.Command == PartyGameCommands.RestartGame
+                            ? discarded : result.Snapshot!.PlayedRounds,
+                    },
                     cancellationToken: cancellationToken);
             }
 
@@ -221,6 +235,16 @@ public static class PartyGameEndpoints
             },
         };
     }
+
+    /// The audit action for a command that bounds a game, or null for the ones
+    /// that merely move it along inside one.
+    private static string? AuditedCommand(string command) => command switch
+    {
+        PartyGameCommands.Start => AuditActions.PartyGameStart,
+        PartyGameCommands.Finish => AuditActions.PartyGameFinish,
+        PartyGameCommands.RestartGame => AuditActions.PartyGameRestart,
+        _ => null,
+    };
 
     private static string VoteCode(PartyGameVoteError error) => error switch
     {
