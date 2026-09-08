@@ -4944,11 +4944,12 @@ public static class CliEntryPoint
         stdout.WriteLine("  missing. Dry-run by default. --delete-orphans physically removes");
         stdout.WriteLine("  orphan objects (filesystem only; never touches the database).");
         stdout.WriteLine();
-        stdout.WriteLine("  Deletion is a conservative mark-and-sweep: an object is removed only");
-        stdout.WriteLine("  if it has been unowned for at least 24h AND is still unowned when");
-        stdout.WriteLine("  re-checked immediately before deletion. That protects bytes whose");
-        stdout.WriteLine("  owning row has not committed yet. Objects owned without a blob row");
-        stdout.WriteLine("  (a print job's rendered artifact) are never deleted.");
+        stdout.WriteLine("  Deletion is a mark-and-sweep. Each unlink revalidates ownership and");
+        stdout.WriteLine("  removes the bytes inside one transaction holding the exclusive");
+        stdout.WriteLine("  storage lock for that content, so a writer publishing the same bytes");
+        stdout.WriteLine("  cannot interleave with it. A 24h minimum age is applied on top as");
+        stdout.WriteLine("  conservative policy, not as the safety mechanism. Objects owned");
+        stdout.WriteLine("  without a blob row (a print job's artifact) are never deleted.");
         stdout.WriteLine();
         stdout.WriteLine("  --dry-run          report only, change nothing (default)");
         stdout.WriteLine("  --delete-orphans   delete on-disk objects with no BlobObject row");

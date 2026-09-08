@@ -86,6 +86,9 @@ public sealed class TrashPurgeLifecycleTests : IDisposable
             inner.WriteAsync(c, ct);
         public Task<StagedBlobWrite> StageAsync(Stream c, CancellationToken ct = default) =>
             inner.StageAsync(c, ct);
+        public Task<DateTimeOffset?> GetLastWriteTimeUtcAsync(
+            string k, CancellationToken ct = default) =>
+            inner.GetLastWriteTimeUtcAsync(k, ct);
         public Task<BlobWriteResult> PublishAsync(
             StagedBlobWrite staged, CancellationToken ct = default) =>
             inner.PublishAsync(staged, ct);
