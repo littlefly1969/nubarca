@@ -19,6 +19,7 @@ import {
   getTvSession,
   type TvAlbum,
   type TvAlbumItem,
+  type TvDisplayAssignment,
   type TvPartySlideshow,
   type TvSessionStatus,
 } from './src/api/tv';
@@ -99,6 +100,10 @@ function AppInner(): React.JSX.Element {
   // teardown effects (flowEffects) for the state they fire from.
   const flowRef = React.useRef<TvFlowState>(flow);
   flowRef.current = flow;
+  // What the owner has this television set to — general, or one specific party.
+  // Server-owned and re-read rather than remembered, so changing it on the web
+  // reaches this device without re-pairing it.
+  const [assignment, setAssignment] = useState<TvDisplayAssignment | null>(null);
 
   useEffect(() => {
     // Fire-and-forget: startup never waits for the OTA server. A downloaded
@@ -117,6 +122,7 @@ function AppInner(): React.JSX.Element {
         if (cancelled) return;
         const lang = toLanguage(session.language);
         if (lang) setLanguage(lang);
+        setAssignment(session.assignment ?? null);
         rawDispatch({ type: 'SESSION_READY' });
       })
       .catch(() => {
@@ -133,6 +139,7 @@ function AppInner(): React.JSX.Element {
   const onPaired = useCallback((session: TvSessionStatus) => {
     const lang = toLanguage(session.language);
     if (lang) setLanguage(lang);
+    setAssignment(session.assignment ?? null);
     rawDispatch({ type: 'SESSION_READY' });
   }, [setLanguage]);
 
@@ -186,6 +193,13 @@ function AppInner(): React.JSX.Element {
             onSessionInvalid();
           }
         });
+      // The assignment is the owner's to change from the web at any time, so it
+      // is re-read on the same beat rather than trusted from startup. A failure
+      // keeps the value already on screen: the assignment did not change because
+      // one request did.
+      getTvSession()
+        .then((session) => { if (!cancelled) setAssignment(session.assignment ?? null); })
+        .catch(() => { /* the personal-status call above owns the 401 verdict */ });
     };
     check();
     const timer = setInterval(check, 60_000);
@@ -300,6 +314,7 @@ function AppInner(): React.JSX.Element {
           onChooseBeautyLab={() => rawDispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
           onChooseUpdates={() => rawDispatch({ type: 'CHOOSE_UPDATES' })}
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
+          assignment={assignment}
         />
       )}
       {flow.name === 'updates' && (

@@ -405,6 +405,12 @@ a {
   outline: none; border-color: #0a84ff; box-shadow: 0 0 0 3px rgb(10 132 255 / 45%);
 }
 
+/* "How do you want to use this TV?" — the choice offered once a pairing has
+   been approved and the television has claimed it. */
+.tv-pair-use { margin-top: 1.25rem; text-align: left; }
+.tv-pair-use h3 { margin: 0 0 0.25rem; }
+.tv-pair-use-options { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
+
 /* Owner-side TV devices management page. */
 .tv-devices-header { display: flex; align-items: center; gap: 1rem; }
 .tv-devices-header h2 { margin: 0; }
@@ -419,6 +425,14 @@ a {
 .tv-device-agent { font-size: 0.85rem; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tv-device-meta { font-size: 0.85rem; }
 .tv-device-side { display: flex; align-items: center; gap: 0.75rem; flex-shrink: 0; }
+/* What this TV is FOR — a separate column from what it IS, because pairing and
+   assignment are separate questions and the row reads better when they look it. */
+.tv-device-assignment {
+  display: flex; flex-direction: column; gap: 0.25rem; flex-shrink: 0; min-width: 0;
+}
+.tv-device-assignment label { font-size: 0.8rem; }
+.tv-device-assignment select { max-width: 22ch; }
+.tv-device-assignment span { font-size: 0.8rem; max-width: 26ch; }
 .tv-device-badge { font-size: 0.8rem; padding: 0.15rem 0.5rem; border-radius: 0.4rem; background: rgb(0 0 0 / 8%); }
 .tv-device-badge-active { background: rgb(16 185 129 / 18%); color: #047857; }
 .tv-device-badge-revoked { background: rgb(239 68 68 / 18%); color: #b91c1c; }

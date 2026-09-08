@@ -20,6 +20,29 @@ originating repository and is deliberately not reproduced here.
   party has run out — which it can see through the moment somebody else collects
   a print.
 
+### NubArca TV — one pairing, two uses
+
+- **A television is paired once and can be pointed anywhere.** Alongside the
+  ordinary NubArca TV experience, a paired TV can be assigned to one specific
+  party. Moving it between the two — or between two parties, or back — costs no
+  new PIN, no new QR code and no trip to the television: pairing answers who the
+  device is and never changes, while what it shows is ordinary state the owner
+  edits from the web.
+- **The choice is offered where it is wanted, twice.** Right after a pairing is
+  approved ("Come vuoi usare questa TV?"), and afterwards from TV management,
+  which now shows and changes each television's use beside its status.
+- **Every television paired before this keeps working exactly as it did.** The
+  default is the general experience, so the upgrade changes nothing until an
+  owner chooses otherwise.
+- **A party a television was pointed at can end, and the television says so.**
+  Revoking a party leaves the TV reporting "that party is no longer available"
+  rather than quietly becoming a general television — and re-enabling party mode
+  mints a new party rather than adopting the screen back into it.
+- **A party is named by its ALBUM across the whole API.** The internal party link
+  id is never accepted from a client and never leaves the server, and both the
+  television and the album are re-matched against the calling owner, so a device
+  from one account and a party from another can never meet.
+
 ### Party Game
 
 - **A party now has a hosted game.** The owner conducts it from a control room,

@@ -164,6 +164,11 @@ public static class AuditActions
     // Owner-side TV device/session management. Revoke terminates a paired TV
     // session immediately (no token/hash recorded).
     public const string TvSessionRevoke = "tv_session.revoke";
+    // What a paired television is FOR — general, or one specific party. Recorded
+    // because it changes which of an owner's content a screen in a room shows,
+    // and it can be changed without any of the proofs pairing required. The line
+    // carries the device and the album, never a token or a party link id.
+    public const string TvAssignmentSet = "tv.assignment.set";
 
     // Owner approved a TV pairing (atomic with first PIN creation when the
     // owner had none — metadata carries only the pinCreated flag).

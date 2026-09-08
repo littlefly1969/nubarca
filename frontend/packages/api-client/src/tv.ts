@@ -12,6 +12,28 @@ export interface TvPairingStatus {
   expiresAt: string;
 }
 
+// What a paired television is FOR. Pairing answers who a device is and never
+// changes; this is ordinary mutable state beside it, which is what lets an owner
+// move a television between the general experience and a party without a second
+// PIN. `albumId`/`albumName` are present only for a party assignment;
+// `partyAvailable` is false when the assignment names a party that has since
+// been revoked or switched off — "that party is over", not "this is a general
+// television". No party link id and no token ever cross.
+export interface TvDisplayAssignment {
+  kind: 'general' | 'party';
+  albumId: string | null;
+  albumName: string | null;
+  partyAvailable: boolean;
+}
+
+// One party an owner may point a television at: their own albums with an active
+// party link, named the way the owner names them.
+export interface TvAssignableParty {
+  albumId: string;
+  albumName: string;
+  gameEnabled: boolean;
+}
+
 export interface TvSessionStatus {
   status: 'active';
   expiresAt: string;
@@ -19,6 +41,7 @@ export interface TvSessionStatus {
   // The paired owner's UI language ("it" | "en") so the TV surface can localize
   // in the owner's language. A bare code — never owner identity.
   language: string;
+  assignment: TvDisplayAssignment;
 }
 
 export function startTvPairing(signal?: AbortSignal): Promise<TvPairingStarted> {
@@ -72,6 +95,23 @@ export function approveTvPairing(
   return api<TvPairingStatus>(`/api/tv/pairing/${encodeURIComponent(publicCode)}/approve`, {
     method: 'POST',
     json: { pairingSecret, personalCode, personalCodeConfirmation },
+  });
+}
+
+// The session THIS pairing produced, for the owner who approved it. `sessionId`
+// is null until the television has actually polled and claimed the pairing — a
+// wait, not an error. Requires the pairing secret as well as the owner cookie,
+// so neither alone names a device.
+export interface TvPairedDevice {
+  sessionId: string | null;
+}
+
+export function getTvPairedDevice(
+  publicCode: string, pairingSecret: string, signal?: AbortSignal,
+): Promise<TvPairedDevice> {
+  return api<TvPairedDevice>(`/api/tv/pairing/${encodeURIComponent(publicCode)}/device`, {
+    headers: { 'X-Tv-Pairing-Secret': pairingSecret },
+    signal,
   });
 }
 
@@ -842,10 +882,37 @@ export interface TvDevice {
   lastSeenAt: string;
   expiresAt: string;
   revokedAt: string | null;
+  // Optional on the wire: a server that predates assignments omits it, and a
+  // device with no assignment IS a general one. Callers must treat a missing
+  // value as `general` rather than assuming the field is there.
+  assignment?: TvDisplayAssignment | null;
 }
 
 export function listTvDevices(signal?: AbortSignal): Promise<TvDevice[]> {
   return api<TvDevice[]>('/api/tv-devices', { signal });
+}
+
+export function listTvAssignableParties(signal?: AbortSignal): Promise<TvAssignableParty[]> {
+  return api<TvAssignableParty[]>('/api/tv-devices/parties', { signal });
+}
+
+/**
+ * Points one paired television at the general experience or at one party.
+ *
+ * The party is named by ALBUM. A party link id is an internal identifier and the
+ * server never accepts one from a client — which is also why there is nothing
+ * here to leak.
+ */
+export function setTvDeviceAssignment(
+  sessionId: string, albumId: string | null, signal?: AbortSignal,
+): Promise<TvDisplayAssignment> {
+  return api<TvDisplayAssignment>(
+    `/api/tv-devices/${encodeURIComponent(sessionId)}/assignment`,
+    {
+      method: 'PATCH',
+      json: albumId === null ? { kind: 'general' } : { kind: 'party', albumId },
+      signal,
+    });
 }
 
 export function revokeTvDevice(sessionId: string, signal?: AbortSignal): Promise<void> {

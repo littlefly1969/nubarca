@@ -16,6 +16,22 @@ export interface TvPairingStatus {
   expiresAt: string;
 }
 
+// What this television is FOR. Pairing answered who it is and never changes;
+// this is ordinary server-side state beside it, so the owner can move this TV
+// between the general NubArca experience and one specific party without another
+// PIN and without walking back to the television.
+//
+// `albumId`/`albumName` are present only for a party assignment.
+// `partyAvailable` is false when the party named here has since been revoked or
+// switched off — an honest "that party is over" rather than a silent fall back
+// to the general experience. No party link id and no token ever cross.
+export interface TvDisplayAssignment {
+  kind: 'general' | 'party';
+  albumId: string | null;
+  albumName: string | null;
+  partyAvailable: boolean;
+}
+
 export interface TvSessionStatus {
   status: 'active';
   expiresAt: string;
@@ -23,6 +39,7 @@ export interface TvSessionStatus {
   // The paired owner's UI language ("it" | "en") so the TV app localizes in the
   // owner's language. A bare code — never owner identity.
   language: string;
+  assignment: TvDisplayAssignment;
 }
 
 export interface TvAlbum {

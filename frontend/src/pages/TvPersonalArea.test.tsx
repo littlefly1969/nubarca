@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { TvPage } from './TvPage';
@@ -29,6 +29,7 @@ const activeSession = () => jsonResponse({
   expiresAt: '2026-08-05T12:00:00Z',
   lastSeenAt: '2026-07-05T12:00:00Z',
   language: 'it',
+  assignment: { kind: 'general', albumId: null, albumName: null, partyAvailable: false },
 });
 
 function renderTv() {
@@ -488,6 +489,81 @@ describe('atomic pairing approval', () => {
     // The existing PIN is never replaced from the pairing flow.
     expect(approveBody!).not.toContain('"personalPin":"');
   });
+
+  // "How do you want to use this TV?" is asked AFTER the approval, on the
+  // device the pairing produced. It is deliberately not part of the approval:
+  // the approval commits a credential, this is ordinary state on the paired
+  // device — which is why skipping it is safe and changing it later needs no PIN.
+  it('asks how the TV will be used once the television has claimed the pairing', async () => {
+    let claimed = false;
+    let assignBody: string | null = null;
+    installFetchMock({
+      'GET /api/tv-personal/pin': () => jsonResponse({
+        configured: true, updatedAt: '2026-07-01T10:00:00Z',
+      }),
+      'POST /api/tv/pairing/ABCD2345/approve': () =>
+        jsonResponse({ status: 'approved', expiresAt: '2026-07-05T12:10:00Z' }),
+      // The SESSION does not exist until the television polls, so the page has
+      // to wait for it rather than assume it.
+      'GET /api/tv/pairing/ABCD2345/device': () =>
+        jsonResponse({ sessionId: claimed ? 's1' : null }),
+      'GET /api/tv-devices/parties': () => jsonResponse([
+        { albumId: 'a1', albumName: 'Festa di Anna', gameEnabled: true },
+      ]),
+      'PATCH /api/tv-devices/s1/assignment': ({ body }) => {
+        assignBody = body;
+        return jsonResponse({
+          kind: 'party', albumId: 'a1', albumName: 'Festa di Anna', partyAvailable: true,
+        });
+      },
+    });
+    renderApproval();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Approva la TV' }));
+
+    // Approved, but nothing to assign yet — and it says so instead of offering
+    // a choice that would land nowhere.
+    expect(await screen.findByTestId('tv-pair-waiting')).toBeInTheDocument();
+    expect(screen.queryByTestId('tv-pair-use')).not.toBeInTheDocument();
+
+    claimed = true;
+    const choice = await screen.findByTestId('tv-pair-use', {}, { timeout: 4_000 });
+    expect(within(choice).getByText('Come vuoi usare questa TV?')).toBeInTheDocument();
+    expect(within(choice).getByRole('button', { name: 'NubArca TV' })).toBeInTheDocument();
+
+    await user.click(within(choice).getByRole('button', { name: 'Party · Festa di Anna' }));
+    // The party is named by ALBUM: no link id, no token.
+    await waitFor(() => expect(assignBody).toBe('{"kind":"party","albumId":"a1"}'));
+    expect(await screen.findByTestId('tv-pair-assigned'))
+      .toHaveTextContent('Questa TV è impostata su: Festa di Anna.');
+  });
+
+  it('leaves the TV general when the use question is never answered', async () => {
+    let assigned = false;
+    installFetchMock({
+      'GET /api/tv-personal/pin': () => jsonResponse({
+        configured: true, updatedAt: '2026-07-01T10:00:00Z',
+      }),
+      'POST /api/tv/pairing/ABCD2345/approve': () =>
+        jsonResponse({ status: 'approved', expiresAt: '2026-07-05T12:10:00Z' }),
+      'GET /api/tv/pairing/ABCD2345/device': () => jsonResponse({ sessionId: 's1' }),
+      // No live party: the general choice is the only one, and taking none is a
+      // complete outcome — the TV is already general.
+      'GET /api/tv-devices/parties': () => jsonResponse([]),
+      'PATCH /api/tv-devices/s1/assignment': () => {
+        assigned = true;
+        return jsonResponse({
+          kind: 'general', albumId: null, albumName: null, partyAvailable: false,
+        });
+      },
+    });
+    renderApproval();
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Approva la TV' }));
+
+    const choice = await screen.findByTestId('tv-pair-use', {}, { timeout: 4_000 });
+    expect(within(choice).getByText(/non hai feste attive/i)).toBeInTheDocument();
+    expect(assigned).toBe(false);
+  });
 });
 
 describe('owner Personal Area TV code panel', () => {
@@ -495,6 +571,7 @@ describe('owner Personal Area TV code panel', () => {
     id: 's1', deviceLabel: null, userAgent: null, status: 'active',
     createdAt: '2026-07-01T10:00:00Z', lastSeenAt: '2026-07-10T10:00:00Z',
     expiresAt: '2026-08-01T10:00:00Z', revokedAt: null,
+    assignment: { kind: 'general', albumId: null, albumName: null, partyAvailable: false },
   };
 
   function renderDevices() {

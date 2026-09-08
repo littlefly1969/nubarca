@@ -229,6 +229,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<IAuthService, AuthService>();
             services.AddScoped<IAdminUserService, AdminUserService>();
             services.AddScoped<ITvPairingService, TvPairingService>();
+            services.AddScoped<ITvDisplayAssignmentService, TvDisplayAssignmentService>();
             services.AddScoped<ITvMediaService, TvMediaService>();
             services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
             services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();

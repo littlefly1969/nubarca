@@ -237,7 +237,7 @@ public sealed class TvPairingService : ITvPairingService
             pinCreated);
     }
 
-    public async Task<TvSessionDto?> GetSessionAsync(
+    public async Task<TvSessionStateDto?> GetSessionAsync(
         string? sessionToken, bool heartbeat, CancellationToken cancellationToken = default)
     {
         var hash = HashTokenOrNull(sessionToken);
@@ -269,7 +269,30 @@ public sealed class TvPairingService : ITvPairingService
             .Select(u => u.UiLanguage)
             .FirstOrDefaultAsync(cancellationToken) ?? UiLanguages.Default;
 
-        return new TvSessionDto("active", session.ExpiresAt, session.LastSeenAt, ownerLanguage);
+        return new TvSessionStateDto(
+            session.Id, "active", session.ExpiresAt, session.LastSeenAt, ownerLanguage);
+    }
+
+    /// <summary>
+    /// The session a pairing minted, for the owner who approved that pairing.
+    ///
+    /// <para>Two things must hold at once: the caller holds the pairing secret
+    /// (the same proof the television's own poll presents) AND the caller is the
+    /// owner who approved it. Either alone names nothing, so an owner cannot use
+    /// a code they saw to reach a television somebody else paired, and a
+    /// television's secret cannot be used to reach an owner API.</para>
+    ///
+    /// <para>Null until the television has actually claimed the pairing, because
+    /// the session does not exist until it polls. That is a wait, not an error:
+    /// the caller polls this the way the television polls the status.</para>
+    /// </summary>
+    public async Task<Guid?> FindPairedSessionIdAsync(
+        string publicCode, string? pairingSecret, Guid ownerUserId,
+        CancellationToken cancellationToken = default)
+    {
+        var pairing = await FindPairingAsync(publicCode, pairingSecret, cancellationToken);
+        if (pairing is null || pairing.ApprovedByUserId != ownerUserId) return null;
+        return pairing.TvSessionId;
     }
 
     public async Task<bool> RevokeSessionAsync(

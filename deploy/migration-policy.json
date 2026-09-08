@@ -71,6 +71,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Creates only the new pending_blob_purges table with its primary key and one lookup index; no existing table, column, constraint or index changes. The previous application neither reads nor writes it, and it is written only by BlobJanitor, which is disabled by default. Rolling back leaves at most a few rows the old application ignores and the new one drains on its next tick."
+    },
+    "20260909090022_AddTvDisplayAssignment": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds two columns to tv_sessions: a NOT NULL string with defaultValue 'general' and a nullable uuid, plus an index, a restricting foreign key to party_album_links and a check constraint tying the two columns together. Every existing paired television takes 'general' with no link, which is exactly the behaviour it had before the columns existed; the previous application neither reads nor writes either column, so rolling back to it leaves values the new schema also accepts, and the check constraint holds for every row the old application could write."
     }
   }
 }
