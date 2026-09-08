@@ -116,7 +116,18 @@ permissions) — the bytes are tracked, not lost.
 rendered print artifact is owned by `PrintJob.ArtifactStorageKey` alone and has
 no blob row by design, so reconcile counts those separately as
 `protected-non-blob` and never deletes them. Any future owner of that shape must
-be added to the same set, or `--delete-orphans` would remove live data.
+be added to the same set — and to the pre-delete revalidation — or
+`--delete-orphans` would remove live data.
+
+`--delete-orphans` is a conservative mark-and-sweep. An object is removed only
+when it has been unowned for at least 24h **and** is still unowned when
+re-checked immediately before deletion. Both conditions are load-bearing: bytes
+reach the store before the row that owns them commits, so a just-written object
+is indistinguishable from a leftover except by age; and an old unowned object can
+gain an owner at any moment, because re-uploading identical bytes finds the file
+already present, skips the write, and then inserts the row. The report breaks
+this out as `too-recent` and `owned-at-recheck`; both are normal on a busy
+system, and a persistently high `too-recent` simply means the store is active.
 
 ## Background jobs (opt-in)
 

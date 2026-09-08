@@ -235,6 +235,22 @@ public partial class LocalFileSystemBlobStorage : IBlobStorage
         return Task.CompletedTask;
     }
 
+    public Task<DateTimeOffset?> GetLastWriteTimeUtcAsync(
+        string storageKey, CancellationToken cancellationToken = default)
+    {
+        // Same validation/traversal defence as every other key-taking method:
+        // a malformed key throws before any filesystem call.
+        var path = ResolveAndValidate(storageKey);
+        var info = new FileInfo(path);
+        // WriteAsync stages into a temp file and renames it into place, and a
+        // rename carries the temp file's write time across, so this is the
+        // moment the bytes actually materialised under this key. A dedup hit
+        // leaves the existing file untouched — correct, since that object
+        // already has its owning row.
+        return Task.FromResult<DateTimeOffset?>(
+            info.Exists ? new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero) : null);
+    }
+
     public async IAsyncEnumerable<string> EnumerateStorageKeysAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

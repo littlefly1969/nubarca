@@ -510,6 +510,11 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         public Task<bool> ExistsAsync(string key, CancellationToken c = default) =>
             Task.FromResult(true);
         public Task DeleteAsync(string key, CancellationToken c = default) => Task.CompletedTask;
+        // Null = "age unknown" → callers must treat it as brand new and refuse
+        // to delete. Safe default for a fake that keeps no bytes.
+        public Task<DateTimeOffset?> GetLastWriteTimeUtcAsync(
+            string key, CancellationToken c = default)
+            => Task.FromResult<DateTimeOffset?>(null);
         public async IAsyncEnumerable<string> EnumerateStorageKeysAsync(
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken c = default)
         {

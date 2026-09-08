@@ -46,4 +46,18 @@ public interface IBlobStorage
     // with no BlobObject row. Files that do not match the sharded storage-key
     // shape are skipped (they are not blobs this layer wrote).
     IAsyncEnumerable<string> EnumerateStorageKeysAsync(CancellationToken cancellationToken = default);
+
+    // When the physical object at `storageKey` was last written, UTC.
+    //
+    // Exists so reconciliation can tell a genuinely stale unowned object from
+    // one whose bytes were written moments ago by a writer that has not yet
+    // committed its owning row — deleting the latter destroys live data. It is
+    // the storage layer's answer because only it knows where the object lives;
+    // the reconciler must never reach for a filesystem path of its own.
+    //
+    // Returns null when the object is absent OR when the implementation cannot
+    // determine an age. Callers MUST treat null as "assume brand new" and
+    // refuse to delete: an unknown age is never a licence to destroy bytes.
+    Task<DateTimeOffset?> GetLastWriteTimeUtcAsync(
+        string storageKey, CancellationToken cancellationToken = default);
 }

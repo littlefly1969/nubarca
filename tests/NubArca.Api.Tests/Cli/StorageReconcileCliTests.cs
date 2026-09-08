@@ -28,13 +28,18 @@ public sealed class StorageReconcileCliTests : IDisposable
             new MemoryStream(new byte[64]));
     }
 
-    private string WriteOrphanObject()
+    // `ageHours` backdates the object. The destructive sweep refuses to touch
+    // anything younger than the conservative minimum orphan age, because a
+    // just-written object may belong to a writer that has not committed its
+    // owning row yet — so a test wanting a genuinely stale orphan must age it.
+    private string WriteOrphanObject(double ageHours = 48)
     {
         var sha = new string('b', 64);
         var dir = Path.Combine(_factory.StorageRoot, "objects", sha[..2], sha[2..4]);
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, sha);
         File.WriteAllBytes(path, new byte[] { 9, 9, 9 });
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddHours(-ageHours));
         return path;
     }
 
@@ -75,6 +80,23 @@ public sealed class StorageReconcileCliTests : IDisposable
         Assert.Equal(0, exit);
         Assert.Contains("deleted 1", stdout);
         Assert.False(File.Exists(orphan));
+    }
+
+    [Fact]
+    public async Task Reconcile_Delete_Orphans_Spares_A_Freshly_Written_Object()
+    {
+        var owner = await _factory.SeedUserAsync();
+        await SeedBlobAsync(owner);
+        var fresh = WriteOrphanObject(ageHours: 0);
+
+        var (exit, stdout, _) = await RunCli("storage", "reconcile", "--delete-orphans");
+
+        // Through the real CLI: a just-written object is never swept, because
+        // its owning row may still be uncommitted.
+        Assert.Equal(0, exit);
+        Assert.Contains("deleted 0", stdout);
+        Assert.Contains("too-recent 1", stdout);
+        Assert.True(File.Exists(fresh));
     }
 
     [Fact]
