@@ -479,5 +479,11 @@ public sealed class DocumentVisualIndexerTests : IDisposable
             => Task.CompletedTask;
         public IAsyncEnumerable<string> EnumerateStorageKeysAsync(CancellationToken ct = default)
             => throw new NotSupportedException();
+        // Null = "age unknown", which every caller must read as "assume brand
+        // new, do not delete". The conservative answer is the right default for
+        // a fake that stores nothing.
+        public Task<DateTimeOffset?> GetLastWriteTimeUtcAsync(
+            string storageKey, CancellationToken ct = default)
+            => Task.FromResult<DateTimeOffset?>(null);
     }
 }

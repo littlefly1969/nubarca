@@ -4940,9 +4940,15 @@ public static class CliEntryPoint
         stdout.WriteLine("storage reconcile");
         stdout.WriteLine("  Compares the physical blob store with the BlobObject table and");
         stdout.WriteLine("  reports COUNTS ONLY (never a storage key or path): on-disk objects");
-        stdout.WriteLine("  with no DB row (orphans), and DB rows whose physical object is");
+        stdout.WriteLine("  with no live owner (orphans), and DB rows whose physical object is");
         stdout.WriteLine("  missing. Dry-run by default. --delete-orphans physically removes");
         stdout.WriteLine("  orphan objects (filesystem only; never touches the database).");
+        stdout.WriteLine();
+        stdout.WriteLine("  Deletion is a conservative mark-and-sweep: an object is removed only");
+        stdout.WriteLine("  if it has been unowned for at least 24h AND is still unowned when");
+        stdout.WriteLine("  re-checked immediately before deletion. That protects bytes whose");
+        stdout.WriteLine("  owning row has not committed yet. Objects owned without a blob row");
+        stdout.WriteLine("  (a print job's rendered artifact) are never deleted.");
         stdout.WriteLine();
         stdout.WriteLine("  --dry-run          report only, change nothing (default)");
         stdout.WriteLine("  --delete-orphans   delete on-disk objects with no BlobObject row");
