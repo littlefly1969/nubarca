@@ -66,6 +66,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one nullable timestamp and one NOT NULL integer with defaultValue 0 to party_participants, and one NOT NULL integer with defaultValue 0 to party_album_links. Existing rows take values that read as 'not retired', 'no greetings sent' and 'no message limit', which is exactly the behaviour before the columns existed; the previous application neither reads nor writes any of them, so rolling back to it leaves values the new schema also accepts."
+    },
+    "20260908090627_AddPendingBlobPurge": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only the new pending_blob_purges table with its primary key and one lookup index; no existing table, column, constraint or index changes. The previous application neither reads nor writes it, and it is written only by BlobJanitor, which is disabled by default. Rolling back leaves at most a few rows the old application ignores and the new one drains on its next tick."
     }
   }
 }
