@@ -286,6 +286,28 @@ public interface IFileItemService
         Guid fileItemId,
         CancellationToken cancellationToken = default);
 
+    // The ONE canonical TRASHED -> PERMANENTLY PURGED transition that every
+    // trigger converges on: individual permanent delete and Empty Trash (both
+    // through PermanentDeleteAsync, which passes deletedBefore = null) and
+    // automatic retention expiry (FileItemSweeper, which passes its cutoff).
+    // Retention therefore produces exactly the same permanent result as a
+    // manual Empty Trash — there is no separate DB-only retention path.
+    //
+    // `deletedBefore`, when given, is part of the atomic delete gate: the row
+    // is removed only while it is still trashed AND still older than the cutoff
+    // it was selected under, so a restore that wins the race is never clobbered.
+    //
+    // Ignores the Private Vault query filter and trusts `ownerUserId`; the
+    // CALLER is responsible for deciding whether the file should be visible to
+    // it at all. Returns false when the file is missing, foreign, or no longer
+    // matches the gate. Never touches physical bytes — BlobJanitor reclaims
+    // those after the separate physical-blob grace window.
+    Task<bool> PurgeTrashedFileAsync(
+        Guid ownerUserId,
+        Guid fileItemId,
+        DateTime? deletedBefore,
+        CancellationToken cancellationToken = default);
+
     // Re-runs embedded image metadata extraction for one existing blob's
     // metadata row (slice 55 backfill). Idempotent: refreshes the typed fields
     // + raw document + ExtractionVersion. Returns false when no BlobMetadata
