@@ -199,6 +199,116 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
         Assert.Contains(vote.Value, PartyGameVoteValues.All);
     }
 
+    // --- playing the same party again ------------------------------------
+
+    [Fact]
+    public async Task Two_simultaneous_restarts_reset_the_game_exactly_once()
+    {
+        var finishedVersion = await FinishAsync();
+
+        await using var firstDb = CreateContext();
+        await using var secondDb = CreateContext();
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var results = await Task.WhenAll(
+            CommandAfterStartAsync(firstDb, PartyGameCommands.RestartGame, finishedVersion, start.Task),
+            CommandAfterStartAsync(secondDb, PartyGameCommands.RestartGame, finishedVersion, start.Task, start));
+
+        Assert.Single(results, x => x.Error is null);
+        Assert.Single(results, x => x.Error == PartyGameCommandError.VersionConflict);
+
+        await using var verify = CreateContext();
+        var session = await verify.PartyGameSessions.SingleAsync();
+        // One reset, not two. The version moved by exactly one, so the loser's
+        // command was refused rather than applied to the winner's fresh lobby.
+        Assert.Equal(PartyGamePhases.Lobby, session.Phase);
+        Assert.Equal(PartyGameStatuses.Lobby, session.Status);
+        Assert.Equal(finishedVersion + 1, session.Version);
+        Assert.Null(session.CurrentRoundId);
+        Assert.Equal(0, session.CurrentRoundNumber);
+        Assert.Empty(await verify.PartyGameRounds.ToListAsync());
+        Assert.Empty(await verify.PartyGameVotes.ToListAsync());
+    }
+
+    [Fact]
+    public async Task A_restart_that_loses_the_race_deletes_nothing()
+    {
+        var finishedVersion = await FinishAsync();
+
+        await using var winnerDb = CreateContext();
+        await using var loserDb = CreateContext();
+
+        // The winner is IN FLIGHT: it has taken the session row's write lock and
+        // deleted the finished match, and its transaction is still open.
+        await using var winnerTx = await winnerDb.Database.BeginTransactionAsync();
+        Assert.Null((await Service(winnerDb).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.RestartGame, finishedVersion)).Error);
+
+        // The loser starts from the same snapshot — the stale read the boundary
+        // exists for — and blocks on that row rather than deleting behind it.
+        var loserTask = Task.Run(() => Service(loserDb).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.RestartGame, finishedVersion));
+        await WaitUntilBlockedAsync(loserTask);
+
+        await winnerTx.CommitAsync();
+        var loser = await loserTask;
+
+        Assert.Equal(PartyGameCommandError.VersionConflict, loser.Error);
+        // And it is handed the lobby the winner created, not an empty error.
+        Assert.Equal(PartyGamePhases.Lobby, loser.Snapshot!.Phase);
+        Assert.Equal(finishedVersion + 1, loser.Snapshot.Version);
+
+        await using var verify = CreateContext();
+        Assert.Equal(finishedVersion + 1, (await verify.PartyGameSessions.SingleAsync()).Version);
+    }
+
+    [Fact]
+    public async Task A_restart_never_hands_a_spent_version_back_to_the_previous_game()
+    {
+        var finishedVersion = await FinishAsync();
+        await using (var restartDb = CreateContext())
+            Assert.Null((await Service(restartDb).ExecuteAsync(
+                _ownerId, _albumId, PartyGameCommands.RestartGame, finishedVersion)).Error);
+
+        // The whole point of keeping the session row. A `start` quoting the
+        // version the previous game ended on must stay refused for ever, and
+        // version 0 — the number a game that never existed would quote — must
+        // never become current again either.
+        await using (var staleDb = CreateContext())
+            Assert.Equal(PartyGameCommandError.VersionConflict, (await Service(staleDb)
+                .ExecuteAsync(_ownerId, _albumId, PartyGameCommands.Start, finishedVersion)).Error);
+        await using (var coldDb = CreateContext())
+            Assert.Equal(PartyGameCommandError.VersionConflict, (await Service(coldDb)
+                .ExecuteAsync(_ownerId, _albumId, PartyGameCommands.Start, 0)).Error);
+
+        // The new game starts from the version the restart left behind.
+        await using var db = CreateContext();
+        var started = await Service(db).ExecuteAsync(
+            _ownerId, _albumId, PartyGameCommands.Start, finishedVersion + 1);
+        Assert.Null(started.Error);
+        Assert.Equal(PartyGamePhases.ChallengeReveal, started.Snapshot!.Phase);
+        Assert.Equal(finishedVersion + 2, started.Snapshot.Version);
+    }
+
+    /// Play one activity to a recorded vote and then end the game, so a restart
+    /// has both a round and a vote to discard. Returns the finished version.
+    private async Task<int> FinishAsync()
+    {
+        var (participantId, roundId) = await OpenVotingAsync();
+        await using (var voteDb = CreateContext())
+            await Service(voteDb).VoteAsync(
+                new PartyAccess(_ownerId, _albumId, _linkId), participantId, roundId,
+                PartyGameVoteValues.Yes);
+
+        await using var host = CreateContext();
+        var service = Service(host);
+        var version = 3;
+        foreach (var command in new[]
+            { PartyGameCommands.CloseVoting, PartyGameCommands.RevealResult, PartyGameCommands.Finish })
+            version = (await service.ExecuteAsync(_ownerId, _albumId, command, version)).Snapshot!.Version;
+        return version;
+    }
+
     private static async Task VoteAfterStartAsync(
         AppDbContext db, PartyAccess access, Guid participantId, Guid roundId, string value,
         Task start, TaskCompletionSource? release = null)

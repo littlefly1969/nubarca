@@ -150,8 +150,22 @@ public static class PartyGameCommands
     public const string SkipChallenge = "skip_challenge";
     public const string Finish = "finish";
 
+    /// <summary>
+    /// Play the same party again. Legal only from <c>finished</c>, and the only
+    /// command whose effect is to DISCARD rather than to advance: the rounds and
+    /// votes of the game that just ended go, and the session returns to its
+    /// lobby.
+    ///
+    /// <para>It is a command rather than a new session because the party link is
+    /// the game's identity. The guests, their photographs, their greetings,
+    /// their prints and the QR on the table all belong to the link, and none of
+    /// them is replayed — only the match is.</para>
+    /// </summary>
+    public const string RestartGame = "restart_game";
+
     public static readonly IReadOnlySet<string> All = new HashSet<string>(
-        [Start, StartChallenge, OpenVoting, CloseVoting, RevealResult, NextChallenge, SkipChallenge, Finish],
+        [Start, StartChallenge, OpenVoting, CloseVoting, RevealResult, NextChallenge, SkipChallenge,
+            Finish, RestartGame],
         StringComparer.Ordinal);
 
     public static bool IsKnown(string? value) => value is not null && All.Contains(value);

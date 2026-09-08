@@ -1261,6 +1261,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   infer that from a missing cookie. And the four surfaces — deck, control room,
   television stage, guest phone — draw an activity with ONE renderer in three
   modes, emitting identical markup, so a preview predicts what the room sees.
+  A finished game plays again through `restart_game`, and the tempting
+  implementation is the wrong one: DELETING the session and letting the next
+  `start` recreate it would send `Version` back to 0 and make every command
+  written during the game that just ended quotable again. The row therefore
+  survives — only its rounds and their votes are deleted — so 27 → 28 across a
+  restart and 27 stays spent. The party link, its token, the guests, their
+  photographs, greetings, prints and quotas, the deck and the display heartbeat
+  are all untouched, because they belong to the party rather than to the match;
+  and the restart takes the session row's write lock through the same
+  conditional-update boundary a vote uses, BEFORE deleting anything, so a loser
+  cannot destroy the winner's fresh lobby. No migration: it is a delete and an
+  update over columns that were already there.
   See [docs/party-game/README.md](party-game/README.md),
   [docs/party-game/runtime.md](party-game/runtime.md) and
   [docs/party-game/ux-integration-contract.md](party-game/ux-integration-contract.md).

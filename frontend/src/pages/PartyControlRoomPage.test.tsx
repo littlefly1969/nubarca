@@ -237,7 +237,7 @@ describe('the control room', () => {
     await user.click(await screen.findByTestId('party-control-finish'));
 
     const dialog = screen.getByTestId('party-control-finish-dialog');
-    expect(within(dialog).getByText(/non può essere ripreso/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/non si può riprendere/i)).toBeInTheDocument();
     expect(sent).toHaveLength(0);
 
     await user.click(within(dialog).getByRole('button', { name: /annulla/i }));
@@ -248,7 +248,9 @@ describe('the control room', () => {
     await waitFor(() => expect(sent).toEqual(['finish']));
   });
 
-  it('offers nothing at all once the game is over', async () => {
+  it('offers nothing at all when the server says nothing is legal', async () => {
+    // The server is the authority on what may be pressed, and an empty answer
+    // is rendered as an empty answer rather than second-guessed.
     installFetchMock({
       [`GET ${READ}`]: () => jsonResponse(snapshot({
         status: 'finished', phase: 'finished', availableCommands: [],
@@ -259,6 +261,62 @@ describe('the control room', () => {
     expect(await screen.findByTestId('party-control-status')).toHaveTextContent(/concluso/i);
     expect(screen.queryByTestId('party-control-primary')).not.toBeInTheDocument();
     expect(screen.getByText(/il gioco è concluso/i)).toBeInTheDocument();
+  });
+
+  it('offers a restart once the evening is over, and says what it will cost', async () => {
+    const sent: { command: string; expectedVersion: number }[] = [];
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        status: 'finished', phase: 'finished', version: 27, playedRounds: 4,
+        availableCommands: ['restart_game'],
+        currentChallenge: null, nextChallenge: null,
+      })),
+      [`POST ${COMMANDS}`]: ({ body }: { body: string | null }) => {
+        sent.push(JSON.parse(body ?? '{}'));
+        return jsonResponse(snapshot({
+          status: 'lobby', phase: 'lobby', version: 28, roundNumber: 0, playedRounds: 0,
+          currentChallenge: null, availableCommands: ['start', 'finish'],
+        }));
+      },
+    });
+    mount();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    const primary = await screen.findByTestId('party-control-primary');
+    expect(primary).toHaveAttribute('data-command', 'restart_game');
+    expect(primary).toHaveTextContent(/ricomincia il gioco/i);
+
+    // Destroying the evening's votes is never one tap away.
+    await user.click(primary);
+    const dialog = screen.getByTestId('party-control-restart_game-dialog');
+    expect(within(dialog).getByText(/voti e risultati/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/invitati, foto, messaggi/i)).toBeInTheDocument();
+    expect(sent).toHaveLength(0);
+
+    await user.click(within(dialog).getByRole('button', { name: /annulla/i }));
+    expect(sent).toHaveLength(0);
+
+    await user.click(screen.getByTestId('party-control-primary'));
+    await user.click(screen.getByTestId('party-control-restart_game-confirm'));
+
+    // It quotes the finished game's version, exactly like every other command.
+    await waitFor(() => expect(sent).toEqual([
+      { command: 'restart_game', expectedVersion: 27 },
+    ]));
+
+    // And the screen adopts the lobby the server returned, without a refetch.
+    await waitFor(() => expect(screen.getByTestId('party-control-primary'))
+      .toHaveAttribute('data-command', 'start'));
+    expect(screen.getByTestId('party-control-status')).toHaveTextContent(/non iniziato/i);
+    expect(screen.getByTestId('party-control-played')).toHaveTextContent('0');
+  });
+
+  it('never offers a restart in a phase the server did not name it in', async () => {
+    installFetchMock({ [`GET ${READ}`]: () => jsonResponse(snapshot()) });
+    mount();
+    await screen.findByTestId('party-control-primary');
+    expect(screen.queryByTestId('party-control-restart_game')).not.toBeInTheDocument();
+    expect(screen.queryByText(/ricomincia il gioco/i)).not.toBeInTheDocument();
   });
 
   it('says plainly when the game is not switched on for this album', async () => {

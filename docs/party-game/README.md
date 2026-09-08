@@ -49,5 +49,9 @@ activities in the deck, then opens the control room. The control room carries
 the link to the television and a QR for guests. From there the evening is one
 button at a time.
 
-A finished game stays finished: replaying means a new party, which mints a new
-link — the same thing "a new party" already meant everywhere else in Party.
+A finished game can be played again from the same control room: `restart_game`
+discards the match — its rounds and its votes — and returns the session to its
+lobby. The party link, the QR code, the guests and everything they contributed
+are untouched, because they belong to the party rather than to the game. The
+version moves FORWARD across the restart, so a command written during the game
+that just ended stays stale.

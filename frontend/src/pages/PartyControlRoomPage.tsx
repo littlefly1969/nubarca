@@ -38,6 +38,15 @@ const COMMAND_LABEL: Record<PartyGameCommand, MessageKey> = {
   next_challenge: 'partyControl.nextChallenge',
   skip_challenge: 'partyControl.skip',
   finish: 'partyControl.finish',
+  restart_game: 'partyControl.restart',
+};
+
+// The two commands a host must not send by accident: one ends the evening, the
+// other throws away what the room just voted. Both are confirmed, and the
+// dialog names exactly what is lost and what is not.
+const CONFIRMED: Partial<Record<PartyGameCommand, { title: MessageKey; body: MessageKey }>> = {
+  finish: { title: 'partyControl.finishTitle', body: 'partyControl.finishBody' },
+  restart_game: { title: 'partyControl.restartTitle', body: 'partyControl.restartBody' },
 };
 
 const REFUSAL_LABEL: Record<string, MessageKey> = {
@@ -63,7 +72,7 @@ export function PartyControlRoomPage() {
   const { t } = useI18n();
   const { snapshot, connection, stale, pending, refusal, run, refresh } =
     usePartyGameControl(albumId);
-  const [confirmFinish, setConfirmFinish] = useState(false);
+  const [confirming, setConfirming] = useState<PartyGameCommand | null>(null);
   const remaining = useCountdown(
     snapshot?.phase === 'challenge_active' ? snapshot.phaseEndsAt : null);
   const qr = useQr(snapshot?.guestUrl ?? null);
@@ -90,9 +99,10 @@ export function PartyControlRoomPage() {
   const display = partyGameDisplayState(snapshot.displaySeenSecondsAgo);
 
   const runCommand = (command: PartyGameCommand) => {
-    if (command === 'finish') { setConfirmFinish(true); return; }
+    if (command in CONFIRMED) { setConfirming(command); return; }
     void run(command);
   };
+  const confirmation = confirming ? CONFIRMED[confirming] : undefined;
 
   return (
     <div className="page-container party-control" data-testid="party-control-room">
@@ -263,25 +273,26 @@ export function PartyControlRoomPage() {
         )}
       </div>
 
-      {confirmFinish && (
+      {confirming && confirmation && (
         <Modal
-          title={t('partyControl.finishTitle')}
-          onClose={() => setConfirmFinish(false)}
+          title={t(confirmation.title)}
+          onClose={() => setConfirming(null)}
           dismissable={pending === null}
-          testId="party-control-finish-dialog"
+          testId={`party-control-${confirming}-dialog`}
           footer={(
             <div className="party-composer-actions">
               <button type="button" disabled={pending !== null}
-                onClick={() => setConfirmFinish(false)}>{t('common.cancel')}</button>
-              <button type="button" className="btn-danger" data-testid="party-control-finish-confirm"
+                onClick={() => setConfirming(null)}>{t('common.cancel')}</button>
+              <button type="button" className="btn-danger"
+                data-testid={`party-control-${confirming}-confirm`}
                 disabled={pending !== null}
-                onClick={() => { setConfirmFinish(false); void run('finish'); }}>
-                {t('partyControl.finish')}
+                onClick={() => { setConfirming(null); void run(confirming); }}>
+                {t(COMMAND_LABEL[confirming])}
               </button>
             </div>
           )}
         >
-          <p>{t('partyControl.finishBody')}</p>
+          <p>{t(confirmation.body)}</p>
         </Modal>
       )}
     </div>

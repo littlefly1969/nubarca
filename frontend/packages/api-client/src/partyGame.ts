@@ -35,7 +35,13 @@ export type PartyGameCommand =
   | 'reveal_result'
   | 'next_challenge'
   | 'skip_challenge'
-  | 'finish';
+  | 'finish'
+  // Play the same party again. Legal only from `finished`, and the only command
+  // that discards rather than advances: the finished match's rounds and votes
+  // go, while the link, its token, the guests and everything they contributed
+  // stay. The version still moves FORWARD, so a command written during the game
+  // that just ended remains stale.
+  | 'restart_game';
 
 export type PartyGameVoteValue = 'yes' | 'no';
 

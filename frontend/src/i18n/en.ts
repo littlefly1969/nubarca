@@ -266,7 +266,12 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyControl.skip': 'Skip',
   'partyControl.finish': 'Finish the game',
   'partyControl.finishTitle': 'Finish the game',
-  'partyControl.finishBody': 'The game closes for everyone and cannot be resumed.',
+  'partyControl.finishBody':
+    'The game closes for everyone and this round cannot be resumed. You can start a fresh game from here afterwards.',
+  'partyControl.restart': 'Start the game over',
+  'partyControl.restartTitle': 'Start the game over',
+  'partyControl.restartBody':
+    'The votes and results of the game that just ended will be deleted. Guests, photos, messages, prints and the party link do not change.',
   'partyControl.refusedStale': 'The game had already moved on — you are now seeing the current state.',
   'partyControl.refusedIllegal': 'That command is no longer possible in this phase.',
   'partyControl.refusedEmpty': 'Prepare at least one activity before starting.',

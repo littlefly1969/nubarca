@@ -277,7 +277,12 @@ const it = {
   'partyControl.skip': 'Salta',
   'partyControl.finish': 'Termina il gioco',
   'partyControl.finishTitle': 'Termina il gioco',
-  'partyControl.finishBody': 'Il gioco si chiude per tutti e non può essere ripreso.',
+  'partyControl.finishBody':
+    'Il gioco si chiude per tutti e la partita in corso non si può riprendere. Da qui potrai poi ricominciare una partita nuova.',
+  'partyControl.restart': 'Ricomincia il gioco',
+  'partyControl.restartTitle': 'Ricomincia il gioco',
+  'partyControl.restartBody':
+    'Verranno cancellati voti e risultati della partita appena conclusa. Invitati, foto, messaggi, stampe e link del Party non cambieranno.',
   'partyControl.refusedStale': 'Il gioco era già andato avanti: ora vedi lo stato aggiornato.',
   'partyControl.refusedIllegal': 'Questo comando non è più possibile in questa fase.',
   'partyControl.refusedEmpty': 'Prepara almeno un’attività prima di iniziare.',

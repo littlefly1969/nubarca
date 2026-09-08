@@ -129,7 +129,8 @@ public sealed class PartyGameEndToEndTests : IDisposable
         // 18. The host ends the evening.
         var finished = await CommandAsync(owner, album, "finish", version);
         Assert.Equal("finished", finished.GetProperty("status").GetString());
-        Assert.Empty(finished.GetProperty("availableCommands").EnumerateArray());
+        Assert.Equal(["restart_game"], finished.GetProperty("availableCommands")
+            .EnumerateArray().Select(x => x.GetString()).ToArray());
         Assert.Equal("finished", (await DisplayAsync(tv, token)).GetProperty("status").GetString());
         Assert.Equal("finished", (await SnapshotAsync(guestA, token)).GetProperty("status").GetString());
 

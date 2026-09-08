@@ -68,6 +68,20 @@ originating repository and is deliberately not reproduced here.
   what lets the control room honestly report whether one is showing the game.
 - **Deleting an activity asks in the product**, naming what is being lost, and
   unsaved work in the composer survives a stray Escape.
+- **A finished game can be played again, on the same party link.** The control
+  room's action at the end of an evening is "Ricomincia il gioco": the rounds
+  and votes of the game that just ended are discarded and the whole deck becomes
+  playable again, while the party URL, the QR code on the table, the guests and
+  their photographs, greetings, prints and remaining allowances are all
+  untouched. Nobody rescans anything, and the host never leaves the control
+  room. The confirmation names both halves, because deleting a room's votes
+  should never be one tap away.
+- **A restart moves the version forward, never back.** Recreating the game from
+  scratch would have reset the command token to zero and made every command
+  written during the finished game quotable again — a second tab could then have
+  moved a party it was no longer looking at. Version 27 becomes 28 across the
+  restart and 27 stays spent, and two restarts racing on the same version elect
+  one winner at the database *before* either deletes anything.
 
 ### One anonymous guest per party
 

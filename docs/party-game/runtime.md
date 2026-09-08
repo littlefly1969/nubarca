@@ -42,6 +42,14 @@ LOBBY --start--> CHALLENGE_REVEAL --start_challenge--> CHALLENGE_ACTIVE
 voting_open, voting_closed — for the next activity, or for FINISHED when there
 is none. `finish` is legal from every phase except FINISHED.
 
+```
+FINISHED --restart_game--> LOBBY
+```
+
+`restart_game` is the one edge that runs backwards, and the only command whose
+effect is to DISCARD rather than to advance. See
+[Playing the same party again](#playing-the-same-party-again).
+
 **An activity nobody votes on takes one shortcut.** When the running activity's
 `VotingMode` is `none`, `CHALLENGE_ACTIVE` goes straight to `RESULT` and
 `open_voting` is not offered at all — the alternative is a control room whose
@@ -61,8 +69,9 @@ The brief lists **`reveal challenge`** among the commands. There is no such
 command. Revealing IS the transition into `CHALLENGE_REVEAL`, and it is
 performed by `start` (from the lobby) and by `next_challenge` (from a result). A
 third name would have produced a command that is legal nowhere, and a control
-room with a primary action that does nothing. The six non-terminal phases map
-one-to-one onto six primary commands:
+room with a primary action that does nothing. Every phase maps onto exactly one
+primary command — the six non-terminal ones onto the commands that move the
+game, and the terminal one onto the command that starts another:
 
 | Phase | Primary command |
 | --- | --- |
@@ -72,6 +81,7 @@ one-to-one onto six primary commands:
 | `voting_open` | `close_voting` |
 | `voting_closed` | `reveal_result` |
 | `result` | `next_challenge` |
+| `finished` | `restart_game` |
 
 ## Two rules that are easy to undo by accident
 
@@ -101,8 +111,60 @@ Every command quotes `expectedVersion`. Two authorities enforce it:
    the winner's state.
 
 [`PartyGameConcurrencyTests`](../../tests/NubArca.Api.Tests/Party/PartyGameConcurrencyTests.cs)
-races two independent connections for the create case, the advance case, and a
-skip-against-advance case.
+races two independent connections for the create case, the advance case, a
+skip-against-advance case, and the restart — both the two-restart race and the
+one where a loser must not delete behind a winner.
+
+## Playing the same party again
+
+A finished game restarts on the same party link. `restart_game` is an owner
+command like any other — quoting `expectedVersion`, refused with the current
+snapshot, applied by the same service — and it is legal from `finished` and
+nowhere else.
+
+**The session row survives, and that is the whole design.** Deleting it and
+letting the next `start` create another would look simpler and would be wrong:
+`Version` would go back to 0, and every command the host's second tab wrote
+during the game that just ended would become quotable again. Keeping the row
+keeps the version MONOTONIC across a restart —
+
+```
+FINISHED version=27  →  restart_game(expectedVersion=27)  →  LOBBY version=28
+```
+
+— so 27 is spent for ever, and so is the 0 a never-started game would quote.
+
+**What it discards** is the runtime of the match: the rounds, the votes hanging
+off them, the current round and its number, the phase, and the two timestamps
+that bounded the game. Rounds go rather than being marked resolved, because a
+round the session still remembers is an activity the new game could never play —
+the unique index on `(session, challenge)` says an activity is played at most
+once per game, and the deck has to be whole again.
+
+**What it keeps** is everything that belongs to the PARTY rather than to the
+match: the `PartyAlbumLink` and its token, so the URL and the QR code on the
+table do not change; `PartyParticipant`, so the guests stay the same guests and
+their quotas are neither refunded nor spent; their photographs, greetings and
+prints; `PartyChallenge`, the deck the host prepared; and `LastDisplaySeenAt`,
+because a television did not stop watching just because the game started over —
+the heartbeat is the link's, not the match's.
+
+**The boundary is the session row**, the same authority the vote path uses. The
+restart's transaction opens with a conditional update whose WHERE clause is the
+whole check — still `finished`, still at the version the caller quoted — and
+takes that row's write lock *before* a single round is deleted. Two restarts
+racing on one version therefore cannot both delete: the loser blocks,
+re-evaluates against the row the winner left behind, matches nothing, and
+returns having written nothing. Deleting first and checking afterwards would
+mean the loser had already destroyed the winner's fresh lobby.
+
+There is no migration: the whole command is a delete and an update over columns
+that were already there.
+
+In the control room it is the primary action at `finished`, behind a
+confirmation that names both halves — the votes and results of the game that
+just ended are deleted; the guests, photos, messages, prints and the party link
+are not.
 
 ## Realtime
 
@@ -344,6 +406,8 @@ that into a clean `404` instead of an exception.
 
 ## Deliberately not here
 
-A finished game stays finished. Replaying means a new party, which mints a new
-link and therefore a new game — the same thing "a new party" already meant
-everywhere else in the feature.
+The finished match's history. A restart discards the rounds and votes rather
+than archiving them: what happened at a party is the party's, and keeping a
+replayable transcript of every evening is a different feature with a different
+privacy question. The audit log records that a restart happened, who did it and
+how many rounds it discarded — never who voted what.
