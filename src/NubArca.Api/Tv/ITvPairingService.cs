@@ -13,7 +13,22 @@ public interface ITvPairingService
     Task<TvPairingApproveResult> ApproveAsync(string publicCode, string? pairingSecret, Guid ownerUserId,
         string? personalCode, string? personalCodeConfirmation,
         CancellationToken cancellationToken = default);
-    Task<TvSessionDto?> GetSessionAsync(string? sessionToken, bool heartbeat,
+    // Resolves the limited TV session cookie. Returns the session's own id
+    // alongside its status, so a caller can ask a DIFFERENT service what this
+    // television is for without resolving the token a second time. Null for an
+    // unknown, revoked or expired session.
+    Task<TvSessionStateDto?> GetSessionAsync(string? sessionToken, bool heartbeat,
+        CancellationToken cancellationToken = default);
+
+    // The session a pairing produced, for the owner who approved it. The pairing
+    // secret is required as well as the owner cookie, so holding one without the
+    // other names nothing; null until the television has actually claimed the
+    // pairing, and for a pairing this owner did not approve.
+    //
+    // It exists so the approval page can finish the job it started — "what is
+    // this television for?" — on the session that pairing minted, without the
+    // owner having to find the device in a list afterwards.
+    Task<Guid?> FindPairedSessionIdAsync(string publicCode, string? pairingSecret, Guid ownerUserId,
         CancellationToken cancellationToken = default);
     Task<bool> RevokeSessionAsync(string? sessionToken, CancellationToken cancellationToken = default);
 

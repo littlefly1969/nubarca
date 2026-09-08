@@ -34,7 +34,15 @@ public sealed class TvSessionConfiguration : IEntityTypeConfiguration<TvSession>
 {
     public void Configure(EntityTypeBuilder<TvSession> builder)
     {
-        builder.ToTable("tv_sessions");
+        builder.ToTable("tv_sessions", t =>
+            // BOTH halves of the assignment invariant, as a database fact rather
+            // than as a rule each write path remembers: a party assignment always
+            // names a link, and a general one never does. Without the second half
+            // a television switched back to general would keep pointing at the
+            // party it used to show.
+            t.HasCheckConstraint("ck_tv_sessions_display_assignment",
+                "(\"DisplayAssignment\" = 'general' AND \"AssignedPartyAlbumLinkId\" IS NULL)"
+                + " OR (\"DisplayAssignment\" = 'party' AND \"AssignedPartyAlbumLinkId\" IS NOT NULL)"));
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.SessionTokenHash).IsRequired().HasMaxLength(64).IsFixedLength();
@@ -47,11 +55,31 @@ public sealed class TvSessionConfiguration : IEntityTypeConfiguration<TvSession>
         builder.Property(x => x.PersonalPinFailedAttempts).HasDefaultValue(0);
         builder.Property(x => x.PersonalPinLockedUntil).HasColumnType("timestamp with time zone");
 
+        // The default is what makes the migration additive: every television
+        // paired before assignments existed reads as `general`, which is exactly
+        // the experience it already had.
+        builder.Property(x => x.DisplayAssignment).IsRequired().HasMaxLength(20)
+            .HasDefaultValue(TvDisplayAssignments.General);
+
         builder.HasIndex(x => x.SessionTokenHash).IsUnique()
             .HasDatabaseName("ux_tv_sessions_token_hash");
         builder.HasIndex(x => new { x.OwnerUserId, x.ExpiresAt })
             .HasDatabaseName("ix_tv_sessions_owner_expires");
+
+        // "Which televisions are showing this party" is the question the party
+        // side will ask, so it is an index rather than a scan of the fleet.
+        builder.HasIndex(x => x.AssignedPartyAlbumLinkId)
+            .HasDatabaseName("ix_tv_sessions_assigned_party_link");
+
         builder.HasOne<User>().WithMany().HasForeignKey(x => x.OwnerUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // Restrict rather than SetNull: nulling the column behind the check
+        // constraint would leave a row claiming to show a party it cannot name.
+        // Deleting an album returns its televisions to `general` explicitly, in
+        // AlbumService, where the rest of that album's Party state is cleared.
+        builder.HasOne<PartyAlbumLink>().WithMany()
+            .HasForeignKey(x => x.AssignedPartyAlbumLinkId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

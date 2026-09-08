@@ -51,6 +51,9 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'mode.party': 'Party',
   'mode.personal': 'Personal area 🔒',
   'mode.beautyLab': 'Beauty Lab 🔒',
+  'mode.assignedParty': 'This TV is assigned to the party: {name}.',
+  'mode.assignedPartyFallback': 'party',
+  'mode.assignedPartyGone': 'The party assigned to this TV is no longer available.',
   'mode.pinChangedNotice': 'The PIN was changed. Enter the new PIN.',
 
   'beautyLab.title': 'Beauty Lab',

@@ -784,6 +784,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IAuthService, AuthService>();
     builder.Services.AddScoped<IAdminUserService, AdminUserService>();
     builder.Services.AddScoped<ITvPairingService, TvPairingService>();
+    builder.Services.AddScoped<ITvDisplayAssignmentService, TvDisplayAssignmentService>();
     builder.Services.AddScoped<ITvMediaService, TvMediaService>();
     builder.Services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
     builder.Services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();

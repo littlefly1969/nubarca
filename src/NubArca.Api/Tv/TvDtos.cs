@@ -12,7 +12,24 @@ public sealed record TvPairingStatusDto(string Status, DateTime ExpiresAt);
 // TV app can localize its 10-foot UI in the owner's language. It is a bare
 // language code — NOT owner identity (no name/email/id) — and defaults to
 // Italian if the owner row is somehow missing.
-public sealed record TvSessionDto(string Status, DateTime ExpiresAt, DateTime LastSeenAt, string Language);
+// `Assignment` is what this television is FOR — general, or one specific party.
+// Additive: an APK built before assignments existed simply ignores the field and
+// keeps behaving as the general television it already was.
+public sealed record TvSessionDto(
+    string Status, DateTime ExpiresAt, DateTime LastSeenAt, string Language,
+    TvDisplayAssignmentDto Assignment);
+
+// The session a pairing produced, for the owner who approved it. Null while the
+// television has not claimed the pairing yet — a wait, not an error. An id and
+// nothing else: no token, no secret, no owner.
+public sealed record TvPairedDeviceDto(Guid? SessionId);
+
+// The resolved session, INTERNAL to the service layer. It carries the session
+// id, which no wire DTO does: the endpoint needs it to ask what this television
+// is for — a question that deliberately belongs to another service — and the
+// television itself has no use for its own row id.
+public sealed record TvSessionStateDto(
+    Guid SessionId, string Status, DateTime ExpiresAt, DateTime LastSeenAt, string Language);
 
 // Approval body. For an owner who does not yet have a Personal Area credential
 // the approval is ATOMIC with creating the DIRECTIONAL code:
@@ -341,4 +358,8 @@ public sealed record TvDeviceDto(
     DateTime CreatedAt,
     DateTime LastSeenAt,
     DateTime ExpiresAt,
-    DateTime? RevokedAt);
+    DateTime? RevokedAt,
+    // What this television is for. Composed by the endpoint from the assignment
+    // service rather than read here, because pairing answers who a device is and
+    // assignment answers what it shows — and they are two questions.
+    TvDisplayAssignmentDto? Assignment = null);

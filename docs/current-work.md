@@ -418,6 +418,33 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   A legacy install whose session survived only in the native HTTP cookie jar
   (and not under the unchanged AsyncStorage key) therefore re-pairs once; JS
   cannot safely extract that HttpOnly value into the durable single authority.
+- **Pairing says WHO a television is; assignment says WHAT it shows, and they
+  are two things.** `TvSession.DisplayAssignment` is `general` or `party`, and a
+  party assignment names a `PartyAlbumLink` — so a television moves between the
+  ordinary NubArca TV experience and one specific party, or between two parties,
+  with no second PIN, no second QR code and no walk to the television. The
+  credential is untouched by any of it, which is the whole point: putting the
+  assignment inside the pairing would have made "change what this screen shows"
+  cost a re-pair. Six things are easy to undo by accident. The default is
+  `general`, so every device paired before the columns existed keeps exactly the
+  behaviour it had, and the migration needs no data script. A CHECK CONSTRAINT
+  holds both halves — a party assignment always names a link, a general one
+  never does — because a television switched back to general that kept its link
+  would still be pointing at a party. The owner API takes an ALBUM, never a
+  party link id: a link id is internal, and the album is what every other owner
+  Party route is already scoped by, so there is no identifier a client could
+  guess, replay or borrow from another account (the television and the album are
+  BOTH re-matched against the caller in the same query, so a session from one
+  account and an album from another can never meet). And the row names the LINK
+  rather than the album, so a revoked party leaves the television saying "that
+  party is over" instead of silently adopting whatever party the album has next
+  — re-enabling party mode mints a new link, and a new party is a new party
+  everywhere else in this feature. Deleting an album returns its televisions to
+  `general` in `AlbumService`, because the assignment carries a restricting
+  foreign key and would otherwise block the delete the way every Party table
+  once did. The television READS its assignment on `/api/tv/session` and can
+  never set one — those routes live outside `/api/tv`, where its path-scoped
+  cookie is not even sent.
 - **OTA isolation is structural.** Publications and channel pointers are keyed by
   runtime version, so bundles built for one native contract cannot be offered to
   a device asking for another.

@@ -54,6 +54,9 @@ const it = {
   'mode.personal': 'Area personale 🔒',
   'mode.beautyLab': 'Laboratorio bellezza 🔒',
   'mode.updates': 'Aggiornamenti',
+  'mode.assignedParty': 'Questa TV è assegnata al Party: {name}.',
+  'mode.assignedPartyFallback': 'festa',
+  'mode.assignedPartyGone': 'Il Party assegnato a questa TV non è più disponibile.',
   'mode.pinChangedNotice': 'Il PIN è stato modificato. Inserisci il nuovo PIN.',
 
   // Updates: the ONE update surface. No PIN, no personal data — it shows the

@@ -3,15 +3,25 @@ import {
   ApiError,
   getTvPersonalPinStatus,
   isCompleteTvCode,
+  listTvAssignableParties,
   listTvDevices,
   revokeTvDevice,
+  setTvDeviceAssignment,
   setTvPersonalCode,
+  type TvAssignableParty,
   type TvDevice,
+  type TvDisplayAssignment,
   type TvPersonalPinStatus,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { TvCodeInput } from '../tv/TvCodeInput';
+
+// What a television with no stated assignment is. Not a placeholder: it is the
+// real answer, and the default the server itself uses.
+const GENERAL_ASSIGNMENT: TvDisplayAssignment = {
+  kind: 'general', albumId: null, albumName: null, partyAvailable: false,
+};
 
 type LoadState =
   | { kind: 'loading' }
@@ -32,12 +42,19 @@ const STATUS_LABEL_KEY: Record<TvDevice['status'], MessageKey> = {
 // Owner-facing management of paired TV sessions. Lists this owner's TV devices
 // and lets them revoke one — which immediately terminates that limited TV
 // session server-side. No tokens/hashes/secrets are shown.
+//
+// It is also where a television's USE is changed: NubArca TV, or one specific
+// party. That is deliberately here rather than anywhere near pairing — pairing
+// answers who a device is and never changes, while this is ordinary state, so
+// moving a television to a party (or between two parties, or back) costs no PIN
+// and no walk to the television.
 export function TvDevicesPanel() {
   const { state, invalidateAuth } = useAuth();
   const { t, formatDate } = useI18n();
   const [status, setStatus] = useState<LoadState>({ kind: 'loading' });
   const [busyIds, setBusyIds] = useState<ReadonlySet<string>>(new Set());
   const [banner, setBanner] = useState<Banner | null>(null);
+  const [parties, setParties] = useState<TvAssignableParty[]>([]);
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -62,6 +79,50 @@ export function TvDevicesPanel() {
     void load(controller.signal);
     return () => controller.abort();
   }, [load]);
+
+  // The parties a television could be pointed at. A failure here is not a
+  // failure of the page: the list stays empty and the Party option is simply
+  // not offered, rather than the device list refusing to render.
+  useEffect(() => {
+    const controller = new AbortController();
+    listTvAssignableParties(controller.signal)
+      .then(setParties)
+      .catch(() => { /* offering no parties is a correct answer here */ });
+    return () => controller.abort();
+  }, []);
+
+  async function onAssign(device: TvDevice, albumId: string | null) {
+    if (busyIds.has(device.id)) return;
+    setBusyIds((prev) => new Set(prev).add(device.id));
+    setBanner(null);
+    try {
+      const assignment = await setTvDeviceAssignment(device.id, albumId);
+      // Adopt what the server returned rather than what was asked for: it is
+      // the authority on which party that album currently is.
+      setStatus((prev) => (prev.kind === 'ready'
+        ? {
+          kind: 'ready',
+          devices: prev.devices.map((d) => (d.id === device.id ? { ...d, assignment } : d)),
+        }
+        : prev));
+      setBanner({ tone: 'info', text: t('tvDevices.assignmentSaved') });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        invalidateAuth();
+        return;
+      }
+      setBanner({ tone: 'error', text: t('tvDevices.assignmentError') });
+      // The server refused; re-read rather than leaving the row showing a
+      // choice that did not happen.
+      await load();
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev);
+        next.delete(device.id);
+        return next;
+      });
+    }
+  }
 
   async function onRevoke(device: TvDevice) {
     if (busyIds.has(device.id)) return;
@@ -164,6 +225,14 @@ export function TvDevicesPanel() {
                   {' · '}{t('tvDevices.expires', { date: formatDate(device.expiresAt) })}
                 </span>
               </div>
+              {device.status === 'active' && (
+                <TvDeviceAssignment
+                  device={device}
+                  parties={parties}
+                  busy={busyIds.has(device.id)}
+                  onAssign={(albumId) => void onAssign(device, albumId)}
+                />
+              )}
               <div className="tv-device-side">
                 <span className={`tv-device-badge tv-device-badge-${device.status}`}>
                   {t(STATUS_LABEL_KEY[device.status])}
@@ -184,6 +253,67 @@ export function TvDevicesPanel() {
         </ul>
       )}
     </section>
+  );
+}
+
+// "How do you want to use this TV?" — one select, on the device it belongs to.
+//
+// The general experience is always offered; the party options are the owner's
+// own albums with a live party. A television pointed at a party that has since
+// been revoked keeps saying so (its option is rendered even though it is no
+// longer assignable) rather than silently reading as a general television — the
+// owner is the one who decides what to do about it.
+function TvDeviceAssignment({ device, parties, busy, onAssign }: {
+  device: TvDevice;
+  parties: TvAssignableParty[];
+  busy: boolean;
+  onAssign(albumId: string | null): void;
+}) {
+  const { t } = useI18n();
+  // A device that carries no assignment is a GENERAL device — that is what the
+  // absence means, and it is what every television paired before assignments
+  // existed is. Reading `.kind` off nothing would take the whole panel down
+  // over a field an older server simply does not send.
+  const assignment = device.assignment ?? GENERAL_ASSIGNMENT;
+  const isParty = assignment.kind === 'party';
+  const value = isParty && assignment.albumId ? assignment.albumId : '';
+  // A revoked party is not in the assignable list, so its option is added back
+  // for this row alone — a select cannot show a value it has no option for.
+  const orphan = isParty && assignment.albumId !== null
+    && !parties.some((p) => p.albumId === assignment.albumId);
+
+  return (
+    <div className="tv-device-assignment" data-testid={`tv-device-assignment-${device.id}`}>
+      <label htmlFor={`tv-device-use-${device.id}`}>{t('tvDevices.useTitle')}</label>
+      <select
+        id={`tv-device-use-${device.id}`}
+        value={value}
+        disabled={busy}
+        onChange={(e) => onAssign(e.target.value === '' ? null : e.target.value)}
+      >
+        <option value="">{t('tvDevices.useGeneral')}</option>
+        {orphan && (
+          <option value={assignment.albumId!}>
+            {t('tvDevices.usePartyGone', {
+              name: assignment.albumName ?? t('tvDevices.partyFallback'),
+            })}
+          </option>
+        )}
+        {parties.map((party) => (
+          <option key={party.albumId} value={party.albumId}>
+            {t('tvDevices.useParty', { name: party.albumName })}
+          </option>
+        ))}
+      </select>
+      {isParty && !assignment.partyAvailable && (
+        <span className="muted" role="status" data-testid={`tv-device-party-gone-${device.id}`}>
+          {t('tvDevices.partyGone')}
+        </span>
+      )}
+      {parties.length === 0 && !isParty && (
+        <span className="muted">{t('tvDevices.noParties')}</span>
+      )}
+    </div>
   );
 }
 

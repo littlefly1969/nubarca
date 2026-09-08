@@ -115,27 +115,52 @@ public static class TvEndpoints
             return Results.Ok(result.Response);
         }).WithName("ApproveTvPairing").RequirePermission(Permissions.TvManage);
 
+        // The television's own view of itself: is this session still good, and
+        // what is it FOR. The two answers come from two services on purpose —
+        // pairing says who this device is, assignment says what it shows — and
+        // the endpoint is where they meet, so neither has to know the other.
+        //
+        // The assignment is re-read on every call, so an owner changing it
+        // reaches the television on its next poll rather than on its next
+        // pairing.
         app.MapGet("/api/tv/session", async (
             HttpContext httpContext,
             [FromServices] ITvPairingService tv,
+            [FromServices] ITvDisplayAssignmentService assignments,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var result = await tv.GetSessionAsync(
-                httpContext.Request.Cookies[TvPairingService.CookieName], heartbeat: false, cancellationToken);
-            return result is null ? Results.Unauthorized() : Results.Ok(result);
+            return await TvSessionResponseAsync(httpContext, tv, assignments, false, cancellationToken);
         }).WithName("GetTvSession");
 
         app.MapPost("/api/tv/session/heartbeat", async (
             HttpContext httpContext,
             [FromServices] ITvPairingService tv,
+            [FromServices] ITvDisplayAssignmentService assignments,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var result = await tv.GetSessionAsync(
-                httpContext.Request.Cookies[TvPairingService.CookieName], heartbeat: true, cancellationToken);
-            return result is null ? Results.Unauthorized() : Results.Ok(result);
+            return await TvSessionResponseAsync(httpContext, tv, assignments, true, cancellationToken);
         }).WithName("HeartbeatTvSession");
+
+        // The session this pairing produced, for the owner who approved it —
+        // null while the television has not polled yet. It exists so the
+        // approval page can finish the sentence it started ("what is this
+        // television for?") on the device it just paired, instead of sending the
+        // owner to look for it in a list. It carries an id and nothing else.
+        app.MapGet("/api/tv/pairing/{publicCode}/device", async (
+            string publicCode,
+            HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var secret = httpContext.Request.Headers[TvPairingService.PairingSecretHeader].ToString();
+            var sessionId = await tv.FindPairedSessionIdAsync(
+                publicCode, secret, ownerUserId, cancellationToken);
+            return Results.Ok(new TvPairedDeviceDto(sessionId));
+        }).WithName("GetTvPairedDevice").RequirePermission(Permissions.TvManage);
 
         app.MapDelete("/api/tv/session", async (
             HttpContext httpContext,
@@ -158,11 +183,75 @@ public static class TvEndpoints
         app.MapGet("/api/tv-devices", async (
             HttpContext httpContext,
             [FromServices] ITvPairingService tv,
+            [FromServices] ITvDisplayAssignmentService assignments,
             CancellationToken cancellationToken) =>
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-            return Results.Ok(await tv.ListOwnerSessionsAsync(ownerUserId, cancellationToken));
+            var devices = await tv.ListOwnerSessionsAsync(ownerUserId, cancellationToken);
+            // One query for the whole list, not one per row.
+            var described = await assignments.DescribeAsync(
+                ownerUserId, devices.Select(d => d.Id).ToList(), cancellationToken);
+            return Results.Ok(devices
+                .Select(d => d with
+                {
+                    Assignment = described.GetValueOrDefault(d.Id, TvDisplayAssignmentDto.General),
+                })
+                .ToList());
         }).WithName("ListTvDevices").RequirePermission(Permissions.TvManage);
+
+        // The parties this owner could point a television at. Album names only —
+        // never a party link id and never a token; the assignment route takes an
+        // ALBUM for exactly that reason.
+        app.MapGet("/api/tv-devices/parties", async (
+            HttpContext httpContext,
+            [FromServices] ITvDisplayAssignmentService assignments,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            return Results.Ok(await assignments.ListAssignablePartiesAsync(ownerUserId, cancellationToken));
+        }).WithName("ListTvAssignableParties").RequirePermission(Permissions.TvManage);
+
+        // What this television shows. Deliberately a PATCH on the device rather
+        // than anything near pairing: the credential identifies the device and
+        // never changes, while this is ordinary mutable state — which is what
+        // lets an owner move a television between the general experience and a
+        // party, or between two parties, without another PIN.
+        app.MapMethods("/api/tv-devices/{sessionId:guid}/assignment", ["PATCH"], async (
+            Guid sessionId,
+            [FromBody] TvAssignmentRequest? body,
+            HttpContext httpContext,
+            [FromServices] ITvDisplayAssignmentService assignments,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await assignments.SetAsync(
+                ownerUserId, sessionId, body?.Kind, body?.AlbumId, cancellationToken);
+
+            if (result.Error is TvAssignmentError error)
+            {
+                return error switch
+                {
+                    // A television that is not this owner's, and a party that is
+                    // not this owner's, are the same generic 404: neither may be
+                    // used to discover that the other exists.
+                    TvAssignmentError.DeviceNotFound => Results.NotFound(),
+                    TvAssignmentError.PartyUnavailable =>
+                        Results.NotFound(new { error = "party_unavailable" }),
+                    TvAssignmentError.AlbumRequired =>
+                        Results.BadRequest(new { error = "album_required" }),
+                    _ => Results.BadRequest(new { error = "unknown_assignment" }),
+                };
+            }
+
+            await audit.LogAsync(ownerUserId, AuditActions.TvAssignmentSet, AuditEntityTypes.TvSession,
+                sessionId, httpContext.Connection.RemoteIpAddress?.ToString(),
+                new { kind = result.Assignment!.Kind, albumId = result.Assignment.AlbumId },
+                cancellationToken);
+            return Results.Ok(result.Assignment);
+        }).WithName("SetTvDeviceAssignment").RequirePermission(Permissions.TvManage);
 
         app.MapDelete("/api/tv-devices/{sessionId:guid}", async (
             Guid sessionId,
@@ -2152,6 +2241,23 @@ public static class TvEndpoints
             SameSite = SameSiteMode.Strict,
             Path = "/api/tv",
         });
+    }
+
+    /// <summary>
+    /// The television's session, composed from the two services that each own
+    /// half of it. Shared by the read and the heartbeat, which differ only in
+    /// whether they stamp <c>LastSeenAt</c>.
+    /// </summary>
+    private static async Task<IResult> TvSessionResponseAsync(
+        HttpContext httpContext, ITvPairingService tv, ITvDisplayAssignmentService assignments,
+        bool heartbeat, CancellationToken cancellationToken)
+    {
+        var state = await tv.GetSessionAsync(
+            httpContext.Request.Cookies[TvPairingService.CookieName], heartbeat, cancellationToken);
+        if (state is null) return Results.Unauthorized();
+        var assignment = await assignments.ResolveAsync(state.SessionId, cancellationToken);
+        return Results.Ok(new TvSessionDto(
+            state.Status, state.ExpiresAt, state.LastSeenAt, state.Language, assignment));
     }
 
     // Duplicated from Program.cs's local `SetNoStore` / `SetPrivateDerivativeCache`

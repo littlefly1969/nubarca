@@ -322,6 +322,19 @@ public class AlbumService : IAlbumService
                 .Contains(p.PartyAlbumLinkId))
             .ExecuteDeleteAsync(cancellationToken);
 
+        // A paired television pointed at one of this album's parties holds a
+        // RESTRICTING foreign key to the link, so it would block the delete the
+        // same way every table above used to. It is returned to the general
+        // NubArca TV experience rather than unpaired: the party is what is going
+        // away, not the television. Both columns move in one statement — the
+        // check constraint refuses a general row that still names a party.
+        await _db.TvSessions
+            .Where(t => t.AssignedPartyAlbumLinkId != null
+                && partyLinkIds.Contains(t.AssignedPartyAlbumLinkId.Value))
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(t => t.DisplayAssignment, TvDisplayAssignments.General)
+                .SetProperty(t => t.AssignedPartyAlbumLinkId, (Guid?)null), cancellationToken);
+
         await _db.PartyAlbumLinks
             .Where(l => l.AlbumId == albumId)
             .ExecuteDeleteAsync(cancellationToken);
