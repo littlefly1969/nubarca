@@ -112,6 +112,12 @@ permissions) — the bytes are tracked, not lost.
 > Use `storage reconcile` (dry-run by default) to inspect on-disk orphans vs.
 > missing rows.
 
+"Orphan" there means **no live owner**, not merely "no `BlobObject` row". A
+rendered print artifact is owned by `PrintJob.ArtifactStorageKey` alone and has
+no blob row by design, so reconcile counts those separately as
+`protected-non-blob` and never deletes them. Any future owner of that shape must
+be added to the same set, or `--delete-orphans` would remove live data.
+
 ## Background jobs (opt-in)
 
 Backfill/maintenance work runs as durable DB-backed jobs. The in-process worker

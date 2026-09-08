@@ -8,6 +8,13 @@ namespace NubArca.Api.Storage;
 // physical path. Dry-run by default; physical deletion of orphans requires
 // an explicit opt-in. Mutates the filesystem only (deletes orphan physical
 // objects when asked); never touches the database.
+//
+// "Orphan" means NO live owner, not merely "no BlobObject row". Ownership of a
+// physical object can be recognised by the model without going through
+// blob_objects — a rendered print artifact is owned by
+// PrintJob.ArtifactStorageKey alone — and such an object must never be counted
+// as an orphan or deleted. Any future owner of that shape belongs in the same
+// set, beside the print artifacts.
 public sealed class StorageReconciliationService
 {
     private readonly AppDbContext _db;
@@ -41,6 +48,29 @@ public sealed class StorageReconciliationService
             .ToListAsync(cancellationToken);
         var known = new HashSet<string>(knownKeys, StringComparer.Ordinal);
 
+        // A BlobObject row is NOT the only thing that owns a physical object.
+        // A rendered print artifact is written straight to the derived store by
+        // PrintStationService / PartyPrintSubmissionService and is referenced
+        // only by PrintJob.ArtifactStorageKey — a plain string column, by
+        // design: the print artifact is not content-addressed library content
+        // and must not be given a synthetic BlobObject just to satisfy this
+        // tool. Its bytes land in the very same objects/{a}/{b}/{sha256}
+        // layout this scan walks, so without this set every live print artifact
+        // looks like an orphan and --delete-orphans deletes a queued job's
+        // rendered image out from under the Print Agent.
+        //
+        // Deliberately NOT filtered by job state: a job holds its artifact for
+        // its whole life, PrintJob rows are never deleted and the column is
+        // never cleared, so any non-null key is a live owner.
+        var printArtifactKeys = await _db.PrintJobs.AsNoTracking()
+            .Where(j => j.ArtifactStorageKey != null)
+            .Select(j => j.ArtifactStorageKey!)
+            .ToListAsync(cancellationToken);
+        // Ownership recognised by the model but not by blob_objects. Kept as a
+        // SEPARATE set so pass 2 keeps meaning exactly "blob rows whose bytes
+        // are gone" and BlobObjectRows keeps counting blob rows only.
+        var ownedWithoutBlobRow = new HashSet<string>(printArtifactKeys, StringComparer.Ordinal);
+
         var splitRoots = !ReferenceEquals(_derivedStorage, _storage);
 
         // Pass 1 — on-disk objects with no BlobObject row (orphans). Scan the
@@ -52,6 +82,7 @@ public sealed class StorageReconciliationService
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var orphans = 0;
         var orphansDeleted = 0;
+        var protectedWithoutBlobRow = 0;
 
         async Task ScanAsync(IBlobStorage store)
         {
@@ -63,6 +94,18 @@ public sealed class StorageReconciliationService
                 }
                 if (known.Contains(key))
                 {
+                    continue;
+                }
+                if (ownedWithoutBlobRow.Contains(key))
+                {
+                    // Live non-blob owner (a print job's rendered artifact).
+                    // Not an orphan, and never deletable by this tool. Counted
+                    // separately so an operator can see why the orphan number
+                    // is lower than "objects minus blob rows". `seen` already
+                    // dedups, so meeting the same artifact in both roots — or
+                    // shared by two jobs that rendered identical bytes — counts
+                    // exactly once.
+                    protectedWithoutBlobRow++;
                     continue;
                 }
 
@@ -113,11 +156,13 @@ public sealed class StorageReconciliationService
             OrphanPhysicalObjects: orphans,
             OrphansDeleted: orphansDeleted,
             MissingPhysicalObjects: missing,
-            DryRun: options.DryRun);
+            DryRun: options.DryRun,
+            ProtectedNonBlobObjects: protectedWithoutBlobRow);
 
         log?.Invoke(
             $"storage reconcile{(options.DryRun ? " (dry-run)" : "")}: " +
             $"scanned {scanned} object(s), {known.Count} blob row(s); " +
+            $"protected-non-blob {protectedWithoutBlobRow}; " +
             $"orphan-on-disk {orphans} (deleted {orphansDeleted}); " +
             $"missing-on-disk {missing}.");
 
@@ -140,4 +185,8 @@ public sealed record StorageReconciliationResult(
     int OrphanPhysicalObjects,
     int OrphansDeleted,
     int MissingPhysicalObjects,
-    bool DryRun);
+    bool DryRun,
+    // On-disk objects that have no BlobObject row but ARE owned by a live
+    // non-blob reference (today: PrintJob.ArtifactStorageKey). Reported so the
+    // orphan count is explainable; these are never deleted by this tool.
+    int ProtectedNonBlobObjects = 0);
