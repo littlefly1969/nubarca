@@ -369,6 +369,25 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `FileItem` through the canonical Trash transition. Private Vault, Trash,
   Party media and every other owner's logical files are outside the scan; a
   shared physical blob is never deleted by the function.
+- **Permanent purge has ONE implementation, and it is opt-in.** Individual
+  permanent delete, Empty Trash and retention expiry all run
+  `IFileItemService.PurgeTrashedFileAsync`; `FileItemSweeper` owns only the
+  schedule. A dependent row added to that cascade is therefore picked up by all
+  three triggers at once — never add a retention-only deletion path. Reclaiming
+  bytes needs BOTH `FileItemSweeper__Enabled=true` (logical row, grace from
+  entering Trash) and `BlobJanitor__Enabled=true` (physical bytes, grace from
+  the hard purge). Both default to `false`, so an installation that sets neither
+  keeps every trashed file's bytes forever, however long the retention window.
+- **A FileItem is pinned by any `Restrict` FK nobody deletes.** `photo_export_entries`
+  and `print_job_sources` are append-only, so before the purge cascade covered
+  them one export or print made a file permanently unpurgeable through every
+  trigger. `PrintJob.FileItemId` is nulled rather than deleted: the nullable
+  column exists so completed print history outlives its source photograph.
+- **The janitor records `pending_blob_purges` before it unlinks.** The blob row
+  (and its storage key) is deleted in the same transaction that writes the
+  pending record; only a successful unlink clears it. Bytes are never removed
+  before the row, because a concurrent same-SHA `StoreAsync` would skip the
+  write and resurrect the row onto missing bytes.
 - **A reverse proxy must forward `Host $http_host`, never `$host`.** The CSRF
   middleware rejects a state-changing `/api` request whose `Origin` disagrees
   with the request's own scheme/host/port, so `Request.Host` has to be the

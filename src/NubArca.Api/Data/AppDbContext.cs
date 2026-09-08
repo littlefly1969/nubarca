@@ -27,6 +27,9 @@ public class AppDbContext : DbContext
     public DbSet<Folder> Folders => Set<Folder>();
     public DbSet<FileItem> FileItems => Set<FileItem>();
     public DbSet<BlobObject> BlobObjects => Set<BlobObject>();
+    // Blobs whose row is already gone but whose bytes are not yet unlinked.
+    // Drained by BlobJanitor; see PendingBlobPurge.
+    public DbSet<PendingBlobPurge> PendingBlobPurges => Set<PendingBlobPurge>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<ShareLink> ShareLinks => Set<ShareLink>();
     public DbSet<FileThumbnail> FileThumbnails => Set<FileThumbnail>();

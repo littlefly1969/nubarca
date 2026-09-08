@@ -70,6 +70,43 @@ blobs accumulate.
   `FileItemSweeper__GraceMinutes=14400` and
   `BlobJanitor__GraceMinutes=60`.
 
+Both are needed. The sweeper alone frees no bytes (it only removes the retained
+logical row); the janitor alone frees nothing either, because the retained row's
+`Restrict` FK pins the blob. **An installation that enables neither keeps every
+trashed file's bytes forever, no matter how long the retention window** — the
+Trash UI shows the file as expired while the object is still on disk.
+
+Verify what a running installation actually has:
+
+```bash
+$DC exec api printenv | grep -E '^(FileItemSweeper|BlobJanitor)__'
+grep -E '^(FileItemSweeper|BlobJanitor)__' .env     # never `source` the .env
+```
+
+The API also reports both, live, in the admin Storage Stats payload
+(`fileItemSweeper` / `blobJanitor`), including whether each is enabled.
+
+### What a permanent purge removes
+
+All three triggers — individual permanent delete, Empty Trash and retention
+expiry — run the same canonical purge, so they remove the same things:
+
+- the `FileItem` row and its owner-scoped dependents (share links, user
+  metadata, album membership, GPS projection, photo-export snapshot entries,
+  print-job source rows; a `PrintJob` survives with `FileItemId` nulled)
+- the original content object, once no other file references it
+- every derived object the file exclusively owned: thumbnail / preview / poster
+  blobs, the sha256-keyed HLS ladder, and the face-preview crops cached in the
+  derived store
+
+A blob still referenced by another live file, an Aesthetics Lab item, a plate or
+an album transfer is never removed — `ReferenceCount` is the authority.
+
+If an unlink fails, the blob's storage key survives in `pending_blob_purges` and
+the next janitor tick retries it. A non-empty `pending_blob_purges` with a
+climbing `AttemptCount` means storage is refusing deletes (read-only mount,
+permissions) — the bytes are tracked, not lost.
+
 > **Never delete blob files by hand.** A blob may be shared by several files
 > via deduplication; only the janitor knows when bytes are safe to remove.
 > Use `storage reconcile` (dry-run by default) to inspect on-disk orphans vs.

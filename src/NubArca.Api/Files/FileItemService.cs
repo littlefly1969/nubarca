@@ -2388,21 +2388,63 @@ public sealed class FileItemService : IFileItemService
             throw new ResourceNotInTrashException(fileItemId);
         }
 
+        return await PurgeTrashedFileAsync(
+            ownerUserId, fileItemId, deletedBefore: null, cancellationToken);
+    }
+
+    // The ONE canonical TRASHED -> PERMANENTLY PURGED transition.
+    //
+    // All three triggers converge here and therefore produce byte-identical
+    // results: individual permanent delete and Empty Trash (both via
+    // PermanentDeleteAsync, deletedBefore = null) and automatic retention
+    // expiry (FileItemSweeper, deletedBefore = the retention cutoff). There is
+    // deliberately no separate DB-only retention deletion path.
+    //
+    // Visibility gating belongs to the CALLER, not here: PermanentDeleteAsync
+    // looks the file up through the normal query filter so a Private Vault file
+    // stays invisible to the public API, while the sweeper enumerates with
+    // IgnoreQueryFilters so a trashed vault file is still reclaimed. This method
+    // therefore ignores the filter and trusts the owner id it is given.
+    public async Task<bool> PurgeTrashedFileAsync(
+        Guid ownerUserId,
+        Guid fileItemId,
+        DateTime? deletedBefore,
+        CancellationToken cancellationToken = default)
+    {
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            // Serialise against a concurrent restore of the same owner's tree.
+            // The sweeper takes this lock too, so retention expiry and a user
+            // restore can never interleave — one of them observes the other's
+            // committed state and the atomic gate below decides the winner.
             await TreeMutationLock.AcquireAsync(_db, ownerUserId, cancellationToken);
 
+            // Re-read the blob id INSIDE the lock. The caller's pre-check ran
+            // outside it and a repoint (metadata strip / DateTaken write) may
+            // have moved the file to a different blob since.
+            var target = await _db.FileItems
+                .AsNoTracking()
+                .IgnoreQueryFilters()
+                .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId)
+                .Select(f => new { f.BlobObjectId })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (target is null)
+            {
+                await tx.CommitAsync(cancellationToken);
+                return false;
+            }
+
             // Capture thumbnail blob ids so we can release their ReferenceCount
-            // after the FileItem row is gone. Mirrors FileItemSweeper exactly.
+            // after the FileItem row is gone.
             var thumbnailBlobIds = await _db.FileThumbnails
                 .Where(t => t.FileItemId == fileItemId)
                 .Select(t => t.BlobObjectId)
                 .ToListAsync(cancellationToken);
 
-            // Delete dependent share_links + thumbnails + user metadata + album memberships first
-            // (all FK Restrict to FileItem).
+            // Delete dependent share_links + thumbnails + user metadata + album memberships
+            // first (all FK Restrict to FileItem).
             await _db.ShareLinks
                 .Where(s => s.FileItemId == fileItemId)
                 .ExecuteDeleteAsync(cancellationToken);
@@ -2420,16 +2462,46 @@ public sealed class FileItemService : IFileItemService
                 .Where(l => l.FileItemId == fileItemId)
                 .ExecuteDeleteAsync(cancellationToken);
 
+            // A photo-export snapshot entry FK-Restricts the file it points at
+            // so it can never dangle while its session is live. Nothing ever
+            // deleted these rows, so one export pinned the file — and its bytes
+            // — forever, defeating all three purge triggers. The export session
+            // is a transient, expiring artifact and the file is now gone for
+            // good, so the entry goes with it; the session row itself (and its
+            // counters) is left alone.
+            await _db.PhotoExportEntries
+                .Where(e => e.FileItemId == fileItemId)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            // Same class of permanent pin from the print studio. The per-slot
+            // source rows die with the file; the PrintJob itself SURVIVES with
+            // its FileItemId nulled, because that column is nullable precisely
+            // so a completed job keeps its history (and its rendered artifact)
+            // after the source photograph is gone.
+            await _db.PrintJobSources
+                .Where(s => s.FileItemId == fileItemId)
+                .ExecuteDeleteAsync(cancellationToken);
+            await _db.PrintJobs
+                .Where(j => j.FileItemId == fileItemId)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(j => j.FileItemId, _ => (Guid?)null),
+                    cancellationToken);
+
             // Atomic gate: only delete if the row is still soft-deleted and
-            // owned. Defends against a concurrent restore between the
-            // pre-check and this delete.
+            // owned — and, for retention expiry, still older than the cutoff it
+            // was selected under. Defends against a concurrent restore between
+            // the caller's pre-check/scan and this delete.
             var rowsDeleted = await _db.FileItems
+                .IgnoreQueryFilters()
                 .Where(f => f.Id == fileItemId
                     && f.OwnerUserId == ownerUserId
-                    && f.DeletedAt != null)
+                    && f.DeletedAt != null
+                    && (deletedBefore == null || f.DeletedAt < deletedBefore))
                 .ExecuteDeleteAsync(cancellationToken);
             if (rowsDeleted == 0)
             {
+                // Lost the race to a restore (or another purge). Roll back so
+                // the dependents above do not vanish under a now-live file.
                 await tx.RollbackAsync(cancellationToken);
                 return false;
             }
@@ -2446,7 +2518,7 @@ public sealed class FileItemService : IFileItemService
             // The retained FileItem row is now gone, so start the grace window
             // without decrementing the already-zero active refcount again.
             await _blobService.MarkPurgeEligibleIfUnreferencedAsync(
-                current.BlobObjectId,
+                target.BlobObjectId,
                 cancellationToken);
 
             await tx.CommitAsync(cancellationToken);

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NubArca.Api.Audit;
 using NubArca.Api.Data;
+using NubArca.Api.Domain;
 
 namespace NubArca.Api.Storage;
 
@@ -16,13 +17,23 @@ namespace NubArca.Api.Storage;
 // configuration.
 //
 // Ordering note: inside one transaction we delete the blob's blob_metadata row
-// (slice 53) and then the BlobObject row (gated atomically by "WHERE Id = $1
-// AND ReferenceCount = 0"); only after that commits do we delete the physical
-// file. The spec's suggested ordering (physical file first) is the reverse; we
-// deviate because the reverse can leave a row whose storage_key points at a
-// missing physical file, which breaks any read path that subsequently resolves
-// the row. With our ordering, the worst-case failure is an orphan physical
-// file on disk — disk waste only.
+// (slice 53), record a PendingBlobPurge carrying the storage key + sha256, and
+// then delete the BlobObject row (gated atomically by "WHERE Id = $1 AND
+// ReferenceCount = 0"); only after that commits do we delete the physical
+// files, and only a successful unlink clears the PendingBlobPurge row.
+//
+// We do NOT delete the physical file first. That ordering can leave a live row
+// whose storage_key points at missing bytes: a concurrent StoreAsync for the
+// same sha256 observes the file as already present, skips the write, then
+// resurrects the row (ReferenceCount 0 -> 1, PurgeEligibleAt cleared), and our
+// gated row delete correctly declines — leaving a referenced blob with no
+// bytes.
+//
+// The PendingBlobPurge row is what makes the safe ordering retry-safe: the
+// storage key outlives the row it came from, so a failed or interrupted unlink
+// is retried on a later tick instead of leaking bytes forever with no record
+// that they exist. Every tick drains leftovers before scanning for new work.
+// A missing physical file is SUCCESS — the goal state is "bytes absent".
 //
 // A soft-deleted FileItem leaves ReferenceCount at 0 but deliberately keeps
 // PurgeEligibleAt null while its Restrict FK preserves restorable bytes. The
@@ -118,6 +129,37 @@ public sealed class BlobJanitor : BackgroundService
         // without the registration keep working.
         var hlsStorage = scope.ServiceProvider.GetService<HlsDerivativeStorage>();
         var audit = scope.ServiceProvider.GetRequiredService<IAuditLogger>();
+        // Needed to release the derived face-preview blobs that die with this
+        // blob's face detections.
+        var blobs = scope.ServiceProvider.GetRequiredService<IBlobService>();
+
+        // Retry leftovers FIRST: rows whose BlobObject is already gone but whose
+        // bytes survived a failed/interrupted unlink. Oldest first so a
+        // persistently failing key cannot starve the ones behind it. These are
+        // already-committed purge decisions, so they need no gate — only the
+        // unlink has to succeed.
+        var pending = await db.PendingBlobPurges
+            .AsNoTracking()
+            .OrderBy(p => p.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var drained = 0;
+        foreach (var leftover in pending)
+        {
+            if (await TryCompletePendingPurgeAsync(
+                    db, storage, derivedStorage, hlsStorage,
+                    leftover.BlobObjectId, leftover.StorageKey, leftover.Sha256,
+                    cancellationToken))
+            {
+                drained++;
+            }
+        }
+
+        if (drained > 0)
+        {
+            _logger.LogInformation(
+                "BlobJanitor completed {Drained} retried physical blob purge(s).", drained);
+        }
 
         var candidates = await db.BlobObjects
             .AsNoTracking()
@@ -149,12 +191,47 @@ public sealed class BlobJanitor : BackgroundService
                             .Where(m => m.BlobObjectId == candidate.Id)
                             .ExecuteDeleteAsync(cancellationToken);
 
+                        // Face previews are derived crops cached in the derived
+                        // store as their OWN BlobObject rows, each holding one
+                        // reference. Their FacePreview rows are about to vanish
+                        // through the FaceDetection -> BlobObject cascade, which
+                        // would strand those blobs at ReferenceCount 1 with no
+                        // owner — invisible to this scan forever. Release them
+                        // here so a later tick reclaims their bytes too.
+                        var previewBlobIds = await db.FacePreviews
+                            .Where(p => db.FaceDetections
+                                .Any(d => d.Id == p.FaceDetectionId
+                                    && d.BlobObjectId == candidate.Id))
+                            .Select(p => p.BlobObjectId)
+                            .ToListAsync(cancellationToken);
+
                         rowsDeleted = await db.BlobObjects
                             .Where(b => b.Id == candidate.Id
                                 && b.ReferenceCount == 0
                                 && b.PurgeEligibleAt == candidate.PurgeEligibleAt
                                 && b.PurgeEligibleAt < cutoff)
                             .ExecuteDeleteAsync(cancellationToken);
+
+                        if (rowsDeleted > 0)
+                        {
+                            foreach (var previewBlobId in previewBlobIds)
+                            {
+                                await blobs.ReleaseAsync(previewBlobId, cancellationToken);
+                            }
+
+                            // The storage key must outlive the row so a failed
+                            // unlink stays retryable. Committed together with
+                            // the row delete: either both happen or neither.
+                            db.PendingBlobPurges.Add(new PendingBlobPurge
+                            {
+                                BlobObjectId = candidate.Id,
+                                StorageKey = candidate.StorageKey,
+                                Sha256 = candidate.Sha256,
+                                CreatedAt = _clock.GetUtcNow().UtcDateTime,
+                                AttemptCount = 0,
+                            });
+                            await db.SaveChangesAsync(cancellationToken);
+                        }
                     }
                     catch (DbUpdateException ex)
                     {
@@ -163,6 +240,10 @@ public sealed class BlobJanitor : BackgroundService
                         // metadata delete and leave the blob in place; a future
                         // slice will handle the cascade.
                         await tx.RollbackAsync(cancellationToken);
+                        // Drop the rolled-back pending record from the change
+                        // tracker; leaving it Added would make the NEXT
+                        // candidate's SaveChanges re-attempt this insert.
+                        DetachPendingPurges(db);
                         _logger.LogWarning(
                             ex,
                             "BlobObject {BlobId} cannot be purged — FK reference still exists.",
@@ -182,27 +263,17 @@ public sealed class BlobJanitor : BackgroundService
                     await tx.CommitAsync(cancellationToken);
                 }
 
-                // Row gone. Delete the physical file. If this fails we have an
-                // orphan blob on disk — disk waste only, no broken references.
-                try
-                {
-                    await storage.DeleteAsync(candidate.StorageKey, cancellationToken);
-                    if (derivedStorage is not null)
-                    {
-                        await derivedStorage.DeleteAsync(candidate.StorageKey, cancellationToken);
-                    }
-                    // Video-hls: remove the (regenerable) HLS ladder for this
-                    // content. Idempotent; the blob_hls_derivatives row is
-                    // already gone via the FK cascade on the blob delete.
-                    hlsStorage?.Delete(candidate.Sha256);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Physical blob delete failed after row purge for {BlobId}.",
-                        candidate.Id);
-                }
+                // The committed record is reached by ExecuteDelete/ExecuteUpdate
+                // from here on, so stop tracking it.
+                DetachPendingPurges(db);
+
+                // Row gone, storage key durably recorded. Unlink the bytes; a
+                // failure leaves the PendingBlobPurge row behind and the next
+                // tick retries it, so nothing is lost either way.
+                await TryCompletePendingPurgeAsync(
+                    db, storage, derivedStorage, hlsStorage,
+                    candidate.Id, candidate.StorageKey, candidate.Sha256,
+                    cancellationToken);
 
                 await audit.LogAsync(
                     userId: null,
@@ -226,5 +297,94 @@ public sealed class BlobJanitor : BackgroundService
         }
 
         return purged;
+    }
+
+    // The pending record is written once with Add/SaveChanges and touched only
+    // by set-based statements afterwards, so it never needs to stay tracked.
+    private static void DetachPendingPurges(AppDbContext db)
+    {
+        foreach (var entry in db.ChangeTracker.Entries<PendingBlobPurge>().ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+    }
+
+    // Finishes ONE already-decided physical purge: unlink the bytes from every
+    // store that may hold them, then drop the PendingBlobPurge record.
+    //
+    // Idempotent by construction. Every DeleteAsync treats a missing file as
+    // success, so a retry after a partial unlink — or after the bytes were
+    // removed out of band — converges on the same end state and clears the
+    // record. Returns true when the bytes are gone and the record is cleared;
+    // false when the unlink failed and the record was deliberately KEPT for a
+    // later retry.
+    private async Task<bool> TryCompletePendingPurgeAsync(
+        AppDbContext db,
+        IBlobStorage storage,
+        IDerivedBlobStorage? derivedStorage,
+        HlsDerivativeStorage? hlsStorage,
+        Guid blobObjectId,
+        string storageKey,
+        string sha256,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Slice 72: a reclaimed blob may be an original or a derived
+            // artifact and we don't track purpose on the row, so delete from
+            // BOTH stores. Both calls are no-ops for a missing file, and when
+            // the roots are the same the second is harmless.
+            await storage.DeleteAsync(storageKey, cancellationToken);
+            if (derivedStorage is not null)
+            {
+                await derivedStorage.DeleteAsync(storageKey, cancellationToken);
+            }
+            // Video-hls: remove the (regenerable) HLS ladder for this content.
+            // Idempotent; the blob_hls_derivatives row is already gone via the
+            // FK cascade on the blob delete.
+            hlsStorage?.Delete(sha256);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Keep the record. This is the whole point: the storage key stays
+            // durable so the next tick can retry instead of leaking bytes with
+            // no record that they exist.
+            try
+            {
+                await db.PendingBlobPurges
+                    .Where(p => p.BlobObjectId == blobObjectId)
+                    .ExecuteUpdateAsync(
+                        setters => setters
+                            .SetProperty(p => p.AttemptCount, p => p.AttemptCount + 1)
+                            .SetProperty(
+                                p => p.LastAttemptAt,
+                                _ => (DateTime?)_clock.GetUtcNow().UtcDateTime),
+                        cancellationToken);
+            }
+            catch (Exception bookkeepingEx) when (bookkeepingEx is not OperationCanceledException)
+            {
+                // Attempt bookkeeping is diagnostics only; never let it mask
+                // the retry itself.
+                _logger.LogDebug(
+                    bookkeepingEx,
+                    "Could not record purge attempt for blob {BlobId}.",
+                    blobObjectId);
+            }
+
+            _logger.LogWarning(
+                ex,
+                "Physical blob delete failed for {BlobId}; kept for retry.",
+                blobObjectId);
+            return false;
+        }
+
+        await db.PendingBlobPurges
+            .Where(p => p.BlobObjectId == blobObjectId)
+            .ExecuteDeleteAsync(cancellationToken);
+        return true;
     }
 }
