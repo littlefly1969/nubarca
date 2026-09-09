@@ -32,7 +32,7 @@ public sealed class PartyMediaService : IPartyMediaService
             && await members.AnyAsync(x => x.Id == cover, cancellationToken) ? cover : (Guid?)null;
         var fallback = configured ?? await members.OrderBy(x => x.AddedAt).ThenBy(x => x.Id)
             .Select(x => (Guid?)x.Id).FirstOrDefaultAsync(cancellationToken);
-        return new PartyAlbumHeader(album.Name, count, fallback);
+        return new PartyAlbumHeader(album.Name, count, fallback, configured);
     }
 
     public async Task<IReadOnlyList<PartyMediaItem>?> ListItemsAsync(

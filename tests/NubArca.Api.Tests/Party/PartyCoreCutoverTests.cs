@@ -113,7 +113,7 @@ public sealed class PartyCoreCutoverTests : IDisposable
         var (ownerId, owner) = await NewHostAsync();
         var albumId = await CreateAlbumAsync(owner, "Festa");
         var token = TokenFromUrl(
-            (await EnablePartyAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
+            (await EnableAndStartAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
 
         var anon = _factory.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await anon.GetAsync($"/api/party/{token}")).StatusCode);
@@ -221,10 +221,16 @@ public sealed class PartyCoreCutoverTests : IDisposable
             Assert.Single(await db.PartyMediaSources.ToListAsync());
         }
 
-        // And the guests can walk in.
+        // And the guests can walk in — to the INVITATION first, because that is
+        // what a published party is, and then to the party once it starts.
         var guest = _factory.CreateClient();
         var token = TokenFromUrl(status.GetProperty("partyUrl").GetString()!);
-        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync($"/api/party/{token}")).StatusCode);
+        var invitation = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{token}");
+        Assert.Equal("before", invitation.GetProperty("phase").GetString());
+
+        await PartyTestHost.StartAsync(owner, migratedPartyId);
+        var live = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{token}");
+        Assert.Equal("live", live.GetProperty("phase").GetString());
     }
 
     // --- 2. Lifecycle ------------------------------------------------------
@@ -341,7 +347,7 @@ public sealed class PartyCoreCutoverTests : IDisposable
     {
         var (roleKey, _, owner) = await NewHostWithRoleAsync();
         var albumId = await CreateAlbumAsync(owner, "Festa");
-        var status = await EnablePartyAsync(owner, albumId);
+        var status = await EnableAndStartAsync(owner, albumId);
         var token = TokenFromUrl(status.GetProperty("partyUrl").GetString()!);
 
         // The guest is at the party, holding a valid QR, in a browser nobody is
@@ -366,7 +372,7 @@ public sealed class PartyCoreCutoverTests : IDisposable
         var (_, owner) = await NewHostAsync();
         var albumId = await CreateAlbumAsync(owner, "Festa");
         var token = TokenFromUrl(
-            (await EnablePartyAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
+            (await EnableAndStartAsync(owner, albumId)).GetProperty("partyUrl").GetString()!);
 
         var guest = _factory.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync($"/api/party/{token}")).StatusCode);
@@ -386,15 +392,15 @@ public sealed class PartyCoreCutoverTests : IDisposable
         var (_, owner) = await NewHostAsync(
             Permissions.PartyAccess, Permissions.PartyContributions);
         var albumId = await CreateAlbumAsync(owner, "Festa");
-        var status = await EnablePartyAsync(owner, albumId);
+        var status = await EnableAndStartAsync(owner, albumId);
         var token = TokenFromUrl(status.GetProperty("partyUrl").GetString()!);
 
         var guest = _factory.CreateClient();
         var hub = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{token}");
-        Assert.False(hub.GetProperty("gameEnabled").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, hub.GetProperty("gameUrl").ValueKind);
+        var capabilities = hub.GetProperty("capabilities");
+        Assert.Equal(JsonValueKind.Null, capabilities.GetProperty("gameUrl").ValueKind);
         // Contributions are permitted, so the hub still names where they go.
-        Assert.Equal(JsonValueKind.String, hub.GetProperty("contributionUrl").ValueKind);
+        Assert.Equal(JsonValueKind.String, capabilities.GetProperty("contributionUrl").ValueKind);
 
         Assert.Equal(
             HttpStatusCode.NotFound, (await guest.GetAsync($"/api/party/{token}/game")).StatusCode);
@@ -409,7 +415,7 @@ public sealed class PartyCoreCutoverTests : IDisposable
     {
         var (roleKey, _, owner) = await NewHostWithRoleAsync();
         var albumId = await CreateAlbumAsync(owner, "Festa");
-        var status = await EnablePartyAsync(owner, albumId);
+        var status = await EnableAndStartAsync(owner, albumId);
         var viewToken = TokenFromUrl(status.GetProperty("partyUrl").GetString()!);
         var uploadToken = UploadTokenFromStatus(status);
 
@@ -428,7 +434,9 @@ public sealed class PartyCoreCutoverTests : IDisposable
         // The party itself is untouched: the host may still hold it, and the
         // hub simply stops offering a place to contribute.
         var hub = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        Assert.Equal(JsonValueKind.Null, hub.GetProperty("contributionUrl").ValueKind);
+        Assert.Equal(
+            JsonValueKind.Null,
+            hub.GetProperty("capabilities").GetProperty("contributionUrl").ValueKind);
     }
 
     [Fact]
@@ -500,6 +508,17 @@ public sealed class PartyCoreCutoverTests : IDisposable
             $"/api/albums/{albumId}/party-settings", new { enabled = true });
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    // Enabling guest access PUBLISHES the party — an invitation, which is
+    // deliberately not the party itself. A test about a guest AT the party
+    // starts it, exactly as a host does; a test about the lifecycle does not,
+    // because where enabling leaves the party is the thing it is checking.
+    private static async Task<JsonElement> EnableAndStartAsync(HttpClient owner, Guid albumId)
+    {
+        var settings = await EnablePartyAsync(owner, albumId);
+        await PartyTestHost.StartAsync(owner, settings);
+        return settings;
     }
 
     private static async Task CreateChallengeAsync(HttpClient owner, Guid albumId) =>

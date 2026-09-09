@@ -83,7 +83,7 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
     {
         var guest = await SeedGuestAsync();
         var access = new PartyAccess(
-            _partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All,
+            _partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live,
             MaxMessagesPerParticipant: 1);
 
         await using var firstDb = CreateContext();

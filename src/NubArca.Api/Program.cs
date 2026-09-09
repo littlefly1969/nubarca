@@ -837,6 +837,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // The Party aggregate root: creating a party for an album and moving it
     // through its lifecycle. Everything else in Party keeps working on the
     // (owner, album) pair this resolves to.
+    // What a party OWNS, stated once and shared by the two things that erase
+    // one: deleting its album, and tearing the party down while keeping it.
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyStateEraser, NubArca.Api.Party.PartyStateEraser>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
     // What the HOST's role permits their party to offer. Scoped, because it
     // reads current database state on every request through
@@ -844,6 +848,10 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // reach guests who are already at the party.
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyCapabilityPolicy, NubArca.Api.Party.PartyCapabilityPolicy>();
+    // The six typed slots a party tells its guests. Not a page builder: see
+    // PartyGuestContent.
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyGuestContentService, NubArca.Api.Party.PartyGuestContentService>();
     // Public party capabilities (owner lifecycle + the public token seam) and
     // party-scoped media surfacing.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();

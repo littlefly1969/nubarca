@@ -177,7 +177,11 @@ public sealed class PartyChallengeTests : IDisposable
     {
         var response = await owner.PatchAsJsonAsync($"/api/albums/{album}/party-settings", new { enabled = true });
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
+        var settings = await response.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests exercise the party.
+        await PartyTestHost.StartAsync(owner, settings);
+        return settings;
     }
     private static async Task EnableGameAsync(HttpClient owner, Guid album, int votes)
     {

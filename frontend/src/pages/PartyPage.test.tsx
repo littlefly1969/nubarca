@@ -73,15 +73,41 @@ describe('PartyPage (public party landing)', () => {
   // a five-second default leaves no room for what they do afterwards.
   vi.setConfig({ testTimeout: 20_000 });
 
-  const hub = {
-    albumName: 'Beach Party', itemCount: 1,
-    coverUrl: '/api/party/tok-1/media/f1/preview',
-    contributionUrl: '/party/upload-token/upload', gameEnabled: true,
-    // Null unless printing would really work right now — the server decides.
-    printUrl: null,
-    // Same rule for the hosted game: a url is the card, a null is no card.
-    gameUrl: null,
-  };
+  // The guest context the canonical route returns. These tests describe the
+  // LIVE surface and say so: the phase is what selects it, and the same token
+  // produces an invitation before the party and the memories after it.
+  //
+  // `gameEnabled` used to ride beside `gameUrl` on the wire and was always
+  // equal to it — a url is the card, a null is no card — so the overrides below
+  // still accept the old name and translate it.
+  function context(overrides: Record<string, unknown> = {}) {
+    const { contributionUrl, gameUrl, printUrl, faceSearch, gameEnabled, ...rest } = {
+      contributionUrl: '/party/upload-token/upload' as string | null,
+      gameUrl: undefined as string | null | undefined,
+      printUrl: null as string | null,
+      faceSearch: true,
+      gameEnabled: true,
+      ...overrides,
+    } as Record<string, unknown>;
+    const resolvedGameUrl = gameUrl !== undefined
+      ? gameUrl
+      : (gameEnabled ? '/party/tok-1/game' : null);
+    return {
+      title: 'Beach Party',
+      phase: 'live',
+      accessMode: 'full',
+      eventStartsAt: null,
+      albumName: 'Beach Party',
+      itemCount: 1,
+      coverUrl: '/api/party/tok-1/media/f1/preview',
+      content: [],
+      capabilities: { contributionUrl, gameUrl: resolvedGameUrl, printUrl, faceSearch },
+      library: { available: false, accessEndsAt: null },
+      ...rest,
+    };
+  }
+
+  const hub = context();
 
   it('is the canonical Guest Hub and keeps both legacy capabilities reachable', async () => {
     installFetchMock({
@@ -141,7 +167,7 @@ describe('PartyPage (public party landing)', () => {
 
   it('falls back to the branded NubArca cover when the album has none', async () => {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, coverUrl: null }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ coverUrl: null })),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
     render(wrapper());
@@ -157,7 +183,7 @@ describe('PartyPage (public party landing)', () => {
 
   it('shows NO contribution CTA when the backend returns no contribution URL', async () => {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, contributionUrl: null }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ contributionUrl: null })),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
     render(wrapper());
@@ -210,7 +236,7 @@ describe('PartyPage (public party landing)', () => {
 
   function mockHub(overrides: Record<string, unknown> = {}) {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, ...overrides }),
+      'GET /api/party/tok-1': () => jsonResponse(context(overrides)),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
   }
@@ -223,11 +249,17 @@ describe('PartyPage (public party landing)', () => {
 
     // A real destination is a real link; an action that opens something in
     // place is a real button. Never a clickable div either way.
-    expect(within(deck).getAllByRole('link')).toHaveLength(3);
+    //
+    // Four links, because the hosted game and its activity deck are two cards
+    // and the server turns them on together — `gameUrl` is the one signal, and
+    // a party with the game on has always had both.
+    expect(within(deck).getAllByRole('link')).toHaveLength(4);
     expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
       .toHaveAttribute('href', '#party-photos');
     expect(within(deck).getByRole('link', { name: /Sfide e votazioni/i }))
       .toHaveAttribute('href', '/party/tok-1/challenges');
+    expect(within(deck).getByRole('link', { name: /Gioco/i }))
+      .toHaveAttribute('href', '/party/tok-1/game');
 
     const face = within(deck).getByRole('button', { name: /Trova le tue foto/i });
     expect(face.tagName).toBe('BUTTON');
@@ -298,7 +330,7 @@ describe('PartyPage (public party landing)', () => {
 
   it('renders the album and opens a photo with a download link', async () => {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 1 }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
 
@@ -336,7 +368,7 @@ describe('PartyPage (public party landing)', () => {
 
   it('does not expose owner/metadata/upload surfaces', async () => {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 1 }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
       'GET /api/party/tok-1/items': () => jsonResponse(items),
     });
 
@@ -371,7 +403,7 @@ describe('PartyPage (public party landing)', () => {
   it('live-refreshes to show a newly uploaded photo', async () => {
     let current = items;
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: current.items.length }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: current.items.length })),
       'GET /api/party/tok-1/items': () => jsonResponse(current),
     });
     vi.useFakeTimers();
@@ -393,7 +425,7 @@ describe('PartyPage (public party landing)', () => {
   it('drops a hidden item and closes its lightbox on the next refresh', async () => {
     let current = two;
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: current.items.length }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: current.items.length })),
       'GET /api/party/tok-1/items': () => jsonResponse(current),
     });
     vi.useFakeTimers();
@@ -423,7 +455,7 @@ describe('PartyPage (public party landing)', () => {
   it('becomes unavailable when the token is revoked during refresh', async () => {
     let revoked = false;
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 1 }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 1 })),
       'GET /api/party/tok-1/items': () => (revoked ? errorResponse(404) : jsonResponse(items)),
     });
     vi.useFakeTimers();
@@ -455,7 +487,7 @@ describe('PartyPage (public party landing)', () => {
       ],
     };
     const mock = installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ albumName: 'Beach Party', itemCount: 2 }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 2 })),
       'GET /api/party/tok-1/items': () => jsonResponse(twoItems),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems.items[1]],
@@ -522,7 +554,7 @@ describe('PartyPage (public party landing)', () => {
 
   function mockAlbum(list: ReturnType<typeof media>[], album: Record<string, unknown> = {}) {
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, ...album, itemCount: list.length }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ ...album, itemCount: list.length })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: list }),
     });
   }
@@ -708,7 +740,7 @@ describe('PartyPage (public party landing)', () => {
   it('counts MATCHES, not the album, while a face filter is applied', async () => {
     const twoItems = [media('f1'), media('f2'), media('f3')];
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: 3 }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 3 })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: twoItems }),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems[1]],
@@ -760,7 +792,7 @@ describe('PartyPage (public party landing)', () => {
   it('announces moments that arrive while the guest is on the page', async () => {
     let current = [media('f1'), media('f2')];
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: current.length }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: current.length })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: current }),
     });
     vi.useFakeTimers();
@@ -908,7 +940,7 @@ describe('PartyPage (public party landing)', () => {
     // an unavailable capability is an absent one.
     const page = document.body.textContent ?? '';
     expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo/i);
-    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(4);
+    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(5);
     expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
     expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
   });
@@ -1084,7 +1116,7 @@ describe('PartyPage (public party landing)', () => {
   it('keeps its section state across a polling refresh', async () => {
     let current = [media('f1'), media('f2')];
     installFetchMock({
-      'GET /api/party/tok-1': () => jsonResponse({ ...hub, itemCount: current.length }),
+      'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: current.length })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: current }),
     });
     vi.useFakeTimers();

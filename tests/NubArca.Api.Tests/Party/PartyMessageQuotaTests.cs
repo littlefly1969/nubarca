@@ -244,6 +244,13 @@ public sealed class PartyMessageQuotaTests : IDisposable
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-slideshow-settings",
             new { maxMessagesPerParticipant = messagesPerGuest })).EnsureSuccessStatusCode();
 
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests are about guests at the
+        // party, so they start it, exactly as a host does.
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(
+            owner,
+            await (await owner.GetAsync($"/api/albums/{album}/party-settings"))
+                .Content.ReadFromJsonAsync<JsonElement>());
         var status = await (await owner.GetAsync($"/api/albums/{album}/party-settings"))
             .Content.ReadFromJsonAsync<JsonElement>();
         var view = status.GetProperty("partyUrl").GetString()!["/party/".Length..];

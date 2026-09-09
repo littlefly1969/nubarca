@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Files;
 
 namespace NubArca.Api.Party;
 
@@ -8,11 +9,19 @@ public sealed class PartyService : IPartyService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPartyStateEraser _eraser;
+    private readonly IFileItemService _fileItems;
 
-    public PartyService(AppDbContext db, TimeProvider clock)
+    public PartyService(
+        AppDbContext db,
+        TimeProvider clock,
+        IPartyStateEraser eraser,
+        IFileItemService fileItems)
     {
         _db = db;
         _clock = clock;
+        _eraser = eraser;
+        _fileItems = fileItems;
     }
 
     public async Task<IReadOnlyList<PartySummaryDto>> ListAsync(
@@ -259,6 +268,7 @@ public sealed class PartyService : IPartyService
         party.Description = description;
         party.EventStartsAt = request.EventStartsAt;
         party.GuestAccessExpiresAt = request.GuestAccessExpiresAt;
+        party.LibraryAccessExpiresAt = request.LibraryAccessExpiresAt;
         party.Version++;
         party.UpdatedAt = _clock.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(cancellationToken);
@@ -368,6 +378,71 @@ public sealed class PartyService : IPartyService
         }
 
         return PartyMutationResult.Ok(await ProjectAsync(party, cancellationToken));
+    }
+
+    public async Task<PartyMutationResult> TeardownAsync(
+        Guid ownerUserId,
+        Guid partyId,
+        int expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var party = await _db.Parties
+            .FirstOrDefaultAsync(p => p.Id == partyId && p.OwnerUserId == ownerUserId, cancellationToken);
+        if (party is null)
+        {
+            return PartyMutationResult.Refused(PartyMutationOutcome.NotFound);
+        }
+        if (party.Version != expectedVersion)
+        {
+            return PartyMutationResult.Refused(
+                PartyMutationOutcome.VersionConflict, await ProjectAsync(party, cancellationToken));
+        }
+
+        var albumId = await _db.PartyMediaSources
+            .AsNoTracking()
+            .Where(s => s.PartyId == partyId && s.Role == PartyMediaSourceRoles.Main)
+            .Select(s => (Guid?)s.AlbumId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // FINALIZE FIRST, while the provenance still exists to be read.
+        //
+        // A guest upload survives exactly when the host let it be seen. Anything
+        // they left pending, hid, rejected or took out of the album goes — and
+        // goes the ORDINARY way, into Trash through IFileItemService, where it
+        // is restorable and where the sweeper and the janitor reclaim it on
+        // their own schedules. Nothing here touches a blob, and nothing here
+        // bypasses the one canonical deletion path.
+        //
+        // Owner-added media has no row here at all, which is why it is never
+        // considered: moderation only ever described guest contributions.
+        if (albumId is Guid album)
+        {
+            var doomed = await _db.PartyUploadItems
+                .AsNoTracking()
+                .Where(u => u.AlbumId == album && u.Status != PartyUploadStatuses.Approved)
+                .Select(u => u.FileItemId)
+                .ToListAsync(cancellationToken);
+
+            foreach (var fileItemId in doomed)
+            {
+                // SystemCleanup, deliberately: this is the consequence of a
+                // moderation decision the host already took, not an instruction
+                // to suppress the content if they ever upload it themselves. A
+                // user-intent reason here would write tombstones for photographs
+                // that were never theirs to disown.
+                await _fileItems.SoftDeleteAsync(
+                    ownerUserId, fileItemId, cancellationToken, FileDeleteReason.SystemCleanup);
+            }
+        }
+
+        // Everything a party owns, in foreign-key order — the one list, shared
+        // with the album delete that erases a party from the other direction.
+        await _eraser.EraseAsync(partyId, albumId, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        // The party is gone, so there is nothing to project. The outcome IS the
+        // answer.
+        return PartyMutationResult.Ok(null!);
     }
 
     private async Task<PartyDto> ProjectAsync(Domain.Party party, CancellationToken cancellationToken)

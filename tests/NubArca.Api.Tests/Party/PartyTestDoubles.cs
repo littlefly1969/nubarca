@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+using System.Text.Json;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Party;
@@ -18,6 +20,20 @@ internal static class PartyTestCapabilities
 {
     /// <summary>A host permitted to run every Party capability.</summary>
     internal static readonly PartyCapabilities All = new(true, true, true, true, true);
+}
+
+/// <summary>
+/// A party that is happening right now, with both windows open.
+///
+/// <para>The state a test driving a game or a message is implicitly assuming.
+/// Stated rather than defaulted, so a test can never assert that something works
+/// during a party while silently being in another phase.</para>
+/// </summary>
+internal static class PartyTestExperience
+{
+    internal static readonly PartyGuestExperience Live = new(
+        PartyGuestPhase.Live, PartyGuestAccessMode.Full,
+        LibraryAvailable: false, LibraryAccessEndsAt: null);
 }
 
 internal sealed class FixedPartyCapabilityPolicy : IPartyCapabilityPolicy
@@ -75,5 +91,48 @@ internal static class PartySeed
             SortOrder = 0,
             CreatedAt = now,
         });
+    }
+}
+
+/// <summary>
+/// Taking a party from "the QR works" to "the party is happening".
+///
+/// <para>Enabling guest access PUBLISHES a party — it is an invitation, and the
+/// invitation surface is deliberately not the party: no gallery, no
+/// contributions, no game, no printing, no finding your face. A test that
+/// exercises any of those has to start the party first, which is exactly what a
+/// host does.</para>
+///
+/// <para>One helper rather than the same three lines in every fixture, so the
+/// step is named and a fixture that forgets it fails loudly rather than
+/// mysteriously.</para>
+/// </summary>
+internal static class PartyTestHost
+{
+    /// <summary>
+    /// Moves the party behind this album's party settings to <c>live</c>.
+    /// Takes the settings DTO an enable returned, because that is where the
+    /// party id already is.
+    /// </summary>
+    internal static async Task StartAsync(HttpClient owner, JsonElement partySettings)
+    {
+        if (partySettings.TryGetProperty("partyId", out var id)
+            && id.ValueKind == JsonValueKind.String)
+        {
+            await StartAsync(owner, id.GetGuid());
+        }
+    }
+
+    internal static async Task StartAsync(HttpClient owner, Guid partyId)
+    {
+        var party = await owner.GetFromJsonAsync<JsonElement>($"/api/parties/{partyId}");
+        if (party.GetProperty("status").GetString() != PartyStatuses.Published)
+        {
+            return;
+        }
+        var response = await owner.PostAsJsonAsync(
+            $"/api/parties/{partyId}/start-live",
+            new { version = party.GetProperty("version").GetInt32() });
+        response.EnsureSuccessStatusCode();
     }
 }

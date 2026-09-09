@@ -6,6 +6,33 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### One QR code, from the invitation to the memories
+
+- **The same QR is the invitation, the party, and the photographs afterwards.**
+  Guests scan it once. Before the evening it reads as an invitation — the name,
+  the date, where it is, what to wear, what there is to eat. When the host starts
+  the party it becomes the party. When they end it, it becomes the memories.
+  Nobody has to be sent a second link.
+- **A party can say things.** Six things, each with its own small form:
+  invitation, where, dress code, menu, a note, and a thank-you. The host chooses
+  which of them guests see before the party, during it, and afterwards. It is
+  deliberately not a page builder — a party has a handful of things to say, and
+  saying them well beats being able to say anything.
+- **The photographs can outlive the party.** "Guest access ends" closes the
+  party; "the photos stay available until" is a separate date that can run
+  longer. When it does, the QR keeps working and shows a thank-you and the
+  album — and when the photos have gone, it says so rather than offering a
+  button that leads nowhere.
+- **The party starting under a guest doesn't yank the page away.** Somebody
+  reading the invitation gets "the party has started" and a way in, when they're
+  ready.
+- Before the party there is no gallery, no upload, no game and no printing — and
+  not merely hidden: those addresses are closed until the party is running.
+- **A finished party can be tidied away without losing the album.** The
+  photographs guests were allowed to see stay exactly where they are; the ones
+  the host never let through go to the Trash, where they can still be recovered.
+  Afterwards the album is an ordinary album.
+
 ### Parties have a place of their own
 
 - **Party is a destination now.** There is a Parties entry in the sidebar, a

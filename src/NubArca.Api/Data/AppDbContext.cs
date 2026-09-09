@@ -98,6 +98,10 @@ public class AppDbContext : DbContext
     public DbSet<Domain.Party> Parties => Set<Domain.Party>();
     public DbSet<PartyMediaSource> PartyMediaSources => Set<PartyMediaSource>();
 
+    // What a party TELLS its guests: six typed slots, at most one per kind.
+    // Deliberately not a page builder — see PartyGuestContent.
+    public DbSet<PartyGuestContent> PartyGuestContents => Set<PartyGuestContent>();
+
     // PUBLIC read-only party access links (token hash only). A CAPABILITY over
     // a party: PartyId is its identity, while OwnerUserId/AlbumId remain as a
     // compatibility projection of the party and its main media source.

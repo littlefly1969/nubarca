@@ -949,8 +949,11 @@ public sealed class AlbumContributionTests : IDisposable
         var party = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings",
             new { enabled = true });
         party.EnsureSuccessStatusCode();
-        var token = (await party.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("partyUrl").GetString()!.Split('/')[^1];
+        var partySettings = await party.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests exercise the party.
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(owner, partySettings);
+        var token = partySettings.GetProperty("partyUrl").GetString()!.Split('/')[^1];
 
         var anon = _factory.CreateClient();
         // /api/party/{token} is the header (name + count); the media list is /items.

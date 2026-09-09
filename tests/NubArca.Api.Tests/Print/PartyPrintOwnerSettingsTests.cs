@@ -216,8 +216,12 @@ public sealed class PartyPrintOwnerSettingsTests : IDisposable
         var party = await host.Client.PatchAsJsonAsync(
             $"/api/albums/{host.AlbumId}/party-settings", new { enabled = true });
         party.EnsureSuccessStatusCode();
-        var viewToken = (await party.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("partyUrl").GetString()!["/party/".Length..];
+        var partySettings = await party.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. There is nothing to print from an
+        // invitation, so these tests start the party as a host does.
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(host.Client, partySettings);
+        var viewToken = partySettings.GetProperty("partyUrl").GetString()!["/party/".Length..];
 
         (await SaveAsync(host, new
         {
@@ -231,7 +235,7 @@ public sealed class PartyPrintOwnerSettingsTests : IDisposable
         (await SaveAsync(host, new { photoEnabled = false })).EnsureSuccessStatusCode();
         var anon = _factory.CreateClient();
         var album = await anon.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        Assert.Equal(JsonValueKind.Null, album.GetProperty("printUrl").ValueKind);
+        Assert.Equal(JsonValueKind.Null, album.GetProperty("capabilities").GetProperty("printUrl").ValueKind);
     }
 
     [Fact]
@@ -421,12 +425,16 @@ public sealed class PartyPrintOwnerSettingsTests : IDisposable
         var party = await host.Client.PatchAsJsonAsync(
             $"/api/albums/{host.AlbumId}/party-settings", new { enabled = true });
         party.EnsureSuccessStatusCode();
-        var viewToken = (await party.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("partyUrl").GetString()!["/party/".Length..];
+        var partySettings = await party.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. There is nothing to print from an
+        // invitation, so these tests start the party as a host does.
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(host.Client, partySettings);
+        var viewToken = partySettings.GetProperty("partyUrl").GetString()!["/party/".Length..];
 
         var anon = _factory.CreateClient();
         var before = await anon.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        Assert.Equal(JsonValueKind.Null, before.GetProperty("printUrl").ValueKind);
+        Assert.Equal(JsonValueKind.Null, before.GetProperty("capabilities").GetProperty("printUrl").ValueKind);
 
         (await SaveAsync(host, new
         {
@@ -436,10 +444,10 @@ public sealed class PartyPrintOwnerSettingsTests : IDisposable
 
         // The panel is the only thing that decides; the hub just reports it.
         var after = await anon.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        Assert.Equal(JsonValueKind.String, after.GetProperty("printUrl").ValueKind);
+        Assert.Equal(JsonValueKind.String, after.GetProperty("capabilities").GetProperty("printUrl").ValueKind);
 
         (await SaveAsync(host, new { enabled = false })).EnsureSuccessStatusCode();
         var off = await anon.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        Assert.Equal(JsonValueKind.Null, off.GetProperty("printUrl").ValueKind);
+        Assert.Equal(JsonValueKind.Null, off.GetProperty("capabilities").GetProperty("printUrl").ValueKind);
     }
 }

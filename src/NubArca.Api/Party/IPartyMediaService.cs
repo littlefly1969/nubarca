@@ -26,7 +26,21 @@ public interface IPartyMediaService
         CancellationToken cancellationToken = default);
 }
 
-public sealed record PartyAlbumHeader(string Name, int ItemCount, Guid? CoverFileItemId = null);
+/// <summary>
+/// The album as a party surface sees it.
+///
+/// <para><c>CoverFileItemId</c> is the album's cover the way every other surface
+/// resolves it — the host's choice, or the first displayable member when they
+/// made none. <c>ChosenCoverFileItemId</c> is only ever the CHOICE, and it is
+/// what the invitation is allowed to show: before the party the whole gallery is
+/// closed, and a photograph the host explicitly nominated to represent the album
+/// is a different thing from whichever one happens to sort first.</para>
+/// </summary>
+public sealed record PartyAlbumHeader(
+    string Name,
+    int ItemCount,
+    Guid? CoverFileItemId = null,
+    Guid? ChosenCoverFileItemId = null);
 
 public enum PartyMediaKind { Image, Video }
 

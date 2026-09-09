@@ -210,7 +210,7 @@ public sealed class AlbumDeletePartyGamePostgresTests : IAsyncLifetime
 
         await using (var voteDb = NewContext())
             await Game(voteDb).VoteAsync(
-                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All), _participantId, roundId,
+                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live), _participantId, roundId,
                 PartyGameVoteValues.Yes);
 
         await using var finisher = NewContext();
@@ -229,7 +229,7 @@ public sealed class AlbumDeletePartyGamePostgresTests : IAsyncLifetime
     private static PartyGameService Game(AppDbContext db) =>
         new(db, TimeProvider.System,
             new PartyLinkService(
-                db, TimeProvider.System, new PartyService(db, TimeProvider.System),
+                db, TimeProvider.System, new PartyService(db, TimeProvider.System, new PartyStateEraser(db), null!),
                 new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()),
             NullLogger<PartyGameService>.Instance);
 }

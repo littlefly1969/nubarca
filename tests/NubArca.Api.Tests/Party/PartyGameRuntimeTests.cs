@@ -333,14 +333,14 @@ public sealed class PartyGameRuntimeTests : IDisposable
 
         var hub = await (await _factory.CreateClient().GetAsync($"/api/party/{token}"))
             .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal($"/party/{token}/game", hub.GetProperty("gameUrl").GetString());
+        Assert.Equal($"/party/{token}/game", hub.GetProperty("capabilities").GetProperty("gameUrl").GetString());
 
         // Turning the game off removes the capability rather than disabling it:
         // a null url is the whole answer, exactly as printing works.
         await SetGameEnabledAsync(owner, album, enabled: false);
         var without = await (await _factory.CreateClient().GetAsync($"/api/party/{token}"))
             .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(JsonValueKind.Null, without.GetProperty("gameUrl").ValueKind);
+        Assert.Equal(JsonValueKind.Null, without.GetProperty("capabilities").GetProperty("gameUrl").ValueKind);
     }
 
     [Fact]
@@ -412,8 +412,7 @@ public sealed class PartyGameRuntimeTests : IDisposable
         var response = await owner.PostAsJsonAsync("/api/albums", new { name });
         response.EnsureSuccessStatusCode();
         var album = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
-        (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-settings", new { enabled = true }))
-            .EnsureSuccessStatusCode();
+        await EnableAndStartPartyAsync(owner, album);
         await SetGameEnabledAsync(owner, album, enabled: true);
         var names = new[] { "Uno", "Due", "Tre", "Quattro" };
         for (var i = 0; i < challenges; i++)
@@ -472,4 +471,16 @@ public sealed class PartyGameRuntimeTests : IDisposable
 
     private static string[] Commands(JsonElement snapshot) =>
         snapshot.GetProperty("availableCommands").EnumerateArray().Select(x => x.GetString()!).ToArray();
+
+    // Enabling guest access PUBLISHES the party — an invitation, which is
+    // deliberately not the party itself. These tests exercise the party, so they
+    // start it, exactly as a host does.
+    private static async Task EnableAndStartPartyAsync(HttpClient owner, Guid album)
+    {
+        var response = await owner.PatchAsJsonAsync(
+            $"/api/albums/{album}/party-settings", new { enabled = true });
+        response.EnsureSuccessStatusCode();
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(
+            owner, await response.Content.ReadFromJsonAsync<JsonElement>());
+    }
 }

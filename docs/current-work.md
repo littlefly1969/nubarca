@@ -603,6 +603,54 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   NOT NULL with a restricting FK the previous application cannot satisfy, so the
   cutover takes a short window in which Party is unavailable, in preference to a
   dual-write transition spread through the services.
+- **One QR, three surfaces, and the SERVER picks which.** `/party/{token}` never
+  changes and is never rotated at a lifecycle change: the same code is the
+  invitation, the party and the memories. `PartyGuestExperience` is the whole
+  rule — a pure function of status, the two windows and the clock — resolved at
+  the same seam that resolves the token, with the phase FOLDED INTO the
+  capabilities there. That fold is what keeps every endpoint's single existing
+  check honest: a live capability outside the party is not a capability, so no
+  endpoint grew an `if (status …)` and a surface the browser stops drawing cannot
+  be reached by typing its route. `/items` and every media byte obey it too —
+  hiding a gallery in a browser is not a rule. The ONE exception is the album's
+  CHOSEN cover, which is the invitation's hero and the only file id that resolves
+  before the party; an album with no chosen cover gets a branded composition, not
+  a broken frame. Three things stay separate throughout: status is the phase, the
+  link is the capability and its revocation, and the windows are product
+  decisions — a status never revokes a token, and a token is never invalid merely
+  because the party has not started or has finished.
+- **`LibraryAccessExpiresAt` is now read, and null is not a second window.** It
+  decides how long the memories last: unset means "as long as guest access", a
+  value may OUTLIVE guest access — which is the whole point of the After surface
+  — and may also fall short of it, in which case the memories close and the
+  thank-you stays. Once the party is over and guest access has closed, a still
+  open library is `library-only`: the same QR narrowed to a greeting and the
+  album, with no capability deck, no info and no dead CTA. Both closed is the
+  same generic unavailable an unknown token gets. It rides on the party's own
+  metadata PATCH — one endpoint, one version — and is configured in the After tab
+  because that is where it means something.
+- **Guest content is six typed slots, NOT a page builder.** `PartyGuestContent`
+  keyed `(PartyId, Kind)` — invitation, location, dress-code, menu, info,
+  thank-you — with no slug, no sort order, no blocks, no HTML and no Markdown;
+  the order a guest reads them in is a product decision, not data somebody drags.
+  Every payload is validated server-side against its kind AND re-serialized from
+  the parsed object, so an unknown field is dropped rather than stored: knowing
+  the route is not permission to persist arbitrary documents. Location holds an
+  ADDRESS rather than a map URL, because an arbitrary external link kept as
+  authority is somebody else's page one QR away. Visibility defaults are the
+  SERVER's, each slot carries its OWN version (editing the menu never contends
+  with renaming the party), and a slot that is disabled or scoped elsewhere is
+  ABSENT from the guest context rather than sent with a flag to respect.
+- **Tearing a party down keeps its album, and finalizes the guests' media
+  first.** Owner-added media always survives — it was never a guest contribution.
+  A guest upload survives if and only if its final `PartyUploadItem.Status` is
+  `approved`, automatic or manual; everything else goes to Trash through the
+  ORDINARY `IFileItemService` lifecycle, restorable, with no blob touched. The
+  provenance rows then go with the rest, and that is the point: afterwards the
+  album is SELF-CONTAINED, and what is visible in it is decided the way it is for
+  every other album — by the files being active. `PartyStateEraser` holds what a
+  party owns as ONE list, shared with the album delete that erases a party from
+  the other direction.
 - **Party is a DESTINATION, and a party is created before its photographs.**
   `/parties` and `/parties/{id}` are the owner product; the navigation entry is
   ABSENT without `party.access`, never disabled. `POST /api/parties` takes a name

@@ -204,6 +204,10 @@ public static class AuditActions
     public const string PartyUpdate = "party.update";
     public const string PartyMediaSourceSet = "party.media_source.set";
 
+    // The party's rows are gone after this; this line is the only remaining
+    // record that the evening existed.
+    public const string PartyTeardown = "party.teardown";
+
     public const string PartyPublish = "party.publish";
     public const string PartyStartLive = "party.start_live";
     public const string PartyEndLive = "party.end_live";

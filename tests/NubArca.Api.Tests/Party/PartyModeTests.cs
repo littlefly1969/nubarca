@@ -379,7 +379,12 @@ public sealed class PartyModeTests : IDisposable
     {
         var resp = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", new { enabled = true });
         resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var settings = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests exercise the party, so
+        // they start it, exactly as a host does.
+        await PartyTestHost.StartAsync(owner, settings);
+        return settings;
     }
 
     private static string TokenFromUrl(string partyUrl) => partyUrl["/party/".Length..];

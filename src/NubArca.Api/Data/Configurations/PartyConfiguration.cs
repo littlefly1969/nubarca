@@ -96,3 +96,40 @@ public class PartyMediaSourceConfiguration : IEntityTypeConfiguration<PartyMedia
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGuestContent>
+{
+    public void Configure(EntityTypeBuilder<PartyGuestContent> builder)
+    {
+        builder.ToTable("party_guest_contents");
+
+        // The composite key IS the "at most one slot per kind" rule. Expressing
+        // it as the key rather than as a surrogate id plus a unique index means
+        // there is no second way to write the same fact — and no id for a client
+        // to address a slot by instead of naming what it is.
+        builder.HasKey(c => new { c.PartyId, c.Kind });
+
+        builder.Property(c => c.Kind).IsRequired().HasMaxLength(32);
+        builder.Property(c => c.Enabled).HasDefaultValue(false);
+        builder.Property(c => c.VisibleBefore).HasDefaultValue(false);
+        builder.Property(c => c.VisibleLive).HasDefaultValue(false);
+        builder.Property(c => c.VisibleAfter).HasDefaultValue(false);
+
+        // Bounded generously. The real limits are enforced per FIELD by
+        // PartyGuestContentPayload before anything is stored; this only stops a
+        // corrupt write from being unbounded.
+        builder.Property(c => c.ContentJson).IsRequired().HasMaxLength(16_384);
+
+        builder.Property(c => c.Version).HasDefaultValue(1);
+        builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");
+        builder.Property(c => c.UpdatedAt).HasColumnType("timestamp with time zone");
+
+        // Restrict, like every other Party foreign key: what a delete takes with
+        // it is stated out loud in AlbumService rather than left to a cascade
+        // nobody reads.
+        builder.HasOne<Domain.Party>()
+            .WithMany()
+            .HasForeignKey(c => c.PartyId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

@@ -59,7 +59,12 @@ public sealed record PartyMetadataRequest(
     string? Title,
     string? Description,
     DateTime? EventStartsAt,
-    DateTime? GuestAccessExpiresAt);
+    DateTime? GuestAccessExpiresAt,
+    // When the MEMORIES stop, which is a different decision from when the guest
+    // experience does: it may outlive it, and the whole point of the After
+    // surface is that it can. It rides on this mutation rather than a second
+    // endpoint, because it is the party's data and shares the party's version.
+    DateTime? LibraryAccessExpiresAt);
 
 /// <summary>
 /// How an owner mutation of the root ended.
@@ -186,6 +191,39 @@ public interface IPartyService
         Guid ownerUserId,
         Guid partyId,
         Guid albumId,
+        int expectedVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// TEARS THE PARTY DOWN, keeping its album.
+    ///
+    /// <para>The evening is over and the host wants it out of their way. What
+    /// they must not lose is the photographs — so before any party row is
+    /// deleted, the guest media is FINALIZED against the moderation decisions
+    /// that were made while the party ran:</para>
+    ///
+    /// <list type="bullet">
+    /// <item>owner-added album media always survives — it was never a guest
+    /// contribution and no party ever governed it;</item>
+    /// <item>a guest upload survives if and only if its final
+    /// <c>PartyUploadItem.Status</c> is <c>approved</c>, which covers both an
+    /// automatically approved party and one where the host approved by hand;</item>
+    /// <item><c>pending</c>, <c>hidden</c>, <c>rejected</c> and
+    /// <c>removed_from_album</c> media go through NubArca's ORDINARY FileItem
+    /// deletion lifecycle — into Trash, restorable, reclaimed by the sweeper and
+    /// the janitor on their own schedules. Nothing here touches a blob.</item>
+    /// </list>
+    ///
+    /// <para>The provenance rows are then deleted with everything else, and that
+    /// is the point: afterwards the album is SELF-CONTAINED. What is visible in
+    /// it is decided the way it is decided for every other album — by the files
+    /// being active — and no party history has to be consulted to answer it.</para>
+    ///
+    /// <para>Version-checked like every other owner write.</para>
+    /// </summary>
+    Task<PartyMutationResult> TeardownAsync(
+        Guid ownerUserId,
+        Guid partyId,
         int expectedVersion,
         CancellationToken cancellationToken = default);
 
