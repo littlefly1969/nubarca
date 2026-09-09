@@ -15,7 +15,7 @@ describe('primary navigation model', () => {
   // before roles existed.
   it('keeps every normal-user destination for a Member', () => {
     expect(allRoutes(MEMBER_PERMISSIONS)).toEqual([
-      '/', '/media', '/albums', '/people',
+      '/', '/media', '/albums', '/people', '/parties',
       '/lab', '/shares', '/cloud-functions', '/private', '/trash',
     ]);
   });

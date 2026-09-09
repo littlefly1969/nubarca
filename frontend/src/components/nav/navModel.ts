@@ -54,6 +54,11 @@ const MAIN: NavItem[] = [
   // collection.
   { to: '/albums', labelKey: 'nav.albums', icon: 'albums' },
   { to: '/people', labelKey: 'nav.people', icon: 'people', permission: PERMISSIONS.peopleAccess },
+  // Party is a first-class destination now, not a mode hidden inside an album's
+  // settings. It needs only the PRODUCT permission: which capabilities appear
+  // inside a party is the workspace's own decision, exactly as the Laboratory
+  // shell decides which of its sections to show.
+  { to: '/parties', labelKey: 'nav.parties', icon: 'calendar', permission: PERMISSIONS.partyAccess },
 ];
 
 const MORE: NavItem[] = [

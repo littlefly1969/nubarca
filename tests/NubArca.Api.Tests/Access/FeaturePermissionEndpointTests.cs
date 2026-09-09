@@ -51,6 +51,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             Permissions.PartyAccess },
         { "/api/albums/00000000-0000-0000-0000-000000000000/party-messages",
             Permissions.PartyAccess },
+        { "/api/parties", Permissions.PartyAccess },
         { "/api/parties/00000000-0000-0000-0000-000000000000", Permissions.PartyAccess },
         { "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
             Permissions.PartyGames },
@@ -141,6 +142,7 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             "/api/albums/00000000-0000-0000-0000-000000000000/party-settings",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
             "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
+            "/api/parties",
         })
         {
             var response = await client.GetAsync(route);

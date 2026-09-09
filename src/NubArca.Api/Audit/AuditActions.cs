@@ -197,6 +197,13 @@ public static class AuditActions
     // one "status changed", because "the host announced the party" and "the
     // host started it" are different events and the audit trail is where that
     // difference is answerable later.
+    // The root's own owner actions. Creating a party and pointing it at an album
+    // are decisions about what the event IS; the metadata line exists for the
+    // one field in it that governs access — when the guests stop.
+    public const string PartyCreate = "party.create";
+    public const string PartyUpdate = "party.update";
+    public const string PartyMediaSourceSet = "party.media_source.set";
+
     public const string PartyPublish = "party.publish";
     public const string PartyStartLive = "party.start_live";
     public const string PartyEndLive = "party.end_live";
