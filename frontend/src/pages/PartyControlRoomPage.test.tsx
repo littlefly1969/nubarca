@@ -289,8 +289,12 @@ describe('the control room', () => {
     // Destroying the evening's votes is never one tap away.
     await user.click(primary);
     const dialog = screen.getByTestId('party-control-restart_game-dialog');
+    // The confirmation names BOTH halves: what is destroyed, and — item by
+    // item — what a host might reasonably fear is destroyed with it.
     expect(within(dialog).getByText(/voti e risultati/i)).toBeInTheDocument();
     expect(within(dialog).getByText(/invitati, foto, messaggi/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/stampe e quote/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/link e il qr/i)).toBeInTheDocument();
     expect(sent).toHaveLength(0);
 
     await user.click(within(dialog).getByRole('button', { name: /annulla/i }));
