@@ -305,6 +305,7 @@ function AppInner(): React.JSX.Element {
       {flow.name === 'pairing' && (
         <PairingScreen
           onPaired={onPaired}
+          onChooseSpike={() => rawDispatch({ type: 'CHOOSE_SPIKE' })}
           notice={flow.incomplete ? t('pairing.incomplete') : null}
         />
       )}

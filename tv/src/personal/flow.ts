@@ -74,7 +74,7 @@ export type TvFlowState =
   | { name: 'party' }
   | { name: 'updates' }
   // SPIKE ONLY — a plain mode like `updates`: no PIN, no grant, no owner API.
-  | { name: 'webviewSpike' }
+  | { name: 'webviewSpike'; from: 'mode' | 'pairing' }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
   | { name: 'personalLibrary'; home: PersonalHomeInfo }
@@ -135,9 +135,20 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
     case 'UPDATES_BACK':
       return state.name === 'updates' ? { name: 'mode', notice: null } : state;
     case 'CHOOSE_SPIKE':
-      return state.name === 'mode' ? { name: 'webviewSpike' } : state;
+      // SPIKE ONLY, and reachable from PAIRING as well as from the mode
+      // selector: a development build points at localhost, which a Fire TV
+      // cannot reach, so a probe that needed a session would be unreachable on
+      // the hardware it exists to measure. It holds no grant and calls no owner
+      // API, exactly like `updates`.
+      return state.name === 'mode' || state.name === 'pairing'
+        ? { name: 'webviewSpike', from: state.name }
+        : state;
     case 'SPIKE_BACK':
-      return state.name === 'webviewSpike' ? { name: 'mode', notice: null } : state;
+      return state.name === 'webviewSpike'
+        ? (state.from === 'pairing'
+          ? { name: 'pairing', incomplete: false }
+          : { name: 'mode', notice: null })
+        : state;
     case 'CHOOSE_PERSONAL':
       return state.name === 'mode' ? { name: 'pin', target: 'personal' } : state;
     case 'CHOOSE_BEAUTY_LAB':

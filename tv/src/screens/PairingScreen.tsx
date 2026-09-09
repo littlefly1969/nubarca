@@ -40,6 +40,11 @@ function timedRequest<T>(operation: (signal: AbortSignal) => Promise<T>) {
 
 interface Props {
   onPaired: (session: TvSessionStatus) => void;
+  // SPIKE ONLY. The WebView probe needs no session and no server, but it lived
+  // behind pairing — and a development build points at localhost, which a Fire
+  // TV cannot reach. So the probe was unreachable on the exact hardware it
+  // exists to measure. This entry is the way in.
+  onChooseSpike?: () => void;
   // Shown above the pairing UI, e.g. the "pairing is incomplete" recovery
   // notice when a legacy paired session had no owner PIN.
   notice?: string | null;
@@ -49,7 +54,7 @@ interface Props {
 // approves it. On TV the QR and the explanation form one horizontal row: the
 // former vertical stack was taller than Fire OS's common 960x540dp viewport,
 // which pushed most of the lockup above the visible area.
-export function PairingScreen({ onPaired, notice = null }: Props) {
+export function PairingScreen({ onPaired, onChooseSpike, notice = null }: Props) {
   const { t } = useI18n();
   const viewport = useWindowDimensions();
   const layout = pairingLayout(viewport);
@@ -222,7 +227,19 @@ export function PairingScreen({ onPaired, notice = null }: Props) {
           </Text>
           <View style={styles.retry}>
             <FocusableButton label={t('common.tryAgain')} onPress={begin} hasTVPreferredFocus />
+            {onChooseSpike && (
+              <FocusableButton label="WebView spike" onPress={onChooseSpike} />
+            )}
           </View>
+        </View>
+      )}
+
+      {/* SPIKE ONLY: reachable while pairing is still pending too, because a
+          development build cannot pair at all and the probe needs nothing from
+          the server. */}
+      {onChooseSpike && state.kind !== 'expired' && state.kind !== 'error' && (
+        <View style={styles.retry}>
+          <FocusableButton label="WebView spike" onPress={onChooseSpike} />
         </View>
       )}
     </View>
