@@ -371,6 +371,108 @@ public sealed class TvDisplayAssignmentTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Unpairing_a_television_leaves_no_usable_party_pointer_behind()
+    {
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairTvAsync(owner);
+        var sessionId = await SingleSessionIdAsync(ownerId);
+        var album = await PartyAlbumAsync(owner, "Festa");
+        await AssignAsync(owner, sessionId, album);
+
+        // The owner unpairs the television.
+        (await owner.DeleteAsync($"/api/tv-devices/{sessionId}")).EnsureSuccessStatusCode();
+
+        // Every door the assignment could have opened is shut, because each one
+        // resolves the SESSION first and the session is revoked. The row may
+        // still name a party; nothing can reach it.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await TvGet("/api/tv/session", cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await TvGet("/api/tv/session/heartbeat", cookie, post: true)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await TvGet("/api/tv/albums", cookie)).StatusCode);
+
+        // And it cannot be re-pointed either: a revoked device is not a device.
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await RawAssignAsync(owner, sessionId, album)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await RawAssignAsync(owner, sessionId, null)).StatusCode);
+
+        // Re-pairing mints a NEW session, which starts general — the old row's
+        // assignment is not inherited by the television that replaces it.
+        var freshCookie = await PairTvAsync(owner);
+        var fresh = await TvAssignmentAsync(freshCookie);
+        Assert.Equal("general", fresh.GetProperty("kind").GetString());
+        Assert.Equal(JsonValueKind.Null, fresh.GetProperty("albumId").ValueKind);
+    }
+
+    [Fact]
+    public async Task An_assignment_is_readable_only_by_the_television_it_belongs_to()
+    {
+        var (_, alice) = await _factory.CreateAuthenticatedClientAsync("alice@example.com");
+        var aliceCookie = await PairTvAsync(alice);
+        var aliceSession = await SingleSessionIdAsync(await OwnerIdAsync(alice));
+        var aliceParty = await PartyAlbumAsync(alice, "Festa di Alice");
+        await AssignAsync(alice, aliceSession, aliceParty);
+
+        // No cookie at all: the session read is the gate, so there is nothing to
+        // read an assignment from.
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await _factory.CreateClient().GetAsync("/api/tv/session")).StatusCode);
+        // An invented cookie resolves to no session.
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await TvGet("/api/tv/session", $"x={new string('9', 43)}")).StatusCode);
+
+        // ANOTHER owner's television reads its OWN assignment and never Alice's
+        // — the assignment is resolved from the presented session, not from a
+        // parameter anybody could change.
+        var (_, bob) = await _factory.CreateAuthenticatedClientAsync("bob@example.com");
+        var bobCookie = await PairTvAsync(bob);
+        var bobSees = await TvAssignmentAsync(bobCookie);
+        Assert.Equal("general", bobSees.GetProperty("kind").GetString());
+        Assert.Equal(JsonValueKind.Null, bobSees.GetProperty("albumId").ValueKind);
+
+        // Alice's own television still sees hers, and the album id it names is
+        // hers alone.
+        Assert.Equal(aliceParty, (await TvAssignmentAsync(aliceCookie)).GetProperty("albumId").GetGuid());
+    }
+
+    [Fact]
+    public async Task A_party_assignment_mints_no_participant_and_needs_no_guest_cookie()
+    {
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairTvAsync(owner);
+        var sessionId = await SingleSessionIdAsync(ownerId);
+        var album = await PartyAlbumAsync(owner, "Festa");
+
+        await AssignAsync(owner, sessionId, album);
+        // Read it the way a television would, repeatedly — a poll must not
+        // accumulate anything.
+        for (var i = 0; i < 3; i++)
+        {
+            await TvAssignmentAsync(cookie);
+            (await TvGet("/api/tv/session/heartbeat", cookie, post: true)).EnsureSuccessStatusCode();
+        }
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // A DISPLAY is not a GUEST. Assigning a television to a party, and the
+        // television reading that assignment, must never produce a participant —
+        // a display that joined would inflate the very room it is there to show.
+        Assert.Empty(await db.PartyParticipants.ToListAsync());
+        Assert.Empty(await db.PartyGameVotes.ToListAsync());
+        Assert.Empty(await db.PartyChallengeVotes.ToListAsync());
+
+        // And no guest capability was needed to get here: the television never
+        // received a party cookie, and the only credential it holds is its own
+        // device session.
+        var response = await TvGet("/api/tv/session", cookie);
+        Assert.False(response.Headers.Contains("Set-Cookie"),
+            "the TV session read must not issue a party browser cookie");
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("PartyBrowser", body);
+        Assert.DoesNotContain("token", body, StringComparison.OrdinalIgnoreCase);
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private async Task<string> PairTvAsync(HttpClient owner)
@@ -443,6 +545,12 @@ public sealed class TvDisplayAssignmentTests : IDisposable
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return body.GetProperty("sessionId").ValueKind == JsonValueKind.Null
             ? null : body.GetProperty("sessionId").GetGuid();
+    }
+
+    private static async Task<Guid> OwnerIdAsync(HttpClient owner)
+    {
+        var me = await (await owner.GetAsync("/api/auth/me")).Content.ReadFromJsonAsync<JsonElement>();
+        return me.GetProperty("id").GetGuid();
     }
 
     private async Task<Guid> SingleSessionIdAsync(Guid ownerUserId)
