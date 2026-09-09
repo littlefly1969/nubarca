@@ -35,6 +35,24 @@ import { FocusableButton } from '../components/FocusableButton';
 
 type Probe = 'replica' | 'origin' | 'stress' | 'unreachable';
 
+// THE WATCHDOG, and the numbers CHECK 14 is measured against.
+//
+// A2 in production needs one of these or it does not ship: a renderer the OS
+// killed must come back without anybody touching the television, and a renderer
+// that is alive but no longer running must be treated as dead. So the spike
+// carries the same mechanism, because testing a WebView without it would prove
+// nothing about the architecture that would actually be built.
+//
+// A page posts a heartbeat every 2s. Missing five of them is not a slow frame.
+const WEDGE_AFTER_MS = 10_000;
+// Long enough that a remount is visibly a remount rather than a flicker, short
+// enough that a room watching the screen sees it come back.
+const RECOVER_DELAY_MS = 2_000;
+// A crash LOOP must end somewhere visible. After this many automatic recoveries
+// the shell stops and says so in native UI, rather than cycling for ever behind
+// a black rectangle.
+const MAX_RECOVERIES = 5;
+
 interface Props {
   baseUrl: string;
   onBack: () => void;
@@ -135,6 +153,11 @@ export function WebViewSpikeScreen({ baseUrl, onBack }: Props) {
   const [beat, setBeat] = useState<{ ticks: number; frames: number; up: number; heap: number } | null>(null);
   const [lastBeatAt, setLastBeatAt] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  // Changing this remounts the WebView: a dead renderer cannot be revived, only
+  // replaced, so recovery IS a new instance.
+  const [generation, setGeneration] = useState(0);
+  const [recoveries, setRecoveries] = useState(0);
+  const [gaveUp, setGaveUp] = useState(false);
   const mountedAt = useRef(Date.now());
   const webRef = useRef<WebView>(null);
 
@@ -150,16 +173,45 @@ export function WebViewSpikeScreen({ baseUrl, onBack }: Props) {
   // probe 14 in one gesture.
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (probe !== null) { setProbe(null); setBeat(null); setLastBeatAt(null); return true; }
+      if (probe !== null) {
+        setProbe(null); setBeat(null); setLastBeatAt(null);
+        setRecoveries(0); setGaveUp(false); setGeneration(0);
+        return true;
+      }
       onBack();
       return true;
     });
     return () => sub.remove();
   }, [probe, onBack]);
 
+  // One recovery: a new WebView instance, after a visible pause, up to the cap.
+  const recover = useCallback((why: string) => {
+    setRecoveries((n) => {
+      if (n >= MAX_RECOVERIES) { setGaveUp(true); return n; }
+      setStatus(`recovering (${why})`);
+      setTimeout(() => {
+        setGeneration((g) => g + 1);
+        setLastBeatAt(null);
+        setBeat(null);
+        setStatus('starting');
+      }, RECOVER_DELAY_MS);
+      return n + 1;
+    });
+  }, []);
+
   const note = useCallback((message: string) => {
     setErrors((prev) => [`${new Date().toLocaleTimeString()} ${message}`, ...prev].slice(0, 6));
   }, []);
+
+  // A view that is mounted and claims to have loaded, but whose page stopped
+  // beating, is the failure a status field cannot see. Treated exactly like a
+  // dead renderer.
+  useEffect(() => {
+    if (probe === null || gaveUp || lastBeatAt === null) return;
+    if (now - lastBeatAt <= WEDGE_AFTER_MS) return;
+    note('wedged — no heartbeat');
+    recover('wedged');
+  }, [now, lastBeatAt, probe, gaveUp, note, recover]);
 
   if (probe === null) {
     return (
@@ -201,11 +253,13 @@ export function WebViewSpikeScreen({ baseUrl, onBack }: Props) {
   // The failure signal the whole spike exists to catch: the view is mounted and
   // claims to have loaded, but nothing inside it is running any more.
   const wedged = (probe === 'replica' || probe === 'stress')
-    && silentFor !== null && silentFor > 10;
+    && silentFor !== null && silentFor * 1_000 > WEDGE_AFTER_MS;
 
   return (
     <View style={styles.fill}>
-      <WebView
+      {/* `key` is the recovery mechanism: a new generation is a new WebView. */}
+      {!gaveUp && <WebView
+        key={generation}
         ref={webRef}
         style={styles.fill}
         source={
@@ -232,22 +286,39 @@ export function WebViewSpikeScreen({ baseUrl, onBack }: Props) {
         onNavigationStateChange={(nav: WebViewNavigation) => setStatus(nav.loading ? 'loading' : 'loaded')}
         onError={(e) => { setStatus('error'); note(`error ${e.nativeEvent.description}`); }}
         onHttpError={(e) => note(`http ${e.nativeEvent.statusCode}`)}
-        onRenderProcessGone={() => { setStatus('renderer-gone'); note('render process gone'); }}
-        onContentProcessDidTerminate={() => { setStatus('renderer-gone'); note('content process terminated'); }}
+        onRenderProcessGone={() => {
+          setStatus('renderer-gone'); note('render process gone'); recover('renderer gone');
+        }}
+        onContentProcessDidTerminate={() => {
+          setStatus('renderer-gone'); note('content process terminated'); recover('terminated');
+        }}
         onMessage={(e) => {
           try {
             setBeat(JSON.parse(e.nativeEvent.data) as typeof beat);
             setLastBeatAt(Date.now());
           } catch { /* a malformed beat is itself a finding, logged by silence */ }
         }}
-      />
+      />}
+
+      {/* The native fallback. A2's whole failure story is that the shell
+          survives its renderer and says something true, rather than leaving a
+          black rectangle in somebody's living room. */}
+      {gaveUp && (
+        <View style={styles.menu}>
+          <Text style={styles.title}>Renderer gave up</Text>
+          <Text style={styles.note}>
+            {MAX_RECOVERIES} automatic recoveries were not enough. The native shell is
+            still running — this text is drawn by it. Press BACK.
+          </Text>
+        </View>
+      )}
 
       {/* Native HUD, outside the WebView on purpose: it must survive the thing
           it is measuring. */}
       <View style={styles.hud} pointerEvents="none">
         <Text style={styles.hudLine}>
-          {probe} · {status} · loads {loads} · shell up{' '}
-          {Math.round((now - mountedAt.current) / 1000)}s
+          {probe} · {status} · loads {loads} · recoveries {recoveries}/{MAX_RECOVERIES}
+          {' '}· shell up {Math.round((now - mountedAt.current) / 1000)}s
         </Text>
         {beat && (
           <Text style={styles.hudLine}>

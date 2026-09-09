@@ -177,7 +177,15 @@ test('the existing finishAndRemoveTask behaviour is untouched', async () => {
 test('the updater introduced no new native or JavaScript dependency', () => {
   // The bridge is the one already in the app, and the download reuses the
   // expo-file-system dependency the media cache already requires.
-  assert.equal(Object.keys(packageJson.dependencies).length, 11);
+  //
+  // SPIKE BRANCH ONLY — 12, not 11, because this branch deliberately adds
+  // `react-native-webview` to answer the A2 hardware question. The guard fired
+  // exactly as designed: a new NATIVE dependency must never be invisible. This
+  // edit is the deliberate acknowledgement, and it MUST NOT reach main — the
+  // spike is a measuring instrument, not a change to the product.
+  assert.equal(Object.keys(packageJson.dependencies).length, 12);
+  assert.ok(packageJson.dependencies['react-native-webview'],
+    'the spike exists to test this dependency; without it there is nothing to measure');
   assert.ok(packageJson.dependencies['expo-file-system']);
   assert.equal(packageJson.dependencies['expo-updates'] !== undefined, true);
   assert.doesNotMatch(pluginSource, /require\('(?!node:|expo\/config-plugins)/);

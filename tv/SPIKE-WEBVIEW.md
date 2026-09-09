@@ -136,11 +136,28 @@ Record device, Fire OS version, screen mode and RAM before starting.
 | 11 | Memory | Replica probe: read `heap` on the HUD at 0/15/60 min | Heap flat, not climbing. Renderer-gone under normal load = memory pressure |
 | 12 | Prolonged stability | **Replica probe, 2 h minimum, screen on** | `last beat` never exceeds 10 s; `scenes` keeps incrementing; no renderer-gone entry |
 | 13 | Real Fire TV | Every check above on real hardware | Emulator results do not count |
-| 14 | Failure fallback | **Kill the renderer (memory stress)** probe, and **Unreachable host** | HUD reports `renderer-gone` / an error, the native shell SURVIVES it, and BACK still returns to the mode selector |
+| 14 | Failure fallback | **Kill the renderer (memory stress)** probe, and **Unreachable host** | HUD reports `renderer-gone`, `recoveries` increments, a new WebView mounts ~2 s later, the native shell SURVIVES throughout, and BACK still returns to the menu |
 
 **12 and 14 are the ones that decide the architecture.** A WebView that renders
 beautifully for ten minutes and wedges after ninety is worse than a plainer
 native renderer, because it fails during the party rather than before it.
+
+## The watchdog, and the numbers check 14 is measured against
+
+A2 in production needs a watchdog or it does not ship: a renderer the OS killed
+must come back without anybody touching the television. So the spike carries the
+same mechanism — testing a WebView without one would prove nothing about the
+architecture that would actually be built.
+
+| Constant | Value | What it decides |
+| --- | --- | --- |
+| `WEDGE_AFTER_MS` | **10 s** | A page beats every 2 s. Five missed beats is not a slow frame — it is dead, even if the view still claims `loaded`. |
+| `RECOVER_DELAY_MS` | **2 s** | The pause before a replacement WebView is mounted. Long enough to see, short enough that a room does not. |
+| `MAX_RECOVERIES` | **5** | Then the shell stops and draws a NATIVE "renderer gave up" screen. A crash loop has to end somewhere visible rather than cycling behind a black rectangle. |
+
+Recovery is a REMOUNT, not a revival: a dead renderer cannot be resurrected, so
+the shell replaces it (`key={generation}`). Both triggers — `onRenderProcessGone`
+and a missed heartbeat — go through the same path.
 
 ## What a failure means
 
