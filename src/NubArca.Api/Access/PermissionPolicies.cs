@@ -23,6 +23,15 @@ public static class PermissionPolicies
     // reach would be authority without a use for it.
     public const string PeopleClusterRebuild = Prefix + "people:cluster-rebuild+access";
 
+    // A Party FEATURE is reachable only with the Party product itself, the same
+    // rule the catalogue states as a Parent. One policy per feature rather than
+    // a check inside each handler, so an endpoint names a capability and the
+    // "requires party.access too" half can never be forgotten at one call site.
+    public const string PartyContributions = Prefix + "party:contributions+access";
+    public const string PartyGames = Prefix + "party:games+access";
+    public const string PartyPrint = Prefix + "party:print+access";
+    public const string PartyFaceSearch = Prefix + "party:face-search+access";
+
     // READING the role catalogue. Both administrative editors need it — the
     // Users editor to show what a role means before it is assigned, the Roles
     // editor to edit it — so the read is "either authority" while every role
@@ -63,6 +72,22 @@ public static class PermissionPolicies
                 Permissions.PeopleAccess, Permissions.PeopleClusterRebuild));
         });
 
+        foreach (var (name, feature) in new[]
+        {
+            (PartyContributions, Permissions.PartyContributions),
+            (PartyGames, Permissions.PartyGames),
+            (PartyPrint, Permissions.PartyPrint),
+            (PartyFaceSearch, Permissions.PartyFaceSearch),
+        })
+        {
+            options.AddPolicy(name, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.AddRequirements(new PermissionRequirement(
+                    Permissions.PartyAccess, feature));
+            });
+        }
+
         options.AddPolicy(RolesRead, policy =>
         {
             policy.RequireAuthenticatedUser();
@@ -96,4 +121,20 @@ public static class PermissionEndpointExtensions
     public static TBuilder RequireRolesRead<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
         => builder.RequireAuthorization(PermissionPolicies.RolesRead);
+
+    public static TBuilder RequirePartyContributions<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.PartyContributions);
+
+    public static TBuilder RequirePartyGames<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.PartyGames);
+
+    public static TBuilder RequirePartyPrint<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.PartyPrint);
+
+    public static TBuilder RequirePartyFaceSearch<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder
+        => builder.RequireAuthorization(PermissionPolicies.PartyFaceSearch);
 }

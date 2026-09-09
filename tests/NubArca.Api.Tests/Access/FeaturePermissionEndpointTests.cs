@@ -39,6 +39,25 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         { "/api/aesthetics-lab/items", Permissions.LaboratoryAesthetics },
         { "/api/private-vault", Permissions.PrivateVaultAccess },
         { "/api/uploads/staging/config", Permissions.CloudFunctionsAccess },
+        // Party. The owner surface is nested under the album it is configured
+        // from, so a permitted caller gets a 404 for an album that does not
+        // exist — not a refusal, which is the property this theory checks.
+        // Moderating what guests already left is `party.access`, not
+        // `party.contributions`: closing the contribution channel must not lock
+        // the host out of the queue it filled.
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-settings",
+            Permissions.PartyAccess },
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-uploads",
+            Permissions.PartyAccess },
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-messages",
+            Permissions.PartyAccess },
+        { "/api/parties/00000000-0000-0000-0000-000000000000", Permissions.PartyAccess },
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
+            Permissions.PartyGames },
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-game",
+            Permissions.PartyGames },
+        { "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
+            Permissions.PartyPrint },
         { "/api/tv-devices", Permissions.TvManage },
         { "/api/tv-personal/pin", Permissions.TvManage },
         { "/api/admin/users", Permissions.AdminUsersManage },
@@ -78,6 +97,9 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
             Permissions.LaboratoryPlates or Permissions.LaboratoryAesthetics =>
                 [Permissions.LaboratoryAccess, permissionKey],
             Permissions.PeopleClusterRebuild => [Permissions.PeopleAccess, permissionKey],
+            Permissions.PartyContributions or Permissions.PartyGames
+                or Permissions.PartyPrint or Permissions.PartyFaceSearch =>
+                [Permissions.PartyAccess, permissionKey],
             _ => [permissionKey],
         };
 
@@ -116,6 +138,9 @@ public sealed class FeaturePermissionEndpointTests : IDisposable
         {
             "/api/people", "/api/plates/images", "/api/aesthetics-lab/items",
             "/api/private-vault", "/api/uploads/staging/config", "/api/tv-devices",
+            "/api/albums/00000000-0000-0000-0000-000000000000/party-settings",
+            "/api/albums/00000000-0000-0000-0000-000000000000/party-challenges",
+            "/api/albums/00000000-0000-0000-0000-000000000000/party-print-settings",
         })
         {
             var response = await client.GetAsync(route);

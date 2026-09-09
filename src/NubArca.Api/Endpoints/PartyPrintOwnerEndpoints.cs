@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Audit;
 using NubArca.Api.Http;
 using NubArca.Api.Print;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -31,7 +32,7 @@ public static class PartyPrintOwnerEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var profile = await profiles.GetAsync(ownerUserId, albumId, cancellationToken);
             return profile is null ? Results.NotFound() : Results.Ok(profile);
-        }).WithName("GetPartyPrintSettings").RequireAuthorization();
+        }).WithName("GetPartyPrintSettings").RequirePartyPrint();
 
         app.MapMethods("/api/albums/{albumId:guid}/party-print-settings", ["PATCH"], async (
             Guid albumId,
@@ -71,6 +72,6 @@ public static class PartyPrintOwnerEndpoints
                 cancellationToken);
 
             return Results.Ok(saved);
-        }).WithName("SetPartyPrintSettings").RequireAuthorization();
+        }).WithName("SetPartyPrintSettings").RequirePartyPrint();
     }
 }

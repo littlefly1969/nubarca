@@ -1,9 +1,15 @@
 namespace NubArca.Api.Domain;
 
-// Owner + album scoped PUBLIC read-only "party" access link. When Enabled (and
-// not revoked/expired) an unauthenticated visitor holding the link's token may
-// view party-safe DERIVED media (metadata-stripped thumbnails/previews) of the
-// album — never originals, never metadata, never owner/AI/face internals.
+// A PUBLIC capability OF A PARTY. When Enabled (and not revoked/expired) an
+// unauthenticated visitor holding the link's token may view party-safe DERIVED
+// media (metadata-stripped thumbnails/previews) of the party's main album —
+// never originals, never metadata, never owner/AI/face internals.
+//
+// The name is historical: this row was the closest thing the product had to a
+// party before Party existed. It is deliberately NOT replaced by a "V2" table —
+// the token system, its three purpose-bound derivations and every service built
+// on it are correct, so the party became its ROOT (PartyId) instead, and
+// OwnerUserId/AlbumId stayed as a projection of the party and its main source.
 //
 // SECURITY: only the token HASH is stored (TokenHash). The raw token is NEVER
 // persisted. The raw token is a deterministic, high-entropy value derived on
@@ -15,7 +21,34 @@ namespace NubArca.Api.Domain;
 public class PartyAlbumLink
 {
     public Guid Id { get; set; }
+
+    /// <summary>
+    /// The party this capability belongs to — the AUTHORITATIVE identity of
+    /// what a token unlocks.
+    ///
+    /// <para>A link is one QR for one party, and a party outlives its links: it
+    /// may be revoked and re-minted many times for the same event. That is why
+    /// this is a foreign key to <see cref="Party"/> rather than the party being
+    /// inferred from the pair below.</para>
+    /// </summary>
+    public Guid PartyId { get; set; }
+
+    /// <summary>
+    /// COMPATIBILITY PROJECTION of the party's owner. Authoritative data lives
+    /// on <see cref="Party.OwnerUserId"/>; this column is kept because every
+    /// owner-scoped Party query in the system already filters on it, and
+    /// rewriting them all to join the party would be churn without a behaviour
+    /// change. It is written from the party and never diverges from it.
+    /// </summary>
     public Guid OwnerUserId { get; set; }
+
+    /// <summary>
+    /// COMPATIBILITY PROJECTION of the party's <c>main</c> media source.
+    /// Authoritative data lives in <see cref="PartyMediaSource"/>; the public
+    /// resolver reads the party's main source and every downstream service
+    /// keeps working on an album id, exactly as before. Written whenever the
+    /// main source is established and never diverges from it.
+    /// </summary>
     public Guid AlbumId { get; set; }
 
     // SHA-256 hex of the derived public VIEW/download token. Raw token never stored.

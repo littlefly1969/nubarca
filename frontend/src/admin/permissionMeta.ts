@@ -50,6 +50,26 @@ const PERMISSION_META: Record<string, PermissionPresentation> = {
     labelKey: 'perm.privateVaultAccess',
     descriptionKey: 'permDesc.privateVaultAccess',
   },
+  [PERMISSIONS.partyAccess]: {
+    labelKey: 'perm.partyAccess',
+    descriptionKey: 'permDesc.partyAccess',
+  },
+  [PERMISSIONS.partyContributions]: {
+    labelKey: 'perm.partyContributions',
+    descriptionKey: 'permDesc.partyContributions',
+  },
+  [PERMISSIONS.partyGames]: {
+    labelKey: 'perm.partyGames',
+    descriptionKey: 'permDesc.partyGames',
+  },
+  [PERMISSIONS.partyPrint]: {
+    labelKey: 'perm.partyPrint',
+    descriptionKey: 'permDesc.partyPrint',
+  },
+  [PERMISSIONS.partyFaceSearch]: {
+    labelKey: 'perm.partyFaceSearch',
+    descriptionKey: 'permDesc.partyFaceSearch',
+  },
   [PERMISSIONS.tvManage]: {
     labelKey: 'perm.tvManage',
     descriptionKey: 'permDesc.tvManage',

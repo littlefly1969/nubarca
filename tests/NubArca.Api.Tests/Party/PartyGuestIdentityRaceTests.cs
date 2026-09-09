@@ -20,6 +20,7 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
         Path.GetTempPath(), $"nubarca-guest-identity-{Guid.NewGuid():N}.db");
 
     private readonly Guid _linkId = Guid.NewGuid();
+    private readonly Guid _partyId = Guid.NewGuid();
     private readonly Guid _albumId = Guid.NewGuid();
     private readonly Guid _ownerId = Guid.NewGuid();
     private readonly Guid _challengeOne = Guid.NewGuid();
@@ -44,9 +45,13 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
             Id = _albumId, OwnerUserId = _ownerId, Name = "Festa",
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
+        // The party the link is a capability OF: the root, and the `main`
+        // media source that resolves back to this album.
+        PartySeed.Party(db, _partyId, _ownerId, _albumId);
         db.PartyAlbumLinks.Add(new PartyAlbumLink
         {
-            Id = _linkId, OwnerUserId = _ownerId, AlbumId = _albumId,
+            Id = _linkId,
+            PartyId = _partyId, OwnerUserId = _ownerId, AlbumId = _albumId,
             TokenHash = new string('a', 64), Enabled = true, UploadEnabled = true,
             MaxMessagesPerParticipant = 1,
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
@@ -78,7 +83,8 @@ public sealed class PartyGuestIdentityRaceTests : IAsyncLifetime
     {
         var guest = await SeedGuestAsync();
         var access = new PartyAccess(
-            _ownerId, _albumId, _linkId, MaxMessagesPerParticipant: 1);
+            _partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All,
+            MaxMessagesPerParticipant: 1);
 
         await using var firstDb = CreateContext();
         await using var secondDb = CreateContext();

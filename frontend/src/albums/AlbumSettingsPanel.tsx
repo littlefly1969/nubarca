@@ -15,6 +15,8 @@ import {
   type AlbumPartyStatus,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
+import { usePermissions } from '../auth/usePermissions';
+import { PERMISSIONS } from '../auth/permissions';
 import { useI18n } from '../i18n';
 import { PartyChallengeManager } from './PartyChallengeManager';
 import { PartyPrintSettings } from './PartyPrintSettings';
@@ -40,6 +42,17 @@ export function AlbumSettingsPanel({
 }: Props) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
+  // A capability the caller does not hold is ABSENT from this panel, never a
+  // control that answers 403 when pressed. The server enforces each of these
+  // independently; what happens here is only that a door nobody may open is
+  // not drawn. Each feature asks for the product permission as well, because
+  // that is the rule the server applies.
+  const perms = usePermissions();
+  const canParty = perms.has(PERMISSIONS.partyAccess);
+  const canPartyGames = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]);
+  const canPartyPrint = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyPrint]);
+  const canPartyContributions =
+    perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyContributions]);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(album.name);
   const [desc, setDesc] = useState(album.description ?? '');
@@ -266,6 +279,8 @@ export function AlbumSettingsPanel({
           </label>
           <p className="muted">{t('albumDetail.showOnTvHelp')}</p>
 
+          {canParty && (
+            <>
           <label className="album-tv-label">
             <input
               type="checkbox"
@@ -284,7 +299,7 @@ export function AlbumSettingsPanel({
               <a href={party.partyUrl} target="_blank" rel="noopener noreferrer">{window.location.origin}{party.partyUrl}</a>
             </p>
           )}
-          {party?.partyMode && (
+          {party?.partyMode && canPartyContributions && (
             <div className="album-party-upload" data-testid="album-party-upload">
               <label className="album-tv-label">
                 <input type="checkbox" checked={party.uploadEnabled} disabled={partySaving} aria-label={t('albumDetail.allowGuestUploads')} onChange={(e) => void toggleUpload(e.target.checked)} />
@@ -408,7 +423,7 @@ export function AlbumSettingsPanel({
             </div>
           )}
 
-          {party?.partyMode && (
+          {party?.partyMode && canPartyGames && (
             <div className="album-party-game" data-testid="party-game-settings">
               <h4>{t('partyGame.title')}</h4>
               <p className="muted">{t('partyGame.help')}</p>
@@ -452,7 +467,9 @@ export function AlbumSettingsPanel({
           {/* Printing is a guest capability like the others, so it is configured
               here beside them — but on its own endpoint, so saving a budget can
               never rotate a token or change moderation as a side effect. */}
-          {party?.partyMode && <PartyPrintSettings albumId={albumId} />}
+          {party?.partyMode && canPartyPrint && <PartyPrintSettings albumId={albumId} />}
+            </>
+          )}
         </fieldset>
 
         <fieldset className="ws-filter-section">

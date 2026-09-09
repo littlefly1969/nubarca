@@ -1,16 +1,26 @@
 namespace NubArca.Api.Party;
 
-// Owner-scoped lifecycle + public validation of party album links. All owner
-// methods collapse missing / foreign albums to null/false (the HTTP layer maps
-// to a generic 404). Only token HASHES are persisted; the raw token is derived
-// on demand and returned only to owner-authorized callers.
+// Owner-scoped lifecycle + public validation of a party's PUBLIC CAPABILITIES.
+// All owner methods collapse missing / foreign albums to null/false (the HTTP
+// layer maps to a generic 404). Only token HASHES are persisted; the raw token
+// is derived on demand and returned only to owner-authorized callers.
+//
+// It also holds THE SEAM (see ResolvePublicAsync): the one walk from a token to
+// the party and its main album. Everything downstream keeps working on the
+// (ownerUserId, albumId) pair it already handled correctly.
 public interface IPartyLinkService
 {
-    // Enables party mode on the owner's album (party master switch). Ensures the
-    // album is ShowOnTv (party implies TV visibility). If an active link already
-    // exists it is REUSED (view token stays stable) and only its upload
-    // sub-switch is updated; otherwise a fresh link with new view + upload tokens
-    // is created. `uploadEnabled` sets the upload sub-switch (null = keep an
+    // The COMPATIBILITY ENTRY POINT for "Album -> Party Mode", and the only
+    // creator of parties in this slice.
+    //
+    // Establishes the party this album is the `main` media source of (found or
+    // created), publishes it if it is still a Draft, and mints or reuses the
+    // public capability. Show-on-TV is deliberately untouched: a party does not
+    // require a television. If an active link already exists it is REUSED (view
+    // token stays stable) and only its sub-switches are updated; otherwise a
+    // fresh link with new view + upload tokens is created.
+    //
+    // `uploadEnabled` sets the upload sub-switch (null = keep an
     // existing link's value, or default true for a new link). `requireApproval`
     // sets the upload-approval mode (null = keep an existing link's value, or
     // default false for a new link) without rotating tokens.
@@ -37,15 +47,16 @@ public interface IPartyLinkService
         CancellationToken cancellationToken = default);
 
     // For the owner's paired TV / owner UI: the derived party URLs (view + upload)
-    // for an album when it is ShowOnTv AND has an active party link, else absent.
-    // UploadUrl is null when the upload sub-switch is off. Batch form avoids N+1.
+    // for an album that has an active party link, else absent. UploadUrl is null
+    // when the upload sub-switch is off. Batch form avoids N+1.
+    //
+    // This HANDS OUT a public URL, so it answers empty for an owner whose role
+    // no longer carries `party.access` — the same rule the public resolvers
+    // apply from the other end.
     Task<IReadOnlyDictionary<Guid, PartyLinkUrls>> GetActivePartyUrlsAsync(
         Guid ownerUserId, IReadOnlyCollection<Guid> albumIds,
         CancellationToken cancellationToken = default);
 
-    // Validates a public VIEW token: returns the owner+album it unlocks when the
-    // link is enabled, not revoked, not expired, AND its album still belongs to
-    // the owner and is ShowOnTv. Null otherwise (generic 404 upstream).
     // Updates the slideshow timing / per-participant quotas on the album's
     // ACTIVE link. Deliberately separate from EnableAsync: these four values
     // must be changeable without minting a link, rotating the view/upload
@@ -75,13 +86,21 @@ public interface IPartyLinkService
     // nothing on its own.
     string DeriveViewToken(Guid linkId);
 
+    // THE PUBLIC SEAM. Validates a public VIEW token and walks
+    //     token -> PartyAlbumLink -> Party -> PartyMediaSource(main) -> Album
+    // returning the party, its owner, its MAIN album, the resolving link and
+    // what the owner's role permits the party to offer. Null when the
+    // capability is not live, the party has closed guest access, it has no
+    // main album, that album is no longer the owner's, or the owner's role no
+    // longer carries `party.access` — every case a generic 404 upstream.
     Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default);
 
-    // Validates a public UPLOAD token: like ResolvePublicAsync but matches the
-    // separate upload-token hash and additionally requires the upload sub-switch
-    // to be on. A view token can never satisfy this (different hash), and vice
-    // versa. Null otherwise (generic 404 upstream).
+    // The same seam for a public UPLOAD token: it matches the separate
+    // upload-token hash and additionally requires the upload sub-switch to be
+    // on. A view token can never satisfy this (different hash), and vice versa.
+    // The returned grant also carries the link's approval mode and per-guest
+    // quotas, so a contribution path needs no second query.
     Task<PartyAccess?> ResolveUploadAsync(
         string uploadToken, CancellationToken cancellationToken = default);
 }

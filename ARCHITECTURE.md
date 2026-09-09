@@ -606,7 +606,7 @@ The current context contains the following logical groups.
 | Sharing and collections | `ShareLink`, `Album`, `AlbumItem`, `AuditLog` | Owner-managed collections, public file capabilities, forensic events |
 | Durable operations | `BackgroundJob`, `AdminImportRun`, `AdminImportItem`, `RemoteUploadSession`, `RemoteUploadItem`, `RemoteUploadChunk` | Jobs, persisted import manifests, and staged-upload state |
 | Library organization | `MediaLibraryRule`, `PhotoOrganizerRun`, `PhotoOrganizerMove`, `PhotoExportSession`, `PhotoExportEntry`, `OwnerDeletedContentTombstone` | Visibility, deterministic moves, export snapshots, and re-import suppression |
-| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, public event capabilities and moderation |
+| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `Party`, `PartyMediaSource`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, public event capabilities and moderation |
 | AI foundation | `AiModel`, `AiProfile`, `BlobAiArtifactStatus`, `BlobEmbedding`, `AiAnnotation`, `AiIndexDiagnostic`, document schema entities | Provider/profile lifecycle, artifact state, vectors, diagnostics, future document/tag seams |
 | Face and People | `FaceDetection`, `FaceEmbedding`, `FaceCluster`, `FaceClusterMember`, `Person`, `PersonGroup`, `FaceAssignment`, `PersonFaceAssignment`, `IgnoredFace`, `AiSetting`, `FacePreview` | Blob-level face artifacts plus owner-level grouping, confirmation, ignore state, and display crops |
 | Private Vault | `PrivateVault`, `PrivateVaultAccessToken`; `PrivateVaultId` on normal tree rows | Exclusion-first private partition using the normal logical tree and original blobs |
@@ -945,9 +945,29 @@ A share link grants public download access to one active file. The raw random to
 
 Download count and last-access time are updated atomically. Public responses never reveal owner identity, logical parent path, blob ID, SHA, or storage key.
 
-### 14.3 Party album capabilities
+### 14.3 Party as an aggregate root
 
-Party is a separate public projection over an owner album. Its capability model supports:
+**`Party` is the product's root, and it is none of the three things it used to be confused with.** It is not `PartyAlbumLink`, which is a public *capability* over a party and may be minted, revoked and rotated many times for one event. It is not `Album`, which is a collection of media the owner may also use for anything else. And it is not "an album with `ShowOnTv`": a party is held with or without a television in the room.
+
+A party reaches media through **`PartyMediaSource`**, never a `MediaAlbumId` column. The composite key `(PartyId, AlbumId)` *is* the uniqueness rule — one album contributes to one party once — and `Role` is a validated application string rather than a PostgreSQL enum, so `official`, `guest-contributions` and `selected-memories` become code rather than schema when they are built. Exactly one role carries behaviour today: `main`.
+
+**One seam, walked once.** Every public Party request resolves
+
+```
+token -> PartyAlbumLink -> Party -> PartyMediaSource(main) -> Album
+```
+
+in `PartyLinkService`, and hands the rest of NubArca the `(ownerUserId, albumId)` pair it already handles correctly. `IPartyMediaService`, upload, messages, printing, the game and face search are unchanged and know nothing about a `Party`: *adapt once at the entrance, reuse everything after it*. There is deliberately no `PartyMediaServiceV2`, and no service acquires a second `PartyId`-shaped copy of itself.
+
+`PartyAlbumLink` keeps `OwnerUserId` and `AlbumId` as a **compatibility projection** of the party and its main source — written from them, never diverging — because every owner-scoped Party query already filters on that pair and rewriting them all would be churn without a behaviour change. `PartyId` is the authoritative identity.
+
+**Status is descriptive, not an access gate.** The lifecycle is `draft → published → live → ended`, three moves held as a pure function (`PartyLifecycle.Target`), stated as an *action* by the caller and refused when it does not exist — the same shape as `PartyMessageTransitions`. `EventStartsAt` is scheduling; `LiveStartedAt`/`LiveEndedAt` record transitions that actually happened, and nothing moves a party on a clock. `Game.Start()`/`Game.Finish()` move a match, never the evening around it. What a guest may do is decided by the capability they present and the owner's role, so there is one answer to "why is this party closed" rather than two. `Party.GuestAccessExpiresAt` is the party's own guest window, enforced at the seam so closing it closes every capability at once; `LibraryAccessExpiresAt` is carried for the post-event library and is deliberately enforced nowhere yet.
+
+**Party and Show-on-TV are independent.** Enabling party mode no longer forces `Album.ShowOnTv`, and turning Show-on-TV off no longer revokes live party links. `ShowOnTv` keeps its meaning for the ordinary Album/TV product, and the TV surfaces still require it; a party that wants a television asks for one.
+
+### 14.3.1 Party capabilities
+
+Party is a public projection over the party's main album. Its capability model supports:
 
 - read-only album and media presentation;
 - a distinct anonymous upload flow;
@@ -957,6 +977,10 @@ Party is a separate public projection over an owner album. Its capability model 
 - event slideshow and proportional media grids.
 
 Party token validation always derives the currently visible item set from owner, album membership, file state, moderation, and expiry/revocation. Stored Party search results do not permanently grant access: result visibility is re-derived when read.
+
+**A guest holds a capability; the HOST holds a permission.** `party.access` is the Party product, and `party.contributions`, `party.games`, `party.print` and `party.face-search` are feature permissions whose `Parent` is `party.access` — so a role carrying only `party.games` opens nothing. On every public request the seam resolves the OWNER's effective permissions through the same `IUserPermissionService` the authenticated endpoints use (`IPartyCapabilityPolicy`), which is what makes revoking a Party permission take effect for guests already at the party, on their next request, with no token rotation and nobody signing in again. The rule is enforced in both directions and tested from both: a valid token cannot outrank a missing permission, and a permission cannot rescue a revoked capability. A capability the host may not run is **absent** from the guest hub — never a disabled tile — and its routes answer the same generic 404 as an unknown token. Anything that *hands a guest access* is gated the same way, which is why `GetActivePartyUrlsAsync` (the QR the TV publishes) and the print-token resolver both ask.
+
+Owner-side Party surfaces are gated by the same keys through the ordinary policy machinery (`.RequirePermission(Permissions.PartyAccess)`, `.RequirePartyGames()`, `.RequirePartyPrint()`). Moderating what guests already left is `party.access`, not `party.contributions`: closing the contribution channel must not lock the host out of the queue it filled.
 
 ### 14.4 Anonymous Party upload
 
@@ -976,7 +1000,7 @@ Moderation follows a **state machine held in the domain** (`PartyMessageTransiti
 
 Moderation authority is `owner || activeMembership.CanManagePartyMessages`, resolved in one place (`IPartyMessageAccessResolver`) and re-read from the database on every request, so revoking the membership or clearing the capability takes effect on the next call. Authority is checked *before* the transition is, so a stranger attempting an impossible move still gets the generic not-found rather than a 400 confirming the message exists. Because a membership row is **reused** when somebody is invited again, the capability is explicitly cleared on revoke and on re-invite: a revoked delegation must never rise again without a new decision by the owner. **The album role is deliberately absent from that predicate**: an `editor` curates an album, and running the Party is not curation, so widening the role would hand every existing editor a capability nobody granted. The capability is a narrow delegation over messages alone — it conveys no Party governance (enable/revoke, tokens, settings, slideshow timing, pairing, face-search, photo/video moderation, membership), and only the owner may grant or revoke it. A message id outside the album's current Party is a generic not-found, so a route the caller does legitimately manage cannot be used to probe.
 
-Deleting an album deletes its Party state — messages, guest-upload moderation rows, participants and links — in foreign-key order, exactly as it already deletes its shares. None of those tables is the audit trail (the audit log is), and the guest's stored photo is untouched: an upload row was a visibility control over a party surface that is going away. Face-search sessions are absent from that list because they already cascade from the album.
+Deleting an album deletes its Party state — messages, guest-upload moderation rows, participants, links, its media source and, when nothing is left to draw on, the party itself — in foreign-key order, exactly as it already deletes its shares. None of those tables is the audit trail (the audit log is), and the guest's stored photo is untouched: an upload row was a visibility control over a party surface that is going away. Face-search sessions are absent from that list because they already cascade from the album.
 
 The TV consumes messages through a **separate projection** (`GET /api/tv/albums/{albumId}/party-messages`) carrying only the current Party's visible messages. `TvAlbumItem.mediaType` stays `image | video`, so an older TV client simply never calls the route and keeps working. Presentation is two surfaces over one feed: the **Ribbon**, a still (never scrolling) band holding one message at a time and suspended while the MENU/QR overlay is up; and the **Hero**, a full-screen card inserted only into a genuinely autoplaying slideshow. Hero insertion holds the current media rather than moving the index, so the carousel resumes with nothing lost or repeated; it waits for the boundary a video was going to reach anyway rather than truncating it, and is suspended entirely while a Party face filter is active, because the guest asked for a specific subset of photographs and a greeting card is not an answer to that.
 

@@ -201,21 +201,12 @@ public class AlbumService : IAlbumService
         album.ShowOnTv = showOnTv;
         album.UpdatedAt = now;
 
-        // Party mode implies TV visibility: turning OFF "Show on TV" must also
-        // revoke any active public party link immediately (the public resolver
-        // also re-checks ShowOnTv, so this is defence-in-depth + a clean state).
-        if (!showOnTv)
-        {
-            await _db.PartyAlbumLinks
-                .Where(p => p.AlbumId == albumId && p.OwnerUserId == ownerUserId
-                    && p.Enabled && p.RevokedAt == null)
-                .ExecuteUpdateAsync(
-                    s => s.SetProperty(p => p.Enabled, false)
-                          .SetProperty(p => p.RevokedAt, _ => now)
-                          .SetProperty(p => p.UpdatedAt, _ => now),
-                    cancellationToken);
-        }
-
+        // Party is deliberately NOT touched. Show-on-TV is the owner's decision
+        // about their own television; a party is an event they are hosting, and
+        // one is held with no screen in the room all the time. Turning this off
+        // used to revoke every live party QR on the album — which is why party
+        // mode had to turn it back on, and why the two switches could never be
+        // set independently. Party access is revoked by revoking the party.
         await _db.SaveChangesAsync(cancellationToken);
 
         return new AlbumDetail(album.Id, album.Name, album.Description, album.ShowOnTv, album.CreatedAt, album.UpdatedAt);
@@ -421,6 +412,25 @@ public class AlbumService : IAlbumService
 
         await _db.PartyChallenges
             .Where(c => c.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        // The Party ROOT, last, because everything above holds a restricting
+        // foreign key to it or to the album it draws on. A media source is the
+        // party's claim on this album, so it goes with the album; a party left
+        // with no source at all has nothing to show and no way to acquire one
+        // in this slice, so it goes too — while a party that still draws on
+        // another album survives, which is the whole point of the table.
+        var partyIds = await _db.PartyMediaSources
+            .Where(s => s.AlbumId == albumId)
+            .Select(s => s.PartyId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        await _db.PartyMediaSources
+            .Where(s => s.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.Parties
+            .Where(p => partyIds.Contains(p.Id)
+                && !_db.PartyMediaSources.Any(s => s.PartyId == p.Id))
             .ExecuteDeleteAsync(cancellationToken);
 
         _db.Albums.Remove(album);

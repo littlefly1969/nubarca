@@ -5,6 +5,7 @@ using NubArca.Api.Data;
 using NubArca.Api.Domain;
 using NubArca.Api.Files;
 using NubArca.Api.Http;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -70,7 +71,7 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
-            var header = await partyMedia.GetAlbumAsync(access.OwnerUserId, access.AlbumId, cancellationToken);
+            var header = await partyMedia.GetAlbumAsync(access.OwnerUserId, access.MainAlbumId, cancellationToken);
             if (header is null)
             {
                 return Results.NotFound();
@@ -80,31 +81,37 @@ public static class PartyEndpoints
                 userId: null,
                 action: AuditActions.PartyPublicView,
                 entityType: AuditEntityTypes.PartyAlbum,
-                entityId: access.AlbumId,
+                entityId: access.MainAlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                 metadata: null,
                 cancellationToken: cancellationToken);
 
             var links = await party.GetActivePartyUrlsAsync(
-                access.OwnerUserId, [access.AlbumId], cancellationToken);
-            links.TryGetValue(access.AlbumId, out var urls);
+                access.OwnerUserId, [access.MainAlbumId], cancellationToken);
+            links.TryGetValue(access.MainAlbumId, out var urls);
             var enc = Uri.EscapeDataString(token);
             var coverUrl = header.CoverFileItemId is Guid cover
                 ? $"/api/party/{enc}/media/{cover}/preview" : null;
-            var gameEnabled = await httpContext.RequestServices.GetRequiredService<AppDbContext>()
-                .PartyAlbumLinks.AsNoTracking()
-                .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.GameEnabled, cancellationToken);
+            // A capability the HOST is no longer permitted to run is ABSENT from
+            // the hub, never a disabled tile — the same rule the frontend
+            // applies to the owner's own controls. `access.Capabilities` was
+            // resolved once with the token, so this costs no extra query.
+            var gameEnabled = access.Capabilities.Games
+                && await httpContext.RequestServices.GetRequiredService<AppDbContext>()
+                    .PartyAlbumLinks.AsNoTracking()
+                    .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.GameEnabled, cancellationToken);
             // Printing is offered only when it would actually work right now. The
-            // resolver re-checks the whole chain — profile, station, printer
-            // format, budget — so a card never appears for a party that cannot
-            // print, and disappears the moment it stops being able to.
-            var printUrl = access.PartyAlbumLinkId is Guid printLinkId
-                ? await httpContext.RequestServices
-                    .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
-                    .GetAsync(printLinkId, access.AlbumId, cancellationToken)
-                : null;
+            // resolver re-checks the whole chain — the host's `party.print`
+            // permission, profile, station, printer format, budget — so a card
+            // never appears for a party that cannot print, and disappears the
+            // moment it stops being able to.
+            var printUrl = await httpContext.RequestServices
+                .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
+                .GetAsync(access.PartyAlbumLinkId, access.MainAlbumId, cancellationToken);
             return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(
-                header.Name, header.ItemCount, coverUrl, urls?.UploadUrl, gameEnabled, printUrl,
+                header.Name, header.ItemCount, coverUrl,
+                access.Capabilities.Contributions ? urls?.UploadUrl : null,
+                gameEnabled, printUrl,
                 // Same rule as printing: the capability states where it lives,
                 // and its absence is the whole answer.
                 gameEnabled ? NubArca.Api.Party.PartyLinkService.BuildGameUrl(token) : null));
@@ -119,7 +126,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             var participantId = await PartyGuestSession.ResolveOrCreateAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
@@ -145,7 +152,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             // VOTE NEVER MINTS IDENTITY — the same rule as the hosted game, and
             // for the same reason: a cookie is a claim, and a claim the server
             // never issued must not become a vote. This is resolve-only, so a
@@ -175,7 +182,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             // VOTE NEVER MINTS IDENTITY — the same rule as the hosted game, and
             // for the same reason: a cookie is a claim, and a claim the server
             // never issued must not become a vote. This is resolve-only, so a
@@ -206,9 +213,9 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
         {
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             var fileId = await db.PartyChallenges.AsNoTracking()
-                .Where(x => x.Id == challengeId && x.AlbumId == access.AlbumId && x.IsEnabled)
+                .Where(x => x.Id == challengeId && x.AlbumId == access.MainAlbumId && x.IsEnabled)
                 .Select(x => x.MediaFileItemId).FirstOrDefaultAsync(cancellationToken);
             return fileId is Guid id
                 ? await ServePartyMediaAsync(token, id, "preview", httpContext, party, partyMedia,
@@ -230,8 +237,8 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
-            var header = await partyMedia.GetAlbumAsync(access.OwnerUserId, access.AlbumId, cancellationToken);
-            var items = await partyMedia.ListItemsAsync(access.OwnerUserId, access.AlbumId, cancellationToken);
+            var header = await partyMedia.GetAlbumAsync(access.OwnerUserId, access.MainAlbumId, cancellationToken);
+            var items = await partyMedia.ListItemsAsync(access.OwnerUserId, access.MainAlbumId, cancellationToken);
             if (header is null || items is null)
             {
                 return Results.NotFound();
@@ -312,7 +319,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolveUploadAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.Contributions)
             {
                 return Results.NotFound();
             }
@@ -348,7 +355,7 @@ public static class PartyEndpoints
                 {
                     await using var stream = file.OpenReadStream();
                     outcome = await uploads.UploadAsync(
-                        access.OwnerUserId, access.AlbumId,
+                        access.OwnerUserId, access.MainAlbumId,
                         file.FileName, file.ContentType, file.Length, stream,
                         access.PartyAlbumLinkId, access.RequireUploadApproval,
                         participant, access.MaxPhotoUploadsPerParticipant,
@@ -383,7 +390,7 @@ public static class PartyEndpoints
                 userId: null,
                 action: AuditActions.PartyUpload,
                 entityType: AuditEntityTypes.PartyAlbum,
-                entityId: access.AlbumId,
+                entityId: access.MainAlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                 metadata: new
                 {
@@ -420,10 +427,11 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolveUploadAsync(token, cancellationToken);
-            if (access is null || access.PartyAlbumLinkId is not Guid linkId)
+            if (access is null || !access.Capabilities.Contributions)
             {
                 return Results.NotFound();
             }
+            var linkId = access.PartyAlbumLinkId;
 
             var participantId = await PartyGuestSession.ResolveOrCreateAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
@@ -466,7 +474,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.FaceSearch)
             {
                 return Results.NotFound();
             }
@@ -501,7 +509,7 @@ public static class PartyEndpoints
             }
 
             var outcome = await faceSearch.SearchAsync(
-                access.OwnerUserId, access.AlbumId, access.PartyAlbumLinkId,
+                access.OwnerUserId, access.MainAlbumId, access.PartyAlbumLinkId,
                 bytes, file.ContentType, cancellationToken);
 
             // Aggregate-only audit (never the selfie, token/hash, query vector, file
@@ -510,7 +518,7 @@ public static class PartyEndpoints
                 userId: null,
                 action: AuditActions.PartyFaceSearch,
                 entityType: AuditEntityTypes.PartyAlbum,
-                entityId: access.AlbumId,
+                entityId: access.MainAlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                 metadata: new { status = outcome.Status, resultCount = outcome.ResultCount },
                 cancellationToken: cancellationToken);
@@ -547,12 +555,12 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.FaceSearch)
             {
                 return Results.NotFound();
             }
 
-            var view = await faceSearch.GetAsync(access.OwnerUserId, access.AlbumId, searchId, cancellationToken);
+            var view = await faceSearch.GetAsync(access.OwnerUserId, access.MainAlbumId, searchId, cancellationToken);
             if (view is null)
             {
                 return Results.NotFound();
@@ -583,19 +591,19 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.FaceSearch)
             {
                 return Results.NotFound();
             }
 
             var result = await faceSearch.ActivateForTvAsync(
-                access.OwnerUserId, access.AlbumId, searchId, cancellationToken);
+                access.OwnerUserId, access.MainAlbumId, searchId, cancellationToken);
 
             await audit.LogAsync(
                 userId: null,
                 action: AuditActions.PartyFaceSearchActivateTv,
                 entityType: AuditEntityTypes.PartyAlbum,
-                entityId: access.AlbumId,
+                entityId: access.MainAlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                 metadata: new { status = result.Status.ToString() },
                 cancellationToken: cancellationToken);
@@ -629,18 +637,18 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.FaceSearch)
             {
                 return Results.NotFound();
             }
 
-            await faceSearch.DeleteAsync(access.OwnerUserId, access.AlbumId, searchId, cancellationToken);
+            await faceSearch.DeleteAsync(access.OwnerUserId, access.MainAlbumId, searchId, cancellationToken);
 
             await audit.LogAsync(
                 userId: null,
                 action: AuditActions.PartyFaceSearchDelete,
                 entityType: AuditEntityTypes.PartyAlbum,
-                entityId: access.AlbumId,
+                entityId: access.MainAlbumId,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
                 metadata: new { source = "party" },
                 cancellationToken: cancellationToken);
@@ -657,7 +665,7 @@ public static class PartyEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             var result = await challenges.ListOwnerAsync(ownerId, albumId, cancellationToken);
             return result is null ? Results.NotFound() : Results.Ok(result);
-        }).WithName("ListOwnerPartyChallenges").RequireAuthorization();
+        }).WithName("ListOwnerPartyChallenges").RequirePartyGames();
 
         app.MapPost("/api/albums/{albumId:guid}/party-challenges", async (
             Guid albumId, HttpContext httpContext,
@@ -670,7 +678,7 @@ public static class PartyEndpoints
             var result = await challenges.CreateAsync(ownerId, albumId, body, cancellationToken);
             return result is null ? Results.BadRequest() : Results.Created(
                 $"/api/albums/{albumId}/party-challenges/{result.Id}", result);
-        }).WithName("CreatePartyChallenge").RequireAuthorization();
+        }).WithName("CreatePartyChallenge").RequirePartyGames();
 
         app.MapPut("/api/albums/{albumId:guid}/party-challenges/{challengeId:guid}", async (
             Guid albumId, Guid challengeId, HttpContext httpContext,
@@ -682,7 +690,7 @@ public static class PartyEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             var result = await challenges.UpdateAsync(ownerId, albumId, challengeId, body, cancellationToken);
             return result is null ? Results.BadRequest() : Results.Ok(result);
-        }).WithName("UpdatePartyChallenge").RequireAuthorization();
+        }).WithName("UpdatePartyChallenge").RequirePartyGames();
 
         app.MapDelete("/api/albums/{albumId:guid}/party-challenges/{challengeId:guid}", async (
             Guid albumId, Guid challengeId, HttpContext httpContext,
@@ -692,7 +700,7 @@ public static class PartyEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             return await challenges.DeleteAsync(ownerId, albumId, challengeId, cancellationToken)
                 ? Results.NoContent() : Results.NotFound();
-        }).WithName("DeletePartyChallenge").RequireAuthorization();
+        }).WithName("DeletePartyChallenge").RequirePartyGames();
 
         app.MapPut("/api/albums/{albumId:guid}/party-challenges/order", async (
             Guid albumId, HttpContext httpContext,
@@ -704,7 +712,7 @@ public static class PartyEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             return await challenges.ReorderAsync(ownerId, albumId, body.ChallengeIds, cancellationToken)
                 ? Results.NoContent() : Results.BadRequest();
-        }).WithName("ReorderPartyChallenges").RequireAuthorization();
+        }).WithName("ReorderPartyChallenges").RequirePartyGames();
 
         // Owner-only party-mode status for an album. Normal user cookie (never the TV
         // session). Foreign/missing → generic 404. PartyUrl (derived, relative) is
@@ -718,7 +726,7 @@ public static class PartyEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("GetAlbumPartySettings").RequireAuthorization();
+        }).WithName("GetAlbumPartySettings").RequirePermission(Permissions.PartyAccess);
 
         // Owner-only enable/disable of PUBLIC party mode on an album. Enabling implies
         // ShowOnTv=true; the first enable mints view+upload tokens, and the optional
@@ -785,7 +793,7 @@ public static class PartyEndpoints
 
             var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("SetAlbumPartyMode").RequireAuthorization();
+        }).WithName("SetAlbumPartyMode").RequirePermission(Permissions.PartyAccess);
 
         // Owner-only party SLIDESHOW/QUOTA settings. Deliberately a separate route
         // from party-settings: these four numbers are saved as a draft from the
@@ -840,7 +848,7 @@ public static class PartyEndpoints
 
             var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
             return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("SetPartySlideshowSettings").RequireAuthorization();
+        }).WithName("SetPartySlideshowSettings").RequirePermission(Permissions.PartyAccess);
 
         app.MapMethods("/api/albums/{id:guid}/party-game-settings", ["PATCH"], async (
             Guid id, HttpContext httpContext,
@@ -858,7 +866,7 @@ public static class PartyEndpoints
                 body.VotesPerGuest, body.MaxChallengesPerSession, cancellationToken))
                 return Results.NotFound();
             return Results.Ok(await party.GetOwnerStatusAsync(ownerId, id, cancellationToken));
-        }).WithName("SetPartyGameSettings").RequireAuthorization();
+        }).WithName("SetPartyGameSettings").RequirePartyGames();
 
         // Owner-side moderation of anonymous party uploads. Owner-authenticated (normal
         // user session). Lets the owner see guest-uploaded items and their moderation
@@ -874,7 +882,7 @@ public static class PartyEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var list = await moderation.ListAsync(ownerUserId, albumId, cancellationToken);
             return list is null ? Results.NotFound() : Results.Ok(list);
-        }).WithName("ListPartyUploads").RequireAuthorization();
+        }).WithName("ListPartyUploads").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-uploads/{fileItemId:guid}/hide", async (
             Guid albumId, Guid fileItemId,
@@ -885,7 +893,7 @@ public static class PartyEndpoints
             await ModeratePartyUploadAsync(
                 httpContext, moderation, audit, albumId, fileItemId,
                 NubArca.Api.Domain.PartyUploadStatuses.Hidden, AuditActions.PartyUploadHide, cancellationToken))
-            .WithName("HidePartyUpload").RequireAuthorization();
+            .WithName("HidePartyUpload").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-uploads/{fileItemId:guid}/approve", async (
             Guid albumId, Guid fileItemId,
@@ -896,7 +904,7 @@ public static class PartyEndpoints
             await ModeratePartyUploadAsync(
                 httpContext, moderation, audit, albumId, fileItemId,
                 NubArca.Api.Domain.PartyUploadStatuses.Approved, AuditActions.PartyUploadApprove, cancellationToken))
-            .WithName("ApprovePartyUpload").RequireAuthorization();
+            .WithName("ApprovePartyUpload").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-uploads/{fileItemId:guid}/reject", async (
             Guid albumId, Guid fileItemId,
@@ -907,7 +915,7 @@ public static class PartyEndpoints
             await ModeratePartyUploadAsync(
                 httpContext, moderation, audit, albumId, fileItemId,
                 NubArca.Api.Domain.PartyUploadStatuses.Rejected, AuditActions.PartyUploadReject, cancellationToken))
-            .WithName("RejectPartyUpload").RequireAuthorization();
+            .WithName("RejectPartyUpload").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-uploads/{fileItemId:guid}/restore", async (
             Guid albumId, Guid fileItemId,
@@ -918,7 +926,7 @@ public static class PartyEndpoints
             await ModeratePartyUploadAsync(
                 httpContext, moderation, audit, albumId, fileItemId,
                 NubArca.Api.Domain.PartyUploadStatuses.Approved, AuditActions.PartyUploadRestore, cancellationToken))
-            .WithName("RestorePartyUpload").RequireAuthorization();
+            .WithName("RestorePartyUpload").RequirePermission(Permissions.PartyAccess);
 
         // --- PUBLIC party MESSAGES (anonymous, upload-token scoped) ---
         //
@@ -947,7 +955,7 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolveUploadAsync(token, cancellationToken);
-            if (access is null)
+            if (access is null || !access.Capabilities.Contributions)
             {
                 return Results.NotFound();
             }
@@ -1001,7 +1009,7 @@ public static class PartyEndpoints
                 entityType: AuditEntityTypes.PartyMessage,
                 entityId: message.Id,
                 ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                metadata: new { albumId = access.AlbumId, status = message.Status },
+                metadata: new { albumId = access.MainAlbumId, status = message.Status },
                 cancellationToken: cancellationToken);
 
             return Results.Ok(message);
@@ -1028,7 +1036,7 @@ public static class PartyEndpoints
             var actorUserId = httpContext.GetCurrentUserId()!.Value;
             var list = await messages.ListForManagerAsync(albumId, actorUserId, cancellationToken);
             return list is null ? Results.NotFound() : Results.Ok(list);
-        }).WithName("ListPartyMessages").RequireAuthorization();
+        }).WithName("ListPartyMessages").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/approve", async (
             Guid albumId, Guid messageId,
@@ -1040,7 +1048,7 @@ public static class PartyEndpoints
                 httpContext, messages, audit, albumId, messageId,
                 NubArca.Api.Domain.PartyMessageModeration.Approve,
                 AuditActions.PartyMessageApprove, cancellationToken))
-            .WithName("ApprovePartyMessage").RequireAuthorization();
+            .WithName("ApprovePartyMessage").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/reject", async (
             Guid albumId, Guid messageId,
@@ -1052,7 +1060,7 @@ public static class PartyEndpoints
                 httpContext, messages, audit, albumId, messageId,
                 NubArca.Api.Domain.PartyMessageModeration.Reject,
                 AuditActions.PartyMessageReject, cancellationToken))
-            .WithName("RejectPartyMessage").RequireAuthorization();
+            .WithName("RejectPartyMessage").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/hide", async (
             Guid albumId, Guid messageId,
@@ -1064,7 +1072,7 @@ public static class PartyEndpoints
                 httpContext, messages, audit, albumId, messageId,
                 NubArca.Api.Domain.PartyMessageModeration.Hide,
                 AuditActions.PartyMessageHide, cancellationToken))
-            .WithName("HidePartyMessage").RequireAuthorization();
+            .WithName("HidePartyMessage").RequirePermission(Permissions.PartyAccess);
 
         // Restore lands on the same state as approve and is a SEPARATE route only
         // so the audit trail distinguishes "the host read it and let it through"
@@ -1079,7 +1087,7 @@ public static class PartyEndpoints
                 httpContext, messages, audit, albumId, messageId,
                 NubArca.Api.Domain.PartyMessageModeration.Restore,
                 AuditActions.PartyMessageRestore, cancellationToken))
-            .WithName("RestorePartyMessage").RequireAuthorization();
+            .WithName("RestorePartyMessage").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/promote-hero", async (
             Guid albumId, Guid messageId,
@@ -1090,7 +1098,7 @@ public static class PartyEndpoints
             await SetPartyMessageHeroAsync(
                 httpContext, messages, audit, albumId, messageId, true,
                 AuditActions.PartyMessageHeroPromote, cancellationToken))
-            .WithName("PromotePartyMessageHero").RequireAuthorization();
+            .WithName("PromotePartyMessageHero").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/albums/{albumId:guid}/party-messages/{messageId:guid}/demote-hero", async (
             Guid albumId, Guid messageId,
@@ -1101,7 +1109,7 @@ public static class PartyEndpoints
             await SetPartyMessageHeroAsync(
                 httpContext, messages, audit, albumId, messageId, false,
                 AuditActions.PartyMessageHeroDemote, cancellationToken))
-            .WithName("DemotePartyMessageHero").RequireAuthorization();
+            .WithName("DemotePartyMessageHero").RequirePermission(Permissions.PartyAccess);
 
         return app;
     }
@@ -1149,7 +1157,7 @@ public static class PartyEndpoints
         }
 
         return await ServeMediaCoreAsync(
-            access.OwnerUserId, access.AlbumId, fileId, variant, httpContext,
+            access.OwnerUserId, access.MainAlbumId, fileId, variant, httpContext,
             partyMedia, thumbnails, stripper, cancellationToken);
     }
 

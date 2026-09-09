@@ -576,6 +576,51 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   decides what the bytes are, and moderation never refunds — hiding a photo is a
   visibility decision, and giving the slot back would let a guest re-upload the
   thing the owner just hid.
+- **Party is its own root, and it is not the QR, the album, or the television.**
+  `Party` is the EVENT; `PartyAlbumLink` is a public capability OF it, minted and
+  revoked many times for one evening; `Album` is where its media happens to live,
+  reached through `PartyMediaSource` (composite key `(PartyId, AlbumId)`, one
+  validated role — `main` — with `official`/`guest-contributions`/
+  `selected-memories` deliberately possible as rows rather than schema). One seam
+  does the whole walk — `token → PartyAlbumLink → Party → PartyMediaSource(main)
+  → Album` — and hands every existing service the `(ownerUserId, albumId)` pair it
+  already handles correctly, which is why there is no `PartyMediaServiceV2` and no
+  service carries a second PartyId-shaped copy of itself. `PartyAlbumLink.
+  OwnerUserId`/`AlbumId` survive as a COMPATIBILITY PROJECTION of the party and
+  its main source, written from them and authoritative nowhere. Three things are
+  easy to undo by accident. **Status is descriptive, not a gate**: `draft →
+  published → live → ended` is three moves in a pure `PartyLifecycle.Target`, the
+  caller names an ACTION and a re-publish is refused rather than silently
+  succeeding, and nothing moves a party on a clock — what closes a party to guests
+  is still the link's own switches plus the owner's permission, so there is one
+  answer to "why is this closed". **Enabling party mode is what CREATES the
+  party** (`Album → Party Mode` finds or creates it, adds the `main` source and
+  publishes a Draft, all in one transaction with the capability) — there is no
+  second creator and no Party UI yet. And **Party no longer implies Show-on-TV**:
+  enabling a party does not switch the album onto the owner's television, turning
+  Show-on-TV off no longer revokes live QR codes, and the TV surfaces still
+  require their own flag. The migration is classified NOT automated: `PartyId` is
+  NOT NULL with a restricting FK the previous application cannot satisfy, so the
+  cutover takes a short window in which Party is unavailable, in preference to a
+  dual-write transition spread through the services.
+- **A guest holds a capability; the HOST holds a permission.** `party.access` is
+  the product and `party.contributions` / `party.games` / `party.print` /
+  `party.face-search` are feature keys whose Parent is `party.access`, so a role
+  carrying only one of them opens nothing. Every public Party request resolves the
+  OWNER's effective permissions at the seam through the same
+  `IUserPermissionService` the authenticated endpoints use
+  (`IPartyCapabilityPolicy`) — which is what makes revoking a key reach guests who
+  are already at the party, on their next request, with no token rotation and
+  nobody signing in again. Both directions are enforced and both are tested: a
+  valid token cannot outrank a missing permission, and a permission cannot rescue
+  a revoked capability. A capability the host may not run is ABSENT — from the
+  guest hub, from Album settings, from the owner's routes — never a disabled tile,
+  and its endpoints answer the same generic 404 as an unknown token. The rule for
+  where to check is "anything that hands a guest access, or that a guest
+  presents", which is why the TV's party QR (`GetActivePartyUrlsAsync`) and the
+  print-token resolver both ask. Owner-side MODERATION is `party.access`, not
+  `party.contributions`: closing the contribution channel must not lock the host
+  out of the queue it filled.
 - **Party publishes one Guest Hub QR; the old capabilities remain capabilities.**
   The view token's `/party/{token}` route is the canonical mobile Hub and the
   only link rendered as a QR. Browse/download, face search, contribution and

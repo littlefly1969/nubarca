@@ -193,6 +193,14 @@ public static class AuditActions
     // (outcome bucket + interpreter key) — never the command text, names or dates.
     public const string TvPersonalInterpretCommand = "tv_personal.interpret_command";
 
+    // The Party's own lifecycle. Recorded as three distinct actions rather than
+    // one "status changed", because "the host announced the party" and "the
+    // host started it" are different events and the audit trail is where that
+    // difference is answerable later.
+    public const string PartyPublish = "party.publish";
+    public const string PartyStartLive = "party.start_live";
+    public const string PartyEndLive = "party.end_live";
+
     // Public read-only party album links. Enable/revoke are owner actions;
     // public_view is logged on an anonymous album open (no token/hash recorded).
     public const string PartyEnable = "party.enable";
@@ -358,6 +366,9 @@ public static class AuditEntityTypes
     public const string PhotoExportSession = "photo_export_session";
     public const string TvSession = "tv_session";
     public const string TvPairing = "tv_pairing";
+    // The Party aggregate root, distinct from `party_album` — which names the
+    // album a party's capability was scoped to, not the event itself.
+    public const string Party = "party";
     public const string PartyAlbum = "party_album";
     public const string PartyMessage = "party_message";
     public const string Plate = "plate";

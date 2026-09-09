@@ -94,9 +94,36 @@ export function App() {
             <Route path="/help" element={<HelpPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
-            <Route path="/albums/:albumId/party-uploads" element={<PartyUploadsPage />} />
-            <Route path="/albums/:albumId/party-messages" element={<PartyMessagesPage />} />
-            <Route path="/albums/:albumId/party-game" element={<PartyControlRoomPage />} />
+            {/* The owner's Party destinations. Each names the same pair the
+                server's policy requires — the product permission AND the
+                capability — so a link that survived in somebody's history
+                cannot walk past a role that no longer carries it. Moderating
+                what guests already left is `party.access`: closing the
+                contribution channel must not lock the host out of the queue. */}
+            <Route
+              path="/albums/:albumId/party-uploads"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
+                  <PartyUploadsPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/albums/:albumId/party-messages"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
+                  <PartyMessagesPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/albums/:albumId/party-game"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess, PERMISSIONS.partyGames]}>
+                  <PartyControlRoomPage />
+                </PermissionRoute>
+              }
+            />
             {/* "Shared with me" is no longer a destination: /albums holds both
                 collections. The old list route keeps working as a redirect, and
                 the per-album route stays exactly where it is — it is the

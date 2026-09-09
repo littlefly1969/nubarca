@@ -124,14 +124,14 @@ public sealed class PartyChallengeService : IPartyChallengeService
 
     public async Task<PartyGuestChallengesDto?> ListGuestAsync(PartyAccess access, Guid participantId, CancellationToken ct = default)
     {
-        if (access.PartyAlbumLinkId is not Guid linkId) return null;
+        var linkId = access.PartyAlbumLinkId;
         var state = await GuestStateAsync(access, participantId, linkId, ct);
         if (state is null) return null;
         var voted = await _db.PartyChallengeVotes.AsNoTracking()
             .Where(x => x.PartyAlbumLinkId == linkId && x.PartyParticipantId == participantId)
             .Select(x => x.PartyChallengeId).ToListAsync(ct);
         var items = await _db.PartyChallenges.AsNoTracking()
-            .Where(x => x.AlbumId == access.AlbumId && x.IsEnabled)
+            .Where(x => x.AlbumId == access.MainAlbumId && x.IsEnabled)
             .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
             .Select(x => new PartyGuestChallengeDto(x.Id, x.Title, x.Body, x.Kind,
                 x.MediaFileItemId == null ? null : $"/api/party/challenge-media/{x.Id}", voted.Contains(x.Id)))
@@ -143,11 +143,11 @@ public sealed class PartyChallengeService : IPartyChallengeService
     public async Task<PartyVoteResultDto?> VoteAsync(
         PartyAccess access, Guid participantId, Guid challengeId, bool voted, CancellationToken ct = default)
     {
-        if (access.PartyAlbumLinkId is not Guid linkId) return null;
+        var linkId = access.PartyAlbumLinkId;
         var state = await GuestStateAsync(access, participantId, linkId, ct);
         if (state is null) return null;
         var eligible = await _db.PartyChallenges.AsNoTracking()
-            .AnyAsync(x => x.Id == challengeId && x.AlbumId == access.AlbumId && x.IsEnabled, ct);
+            .AnyAsync(x => x.Id == challengeId && x.AlbumId == access.MainAlbumId && x.IsEnabled, ct);
         if (!eligible) return null;
 
         // The conditional participant UPDATE and the unique vote index are the
@@ -174,7 +174,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
                 await _db.SaveChangesAsync(ct);
                 _logger.LogInformation(
                     "party.challenge.voted AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} ChallengeId={ChallengeId}",
-                    access.AlbumId, linkId, challengeId);
+                    access.MainAlbumId, linkId, challengeId);
             }
             catch (DbUpdateException)
             {
@@ -202,7 +202,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
             await _participants.ReleaseChallengeVoteAsync(participantId, ct);
             _logger.LogInformation(
                 "party.challenge.unvoted AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} ChallengeId={ChallengeId}",
-                access.AlbumId, linkId, challengeId);
+                access.MainAlbumId, linkId, challengeId);
         }
         await tx.CommitAsync(ct);
         var used = await _db.PartyChallengeVotes.AsNoTracking()
@@ -405,7 +405,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
         PartyAccess access, Guid participantId, Guid linkId, CancellationToken ct)
     {
         var row = await _db.PartyAlbumLinks.AsNoTracking()
-            .Where(x => x.Id == linkId && x.AlbumId == access.AlbumId && x.Enabled && x.GameEnabled)
+            .Where(x => x.Id == linkId && x.AlbumId == access.MainAlbumId && x.Enabled && x.GameEnabled)
             .Join(_db.Albums.AsNoTracking(), x => x.AlbumId, a => a.Id,
                 (x, a) => new { a.Name, x.VotesPerGuest }).FirstOrDefaultAsync(ct);
         if (row is null) return null;

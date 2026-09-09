@@ -7,6 +7,13 @@ namespace NubArca.Api.Party;
 // can display/copy/QR it — never the token hash or any storage internal.
 public sealed record AlbumPartyStatusDto(
     Guid AlbumId,
+    // The Party this album is the `main` media source of, once one exists. It
+    // is how the compatibility surface hands the owner the identity of the
+    // product root without a second request — and it is the OWNER's own id on
+    // an owner-authenticated route, never a public one.
+    Guid? PartyId,
+    // Reported, never required. Party and Show-on-TV are two independent
+    // publication decisions: a party can run with no television in the room.
     bool ShowOnTv,
     bool PartyMode,
     string? PartyUrl,
@@ -85,18 +92,35 @@ public sealed record PartyUploadSessionDto(
 // the frontend can use to surface the (re)generated link.
 public sealed record PartyEnableResult(
     Guid AlbumId,
+    Guid PartyId,
     Guid LinkId,
     string PartyUrl);
 
-// Resolved public access grant from a validated token: which owner's which
-// album the token unlocks. Never leaves the service layer. For an UPLOAD grant
-// it also carries the resolving link id and its approval-mode flag so the upload
-// service can record the correct initial moderation state (view grants leave
-// these at their defaults).
+// Resolved public access grant from a validated token — the WHOLE of what one
+// public Party request is allowed to touch. Never leaves the service layer.
+//
+// This is the seam. The resolver walks
+//     token -> PartyAlbumLink -> Party -> PartyMediaSource(main) -> Album
+// once, and everything downstream keeps working on (OwnerUserId, MainAlbumId)
+// exactly as it did before Party existed. Adapt once at the entrance, reuse
+// everything after it: no service acquires a second, PartyId-shaped copy of
+// itself.
+//
+// `Capabilities` is the host's role, resolved in the same pass, so an endpoint
+// asks what the party may offer without re-deriving it. For an UPLOAD grant the
+// record also carries the link's approval mode and per-guest quotas so the
+// upload path needs no second query (view grants leave these at their
+// defaults).
 public sealed record PartyAccess(
+    Guid PartyId,
     Guid OwnerUserId,
-    Guid AlbumId,
-    Guid? PartyAlbumLinkId = null,
+    // The party's `main` media source. Named for what it IS rather than
+    // "AlbumId": a party may have more than one album, and every service
+    // downstream is being handed this one deliberately.
+    Guid MainAlbumId,
+    // Always present: a grant is only ever produced by resolving a link.
+    Guid PartyAlbumLinkId,
+    PartyCapabilities Capabilities,
     bool RequireUploadApproval = false,
     // Per-participant quotas carried straight off the resolved link (0 =
     // unlimited), so the upload path needs no second query to learn them.

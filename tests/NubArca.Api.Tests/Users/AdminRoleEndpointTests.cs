@@ -41,14 +41,19 @@ public sealed class AdminRoleEndpointTests : IDisposable
         var administrator = listed.Roles.Single(r => r.Key == RoleKeys.Administrator);
         Assert.True(administrator.IsSystem);
         Assert.True(administrator.IsAdministrator);
-        Assert.Equal(15, administrator.Permissions.Count);
+        // The WHOLE catalogue, counted from the catalogue: an Administrator's
+        // authority is never quietly narrowed by a release that adds a key.
+        Assert.Equal(PermissionCatalog.AllKeys.Count, administrator.Permissions.Count);
         Assert.Equal(1, administrator.UserCount);
 
-        // Member carries every non-administrative permission — `cast.access` and
-        // `people.cluster.rebuild` included. That is the migration contract, not
-        // an oversight: a key added without a decision about Member would
-        // silently remove a capability from every account that migrated here.
-        Assert.Equal(10, listed.Roles.Single(r => r.Key == RoleKeys.Member).Permissions.Count);
+        // Member carries every non-administrative permission — `cast.access`,
+        // `people.cluster.rebuild` and the five Party keys included. That is the
+        // migration contract, not an oversight: a key added without a decision
+        // about Member would silently remove a capability from every account
+        // that migrated here.
+        Assert.Equal(
+            PermissionCatalog.All.Count(p => !p.Administrative),
+            listed.Roles.Single(r => r.Key == RoleKeys.Member).Permissions.Count);
         Assert.Empty(listed.Roles.Single(r => r.Key == RoleKeys.Restricted).Permissions);
     }
 

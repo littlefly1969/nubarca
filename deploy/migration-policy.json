@@ -30,7 +30,7 @@
     "20260905074138_AddPartyPrintStudio": {
       "automated": true,
       "previousApplicationCompatible": true,
-      "reason": "Creates only the three new party-print tables — profiles, idempotency requests, and the per-job source rows; the previous application neither reads nor writes them, and no existing table is altered."
+      "reason": "Creates only the three new party-print tables \u2014 profiles, idempotency requests, and the per-job source rows; the previous application neither reads nor writes them, and no existing table is altered."
     },
     "20260905080901_AddPartyPrintCapabilityToken": {
       "automated": true,
@@ -40,7 +40,7 @@
     "20260905191336_AddPartyPrintPerGuestBudget": {
       "automated": true,
       "previousApplicationCompatible": true,
-      "reason": "Adds four NOT NULL integer columns with defaultValue 0 — two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
+      "reason": "Adds four NOT NULL integer columns with defaultValue 0 \u2014 two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
     },
     "20260905231112_AddPartyGameRuntime": {
       "automated": true,
@@ -76,6 +76,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds two columns to tv_sessions: a NOT NULL string with defaultValue 'general' and a nullable uuid, plus an index, a restricting foreign key to party_album_links and a check constraint tying the two columns together. Every existing paired television takes 'general' with no link, which is exactly the behaviour it had before the columns existed; the previous application neither reads nor writes either column, so rolling back to it leaves values the new schema also accepts, and the check constraint holds for every row the old application could write."
+    },
+    "20260909164555_AddPartyAggregateRoot": {
+      "automated": false,
+      "previousApplicationCompatible": false,
+      "reason": "Party becomes the aggregate root. It creates the parties and party_media_sources tables, then adds a NOT NULL PartyId to party_album_links with a restricting foreign key and backfills one party per historical party album. The previous application knows nothing about PartyId, so every link it minted after the upgrade would carry the zero GUID and be rejected by that foreign key: rolling back leaves an installation that cannot enable party mode at all. It also removes the Party/ShowOnTv coupling, which the previous application still assumes. This migration therefore requires a short maintenance window in which Party is unavailable, taken deliberately in preference to a dual-write transition spread through the services; the rest of NubArca is unaffected and no token, participant, upload, message, print, game or face-search row is read or rewritten."
     }
   }
 }

@@ -834,8 +834,18 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Albums.Sharing.IAlbumTransferService,
         NubArca.Api.Albums.Sharing.AlbumTransferService>();
-    // Public read-only party album links (owner lifecycle + public validation)
-    // and party-scoped media surfacing.
+    // The Party aggregate root: creating a party for an album and moving it
+    // through its lifecycle. Everything else in Party keeps working on the
+    // (owner, album) pair this resolves to.
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
+    // What the HOST's role permits their party to offer. Scoped, because it
+    // reads current database state on every request through
+    // IUserPermissionService — which is what makes revoking a Party permission
+    // reach guests who are already at the party.
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyCapabilityPolicy, NubArca.Api.Party.PartyCapabilityPolicy>();
+    // Public party capabilities (owner lifecycle + the public token seam) and
+    // party-scoped media surfacing.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
     builder.Services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();
@@ -1471,6 +1481,7 @@ app.MapShareLinkEndpoints();
 // extracted as part of the modular-monolith cleanup. Same routes, same
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
+app.MapPartyOwnerEndpoints();
 app.MapPartyGameEndpoints();
 app.MapPartyPrintEndpoints();
 app.MapPartyPrintOwnerEndpoints();

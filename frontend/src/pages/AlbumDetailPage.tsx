@@ -9,6 +9,8 @@ import {
   type AlbumPartyStatus,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
+import { usePermissions } from '../auth/usePermissions';
+import { PERMISSIONS } from '../auth/permissions';
 import { useI18n } from '../i18n';
 import { AlbumSettingsPanel } from '../albums/AlbumSettingsPanel';
 import { AlbumSharePanel } from '../albums/AlbumSharePanel';
@@ -36,6 +38,7 @@ export function AlbumDetailPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const navigate = useNavigate();
   const { state, invalidateAuth } = useAuth();
+  const canParty = usePermissions().has(PERMISSIONS.partyAccess);
   const { t } = useI18n();
   const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = useState<HeaderStatus>({ kind: 'loading' });
@@ -87,7 +90,14 @@ export function AlbumDetailPage() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setStatus({ kind: 'loading' });
-    Promise.all([getAlbum(albumId, ctrl.signal), getAlbumPartySettings(albumId, ctrl.signal)])
+    // Party settings are only ASKED for by a caller who may have them. Without
+    // `party.access` the server answers 403 — correctly — and requesting it
+    // anyway would turn a permission the user simply does not hold into a
+    // failure to load their own album.
+    Promise.all([
+      getAlbum(albumId, ctrl.signal),
+      canParty ? getAlbumPartySettings(albumId, ctrl.signal) : Promise.resolve(null),
+    ])
       .then(([album, party]) => setStatus({ kind: 'ready', album, party }))
       .catch((err) => {
         if ((err as Error).name === 'AbortError') return;
@@ -96,7 +106,7 @@ export function AlbumDetailPage() {
         setStatus({ kind: 'error', message: t('albumDetail.loadError') });
       });
     return () => ctrl.abort();
-  }, [albumId, invalidateAuth, navigate, t]);
+  }, [albumId, canParty, invalidateAuth, navigate, t]);
 
   // Whether to offer the shared-content view at all. A plain 404/401 here just
   // leaves it hidden: it is a navigation affordance, not a permission.

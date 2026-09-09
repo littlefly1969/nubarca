@@ -32,12 +32,21 @@ public sealed class PartyLinkService : IPartyLinkService
 
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPartyService _parties;
+    private readonly IPartyCapabilityPolicy _capabilities;
     private readonly byte[] _secret;
 
-    public PartyLinkService(AppDbContext db, TimeProvider clock, IConfiguration config)
+    public PartyLinkService(
+        AppDbContext db,
+        TimeProvider clock,
+        IPartyService parties,
+        IPartyCapabilityPolicy capabilities,
+        IConfiguration config)
     {
         _db = db;
         _clock = clock;
+        _parties = parties;
+        _capabilities = capabilities;
         var configured = config["Party:TokenSecret"];
         _secret = Encoding.UTF8.GetBytes(
             string.IsNullOrWhiteSpace(configured) ? DefaultSecret : configured);
@@ -50,21 +59,34 @@ public sealed class PartyLinkService : IPartyLinkService
         bool? requireMessageApproval = null,
         CancellationToken cancellationToken = default)
     {
-        var album = await _db.Albums
-            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (album is null)
+        var now = _clock.GetUtcNow().UtcDateTime;
+
+        // The party is the root, so it is established FIRST — found when this
+        // album is already somebody's party, created (with its `main` media
+        // source) when it is not. Nothing is saved by that call: the party, its
+        // media source and the capability below all land in one transaction, so
+        // a party can never exist because a link failed to be written.
+        //
+        // Show-on-TV is deliberately NOT touched. A party and a television are
+        // two independent publication decisions, and forcing one from the other
+        // is exactly the coupling this slice removes.
+        var party = await _parties.EnsureForAlbumAsync(ownerUserId, albumId, cancellationToken);
+        if (party is null)
         {
             return null;
         }
 
-        var now = _clock.GetUtcNow().UtcDateTime;
-
-        // Party implies TV visibility.
-        if (!album.ShowOnTv)
+        // Enabling the public capability IS publishing the party, so a party
+        // still in Draft moves with it — through the same domain transition the
+        // Party API uses, never by assigning a status here. A party the host has
+        // already taken further (Live, or explicitly Ended) is left alone: this
+        // entry point mints a QR, and re-opening an event is a decision the
+        // Party surface owns.
+        if (PartyLifecycle.Target(party.Status, PartyLifecycleAction.Publish) is string published)
         {
-            album.ShowOnTv = true;
-            album.UpdatedAt = now;
+            party.Status = published;
+            party.Version++;
+            party.UpdatedAt = now;
         }
 
         // Reuse the current active link so the view token (and any printed QR)
@@ -101,6 +123,8 @@ public sealed class PartyLinkService : IPartyLinkService
             link = new PartyAlbumLink
             {
                 Id = Guid.NewGuid(),
+                PartyId = party.Id,
+                // Compatibility projections of the party and its main source.
                 OwnerUserId = ownerUserId,
                 AlbumId = albumId,
                 Enabled = true,
@@ -118,8 +142,17 @@ public sealed class PartyLinkService : IPartyLinkService
             _db.PartyAlbumLinks.Add(link);
         }
 
+        // Converge a reused link on the party this album actually resolves to.
+        // Normally already true — the migration gave every existing link its
+        // party, and a new one is built with it above — so this is the cheap
+        // guarantee that a live QR and the party it belongs to never drift.
+        if (link.PartyId != party.Id)
+        {
+            link.PartyId = party.Id;
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
-        return new PartyEnableResult(albumId, link.Id, BuildPartyUrl(DeriveToken(link.Id)));
+        return new PartyEnableResult(albumId, party.Id, link.Id, BuildPartyUrl(DeriveToken(link.Id)));
     }
 
     public async Task<bool> DisableAsync(
@@ -160,6 +193,18 @@ public sealed class PartyLinkService : IPartyLinkService
             return null;
         }
 
+        // The party this album is the `main` source of, if it has ever been one.
+        // Reported so the owner surface holds the product's identity without a
+        // second request; null simply means party mode was never enabled here.
+        var partyId = await _db.PartyMediaSources
+            .AsNoTracking()
+            .Where(s => s.AlbumId == albumId && s.Role == PartyMediaSourceRoles.Main)
+            .Join(_db.Parties.AsNoTracking().Where(p => p.OwnerUserId == ownerUserId),
+                s => s.PartyId, p => p.Id, (s, p) => new { p.Id, p.CreatedAt })
+            .OrderBy(p => p.CreatedAt)
+            .Select(p => (Guid?)p.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var active = await _db.PartyAlbumLinks
             .AsNoTracking()
@@ -180,14 +225,16 @@ public sealed class PartyLinkService : IPartyLinkService
             })
             .FirstOrDefaultAsync(cancellationToken);
 
-        // Party requires ShowOnTv; a link on a no-longer-ShowOnTv album is inert.
-        var partyMode = active is not null && album.ShowOnTv;
+        // Party mode is an ACTIVE LINK and nothing else. Show-on-TV is reported
+        // beside it because the panel still shows both switches, but a party
+        // held without a television in the room is a party.
+        var partyMode = active is not null;
         var viewUrl = partyMode ? BuildPartyUrl(DeriveToken(active!.Id)) : null;
         var uploadOn = partyMode && active!.UploadEnabled && active.UploadTokenHash is not null;
         var uploadUrl = uploadOn ? BuildUploadUrl(DeriveUploadToken(active!.Id)) : null;
         var requireApproval = partyMode && active!.RequireUploadApproval;
         return new AlbumPartyStatusDto(
-            albumId, album.ShowOnTv, partyMode, viewUrl, uploadOn, uploadUrl, requireApproval,
+            albumId, partyId, album.ShowOnTv, partyMode, viewUrl, uploadOn, uploadUrl, requireApproval,
             // Defaults when no link exists yet, so the settings panel renders the
             // values a first enable would actually produce.
             active?.PhotoSlideSeconds ?? PartySlideshowDefaults.PhotoSeconds,
@@ -293,17 +340,28 @@ public sealed class PartyLinkService : IPartyLinkService
             return result;
         }
 
+        // This method HANDS OUT public URLs, which is the one thing a host who
+        // may not run parties must not be able to do. Anything a guest presents
+        // or is given goes through the owner's role; the resolvers below do the
+        // same at the other end of the same rule.
+        var capabilities = await _capabilities.ForOwnerAsync(ownerUserId, cancellationToken);
+        if (!capabilities.Access)
+        {
+            return result;
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
 
-        // Only ShowOnTv albums with an active link. The album join keeps a link
-        // on a since-disabled album from producing a URL.
+        // Albums with an active link. Show-on-TV is deliberately absent: the two
+        // TV callers already filter their own album list on it, and a party does
+        // not need a television to exist.
         var rows = await _db.PartyAlbumLinks
             .AsNoTracking()
             .Where(p => p.OwnerUserId == ownerUserId
                 && albumIds.Contains(p.AlbumId)
                 && p.Enabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
-            .Join(_db.Albums.AsNoTracking().Where(a => a.OwnerUserId == ownerUserId && a.ShowOnTv),
+            .Join(_db.Albums.AsNoTracking().Where(a => a.OwnerUserId == ownerUserId),
                 p => p.AlbumId, a => a.Id,
                 (p, a) => new
                 {
@@ -335,28 +393,17 @@ public sealed class PartyLinkService : IPartyLinkService
         }
 
         var hash = HashToken(token);
-        var now = _clock.GetUtcNow().UtcDateTime;
-
         var link = await _db.PartyAlbumLinks
             .AsNoTracking()
-            .Where(p => p.TokenHash == hash
-                && p.Enabled && p.RevokedAt == null
-                && (p.ExpiresAt == null || p.ExpiresAt > now))
-            .Select(p => new { p.Id, p.OwnerUserId, p.AlbumId })
+            .Where(p => p.TokenHash == hash)
+            .Select(p => new LinkRow(
+                p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
+                p.RequireUploadApproval,
+                p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
             .FirstOrDefaultAsync(cancellationToken);
-        if (link is null)
-        {
-            return null;
-        }
 
-        // The album must still belong to the owner AND still be ShowOnTv — so
-        // turning off "Show on TV" (or moving the album) severs public access
-        // even if a stale link row lingered.
-        var albumOk = await _db.Albums
-            .AsNoTracking()
-            .AnyAsync(a => a.Id == link.AlbumId && a.OwnerUserId == link.OwnerUserId && a.ShowOnTv,
-                cancellationToken);
-        return albumOk ? new PartyAccess(link.OwnerUserId, link.AlbumId, link.Id) : null;
+        return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
     }
 
     public async Task<PartyAccess?> ResolveUploadAsync(
@@ -368,38 +415,124 @@ public sealed class PartyLinkService : IPartyLinkService
         }
 
         var hash = HashToken(uploadToken);
-        var now = _clock.GetUtcNow().UtcDateTime;
 
-        // Match the SEPARATE upload-token hash + require the upload sub-switch on.
-        // A view token hashes to TokenHash, never UploadTokenHash, so it can never
-        // authorize an upload here (and vice-versa).
+        // Match the SEPARATE upload-token hash. A view token hashes to
+        // TokenHash, never UploadTokenHash, so it can never authorize an upload
+        // here (and vice-versa); the upload SUB-SWITCH is then required by
+        // BuildAccessAsync, which is the only place either rule lives.
         var link = await _db.PartyAlbumLinks
             .AsNoTracking()
-            .Where(p => p.UploadTokenHash == hash
-                && p.Enabled && p.UploadEnabled && p.RevokedAt == null
-                && (p.ExpiresAt == null || p.ExpiresAt > now))
-            .Select(p => new
-            {
-                p.Id, p.OwnerUserId, p.AlbumId, p.RequireUploadApproval,
+            .Where(p => p.UploadTokenHash == hash)
+            .Select(p => new LinkRow(
+                p.Id, p.PartyId, p.Enabled && p.UploadEnabled, p.RevokedAt, p.ExpiresAt,
+                p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
-                p.RequireMessageApproval, p.MaxMessagesPerParticipant,
-            })
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
             .FirstOrDefaultAsync(cancellationToken);
-        if (link is null)
+
+        return await BuildAccessAsync(link, isUploadGrant: true, cancellationToken);
+    }
+
+    // What a link row carries into the seam. `Live` already folds in whichever
+    // switches the caller's capability needs, so the validity rule below is one
+    // expression for both tokens rather than two that must be kept in step.
+    private sealed record LinkRow(
+        Guid Id, Guid PartyId, bool Live, DateTime? RevokedAt, DateTime? ExpiresAt,
+        bool RequireUploadApproval,
+        int MaxPhotoUploadsPerParticipant, int MaxVideoUploadsPerParticipant,
+        bool RequireMessageApproval, int MaxMessagesPerParticipant);
+
+    // THE SEAM.
+    //
+    //     token -> PartyAlbumLink -> Party -> PartyMediaSource(main) -> Album
+    //
+    // Walked once, here, so every public Party endpoint receives a resolved
+    // context and every service downstream keeps working on the
+    // (ownerUserId, albumId) pair it already handles correctly. Nothing about
+    // this walk is repeated anywhere else, and no service acquires a second,
+    // PartyId-shaped copy of itself.
+    //
+    // Four independent things must all be true, and each is re-read on EVERY
+    // request rather than trusted from when the QR was printed:
+    //   * the capability is live (enabled, not revoked, not expired, and for an
+    //     upload token the upload sub-switch is on);
+    //   * the party has not closed guest access;
+    //   * the party still has a `main` album, and it still belongs to the party's
+    //     owner;
+    //   * the OWNER's role still permits running a party at all.
+    // Every failure returns null and becomes one generic 404 upstream, so an
+    // unknown token, a revoked party and a host who lost the permission are
+    // indistinguishable from outside.
+    private async Task<PartyAccess?> BuildAccessAsync(
+        LinkRow? link, bool isUploadGrant, CancellationToken cancellationToken)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        if (link is null || !link.Live || link.RevokedAt is not null
+            || (link.ExpiresAt is not null && link.ExpiresAt <= now))
         {
             return null;
         }
 
+        var party = await _db.Parties
+            .AsNoTracking()
+            .Where(p => p.Id == link.PartyId)
+            .Select(p => new { p.Id, p.OwnerUserId, p.GuestAccessExpiresAt })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (party is null)
+        {
+            return null;
+        }
+
+        // The party's OWN guest window, independent of any one link's expiry:
+        // closing it closes every capability of the party at once rather than
+        // one QR at a time.
+        if (party.GuestAccessExpiresAt is DateTime guestUntil && guestUntil <= now)
+        {
+            return null;
+        }
+
+        // The `main` media source is what the rest of NubArca is handed. Ordered
+        // so a party that acquires more sources later still resolves the same
+        // album today rather than whichever row the database returned first.
+        var mainAlbumId = await _db.PartyMediaSources
+            .AsNoTracking()
+            .Where(s => s.PartyId == party.Id && s.Role == PartyMediaSourceRoles.Main)
+            .OrderBy(s => s.SortOrder)
+            .ThenBy(s => s.AlbumId)
+            .Select(s => (Guid?)s.AlbumId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (mainAlbumId is not Guid albumId)
+        {
+            return null;
+        }
+
+        // The album must still belong to the party's owner, so moving it out
+        // severs public access even if a stale source row lingered. Show-on-TV
+        // is deliberately NOT part of this: a party is not a television.
         var albumOk = await _db.Albums
             .AsNoTracking()
-            .AnyAsync(a => a.Id == link.AlbumId && a.OwnerUserId == link.OwnerUserId && a.ShowOnTv,
-                cancellationToken);
-        return albumOk
+            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == party.OwnerUserId, cancellationToken);
+        if (!albumOk)
+        {
+            return null;
+        }
+
+        var capabilities = await _capabilities.ForOwnerAsync(party.OwnerUserId, cancellationToken);
+        if (!capabilities.Access)
+        {
+            return null;
+        }
+
+        // An upload grant carries the link's approval mode and per-guest quotas
+        // so the contribution paths need no second query; a view grant leaves
+        // them at their defaults, exactly as before.
+        return isUploadGrant
             ? new PartyAccess(
-                link.OwnerUserId, link.AlbumId, link.Id, link.RequireUploadApproval,
+                party.Id, party.OwnerUserId, albumId, link.Id, capabilities,
+                link.RequireUploadApproval,
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
                 link.RequireMessageApproval, link.MaxMessagesPerParticipant)
-            : null;
+            : new PartyAccess(party.Id, party.OwnerUserId, albumId, link.Id, capabilities);
     }
 
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.

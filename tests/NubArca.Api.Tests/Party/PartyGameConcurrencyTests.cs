@@ -23,6 +23,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
 
     private readonly Guid _albumId = Guid.NewGuid();
     private readonly Guid _linkId = Guid.NewGuid();
+    private readonly Guid _partyId = Guid.NewGuid();
     private readonly Guid _ownerId = Guid.NewGuid();
 
     public async Task InitializeAsync()
@@ -42,9 +43,13 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         });
+        // The party the link is a capability OF: the root, and the `main`
+        // media source that resolves back to this album.
+        PartySeed.Party(db, _partyId, _ownerId, _albumId);
         db.PartyAlbumLinks.Add(new PartyAlbumLink
         {
             Id = _linkId,
+            PartyId = _partyId,
             OwnerUserId = _ownerId,
             AlbumId = _albumId,
             TokenHash = new string('a', 64),
@@ -182,7 +187,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
             roundId = (await seed.PartyGameSessions.AsNoTracking().SingleAsync()).CurrentRoundId!.Value;
         }
 
-        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
         await using var firstDb = CreateContext();
         await using var secondDb = CreateContext();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -297,7 +302,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
         var (participantId, roundId) = await OpenVotingAsync();
         await using (var voteDb = CreateContext())
             await Service(voteDb).VoteAsync(
-                new PartyAccess(_ownerId, _albumId, _linkId), participantId, roundId,
+                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All), participantId, roundId,
                 PartyGameVoteValues.Yes);
 
         await using var host = CreateContext();
@@ -339,7 +344,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_that_arrives_while_the_close_is_committing_is_refused_and_writes_nothing()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
 
         await using var closeDb = CreateContext();
         await using var voteDb = CreateContext();
@@ -372,7 +377,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_that_is_committing_holds_the_close_and_then_both_stand()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
 
         await using var voteDb = CreateContext();
         await using var closeDb = CreateContext();
@@ -407,7 +412,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_never_moves_the_owner_command_version()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_ownerId, _albumId, _linkId);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
 
         await using (var voteDb = CreateContext())
         {
@@ -477,7 +482,9 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
 
     private static PartyGameService Service(AppDbContext db) =>
         new(db, TimeProvider.System,
-            new PartyLinkService(db, TimeProvider.System, new ConfigurationBuilder().Build()),
+            new PartyLinkService(
+                db, TimeProvider.System, new PartyService(db, TimeProvider.System),
+                new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()),
             NullLogger<PartyGameService>.Instance);
 
     private async Task<PartyGameCommandResult> CommandAfterStartAsync(
