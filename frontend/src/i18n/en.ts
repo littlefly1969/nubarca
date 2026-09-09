@@ -271,7 +271,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyControl.restart': 'Start the game over',
   'partyControl.restartTitle': 'Start the game over',
   'partyControl.restartBody':
-    'The votes and results of the game that just ended will be deleted. Guests, photos, messages, prints and the party link do not change.',
+    'The votes and results of the game that just ended will be deleted. Unchanged: guests, photos, messages, prints and allowances, and the party link and QR code.',
   'partyControl.refusedStale': 'The game had already moved on — you are now seeing the current state.',
   'partyControl.refusedIllegal': 'That command is no longer possible in this phase.',
   'partyControl.refusedEmpty': 'Prepare at least one activity before starting.',

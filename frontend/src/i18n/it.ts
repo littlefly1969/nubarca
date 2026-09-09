@@ -282,7 +282,7 @@ const it = {
   'partyControl.restart': 'Ricomincia il gioco',
   'partyControl.restartTitle': 'Ricomincia il gioco',
   'partyControl.restartBody':
-    'Verranno cancellati voti e risultati della partita appena conclusa. Invitati, foto, messaggi, stampe e link del Party non cambieranno.',
+    'Verranno cancellati voti e risultati della partita appena conclusa. Restano invariati: invitati, foto, messaggi, stampe e quote, e il link e il QR del Party.',
   'partyControl.refusedStale': 'Il gioco era già andato avanti: ora vedi lo stato aggiornato.',
   'partyControl.refusedIllegal': 'Questo comando non è più possibile in questa fase.',
   'partyControl.refusedEmpty': 'Prepara almeno un’attività prima di iniziare.',
