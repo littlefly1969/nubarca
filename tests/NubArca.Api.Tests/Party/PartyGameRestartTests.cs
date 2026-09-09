@@ -313,15 +313,42 @@ public sealed class PartyGameRestartTests : IDisposable
             .ToListAsync();
         var challenges = await db.PartyChallenges.AsNoTracking().OrderBy(x => x.SortOrder)
             .Select(x => new { x.Id, x.Title, x.Body, x.IsEnabled, x.SortOrder }).ToListAsync();
-        var uploads = await db.PartyUploadItems.AsNoTracking().CountAsync();
+        var uploads = await db.PartyUploadItems.AsNoTracking()
+            .OrderBy(x => x.Id).Select(x => new { x.Id, x.AlbumId, x.Status }).ToListAsync();
+
+        // The host's printing state: the budgets and what has already been spent
+        // against them, plus every request that has been made. A restart that
+        // refunded a print — or forgot one — would be giving away consumables.
+        var printProfiles = await db.PartyPrintProfiles.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => new
+            {
+                x.Id, x.PartyAlbumId, x.Enabled, x.PhotoEnabled, x.PhotoMaxPrints,
+                x.PhotoAcceptedCount, x.PhotoPrintsPerGuest, x.StripEnabled,
+            }).ToListAsync();
+        var printRequests = await db.PartyPrintRequests.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => new { x.Id, x.PartyAlbumId, x.Product, x.PrintJobId }).ToListAsync();
+
+        // The OLDER interval-driven challenge system, which shares the album and
+        // the link with the game and is a different feature entirely. Restarting
+        // the hosted game must not touch a single row of it — the two session
+        // types were deliberately kept apart, and this is where that would break.
+        var legacyVotes = await db.PartyChallengeVotes.AsNoTracking().CountAsync();
+        var legacySessions = await db.PartyChallengeSessions.AsNoTracking().CountAsync();
+        var legacyCompletions = await db.PartyChallengeCompletions.AsNoTracking().CountAsync();
+
         return JsonSerializer.Serialize(new
         {
             Link = new
             {
-                link.Id, link.TokenHash, link.Enabled, link.GameEnabled, link.RevokedAt,
+                link.Id, link.TokenHash, link.UploadTokenHash, link.PrintTokenHash,
+                link.Enabled, link.GameEnabled, link.RevokedAt,
+                // The display belongs to the PARTY, not to one run of the game.
                 link.LastDisplaySeenAt,
+                link.MaxPhotoUploadsPerParticipant, link.MaxMessagesPerParticipant,
             },
             participants, messages, challenges, uploads,
+            printProfiles, printRequests,
+            legacyVotes, legacySessions, legacyCompletions,
         });
     }
 
