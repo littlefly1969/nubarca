@@ -260,6 +260,57 @@ public class AlbumService : IAlbumService
         if (album is null)
             return false;
 
+        // ONE UNIT OF WORK. Every statement below is an ExecuteDelete or an
+        // ExecuteUpdate, and each one commits on its own unless a transaction
+        // says otherwise — so a failure partway through used to leave everything
+        // before it committed. That is bad for rows and worse for the
+        // television: an album delete that failed after the assignment reset
+        // would leave a screen in somebody's room silently showing something
+        // else, with the party it was pointed at still there.
+        //
+        // It PARTICIPATES in a caller's transaction when there is one, rather
+        // than demanding its own — the same shape the party vote and restart
+        // paths use, so an album delete can be one step of a larger unit of work.
+        var owned = _db.Database.CurrentTransaction is null;
+        var transaction = owned
+            ? await _db.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            await RemoveAlbumAndItsPartyStateAsync(album, albumId, cancellationToken);
+            if (owned) await transaction!.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            // Nothing partially deleted, and no television left pointing
+            // somewhere it was never moved to.
+            if (owned) await transaction!.RollbackAsync(cancellationToken);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
+
+        // Only once the delete is durable: a cache invalidation cannot be rolled
+        // back, so it must not happen for a delete that did not commit.
+        InvalidateSemanticRankings(ownerUserId);
+        return true;
+    }
+
+    /// <summary>
+    /// Everything deleting an album destroys, in the order its foreign keys
+    /// demand. Called inside the caller's transaction, never on its own.
+    ///
+    /// <para>The order is not stylistic. Every table here reaches the album
+    /// through a RESTRICTING key, so each one has to be gone before the thing it
+    /// names — which is why the sequence reads bottom-up: the rows that point at
+    /// the most things go first, and the album goes last.</para>
+    /// </summary>
+    private async Task RemoveAlbumAndItsPartyStateAsync(
+        Album album, Guid albumId, CancellationToken cancellationToken)
+    {
+
         // Delete item memberships first (FK Restrict → Album).
         await _db.AlbumItems
             .Where(ai => ai.AlbumId == albumId)
@@ -301,6 +352,35 @@ public class AlbumService : IAlbumService
             .ExecuteDeleteAsync(cancellationToken);
 
         var partyLinkIds = _db.PartyAlbumLinks.Where(l => l.AlbumId == albumId).Select(l => l.Id);
+
+        // The HOSTED GAME's runtime, and it has to go before four of the deletes
+        // below rather than one. Its restricting foreign keys reach further than
+        // the party link: a vote names a PARTICIPANT, a round names a CHALLENGE,
+        // and the session names both the LINK and the ALBUM. An album that had
+        // ever run a Party Game therefore could not be deleted at all — the
+        // constraint failed instead, in four different places.
+        //
+        // Deleted explicitly, in key order, rather than left to the cascade the
+        // session already carries. The cascade would work, but "what this
+        // aggregate owns" is a statement this method should make out loud: the
+        // next table added under the session must be deleted here too, and a
+        // silent cascade is exactly what stops anyone noticing.
+        //
+        // This is not a restart. The album itself is going away, so the game's
+        // whole history goes with it — see PartyGameService.RestartAsync for the
+        // other case, where the session deliberately survives.
+        var partyGameSessionIds = _db.PartyGameSessions
+            .Where(g => g.AlbumId == albumId).Select(g => g.Id);
+        await _db.PartyGameVotes
+            .Where(v => partyGameSessionIds.Contains(v.PartyGameSessionId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyGameRounds
+            .Where(r => partyGameSessionIds.Contains(r.PartyGameSessionId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyGameSessions
+            .Where(g => g.AlbumId == albumId)
+            .ExecuteDeleteAsync(cancellationToken);
+
         await _db.PartyChallengeVotes
             .Where(v => partyLinkIds.Contains(v.PartyAlbumLinkId))
             .ExecuteDeleteAsync(cancellationToken);
@@ -345,8 +425,6 @@ public class AlbumService : IAlbumService
 
         _db.Albums.Remove(album);
         await _db.SaveChangesAsync(cancellationToken);
-        InvalidateSemanticRankings(ownerUserId);
-        return true;
     }
 
     public async Task<IReadOnlyList<AlbumItemSummary>?> ListItemsAsync(
