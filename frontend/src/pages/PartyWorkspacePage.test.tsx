@@ -25,6 +25,20 @@ const withAlbum = (over: Record<string, unknown> = {}) => party({
   ...over,
 });
 
+const slot = (kind: string, over: Record<string, unknown> = {}) => ({
+  kind, enabled: false, visibleBefore: true, visibleLive: true, visibleAfter: false,
+  content: {}, version: 0, ...over,
+});
+
+const EVERY_SLOT = [
+  slot('invitation', { visibleLive: false }),
+  slot('location'),
+  slot('dress-code'),
+  slot('menu'),
+  slot('info'),
+  slot('thank-you', { visibleBefore: false, visibleLive: false, visibleAfter: true }),
+];
+
 const albumParty = (over: Record<string, unknown> = {}) => ({
   albumId: ALBUM_ID, partyId: PARTY_ID, showOnTv: false, partyMode: true,
   partyUrl: '/party/tok', uploadEnabled: true, uploadUrl: '/party/uptok/upload',
@@ -46,6 +60,121 @@ function page(permissions?: readonly string[]) {
     </AuthedWrapper>
   );
 }
+
+describe('PartyWorkspacePage — what the party tells its guests', () => {
+  it('offers a typed card per kind, in the product order, and no page builder', async () => {
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-tab-before'));
+
+    for (const kind of ['invitation', 'location', 'dress-code', 'menu', 'info']) {
+      expect(await screen.findByTestId(`party-content-${kind}`)).toBeInTheDocument();
+    }
+    // The thank-you belongs to the After surface, not this one.
+    expect(screen.queryByTestId('party-content-thank-you')).not.toBeInTheDocument();
+    // No palette, no blocks, no drag handles: this is six named shapes.
+    expect(screen.queryByText(/blocco|block|trascina|drag/i)).not.toBeInTheDocument();
+  });
+
+  it('reveals a slot’s form only once the host turns it on', async () => {
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-tab-before'));
+    const card = await screen.findByTestId('party-content-location');
+    // Progressive disclosure: a name, and nothing else, until there is a reason.
+    expect(within(card).queryByLabelText('Luogo')).not.toBeInTheDocument();
+
+    await userEvent.click(within(card).getByLabelText('Dove'));
+    expect(within(card).getByLabelText('Luogo')).toBeInTheDocument();
+    expect(within(card).getByLabelText('Indirizzo')).toBeInTheDocument();
+  });
+
+  it('saves one slot with its OWN version', async () => {
+    const mock = installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+      [`PUT /api/parties/${PARTY_ID}/guest-content/location`]: () =>
+        jsonResponse(slot('location', { enabled: true, version: 1 })),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-tab-before'));
+    const card = await screen.findByTestId('party-content-location');
+    await userEvent.click(within(card).getByLabelText('Dove'));
+    await userEvent.type(within(card).getByLabelText('Luogo'), 'Villa Aurora');
+    await userEvent.click(within(card).getByTestId('party-content-save-location'));
+
+    const put = mock.calls.find((c) => c.method === 'PUT')!;
+    const body = JSON.parse(String(put.body));
+    expect(body.enabled).toBe(true);
+    expect(body.content.venueName).toBe('Villa Aurora');
+    // The SLOT's version, not the party's: editing the menu never contends
+    // with renaming the party.
+    expect(body.version).toBe(0);
+  });
+
+  it('adopts the server’s slot on a conflict rather than overwriting', async () => {
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+      [`PUT /api/parties/${PARTY_ID}/guest-content/info`]: () => jsonResponse({
+        error: 'version_conflict',
+        content: slot('info', {
+          enabled: true, version: 4, content: { title: 'Scritto da qualcun altro', body: 'Testo' },
+        }),
+      }, 409),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-tab-before'));
+    const card = await screen.findByTestId('party-content-info');
+    await userEvent.click(within(card).getByLabelText('Info'));
+    await userEvent.type(within(card).getByLabelText('Titolo'), 'Il mio');
+    await userEvent.click(within(card).getByTestId('party-content-save-info'));
+
+    expect(await screen.findByTestId('party-content-conflict-info')).toBeInTheDocument();
+    // The card now shows what actually happened.
+    expect(within(await screen.findByTestId('party-content-info')).getByLabelText('Titolo'))
+      .toHaveValue('Scritto da qualcun altro');
+  });
+
+  it('configures the memories’ own window in After, on the party’s mutation', async () => {
+    const mock = installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+      [`PATCH /api/parties/${PARTY_ID}`]: () =>
+        jsonResponse(withAlbum({ version: 2, libraryAccessExpiresAt: '2027-07-20T00:00:00Z' })),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-tab-after'));
+    // The thank-you lives here, not on the invitation.
+    expect(await screen.findByTestId('party-content-thank-you')).toBeInTheDocument();
+
+    const window = await screen.findByTestId('party-library-window');
+    await userEvent.type(
+      within(window).getByLabelText(/Le foto restano disponibili/i), '2027-07-20T00:00');
+    await userEvent.click(within(window).getByTestId('party-library-save'));
+
+    // One endpoint, one version: the memories' end is the party's own data.
+    const patch = mock.calls.find((c) => c.method === 'PATCH')!;
+    expect(patch.url).toContain(`/api/parties/${PARTY_ID}`);
+    expect(JSON.parse(String(patch.body)).libraryAccessExpiresAt).toBeTruthy();
+  });
+});
 
 describe('PartyWorkspacePage', () => {
   it('a party with no album invites one instead of failing', async () => {

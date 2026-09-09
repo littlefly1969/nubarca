@@ -1,0 +1,194 @@
+import { useEffect, useState } from 'react';
+import {
+  ApiError,
+  setPartyGuestContent,
+  type PartyGuestContentKind,
+  type PartyGuestContentSlot,
+} from '@nubarca/api-client';
+import { useI18n } from '../i18n';
+
+// The owner's typed editors: six named shapes, one card each.
+//
+// Deliberately NOT a page builder. There is no block palette, no drag handle,
+// no HTML field and no slug — a party has a handful of things to say, and each
+// of them has a form that knows what it is. The server validates every payload
+// against the same shape, so this file is a convenience rather than the rule.
+//
+// Every card is its own draft with its OWN version: editing the menu never
+// contends with renaming the party, and a conflict refreshes just that card.
+
+type Draft = {
+  enabled: boolean;
+  visibleBefore: boolean;
+  visibleLive: boolean;
+  visibleAfter: boolean;
+  content: Record<string, unknown>;
+  version: number;
+};
+
+const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
+  enabled: slot.enabled,
+  visibleBefore: slot.visibleBefore,
+  visibleLive: slot.visibleLive,
+  visibleAfter: slot.visibleAfter,
+  content: { ...(slot.content ?? {}) },
+  version: slot.version,
+});
+
+const text = (content: Record<string, unknown>, key: string): string => {
+  const value = content[key];
+  return typeof value === 'string' ? value : '';
+};
+
+export function PartyContentCard({
+  slot, partyId, phases, onSaved,
+}: {
+  slot: PartyGuestContentSlot;
+  partyId: string;
+  /** Which surfaces this card offers a visibility switch for. */
+  phases: readonly ('before' | 'live' | 'after')[];
+  onSaved(next: PartyGuestContentSlot): void;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState<Draft>(() => fromSlot(slot));
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<'idle' | 'saved' | 'conflict' | 'failed'>('idle');
+
+  // Re-seeded when the SERVER's version moves — including after a conflict,
+  // which is how the card adopts what actually happened.
+  useEffect(() => { setDraft(fromSlot(slot)); }, [slot.version, slot.kind]);
+
+  const set = (key: string, value: string) =>
+    setDraft((d) => ({ ...d, content: { ...d.content, [key]: value } }));
+
+  async function save() {
+    setBusy(true); setStatus('idle');
+    try {
+      onSaved(await setPartyGuestContent(partyId, slot.kind, draft));
+      setStatus('saved');
+    } catch (err) {
+      const body = (err as ApiError).body as { content?: PartyGuestContentSlot } | undefined;
+      if (err instanceof ApiError && err.status === 409 && body?.content) {
+        onSaved(body.content);
+        setStatus('conflict');
+      } else {
+        setStatus('failed');
+      }
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="party-card" data-testid={`party-content-${slot.kind}`}>
+      <label className="party-toggle">
+        <input
+          type="checkbox" checked={draft.enabled} disabled={busy}
+          aria-label={t(contentLabelKey(slot.kind))}
+          onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))}
+        />
+        <span>{t(contentLabelKey(slot.kind))}</span>
+      </label>
+
+      {/* Progressive disclosure: a slot the host has not turned on shows its
+          name and nothing else. The form appears when there is a reason for it. */}
+      {draft.enabled && (
+        <>
+          <ContentFields kind={slot.kind} content={draft.content} busy={busy} set={set} />
+
+          <div className="party-content-visibility">
+            {phases.map((phase) => {
+              const key = phase === 'before'
+                ? 'visibleBefore' : phase === 'live' ? 'visibleLive' : 'visibleAfter';
+              return (
+                <label className="party-toggle" key={phase}>
+                  <input
+                    type="checkbox" checked={draft[key]} disabled={busy}
+                    aria-label={`${t(contentLabelKey(slot.kind))} — ${t(phaseLabelKey(phase))}`}
+                    onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))}
+                  />
+                  <span>{t(phaseLabelKey(phase))}</span>
+                </label>
+              );
+            })}
+          </div>
+
+          <button
+            type="button" className="row-action-primary" disabled={busy}
+            data-testid={`party-content-save-${slot.kind}`}
+            onClick={() => void save()}
+          >
+            {t('party.overview.save')}
+          </button>
+        </>
+      )}
+
+      {status === 'saved' && <p className="muted" role="status">{t('party.overview.saved')}</p>}
+      {status === 'conflict' && (
+        <p className="inline-error" role="alert" data-testid={`party-content-conflict-${slot.kind}`}>
+          {t('party.overview.conflict')}
+        </p>
+      )}
+      {status === 'failed' && (
+        <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
+      )}
+    </section>
+  );
+}
+
+function ContentFields({
+  kind, content, busy, set,
+}: {
+  kind: PartyGuestContentKind;
+  content: Record<string, unknown>;
+  busy: boolean;
+  set(key: string, value: string): void;
+}) {
+  const { t } = useI18n();
+  const field = (key: string, labelKey: Parameters<typeof t>[0], long = false) => (
+    <label className="party-field" key={key}>
+      <span>{t(labelKey)}</span>
+      {long ? (
+        <textarea
+          rows={3} value={text(content, key)} disabled={busy}
+          aria-label={t(labelKey)} onChange={(e) => set(key, e.target.value)}
+        />
+      ) : (
+        <input
+          value={text(content, key)} disabled={busy}
+          aria-label={t(labelKey)} onChange={(e) => set(key, e.target.value)}
+        />
+      )}
+    </label>
+  );
+
+  switch (kind) {
+    case 'invitation':
+      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', true)}</>;
+    case 'location':
+      return (
+        <>
+          {field('venueName', 'partyContent.venue')}
+          {field('address', 'partyContent.address')}
+          {field('note', 'partyContent.note', true)}
+        </>
+      );
+    case 'dress-code':
+      return <>{field('headline', 'partyContent.headline')}{field('description', 'partyContent.message', true)}</>;
+    case 'menu':
+      // The sections are edited as a whole in a later slice; for now the intro
+      // is what an owner can write here, and an existing menu's sections are
+      // preserved untouched because the draft carries them through.
+      return <>{field('intro', 'partyContent.message', true)}</>;
+    case 'info':
+      return <>{field('title', 'partyContent.headline')}{field('body', 'partyContent.message', true)}</>;
+    default:
+      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', true)}</>;
+  }
+}
+
+function contentLabelKey(kind: PartyGuestContentKind) {
+  return `partyContent.kind.${kind}` as 'partyContent.kind.invitation';
+}
+
+function phaseLabelKey(phase: 'before' | 'live' | 'after') {
+  return `partyContent.phase.${phase}` as 'partyContent.phase.before';
+}

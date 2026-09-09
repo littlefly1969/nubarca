@@ -35,9 +35,23 @@ public static class PartyOwnerEndpoints
         string? Description,
         DateTime? EventStartsAt,
         DateTime? GuestAccessExpiresAt,
+        DateTime? LibraryAccessExpiresAt,
         int Version);
 
     public sealed record SetPartyMainMediaSourceRequest(Guid AlbumId, int Version);
+
+    /// <summary>
+    /// One typed slot as the owner writes it. <c>Content</c> is raw JSON on the
+    /// wire and validated SERVER-SIDE against the shape its kind declares, so
+    /// knowing the route is not permission to store arbitrary documents.
+    /// </summary>
+    public sealed record PartyGuestContentRequest(
+        bool Enabled,
+        bool VisibleBefore,
+        bool VisibleLive,
+        bool VisibleAfter,
+        System.Text.Json.JsonElement? Content,
+        int Version);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -70,7 +84,8 @@ public static class PartyOwnerEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var result = await parties.CreateAsync(
                 ownerUserId,
-                new PartyMetadataRequest(body.Title, body.Description, body.EventStartsAt, null),
+                new PartyMetadataRequest(
+                    body.Title, body.Description, body.EventStartsAt, null, null),
                 cancellationToken);
             if (result.Outcome != PartyMutationOutcome.Ok)
             {
@@ -118,7 +133,8 @@ public static class PartyOwnerEndpoints
                 ownerUserId,
                 partyId,
                 new PartyMetadataRequest(
-                    body.Title, body.Description, body.EventStartsAt, body.GuestAccessExpiresAt),
+                    body.Title, body.Description, body.EventStartsAt,
+                    body.GuestAccessExpiresAt, body.LibraryAccessExpiresAt),
                 body.Version,
                 cancellationToken);
             if (result.Outcome == PartyMutationOutcome.Ok)
@@ -129,7 +145,11 @@ public static class PartyOwnerEndpoints
                 await audit.LogAsync(
                     ownerUserId, AuditActions.PartyUpdate, AuditEntityTypes.Party, partyId,
                     httpContext.Connection.RemoteIpAddress?.ToString(),
-                    new { guestAccessExpiresAt = result.Party!.GuestAccessExpiresAt },
+                    new
+                    {
+                        guestAccessExpiresAt = result.Party!.GuestAccessExpiresAt,
+                        libraryAccessExpiresAt = result.Party!.LibraryAccessExpiresAt,
+                    },
                     cancellationToken);
             }
             return ToResult(result);
@@ -163,6 +183,88 @@ public static class PartyOwnerEndpoints
             }
             return ToResult(result);
         }).WithName("SetPartyMainMediaSource").RequirePermission(Permissions.PartyAccess);
+
+        // Tearing a party down keeps its ALBUM. The photographs the guests were
+        // allowed to see stay exactly where they are; the ones the host never
+        // let through go to Trash the ordinary way, and the party's own rows —
+        // links, participants, counters, games, sessions, content — go with it.
+        app.MapDelete("/api/parties/{partyId:guid}", async (
+            Guid partyId,
+            [FromQuery] int version,
+            HttpContext httpContext,
+            [FromServices] IPartyService parties,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await parties.TeardownAsync(
+                ownerUserId, partyId, version, cancellationToken);
+            if (result.Outcome != PartyMutationOutcome.Ok)
+            {
+                return ToResult(result);
+            }
+
+            // The party's rows are gone; what happened to it is not. This line
+            // is the only remaining record that the evening existed, which is
+            // exactly where that belongs.
+            await audit.LogAsync(
+                ownerUserId, AuditActions.PartyTeardown, AuditEntityTypes.Party, partyId,
+                httpContext.Connection.RemoteIpAddress?.ToString(), null, cancellationToken);
+            return Results.NoContent();
+        }).WithName("TearDownParty").RequirePermission(Permissions.PartyAccess);
+
+        // What the party TELLS its guests. Two routes for six typed slots, not
+        // one endpoint per kind: they are the same shape of decision and they
+        // are edited on one screen.
+        app.MapGet("/api/parties/{partyId:guid}/guest-content", async (
+            Guid partyId,
+            HttpContext httpContext,
+            [FromServices] IPartyGuestContentService content,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var slots = await content.ListAsync(ownerUserId, partyId, cancellationToken);
+            return slots is null ? Results.NotFound() : Results.Ok(slots);
+        }).WithName("ListPartyGuestContent").RequirePermission(Permissions.PartyAccess);
+
+        // PUT because it states the whole slot — what it says, whether it is on,
+        // and which surfaces it belongs to. The version is the SLOT's own, so
+        // editing the menu never contends with renaming the party.
+        app.MapPut("/api/parties/{partyId:guid}/guest-content/{kind}", async (
+            Guid partyId,
+            string kind,
+            HttpContext httpContext,
+            [FromServices] IPartyGuestContentService content,
+            [FromBody] PartyGuestContentRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null)
+            {
+                return Results.BadRequest(new { error = "Missing request body." });
+            }
+
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await content.UpsertAsync(
+                ownerUserId, partyId, kind,
+                new PartyGuestContentWrite(
+                    body.Enabled, body.VisibleBefore, body.VisibleLive, body.VisibleAfter,
+                    body.Content, body.Version),
+                cancellationToken);
+
+            return result.Outcome switch
+            {
+                PartyGuestContentOutcome.Ok => Results.Ok(result.Content),
+                // A kind the product does not define is a not-found rather than
+                // a validation error: there is no such slot to talk about.
+                PartyGuestContentOutcome.UnknownKind => Results.NotFound(),
+                PartyGuestContentOutcome.InvalidPayload =>
+                    Results.BadRequest(new { error = "invalid_content" }),
+                PartyGuestContentOutcome.VersionConflict => Results.Json(
+                    new { error = "version_conflict", content = result.Content },
+                    statusCode: StatusCodes.Status409Conflict),
+                _ => Results.NotFound(),
+            };
+        }).WithName("SetPartyGuestContent").RequirePermission(Permissions.PartyAccess);
 
         // One route per ACTION rather than a status the caller chooses:
         // `publish` and `start-live` are different decisions that happen to

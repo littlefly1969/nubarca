@@ -4,10 +4,13 @@ import {
   ApiError,
   getAlbumPartySettings,
   getParty,
+  listPartyGuestContent,
   transitionParty,
   updateParty,
   type AlbumPartyStatus,
   type Party,
+  type PartyGuestContentKind,
+  type PartyGuestContentSlot,
   type PartyLifecycleAction,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
@@ -15,6 +18,7 @@ import { useI18n } from '../i18n';
 import { PartyAlbumSection } from '../party/PartyAlbumSection';
 import { PartyGuestAccessSection } from '../party/PartyGuestAccessSection';
 import { PartyLiveTab } from '../party/PartyLiveTab';
+import { PartyContentCard } from '../party/PartyContentEditors';
 import {
   PARTY_TIMELINE,
   mainMediaSource,
@@ -36,7 +40,10 @@ import '../party/Party.css';
 // id down; nothing here mints a token, moderates a photograph or configures a
 // printer of its own.
 
-type Tab = 'overview' | 'live' | 'photos';
+// Five tabs, and every one of them has content. There were three until the
+// party had something to say beforehand and afterwards; a tab that promises
+// what the product cannot do is worse than no tab.
+type Tab = 'overview' | 'before' | 'live' | 'after' | 'photos';
 
 type Status =
   | { kind: 'loading' }
@@ -66,7 +73,38 @@ export function PartyWorkspacePage() {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [tab, setTab] = useState<Tab>('overview');
   const [albumParty, setAlbumParty] = useState<AlbumPartyStatus | null>(null);
+  // Every kind, always — the server returns the ones the host has written and
+  // the ones they have not, so the editor renders what the server says rather
+  // than holding a second opinion about the defaults.
+  const [contentSlots, setContentSlots] = useState<PartyGuestContentSlot[]>([]);
+  const [libraryDraft, setLibraryDraft] = useState('');
+  const [librarySaving, setLibrarySaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  const onSlotSaved = useCallback((next: PartyGuestContentSlot) => {
+    setContentSlots((cur) => cur.map((slot) => (slot.kind === next.kind ? next : slot)));
+  }, []);
+
+  // The memories' window rides on the party's OWN metadata mutation — it is the
+  // party's data and shares the party's version, so there is no second endpoint
+  // and no second concurrency check for one date.
+  const saveLibraryWindow = useCallback(async () => {
+    if (status.kind !== 'ready') return;
+    setLibrarySaving(true);
+    try {
+      const next = await updateParty(status.party.id, {
+        title: status.party.title,
+        description: status.party.description,
+        eventStartsAt: status.party.eventStartsAt,
+        guestAccessExpiresAt: status.party.guestAccessExpiresAt,
+        libraryAccessExpiresAt: fromLocalInput(libraryDraft),
+        version: status.party.version,
+      });
+      setStatus({ kind: 'ready', party: next });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth();
+    } finally { setLibrarySaving(false); }
+  }, [status, libraryDraft, invalidateAuth]);
 
   const load = useCallback((signal: AbortSignal) => {
     if (!partyId) return;
@@ -88,6 +126,20 @@ export function PartyWorkspacePage() {
     load(ctrl.signal);
     return () => ctrl.abort();
   }, [load]);
+
+  useEffect(() => {
+    if (!partyId) return;
+    const ctrl = new AbortController();
+    listPartyGuestContent(partyId, ctrl.signal)
+      .then(setContentSlots)
+      .catch(() => { if (!ctrl.signal.aborted) setContentSlots([]); });
+    return () => ctrl.abort();
+  }, [partyId]);
+
+  useEffect(() => {
+    if (status.kind !== 'ready') return;
+    setLibraryDraft(toLocalInput(status.party.libraryAccessExpiresAt));
+  }, [status.kind, status.kind === 'ready' ? status.party.version : 0]);
 
   const main = status.kind === 'ready' ? mainMediaSource(status.party) : null;
   const mainAlbumId = main?.albumId ?? null;
@@ -148,7 +200,7 @@ export function PartyWorkspacePage() {
       {/* A tablist, not a row of links: arrow keys and roving focus are what
           make this usable without a mouse. */}
       <div className="party-tabs" role="tablist" aria-label={t('party.title')}>
-        {(['overview', 'live', 'photos'] as const).map((id) => (
+        {(['overview', 'before', 'live', 'after', 'photos'] as const).map((id) => (
           <button
             key={id} type="button" role="tab" id={`party-tab-${id}`}
             aria-selected={tab === id} aria-controls={`party-panel-${id}`}
@@ -173,6 +225,56 @@ export function PartyWorkspacePage() {
             onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
             onAlbumPartyUpdated={setAlbumParty}
           />
+        )}
+        {tab === 'before' && (
+          <PartyContentTab
+            partyId={party.id}
+            slots={contentSlots}
+            onSlotSaved={onSlotSaved}
+            kinds={['invitation', 'location', 'dress-code', 'menu', 'info']}
+            phases={['before', 'live']}
+          />
+        )}
+        {tab === 'after' && (
+          <div className="party-overview">
+            <PartyContentTab
+              partyId={party.id}
+              slots={contentSlots}
+              onSlotSaved={onSlotSaved}
+              kinds={['thank-you']}
+              phases={['after']}
+            />
+            {/* The memories' own window, which may OUTLIVE guest access — that
+                is the whole point of it, and why it is configured here where it
+                means something rather than beside the guest switch. */}
+            <section className="party-card" data-testid="party-library-window">
+              <h3>{t('party.tab.after')}</h3>
+              <label className="party-field">
+                <span>{t('party.after.libraryLabel')}</span>
+                <input
+                  type="datetime-local" value={libraryDraft} disabled={librarySaving}
+                  aria-label={t('party.after.libraryLabel')}
+                  onChange={(e) => setLibraryDraft(e.target.value)}
+                />
+              </label>
+              <p className="muted">{t('party.after.libraryHelp')}</p>
+              <button
+                type="button" className="row-action-primary" data-testid="party-library-save"
+                disabled={librarySaving} onClick={() => void saveLibraryWindow()}
+              >
+                {t('party.overview.save')}
+              </button>
+            </section>
+            {/* The informational slots the host may also want to keep visible
+                afterwards — the same cards, scoped to the After surface. */}
+            <PartyContentTab
+              partyId={party.id}
+              slots={contentSlots}
+              onSlotSaved={onSlotSaved}
+              kinds={['location', 'info']}
+              phases={['after']}
+            />
+          </div>
         )}
         {tab === 'live' && (
           <PartyLiveTab
@@ -205,6 +307,35 @@ export function PartyWorkspacePage() {
         )}
       </div>
     </main>
+  );
+}
+
+// One card per kind, in the server's order, filtered to the kinds this surface
+// is about. It renders the slots it is given rather than inventing any: an
+// untouched slot arrives at version 0 with the product's default visibility.
+function PartyContentTab({
+  partyId, slots, kinds, phases, onSlotSaved,
+}: {
+  partyId: string;
+  slots: readonly PartyGuestContentSlot[];
+  kinds: readonly PartyGuestContentKind[];
+  phases: readonly ('before' | 'live' | 'after')[];
+  onSlotSaved(next: PartyGuestContentSlot): void;
+}) {
+  return (
+    <div className="party-overview">
+      {slots
+        .filter((slot) => kinds.includes(slot.kind))
+        .map((slot) => (
+          <PartyContentCard
+            key={slot.kind}
+            slot={slot}
+            partyId={partyId}
+            phases={phases}
+            onSaved={onSlotSaved}
+          />
+        ))}
+    </div>
   );
 }
 

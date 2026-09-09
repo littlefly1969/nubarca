@@ -123,6 +123,8 @@ export function updateParty(
     description?: string | null;
     eventStartsAt?: string | null;
     guestAccessExpiresAt?: string | null;
+    /** When the MEMORIES stop, which may outlive guest access. */
+    libraryAccessExpiresAt?: string | null;
     version: number;
   },
   signal?: AbortSignal,
@@ -139,6 +141,15 @@ export function setPartyMainMediaSource(
   signal?: AbortSignal,
 ): Promise<Party> {
   return api<Party>(`/api/parties/${partyId}/media/main`, { method: 'PUT', json: body, signal });
+}
+
+// Tearing a party down KEEPS its album. The photographs the guests were allowed
+// to see stay; the ones the host never let through go to Trash the ordinary way;
+// the party's own rows go with it.
+export function tearDownParty(
+  partyId: string, version: number, signal?: AbortSignal,
+): Promise<void> {
+  return api<void>(`/api/parties/${partyId}?version=${version}`, { method: 'DELETE', signal });
 }
 
 /** The three lifecycle moves. The caller names an ACTION, never a target state. */
@@ -216,6 +227,40 @@ export function setAlbumPartyMode(
     json,
     signal,
   });
+}
+
+// --- Owner-side guest CONTENT (normal user auth) ---
+//
+// Six typed slots, at most one per kind, validated server-side. Every kind comes
+// back whether or not the host has written it: an untouched slot arrives at
+// version 0 with the product's own default visibility, so the editor renders
+// what the server says rather than holding a second opinion about it.
+
+export function listPartyGuestContent(
+  partyId: string, signal?: AbortSignal,
+): Promise<PartyGuestContentSlot[]> {
+  return api<PartyGuestContentSlot[]>(`/api/parties/${partyId}/guest-content`, { signal });
+}
+
+// PUT because it states the whole slot. The version is the SLOT's own — editing
+// the menu never contends with renaming the party — and 0 creates it.
+export function setPartyGuestContent(
+  partyId: string,
+  kind: PartyGuestContentKind,
+  body: {
+    enabled: boolean;
+    visibleBefore: boolean;
+    visibleLive: boolean;
+    visibleAfter: boolean;
+    content: Record<string, unknown>;
+    version: number;
+  },
+  signal?: AbortSignal,
+): Promise<PartyGuestContentSlot> {
+  return api<PartyGuestContentSlot>(
+    `/api/parties/${partyId}/guest-content/${kind}`,
+    { method: 'PUT', json: body, signal },
+  );
 }
 
 // --- Owner-side party upload moderation (normal user auth) ---
@@ -301,21 +346,68 @@ export function setPartyPrintSettings(
 
 // --- Public party landing (anonymous, token-scoped) ---
 
-export interface PartyAlbum {
-  albumName: string;
+// THE guest context: one authoritative answer for the canonical QR route.
+//
+// The URL never changes; what it opens does. The same code carries a guest from
+// the invitation, through the party, to the memories — so the landing asks once
+// what they are looking at rather than combining two reads to guess.
+//
+// Deliberately not a row of `showX` booleans. `content` holds only the slots
+// that belong to this phase, and `capabilities` only what is genuinely
+// available: absence IS the answer, which is what keeps a disabled tile from
+// ever being rendered.
+
+/** Which of the three surfaces the guest is standing in front of. */
+export type PartyGuestPhase = 'before' | 'live' | 'after';
+
+/** How much of that surface is open. */
+export type PartyGuestAccessMode = 'full' | 'library-only';
+
+/** One typed slot the host wrote. `content` is the shape its `kind` declares. */
+export interface PartyGuestContentSlot {
+  kind: PartyGuestContentKind;
+  enabled: boolean;
+  visibleBefore: boolean;
+  visibleLive: boolean;
+  visibleAfter: boolean;
+  content: Record<string, unknown>;
+  version: number;
+}
+
+/** Where a capability LIVES, or nothing. The hub builds no route of its own. */
+export interface PartyGuestCapabilities {
+  contributionUrl: string | null;
+  gameUrl: string | null;
+  printUrl: string | null;
+  faceSearch: boolean;
+}
+
+export interface PartyGuestLibrary {
+  available: boolean;
+  accessEndsAt: string | null;
+}
+
+export interface PartyGuestContext {
+  /** The PARTY's name, which is not its album's — they are separate things. */
+  title: string;
+  phase: PartyGuestPhase;
+  accessMode: PartyGuestAccessMode;
+  eventStartsAt: string | null;
+  /** Named only where an album means something: at the party, and afterwards. */
+  albumName: string | null;
   itemCount: number;
   coverUrl: string | null;
-  contributionUrl: string | null;
-  gameEnabled: boolean;
-  // Non-null ONLY while printing would actually work: configured, enabled, on a
-  // live station whose printer does 10x15, with budget left in at least one
-  // product. Null is how the guest hub knows there is no print card to show.
-  printUrl: string | null;
-  // Where the live game lives, non-null exactly while this party has one. The
-  // hub builds no route of its own from gameEnabled: a capability states where
-  // it is, or it is absent.
-  gameUrl: string | null;
+  content: PartyGuestContentSlot[];
+  capabilities: PartyGuestCapabilities;
+  library: PartyGuestLibrary;
 }
+
+/** The six things a party has to say, in the order it says them. */
+export const PARTY_GUEST_CONTENT_KINDS = [
+  'invitation', 'location', 'dress-code', 'menu', 'info', 'thank-you',
+] as const;
+
+export type PartyGuestContentKind = (typeof PARTY_GUEST_CONTENT_KINDS)[number];
 
 // --- Party print studio (anonymous, print-token scoped) ---
 
@@ -432,8 +524,13 @@ export interface PartyItems {
   items: PartyItem[];
 }
 
-export function getPartyAlbum(token: string, signal?: AbortSignal): Promise<PartyAlbum> {
-  return api<PartyAlbum>(`/api/party/${encodeURIComponent(token)}`, { signal });
+// ONE fetch for the landing. What the guest is looking at, how much of it is
+// open, what the host wants to tell them and which capabilities are real — all
+// of it, from the URL that never changes.
+export function getPartyGuestContext(
+  token: string, signal?: AbortSignal,
+): Promise<PartyGuestContext> {
+  return api<PartyGuestContext>(`/api/party/${encodeURIComponent(token)}`, { signal });
 }
 
 export function getPartyItems(token: string, signal?: AbortSignal): Promise<PartyItems> {

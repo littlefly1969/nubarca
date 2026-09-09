@@ -187,7 +187,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
             roundId = (await seed.PartyGameSessions.AsNoTracking().SingleAsync()).CurrentRoundId!.Value;
         }
 
-        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live);
         await using var firstDb = CreateContext();
         await using var secondDb = CreateContext();
         var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -302,7 +302,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
         var (participantId, roundId) = await OpenVotingAsync();
         await using (var voteDb = CreateContext())
             await Service(voteDb).VoteAsync(
-                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All), participantId, roundId,
+                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live), participantId, roundId,
                 PartyGameVoteValues.Yes);
 
         await using var host = CreateContext();
@@ -344,7 +344,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_that_arrives_while_the_close_is_committing_is_refused_and_writes_nothing()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live);
 
         await using var closeDb = CreateContext();
         await using var voteDb = CreateContext();
@@ -377,7 +377,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_that_is_committing_holds_the_close_and_then_both_stand()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live);
 
         await using var voteDb = CreateContext();
         await using var closeDb = CreateContext();
@@ -412,7 +412,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     public async Task A_vote_never_moves_the_owner_command_version()
     {
         var (participantId, roundId) = await OpenVotingAsync();
-        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All);
+        var access = new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All, PartyTestExperience.Live);
 
         await using (var voteDb = CreateContext())
         {
@@ -483,7 +483,7 @@ public sealed class PartyGameConcurrencyTests : IAsyncLifetime
     private static PartyGameService Service(AppDbContext db) =>
         new(db, TimeProvider.System,
             new PartyLinkService(
-                db, TimeProvider.System, new PartyService(db, TimeProvider.System),
+                db, TimeProvider.System, new PartyService(db, TimeProvider.System, new PartyStateEraser(db), null!),
                 new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()),
             NullLogger<PartyGameService>.Instance);
 

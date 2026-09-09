@@ -6,7 +6,8 @@ import { Link, useParams } from 'react-router';
 import {
   ApiError,
   deletePartyFaceSearch,
-  getPartyAlbum,
+  getPartyGuestContext,
+  type PartyGuestContext,
   getPartyItems,
   type PartyItem,
 } from '@nubarca/api-client';
@@ -14,6 +15,12 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PartyGuestDock } from '../components/PartyGuestDock';
+import { PartyGuestContentSections } from '../party/PartyGuestContent';
+import {
+  PartyAfterHome,
+  PartyBeforeHome,
+  PartyPhaseChangeBanner,
+} from '../party/PartyGuestSurfaces';
 import { withContributionMode } from './partyContributionMode';
 import { PRODUCT_NAME } from '../brand/brand';
 import { rememberFaceFilter, rememberPartyHome } from './partyGuestMemo';
@@ -26,13 +33,25 @@ import './PartyGuestHub.css';
 // no metadata, no face/person data — the backend guarantees all of that; this
 // page simply shows what the token-scoped API returns. When party mode is
 // disabled/revoked the API returns 404 and we show a friendly "unavailable".
+//
+// THE SHELL. One URL, three surfaces — invitation, party, memories — chosen by
+// the phase the server reports. The Live experience below is the one that was
+// always here and is deliberately untouched; Before and After are their own
+// components, and nothing about the gallery, the lightbox or the capability
+// deck was rewritten to make room for them.
 type State =
   | { kind: 'loading' }
-  | { kind: 'ready'; albumName: string; items: PartyItem[]; coverUrl: string | null;
-      contributionUrl: string | null; gameEnabled: boolean; printUrl: string | null;
-      gameUrl: string | null }
+  | { kind: 'ready'; context: PartyGuestContext; items: PartyItem[] }
   | { kind: 'unavailable' }
   | { kind: 'error' };
+
+// Whether this surface HAS album media at all — during the party, and
+// afterwards for as long as the memories last. Before it there is nothing to
+// show, and asking anyway would be the client pretending not to know that.
+function hasAlbumMedia(context: PartyGuestContext): boolean {
+  if (context.phase === 'live') return context.accessMode === 'full';
+  return context.phase === 'after' && context.library.available;
+}
 
 // Live-refresh interval for the public party view so guest uploads appear
 // without a manual reload. Same 10-20s band as the TV surfaces; each poll
@@ -315,6 +334,19 @@ export function PartyPage() {
   const { t, tn } = useI18n();
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [lightbox, setLightbox] = useState<PartyItem | null>(null);
+  // The party moving under a guest who is reading is an OFFER, not a takeover.
+  //
+  // `shownPhase` is the surface they are ON, and it only moves when they say so
+  // — polling keeps the context itself fresh, notices the difference, and raises
+  // a banner. A reload lands on the new surface directly, which is why this is a
+  // courtesy rather than the mechanism.
+  const [shownPhase, setShownPhase] = useState<'before' | 'live' | 'after' | null>(null);
+  const [movedTo, setMovedTo] = useState<'live' | 'after' | null>(null);
+  const [showMemories, setShowMemories] = useState(false);
+  const scrollToContent = useCallback(() => {
+    document.querySelector('[data-testid="party-content"]')
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
   // The tile the viewer was opened from, so focus goes back to it on close.
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
   const viewerRef = useRef<HTMLDivElement>(null);
@@ -424,13 +456,18 @@ export function PartyPage() {
       return;
     }
     setState({ kind: 'loading' });
-    Promise.all([getPartyAlbum(token, signal), getPartyItems(token, signal)])
-      .then(([album, items]) => {
-        setState({
-          kind: 'ready', albumName: album.albumName, items: items.items,
-          coverUrl: album.coverUrl, contributionUrl: album.contributionUrl,
-          gameEnabled: album.gameEnabled, printUrl: album.printUrl, gameUrl: album.gameUrl,
-        });
+    // ONE context fetch decides everything, and the gallery is asked for only
+    // where there is one. An invitation must not request album media: the
+    // server would refuse it, and asking anyway would be the client pretending
+    // it does not know what it is looking at.
+    getPartyGuestContext(token, signal)
+      .then(async (context) => {
+        const items = hasAlbumMedia(context)
+          ? (await getPartyItems(token, signal)).items
+          : [];
+        setState({ kind: 'ready', context, items });
+        setShownPhase(context.phase);
+        setMovedTo(null);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -448,18 +485,42 @@ export function PartyPage() {
     return () => ctrl.abort();
   }, [load]);
 
+  // The party MOVING under the guest.
+  //
+  // The same poll that already keeps the page current re-reads the context, so
+  // no second mechanism and no WebSocket: when the phase changes it raises a
+  // banner rather than replacing what somebody is reading mid-sentence. The
+  // banner is the courtesy; a reload lands on the new surface directly.
+  useEffect(() => {
+    if (state.kind !== 'ready' || !token) return;
+    const timer = window.setInterval(() => {
+      getPartyGuestContext(token)
+        .then((fresh) => {
+          setState((cur) => (cur.kind === 'ready' ? { ...cur, context: fresh } : cur));
+          setMovedTo(fresh.phase === shownPhase || fresh.phase === 'before'
+            ? null
+            : fresh.phase);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof ApiError && err.status === 404) setState({ kind: 'unavailable' });
+        });
+    }, PARTY_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [state.kind, shownPhase, token]);
+
   // Live refresh: once the album is showing, poll items so newly uploaded photos
   // appear on the public landing page automatically. Adopts the server list
   // (stable append order); a revoked/disabled token → 404 → "unavailable"; an
   // open lightbox whose photo vanished is closed. Transient errors keep the
   // current view.
   useEffect(() => {
-    if (state.kind !== 'ready' || !token) return;
+    // Only where there IS an album: an invitation polls no gallery.
+    if (state.kind !== 'ready' || !token || !hasAlbumMedia(state.context)) return;
     const timer = window.setInterval(() => {
       getPartyItems(token)
         .then((fresh) => {
           setState((cur) => (cur.kind === 'ready' && !sameItemIds(cur.items, fresh.items)
-            ? { ...cur, albumName: fresh.albumName, items: fresh.items }
+            ? { ...cur, items: fresh.items }
             : cur));
           setLightbox((lb) => (lb && !fresh.items.some((it) => it.id === lb.id) ? null : lb));
         })
@@ -557,7 +618,65 @@ export function PartyPage() {
     );
   }
 
-  const { albumName, items, coverUrl, contributionUrl, gameEnabled, printUrl, gameUrl } = state;
+  const { context, items } = state;
+
+  // Before and After are their own surfaces. The Live experience below is
+  // unchanged — this is a fork at the top of the render, not a rewrite of what
+  // follows it.
+  if (shownPhase === 'before') {
+    return (
+      <main className="party-guest-hub">
+        <div className="party-guest-hub-state-page">
+          <PartyHubTopBar />
+          <PartyBeforeHome context={context} />
+        </div>
+        {/* Entering RELOADS: the new surface needs what the old one never asked
+            for — an invitation fetched no gallery — so it is fetched now rather
+            than half-rendered from stale state. */}
+        {movedTo && <PartyPhaseChangeBanner phase={movedTo} onEnter={() => load()} />}
+        <PartyGuestDock
+          visible
+          section="home"
+          phase="before"
+          hasAlbum={false}
+          hasInfo={context.content.length > 0}
+          contributionUrl={null}
+          onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          onAlbum={() => {}}
+          onInfo={scrollToContent}
+        />
+      </main>
+    );
+  }
+
+  if (shownPhase === 'after' && !showMemories) {
+    return (
+      <main className="party-guest-hub">
+        <div className="party-guest-hub-state-page">
+          <PartyHubTopBar />
+          <PartyAfterHome context={context} onOpenMemories={() => setShowMemories(true)} />
+        </div>
+        <PartyGuestDock
+          visible
+          section="home"
+          phase="after"
+          hasAlbum={context.library.available}
+          hasInfo={context.accessMode === 'full' && context.content.length > 0}
+          contributionUrl={null}
+          onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          onAlbum={() => setShowMemories(true)}
+          onInfo={scrollToContent}
+        />
+      </main>
+    );
+  }
+
+  const albumName = context.albumName ?? context.title;
+  const coverUrl = context.coverUrl;
+  const contributionUrl = context.capabilities.contributionUrl;
+  const gameEnabled = context.capabilities.gameUrl !== null;
+  const printUrl = context.capabilities.printUrl;
+  const gameUrl = context.capabilities.gameUrl;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
   // to items still visible in the live album (a match hidden since the search
   // simply drops out on the next poll).
@@ -725,6 +844,11 @@ export function PartyPage() {
         </div>
       )}
 
+      {/* What the host wants the guests to know DURING the party — where, what
+          to wear, what there is to eat. It sits above the photographs and below
+          the actions: information, not a capability, and never a dock item. */}
+      <PartyGuestContentSections slots={context.content} />
+
       <section
         id="party-photos"
         className="party-guest-hub-gallery"
@@ -809,12 +933,24 @@ export function PartyPage() {
       {/* Navigation, not a second deck. Hidden while the cover is still on
           screen, so the first viewport stays the cover — and hidden means NOT
           RENDERED, so nothing is reachable by Tab behind it. */}
+      {/* The party ending under a guest who is looking at it: offered, never
+          taken. A reload lands on the memories directly. */}
+      {movedTo === 'after' && (
+        <PartyPhaseChangeBanner
+          phase="after"
+          onEnter={() => { setShowMemories(false); load(); }}
+        />
+      )}
+
       <PartyGuestDock
         visible={!heroOnScreen}
         section={galleryOnScreen ? 'album' : 'home'}
+        phase="live"
+        hasInfo={context.content.length > 0}
         contributionUrl={contributionUrl}
         onHome={() => scrollTo(heroRef.current)}
         onAlbum={() => scrollTo(galleryRef.current)}
+        onInfo={scrollToContent}
       />
 
       {token && (

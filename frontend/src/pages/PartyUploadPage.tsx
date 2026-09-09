@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   classifyPartyFile,
-  getPartyAlbum,
+  getPartyGuestContext,
   PARTY_VIDEO_TYPES,
   startPartyUploadSession,
   uploadToPartyWithProgress,
@@ -235,8 +235,10 @@ export function PartyUploadPage() {
     // The upload token is NOT a view token, so the album-name probe may 404 even
     // when uploads are allowed. Treat a 404 here as "show the generic upload
     // page" rather than unavailable — the authoritative check is the POST.
-    getPartyAlbum(token, signal)
-      .then((a) => setPhase({ kind: 'ready', albumName: a.albumName }))
+    getPartyGuestContext(token, signal)
+      // The party names itself now; the album is named only where an album
+      // means something. Either is a fine heading for the upload page.
+      .then((ctx) => setPhase({ kind: 'ready', albumName: ctx.albumName ?? ctx.title }))
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         if (err instanceof ApiError && err.status === 404) {

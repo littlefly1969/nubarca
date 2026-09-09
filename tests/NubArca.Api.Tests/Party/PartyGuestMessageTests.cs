@@ -1143,7 +1143,12 @@ public sealed class PartyGuestMessageTests : IDisposable
             .EnsureSuccessStatusCode();
         var response = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", payload);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<JsonElement>();
+        var settings = await response.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests exercise the party, so
+        // they start it, exactly as a host does.
+        await PartyTestHost.StartAsync(owner, settings);
+        return settings;
     }
 
     private Task<HttpResponseMessage> SubmitRawAsync(string uploadToken, object payload)

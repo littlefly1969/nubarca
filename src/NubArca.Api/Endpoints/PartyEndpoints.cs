@@ -61,6 +61,8 @@ public static class PartyEndpoints
             HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] NubArca.Api.Party.IPartyGuestContentService guestContent,
+            [FromServices] AppDbContext db,
             [FromServices] IAuditLogger audit,
             CancellationToken cancellationToken) =>
         {
@@ -77,6 +79,15 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
+            // The PARTY names itself now, not its album: they have been separate
+            // things since the host could rename either without the other.
+            var root = await db.Parties.AsNoTracking()
+                .Where(p => p.Id == access.PartyId)
+                .Select(p => new { p.Title, p.EventStartsAt })
+                .FirstOrDefaultAsync(cancellationToken);
+            var partyTitle = root?.Title ?? header.Name;
+            var eventStartsAt = root?.EventStartsAt;
+
             await audit.LogAsync(
                 userId: null,
                 action: AuditActions.PartyPublicView,
@@ -86,35 +97,72 @@ public static class PartyEndpoints
                 metadata: null,
                 cancellationToken: cancellationToken);
 
-            var links = await party.GetActivePartyUrlsAsync(
-                access.OwnerUserId, [access.MainAlbumId], cancellationToken);
-            links.TryGetValue(access.MainAlbumId, out var urls);
             var enc = Uri.EscapeDataString(token);
-            var coverUrl = header.CoverFileItemId is Guid cover
+            // The cover is the invitation's hero as much as the gallery's face.
+            // Before the party it is the one file id that resolves at all, and
+            // only when the host CHOSE it: a photograph nominated to represent
+            // the album is a different thing from whichever one sorts first, and
+            // an invitation with no chosen cover gets a composition instead.
+            var heroCover = access.Experience.AllowsAlbumMedia
+                ? header.CoverFileItemId
+                : header.ChosenCoverFileItemId;
+            var coverUrl = heroCover is Guid cover
                 ? $"/api/party/{enc}/media/{cover}/preview" : null;
-            // A capability the HOST is no longer permitted to run is ABSENT from
-            // the hub, never a disabled tile — the same rule the frontend
-            // applies to the owner's own controls. `access.Capabilities` was
-            // resolved once with the token, so this costs no extra query.
+
+            // A capability the HOST is no longer permitted to run, or that does
+            // not belong to this phase, is ABSENT from the hub — never a
+            // disabled tile. `access.Capabilities` was resolved once with the
+            // token, with the phase already folded in, so this costs no extra
+            // query and cannot disagree with what the routes themselves allow.
+            var live = access.Experience.AllowsLiveCapabilities;
             var gameEnabled = access.Capabilities.Games
                 && await httpContext.RequestServices.GetRequiredService<AppDbContext>()
                     .PartyAlbumLinks.AsNoTracking()
                     .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.GameEnabled, cancellationToken);
-            // Printing is offered only when it would actually work right now. The
-            // resolver re-checks the whole chain — the host's `party.print`
-            // permission, profile, station, printer format, budget — so a card
-            // never appears for a party that cannot print, and disappears the
-            // moment it stops being able to.
-            var printUrl = await httpContext.RequestServices
-                .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
-                .GetAsync(access.PartyAlbumLinkId, access.MainAlbumId, cancellationToken);
-            return Results.Ok(new NubArca.Api.Party.PartyAlbumDto(
-                header.Name, header.ItemCount, coverUrl,
-                access.Capabilities.Contributions ? urls?.UploadUrl : null,
-                gameEnabled, printUrl,
-                // Same rule as printing: the capability states where it lives,
-                // and its absence is the whole answer.
-                gameEnabled ? NubArca.Api.Party.PartyLinkService.BuildGameUrl(token) : null));
+
+            string? contributionUrl = null;
+            string? printUrl = null;
+            if (live)
+            {
+                var links = await party.GetActivePartyUrlsAsync(
+                    access.OwnerUserId, [access.MainAlbumId], cancellationToken);
+                links.TryGetValue(access.MainAlbumId, out var urls);
+                contributionUrl = access.Capabilities.Contributions ? urls?.UploadUrl : null;
+
+                // Printing is offered only when it would actually work right
+                // now. The resolver re-checks the whole chain — the host's
+                // `party.print` permission, the phase, profile, station, printer
+                // format, budget — so a card never appears for a party that
+                // cannot print, and disappears the moment it stops being able to.
+                printUrl = await httpContext.RequestServices
+                    .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
+                    .GetAsync(access.PartyAlbumLinkId, access.MainAlbumId, cancellationToken);
+            }
+
+            var content = await guestContent.ForGuestAsync(
+                access.PartyId, access.Experience.Phase, cancellationToken);
+
+            return Results.Ok(new NubArca.Api.Party.PartyGuestContextDto(
+                partyTitle,
+                NubArca.Api.Domain.PartyGuestPhases.Wire(access.Experience.Phase),
+                NubArca.Api.Domain.PartyGuestAccessModes.Wire(access.Experience.Access),
+                eventStartsAt,
+                // The album is named only where it means something: during the
+                // party and in the memories. An invitation is not an album.
+                access.Experience.AllowsAlbumMedia ? header.Name : null,
+                access.Experience.AllowsAlbumMedia ? header.ItemCount : 0,
+                coverUrl,
+                content,
+                new NubArca.Api.Party.PartyGuestCapabilitiesDto(
+                    contributionUrl,
+                    // Same rule as printing: the capability states where it
+                    // lives, and its absence is the whole answer.
+                    gameEnabled ? NubArca.Api.Party.PartyLinkService.BuildGameUrl(token) : null,
+                    printUrl,
+                    access.Capabilities.FaceSearch),
+                new NubArca.Api.Party.PartyGuestLibraryDto(
+                    access.Experience.LibraryAvailable,
+                    access.Experience.LibraryAccessEndsAt)));
         }).WithName("GetPartyAlbum").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/challenges", async (
@@ -232,7 +280,10 @@ public static class PartyEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null)
+            // The gallery IS album media, so it obeys the same rule the bytes
+            // do: absent before the party, present during it, and afterwards for
+            // exactly as long as the memories last.
+            if (access is null || !access.Experience.AllowsAlbumMedia)
             {
                 return Results.NotFound();
             }
@@ -1154,6 +1205,26 @@ public static class PartyEndpoints
         if (access is null)
         {
             return Results.NotFound();
+        }
+
+        // THE LIFECYCLE, on the bytes themselves. Hiding the gallery in the
+        // browser is not a rule; this is. During the party the photographs are
+        // the party, afterwards they are the memories and last exactly as long
+        // as the library does, and before it there is nothing to show.
+        if (!access.Experience.AllowsAlbumMedia)
+        {
+            // ONE exception, and it is the invitation's hero: the cover the host
+            // chose for the album. It is the same derived, metadata-stripped
+            // preview every other party surface serves, and it is the only file
+            // id that resolves before the party — an invitation with a
+            // photograph on it is still not a gallery.
+            var header = await partyMedia.GetAlbumAsync(
+                access.OwnerUserId, access.MainAlbumId, cancellationToken);
+            if (access.Experience.Phase != NubArca.Api.Domain.PartyGuestPhase.Before
+                || header?.ChosenCoverFileItemId != fileId)
+            {
+                return Results.NotFound();
+            }
         }
 
         return await ServeMediaCoreAsync(

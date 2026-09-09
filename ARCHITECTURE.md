@@ -606,7 +606,7 @@ The current context contains the following logical groups.
 | Sharing and collections | `ShareLink`, `Album`, `AlbumItem`, `AuditLog` | Owner-managed collections, public file capabilities, forensic events |
 | Durable operations | `BackgroundJob`, `AdminImportRun`, `AdminImportItem`, `RemoteUploadSession`, `RemoteUploadItem`, `RemoteUploadChunk` | Jobs, persisted import manifests, and staged-upload state |
 | Library organization | `MediaLibraryRule`, `PhotoOrganizerRun`, `PhotoOrganizerMove`, `PhotoExportSession`, `PhotoExportEntry`, `OwnerDeletedContentTombstone` | Visibility, deterministic moves, export snapshots, and re-import suppression |
-| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `Party`, `PartyMediaSource`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, public event capabilities and moderation |
+| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `Party`, `PartyMediaSource`, `PartyGuestContent`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, public event capabilities and moderation |
 | AI foundation | `AiModel`, `AiProfile`, `BlobAiArtifactStatus`, `BlobEmbedding`, `AiAnnotation`, `AiIndexDiagnostic`, document schema entities | Provider/profile lifecycle, artifact state, vectors, diagnostics, future document/tag seams |
 | Face and People | `FaceDetection`, `FaceEmbedding`, `FaceCluster`, `FaceClusterMember`, `Person`, `PersonGroup`, `FaceAssignment`, `PersonFaceAssignment`, `IgnoredFace`, `AiSetting`, `FacePreview` | Blob-level face artifacts plus owner-level grouping, confirmation, ignore state, and display crops |
 | Private Vault | `PrivateVault`, `PrivateVaultAccessToken`; `PrivateVaultId` on normal tree rows | Exclusion-first private partition using the normal logical tree and original blobs |
@@ -1014,7 +1014,102 @@ claim lose in the database rather than in whichever check ran first. It is keyed
 on `Role` so the future roles the table exists for inherit the rule without
 another migration and without a database enum.
 
-### 14.3.2 Party capabilities
+### 14.3.2 The guest experience: one QR, three surfaces
+
+**The canonical QR is `/party/{token}` and never changes.** There is no Before,
+Live or After QR, and no token rotation at a lifecycle change: the same code
+carries a guest from the invitation, through the party, to the memories. What
+changes is what it opens.
+
+`PartyGuestExperience` is **the public experience policy** — a pure function of
+the party's status, its two windows and the clock, producing one answer:
+
+| status | phase | |
+|---|---|---|
+| `published` | `before` | the invitation |
+| `live` | `live` | the party, unchanged from before this slice |
+| `ended` | `after` | the thank-you and the memories |
+
+`draft` produces nothing: a party with no announcement has no business holding a
+public capability, and the answer is the generic unavailable.
+
+It exists so the lifecycle is decided ONCE rather than as an `if (status …)`
+copied into ten endpoints — which is exactly how a surface the frontend stops
+drawing stays reachable by typing its route. Every public request resolves it at
+the same seam that resolves the token, and the phase is **folded into the
+capabilities there**: a live capability outside the party is not a capability, so
+every endpoint keeps its single existing check and none of them grows a
+lifecycle test. The print-token resolver asks the same pure function.
+
+**Three things stay separate.** `Party.Status` is the phase of the experience;
+`PartyAlbumLink` is the technical capability and its revocation; the two windows
+are product decisions. A status never revokes a token, and a token is never
+invalid merely because the party has not started or has finished.
+
+**The two windows.** `GuestAccessExpiresAt` ends the FULL experience.
+`LibraryAccessExpiresAt` — carried since P1 and read from this release — decides
+how long the memories last: null is not a second window (they last as long as
+guest access does), a value may OUTLIVE guest access, and it may also fall short
+of it. Once the party is over and guest access has closed, a still-open library
+produces **`library-only`**: the same QR, narrowed to a thank-you and the album.
+Both closed is the same generic unavailable an unknown token gets.
+
+**Media obeys the phase server-side.** `/items` and every media byte are refused
+before the party and once the memories close — hiding the gallery in a browser
+is not a rule. The one exception is the album's **chosen** cover, which is the
+invitation's hero: a photograph the host nominated to represent the album, and
+the only file id that resolves in `before`. An album with no chosen cover gets a
+branded composition instead.
+
+### 14.3.3 What a party tells its guests
+
+`PartyGuestContent` is **six typed slots, at most one per kind** — invitation,
+location, dress code, menu, info, thank-you — keyed `(PartyId, Kind)`, so the
+uniqueness rule is the key itself. It is deliberately **not a page builder**:
+there is no slug, no sort order, no block list, no component registry, no HTML
+and no Markdown. The order a guest reads them in is a product decision
+(`PartyGuestContentKinds.All`), not data somebody drags around.
+
+Each payload is validated SERVER-SIDE against the shape its kind declares and
+**re-serialized from the parsed object**, so what is stored is what was checked
+and an unknown field is dropped rather than kept. Knowing the route is not
+permission to persist arbitrary documents. The location slot holds an address
+rather than a map URL: an arbitrary external link stored as authority would be
+somebody else's page one QR code away, and the guest surface builds a safe maps
+link from the address instead.
+
+Each slot declares which phases it belongs to, with product defaults the SERVER
+supplies (the invitation before, the thank-you after, the practical details both
+before and during). A disabled slot, or one scoped elsewhere, is **absent** from
+the guest context entirely rather than sent with a flag for the client to
+respect. Each slot also carries its OWN version: editing the menu and renaming
+the party are unrelated decisions and never contend.
+
+The guest context (`GET /api/party/{token}`) is one authoritative answer —
+phase, access mode, the slots that belong to this surface, the capabilities that
+are genuinely available, and the library's state. It carries no owner id, party
+id, album id, link id, token, hash, storage internal, GPS or AI internal, and it
+is deliberately not a row of `showX` booleans: absence IS the answer.
+
+### 14.3.4 Party teardown
+
+Tearing a party down **keeps its album**, and the guest media is FINALIZED
+before any party row is deleted. Owner-added media always survives — it was
+never a guest contribution and no party governed it. A guest upload survives if
+and only if its final `PartyUploadItem.Status` is `approved`, covering both
+automatic and manual approval; `pending`, `hidden`, `rejected` and
+`removed_from_album` go through the ORDINARY `IFileItemService` deletion
+lifecycle into Trash, restorable, with the sweeper and janitor reclaiming on
+their own schedules. Nothing touches a blob.
+
+The provenance rows are then deleted with everything else, and that is the
+point: afterwards the album is **self-contained**. What is visible in it is
+decided the way it is for every other album — by the files being active — and no
+party history has to be consulted. `PartyStateEraser` holds the list of what a
+party owns, shared with the album delete that erases a party from the other
+direction, so the two cannot drift.
+
+### 14.3.5 Party capabilities
 
 Party is a public projection over the party's main album. Its capability model supports:
 

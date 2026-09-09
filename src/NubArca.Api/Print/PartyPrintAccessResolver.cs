@@ -41,9 +41,22 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
                 && l.Enabled
                 && l.RevokedAt == null
                 && (l.ExpiresAt == null || l.ExpiresAt > now))
-            .Select(l => new { l.Id, l.AlbumId, l.OwnerUserId })
+            .Select(l => new { l.Id, l.PartyId, l.AlbumId, l.OwnerUserId })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null) return null;
+
+        // THE PHASE, from the same policy the view and upload seams use. A print
+        // studio belongs to the party itself: there is nothing to print from an
+        // invitation, and an evening that is over prints no more keepsakes. One
+        // pure function, asked here rather than an `if (status …)` of its own.
+        var party = await _db.Parties.AsNoTracking()
+            .Where(p => p.Id == link.PartyId)
+            .Select(p => new { p.Status, p.GuestAccessExpiresAt, p.LibraryAccessExpiresAt })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (party is null) return null;
+        var experience = NubArca.Api.Domain.PartyGuestExperience.Resolve(
+            party.Status, party.GuestAccessExpiresAt, party.LibraryAccessExpiresAt, now);
+        if (experience?.AllowsLiveCapabilities != true) return null;
 
         // The HOST's role, re-read like everything else here. A capability a
         // guest is holding cannot outrank a permission the owner no longer has,

@@ -406,6 +406,7 @@ public sealed class PartyGuestFoldActorTests : IDisposable
             new { name = $"Festa {Guid.NewGuid():N}" }))).GetProperty("id").GetGuid();
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-settings",
             new { enabled = true, uploadEnabled = true })).EnsureSuccessStatusCode();
+        await StartPartyAsync(owner, album);
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-slideshow-settings",
             new { maxMessagesPerParticipant = 10 })).EnsureSuccessStatusCode();
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
@@ -421,5 +422,15 @@ public sealed class PartyGuestFoldActorTests : IDisposable
             .Where(x => x.AlbumId == album && x.Enabled && x.RevokedAt == null)
             .OrderByDescending(x => x.CreatedAt).Select(x => x.Id).FirstAsync());
         return new Party(owner, album, linkId, view);
+    }
+
+    // Enabling guest access PUBLISHES the party — an invitation, which is
+    // deliberately not the party itself. These tests exercise the party, so they
+    // start it, exactly as a host does.
+    private static async Task StartPartyAsync(HttpClient owner, Guid album)
+    {
+        var settings = await (await owner.GetAsync($"/api/albums/{album}/party-settings"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        await NubArca.Api.Tests.Party.PartyTestHost.StartAsync(owner, settings);
     }
 }

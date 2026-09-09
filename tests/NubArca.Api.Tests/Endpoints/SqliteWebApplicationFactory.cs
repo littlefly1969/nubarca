@@ -267,9 +267,18 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // mirroring Program.cs's Postgres-only block. The capability policy
             // is the REAL one on purpose: a test asking whether a guest reaches
             // a party must go through the same role resolution production does.
-            services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
+            // What a party OWNS, stated once and shared by the two things that erase
+    // one: deleting its album, and tearing the party down while keeping it.
+    services.AddScoped<
+        NubArca.Api.Party.IPartyStateEraser, NubArca.Api.Party.PartyStateEraser>();
+    services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
             services.AddScoped<
                 NubArca.Api.Party.IPartyCapabilityPolicy, NubArca.Api.Party.PartyCapabilityPolicy>();
+            // The six typed slots a party tells its guests. Not a page builder:
+            // see PartyGuestContent.
+            services.AddScoped<
+                NubArca.Api.Party.IPartyGuestContentService,
+                NubArca.Api.Party.PartyGuestContentService>();
             services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
             services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
             services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();

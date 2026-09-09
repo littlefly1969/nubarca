@@ -1226,3 +1226,173 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
+
+/* --- The invitation, the memories, and the content a host writes -----------
+ *
+ * One theme, built from the guest hub's own tokens rather than a second design
+ * system that happens to live under /party. What is here is the shape of an
+ * invitation and of a thank-you: generous type, a single column, and nothing
+ * that reads as a dashboard.
+ */
+
+.party-invitation,
+.party-after {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  padding: 1.25rem 1.25rem 5.5rem;
+  max-width: 34rem;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.party-invitation-hero,
+.party-after-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.party-invitation-cover {
+  width: min(100%, 20rem);
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+/* No cover is not a broken frame: an invitation with a hole in it is worse than
+   one without a photograph. */
+.party-invitation-cover--blank {
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.16), transparent 70%),
+    linear-gradient(160deg, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0.03));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.party-invitation-eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.party-invitation-title,
+.party-after-title {
+  margin: 0;
+  font-size: clamp(1.9rem, 7vw, 2.6rem);
+  line-height: 1.15;
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+.party-invitation-date {
+  margin: 0;
+  font-size: 1.05rem;
+  opacity: 0.85;
+}
+
+.party-invitation-footnote,
+.party-after-until {
+  margin: 0;
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.party-after-message { margin: 0; font-size: 1.05rem; opacity: 0.9; text-wrap: balance; }
+.party-after-party { margin: 0; font-size: 0.9rem; opacity: 0.65; }
+
+.party-after-memories { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+
+.party-after-cta {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.85rem 1.6rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.10);
+  color: inherit;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.party-after-cta:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* --- Typed content: text, and only text -------------------------------- */
+
+.party-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  text-align: left;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 0 1.25rem;
+}
+
+.party-content-block { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.party-content-block h2,
+.party-content-block h3 {
+  margin: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  font-weight: 600;
+}
+
+.party-content-headline {
+  font-size: clamp(1.2rem, 4.5vw, 1.5rem) !important;
+  letter-spacing: normal !important;
+  text-transform: none !important;
+  opacity: 1 !important;
+}
+
+.party-content-body { margin: 0; line-height: 1.55; white-space: pre-line; }
+.party-content-strong { margin: 0; font-weight: 600; }
+.party-content-note { margin: 0; font-size: 0.9rem; opacity: 0.75; }
+
+.party-menu-section { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.party-menu-section ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* --- The party moving under a guest who is reading --------------------- */
+
+.party-phase-banner {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 5.25rem);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 24, 0.92);
+  backdrop-filter: blur(8px);
+  max-width: calc(100vw - 2rem);
+}
+
+.party-phase-banner p { margin: 0; font-size: 0.9rem; }
+
+.party-phase-banner button {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 36px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .party-after-cta,
+  .party-phase-banner { transition: none; }
+}

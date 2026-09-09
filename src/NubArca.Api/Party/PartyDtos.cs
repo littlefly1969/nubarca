@@ -120,7 +120,13 @@ public sealed record PartyAccess(
     Guid MainAlbumId,
     // Always present: a grant is only ever produced by resolving a link.
     Guid PartyAlbumLinkId,
+    // What the host's ROLE permits, with the PHASE already folded in: a live
+    // capability outside the party is not a capability. Every endpoint keeps
+    // its single check and none of them grows an `if (status …)` of its own.
     PartyCapabilities Capabilities,
+    // Which of the three surfaces this guest is standing in front of, and how
+    // much of it is open. Resolved once, at the seam, by the central policy.
+    PartyGuestExperience Experience,
     bool RequireUploadApproval = false,
     // Per-participant quotas carried straight off the resolved link (0 =
     // unlimited), so the upload path needs no second query to learn them.
@@ -155,6 +161,47 @@ public sealed record PartyAlbumDto(
     // this party has a hosted game to walk into. The hub builds no route of its
     // own from GameEnabled — a capability says where it lives, or it is absent.
     string? GameUrl = null);
+
+// THE guest context: one authoritative answer for the canonical QR route.
+//
+// It replaces the album-shaped landing DTO because the concept is no longer an
+// album — it is what this guest is looking at right now, which changes as the
+// evening does while the URL never does. One landing, one fetch: a client must
+// not have to combine two reads to learn one state.
+//
+// Deliberately NOT twenty `showX` booleans. `Content` holds only the slots that
+// are enabled AND belong to this phase AND are allowed by the access mode;
+// `Capabilities` holds only what is genuinely available. Absence IS the answer,
+// which is what keeps a disabled tile from ever being rendered.
+//
+// Carries no owner id, no album id, no party id, no link id, no token, no hash,
+// no storage internal, no GPS/EXIF and no AI internal.
+public sealed record PartyGuestContextDto(
+    string Title,
+    // "before" | "live" | "after" — which of the three surfaces to render.
+    string Phase,
+    // "full" | "library-only" — how much of that surface is open.
+    string AccessMode,
+    DateTime? EventStartsAt,
+    string? AlbumName,
+    int ItemCount,
+    string? CoverUrl,
+    IReadOnlyList<PartyGuestContentDto> Content,
+    PartyGuestCapabilitiesDto Capabilities,
+    PartyGuestLibraryDto Library);
+
+// Where a capability LIVES, or nothing. The hub builds no route of its own from
+// a boolean: a capability states where it is, or it is absent. Face search has
+// no URL of its own because it happens on the landing itself, so it is the one
+// flag here.
+public sealed record PartyGuestCapabilitiesDto(
+    string? ContributionUrl = null,
+    string? GameUrl = null,
+    string? PrintUrl = null,
+    bool FaceSearch = false);
+
+// Whether the memories are reachable, and until when if the host said so.
+public sealed record PartyGuestLibraryDto(bool Available, DateTime? AccessEndsAt = null);
 
 public sealed record PartyItemDto(
     Guid Id,

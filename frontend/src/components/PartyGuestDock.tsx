@@ -11,7 +11,15 @@ import { useI18n } from '../i18n';
 // nobody can see must not be reachable by Tab either, and `opacity: 0` leaves it
 // in the tab order.
 
-export type GuestSection = 'home' | 'album';
+export type GuestSection = 'home' | 'album' | 'info';
+
+/**
+ * Which surface the guest is on. The dock EVOLVES with the evening rather than
+ * becoming a second menu: before the party it points at the invitation and what
+ * the host wrote, during it at the party and the album, afterwards at the
+ * memories.
+ */
+export type GuestDockPhase = 'before' | 'live' | 'after';
 
 function HomeIcon() {
   return (
@@ -43,29 +51,53 @@ function CameraPlusIcon() {
   );
 }
 
+function InfoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="8.4" />
+      <path d="M12 11v5.2" />
+      <path d="M12 7.9v.1" />
+    </svg>
+  );
+}
+
 export function PartyGuestDock({
   visible,
   section,
+  phase = 'live',
+  hasAlbum = true,
+  hasInfo = false,
   contributionUrl,
   onHome,
   onAlbum,
+  onInfo,
 }: {
   /** False until the guest has scrolled past the cover — see PartyPage. */
   visible: boolean;
   section: GuestSection;
+  phase?: GuestDockPhase;
+  /** False before the party and once the memories have closed. */
+  hasAlbum?: boolean;
+  /** Whether the host wrote anything visible on this surface. */
+  hasInfo?: boolean;
   /** The one real signal for this action; null means the party takes no uploads. */
   contributionUrl: string | null;
   onHome: () => void;
   onAlbum: () => void;
+  onInfo?: () => void;
 }) {
   const { t } = useI18n();
   if (!visible) return null;
+
+  // The home label follows the surface: an invitation, a party, or the memories.
+  const homeLabel = phase === 'after' ? t('partyGuest.dockMemories') : t('partyDock.home');
 
   return (
     <nav
       className="party-guest-dock"
       aria-label={t('partyDock.label')}
       data-testid="party-dock"
+      data-phase={phase}
       data-share={contributionUrl ? 'yes' : 'no'}
     >
       <div className="party-guest-dock-inner">
@@ -77,21 +109,39 @@ export function PartyGuestDock({
           onClick={onHome}
         >
           <HomeIcon />
-          <span>{t('partyDock.home')}</span>
+          <span>{homeLabel}</span>
         </button>
-        <button
-          type="button"
-          className="party-guest-dock-item"
-          data-testid="party-dock-album"
-          aria-current={section === 'album' ? 'true' : undefined}
-          onClick={onAlbum}
-        >
-          <GridIcon />
-          <span>{t('partyDock.album')}</span>
-        </button>
+        {/* Absent rather than disabled, before the party and once the memories
+            have closed: there is no album to go to. */}
+        {hasAlbum && (
+          <button
+            type="button"
+            className="party-guest-dock-item"
+            data-testid="party-dock-album"
+            aria-current={section === 'album' ? 'true' : undefined}
+            onClick={onAlbum}
+          >
+            <GridIcon />
+            <span>{t('partyDock.album')}</span>
+          </button>
+        )}
+        {hasInfo && onInfo && (
+          <button
+            type="button"
+            className="party-guest-dock-item"
+            data-testid="party-dock-info"
+            aria-current={section === 'info' ? 'true' : undefined}
+            onClick={onInfo}
+          >
+            <InfoIcon />
+            <span>{t('partyGuest.dockInfo')}</span>
+          </button>
+        )}
         {/* The dominant action when the party accepts contributions, and simply
-            absent when it does not — the two remaining items then share the
-            dock rather than leaving a hole where this was. */}
+            absent when it does not — the remaining items then share the dock
+            rather than leaving a hole where this was. Games, printing and
+            finding your face are deliberately never here: the dock is
+            NAVIGATION, and the deck is where actions live. */}
         {contributionUrl && (
           <a
             className="party-guest-dock-share"

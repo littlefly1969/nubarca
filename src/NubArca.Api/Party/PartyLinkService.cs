@@ -476,17 +476,29 @@ public sealed class PartyLinkService : IPartyLinkService
         var party = await _db.Parties
             .AsNoTracking()
             .Where(p => p.Id == link.PartyId)
-            .Select(p => new { p.Id, p.OwnerUserId, p.GuestAccessExpiresAt })
+            .Select(p => new
+            {
+                p.Id, p.OwnerUserId, p.Status,
+                p.GuestAccessExpiresAt, p.LibraryAccessExpiresAt,
+            })
             .FirstOrDefaultAsync(cancellationToken);
         if (party is null)
         {
             return null;
         }
 
-        // The party's OWN guest window, independent of any one link's expiry:
-        // closing it closes every capability of the party at once rather than
-        // one QR at a time.
-        if (party.GuestAccessExpiresAt is DateTime guestUntil && guestUntil <= now)
+        // THE PUBLIC EXPERIENCE POLICY, asked once. It decides which of the
+        // three surfaces this guest is looking at and how much of it is open —
+        // the party's own windows included, which close every capability of the
+        // party at once rather than one QR at a time.
+        //
+        // Null is one generic unavailable: a party still in Draft, a guest
+        // window that closed while the party was being prepared or held, and
+        // both windows expired are indistinguishable from outside, exactly as
+        // an unknown token is.
+        var experience = PartyGuestExperience.Resolve(
+            party.Status, party.GuestAccessExpiresAt, party.LibraryAccessExpiresAt, now);
+        if (experience is null)
         {
             return null;
         }
@@ -523,16 +535,32 @@ public sealed class PartyLinkService : IPartyLinkService
             return null;
         }
 
+        // A LIVE capability outside the party is not a capability. Folding the
+        // phase in here is what keeps every endpoint's single check honest: a
+        // surface the guest surface stops drawing cannot be reached by typing
+        // its route either, and no endpoint acquires a lifecycle test of its own.
+        if (!experience.AllowsLiveCapabilities)
+        {
+            capabilities = capabilities with
+            {
+                Contributions = false,
+                Games = false,
+                Print = false,
+                FaceSearch = false,
+            };
+        }
+
         // An upload grant carries the link's approval mode and per-guest quotas
         // so the contribution paths need no second query; a view grant leaves
         // them at their defaults, exactly as before.
         return isUploadGrant
             ? new PartyAccess(
-                party.Id, party.OwnerUserId, albumId, link.Id, capabilities,
+                party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience,
                 link.RequireUploadApproval,
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
                 link.RequireMessageApproval, link.MaxMessagesPerParticipant)
-            : new PartyAccess(party.Id, party.OwnerUserId, albumId, link.Id, capabilities);
+            : new PartyAccess(
+                party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience);
     }
 
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.

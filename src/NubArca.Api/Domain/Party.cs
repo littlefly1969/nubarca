@@ -17,11 +17,15 @@ namespace NubArca.Api.Domain;
 /// keeps working on <c>(ownerUserId, albumId)</c> exactly as before: the main
 /// album is resolved ONCE at the public seam and handed downstream.</para>
 ///
-/// <para><b>Status is descriptive in P1, not an access gate.</b> What a guest
-/// may do is still decided by the capability they present (the link's
-/// <c>Enabled</c>, <c>RevokedAt</c>, <c>ExpiresAt</c>) and by the owner's role.
-/// Making the status a second, parallel gate would give two places the power to
-/// close a party and no single answer to why one is closed.</para>
+/// <para><b>Status selects the SURFACE; it does not grant or revoke access.</b>
+/// Whether a guest gets in is decided by the capability they present (the link's
+/// <c>Enabled</c>, <c>RevokedAt</c>, <c>ExpiresAt</c>), by the owner's role and
+/// by the party's own windows. What the status decides is which of the three
+/// experiences they are shown — invitation, party, memories — and therefore
+/// which capabilities are part of it; see <see cref="PartyGuestExperience"/>. A
+/// status never revokes a token, and a token is never invalid merely because the
+/// party has not started or has finished: the SAME QR carries a guest from the
+/// invitation to the memories.</para>
 /// </summary>
 public class Party
 {
@@ -61,20 +65,30 @@ public class Party
     public DateTime? LiveEndedAt { get; set; }
 
     /// <summary>
-    /// A hard stop for GUEST access to this party, independent of any one
-    /// link's own expiry. Enforced at the public seam, so setting it closes
-    /// every capability of the party at once rather than one QR at a time.
-    /// Null — which is every party P1 can create — means the link's own rules
-    /// are the whole answer, exactly as before.
+    /// When the FULL guest experience ends — the party's own window, independent
+    /// of any one link's expiry, so setting it closes every capability at once
+    /// rather than one QR at a time. Null means the link's own rules are the
+    /// whole answer.
+    ///
+    /// <para>It does not necessarily end the guest's visit: once the party is
+    /// over, <see cref="LibraryAccessExpiresAt"/> may keep the memories open on
+    /// the same QR. Read only through <see cref="PartyGuestExperience"/>.</para>
     /// </summary>
     public DateTime? GuestAccessExpiresAt { get; set; }
 
     /// <summary>
-    /// Reserved for the post-event library the guests keep. There is no library
-    /// surface in P1, so nothing reads this yet; it is carried because the
-    /// column belongs to the party rather than to whichever slice builds that
-    /// surface, and it is deliberately NOT enforced anywhere, so no reader can
-    /// mistake it for a live rule.
+    /// When the MEMORIES stop being reachable — a different decision from when
+    /// the guest experience does.
+    ///
+    /// <para>Null does not create a second window: the memories simply last as
+    /// long as guest access does. A value may OUTLIVE
+    /// <see cref="GuestAccessExpiresAt"/>, which is the whole point of the After
+    /// surface — the same QR keeps working, and what it opens narrows to the
+    /// album and a thank-you. It may also fall short of it, in which case the
+    /// memories close first and the greeting stays.</para>
+    ///
+    /// <para>Read only through <see cref="PartyGuestExperience"/>, which is the
+    /// one place either window is interpreted.</para>
     /// </summary>
     public DateTime? LibraryAccessExpiresAt { get; set; }
 

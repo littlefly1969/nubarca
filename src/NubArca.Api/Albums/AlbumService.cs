@@ -14,14 +14,21 @@ public class AlbumService : IAlbumService
     // simply get the previous (uncached-invalidating) behaviour.
     private readonly Media.Semantic.SemanticRankingCache? _semanticRankings;
 
+    // What a party owns, stated once. Optional for the same reason the cache is:
+    // legacy direct-construction test sites pass nothing and get an eraser built
+    // on the same context.
+    private readonly Party.IPartyStateEraser _eraser;
+
     public AlbumService(
         AppDbContext db,
         TimeProvider time,
-        Media.Semantic.SemanticRankingCache? semanticRankings = null)
+        Media.Semantic.SemanticRankingCache? semanticRankings = null,
+        Party.IPartyStateEraser? eraser = null)
     {
         _semanticRankings = semanticRankings;
         _db = db;
         _time = time;
+        _eraser = eraser ?? new Party.PartyStateEraser(db);
     }
 
     public async Task<AlbumDetail> CreateAsync(
@@ -333,105 +340,38 @@ public class AlbumService : IAlbumService
         // audit log, which is where that question belongs, as it already is for
         // shares.
         //
-        // Order follows the foreign keys: messages reference the link AND the
-        // participant, upload rows reference the participant, participants
-        // reference the link. Face-search sessions are absent deliberately —
-        // they cascade from the album already, and their results cascade from
-        // the session.
-        await _db.PartyMessages
-            .Where(m => m.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        var partyLinkIds = _db.PartyAlbumLinks.Where(l => l.AlbumId == albumId).Select(l => l.Id);
-
-        // The HOSTED GAME's runtime, and it has to go before four of the deletes
-        // below rather than one. Its restricting foreign keys reach further than
-        // the party link: a vote names a PARTICIPANT, a round names a CHALLENGE,
-        // and the session names both the LINK and the ALBUM. An album that had
-        // ever run a Party Game therefore could not be deleted at all — the
-        // constraint failed instead, in four different places.
+        // WHAT A PARTY OWNS is one list, and it lives in PartyStateEraser —
+        // shared with the teardown that erases a party from the other direction,
+        // keeping its album. Two copies of it would drift the first time a table
+        // was added under one of them.
         //
-        // Deleted explicitly, in key order, rather than left to the cascade the
-        // session already carries. The cascade would work, but "what this
-        // aggregate owns" is a statement this method should make out loud: the
-        // next table added under the session must be deleted here too, and a
-        // silent cascade is exactly what stops anyone noticing.
+        // The guest's stored photograph is untouched here: an upload row was a
+        // visibility control over a party surface that is going away, and the
+        // album going away is what removes the photographs from view. That is
+        // the difference from a teardown, where the album SURVIVES and the
+        // moderation decisions therefore have to be settled on the files first.
         //
-        // This is not a restart. The album itself is going away, so the game's
-        // whole history goes with it — see PartyGameService.RestartAsync for the
-        // other case, where the session deliberately survives.
-        var partyGameSessionIds = _db.PartyGameSessions
-            .Where(g => g.AlbumId == albumId).Select(g => g.Id);
-        await _db.PartyGameVotes
-            .Where(v => partyGameSessionIds.Contains(v.PartyGameSessionId))
-            .ExecuteDeleteAsync(cancellationToken);
-        await _db.PartyGameRounds
-            .Where(r => partyGameSessionIds.Contains(r.PartyGameSessionId))
-            .ExecuteDeleteAsync(cancellationToken);
-        await _db.PartyGameSessions
-            .Where(g => g.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        await _db.PartyChallengeVotes
-            .Where(v => partyLinkIds.Contains(v.PartyAlbumLinkId))
-            .ExecuteDeleteAsync(cancellationToken);
-        await _db.PartyChallengeCompletions
-            .Where(c => partyLinkIds.Contains(c.PartyAlbumLinkId))
-            .ExecuteDeleteAsync(cancellationToken);
-        await _db.PartyChallengeSessions
-            .Where(s => partyLinkIds.Contains(s.PartyAlbumLinkId))
-            .ExecuteDeleteAsync(cancellationToken);
-
-        await _db.PartyUploadItems
-            .Where(u => u.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        await _db.PartyParticipants
-            .Where(p => _db.PartyAlbumLinks
-                .Where(l => l.AlbumId == albumId)
-                .Select(l => l.Id)
-                .Contains(p.PartyAlbumLinkId))
-            .ExecuteDeleteAsync(cancellationToken);
-
-        // A paired television pointed at one of this album's parties holds a
-        // RESTRICTING foreign key to the link, so it would block the delete the
-        // same way every table above used to. It is returned to the general
-        // NubArca TV experience rather than unpaired: the party is what is going
-        // away, not the television. Both columns move in one statement — the
-        // check constraint refuses a general row that still names a party.
-        await _db.TvSessions
-            .Where(t => t.AssignedPartyAlbumLinkId != null
-                && partyLinkIds.Contains(t.AssignedPartyAlbumLinkId.Value))
-            .ExecuteUpdateAsync(u => u
-                .SetProperty(t => t.DisplayAssignment, TvDisplayAssignments.General)
-                .SetProperty(t => t.AssignedPartyAlbumLinkId, (Guid?)null), cancellationToken);
-
-        await _db.PartyAlbumLinks
-            .Where(l => l.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        await _db.PartyChallenges
-            .Where(c => c.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-
-        // The Party ROOT, last, because everything above holds a restricting
-        // foreign key to it or to the album it draws on. A media source is the
-        // party's claim on this album, so it goes with the album; a party left
-        // with no source at all has nothing to show and no way to acquire one
-        // in this slice, so it goes too — while a party that still draws on
-        // another album survives, which is the whole point of the table.
+        // A party that draws on another album as well survives; only a party
+        // left with no source at all goes, which is the whole point of the
+        // media-source table.
         var partyIds = await _db.PartyMediaSources
             .Where(s => s.AlbumId == albumId)
             .Select(s => s.PartyId)
             .Distinct()
             .ToListAsync(cancellationToken);
-        await _db.PartyMediaSources
-            .Where(s => s.AlbumId == albumId)
-            .ExecuteDeleteAsync(cancellationToken);
-        await _db.Parties
-            .Where(p => partyIds.Contains(p.Id)
-                && !_db.PartyMediaSources.Any(s => s.PartyId == p.Id))
-            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var partyId in partyIds)
+        {
+            var otherSources = await _db.PartyMediaSources
+                .AnyAsync(s => s.PartyId == partyId && s.AlbumId != albumId, cancellationToken);
+            if (otherSources)
+            {
+                await _db.PartyMediaSources
+                    .Where(s => s.PartyId == partyId && s.AlbumId == albumId)
+                    .ExecuteDeleteAsync(cancellationToken);
+                continue;
+            }
+            await _eraser.EraseAsync(partyId, albumId, cancellationToken);
+        }
 
         _db.Albums.Remove(album);
         await _db.SaveChangesAsync(cancellationToken);

@@ -9,6 +9,7 @@ using NubArca.Api.Tests.Endpoints;
 using NubArca.Api.Tests.Metadata;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using NubArca.Api.Tests.Party;
 
 namespace NubArca.Api.Tests.Print;
 
@@ -84,7 +85,7 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         // it, and only when printing would actually work.
         var anon = _factory.CreateClient();
         var album = await anon.GetFromJsonAsync<JsonElement>($"/api/party/{viewToken}");
-        var printUrl = album.GetProperty("printUrl");
+        var printUrl = album.GetProperty("capabilities").GetProperty("printUrl");
         var printToken = printUrl.ValueKind == JsonValueKind.Null
             ? string.Empty
             : printUrl.GetString()!["/party/".Length..].Replace("/print", string.Empty);
@@ -328,7 +329,12 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         var resp = await owner.PatchAsJsonAsync(
             $"/api/albums/{albumId}/party-settings", new { enabled = true });
         resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var settings = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        // Enabling guest access PUBLISHES the party — an invitation, which is
+        // deliberately not the party itself. These tests exercise the party, so
+        // they start it, exactly as a host does.
+        await PartyTestHost.StartAsync(owner, settings);
+        return settings;
     }
 
     private async Task<Guid> AddJpegWithExifAsync(HttpClient owner, Guid albumId, string name)
