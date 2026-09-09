@@ -65,10 +65,22 @@ public class PartyMediaSourceConfiguration : IEntityTypeConfiguration<PartyMedia
         builder.HasIndex(s => new { s.PartyId, s.Role, s.SortOrder })
             .HasDatabaseName("ix_party_media_sources_party_role");
 
-        // "Which party is this album already part of" — the compatibility entry
-        // point's lookup, and the album delete cascade's.
-        builder.HasIndex(s => s.AlbumId)
-            .HasDatabaseName("ix_party_media_sources_album");
+        // ONE album is ONE party's `main` source.
+        //
+        // The composite key already says an album contributes to a party once;
+        // this says it contributes to at most one party IN THAT ROLE, which is
+        // the invariant `EnsureForAlbumAsync` has always needed a single answer
+        // to. Enforced by the DATABASE rather than by an `AnyAsync` check the
+        // application performs first, so two concurrent attempts to claim the
+        // same album cannot both find it free and both proceed.
+        //
+        // Keyed on Role rather than hard-coded to `main` so the future roles the
+        // table exists for — `official`, `guest-contributions`,
+        // `selected-memories` — each get the same rule for free, and none of
+        // them needs a database enum to do it.
+        builder.HasIndex(s => new { s.AlbumId, s.Role })
+            .IsUnique()
+            .HasDatabaseName("ux_party_media_sources_album_role");
 
         builder.HasOne<Domain.Party>()
             .WithMany()

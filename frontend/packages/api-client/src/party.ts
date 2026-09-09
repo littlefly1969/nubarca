@@ -39,6 +39,122 @@ export {
 } from '@nubarca/contracts';
 
 
+// --- The Party ROOT (owner, normal user auth) ---
+//
+// Only what the root itself owns: the host's parties, one party's own data,
+// where it draws its media from, and its lifecycle. Everything a party is
+// CONFIGURED with — contributions, moderation, slideshow, games, printing —
+// keeps using the album-scoped functions below with the party's `mainAlbumId`.
+// There is no Party V2 client, because there is no Party V2 backend.
+
+/** One album a party draws on. `role` is `main` in this release. */
+export interface PartyMediaSource {
+  albumId: string;
+  albumName: string;
+  role: string;
+  sortOrder: number;
+}
+
+export type PartyStatus = 'draft' | 'published' | 'live' | 'ended';
+
+export interface Party {
+  id: string;
+  title: string;
+  description: string | null;
+  status: PartyStatus;
+  /** When the host says it begins. Scheduling: nothing acts on it. */
+  eventStartsAt: string | null;
+  /** Written by a real transition, never by a clock. */
+  liveStartedAt: string | null;
+  liveEndedAt: string | null;
+  /** A hard stop for guest access, enforced at the public seam. */
+  guestAccessExpiresAt: string | null;
+  /** Reserved for the post-event library. Nothing reads it yet — no UI. */
+  libraryAccessExpiresAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  mediaSources: PartyMediaSource[];
+  /**
+   * False once any capability has ever been minted for this party. The main
+   * album is fixed from that moment, because guests, greetings, prints and
+   * games are scoped to a link that names it.
+   */
+  canChangeMainMediaSource: boolean;
+}
+
+/** What a party card needs, and deliberately nothing else. */
+export interface PartySummary {
+  id: string;
+  title: string;
+  status: PartyStatus;
+  eventStartsAt: string | null;
+  liveStartedAt: string | null;
+  liveEndedAt: string | null;
+  updatedAt: string;
+  mainAlbumId: string | null;
+  mainAlbumName: string | null;
+}
+
+export function listParties(signal?: AbortSignal): Promise<PartySummary[]> {
+  return api<PartySummary[]>('/api/parties', { signal });
+}
+
+export function getParty(partyId: string, signal?: AbortSignal): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}`, { signal });
+}
+
+// A party begins as a name and a date. No album, no capability, no token, no
+// television, no game, no print configuration: the event exists before the
+// photographs, and every one of those is a later decision by the host.
+export function createParty(
+  body: { title: string; description?: string | null; eventStartsAt?: string | null },
+  signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>('/api/parties', { method: 'POST', json: body, signal });
+}
+
+// The party's own DATA, version-checked. It cannot write `status`,
+// `liveStartedAt` or `liveEndedAt` — those belong to the transitions below.
+export function updateParty(
+  partyId: string,
+  body: {
+    title: string;
+    description?: string | null;
+    eventStartsAt?: string | null;
+    guestAccessExpiresAt?: string | null;
+    version: number;
+  },
+  signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}`, { method: 'PATCH', json: body, signal });
+}
+
+// PUT because it states the whole fact — this party's main album is that one.
+// Refused with 409 once any capability has existed (`media_source_locked`) or
+// when the album already serves another party (`album_already_in_use`).
+export function setPartyMainMediaSource(
+  partyId: string,
+  body: { albumId: string; version: number },
+  signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}/media/main`, { method: 'PUT', json: body, signal });
+}
+
+/** The three lifecycle moves. The caller names an ACTION, never a target state. */
+export type PartyLifecycleAction = 'publish' | 'start-live' | 'end-live';
+
+export function transitionParty(
+  partyId: string,
+  action: PartyLifecycleAction,
+  version: number,
+  signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}/${action}`, {
+    method: 'POST', json: { version }, signal,
+  });
+}
+
 // --- Owner-side party settings (normal user auth) ---
 
 export function setPartyGameSettings(

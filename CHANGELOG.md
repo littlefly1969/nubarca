@@ -6,6 +6,27 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Parties have a place of their own
+
+- **Party is a destination now.** There is a Parties entry in the sidebar, a
+  list of every party you are hosting, and a workspace for each one — Overview,
+  Live and Photos. Setting up a party no longer means opening an album, finding
+  Settings, and scrolling past everything else in it.
+- **A party is made before its photographs.** Give it a name and, if you know
+  it, a date. That is the whole form: no album, no television, no game, no
+  printing, no quotas. Everything else is a decision you take later, in the
+  party's own workspace.
+- **The album is something you link, and it can be swapped** — right up until
+  the party publishes its first QR code. After that it is fixed, and the
+  workspace says so plainly: the guests, greetings and prints of that evening
+  belong to the album they were made in.
+- **Naming a party is naming the party.** Renaming it no longer renames the
+  album, and renaming the album no longer renames it.
+- The evening's own controls — guest contributions, the moderation queues, the
+  slideshow, the game and its activities, printing — are the same ones as
+  before, moved to where the party lives. Album Settings keeps a short line
+  saying which party an album belongs to, and a way in.
+
 ### The Party is the party
 
 - **A party is now a thing of its own**, rather than an album with a switch on

@@ -113,6 +113,47 @@ public static class PartyStatuses
         status is Draft or Published or Live or Ended;
 }
 
+/// <summary>
+/// What an owner may type into a party, and how much of it.
+///
+/// <para>Kept beside the entity so the EF configuration, the API validator and
+/// the client contract quote ONE set of numbers — the same reason
+/// <see cref="PartySlideshowDefaults"/> lives where it does. Measured in
+/// Unicode code points, the one unit .NET and a browser agree on exactly, so a
+/// title of astral characters is counted the way the person typing it counts
+/// it.</para>
+/// </summary>
+public static class PartyTextLimits
+{
+    public const int MaxTitleLength = 200;
+    public const int MaxDescriptionLength = 2000;
+
+    /// <summary>
+    /// Trimmed, or null when there was nothing but whitespace. Trimming is the
+    /// whole normalisation: a party title is a name somebody chose, not a
+    /// message body, so the aggressive format-character stripping
+    /// <c>PartyMessageText</c> does would be wrong here.
+    /// </summary>
+    public static string? Normalize(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+    }
+
+    public static bool IsValidTitle(string? normalized) =>
+        normalized is not null && CodePoints(normalized) <= MaxTitleLength;
+
+    public static bool IsValidDescription(string? normalized) =>
+        normalized is null || CodePoints(normalized) <= MaxDescriptionLength;
+
+    private static int CodePoints(string value)
+    {
+        var count = 0;
+        foreach (var _ in value.EnumerateRunes()) count++;
+        return count;
+    }
+}
+
 public enum PartyLifecycleAction
 {
     Publish,

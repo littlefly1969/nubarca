@@ -603,6 +603,39 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   NOT NULL with a restricting FK the previous application cannot satisfy, so the
   cutover takes a short window in which Party is unavailable, in preference to a
   dual-write transition spread through the services.
+- **Party is a DESTINATION, and a party is created before its photographs.**
+  `/parties` and `/parties/{id}` are the owner product; the navigation entry is
+  ABSENT without `party.access`, never disabled. `POST /api/parties` takes a name
+  and optionally a date and makes a Draft with NOTHING else — no album, no
+  capability, no token, no television, no game session, no print profile — so
+  "is this party public" is never a question about when it was made. A party with
+  no album is an ordinary state the surface invites the host to finish: nothing
+  album-scoped is requested until there is a real album id, so no endpoint is
+  ever called with an invented one. Three things are easy to undo by accident.
+  **The metadata PATCH writes DATA only** — title, description, `EventStartsAt`,
+  `GuestAccessExpiresAt` — under the same optimistic concurrency an album uses,
+  and it cannot write `Status`/`LiveStartedAt`/`LiveEndedAt` by construction
+  rather than by a filter somebody could relax. **`Party.Title` and `Album.Name`
+  are independent** in both directions with no sync; they were only ever the same
+  string because one was made from the other. And **the workspace MOUNTS what
+  already worked** — contributions, moderation, slideshow, game, deck, control
+  room, print — rather than cloning it, which is why `AlbumSettingsPanel` is now
+  a bridge of one sentence and one door instead of the whole Party application.
+- **The main media source is choosable until the first capability, then fixed.**
+  Free to pick and replace while the party has never had a `PartyAlbumLink`;
+  `media_source_locked` (409) from the moment one has EXISTED — active, revoked
+  or superseded — because participants, uploads, greetings, prints, games and
+  face searches are scoped to a link naming that album, and moving it would turn
+  a UI edit into a domain migration. Revoking the party does NOT unlock it.
+  `PartyDto.CanChangeMainMediaSource` carries the answer so the surface says so
+  before the host chooses rather than after. OWNERSHIP decides eligibility, not
+  authority: a shared album's Editor may curate it and can never make it a
+  party's source, and a foreign or missing album is the same generic 404. One
+  album is one party's `main` source and the DATABASE enforces it
+  (`ux_party_media_sources_album_role`, `UNIQUE (AlbumId, Role)`), keyed on Role
+  so future roles inherit the rule without a migration or a database enum — P1
+  left this as an application check while `EnsureForAlbumAsync` needed one
+  answer, and a check that runs first is not a rule.
 - **A guest holds a capability; the HOST holds a permission.** `party.access` is
   the product and `party.contributions` / `party.games` / `party.print` /
   `party.face-search` are feature keys whose Parent is `party.access`, so a role

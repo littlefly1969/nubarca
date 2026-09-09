@@ -15,6 +15,8 @@ import { AdminUsersPage } from './pages/AdminUsersPage';
 import { AlbumDetailPage } from './pages/AlbumDetailPage';
 import { HelpPage } from './pages/HelpPage';
 import { AlbumsPage } from './pages/AlbumsPage';
+import { PartiesPage } from './pages/PartiesPage';
+import { PartyWorkspacePage } from './pages/PartyWorkspacePage';
 import { CloudFunctionsPage } from './pages/CloudFunctionsPage';
 import { MediaLibraryPage } from './pages/MediaLibraryPage';
 import { LegacyMediaRedirect } from './media/workspace/LegacyMediaRedirect';
@@ -94,6 +96,25 @@ export function App() {
             <Route path="/help" element={<HelpPage />} />
             <Route path="/albums" element={<AlbumsPage />} />
             <Route path="/albums/:albumId" element={<AlbumDetailPage />} />
+            {/* THE Party destination. `party.access` alone opens it: which
+                capabilities appear inside a party is the workspace's own
+                decision, and the server gates each of them independently. */}
+            <Route
+              path="/parties"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
+                  <PartiesPage />
+                </PermissionRoute>
+              }
+            />
+            <Route
+              path="/parties/:partyId"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
+                  <PartyWorkspacePage />
+                </PermissionRoute>
+              }
+            />
             {/* The owner's Party destinations. Each names the same pair the
                 server's policy requires — the product permission AND the
                 capability — so a link that survived in somebody's history

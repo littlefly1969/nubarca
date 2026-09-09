@@ -81,6 +81,11 @@
       "automated": false,
       "previousApplicationCompatible": false,
       "reason": "Party becomes the aggregate root. It creates the parties and party_media_sources tables, then adds a NOT NULL PartyId to party_album_links with a restricting foreign key and backfills one party per historical party album. The previous application knows nothing about PartyId, so every link it minted after the upgrade would carry the zero GUID and be rejected by that foreign key: rolling back leaves an installation that cannot enable party mode at all. It also removes the Party/ShowOnTv coupling, which the previous application still assumes. This migration therefore requires a short maintenance window in which Party is unavailable, taken deliberately in preference to a dual-write transition spread through the services; the rest of NubArca is unaffected and no token, participant, upload, message, print, game or face-search row is read or rewritten."
+    },
+    "20260909204649_AddPartyMainMediaSourceUniqueness": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Replaces the plain party_media_sources album index with a unique index over (AlbumId, Role), making 'one album is one party's main media source' a database rule rather than an application check. No table, column or row changes. The previous application already created at most one main source per album through EnsureForAlbumAsync, so every existing row satisfies the constraint and rolling back to that application writes nothing the unique index could reject."
     }
   }
 }

@@ -965,7 +965,56 @@ in `PartyLinkService`, and hands the rest of NubArca the `(ownerUserId, albumId)
 
 **Party and Show-on-TV are independent.** Enabling party mode no longer forces `Album.ShowOnTv`, and turning Show-on-TV off no longer revokes live party links. `ShowOnTv` keeps its meaning for the ordinary Album/TV product, and the TV surfaces still require it; a party that wants a television asks for one.
 
-### 14.3.1 Party capabilities
+### 14.3.1 The owner's Party product
+
+**Party is a destination**, not a mode inside an album's settings. `/parties`
+lists the host's own parties; `/parties/{id}` is the workspace. Both are gated
+on `party.access` and the navigation entry is ABSENT without it.
+
+The root's owner API is deliberately small — `GET/POST /api/parties`,
+`GET/PATCH /api/parties/{id}`, `PUT /api/parties/{id}/media/main`, and the three
+lifecycle actions. Everything a party is CONFIGURED with keeps living on its
+existing album-scoped routes, reached through the party's main album, so there
+is no second Party application: the workspace mounts the components that already
+worked rather than cloning them, and `AlbumSettingsPanel` is reduced to a bridge
+naming the party and the way in.
+
+**A party is created with a name and a date, and nothing else** — no album, no
+capability, no token, no television, no game session, no print profile. *The
+event exists before the photographs*, and a create that quietly minted a QR would
+make "is this party public" a question about when it was made. A party with no
+album is an ordinary state the surface invites the host to finish, never an
+error and never a permission problem; nothing album-scoped is requested until
+there is a real album id to request it with.
+
+`PATCH` writes the party's DATA only — title, description, `EventStartsAt`,
+`GuestAccessExpiresAt` — under the same optimistic concurrency an album mutation
+uses, and a stale write is a 409 carrying the current party so the client
+refreshes rather than overwrites. It cannot write `Status`, `LiveStartedAt` or
+`LiveEndedAt` by construction: those belong to the transitions, and a form able
+to write them could describe an evening that never happened. `Party.Title` and
+`Album.Name` are independent from this point on, in both directions, with no
+sync.
+
+**The main media source is choosable until it is not.** It may be picked and
+replaced freely until the party has EVER had a `PartyAlbumLink` — active,
+revoked or superseded — and is fixed from that moment (`media_source_locked`),
+because the participants, uploads, greetings, prints, games and face searches
+that may already exist are scoped to a link naming that album; moving it would
+turn a UI edit into a domain migration. `PartyDto.CanChangeMainMediaSource`
+carries the answer so the surface says so plainly instead of discovering it from
+a refusal. Ownership, not authority, decides which albums qualify: a shared
+album's Editor may curate it and can never make it a party's source, and a
+foreign or missing album is the same generic 404.
+
+**One album is one party's `main` source, and the DATABASE says so.** P1 left
+this as an application rule while `EnsureForAlbumAsync` needed a single answer;
+`ux_party_media_sources_album_role` (`UNIQUE (AlbumId, Role)`) makes a second
+claim lose in the database rather than in whichever check ran first. It is keyed
+on `Role` so the future roles the table exists for inherit the rule without
+another migration and without a database enum.
+
+### 14.3.2 Party capabilities
 
 Party is a public projection over the party's main album. Its capability model supports:
 

@@ -1,14 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { Link } from 'react-router';
 import {
   ApiError,
   deleteAlbum,
   getAlbumPartySettings,
-  setAlbumPartyMode,
-  setPartySlideshowSettings,
-  PARTY_SLIDESHOW_RANGES,
-  PARTY_GAME_RANGES,
-  setPartyGameSettings,
   setAlbumTvVisibility,
   updateAlbum,
   type AlbumDetail,
@@ -18,13 +12,16 @@ import { useAuth } from '../auth/useAuth';
 import { usePermissions } from '../auth/usePermissions';
 import { PERMISSIONS } from '../auth/permissions';
 import { useI18n } from '../i18n';
-import { PartyChallengeManager } from './PartyChallengeManager';
-import { PartyPrintSettings } from './PartyPrintSettings';
+import { AlbumPartyBridge } from './AlbumPartyBridge';
 
-// Slice 5: the album's rename / description / Show-on-TV / Party (view link,
-// guest upload, upload-management) / delete controls, moved out of the content
-// area into a modal panel so the grid is not buried under a stack of checkboxes.
-// The TV/Party BACKEND semantics are unchanged — this only relocates the UI.
+// The album's own settings: rename, description, Show-on-TV, delete.
+//
+// Party used to live here in full — guest access, upload switches, moderation
+// links, slideshow numbers, the game and its deck, printing — because there was
+// nowhere else for it to be. There is now: Party is a destination of its own,
+// and what remains here is a BRIDGE, one sentence and one door. Two complete
+// interfaces configuring one party would be two places to change it and two
+// places for them to disagree.
 
 interface Props {
   albumId: string;
@@ -47,115 +44,13 @@ export function AlbumSettingsPanel({
   // independently; what happens here is only that a door nobody may open is
   // not drawn. Each feature asks for the product permission as well, because
   // that is the rule the server applies.
-  const perms = usePermissions();
-  const canParty = perms.has(PERMISSIONS.partyAccess);
-  const canPartyGames = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]);
-  const canPartyPrint = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyPrint]);
-  const canPartyContributions =
-    perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyContributions]);
+  const canParty = usePermissions().has(PERMISSIONS.partyAccess);
   const dialogRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState(album.name);
   const [desc, setDesc] = useState(album.description ?? '');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [tvSaving, setTvSaving] = useState(false);
-  const [partySaving, setPartySaving] = useState(false);
-  // The four numeric settings are edited as a DRAFT and saved explicitly. A
-  // PATCH per keypress would send a partially-typed "1" while the user is on
-  // their way to "15", and every one of those is a real config change the TV
-  // would adopt on its next poll.
-  const [slideshowDraft, setSlideshowDraft] = useState({
-    photoSlideSeconds: '', maxVideoSlideSeconds: '',
-    maxPhotoUploadsPerParticipant: '', maxVideoUploadsPerParticipant: '',
-    maxMessagesPerParticipant: '',
-  });
-  const [slideshowStatus, setSlideshowStatus] = useState<'idle' | 'saved' | 'invalid' | 'failed'>('idle');
-  const [gameDraft, setGameDraft] = useState({
-    gameEnabled: false, minChallengeIntervalSeconds: '300',
-    maxChallengeIntervalSeconds: '540', votesPerGuest: '3', maxChallengesPerSession: '',
-  });
-  const [gameStatus, setGameStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
-
-  // Seed the draft from the server whenever the panel learns the current values.
-  useEffect(() => {
-    if (!party) return;
-    setSlideshowDraft({
-      photoSlideSeconds: String(party.photoSlideSeconds),
-      maxVideoSlideSeconds: String(party.maxVideoSlideSeconds),
-      maxPhotoUploadsPerParticipant: String(party.maxPhotoUploadsPerParticipant),
-      maxVideoUploadsPerParticipant: String(party.maxVideoUploadsPerParticipant),
-      maxMessagesPerParticipant: String(party.maxMessagesPerParticipant ?? 0),
-    });
-  }, [party?.albumId, party?.photoSlideSeconds, party?.maxVideoSlideSeconds,
-    party?.maxPhotoUploadsPerParticipant, party?.maxVideoUploadsPerParticipant,
-    party?.maxMessagesPerParticipant]);
-
-  useEffect(() => {
-    if (!party) return;
-    setGameDraft({
-      gameEnabled: party.gameEnabled ?? false,
-      minChallengeIntervalSeconds: String(party.minChallengeIntervalSeconds ?? 300),
-      maxChallengeIntervalSeconds: String(party.maxChallengeIntervalSeconds ?? 540),
-      votesPerGuest: String(party.votesPerGuest ?? 3),
-      maxChallengesPerSession: party.maxChallengesPerSession == null ? '' : String(party.maxChallengesPerSession),
-    });
-  }, [party?.albumId, party?.gameEnabled, party?.minChallengeIntervalSeconds,
-    party?.maxChallengeIntervalSeconds, party?.votesPerGuest, party?.maxChallengesPerSession]);
-
-  const inRange = (raw: string, range: { min: number; max: number }) => {
-    const value = Number(raw);
-    return Number.isInteger(value) && value >= range.min && value <= range.max;
-  };
-
-  const slideshowValid =
-    inRange(slideshowDraft.photoSlideSeconds, PARTY_SLIDESHOW_RANGES.photoSeconds)
-    && inRange(slideshowDraft.maxVideoSlideSeconds, PARTY_SLIDESHOW_RANGES.maxVideoSeconds)
-    && inRange(slideshowDraft.maxPhotoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
-    && inRange(slideshowDraft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
-    && inRange(slideshowDraft.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
-
-  const gameMin = Number(gameDraft.minChallengeIntervalSeconds);
-  const gameMax = Number(gameDraft.maxChallengeIntervalSeconds);
-  const gameSessionMax = gameDraft.maxChallengesPerSession === '' ? null : Number(gameDraft.maxChallengesPerSession);
-  const gameValid = inRange(gameDraft.minChallengeIntervalSeconds, PARTY_GAME_RANGES.intervalSeconds)
-    && inRange(gameDraft.maxChallengeIntervalSeconds, PARTY_GAME_RANGES.intervalSeconds)
-    && gameMax >= gameMin
-    && inRange(gameDraft.votesPerGuest, PARTY_GAME_RANGES.votes)
-    && (gameSessionMax === null || (Number.isInteger(gameSessionMax)
-      && gameSessionMax >= PARTY_GAME_RANGES.maxPerSession.min
-      && gameSessionMax <= PARTY_GAME_RANGES.maxPerSession.max));
-
-  async function saveSlideshowSettings() {
-    if (!slideshowValid) { setSlideshowStatus('invalid'); return; }
-    setPartySaving(true);
-    setSlideshowStatus('idle');
-    try {
-      onPartyUpdated(await setPartySlideshowSettings(albumId, {
-        photoSlideSeconds: Number(slideshowDraft.photoSlideSeconds),
-        maxVideoSlideSeconds: Number(slideshowDraft.maxVideoSlideSeconds),
-        maxPhotoUploadsPerParticipant: Number(slideshowDraft.maxPhotoUploadsPerParticipant),
-        maxVideoUploadsPerParticipant: Number(slideshowDraft.maxVideoUploadsPerParticipant),
-        maxMessagesPerParticipant: Number(slideshowDraft.maxMessagesPerParticipant),
-      }));
-      setSlideshowStatus('saved');
-    } catch {
-      setSlideshowStatus('failed');
-    } finally { setPartySaving(false); }
-  }
-  async function saveGameSettings() {
-    if (!gameValid) return;
-    setPartySaving(true); setGameStatus('idle');
-    try {
-      onPartyUpdated(await setPartyGameSettings(albumId, {
-        gameEnabled: gameDraft.gameEnabled,
-        minChallengeIntervalSeconds: gameMin,
-        maxChallengeIntervalSeconds: gameMax,
-        votesPerGuest: Number(gameDraft.votesPerGuest),
-        maxChallengesPerSession: gameSessionMax,
-      }));
-      setGameStatus('saved');
-    } catch { setGameStatus('failed'); } finally { setPartySaving(false); }
-  }
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
@@ -200,28 +95,6 @@ export function AlbumSettingsPanel({
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) invalidateAuth();
     } finally { setTvSaving(false); }
-  }
-
-  async function toggleParty(next: boolean) {
-    if (next && !window.confirm(t('albumDetail.confirmPartyEnable'))) return;
-    setPartySaving(true);
-    try {
-      const updated = await setAlbumPartyMode(albumId, next);
-      onPartyUpdated(updated);
-      if (next) onAlbumUpdated({ ...album, showOnTv: updated.showOnTv });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) invalidateAuth();
-    } finally { setPartySaving(false); }
-  }
-
-  async function toggleUpload(next: boolean) {
-    if (next && !window.confirm(t('albumDetail.confirmUploadEnable'))) return;
-    setPartySaving(true);
-    try {
-      onPartyUpdated(await setAlbumPartyMode(albumId, true, next));
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) invalidateAuth();
-    } finally { setPartySaving(false); }
   }
 
   async function doDelete() {
@@ -279,197 +152,9 @@ export function AlbumSettingsPanel({
           </label>
           <p className="muted">{t('albumDetail.showOnTvHelp')}</p>
 
-          {canParty && (
-            <>
-          <label className="album-tv-label">
-            <input
-              type="checkbox"
-              checked={party?.partyMode ?? false}
-              disabled={partySaving || party === null}
-              aria-label={t('albumDetail.partyMode')}
-              onChange={(e) => void toggleParty(e.target.checked)}
-            />
-            <span>{t('albumDetail.partyMode')}</span>
-          </label>
-          <p className="muted">{t('albumDetail.partyModeHelp')}</p>
-
-          {party?.partyMode && party.partyUrl && (
-            <p className="album-party-url" data-testid="party-url">
-              {t('albumDetail.publicLink')}{' '}
-              <a href={party.partyUrl} target="_blank" rel="noopener noreferrer">{window.location.origin}{party.partyUrl}</a>
-            </p>
-          )}
-          {party?.partyMode && canPartyContributions && (
-            <div className="album-party-upload" data-testid="album-party-upload">
-              <label className="album-tv-label">
-                <input type="checkbox" checked={party.uploadEnabled} disabled={partySaving} aria-label={t('albumDetail.allowGuestUploads')} onChange={(e) => void toggleUpload(e.target.checked)} />
-                <span>{t('albumDetail.allowGuestUploads')}</span>
-              </label>
-              <p className="muted">{t('albumDetail.guestUploadsHelp')}</p>
-              {/* The upload deep link remains valid, but the owner publishes
-                  only the canonical Guest Hub link above. */}
-              <p className="album-party-manage" data-testid="party-uploads-link">
-                <Link to={`/albums/${albumId}/party-uploads`}>
-                  {t('albumDetail.manageGuestUploads')}
-                  {party.requireUploadApproval ? ` (${t('albumDetail.approvalRequired')})` : ''}
-                </Link>
-              </p>
-              {/* Messages are a separate channel from photos and videos, so
-                  they get their own queue rather than a tab inside the media
-                  one — and the link is here, under the guest-contribution
-                  block, because writing IS a guest contribution. */}
-              <p className="album-party-manage" data-testid="party-messages-link">
-                <Link to={`/albums/${albumId}/party-messages`}>
-                  {t('partyMessages.title')}
-                  {party.requireMessageApproval ? ` (${t('albumDetail.approvalRequired')})` : ''}
-                </Link>
-              </p>
-            </div>
-          )}
-
-          {party?.partyMode && (
-            <div className="album-party-slideshow" data-testid="party-slideshow-settings">
-              <h4>{t('party.slideshowSettingsTitle')}</h4>
-
-              <label className="album-party-number">
-                <span>{t('party.photoSlideSeconds')}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={PARTY_SLIDESHOW_RANGES.photoSeconds.min}
-                  max={PARTY_SLIDESHOW_RANGES.photoSeconds.max}
-                  value={slideshowDraft.photoSlideSeconds}
-                  disabled={partySaving}
-                  aria-label={t('party.photoSlideSeconds')}
-                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, photoSlideSeconds: e.target.value }))}
-                />
-                <span className="muted">{t('party.secondsSuffix')}</span>
-              </label>
-
-              <label className="album-party-number">
-                <span>{t('party.maxVideoSlideSeconds')}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={PARTY_SLIDESHOW_RANGES.maxVideoSeconds.min}
-                  max={PARTY_SLIDESHOW_RANGES.maxVideoSeconds.max}
-                  value={slideshowDraft.maxVideoSlideSeconds}
-                  disabled={partySaving}
-                  aria-label={t('party.maxVideoSlideSeconds')}
-                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxVideoSlideSeconds: e.target.value }))}
-                />
-                <span className="muted">{t('party.secondsSuffix')}</span>
-              </label>
-
-              <label className="album-party-number">
-                <span>{t('party.maxPhotosPerParticipant')}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={PARTY_SLIDESHOW_RANGES.quota.min}
-                  max={PARTY_SLIDESHOW_RANGES.quota.max}
-                  value={slideshowDraft.maxPhotoUploadsPerParticipant}
-                  disabled={partySaving}
-                  aria-label={t('party.maxPhotosPerParticipant')}
-                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxPhotoUploadsPerParticipant: e.target.value }))}
-                />
-                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
-              </label>
-
-              <label className="album-party-number">
-                <span>{t('party.maxVideosPerParticipant')}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={PARTY_SLIDESHOW_RANGES.quota.min}
-                  max={PARTY_SLIDESHOW_RANGES.quota.max}
-                  value={slideshowDraft.maxVideoUploadsPerParticipant}
-                  disabled={partySaving}
-                  aria-label={t('party.maxVideosPerParticipant')}
-                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxVideoUploadsPerParticipant: e.target.value }))}
-                />
-                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
-              </label>
-
-              {/* Greetings are a guest allowance like the two above, so the host
-                  sets it in the same place and on the same 0-is-unlimited
-                  scale — not in a settings area of its own. */}
-              <label className="album-party-number">
-                <span>{t('party.maxMessagesPerParticipant')}</span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={PARTY_SLIDESHOW_RANGES.quota.min}
-                  max={PARTY_SLIDESHOW_RANGES.quota.max}
-                  value={slideshowDraft.maxMessagesPerParticipant}
-                  disabled={partySaving}
-                  aria-label={t('party.maxMessagesPerParticipant')}
-                  onChange={(e) => setSlideshowDraft((d) => ({ ...d, maxMessagesPerParticipant: e.target.value }))}
-                />
-                <span className="muted">{t('party.zeroMeansUnlimited')}</span>
-              </label>
-
-              <button
-                type="button"
-                data-testid="party-slideshow-save"
-                disabled={partySaving || !slideshowValid}
-                onClick={() => void saveSlideshowSettings()}
-              >
-                {t('party.saveSettings')}
-              </button>
-              {slideshowStatus === 'saved' && <p className="muted" role="status">{t('party.settingsSaved')}</p>}
-              {slideshowStatus === 'invalid' && <p className="inline-error" role="alert">{t('party.settingsInvalid')}</p>}
-              {slideshowStatus === 'failed' && <p className="inline-error" role="alert">{t('party.settingsFailed')}</p>}
-            </div>
-          )}
-
-          {party?.partyMode && canPartyGames && (
-            <div className="album-party-game" data-testid="party-game-settings">
-              <h4>{t('partyGame.title')}</h4>
-              <p className="muted">{t('partyGame.help')}</p>
-              <label className="album-tv-label"><input type="checkbox" checked={gameDraft.gameEnabled}
-                onChange={(e) => setGameDraft((d) => ({ ...d, gameEnabled: e.target.checked }))} />
-                <span>{t('partyGame.enable')}</span></label>
-              <div className="party-game-settings-grid">
-                <label>{t('partyGame.minInterval')}<input type="number" min="30" max="86400"
-                  value={gameDraft.minChallengeIntervalSeconds}
-                  onChange={(e) => setGameDraft((d) => ({ ...d, minChallengeIntervalSeconds: e.target.value }))} /></label>
-                <label>{t('partyGame.maxInterval')}<input type="number" min="30" max="86400"
-                  value={gameDraft.maxChallengeIntervalSeconds}
-                  onChange={(e) => setGameDraft((d) => ({ ...d, maxChallengeIntervalSeconds: e.target.value }))} /></label>
-                <label>{t('partyGame.votesPerGuest')}<input type="number" min="1" max="20"
-                  value={gameDraft.votesPerGuest}
-                  onChange={(e) => setGameDraft((d) => ({ ...d, votesPerGuest: e.target.value }))} /></label>
-                <label>{t('partyGame.maxPerSession')}<input type="number" min="1" max="100"
-                  placeholder={t('partyGame.unlimited')} value={gameDraft.maxChallengesPerSession}
-                  onChange={(e) => setGameDraft((d) => ({ ...d, maxChallengesPerSession: e.target.value }))} /></label>
-              </div>
-              {!gameValid && <p className="inline-error">{t('partyGame.invalid')}</p>}
-              <button type="button" disabled={partySaving || !gameValid} onClick={() => void saveGameSettings()}>
-                {t('partyGame.save')}
-              </button>
-              {gameStatus === 'saved' && <p role="status" className="muted">{t('partyGame.saved')}</p>}
-              {gameStatus === 'failed' && <p role="alert" className="inline-error">{t('partyGame.error')}</p>}
-              {gameDraft.gameEnabled && (
-                <>
-                  {/* Preparing and conducting are different jobs, so they are
-                      different surfaces: the deck lives here, the evening is run
-                      from its own page. */}
-                  <Link className="album-party-manage" to={`/albums/${albumId}/party-game`}>
-                    {t('partyGame.controlRoom')}
-                  </Link>
-                  <PartyChallengeManager albumId={albumId} />
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Printing is a guest capability like the others, so it is configured
-              here beside them — but on its own endpoint, so saving a budget can
-              never rotate a token or change moderation as a side effect. */}
-          {party?.partyMode && canPartyPrint && <PartyPrintSettings albumId={albumId} />}
-            </>
-          )}
+          {/* Party's own destination owns the rest. This is a bridge: which
+              party this album belongs to, and the way in. */}
+          {canParty && <AlbumPartyBridge albumId={albumId} partyMode={party?.partyMode ?? false} />}
         </fieldset>
 
         <fieldset className="ws-filter-section">
