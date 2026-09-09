@@ -39,6 +39,36 @@ public static class Permissions
 
     public const string PrivateVaultAccess = "private-vault.access";
 
+    // --- Party ---
+    //
+    // The Party PRODUCT: hosting an event, its public guest surface and the
+    // owner's control of it. It is the parent of the four feature keys below,
+    // so a feature permission alone grants nothing — exactly as a Laboratory
+    // section needs the Laboratory shell.
+    //
+    // It is also re-read on every PUBLIC party request, from the OWNER's role.
+    // A guest holds a capability, never a permission; what their token can
+    // reach is bounded by what the host is allowed to run. That is what makes
+    // revoking the key take effect for guests already at the party, with no
+    // token rotation and nobody signing in again.
+    public const string PartyAccess = "party.access";
+
+    // Guest CONTRIBUTIONS: anonymous photo/video upload and written greetings.
+    // One key because they are one decision — "may my guests add to this" —
+    // and because the upload token already authorizes both.
+    public const string PartyContributions = "party.contributions";
+
+    // The hosted Party Game (activities, rounds, votes, the TV stage).
+    public const string PartyGames = "party.games";
+
+    // Party printed keepsakes: the guest print studio and its budgets. Distinct
+    // from the Print FOUNDATION an operator manages, which is not a Party
+    // capability and stays where it is.
+    public const string PartyPrint = "party.print";
+
+    // "Find your face": the guests' selfie search over the party's own album.
+    public const string PartyFaceSearch = "party.face-search";
+
     // Owner-side TV device management: listing/revoking paired sessions,
     // approving a pairing request and setting the Personal Area PIN. It does
     // NOT gate anything an already-paired TV does with its own session token.

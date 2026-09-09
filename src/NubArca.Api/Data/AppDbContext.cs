@@ -91,7 +91,16 @@ public class AppDbContext : DbContext
     public DbSet<TvPersonalPin> TvPersonalPins => Set<TvPersonalPin>();
     public DbSet<TvPersonalUnlockGrant> TvPersonalUnlockGrants => Set<TvPersonalUnlockGrant>();
 
-    // Owner + album scoped PUBLIC read-only party access links (token hash only).
+    // The Party product's aggregate root and the albums each party draws its
+    // media from. A party is the EVENT: it owns its links, not the other way
+    // round, and it reaches media only through PartyMediaSource — which is what
+    // makes a second album a row rather than a schema change.
+    public DbSet<Domain.Party> Parties => Set<Domain.Party>();
+    public DbSet<PartyMediaSource> PartyMediaSources => Set<PartyMediaSource>();
+
+    // PUBLIC read-only party access links (token hash only). A CAPABILITY over
+    // a party: PartyId is its identity, while OwnerUserId/AlbumId remain as a
+    // compatibility projection of the party and its main media source.
     public DbSet<PartyAlbumLink> PartyAlbumLinks => Set<PartyAlbumLink>();
 
     // Owner-side moderation state for anonymous party uploads (visibility only).

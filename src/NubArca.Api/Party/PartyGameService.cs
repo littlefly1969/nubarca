@@ -255,9 +255,9 @@ public sealed class PartyGameService : IPartyGameService
         PartyAccess access, Guid? participantId = null, bool isDisplay = false,
         CancellationToken cancellationToken = default)
     {
-        if (access.PartyAlbumLinkId is not Guid linkId) return null;
+        var linkId = access.PartyAlbumLinkId;
         var context = await _db.PartyAlbumLinks.AsNoTracking()
-            .Where(x => x.Id == linkId && x.AlbumId == access.AlbumId && x.Enabled && x.GameEnabled)
+            .Where(x => x.Id == linkId && x.AlbumId == access.MainAlbumId && x.Enabled && x.GameEnabled)
             .Join(_db.Albums.AsNoTracking(), x => x.AlbumId, a => a.Id, (x, a) => new { a.Name })
             .FirstOrDefaultAsync(cancellationToken);
         if (context is null) return null;
@@ -273,7 +273,7 @@ public sealed class PartyGameService : IPartyGameService
 
         var session = await _db.PartyGameSessions.AsNoTracking()
             .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId, cancellationToken);
-        var total = await EnabledChallengeCountAsync(access.AlbumId, cancellationToken);
+        var total = await EnabledChallengeCountAsync(access.MainAlbumId, cancellationToken);
         if (session is null)
             return new PartyGamePublicSnapshotDto(context.Name, PartyGameStatuses.Lobby,
                 PartyGamePhases.Lobby, 0, 0, total, null, null);
@@ -330,14 +330,13 @@ public sealed class PartyGameService : IPartyGameService
     {
         if (!PartyGameVoteValues.IsKnown(value))
             return PartyGameVoteResult.Fail(PartyGameVoteError.UnknownValue);
-        if (access.PartyAlbumLinkId is not Guid linkId)
-            return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
+        var linkId = access.PartyAlbumLinkId;
 
         // The game switch is re-read on every tap, so turning it off closes
         // voting on the next request rather than on the next deploy. One cheap
         // existence check, ahead of anything that builds a snapshot.
         var open = await _db.PartyAlbumLinks.AsNoTracking().AnyAsync(
-            x => x.Id == linkId && x.AlbumId == access.AlbumId && x.Enabled && x.GameEnabled,
+            x => x.Id == linkId && x.AlbumId == access.MainAlbumId && x.Enabled && x.GameEnabled,
             cancellationToken);
         if (!open) return PartyGameVoteResult.Fail(PartyGameVoteError.NotFound);
 
@@ -376,7 +375,7 @@ public sealed class PartyGameService : IPartyGameService
         // A vote is worth a line — voting is where a party's load is — but the
         // line carries the round and nothing about the person or their answer.
         _logger.LogInformation(
-            "party.game.voted AlbumId={AlbumId} RoundId={RoundId}", access.AlbumId, activeRound);
+            "party.game.voted AlbumId={AlbumId} RoundId={RoundId}", access.MainAlbumId, activeRound);
 
         return PartyGameVoteResult.Ok(
             (await GetPublicSnapshotAsync(access, participantId, false, cancellationToken))!);

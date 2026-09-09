@@ -40,13 +40,9 @@ public sealed class PartyMessageService : IPartyMessageService
             return PartyMessageSubmissionResult.Fail(PartyMessageSubmissionError.InvalidBody);
         }
 
-        // A message with no party is unrepresentable — see PartyMessage. An
-        // upload-token grant always carries the link it resolved from, so this
-        // only fires against a hand-built PartyAccess.
-        if (access.PartyAlbumLinkId is not Guid linkId)
-        {
-            return PartyMessageSubmissionResult.Fail(PartyMessageSubmissionError.InvalidBody);
-        }
+        // A message with no party is unrepresentable — see PartyMessage — and a
+        // grant always carries the link it resolved from.
+        var linkId = access.PartyAlbumLinkId;
 
         var now = _clock.GetUtcNow().UtcDateTime;
         var status = access.RequireMessageApproval
@@ -57,7 +53,7 @@ public sealed class PartyMessageService : IPartyMessageService
         {
             Id = Guid.NewGuid(),
             PartyAlbumLinkId = linkId,
-            AlbumId = access.AlbumId,
+            AlbumId = access.MainAlbumId,
             OwnerUserId = access.OwnerUserId,
             PartyParticipantId = participantId,
             DisplayName = name,

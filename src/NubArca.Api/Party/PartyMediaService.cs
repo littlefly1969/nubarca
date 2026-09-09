@@ -15,7 +15,10 @@ public sealed class PartyMediaService : IPartyMediaService
     {
         var album = await _db.Albums
             .AsNoTracking()
-            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv)
+            // Owner-owned, and nothing else. A party's media is reachable
+            // because the party resolved to this album, not because a
+            // television was ever enabled for it.
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId)
             .Select(a => new { a.Name, a.CoverFileItemId })
             .FirstOrDefaultAsync(cancellationToken);
         if (album is null)
@@ -37,7 +40,7 @@ public sealed class PartyMediaService : IPartyMediaService
     {
         var albumOk = await _db.Albums
             .AsNoTracking()
-            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv, cancellationToken);
+            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, cancellationToken);
         if (!albumOk)
         {
             return null;
@@ -64,7 +67,7 @@ public sealed class PartyMediaService : IPartyMediaService
     {
         var albumOk = await _db.Albums
             .AsNoTracking()
-            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv, cancellationToken);
+            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, cancellationToken);
         if (!albumOk)
         {
             return null;

@@ -146,7 +146,11 @@ describe('AdminRolesPage', () => {
     const admin = card(ROLES.administrator);
     expect(within(admin).getByText('Di sistema')).toBeInTheDocument();
     expect(within(admin).getByTestId('role-user-count')).toHaveTextContent('1 utente');
-    expect(within(admin).getByTestId('role-permission-total')).toHaveTextContent('15 permessi');
+    // The whole catalogue, counted from the catalogue rather than typed out, so
+    // adding a permission does not silently make this assertion about the wrong
+    // number.
+    expect(within(admin).getByTestId('role-permission-total'))
+      .toHaveTextContent(`${Object.values(PERMISSIONS).length} permessi`);
 
     const lab = card('custom:lab');
     expect(within(lab).getByText('Personalizzato')).toBeInTheDocument();

@@ -237,6 +237,11 @@ export const MEMBER_PERMISSIONS: readonly string[] = [
   PERMISSIONS.laboratoryAesthetics,
   PERMISSIONS.cloudFunctionsAccess,
   PERMISSIONS.privateVaultAccess,
+  PERMISSIONS.partyAccess,
+  PERMISSIONS.partyContributions,
+  PERMISSIONS.partyGames,
+  PERMISSIONS.partyPrint,
+  PERMISSIONS.partyFaceSearch,
   PERMISSIONS.tvManage,
   PERMISSIONS.castAccess,
 ];

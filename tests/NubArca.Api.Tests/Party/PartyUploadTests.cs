@@ -269,6 +269,12 @@ public sealed class PartyUploadTests : IDisposable
 
     private async Task<JsonElement> EnablePartyAsync(HttpClient owner, Guid albumId)
     {
+        // Show-on-TV is now an INDEPENDENT switch: a party no longer turns it
+        // on, because a party is held with or without a television in the room.
+        // The TV surfaces below still require it, so this fixture asks for it
+        // explicitly — which is what an owner does too.
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/tv-settings", new { showOnTv = true }))
+            .EnsureSuccessStatusCode();
         var resp = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", new { enabled = true });
         resp.EnsureSuccessStatusCode();
         return await resp.Content.ReadFromJsonAsync<JsonElement>();

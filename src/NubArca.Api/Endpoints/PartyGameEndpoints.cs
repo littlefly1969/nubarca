@@ -3,6 +3,7 @@ using NubArca.Api.Audit;
 using NubArca.Api.Domain;
 using NubArca.Api.Http;
 using NubArca.Api.Party;
+using NubArca.Api.Access;
 
 namespace NubArca.Api.Endpoints;
 
@@ -47,7 +48,7 @@ public static class PartyGameEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             var snapshot = await game.GetOwnerSnapshotAsync(ownerId, albumId, cancellationToken);
             return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
-        }).WithName("GetPartyGameSnapshot").RequireAuthorization();
+        }).WithName("GetPartyGameSnapshot").RequirePartyGames();
 
         // Owner: one command, quoting the version it believes it is acting on.
         //
@@ -109,7 +110,7 @@ public static class PartyGameEndpoints
             }
 
             return Results.Ok(result.Snapshot);
-        }).WithName("ExecutePartyGameCommand").RequireAuthorization();
+        }).WithName("ExecutePartyGameCommand").RequirePartyGames();
 
         // Public: what a guest phone or a television may know. Anonymous,
         // token-scoped, re-validated on every request, and rate limited on the
@@ -131,7 +132,7 @@ public static class PartyGameEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             var participantId = await PartyGuestSession.ResolveAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             // A caller SAYS it is a television; the server does not guess from
@@ -159,7 +160,7 @@ public static class PartyGameEndpoints
         {
             SetNoStore(httpContext);
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
             var participantId = await PartyGuestSession.ResolveOrCreateAsync(
                 httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
             if (participantId is null) return Results.NotFound();
@@ -188,7 +189,7 @@ public static class PartyGameEndpoints
             SetNoStore(httpContext);
             if (body is null) return Results.BadRequest();
             var access = await party.ResolvePublicAsync(token, cancellationToken);
-            if (access is null) return Results.NotFound();
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
 
             // The same resolve-only path the snapshot read uses, scoped to THIS
             // link: a session minted at another party hashes fine and matches no

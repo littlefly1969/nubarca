@@ -54,11 +54,9 @@ internal static class PartyGuestSession
     internal static async Task<Guid?> ResolveOrCreateAsync(
         HttpContext context,
         IPartyParticipantService participants,
-        Guid? partyAlbumLinkId,
+        Guid partyAlbumLinkId,
         CancellationToken cancellationToken)
     {
-        if (partyAlbumLinkId is not Guid linkId) return null;
-
         var browserToken = context.Request.Cookies[BrowserCookieName];
         var issued = false;
         if (!Looks(browserToken))
@@ -69,7 +67,7 @@ internal static class PartyGuestSession
         }
 
         var resolution = await participants.ResolveOrCreateAsync(
-            linkId, browserToken!, context.Request.Cookies[LegacyCookieName], cancellationToken);
+            partyAlbumLinkId, browserToken!, context.Request.Cookies[LegacyCookieName], cancellationToken);
 
         if (issued) Issue(context, browserToken!);
         return resolution.ParticipantId;
@@ -83,13 +81,10 @@ internal static class PartyGuestSession
     internal static async Task<Guid?> ResolveAsync(
         HttpContext context,
         IPartyParticipantService participants,
-        Guid? partyAlbumLinkId,
+        Guid partyAlbumLinkId,
         CancellationToken cancellationToken)
-    {
-        if (partyAlbumLinkId is not Guid linkId) return null;
-        return await participants.ResolveAsync(
-            linkId, context.Request.Cookies[BrowserCookieName], cancellationToken);
-    }
+        => await participants.ResolveAsync(
+            partyAlbumLinkId, context.Request.Cookies[BrowserCookieName], cancellationToken);
 
     private static bool Looks(string? token) =>
         token is { Length: 43 } && token.All(c =>

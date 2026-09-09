@@ -18,6 +18,15 @@ export const PERMISSIONS = {
   laboratoryAesthetics: 'laboratory.aesthetics',
   cloudFunctionsAccess: 'cloud-functions.access',
   privateVaultAccess: 'private-vault.access',
+  // The Party PRODUCT, and the four capabilities under it. A feature key means
+  // nothing without the product one — the server enforces exactly that — so the
+  // UI asks for both, and renders a capability the caller does not hold as
+  // ABSENT rather than disabled.
+  partyAccess: 'party.access',
+  partyContributions: 'party.contributions',
+  partyGames: 'party.games',
+  partyPrint: 'party.print',
+  partyFaceSearch: 'party.face-search',
   tvManage: 'tv.manage',
   // Delegating short-lived external playback of a video the user can already
   // play (Google Cast). It never widens which files are reachable.

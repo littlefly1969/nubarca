@@ -24,6 +24,13 @@ import { QueryBuilder, type QueryParams } from './query.ts';
 
 export interface AlbumPartyStatus {
   albumId: string;
+  /** The Party this album is the `main` media source of, once one exists.
+   * Null before party mode has ever been enabled here. It is the owner's own
+   * party id on an owner-authenticated route — never a public capability, and
+   * never a token. Optional for a backend that predates the Party root. */
+  partyId?: string | null;
+  /** Reported, never required. Party and Show-on-TV are independent
+   * publication decisions: a party can run with no television in the room. */
   showOnTv: boolean;
   partyMode: boolean;
   /** Relative public landing URL while party mode is active, else null.

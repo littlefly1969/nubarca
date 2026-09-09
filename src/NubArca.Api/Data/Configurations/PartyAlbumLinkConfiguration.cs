@@ -53,6 +53,18 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.HasIndex(p => p.AlbumId)
             .HasDatabaseName("ix_party_album_links_album");
 
+        // The party this capability belongs to. Restrict, like every other
+        // Party foreign key: a party is never deleted out from under its own
+        // links, and what an album delete takes with it is stated out loud in
+        // AlbumService rather than left to a cascade nobody reads.
+        builder.HasIndex(p => p.PartyId)
+            .HasDatabaseName("ix_party_album_links_party");
+
+        builder.HasOne<Domain.Party>()
+            .WithMany()
+            .HasForeignKey(p => p.PartyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
         builder.HasOne<Album>()
             .WithMany()
             .HasForeignKey(p => p.AlbumId)

@@ -1135,6 +1135,12 @@ public sealed class PartyGuestMessageTests : IDisposable
             payload["requireMessageApproval"] = message;
         }
 
+        // Show-on-TV is now an INDEPENDENT switch: a party no longer turns it
+        // on, because a party is held with or without a television in the room.
+        // The TV surfaces below still require it, so this fixture asks for it
+        // explicitly — which is what an owner does too.
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/tv-settings", new { showOnTv = true }))
+            .EnsureSuccessStatusCode();
         var response = await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", payload);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();

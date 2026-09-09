@@ -36,8 +36,12 @@ public sealed class PartyModeTests : IDisposable
 
         var status = await EnablePartyAsync(owner, albumId);
         Assert.True(status.GetProperty("partyMode").GetBoolean());
-        // Party implies ShowOnTv.
-        Assert.True(status.GetProperty("showOnTv").GetBoolean());
+        // Party does NOT imply ShowOnTv: they are two independent publication
+        // decisions, and this one is about guests rather than about a screen.
+        Assert.False(status.GetProperty("showOnTv").GetBoolean());
+        // Enabling party mode is also what creates the PARTY the capability
+        // belongs to, so the owner surface can name its id from here on.
+        Assert.NotEqual(Guid.Empty, status.GetProperty("partyId").GetGuid());
         var url = status.GetProperty("partyUrl").GetString();
         Assert.False(string.IsNullOrEmpty(url));
         Assert.StartsWith("/party/", url);
@@ -47,8 +51,10 @@ public sealed class PartyModeTests : IDisposable
         var disabled = await off.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(disabled.GetProperty("partyMode").GetBoolean());
         Assert.Equal(JsonValueKind.Null, disabled.GetProperty("partyUrl").ValueKind);
-        // Disabling party leaves ShowOnTv on (owner keeps it on their own TV).
-        Assert.True(disabled.GetProperty("showOnTv").GetBoolean());
+        // Disabling party does not touch ShowOnTv either — in either direction.
+        Assert.False(disabled.GetProperty("showOnTv").GetBoolean());
+        // The party itself survives being closed: it is the event, not the QR.
+        Assert.NotEqual(Guid.Empty, disabled.GetProperty("partyId").GetGuid());
     }
 
     [Fact]
@@ -173,24 +179,39 @@ public sealed class PartyModeTests : IDisposable
     }
 
     [Fact]
-    public async Task Disabling_ShowOnTv_Also_Kills_Public_Party_Access()
+    public async Task A_Party_Runs_With_No_Television_In_The_Room()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var albumId = await CreateAlbumAsync(owner, "Party");
         var status = await EnablePartyAsync(owner, albumId);
         var token = TokenFromUrl(status.GetProperty("partyUrl").GetString()!);
 
+        // Enabling a party does not switch the album onto the owner's TV. The
+        // two used to be one decision, which is why party mode forced Show-on-TV
+        // on and turning Show-on-TV off silently revoked every live QR.
+        Assert.False(status.GetProperty("showOnTv").GetBoolean());
+
         var anon = _factory.CreateClient();
         Assert.Equal(HttpStatusCode.OK, (await anon.GetAsync($"/api/party/{token}")).StatusCode);
 
-        // Turning off "Show on TV" severs public party access (party ⊆ TV).
-        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/tv-settings", new { showOnTv = false }))
+        // Setting it, and then clearing it again, is a decision about the
+        // television and nothing else: the guests' QR keeps working throughout.
+        foreach (var showOnTv in new[] { true, false })
+        {
+            (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/tv-settings", new { showOnTv }))
+                .EnsureSuccessStatusCode();
+            Assert.Equal(HttpStatusCode.OK, (await anon.GetAsync($"/api/party/{token}")).StatusCode);
+
+            var reread = await owner.GetFromJsonAsync<JsonElement>(
+                $"/api/albums/{albumId}/party-settings");
+            Assert.True(reread.GetProperty("partyMode").GetBoolean());
+            Assert.Equal(showOnTv, reread.GetProperty("showOnTv").GetBoolean());
+        }
+
+        // Revoking the party is what closes the party.
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", new { enabled = false }))
             .EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.NotFound, (await anon.GetAsync($"/api/party/{token}")).StatusCode);
-
-        // And party mode reads as off for the owner.
-        var reread = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{albumId}/party-settings");
-        Assert.False(reread.GetProperty("partyMode").GetBoolean());
     }
 
     [Fact]

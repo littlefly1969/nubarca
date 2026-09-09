@@ -263,6 +263,13 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             // /api/albums/{id}/media). Mirrors Program.cs (Postgres-only block).
             services.AddScoped<NubArca.Api.Media.IMediaCollectionQueryService,
                 NubArca.Api.Media.MediaCollectionQueryService>();
+            // The Party aggregate root and the host's Party capabilities, both
+            // mirroring Program.cs's Postgres-only block. The capability policy
+            // is the REAL one on purpose: a test asking whether a guest reaches
+            // a party must go through the same role resolution production does.
+            services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyCapabilityPolicy, NubArca.Api.Party.PartyCapabilityPolicy>();
             services.AddScoped<NubArca.Api.Party.IPartyLinkService, NubArca.Api.Party.PartyLinkService>();
             services.AddScoped<NubArca.Api.Party.IPartyMediaService, NubArca.Api.Party.PartyMediaService>();
             services.AddScoped<NubArca.Api.Print.IPartyPrintBudget, NubArca.Api.Print.PartyPrintBudget>();

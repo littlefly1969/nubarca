@@ -18,8 +18,13 @@ namespace NubArca.Api.Print;
 public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
 {
     private readonly AppDbContext _db;
+    private readonly IPartyCapabilityPolicy _capabilities;
 
-    public PartyPrintAccessResolver(AppDbContext db) => _db = db;
+    public PartyPrintAccessResolver(AppDbContext db, IPartyCapabilityPolicy capabilities)
+    {
+        _db = db;
+        _capabilities = capabilities;
+    }
 
     public async Task<PartyPrintAccess?> ResolveAsync(
         string printToken, CancellationToken cancellationToken)
@@ -39,6 +44,14 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             .Select(l => new { l.Id, l.AlbumId, l.OwnerUserId })
             .FirstOrDefaultAsync(cancellationToken);
         if (link is null) return null;
+
+        // The HOST's role, re-read like everything else here. A capability a
+        // guest is holding cannot outrank a permission the owner no longer has,
+        // and losing `party.print` must close the studio on the next request
+        // rather than at the next party. Same rule, same shape, as the public
+        // view/upload seam in PartyLinkService — asked once, at the entrance.
+        var capabilities = await _capabilities.ForOwnerAsync(link.OwnerUserId, cancellationToken);
+        if (!capabilities.Print) return null;
 
         var profile = await _db.PartyPrintProfiles.AsNoTracking()
             .FirstOrDefaultAsync(p => p.PartyAlbumId == link.AlbumId, cancellationToken);

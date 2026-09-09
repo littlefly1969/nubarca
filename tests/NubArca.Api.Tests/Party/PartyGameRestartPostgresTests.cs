@@ -36,6 +36,7 @@ public sealed class PartyGameRestartPostgresTests : IAsyncLifetime
     private readonly Guid _ownerId = Guid.NewGuid();
     private readonly Guid _albumId = Guid.NewGuid();
     private readonly Guid _linkId = Guid.NewGuid();
+    private readonly Guid _partyId = Guid.NewGuid();
     private readonly Guid _participantId = Guid.NewGuid();
 
     public PartyGameRestartPostgresTests(PostgresContainerFixture fixture) => _fixture = fixture;
@@ -60,9 +61,13 @@ public sealed class PartyGameRestartPostgresTests : IAsyncLifetime
             Id = _albumId, OwnerUserId = _ownerId, Name = "Festa",
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
+        // The party the link is a capability OF: the root, and the `main`
+        // media source that resolves back to this album.
+        PartySeed.Party(db, _partyId, _ownerId, _albumId);
         db.PartyAlbumLinks.Add(new PartyAlbumLink
         {
-            Id = _linkId, OwnerUserId = _ownerId, AlbumId = _albumId,
+            Id = _linkId,
+            PartyId = _partyId, OwnerUserId = _ownerId, AlbumId = _albumId,
             TokenHash = new string('a', 64), Enabled = true, GameEnabled = true,
             CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
@@ -210,7 +215,7 @@ public sealed class PartyGameRestartPostgresTests : IAsyncLifetime
 
         await using (var voteDb = NewContext())
             await Service(voteDb).VoteAsync(
-                new PartyAccess(_ownerId, _albumId, _linkId), _participantId, roundId,
+                new PartyAccess(_partyId, _ownerId, _albumId, _linkId, PartyTestCapabilities.All), _participantId, roundId,
                 PartyGameVoteValues.Yes);
 
         await using var finisher = NewContext();
@@ -239,6 +244,8 @@ public sealed class PartyGameRestartPostgresTests : IAsyncLifetime
 
     private static PartyGameService Service(AppDbContext db) =>
         new(db, TimeProvider.System,
-            new PartyLinkService(db, TimeProvider.System, new ConfigurationBuilder().Build()),
+            new PartyLinkService(
+                db, TimeProvider.System, new PartyService(db, TimeProvider.System),
+                new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()),
             NullLogger<PartyGameService>.Instance);
 }

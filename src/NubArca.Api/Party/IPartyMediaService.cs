@@ -1,15 +1,16 @@
 namespace NubArca.Api.Party;
 
 // Read-only, album-scoped media surfacing for a resolved party token. The
-// (ownerUserId, albumId) pair is already validated by IPartyLinkService before
-// any of these are called. Every query joins FileItems (Private-Vault global
+// (ownerUserId, albumId) pair is the party's MAIN media source, already
+// resolved and validated by IPartyLinkService before any of these are called —
+// which is why nothing here knows what a Party is. Every query joins FileItems (Private-Vault global
 // filter) so vaulted/vault-only files never appear, and re-checks owner + album
 // membership so a file cannot be addressed through a token for a different
 // album.
 public interface IPartyMediaService
 {
     // Album header (name + displayable item count). Null when the album is
-    // missing/foreign/not-ShowOnTv (generic 404 upstream).
+    // missing or foreign (generic 404 upstream).
     Task<PartyAlbumHeader?> GetAlbumAsync(
         Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default);
 

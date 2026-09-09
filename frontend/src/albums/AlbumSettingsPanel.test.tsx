@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { AlbumSettingsPanel } from './AlbumSettingsPanel';
+import { PERMISSIONS } from '@nubarca/api-client';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -19,14 +20,17 @@ const party = {
   maxPhotoUploadsPerParticipant: 0, maxVideoUploadsPerParticipant: 0,
 };
 
-function renderPanel(overrides: Partial<Parameters<typeof AlbumSettingsPanel>[0]> = {}) {
+function renderPanel(
+  overrides: Partial<Parameters<typeof AlbumSettingsPanel>[0]> = {},
+  permissions?: readonly string[],
+) {
   const props = {
     albumId: 'a1', album, party,
     onAlbumUpdated: vi.fn(), onPartyUpdated: vi.fn(), onDeleted: vi.fn(), onClose: vi.fn(),
     ...overrides,
   };
   render(
-    <AuthedWrapper>
+    <AuthedWrapper permissions={permissions}>
       <MemoryRouter><AlbumSettingsPanel {...props} /></MemoryRouter>
     </AuthedWrapper>,
   );
@@ -83,6 +87,35 @@ describe('AlbumSettingsPanel', () => {
   it('the settings section is absent while party mode is off', () => {
     renderPanel({ party });
     expect(screen.queryByTestId('party-slideshow-settings')).not.toBeInTheDocument();
+  });
+
+  // --- A capability the caller does not hold is ABSENT, never disabled -----
+
+  it('Party is absent entirely without party.access', () => {
+    // Not a disabled switch: a door nobody may open is not drawn. The album's
+    // own controls are untouched, because Show-on-TV is not a Party decision.
+    renderPanel({ party: activeParty }, [PERMISSIONS.tvManage]);
+
+    expect(screen.queryByLabelText(/Modalità party/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-url')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('album-party-upload')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-slideshow-settings')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-game-settings')).not.toBeInTheDocument();
+    expect(screen.getByTestId('album-tv-toggle')).toBeInTheDocument();
+  });
+
+  it('a Party feature the caller may not run is absent while the rest stays', () => {
+    // The parent rule the server enforces, shown: party.access opens Party, and
+    // each feature key opens its own section and nothing else.
+    renderPanel({ party: activeParty }, [PERMISSIONS.partyAccess, PERMISSIONS.partyGames]);
+
+    expect(screen.getByLabelText(/Modalità party/i)).toBeInTheDocument();
+    expect(screen.getByTestId('party-slideshow-settings')).toBeInTheDocument();
+    expect(screen.getByTestId('party-game-settings')).toBeInTheDocument();
+    // No party.contributions: the guest-contribution block and the moderation
+    // links it carries are simply not there.
+    expect(screen.queryByTestId('album-party-upload')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-messages-link')).not.toBeInTheDocument();
   });
 
   it('refuses to save an out-of-range value and never calls the API', async () => {

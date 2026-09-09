@@ -6,6 +6,30 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The Party is the party
+
+- **A party is now a thing of its own**, rather than an album with a switch on
+  it. It has a name, a lifecycle — being prepared, announced, running, over —
+  and it keeps its identity across every QR code it hands out: revoking a link
+  and printing a new one is still the same evening, not a new one.
+- **A party can draw on more than one album.** Only its main album is used
+  today, but the shape is there, which is what makes "the photographer's album
+  as well" a decision rather than a rebuild.
+- **A party no longer needs a television.** Turning party mode on used to switch
+  the album onto the host's TV, and turning the TV off used to silently revoke
+  every QR code the guests were holding. The two are now separate decisions:
+  Show-on-TV means what it says for the ordinary TV experience, and a party runs
+  with or without a screen in the room.
+- **Party is a permission, and so are its four capabilities** — guest
+  contributions, games, printing and "find your face". They can be given to a
+  role and taken away, and taking one away reaches guests who are already at the
+  party on their next tap, with no new QR and nobody signing in again. A
+  capability somebody may not use is simply not there: no greyed-out tiles, on
+  the host's settings or on the guests' phones.
+- Existing parties are carried across the upgrade with their links, tokens,
+  guests, photos, greetings, prints, games and searches untouched. **Party is
+  briefly unavailable while the upgrade runs**; the rest of NubArca is not.
+
 ### Print orientation, and a guest who can see their own share
 
 - **A photo can be printed portrait or landscape**, defaulting to the

@@ -42,11 +42,13 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             Id = albumId, OwnerUserId = ownerId, Name = "Giulia & Matteo",
             CreatedAt = DateTime.UtcNow,
         });
-        // A real link, because a guest's participant session hangs off one and
-        // the foreign key is not decoration.
+        // A real party and a real link, because a guest's participant session
+        // hangs off the link, the link belongs to the party, and neither foreign
+        // key is decoration.
+        var partyId = NubArca.Api.Tests.Party.PartySeed.Party(db, ownerId, albumId);
         db.PartyAlbumLinks.Add(new NubArca.Api.Domain.PartyAlbumLink
         {
-            Id = linkId, OwnerUserId = ownerId, AlbumId = albumId,
+            Id = linkId, PartyId = partyId, OwnerUserId = ownerId, AlbumId = albumId,
             TokenHash = Guid.NewGuid().ToString("N"), Enabled = true,
             CreatedAt = DateTime.UtcNow,
         });
