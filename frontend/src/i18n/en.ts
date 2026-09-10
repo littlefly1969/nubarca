@@ -1648,12 +1648,12 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumContent.removeError': 'Could not remove the item. Please try again.',
 
   'albumContent.reorderHelp':
-    'Use the arrows to move an item. This order is what members see.',
-  'albumContent.moveGroup': 'Move item {position}',
-  'albumContent.moveUp': 'Move item {position} earlier',
-  'albumContent.moveDown': 'Move item {position} later',
-  'albumContent.moveFirst': 'Move item {position} to the start',
-  'albumContent.moveLast': 'Move item {position} to the end',
+    'Use an item’s ⋯ button to move it, make it the cover or remove it. This order is what members see.',
+  'albumContent.actionsFor': 'Actions for item {position} of {total}',
+  'albumContent.moveUp': 'Move up',
+  'albumContent.moveDown': 'Move down',
+  'albumContent.moveFirst': 'Move to the start',
+  'albumContent.moveLast': 'Move to the end',
   'albumContent.moved': 'Moved to position {position} of {total}.',
   'albumContent.position': '{position} of {total}',
   'albumContent.useAsCover': 'Use as cover',
@@ -1666,6 +1666,11 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumContent.conflict':
     'This album was changed by another user. We loaded the latest version — check the changes before trying again.',
   'albumContent.noLongerAllowed': 'You no longer have permission to edit this album.',
+  'albumContent.listAria': 'Album items',
+  'albumContent.changedWhileBrowsing':
+    'This album changed while you were scrolling it, so the latest version was loaded from the start.',
+  'albumContent.loadMoreError': 'Could not load more items.',
+  'albumContent.actionError': 'Could not complete the action. Please try again.',
 
   'albumEdit.open': 'Edit album',
   'albumEdit.title': 'Edit album',

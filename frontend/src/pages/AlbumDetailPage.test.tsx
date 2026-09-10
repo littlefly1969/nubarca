@@ -166,9 +166,7 @@ describe('AlbumDetailPage — the content panel is not a sharing feature', () =>
   it('opens it, which is where the cover is chosen', async () => {
     installFetchMock(baseHandlers({
       ...noMembers,
-      'GET /api/albums/album-1/content': () => jsonResponse({
-        albumId: 'album-1', version: 1, canEdit: true, coverFileItemId: null, items: [],
-      }),
+      'GET /api/albums/album-1/content': () => jsonResponse(emptyContent),
     }));
     render(wrapper());
 
@@ -187,5 +185,44 @@ describe('AlbumDetailPage — the content panel is not a sharing feature', () =>
 
     await screen.findByRole('heading', { name: 'My Album' });
     expect(mock.calls.some((c) => c.url.includes('/members'))).toBe(false);
+  });
+});
+
+const emptyContent = {
+  version: 1, canEdit: true, coverFileItemId: null, items: [], totalCount: 0, nextCursor: null,
+};
+
+// The content manager is a sheet over the album page. Kept mounted underneath
+// it, the album's workspace went on holding its pages, decoded images,
+// observers and handlers for the whole of a curation session — two heavy media
+// surfaces at once, for a view nobody can see.
+describe('AlbumDetailPage — one heavy media surface at a time', () => {
+  it('unmounts the album workspace while the content manager is open', async () => {
+    const mock = installFetchMock(baseHandlers({
+      'GET /api/albums/album-1/content': () => jsonResponse(emptyContent),
+    }));
+    const mediaReads = () => mock.calls.filter((c) => c.url.startsWith('/api/albums/album-1/media')).length;
+    render(wrapper());
+
+    expect(await screen.findByText('photo.jpg')).toBeInTheDocument();
+    expect(screen.getByTestId('ws-sticky-chrome')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('album-open-content'));
+    await screen.findByTestId('album-content-panel');
+
+    // Not hidden: gone — no chrome, no wall, no tile behind the dialog.
+    expect(screen.queryByTestId('ws-sticky-chrome')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('media-grid')).not.toBeInTheDocument();
+    expect(screen.queryByText('photo.jpg')).not.toBeInTheDocument();
+    // …and nothing is fetched for it while the manager is open.
+    const whileOpen = mediaReads();
+    await screen.findByTestId('album-content-empty');
+    expect(mediaReads()).toBe(whileOpen);
+
+    // Closing returns to the album, re-read — which is also what shows the
+    // curator's new order.
+    await userEvent.click(screen.getByTestId('album-content-close'));
+    expect(await screen.findByText('photo.jpg')).toBeInTheDocument();
+    expect(mediaReads()).toBeGreaterThan(whileOpen);
   });
 });

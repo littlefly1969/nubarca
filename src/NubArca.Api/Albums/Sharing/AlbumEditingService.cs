@@ -183,6 +183,96 @@ public sealed class AlbumEditingService : IAlbumEditingService
         return Ok(album);
     }
 
+    public async Task<AlbumEditResult> MoveItemAsync(
+        Guid actorUserId, Guid albumId, int expectedVersion, Guid albumItemId, int targetIndex,
+        string? ipAddress, CancellationToken cancellationToken = default)
+    {
+        var gate = await AuthorizeAsync(albumId, actorUserId, cancellationToken);
+        if (gate is not null)
+        {
+            return gate;
+        }
+        if (targetIndex < 0)
+        {
+            return Invalid("The target position must be zero or greater.");
+        }
+
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
+        if (!await TryClaimVersionAsync(albumId, expectedVersion, cancellationToken))
+        {
+            return await ConflictAsync(albumId, cancellationToken);
+        }
+
+        var isMember = await _db.AlbumItems
+            .AnyAsync(ai => ai.AlbumId == albumId && ai.Id == albumItemId, cancellationToken);
+        if (!isMember)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return new AlbumEditResult(AlbumEditOutcome.ItemNotFound);
+        }
+
+        var total = await EnsureDenseOrderAsync(albumId, cancellationToken);
+        if (targetIndex >= total)
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return Invalid("The target position is outside the album.");
+        }
+
+        // Dense 1..n, so an item's index is its SortOrder - 1 and a move is
+        // arithmetic on one contiguous range.
+        var fromOrder = await _db.AlbumItems
+            .Where(ai => ai.AlbumId == albumId && ai.Id == albumItemId)
+            .Select(ai => ai.SortOrder)
+            .FirstAsync(cancellationToken);
+        var toOrder = targetIndex + 1;
+
+        if (fromOrder == toOrder)
+        {
+            // Already there. Nothing is written, so the claimed version is
+            // released rather than spent on a change that did not happen.
+            await tx.RollbackAsync(cancellationToken);
+            var unchanged = await _db.Albums.AsNoTracking()
+                .FirstAsync(a => a.Id == albumId, cancellationToken);
+            return Ok(unchanged) with { Position = targetIndex, TotalCount = total };
+        }
+
+        // The index on (AlbumId, SortOrder) is not unique, so the range can
+        // shift in place: no temporary sentinel, and no row outside the range
+        // is touched.
+        if (toOrder < fromOrder)
+        {
+            // Earlier: the destination and everything up to the old slot step
+            // one later.
+            await _db.AlbumItems
+                .Where(ai => ai.AlbumId == albumId && ai.SortOrder >= toOrder && ai.SortOrder < fromOrder)
+                .ExecuteUpdateAsync(s => s.SetProperty(ai => ai.SortOrder, ai => ai.SortOrder + 1),
+                    cancellationToken);
+        }
+        else
+        {
+            // Later: everything after the old slot, up to the destination, steps
+            // one earlier.
+            await _db.AlbumItems
+                .Where(ai => ai.AlbumId == albumId && ai.SortOrder > fromOrder && ai.SortOrder <= toOrder)
+                .ExecuteUpdateAsync(s => s.SetProperty(ai => ai.SortOrder, ai => ai.SortOrder - 1),
+                    cancellationToken);
+        }
+        await _db.AlbumItems
+            .Where(ai => ai.AlbumId == albumId && ai.Id == albumItemId)
+            .ExecuteUpdateAsync(s => s.SetProperty(ai => ai.SortOrder, toOrder), cancellationToken);
+
+        var album = await _db.Albums.AsNoTracking()
+            .FirstAsync(a => a.Id == albumId, cancellationToken);
+        // Positions and the count, never an id sequence — the same rule as the
+        // complete-list reorder.
+        await AuditAsync(actorUserId, albumId, AuditActions.AlbumEditReorder, ipAddress,
+            new { version = album.Version, albumItemId, from = fromOrder - 1, to = targetIndex, items = total },
+            cancellationToken);
+        await tx.CommitAsync(cancellationToken);
+        return Ok(album) with { Position = targetIndex, TotalCount = total };
+    }
+
     public async Task<AlbumEditResult> RemoveItemAsync(
         Guid actorUserId, Guid albumId, int expectedVersion, Guid albumItemId, string? ipAddress,
         CancellationToken cancellationToken = default)
@@ -312,6 +402,44 @@ public sealed class AlbumEditingService : IAlbumEditingService
             .Select(x => x.FileItemId)
             .ToListAsync(cancellationToken);
         return ids.ToHashSet();
+    }
+
+    // Positions are arithmetic only on a dense 1..n order. The edit paths keep
+    // it dense — an append takes max + 1, a removal recompacts, a reorder
+    // renumbers, a move shifts one range — but an order written some other way
+    // (numbered from zero, with a gap, with a duplicate) would make a range
+    // shift land in the wrong place. Such an album is renumbered ONCE, here, in
+    // its current visible order; every later move then finds it dense. Returns
+    // the album's item count.
+    private async Task<int> EnsureDenseOrderAsync(Guid albumId, CancellationToken cancellationToken)
+    {
+        var shape = await _db.AlbumItems
+            .Where(ai => ai.AlbumId == albumId)
+            .GroupBy(ai => ai.AlbumId)
+            .Select(g => new
+            {
+                Count = g.Count(),
+                Min = g.Min(ai => ai.SortOrder),
+                Max = g.Max(ai => ai.SortOrder),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (shape is null)
+        {
+            return 0;
+        }
+
+        // Min, max and count alone cannot see a duplicate that hides a gap
+        // ({1, 2, 2, 4}), so the distinct count is checked as well.
+        var distinct = await _db.AlbumItems
+            .Where(ai => ai.AlbumId == albumId)
+            .Select(ai => ai.SortOrder)
+            .Distinct()
+            .CountAsync(cancellationToken);
+        if (shape.Min != 1 || shape.Max != shape.Count || distinct != shape.Count)
+        {
+            await CompactAsync(albumId, cancellationToken);
+        }
+        return shape.Count;
     }
 
     private async Task CompactAsync(Guid albumId, CancellationToken cancellationToken)

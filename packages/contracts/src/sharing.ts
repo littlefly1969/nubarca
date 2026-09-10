@@ -110,11 +110,51 @@ export interface AlbumContentItem {
 
 // The curator's moderation view, wrapped so the concurrency token travels with
 // the items the caller is about to reorder or remove.
+//
+// AUTHORITY: NubArca.Api.Albums.Sharing.AlbumContentResponse. One PAGE of the
+// album in its curated order: `totalCount` is the whole album, so a row can say
+// "37 of 520" while the rest is unread, and `nextCursor` is null when the album
+// ends here.
 export interface AlbumContentResponse {
   version: number;
   coverFileItemId: string | null;
   canEdit: boolean;
   items: AlbumContentItem[];
+  totalCount: number;
+  nextCursor: string | null;
+}
+
+/**
+ * One page of the curation view.
+ *
+ * The cursor is NOT opaque: it is the `albumItemId` of the last row the caller
+ * holds, and the page continues after that row. That is what lets a curator
+ * keep scrolling after their OWN confirmed edit — the server moved the album
+ * from exactly the version they hold to the next one, so they apply the edit
+ * locally and continue after whichever row is now last.
+ *
+ * A continuation MUST carry `expectedVersion`. If anybody else changed the album
+ * the server answers 409 and the client starts again from the top: a page of one
+ * version is never appended to rows of another.
+ */
+export interface AlbumContentQuery {
+  limit: number;
+  cursor?: string | null;
+  expectedVersion?: number | null;
+}
+
+export function albumContentQueryToParams(query: AlbumContentQuery): QueryParams {
+  const b = new QueryBuilder();
+  b.setNumber('limit', query.limit);
+  b.setOptional('cursor', query.cursor);
+  b.setNumber('expectedVersion', query.expectedVersion);
+  return b.build();
+}
+
+/** Moves ONE item to a 0-based position: an O(1) payload whatever the album's size. */
+export interface MoveAlbumItemPayload {
+  expectedVersion: number;
+  targetIndex: number;
 }
 
 // One media item of a shared album. Deliberately carries NO file name: a
@@ -220,6 +260,9 @@ export function albumMemberDownloadPath(albumId: string, membershipId: string): 
 export function albumMemberPartyMessagesPath(albumId: string, membershipId: string): string {
   return `${albumMemberPath(albumId, membershipId)}/party-messages`;
 }
+export function albumContentPath(albumId: string): string {
+  return `/api/albums/${albumId}/content`;
+}
 
 export const SHARED_ALBUMS_PATH = '/api/shared-albums';
 export const ALBUM_INVITATIONS_PATH = '/api/shared-albums/invitations';
@@ -228,6 +271,9 @@ export function sharedAlbumPath(albumId: string): string {
 }
 export function sharedAlbumItemsPath(albumId: string): string {
   return `${sharedAlbumPath(albumId)}/items`;
+}
+export function sharedAlbumItemMovePath(albumId: string, albumItemId: string): string {
+  return `${sharedAlbumItemsPath(albumId)}/${albumItemId}/move`;
 }
 export function albumInvitationPath(membershipId: string, action: 'accept' | 'decline'): string {
   return `${ALBUM_INVITATIONS_PATH}/${membershipId}/${action}`;

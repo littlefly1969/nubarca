@@ -7,11 +7,12 @@ import { AlbumSharedContentPanel } from './AlbumSharedContentPanel';
 import { SharedAlbumDetailPage } from '../pages/SharedAlbumDetailPage';
 import {
   AuthedWrapper,
-  emptyResponse,
   errorResponse,
   installFetchMock,
   jsonResponse,
   sharedItemsPage,
+  stubContentListGeometry,
+  type InstalledFetchMock,
 } from '../test-utils';
 
 // SHARE-ALBUM-03 frontend: the Editor role, curation, accessible reorder, and
@@ -33,6 +34,8 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+  // The curation list is virtualized and needs a viewport to fill.
+  stubContentListGeometry();
 });
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -42,7 +45,7 @@ function item(over: Partial<Record<string, unknown>> = {}) {
     albumItemId: 'ai-1',
     fileItemId: 'f1',
     kind: 'image',
-    thumbnailUrl: '/api/files/f1/thumbnail?size=small',
+    thumbnailUrl: '/api/files/f1/thumbnail?size=micro',
     origin: 'owner',
     contributorDisplayName: null,
     contributorMaskedEmail: null,
@@ -53,8 +56,22 @@ function item(over: Partial<Record<string, unknown>> = {}) {
   };
 }
 
+// One page of the curation view. These fixtures are whole albums on one page.
 function page(items: unknown[], over: Partial<Record<string, unknown>> = {}) {
-  return { version: 5, coverFileItemId: null, canEdit: true, items, ...over };
+  return {
+    version: 5, coverFileItemId: null, canEdit: true, items,
+    totalCount: items.length, nextCursor: null, ...over,
+  };
+}
+
+// What an editorial mutation answers: the album's new version and state.
+function edited(version: number, coverFileItemId: string | null = null) {
+  return { albumId: 'alb-1', version, name: 'Trip', description: null, coverFileItemId };
+}
+
+// …and a move also says where the item landed.
+function moved(version: number, position: number, totalCount: number) {
+  return { ...edited(version), position, totalCount };
 }
 
 function renderContent() {
@@ -63,6 +80,20 @@ function renderContent() {
       <AlbumSharedContentPanel albumId="alb-1" onClose={vi.fn()} />
     </AuthedWrapper>,
   );
+}
+
+// Every row carries ONE control; the moves, the cover and removal are behind it.
+async function openActions(row: HTMLElement) {
+  await userEvent.click(within(row).getByTestId('album-content-actions'));
+  return within(row).getByTestId('album-content-actions-panel');
+}
+
+function contentReads(spy: InstalledFetchMock) {
+  return spy.calls.filter((c) => c.method === 'GET' && c.url.startsWith('/api/albums/alb-1/content'));
+}
+
+function rowOrder() {
+  return screen.getAllByTestId('album-content-row').map((r) => r.getAttribute('data-item-id'));
 }
 
 const THREE = [
@@ -74,114 +105,141 @@ const THREE = [
 // ── Reorder ────────────────────────────────────────────────────────────────
 
 describe('AlbumSharedContentPanel — reorder', () => {
-  it('sends the COMPLETE ordered id list and the expected version', async () => {
+  it('sends ONE item, its destination and the expected version — never the id sequence', async () => {
     const spy = installFetchMock({
       'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
-      'PUT /api/shared-albums/alb-1/order': () => jsonResponse({ version: 6 }),
+      'POST /api/shared-albums/alb-1/items/ai-3/move': () => jsonResponse(moved(6, 0, 3)),
     });
     renderContent();
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[2]);
     await userEvent.click(within(rows[2]).getByTestId('album-content-move-first'));
 
-    const sent = spy.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/order'));
-    const body = JSON.parse(sent!.body!);
-    // Complete list, not a delta — the server refuses a partial one.
-    expect(body.albumItemIds).toEqual(['ai-3', 'ai-1', 'ai-2']);
-    expect(body.expectedVersion).toBe(5);
+    const sent = spy.calls.find((c) => c.method === 'POST')!;
+    expect(sent.url).toBe('/api/shared-albums/alb-1/items/ai-3/move');
+    expect(JSON.parse(sent.body!)).toEqual({ expectedVersion: 5, targetIndex: 0 });
+    // The complete-list reorder is not used any more.
+    expect(spy.calls.some((c) => c.url.endsWith('/order'))).toBe(false);
   });
 
   it('is fully operable from the keyboard', async () => {
     const spy = installFetchMock({
       'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
-      'PUT /api/shared-albums/alb-1/order': () => jsonResponse({ version: 6 }),
+      'POST /api/shared-albums/alb-1/items/ai-1/move': () => jsonResponse(moved(6, 1, 3)),
     });
     renderContent();
 
     await screen.findAllByTestId('album-content-row');
-    // Tab to the first row's "move down" and activate it with the keyboard —
-    // no pointer gesture anywhere in this path.
-    const down = screen.getAllByTestId('album-content-move-down')[0];
-    down.focus();
-    expect(down).toHaveFocus();
+    // Open the first row's actions and move it down with the keyboard — no
+    // pointer gesture anywhere in this path.
+    const toggle = screen.getAllByTestId('album-content-actions')[0];
+    toggle.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    // "Move up" is disabled on the first row, so Tab reaches "Move down".
+    await userEvent.tab();
+    expect(document.activeElement).toHaveAttribute('data-testid', 'album-content-move-down');
     await userEvent.keyboard('{Enter}');
 
-    const sent = spy.calls.find((c) => c.method === 'PUT');
-    expect(JSON.parse(sent!.body!).albumItemIds).toEqual(['ai-2', 'ai-1', 'ai-3']);
+    const sent = spy.calls.find((c) => c.method === 'POST');
+    expect(JSON.parse(sent!.body!)).toEqual({ expectedVersion: 5, targetIndex: 1 });
   });
 
-  it('announces the move and keeps focus on the moved row', async () => {
-    let order = THREE;
-    installFetchMock({
-      'GET /api/albums/alb-1/content': () => jsonResponse(page(order)),
-      'PUT /api/shared-albums/alb-1/order': (req) => {
-        const ids: string[] = JSON.parse(req.body!).albumItemIds;
-        order = ids.map((id) => THREE.find((i) => i.albumItemId === id)!);
-        return jsonResponse({ version: 6 });
-      },
+  it('announces the move, applies it without re-reading, and keeps focus on the moved row', async () => {
+    const spy = installFetchMock({
+      'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
+      'POST /api/shared-albums/alb-1/items/ai-1/move': () => jsonResponse(moved(6, 1, 3)),
     });
     renderContent();
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[0]);
     await userEvent.click(within(rows[0]).getByTestId('album-content-move-down'));
 
     // Politely announced for a screen reader…
     expect(await screen.findByTestId('album-content-live')).toHaveTextContent(/posizione 2 di 3/i);
-    // …and focus follows the item so repeated moves are possible.
+    await vi.waitFor(() => expect(rowOrder()).toEqual(['ai-2', 'ai-1', 'ai-3']));
+    // …and focus follows the item, on the same action, so repeated moves work.
     await vi.waitFor(() => {
-      const moved = document.querySelector('[data-item-id="ai-1"] [data-testid="album-content-move-up"]');
-      expect(document.activeElement).toBe(moved);
+      const again = document.querySelector('[data-item-id="ai-1"] [data-testid="album-content-move-down"]');
+      expect(document.activeElement).toBe(again);
     });
+    // The server confirmed exactly this change; nothing was re-read.
+    expect(contentReads(spy)).toHaveLength(1);
   });
 
   it('does not leave an optimistic order behind when the server refuses', async () => {
     installFetchMock({
       'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
-      'PUT /api/shared-albums/alb-1/order': () => errorResponse(409, {
+      'POST /api/shared-albums/alb-1/items/ai-1/move': () => errorResponse(409, {
         error: 'changed', version: 9, name: 'Trip', description: null, coverFileItemId: null,
       }),
     });
     renderContent();
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[0]);
     await userEvent.click(within(rows[0]).getByTestId('album-content-move-down'));
 
     // Reloaded to the server's truth: the original order, unchanged.
-    const after = await screen.findAllByTestId('album-content-row');
-    expect(after.map((r) => r.getAttribute('data-item-id'))).toEqual(['ai-1', 'ai-2', 'ai-3']);
+    await screen.findByTestId('album-content-notice');
+    await vi.waitFor(() => expect(rowOrder()).toEqual(['ai-1', 'ai-2', 'ai-3']));
+  });
+
+  it('closes the open row with Escape before it closes the dialog', async () => {
+    installFetchMock({
+      'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
+    });
+    const onClose = vi.fn();
+    render(
+      <AuthedWrapper>
+        <AlbumSharedContentPanel albumId="alb-1" onClose={onClose} />
+      </AuthedWrapper>,
+    );
+
+    const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[1]);
+    within(rows[1]).getByTestId('album-content-move-up').focus();
+    await userEvent.keyboard('{Escape}');
+
+    expect(within(rows[1]).queryByTestId('album-content-actions-panel')).not.toBeInTheDocument();
+    await vi.waitFor(() => expect(within(rows[1]).getByTestId('album-content-actions')).toHaveFocus());
+    expect(onClose).not.toHaveBeenCalled();
+
+    await userEvent.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalled();
   });
 });
 
 // ── Cover ──────────────────────────────────────────────────────────────────
 
 describe('AlbumSharedContentPanel — cover', () => {
-  it('sets and clears the cover with the expected version', async () => {
-    let cover: string | null = null;
+  it('sets and clears the cover, chaining each edit on the version the last returned', async () => {
+    let version = 5;
     const spy = installFetchMock({
-      'GET /api/albums/alb-1/content': () => jsonResponse(page(
-        THREE.map((i) => ({ ...i, isCover: i.fileItemId === cover })),
-        { coverFileItemId: cover },
-      )),
+      'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
       'PUT /api/shared-albums/alb-1/cover': (req) => {
-        cover = JSON.parse(req.body!).fileItemId;
-        return jsonResponse({ version: 6, coverFileItemId: cover });
+        version += 1;
+        return jsonResponse(edited(version, JSON.parse(req.body!).fileItemId));
       },
     });
     renderContent();
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[1]);
     await userEvent.click(within(rows[1]).getByTestId('album-content-set-cover'));
 
-    expect(await screen.findByTestId('album-content-is-cover')).toBeInTheDocument();
+    expect(await within(rows[1]).findByTestId('album-content-is-cover')).toBeInTheDocument();
     expect(JSON.parse(spy.calls.find((c) => c.url.endsWith('/cover'))!.body!))
       .toEqual({ expectedVersion: 5, fileItemId: 'f2' });
 
-    await userEvent.click(screen.getByTestId('album-content-clear-cover'));
+    await userEvent.click(within(rows[1]).getByTestId('album-content-clear-cover'));
     await vi.waitFor(() => {
       expect(screen.queryByTestId('album-content-is-cover')).not.toBeInTheDocument();
     });
     const clear = spy.calls.filter((c) => c.url.endsWith('/cover')).at(-1)!;
-    expect(JSON.parse(clear.body!).fileItemId).toBeNull();
+    expect(JSON.parse(clear.body!)).toEqual({ expectedVersion: 6, fileItemId: null });
   });
 
   it('never offers an unavailable item as a cover', async () => {
@@ -196,7 +254,9 @@ describe('AlbumSharedContentPanel — cover', () => {
     const rows = await screen.findAllByTestId('album-content-row');
     // The server would refuse it, so offering it would be a control that always
     // fails.
+    await openActions(rows[0]);
     expect(within(rows[0]).queryByTestId('album-content-set-cover')).not.toBeInTheDocument();
+    await openActions(rows[1]);
     expect(within(rows[1]).getByTestId('album-content-set-cover')).toBeInTheDocument();
   });
 
@@ -208,7 +268,9 @@ describe('AlbumSharedContentPanel — cover', () => {
     });
     renderContent();
 
-    await userEvent.click(await screen.findByTestId('album-content-remove'));
+    const [row] = await screen.findAllByTestId('album-content-row');
+    await openActions(row);
+    await userEvent.click(within(row).getByTestId('album-content-remove'));
     expect(confirmSpy.mock.calls[0][0]!).toMatch(/copertina automatica/i);
   });
 });
@@ -219,19 +281,20 @@ describe('AlbumSharedContentPanel — editorial removal', () => {
   it('removes another user’s contribution without deleting the source', async () => {
     const confirmSpy = vi.fn((_m?: string) => true);
     vi.stubGlobal('confirm', confirmSpy);
-    let removed = false;
     const spy = installFetchMock({
-      'GET /api/albums/alb-1/content': () => jsonResponse(page(removed ? [] : [
+      'GET /api/albums/alb-1/content': () => jsonResponse(page([
         item({
           albumItemId: 'ai-9', fileItemId: 'f9', origin: 'contribution',
           contributorDisplayName: 'Bruno', contributorMaskedEmail: 'b•••o@example.com',
         }),
       ])),
-      'DELETE /api/shared-albums/alb-1/items/ai-9': () => { removed = true; return emptyResponse(); },
+      'DELETE /api/shared-albums/alb-1/items/ai-9': () => jsonResponse(edited(6)),
     });
     renderContent();
 
-    await userEvent.click(await screen.findByTestId('album-content-remove'));
+    const [row] = await screen.findAllByTestId('album-content-row');
+    await openActions(row);
+    await userEvent.click(within(row).getByTestId('album-content-remove'));
 
     // Named unambiguously, and explicit that the file survives.
     expect(confirmSpy.mock.calls[0][0]!).toContain('Bruno (b•••o@example.com)');
@@ -250,11 +313,11 @@ describe('AlbumSharedContentPanel — editorial removal', () => {
     });
     renderContent();
 
-    await screen.findAllByTestId('album-content-row');
-    for (const button of screen.getAllByTestId('album-content-remove')) {
-      expect(button).toHaveTextContent(/rimuovi dall’album/i);
+    for (const row of await screen.findAllByTestId('album-content-row')) {
+      await openActions(row);
+      expect(within(row).getByTestId('album-content-remove')).toHaveTextContent(/rimuovi dall’album/i);
+      expect(document.body.innerHTML).not.toMatch(/elimina/i);
     }
-    expect(document.body.innerHTML).not.toMatch(/elimina/i);
   });
 });
 
@@ -264,26 +327,30 @@ describe('conflict handling', () => {
   it('reloads and explains on 409, without retrying', async () => {
     const spy = installFetchMock({
       'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
-      'PUT /api/shared-albums/alb-1/order': () => errorResponse(409, { error: 'changed', version: 9 }),
+      'POST /api/shared-albums/alb-1/items/ai-1/move': () => errorResponse(409, { error: 'changed', version: 9 }),
     });
     renderContent();
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[0]);
     await userEvent.click(within(rows[0]).getByTestId('album-content-move-down'));
 
     expect(await screen.findByTestId('album-content-notice'))
       .toHaveTextContent(/modificato da un altro utente/i);
     // Exactly ONE attempt: a destructive command is never auto-retried.
-    expect(spy.calls.filter((c) => c.method === 'PUT').length).toBe(1);
-    // …and it did reload.
-    expect(spy.calls.filter((c) => c.url === '/api/albums/alb-1/content').length).toBe(2);
+    expect(spy.calls.filter((c) => c.method === 'POST').length).toBe(1);
+    // …and it did reload, from the first page: no cursor, no stale version.
+    await vi.waitFor(() => expect(contentReads(spy)).toHaveLength(2));
+    expect(contentReads(spy)[1].url).toBe('/api/albums/alb-1/content?limit=40');
+    // Focus lands on the explanation, not on a row that was replaced.
+    await vi.waitFor(() => expect(screen.getByTestId('album-content-notice')).toHaveFocus());
   });
 
   it('closes the curation panel when the role is lost mid-session', async () => {
     const onClose = vi.fn();
     installFetchMock({
       'GET /api/albums/alb-1/content': () => jsonResponse(page(THREE)),
-      'PUT /api/shared-albums/alb-1/order': () => errorResponse(403),
+      'POST /api/shared-albums/alb-1/items/ai-1/move': () => errorResponse(403),
     });
     render(
       <AuthedWrapper>
@@ -292,6 +359,7 @@ describe('conflict handling', () => {
     );
 
     const rows = await screen.findAllByTestId('album-content-row');
+    await openActions(rows[0]);
     await userEvent.click(within(rows[0]).getByTestId('album-content-move-down'));
 
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -305,6 +373,7 @@ describe('conflict handling', () => {
 
     await screen.findAllByTestId('album-content-row');
     // ABSENT, not disabled — a disabled control advertises a capability.
+    expect(screen.queryByTestId('album-content-actions')).not.toBeInTheDocument();
     expect(screen.queryByTestId('album-content-move-up')).not.toBeInTheDocument();
     expect(screen.queryByTestId('album-content-remove')).not.toBeInTheDocument();
     expect(screen.queryByTestId('album-content-set-cover')).not.toBeInTheDocument();

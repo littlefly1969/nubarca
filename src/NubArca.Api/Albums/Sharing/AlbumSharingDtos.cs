@@ -118,11 +118,56 @@ public sealed record AlbumContentItem(
 
 // The owner/editor moderation view, wrapped so the album's concurrency token
 // travels with the items a caller is about to reorder or remove from.
+//
+// One PAGE of the album in its curated order. `TotalCount` is the whole album,
+// so a row can say "37 of 520" while the rest is unread. `NextCursor` is the
+// AlbumItemId of the last row returned, or null when the album ends here — see
+// AlbumContentQuery for how a continuation is bound to `Version`.
 public sealed record AlbumContentResponse(
     int Version,
     Guid? CoverFileItemId,
     bool CanEdit,
-    IReadOnlyList<AlbumContentItem> Items);
+    IReadOnlyList<AlbumContentItem> Items,
+    int TotalCount,
+    string? NextCursor);
+
+// One request for a page of the curation view.
+//
+// The cursor is deliberately NOT opaque: it is the AlbumItemId of the last row
+// the caller holds, and the page continues after that row's position. That is
+// what lets a curator keep scrolling after their OWN edit without re-reading
+// what they already have — a server-confirmed mutation took the album from
+// exactly the version they hold to the next one, so they apply it locally and
+// continue after whichever row is now last.
+//
+// `ExpectedVersion` is what makes that safe, and a continuation must carry it.
+// A page is served only while the album is still at that version; if anybody
+// else changed it the answer is a conflict and the client starts again from
+// the top — never a page of one version appended to rows of another.
+public sealed record AlbumContentQuery(int Limit, Guid? After, int? ExpectedVersion)
+{
+    public const int DefaultLimit = 40;
+    public const int MaxLimit = 100;
+}
+
+public enum AlbumContentReadOutcome
+{
+    Ok,
+    // No album, or a caller who may not curate it. One value for both: a
+    // non-curator must not learn the album exists.
+    NotFound,
+    // The album is no longer at the version the continuation was read at.
+    VersionConflict,
+    // The cursor names no row of this album — at a matching version that can
+    // only be a foreign or invented id.
+    InvalidCursor,
+}
+
+public sealed record AlbumContentReadResult(
+    AlbumContentReadOutcome Outcome,
+    AlbumContentResponse? Content = null,
+    // Populated on VersionConflict, so the client learns what it missed.
+    int? CurrentVersion = null);
 
 public static class AlbumContentOrigins
 {

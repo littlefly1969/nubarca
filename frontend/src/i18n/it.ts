@@ -1667,12 +1667,12 @@ const it = {
   'albumContent.removeError': 'Impossibile rimuovere l’elemento. Riprova.',
 
   'albumContent.reorderHelp':
-    'Usa le frecce per spostare un elemento. L’ordine è quello che vedono i membri.',
-  'albumContent.moveGroup': 'Sposta l’elemento {position}',
-  'albumContent.moveUp': 'Sposta prima l’elemento {position}',
-  'albumContent.moveDown': 'Sposta dopo l’elemento {position}',
-  'albumContent.moveFirst': 'Sposta all’inizio l’elemento {position}',
-  'albumContent.moveLast': 'Sposta alla fine l’elemento {position}',
+    'Usa il pulsante ⋯ di un elemento per spostarlo, sceglierlo come copertina o rimuoverlo. L’ordine è quello che vedono i membri.',
+  'albumContent.actionsFor': 'Azioni per l’elemento {position} di {total}',
+  'albumContent.moveUp': 'Sposta su',
+  'albumContent.moveDown': 'Sposta giù',
+  'albumContent.moveFirst': 'Sposta all’inizio',
+  'albumContent.moveLast': 'Sposta alla fine',
   'albumContent.moved': 'Spostato in posizione {position} di {total}.',
   'albumContent.position': '{position} di {total}',
   'albumContent.useAsCover': 'Usa come copertina',
@@ -1685,6 +1685,11 @@ const it = {
   'albumContent.conflict':
     'L’album è stato modificato da un altro utente. Abbiamo caricato la versione più recente; controlla le modifiche prima di riprovare.',
   'albumContent.noLongerAllowed': 'Non hai più i permessi per modificare questo album.',
+  'albumContent.listAria': 'Elementi dell’album',
+  'albumContent.changedWhileBrowsing':
+    'L’album è stato modificato mentre lo scorrevi: abbiamo ricaricato la versione più recente dall’inizio.',
+  'albumContent.loadMoreError': 'Impossibile caricare altri elementi.',
+  'albumContent.actionError': 'Impossibile completare l’operazione. Riprova.',
 
   'albumEdit.open': 'Modifica album',
   'albumEdit.title': 'Modifica album',

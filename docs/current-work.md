@@ -235,6 +235,25 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and it is not a capability: membership is resolved BEFORE it is read, so a
   stranger's malformed cursor is a 404 rather than the 400 that would confirm
   the album exists.
+- **The curation list reads the album a page at a time, and the version is the
+  page boundary.** `GET /api/albums/{id}/content?limit=` answers one page plus
+  `totalCount`. A continuation names the last row the client HOLDS as `cursor`,
+  together with `expectedVersion`. A changed album answers `409`, and the client
+  then re-reads from the top instead of stitching two versions together. The
+  cursor is deliberately not opaque. After the curator's OWN confirmed edit, the
+  client applies it locally (the server claimed exactly the version it holds)
+  and continues after whichever row is now last. "Re-read after every edit" is
+  therefore not the fix it looks like: it is the O(album) cost this replaced. A
+  request naming none of `limit`/`cursor`/`expectedVersion` is the legacy
+  whole-album read, kept for clients that predate paging. Reorder is
+  `POST /api/shared-albums/{id}/items/{albumItemId}/move` (item, 0-based
+  target, version). It renumbers one range set-based, keeps the order dense, and
+  first renumbers, once, any album a copy numbered from zero. The complete-list
+  `PUT .../order` remains server-side for older clients; the web no longer calls
+  it. `AlbumSharedContentPanel` is ONE component for Owner and Editor. It is
+  virtualized, with a single Actions control per row. While it is open, the
+  page's wall (`MediaWorkspace` / `SharedAlbumBrowser`) is UNMOUNTED, not
+  hidden.
 - **There is ONE media-selection experience, and it is the Media Library.** A
   shared album's "Add from library" navigates to `/media` with the album in
   transient router state — never a URL, never a second route, never a fork of

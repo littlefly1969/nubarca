@@ -815,6 +815,8 @@ The default grid thumbnail and medium preview are JPEG derivatives. Sizes are co
 
 Authorized thumbnail/preview endpoints may generate a missing derivative on demand. Batch jobs prewarm missing artifacts away from interactive requests. Both paths use the same renderer and persistence model.
 
+The `micro` size (96 px) is the one derivative rendered from another derivative instead of from the original. The album content manager draws each row as a ~56 px icon, so `micro` is produced lazily from the file's gallery derivative — the small thumbnail of a photo, or the poster of a video, behind the same server-confirmed-video gate as the poster route. No grid or wall uses it, batch jobs do not prewarm it, and it regenerates through either parent like any other cached artifact.
+
 `FileThumbnail` is the success record. `DerivativeDiagnostic` records durable failure state for a file/size pair:
 
 - permanent failure;

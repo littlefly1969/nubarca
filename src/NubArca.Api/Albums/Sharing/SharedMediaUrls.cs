@@ -1,3 +1,5 @@
+using NubArca.Api.Files;
+
 namespace NubArca.Api.Albums.Sharing;
 
 // The one place shared-album media URLs are built.
@@ -19,6 +21,12 @@ public static class SharedMediaUrls
 
     public static string Thumbnail(Guid albumId, Guid fileItemId) =>
         Base(albumId, fileItemId) + "/thumbnail";
+
+    // The curation-list icon (ThumbnailSizes.Micro) on the same route. For a
+    // video the route answers with an icon of its poster, so one URL shape
+    // serves every row of the content manager.
+    public static string MicroThumbnail(Guid albumId, Guid fileItemId) =>
+        Thumbnail(albumId, fileItemId) + "?size=" + ThumbnailSizes.Micro;
 
     public static string Preview(Guid albumId, Guid fileItemId) =>
         Base(albumId, fileItemId) + "/preview";
