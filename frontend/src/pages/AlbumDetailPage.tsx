@@ -4,7 +4,6 @@ import {
   ApiError,
   getAlbum,
   getAlbumPartySettings,
-  listAlbumMembers,
   type AlbumDetail,
   type AlbumPartyStatus,
 } from '@nubarca/api-client';
@@ -56,7 +55,6 @@ export function AlbumDetailPage() {
   // there are never two near-identical views of the same album on screen.
   const [contentOpen, setContentOpen] = useState(false);
   const contentButtonRef = useRef<HTMLButtonElement>(null);
-  const [hasMembers, setHasMembers] = useState(false);
   // SHARE-COPY-01: "Send a copy" is its OWN entry point, next to but distinct
   // from "Share". Sharing grants revocable access to media that stays yours;
   // sending a copy gives away an independent album you can never take back.
@@ -108,18 +106,6 @@ export function AlbumDetailPage() {
     return () => ctrl.abort();
   }, [albumId, canParty, invalidateAuth, navigate, t]);
 
-  // Whether to offer the shared-content view at all. A plain 404/401 here just
-  // leaves it hidden: it is a navigation affordance, not a permission.
-  const refreshMembership = useCallback(() => {
-    if (!albumId) return;
-    listAlbumMembers(albumId)
-      .then((members) => setHasMembers(members.some(
-        (m) => m.state === 'pending' || m.state === 'accepted')))
-      .catch(() => setHasMembers(false));
-  }, [albumId]);
-
-  useEffect(() => { refreshMembership(); }, [refreshMembership]);
-
   const onIdentityChange = useCallback((next: MediaWorkspaceIdentity) => {
     setIdentity(next);
     setSearchParams(filtersToUrlParams(next), { replace: true });
@@ -148,17 +134,22 @@ export function AlbumDetailPage() {
             {album.description && <p className="album-description">{album.description}</p>}
           </div>
           <div className="album-detail-header-actions">
-            {hasMembers && (
-              <button
-                type="button"
-                ref={contentButtonRef}
-                className="row-action"
-                data-testid="album-open-content"
-                onClick={() => setContentOpen(true)}
-              >
-                {t('albumContent.tab')}
-              </button>
-            )}
+            {/* Always offered to the owner. This used to appear only once the
+                album had a member, which quietly made the album's own content
+                controls — reordering, editorial removal and CHOOSING THE COVER
+                — unreachable on an unshared album. The cover is not a sharing
+                concern: a party invitation shows the cover the host CHOSE and
+                nothing else, so a host with a private album had no way to give
+                their invitation a photograph at all. */}
+            <button
+              type="button"
+              ref={contentButtonRef}
+              className="row-action"
+              data-testid="album-open-content"
+              onClick={() => setContentOpen(true)}
+            >
+              {t('albumContent.tab')}
+            </button>
             <button
               type="button"
               ref={shareButtonRef}
@@ -207,7 +198,7 @@ export function AlbumDetailPage() {
         <AlbumSharePanel
           albumId={albumId}
           albumName={album.name}
-          onClose={() => { setShareOpen(false); refreshMembership(); }}
+          onClose={() => setShareOpen(false)}
           returnFocusRef={shareButtonRef}
         />
       )}

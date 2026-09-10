@@ -145,3 +145,47 @@ describe('AlbumDetailPage', () => {
     expect(await screen.findByText('albums list')).toBeInTheDocument();
   });
 });
+
+// The gap this closes: the content panel — which is the ONLY place in the
+// product that chooses an album's cover — used to appear on the owner's page
+// only once the album had a member. On a private album the cover was therefore
+// unreachable, and since a party invitation shows the CHOSEN cover and nothing
+// else, a host with a private album could not give their invitation a
+// photograph at all.
+describe('AlbumDetailPage — the content panel is not a sharing feature', () => {
+  const noMembers = { 'GET /api/albums/album-1/members': () => jsonResponse([]) };
+
+  it('offers the content panel on an album shared with nobody', async () => {
+    installFetchMock(baseHandlers(noMembers));
+    render(wrapper());
+
+    await screen.findByRole('heading', { name: 'My Album' });
+    expect(screen.getByTestId('album-open-content')).toBeInTheDocument();
+  });
+
+  it('opens it, which is where the cover is chosen', async () => {
+    installFetchMock(baseHandlers({
+      ...noMembers,
+      'GET /api/albums/album-1/content': () => jsonResponse({
+        albumId: 'album-1', version: 1, canEdit: true, coverFileItemId: null, items: [],
+      }),
+    }));
+    render(wrapper());
+
+    await screen.findByRole('heading', { name: 'My Album' });
+    await userEvent.click(screen.getByTestId('album-open-content'));
+
+    expect(await screen.findByRole('heading', { name: 'Contenuto dell’album' }))
+      .toBeInTheDocument();
+  });
+
+  it('does not ask who the members are just to draw the button', async () => {
+    // The membership request existed ONLY to gate this control. Keeping it would
+    // be a request per album view that nothing reads.
+    const mock = installFetchMock(baseHandlers(noMembers));
+    render(wrapper());
+
+    await screen.findByRole('heading', { name: 'My Album' });
+    expect(mock.calls.some((c) => c.url.includes('/members'))).toBe(false);
+  });
+});
