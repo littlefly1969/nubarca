@@ -166,8 +166,24 @@
 .party-timeline-step.is-done { opacity: 0.8; }
 .party-timeline-step.is-current { opacity: 1; font-weight: 600; border-color: currentColor; }
 
+/* The one card that removes something. Set apart by its border rather than by
+   a loud fill: it has to be findable without reading as an alarm on a page the
+   host visits to run their evening. */
+.party-card--danger { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.party-card--danger h3 { color: var(--danger); }
+
+.party-teardown-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.party-teardown-confirm p { margin: 0; flex: 1 1 100%; font-weight: 600; }
+
 @media (max-width: 40rem) {
   .party-page { padding: 0.75rem; }
   .party-page-header { flex-direction: column; align-items: stretch; }
   .party-primary-action button { width: 100%; }
+  .party-teardown-confirm button { width: 100%; }
 }
