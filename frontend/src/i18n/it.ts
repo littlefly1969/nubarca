@@ -462,6 +462,17 @@ const it = {
   'party.action.failed': 'Non ha funzionato. Vedi lo stato corrente.',
   'party.action.confirmEnd': 'Terminare la festa? Gli ospiti conservano le fotografie; la serata risulta conclusa.',
 
+  'party.teardown.heading': 'Elimina la festa',
+  'party.teardown.help': 'La festa, il suo QR e tutto ciò che le appartiene — partecipanti, saluti, giochi, stampe — vengono eliminati. L’album resta.',
+  'party.teardown.keeps': 'Le fotografie che hai aggiunto tu restano. Restano anche quelle degli ospiti che hai approvato. Quelle che non hai mai fatto passare vanno nel Cestino, da dove puoi recuperarle.',
+  'party.teardown.start': 'Elimina la festa',
+  'party.teardown.confirmQuestion': 'Eliminare «{title}»? Non si torna indietro.',
+  'party.teardown.confirm': 'Sì, elimina',
+  'party.teardown.cancel': 'Annulla',
+  'party.teardown.busy': 'Eliminazione in corso…',
+  'party.teardown.failed': 'Non è stato possibile eliminare la festa.',
+  'party.teardown.conflict': 'Qualcun altro ha modificato questa festa. Vedi la versione corrente: riprova se vuoi ancora eliminarla.',
+
   'party.album.heading': 'Album della festa',
   'party.album.help': 'Collega un album per foto, contributi e funzioni Live.',
   'party.album.useExisting': 'Usa album esistente',

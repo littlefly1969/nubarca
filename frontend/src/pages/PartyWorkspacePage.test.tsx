@@ -343,3 +343,114 @@ describe('PartyWorkspacePage', () => {
     expect(await screen.findByTestId('party-live-needs-album')).toBeInTheDocument();
   });
 });
+
+// The workspace navigates away when the party stops existing, so this block
+// mounts a destination for it. A bare marker rather than the real list page:
+// what is under test is that the host LEAVES, not what they arrive at.
+function pageWithList() {
+  return (
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}`]}>
+        <Routes>
+          <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
+          <Route path="/parties" element={<div data-testid="parties-page-marker" />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>
+  );
+}
+
+describe('PartyWorkspacePage — deleting the party', () => {
+  // The gap this closes: the endpoint and its client have existed since Party
+  // became a root, and no screen called either. A party could be created and
+  // never removed.
+  it('offers a way to delete the party at all', async () => {
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('party-teardown-start')).toBeInTheDocument();
+  });
+
+  it('says what SURVIVES before the host commits, not afterwards', async () => {
+    // The sentence that decides whether somebody dares press it: the album and
+    // the approved photographs stay. It is on the page before the first click.
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+    render(page());
+
+    const card = await screen.findByTestId('party-teardown');
+    expect(within(card).getByText(/L’album resta/i)).toBeInTheDocument();
+    expect(within(card).getByText(/Cestino/i)).toBeInTheDocument();
+  });
+
+  it('asks first, and one click deletes nothing', async () => {
+    const mock = installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-teardown-start'));
+
+    expect(await screen.findByTestId('party-teardown-confirm')).toBeInTheDocument();
+    expect(mock.calls.some((c) => c.method === 'DELETE')).toBe(false);
+  });
+
+  it('cancelling leaves the party alone', async () => {
+    const mock = installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-teardown-start'));
+    await userEvent.click(screen.getByTestId('party-teardown-cancel'));
+
+    expect(screen.queryByTestId('party-teardown-confirm')).not.toBeInTheDocument();
+    expect(mock.calls.some((c) => c.method === 'DELETE')).toBe(false);
+  });
+
+  it('confirming sends the party’s CURRENT version and returns to the list', async () => {
+    const mock = installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ version: 7 })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
+    });
+    render(pageWithList());
+
+    await userEvent.click(await screen.findByTestId('party-teardown-start'));
+    await userEvent.click(screen.getByTestId('party-teardown-confirm-yes'));
+
+    const del = mock.calls.find((c) => c.method === 'DELETE')!;
+    expect(del.url).toContain(`/api/parties/${PARTY_ID}`);
+    // Optimistic concurrency travels with the request: a party somebody else
+    // edited meanwhile must be refused, not torn down from a stale read.
+    expect(del.url).toContain('version=7');
+    // The party is gone, so this route has nothing left to load.
+    expect(await screen.findByTestId('parties-page-marker')).toBeInTheDocument();
+  });
+
+  it('adopts the server’s party on a version conflict instead of insisting', async () => {
+    installFetchMock({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ version: 3 })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`DELETE /api/parties/${PARTY_ID}`]: () =>
+        jsonResponse({ party: withAlbum({ version: 4, title: 'Rinominata' }) }, 409),
+    });
+    render(page());
+
+    await userEvent.click(await screen.findByTestId('party-teardown-start'));
+    await userEvent.click(screen.getByTestId('party-teardown-confirm-yes'));
+
+    expect(await screen.findByTestId('party-teardown-conflict')).toBeInTheDocument();
+    // The page now shows what actually exists, not what it acted on.
+    expect(screen.getByTestId('party-title')).toHaveTextContent('Rinominata');
+  });
+});

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import {
   ApiError,
   getAlbumPartySettings,
   getParty,
   listPartyGuestContent,
+  tearDownParty,
   transitionParty,
   updateParty,
   type AlbumPartyStatus,
@@ -551,6 +552,98 @@ function PartyOverview({
           })}
         </ol>
       </section>
+
+      <PartyTeardownSection party={party} onPartyUpdated={onPartyUpdated} />
     </div>
+  );
+}
+
+// Deleting the party, and the ONE place in the product that can.
+//
+// The endpoint and its client have existed since the party became a root; what
+// was missing was a way to reach them, so a party could be created and never
+// removed. That gap is why this is a plain section rather than a menu item
+// hidden behind an overflow: the host must be able to find it.
+//
+// Two things are deliberate. The confirmation is INLINE rather than a
+// window.confirm, because the sentence that matters — the album and the
+// approved photographs survive — does not fit in a browser dialog and is
+// exactly what the host is afraid of when they hesitate here. And the version
+// travels with the request, so a party somebody else has edited meanwhile is
+// refused with its current state rather than torn down from a stale read.
+function PartyTeardownSection({
+  party, onPartyUpdated,
+}: {
+  party: Party;
+  onPartyUpdated(next: Party): void;
+}) {
+  const { t } = useI18n();
+  const { invalidateAuth } = useAuth();
+  const navigate = useNavigate();
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState<'idle' | 'conflict' | 'failed'>('idle');
+
+  async function run() {
+    setBusy(true); setState('idle');
+    try {
+      await tearDownParty(party.id, party.version);
+      // The party no longer exists, so there is nothing left for this route to
+      // load: go back to the list rather than re-fetching a 404.
+      navigate('/parties');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+      const body = (err as ApiError).body as { party?: Party } | undefined;
+      if (err instanceof ApiError && err.status === 409 && body?.party) {
+        onPartyUpdated(body.party);
+        setState('conflict');
+      } else {
+        setState('failed');
+      }
+      setAsking(false);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="party-card party-card--danger" data-testid="party-teardown">
+      <h3>{t('party.teardown.heading')}</h3>
+      <p className="muted">{t('party.teardown.help')}</p>
+      {/* Stated BEFORE the host commits, not in a receipt afterwards. */}
+      <p className="muted">{t('party.teardown.keeps')}</p>
+
+      {!asking ? (
+        <button
+          type="button" className="row-action row-action-danger" data-testid="party-teardown-start"
+          onClick={() => { setState('idle'); setAsking(true); }}
+        >
+          {t('party.teardown.start')}
+        </button>
+      ) : (
+        <div className="party-teardown-confirm" data-testid="party-teardown-confirm">
+          <p role="alert">{t('party.teardown.confirmQuestion', { title: party.title })}</p>
+          <button
+            type="button" className="row-action row-action-danger" data-testid="party-teardown-confirm-yes"
+            disabled={busy} onClick={() => void run()}
+          >
+            {busy ? t('party.teardown.busy') : t('party.teardown.confirm')}
+          </button>
+          <button
+            type="button" className="row-action" data-testid="party-teardown-cancel"
+            disabled={busy} onClick={() => setAsking(false)}
+          >
+            {t('party.teardown.cancel')}
+          </button>
+        </div>
+      )}
+
+      {state === 'conflict' && (
+        <p className="inline-error" role="alert" data-testid="party-teardown-conflict">
+          {t('party.teardown.conflict')}
+        </p>
+      )}
+      {state === 'failed' && (
+        <p className="inline-error" role="alert">{t('party.teardown.failed')}</p>
+      )}
+    </section>
   );
 }

@@ -451,6 +451,17 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.action.failed': 'That did not work. The current state is shown.',
   'party.action.confirmEnd': 'End the party? Guests keep the photographs; the evening is recorded as over.',
 
+  'party.teardown.heading': 'Delete the party',
+  'party.teardown.help': 'The party, its QR code and everything belonging to it — participants, greetings, games, prints — are deleted. The album stays.',
+  'party.teardown.keeps': 'The photographs you added stay. So do the guests’ photographs you approved. The ones you never let through go to Trash, where you can still recover them.',
+  'party.teardown.start': 'Delete the party',
+  'party.teardown.confirmQuestion': 'Delete “{title}”? There is no going back.',
+  'party.teardown.confirm': 'Yes, delete it',
+  'party.teardown.cancel': 'Cancel',
+  'party.teardown.busy': 'Deleting…',
+  'party.teardown.failed': 'The party could not be deleted.',
+  'party.teardown.conflict': 'Somebody else changed this party. The current version is shown — try again if you still want to delete it.',
+
   'party.album.heading': "The party's album",
   'party.album.help': 'Link an album for photos, contributions and Live features.',
   'party.album.useExisting': 'Use an existing album',
