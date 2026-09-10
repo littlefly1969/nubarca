@@ -252,3 +252,61 @@ function asConflict<TCode extends string, TSnapshot>(error: unknown): unknown {
   }
   return error;
 }
+
+// --- Display surface ------------------------------------------------------
+//
+// A paired NubArca TV showing an assigned party. It is NOT a guest: it holds
+// no party token and no browser cookie, only a display grant its native shell
+// minted from the device's own session. The grant travels in a header, never a
+// query string, because a URL reaches access logs, history and referrers.
+
+/** The header a display presents. Matches PartyDisplayService.GrantHeader. */
+export const PARTY_DISPLAY_GRANT_HEADER = 'X-Party-Display-Grant';
+
+export function getPartyDisplaySnapshot(
+  grant: string, signal?: AbortSignal,
+): Promise<PartyGamePublicSnapshot> {
+  return api<PartyGamePublicSnapshot>('/api/party-display/game', {
+    headers: { [PARTY_DISPLAY_GRANT_HEADER]: grant },
+    signal,
+  });
+}
+
+/**
+ * The lobby's join code, as PIXELS.
+ *
+ * The display cannot build this itself and must not be able to: the code
+ * encodes the party's join URL, and holding that URL would make a television a
+ * guest. The server encodes it instead, so the room can scan what the screen
+ * shows while the screen holds nothing it could use.
+ */
+export async function getPartyDisplayJoinQr(
+  grant: string, signal?: AbortSignal,
+): Promise<string> {
+  const response = await fetch('/api/party-display/join-qr', {
+    headers: { [PARTY_DISPLAY_GRANT_HEADER]: grant },
+    signal,
+  });
+  if (!response.ok) throw new ApiError(response.status, 'display join qr', null);
+  return response.text();
+}
+
+/**
+ * An activity photograph, fetched with the grant and handed back as an object
+ * URL.
+ *
+ * An <img> cannot carry a header, and the alternatives — a credential in the
+ * query string, or a guest token — are the two things this surface exists to
+ * avoid. So the bytes are fetched properly and the DOM is given a blob: URL.
+ * The caller owns it and must revoke it.
+ */
+export async function fetchPartyDisplayMedia(
+  path: string, grant: string, signal?: AbortSignal,
+): Promise<string> {
+  const response = await fetch(path, {
+    headers: { [PARTY_DISPLAY_GRANT_HEADER]: grant },
+    signal,
+  });
+  if (!response.ok) throw new ApiError(response.status, 'display media', null);
+  return URL.createObjectURL(await response.blob());
+}

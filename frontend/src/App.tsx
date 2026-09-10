@@ -43,6 +43,7 @@ import { PartyUploadPage } from './pages/PartyUploadPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
 import { PartyTvStagePage } from './pages/PartyTvStagePage';
+import { PartyDisplayStagePage } from './pages/PartyDisplayStagePage';
 import { PartyControlRoomPage } from './pages/PartyControlRoomPage';
 import { PartyPrintPage } from './pages/PartyPrintPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
@@ -71,6 +72,10 @@ export function App() {
           <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />
           <Route path="/party/:token/game" element={<PartyGamePage />} />
           <Route path="/party/:token/tv" element={<PartyTvStagePage />} />
+          {/* The paired-television display surface. Same canonical stage, a
+              different authorisation: a display grant in the fragment rather
+              than a party token in the path. */}
+          <Route path="/party-display/stage" element={<PartyDisplayStagePage />} />
           {/* PUBLIC, unauthenticated party PRINT STUDIO. Its :token is a PRINT
               token, not the view one: a separate capability, resolved on every
               request, that can print but cannot browse the album. */}
