@@ -1617,11 +1617,11 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumShare.revokeDownloadNote':
     'Revoking blocks future access. Files already downloaded to a device cannot be called back.',
 
-  'albumContent.tab': 'Shared content',
-  'albumContent.heading': 'Shared content',
+  'albumContent.tab': 'Content',
+  'albumContent.heading': 'Album content',
   'albumContent.intro':
-    'Everything the live album is made of: your own items and your collaborators’ contributions, in the order members see them.',
-  'albumContent.loadError': 'Could not load the shared content.',
+    'Everything the live album is made of: your own items and any collaborators’ contributions, in the order they appear. This is also where you choose the cover.',
+  'albumContent.loadError': 'Could not load the album content.',
   'albumContent.empty': 'This album has no items yet.',
   'albumContent.addedBy': 'Added by {name}',
   'albumContent.ownerItem': 'Your item',

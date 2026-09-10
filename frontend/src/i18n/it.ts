@@ -1635,11 +1635,11 @@ const it = {
   'albumShare.revokeDownloadNote':
     'La revoca blocca gli accessi futuri. I file già scaricati sul dispositivo non possono essere richiamati.',
 
-  'albumContent.tab': 'Contenuto condiviso',
-  'albumContent.heading': 'Contenuto condiviso',
+  'albumContent.tab': 'Contenuto',
+  'albumContent.heading': 'Contenuto dell’album',
   'albumContent.intro':
-    'Tutto ciò che compone l’album dal vivo: i tuoi elementi e i contributi dei collaboratori, nello stesso ordine che vedono i membri.',
-  'albumContent.loadError': 'Impossibile caricare il contenuto condiviso.',
+    'Tutto ciò che compone l’album dal vivo: i tuoi elementi e gli eventuali contributi dei collaboratori, nell’ordine in cui appaiono. Qui scegli anche la copertina.',
+  'albumContent.loadError': 'Impossibile caricare il contenuto dell’album.',
   'albumContent.empty': 'L’album non contiene ancora elementi.',
   'albumContent.addedBy': 'Aggiunto da {name}',
   'albumContent.ownerItem': 'Tuo elemento',
