@@ -1,5 +1,6 @@
 import { api, ApiError } from './client';
 import type {
+  AlbumContentQuery,
   AlbumContentResponse,
   AlbumInvitation,
   AlbumMember,
@@ -19,6 +20,7 @@ import type {
 
 export type {
   AlbumContentItem,
+  AlbumContentQuery,
   AlbumContentResponse,
   AlbumInvitation,
   AlbumMember,
@@ -36,7 +38,10 @@ export type {
 } from '@nubarca/contracts';
 import {
   ALBUM_INVITATIONS_PATH,
+  albumContentPath,
+  albumContentQueryToParams,
   albumInvitationPath,
+  sharedAlbumItemMovePath,
   sharedAlbumItemsPath,
   sharedAlbumItemsQueryToParams,
   withQuery,
@@ -217,13 +222,20 @@ export async function setAlbumMemberRole(
   });
 }
 
-// The owner's moderation view of the live album: their own media plus every
-// linked contribution, with provenance and current source state.
+// One PAGE of the curation view of the live album — the owner's own media plus
+// every linked contribution, with provenance and current source state. Always
+// paged: the first page names only `limit`; a continuation names the last row
+// held as `cursor` together with the `expectedVersion` it was read at, and a
+// 409 means the album changed and the list must start again.
 export async function listAlbumContent(
   albumId: string,
+  query: AlbumContentQuery,
   signal?: AbortSignal,
 ): Promise<AlbumContentResponse> {
-  return api<AlbumContentResponse>(`/api/albums/${albumId}/content`, { signal });
+  return api<AlbumContentResponse>(
+    withQuery(albumContentPath(albumId), albumContentQueryToParams(query)),
+    { signal },
+  );
 }
 
 // The owner removing ANY item from their album — their own or a contribution.
@@ -338,30 +350,41 @@ export async function setSharedAlbumCover(
   });
 }
 
-// The COMPLETE ordered list of AlbumItem ids — the server rejects a partial or
-// duplicated one rather than interpreting it.
-export async function reorderSharedAlbum(
+export interface AlbumItemMoveResult extends AlbumEditResult {
+  // Where the item landed (0-based), and the album's size.
+  position: number;
+  totalCount: number;
+}
+
+// Moves ONE item to a 0-based position. The payload is the item, the target and
+// the version — never the album's id sequence — so it costs the same for a
+// ten-item album and a thousand-item one, and reaches positions the caller has
+// not loaded. (The server's complete-list PUT /order still exists for clients
+// that predate this; the web client no longer uses it.)
+export async function moveSharedAlbumItem(
   albumId: string,
+  albumItemId: string,
   expectedVersion: number,
-  albumItemIds: string[],
+  targetIndex: number,
   signal?: AbortSignal,
-): Promise<AlbumEditResult> {
-  return api<AlbumEditResult>(`/api/shared-albums/${albumId}/order`, {
-    method: 'PUT',
-    json: { expectedVersion, albumItemIds },
+): Promise<AlbumItemMoveResult> {
+  return api<AlbumItemMoveResult>(sharedAlbumItemMovePath(albumId, albumItemId), {
+    method: 'POST',
+    json: { expectedVersion, targetIndex },
     signal,
   });
 }
 
 // Editorial removal of ANY item. Removes the album membership only — the source
-// file is never deleted, and for another user's media it could not be.
+// file is never deleted, and for another user's media it could not be. Answers
+// the album's new version and cover, which a removal of the cover item clears.
 export async function removeSharedAlbumItem(
   albumId: string,
   albumItemId: string,
   expectedVersion: number,
   signal?: AbortSignal,
-): Promise<void> {
-  await api<void>(
+): Promise<AlbumEditResult> {
+  return api<AlbumEditResult>(
     `/api/shared-albums/${albumId}/items/${albumItemId}?expectedVersion=${expectedVersion}`,
     { method: 'DELETE', signal },
   );

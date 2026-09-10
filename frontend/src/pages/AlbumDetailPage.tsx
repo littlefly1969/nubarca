@@ -181,18 +181,26 @@ export function AlbumDetailPage() {
         </div>
       </header>
 
-      <MediaWorkspace
-        source={source}
-        identity={identity}
-        onIdentityChange={onIdentityChange}
-        searchPlaceholder={t('mediaWs.searchAlbum')}
-        // Album Play, the same control a recipient gets on a shared album. It
-        // plays the CURRENT result — tab, search and filters included — and
-        // mutates nothing, which is what makes it safe to offer on both sides.
-        // It is not Party and it is not Show-on-TV: those stay in Settings,
-        // where publishing decisions belong.
-        showPlay
-      />
+      {/* ONE heavy media surface at a time. While the content manager is open
+          the album's wall is UNMOUNTED, not hidden: a hidden workspace would
+          keep its pages, its decoded images, its observers and its handlers
+          alive underneath a dialog that covers it. The identity (tab, filters)
+          is owned by this page, so closing the manager returns to the same view
+          — re-read, which is also what shows the curator's new order. */}
+      {!contentOpen && (
+        <MediaWorkspace
+          source={source}
+          identity={identity}
+          onIdentityChange={onIdentityChange}
+          searchPlaceholder={t('mediaWs.searchAlbum')}
+          // Album Play, the same control a recipient gets on a shared album. It
+          // plays the CURRENT result — tab, search and filters included — and
+          // mutates nothing, which is what makes it safe to offer on both sides.
+          // It is not Party and it is not Show-on-TV: those stay in Settings,
+          // where publishing decisions belong.
+          showPlay
+        />
+      )}
 
       {shareOpen && (
         <AlbumSharePanel

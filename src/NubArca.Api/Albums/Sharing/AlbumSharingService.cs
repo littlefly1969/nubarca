@@ -610,8 +610,8 @@ public sealed class AlbumSharingService : IAlbumSharingService
             provenance.AddedByUserId));
     }
 
-    public async Task<AlbumContentResponse?> ListAlbumContentAsync(
-        Guid actorUserId, Guid albumId,
+    public async Task<AlbumContentReadResult> ListAlbumContentAsync(
+        Guid actorUserId, Guid albumId, AlbumContentQuery? query,
         CancellationToken cancellationToken = default)
     {
         // SHARE-ALBUM-03: the moderation view is reachable by the OWNER and by
@@ -620,22 +620,64 @@ public sealed class AlbumSharingService : IAlbumSharingService
         var grant = await _access.ResolveAsync(albumId, actorUserId, cancellationToken);
         if (grant is null || (!grant.IsOwner && !AlbumRoles.CanEdit(grant.Role)))
         {
-            return null;
+            return new AlbumContentReadResult(AlbumContentReadOutcome.NotFound);
         }
+
+        // The version, the total and the page come from ONE snapshot, so a page
+        // can never describe a state other than the version it is stamped with.
+        // REPEATABLE READ is a snapshot on PostgreSQL; SQLite promotes it to
+        // serializable. Read-only, so disposing it is its whole lifecycle.
+        await using var snapshot = await _db.Database.BeginTransactionAsync(
+            System.Data.IsolationLevel.RepeatableRead, cancellationToken);
+
         var album = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == albumId)
             .Select(a => new { a.Version, a.CoverFileItemId, a.OwnerUserId })
             .FirstAsync(cancellationToken);
+        if (query?.ExpectedVersion is int expected && expected != album.Version)
+        {
+            return new AlbumContentReadResult(
+                AlbumContentReadOutcome.VersionConflict, CurrentVersion: album.Version);
+        }
         var ownerUserId = album.OwnerUserId;
+
+        var members = _db.AlbumItems.AsNoTracking().Where(ai => ai.AlbumId == albumId);
+        var totalCount = await members.CountAsync(cancellationToken);
+
+        // A continuation resumes after the caller's last row. `(SortOrder,
+        // FileItemId)` is exactly the order below, so the page starts where the
+        // previous one ended: nothing skipped, nothing repeated.
+        var page = members;
+        if (query?.After is Guid after)
+        {
+            var anchor = await members
+                .Where(ai => ai.Id == after)
+                .Select(ai => new { ai.SortOrder, ai.FileItemId })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (anchor is null)
+            {
+                return new AlbumContentReadResult(AlbumContentReadOutcome.InvalidCursor);
+            }
+            var anchorOrder = anchor.SortOrder;
+            var anchorFileId = anchor.FileItemId;
+            page = page.Where(ai => ai.SortOrder > anchorOrder
+                || (ai.SortOrder == anchorOrder && ai.FileItemId.CompareTo(anchorFileId) > 0));
+        }
+
+        // The album's CURATED order, not the order things happened to be
+        // added in. FileItemId stays the final tie-break so the sequence is
+        // stable even if two rows share a SortOrder.
+        var ordered = page.OrderBy(ai => ai.SortOrder).ThenBy(ai => ai.FileItemId);
+        // One more than asked for: whether a further page exists is a fact
+        // about the data, never a guess from a full page.
+        IQueryable<AlbumItem> bounded = query is null ? ordered : ordered.Take(query.Limit + 1);
 
         // Every row of the album, including ones whose source is no longer
         // servable — this is the moderation view, so a row the owner needs to
         // clear must be visible rather than silently filtered out.
         // IgnoreQueryFilters reaches a source that has since been vaulted; it
         // reports it as unavailable and never yields a URL for it.
-        var rows = await _db.AlbumItems
-            .AsNoTracking()
-            .Where(ai => ai.AlbumId == albumId)
+        var rows = await bounded
             .Select(ai => new
             {
                 AlbumItemId = ai.Id,
@@ -673,12 +715,13 @@ public sealed class AlbumSharingService : IAlbumSharingService
                     && m.State == AlbumMembershipStates.Accepted
                     && m.RevokedAt == null),
             })
-            // The album's CURATED order, not the order things happened to be
-            // added in. FileItemId stays the final tie-break so the sequence is
-            // stable even if two rows share a SortOrder.
-            .OrderBy(x => x.SortOrder)
-            .ThenBy(x => x.FileItemId)
             .ToListAsync(cancellationToken);
+
+        var hasMore = query is not null && rows.Count > query.Limit;
+        if (hasMore)
+        {
+            rows.RemoveAt(rows.Count - 1);
+        }
 
         var items = rows.Select(x =>
         {
@@ -698,16 +741,15 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 x.AlbumItemId,
                 x.FileItemId,
                 isVideo ? "video" : "image",
-                // Owner-scoped URLs for the owner's own media; album-scoped for
-                // a contribution, since the owner does not own those bytes and
-                // /api/files/{id}/* would (correctly) refuse them.
+                // Every row is drawn as a ~56 px icon, so every item — photo or
+                // video — is addressed at the Micro size; the route answers a
+                // video with an icon of its poster. Owner-scoped URLs for the
+                // owner's own media; album-scoped for a contribution, since the
+                // owner does not own those bytes and /api/files/{id}/* would
+                // (correctly) refuse them.
                 isOwnerItem
-                    ? (isVideo
-                        ? $"/api/files/{x.FileItemId}/poster"
-                        : $"/api/files/{x.FileItemId}/thumbnail?size=small")
-                    : (isVideo
-                        ? SharedMediaUrls.Poster(albumId, x.FileItemId)
-                        : SharedMediaUrls.Thumbnail(albumId, x.FileItemId)),
+                    ? $"/api/files/{x.FileItemId}/thumbnail?size={NubArca.Api.Files.ThumbnailSizes.Micro}"
+                    : SharedMediaUrls.MicroThumbnail(albumId, x.FileItemId),
                 isOwnerItem ? AlbumContentOrigins.Owner : AlbumContentOrigins.Contribution,
                 isOwnerItem ? null : x.ContributorDisplayName,
                 isOwnerItem ? null : RecipientEmailMask.Mask(x.ContributorEmail),
@@ -716,11 +758,13 @@ public sealed class AlbumSharingService : IAlbumSharingService
                 album.CoverFileItemId == x.FileItemId);
         }).ToList();
 
-        return new AlbumContentResponse(
+        return new AlbumContentReadResult(AlbumContentReadOutcome.Ok, new AlbumContentResponse(
             album.Version,
             album.CoverFileItemId,
             grant.IsOwner || AlbumRoles.CanEdit(grant.Role),
-            items);
+            items,
+            totalCount,
+            hasMore ? rows[^1].AlbumItemId.ToString() : null));
     }
 
     // Removes every item a given user contributed to an album. Used by the

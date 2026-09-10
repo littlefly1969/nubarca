@@ -7597,10 +7597,19 @@ video.lightbox-image {
 
 .album-share-member-role select { font-size: 0.8rem; padding: 0.15rem 0.3rem; }
 
-/* Owner moderation list. A row, not a card grid: the owner is reading
-   provenance and deciding, not browsing. */
-.album-content-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.album-content-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; }
+/* Curation list. A row, not a card grid: the curator is reading provenance and
+   deciding, not browsing. The list is VIRTUALIZED inside a scroller of its own
+   that takes the sheet's remaining height; rows are absolutely placed by the
+   virtualizer, so the space between them is each row's own bottom padding (a
+   flex gap would not apply to them). */
+.album-content-scroller { flex: 1 1 0; min-height: 12rem; overflow-y: auto; overscroll-behavior: contain; }
+.album-content-list { list-style: none; margin: 0; padding: 0; position: relative; width: 100%; }
+.album-content-row { position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box; padding-bottom: 0.6rem; }
+.album-content-card { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 8px; }
+.album-content-actions-toggle { flex: 0 0 auto; }
+/* The one open row's actions: a full-width strip under its card. */
+.album-content-actions { flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.album-content-more { margin: 0.4rem 0 0; }
 .album-content-thumb { flex: 0 0 auto; width: 3.5rem; height: 3.5rem; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--fg) 8%, transparent); display: grid; place-items: center; }
 .album-content-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .album-content-thumb-missing { font-size: 1.2rem; color: var(--muted); }
@@ -7610,15 +7619,13 @@ video.lightbox-image {
 .album-content-provenance { font-size: 0.85rem; overflow-wrap: anywhere; }
 .album-content-when { font-size: 0.72rem; }
 .album-content-unavailable { font-size: 0.78rem; color: var(--error); overflow-wrap: anywhere; }
-.album-content-row > .row-action { flex: 0 0 auto; }
 
 /* "This one is mine" on the shared wall. No contributor identity is shown to a
    member — that provenance belongs to the owner's moderation surface. */
 .shared-media-mine-badge { position: absolute; left: 0.35rem; top: 0.35rem; font-size: 0.62rem; font-weight: 600; padding: 0.05rem 0.35rem; border-radius: 6px; background: color-mix(in srgb, var(--accent) 85%, #000); color: #fff; }
 
 @media (max-width: 40rem) {
-  .album-content-row { flex-wrap: wrap; }
-  .album-content-row > .row-action { width: 100%; }
+  .album-content-actions > .row-action { flex: 1 1 calc(50% - 0.4rem); }
 }
 
 /* ── SHARE-COPY-01: detached album copies ──────────────────────────────────

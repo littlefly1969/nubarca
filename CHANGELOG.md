@@ -6,6 +6,25 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Curating a large album stays fast
+
+- **An album's Content panel opens straight away, whatever the album's size.**
+  It reads the album a page at a time as you scroll, and only the rows on screen
+  exist. A thousand-item album no longer builds a thousand rows, thousands of
+  buttons and a thousand gallery-size thumbnails before you can start.
+  Positions still read "37 of 520".
+- **Each item has one ⋯ button.** Move up, down, to the start or to the end,
+  make it the cover, or remove it from the album — all behind it, and all still
+  usable from the keyboard, by touch and with a screen reader.
+- **Moving an item sends just that item.** "To the end" works even when you
+  have not scrolled to the end, and the list does not reload after your own
+  move. If somebody else changed the album in the meantime, you are told and
+  shown the current order; nothing is retried behind your back.
+- **Row thumbnails are small icons** made for this list, instead of the
+  gallery's thumbnails.
+- **The gallery behind the panel is set aside while you curate**, for owners and
+  Editors alike, and comes back showing the new order when you close it.
+
 ### A photograph on the menu
 
 - **Every part of the invitation can carry a picture.** The invitation, where it

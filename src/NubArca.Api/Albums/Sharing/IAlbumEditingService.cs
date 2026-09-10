@@ -65,6 +65,23 @@ public interface IAlbumEditingService
         IReadOnlyList<Guid> orderedAlbumItemIds, string? ipAddress,
         CancellationToken cancellationToken = default);
 
+    // Moves ONE item to `targetIndex` (0-based) in the album's curated order.
+    //
+    // This is the curation surface's reorder. Its payload is O(1) whatever the
+    // album's size, and it reaches a destination the caller never loaded: "to
+    // the end" of a thousand-item album names index 999, not a thousand ids.
+    // ReorderAsync, the complete-list form, stays for clients that predate it.
+    //
+    // Only the rows between the old and the new position are renumbered, by a
+    // set-based UPDATE, and the order stays a dense 1..n. The version rule is
+    // the same as every other edit, so a move formed against a stale order is a
+    // conflict rather than a move to a position nobody chose — and for the same
+    // reason a `targetIndex` outside the album is refused, not clamped. Returns
+    // the item's resulting position and the album's size.
+    Task<AlbumEditResult> MoveItemAsync(
+        Guid actorUserId, Guid albumId, int expectedVersion, Guid albumItemId, int targetIndex,
+        string? ipAddress, CancellationToken cancellationToken = default);
+
     // Editorial removal of ANY item — the caller's own, another
     // collaborator's, or the owner's.
     //
@@ -111,7 +128,10 @@ public sealed record AlbumEditResult(
     Guid? CoverFileItemId = null,
     // Populated on VersionConflict so the caller can explain the collision
     // without a second round-trip.
-    string? Message = null)
+    string? Message = null,
+    // A move only: where the item landed, and the album's size.
+    int? Position = null,
+    int? TotalCount = null)
 {
     public bool IsOk => Outcome == AlbumEditOutcome.Ok;
 }
@@ -131,3 +151,7 @@ public sealed record SetAlbumCoverRequest(
 public sealed record ReorderAlbumRequest(
     int ExpectedVersion,
     IReadOnlyList<Guid> AlbumItemIds);
+
+public sealed record MoveAlbumItemRequest(
+    int ExpectedVersion,
+    int? TargetIndex);

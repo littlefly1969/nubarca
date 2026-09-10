@@ -20,7 +20,9 @@ frontend; a .NET worker for background jobs; local content-addressed blob storag
 - `FileItemUserMetadata` is owner/user-scoped.
 - `FileThumbnail` rows represent successful derived artifacts.
 - Derived artifacts are cache/regenerable.
-- Grid/list should use **small** thumbnails.
+- Grid/list should use **small** thumbnails. The one exception is the album
+  content manager's ~56 px curation rows, which use the **micro** icon (rendered
+  lazily from the gallery derivative, never from the original).
 - Viewer/lightbox should use **medium** preview.
 - Original full-res must only be served through explicit content/download endpoints.
 - Video cards use the **poster**; video playback uses the **video** endpoint.

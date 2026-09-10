@@ -113,8 +113,13 @@ public interface IAlbumSharingService
     // SHARE-ALBUM-03: reachable by the Owner AND by an Editor, through the same
     // grant the editorial mutations use. Carries the album's concurrency token
     // so a curator can reorder or remove without a second read.
-    Task<AlbumContentResponse?> ListAlbumContentAsync(
-        Guid actorUserId, Guid albumId,
+    //
+    // PAGED: `query` bounds the read to one page of the curated order, so the
+    // cost of opening the view does not grow with the album. A null query is
+    // the legacy whole-album read, kept for clients that predate paging. See
+    // AlbumContentQuery for the rule that binds a continuation to a version.
+    Task<AlbumContentReadResult> ListAlbumContentAsync(
+        Guid actorUserId, Guid albumId, AlbumContentQuery? query,
         CancellationToken cancellationToken = default);
 
     // ── Recipient side ──────────────────────────────────────────────────────

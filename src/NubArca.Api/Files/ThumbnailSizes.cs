@@ -24,6 +24,14 @@ public static class ThumbnailSizes
     // video. Stored as one derivative to keep request/row/refcount overhead low.
     public const string VideoPreviewStrip = "video-preview-strip";
 
+    // A curation-list ICON. The album content manager draws every item as a
+    // ~56 px square, and the 768 px grid thumbnail is roughly sixty times the
+    // pixels that needs. Rendered lazily from the file's GALLERY derivative (the
+    // small thumbnail of a photo, the poster of a video), never from the
+    // original — and never for a grid or a wall, which stay on Small.
+    public const string Micro = "micro";
+    public const int DefaultMicroMaxEdge = 96;
+
     // Bounding-box edge length in pixels. Aspect ratio is preserved when the
     // source is rectangular; if both dimensions already fit, no upscale occurs.
     // For Poster the edge is informational only — providers produce the exact
@@ -37,6 +45,7 @@ public static class ThumbnailSizes
             [VideoPreviewStrip] =
                 VideoPreviewStripSpec.DefaultFrameWidth
                 * VideoPreviewStripSpec.DefaultFrameCount,
+            [Micro] = DefaultMicroMaxEdge,
         };
 
     public static bool IsKnown(string? size) =>

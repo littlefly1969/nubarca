@@ -238,23 +238,74 @@ public static class AlbumSharingEndpoints
             return Results.NoContent();
         }).WithName("RevokeAlbumMember").RequireAuthorization();
 
-        // The OWNER's moderation view: their own items plus every contribution,
-        // with provenance and current source state. Additive — nothing here
-        // merges into the owner's gallery, library or album workspace.
+        // The curation view: the owner's own items plus every contribution, with
+        // provenance and current source state, for the Owner and an Editor.
+        // Additive — nothing here merges into the owner's gallery, library or
+        // album workspace.
+        //
+        // PAGED when the caller asks: `limit` (clamped to 1..100) for the first
+        // page, then `cursor` + `expectedVersion` to continue — see
+        // AlbumContentQuery. A request naming none of the three is the legacy
+        // whole-album read, which a client that predates paging depends on.
         app.MapGet("/api/albums/{id:guid}/content", async (
             Guid id,
+            [FromQuery] int? limit,
+            [FromQuery] string? cursor,
+            [FromQuery] int? expectedVersion,
             HttpContext httpContext,
             [FromServices] IAlbumSharingService sharing,
             CancellationToken cancellationToken) =>
         {
-            var actorUserId = httpContext.GetCurrentUserId()!.Value;
-            var content = await sharing.ListAlbumContentAsync(actorUserId, id, cancellationToken);
-            if (content is null)
+            AlbumContentQuery? query = null;
+            if (limit is not null || cursor is not null || expectedVersion is not null)
             {
-                return Results.NotFound();
+                Guid? after = null;
+                if (!string.IsNullOrWhiteSpace(cursor))
+                {
+                    if (!Guid.TryParse(cursor, out var parsed))
+                    {
+                        return Results.BadRequest(new { error = "Invalid cursor." });
+                    }
+                    // A continuation only means something at the version it was
+                    // read at, so it may not arrive without one.
+                    if (expectedVersion is null)
+                    {
+                        return Results.BadRequest(new { error = "A cursor must be sent with 'expectedVersion'." });
+                    }
+                    after = parsed;
+                }
+                query = new AlbumContentQuery(
+                    Math.Clamp(limit ?? AlbumContentQuery.DefaultLimit, 1, AlbumContentQuery.MaxLimit),
+                    after,
+                    expectedVersion);
             }
-            SetNoStore(httpContext);
-            return Results.Ok(content);
+
+            var actorUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await sharing.ListAlbumContentAsync(actorUserId, id, query, cancellationToken);
+            switch (result.Outcome)
+            {
+                case AlbumContentReadOutcome.Ok:
+                    SetNoStore(httpContext);
+                    return Results.Ok(result.Content);
+
+                case AlbumContentReadOutcome.VersionConflict:
+                    // The same 409 the editing routes answer. The client starts
+                    // again at the current version instead of stitching together
+                    // pages of two different albums.
+                    SetNoStore(httpContext);
+                    return Results.Json(new
+                    {
+                        error = "This album changed while you were browsing it.",
+                        albumId = id,
+                        version = result.CurrentVersion,
+                    }, statusCode: StatusCodes.Status409Conflict);
+
+                case AlbumContentReadOutcome.InvalidCursor:
+                    return Results.BadRequest(new { error = "Invalid cursor." });
+
+                default:
+                    return Results.NotFound();
+            }
         }).WithName("ListAlbumContent").RequireAuthorization();
 
         // The owner removing ANY item — their own or a contribution. Album
@@ -506,6 +557,27 @@ public static class AlbumSharingEndpoints
             return Respond(result, httpContext, albumId);
         }).WithName("ReorderSharedAlbum").RequireAuthorization();
 
+        // ONE item to ONE position — the curation surface's reorder. An O(1)
+        // payload whatever the album's size, reaching positions the caller has
+        // never loaded. The complete-list PUT /order above stays for clients
+        // that predate it.
+        app.MapPost("/api/shared-albums/{albumId:guid}/items/{albumItemId:guid}/move", async (
+            Guid albumId,
+            Guid albumItemId,
+            HttpContext httpContext,
+            [FromServices] IAlbumEditingService editing,
+            [FromBody] MoveAlbumItemRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body?.TargetIndex is null)
+                return Results.BadRequest(new { error = "Missing 'targetIndex'." });
+            var actorUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await editing.MoveItemAsync(
+                actorUserId, albumId, body.ExpectedVersion, albumItemId, body.TargetIndex.Value,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+            return Respond(result, httpContext, albumId);
+        }).WithName("MoveSharedAlbumItem").RequireAuthorization();
+
         // EDITORIAL removal of any item. Distinct from a contributor withdrawing
         // their own — which action happened follows the route invoked, not the
         // actor's identity, so an Editor removing their own contribution is
@@ -535,6 +607,21 @@ public static class AlbumSharingEndpoints
         {
             case AlbumEditOutcome.Ok:
                 SetNoStore(httpContext);
+                if (result.Position is not null)
+                {
+                    // A move also says where the item landed, so the client can
+                    // apply it to the rows it holds without re-reading them.
+                    return Results.Ok(new
+                    {
+                        albumId,
+                        version = result.Version,
+                        name = result.Name,
+                        description = result.Description,
+                        coverFileItemId = result.CoverFileItemId,
+                        position = result.Position,
+                        totalCount = result.TotalCount,
+                    });
+                }
                 return Results.Ok(new
                 {
                     albumId,
@@ -732,17 +819,17 @@ public static class AlbumSharingEndpoints
             [FromServices] IFileThumbnailService thumbnails,
             CancellationToken cancellationToken) =>
         {
-            // Only the grid size is reachable through this route; the viewer has
-            // its own /preview. An unknown value is a 400, exactly as on the
-            // owner's endpoint.
+            // The grid size and the curation-list icon are reachable through
+            // this route; the viewer has its own /preview. An unknown value is a
+            // 400, exactly as on the owner's endpoint.
             var requested = string.IsNullOrWhiteSpace(size) ? ThumbnailSizes.Small : size!;
-            if (requested != ThumbnailSizes.Small)
+            if (requested != ThumbnailSizes.Small && requested != ThumbnailSizes.Micro)
             {
                 return Results.BadRequest(new { error = $"Unknown thumbnail size '{requested}'." });
             }
 
             return await ServeDerivativeAsync(
-                albumId, fileId, ThumbnailSizes.Small, only: null,
+                albumId, fileId, requested, only: null,
                 httpContext, access, thumbnails, cancellationToken);
         }).WithName("GetSharedAlbumThumbnail").RequireAuthorization();
 
@@ -929,7 +1016,11 @@ public static class AlbumSharingEndpoints
             return Results.NotFound();
         }
 
-        var size = grant.Kind == SharedMediaKind.Video ? ThumbnailSizes.Poster : imageSize;
+        // A video has no image derivative: its thumbnail and preview are its
+        // poster, and its micro icon is rendered from that poster.
+        var size = grant.Kind == SharedMediaKind.Video && imageSize != ThumbnailSizes.Micro
+            ? ThumbnailSizes.Poster
+            : imageSize;
 
         var content = await thumbnails.EnsureAsync(
             fileId, grant.MediaOwnerUserId, size, cancellationToken);

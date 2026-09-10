@@ -185,13 +185,19 @@ export function SharedAlbumDetailPage() {
         {notice && <p className="inline-error" role="status" data-testid="shared-album-notice">{notice}</p>}
       </header>
 
-      <SharedAlbumBrowser
-        albumId={albumId}
-        albumName={current.name}
-        capabilities={capabilities}
-        onItemsChanged={load}
-        onNotice={setNotice}
-      />
+      {/* ONE heavy media surface at a time — the same rule as the owner's album
+          page, because it is the same content manager. While curation is open
+          the wall is unmounted, so no page fetch, image decode or observer runs
+          underneath the dialog; closing it re-reads the album. */}
+      {!curateOpen && (
+        <SharedAlbumBrowser
+          albumId={albumId}
+          albumName={current.name}
+          capabilities={capabilities}
+          onItemsChanged={load}
+          onNotice={setNotice}
+        />
+      )}
 
       {editOpen && (
         <AlbumDetailsEditor

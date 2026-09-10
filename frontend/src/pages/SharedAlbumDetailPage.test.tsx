@@ -465,3 +465,37 @@ describe('SharedAlbumDetailPage authority', () => {
     expect(screen.getByTestId('shared-album-curate')).toBeInTheDocument();
   });
 });
+
+// The Editor opens the SAME content manager the owner does, so the same rule
+// holds here: while it is open the shared wall is unmounted, not left running
+// underneath the dialog.
+describe('SharedAlbumDetailPage — one heavy media surface at a time', () => {
+  it('unmounts the shared wall while an Editor curates', async () => {
+    const mock = installFetchMock({
+      'GET /api/shared-albums/alb-1': () => jsonResponse({ ...ALBUM, role: 'editor', canEdit: true }),
+      'GET /api/shared-albums/alb-1/items': () => jsonResponse(sharedItemsPage([item()])),
+      'GET /api/albums/alb-1/content': () => jsonResponse({
+        version: 1, canEdit: true, coverFileItemId: null, items: [], totalCount: 0, nextCursor: null,
+      }),
+    });
+    const wallReads = () => mock.calls.filter((c) => c.url.startsWith('/api/shared-albums/alb-1/items')).length;
+    renderPage();
+
+    expect(await screen.findAllByTestId('shared-media-tile')).toHaveLength(1);
+    expect(screen.getByTestId('shared-album-chrome')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('shared-album-curate'));
+    await screen.findByTestId('album-content-panel');
+
+    // Not hidden: gone — no chrome, no tile behind the dialog…
+    expect(screen.queryByTestId('shared-album-chrome')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('shared-media-tile')).not.toBeInTheDocument();
+    // …and no page of the wall is read while the manager is open.
+    const whileOpen = wallReads();
+    await screen.findByTestId('album-content-empty');
+    expect(wallReads()).toBe(whileOpen);
+
+    await userEvent.click(screen.getByTestId('album-content-close'));
+    expect(await screen.findAllByTestId('shared-media-tile')).toHaveLength(1);
+  });
+});

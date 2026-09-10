@@ -13,6 +13,7 @@ import {
   installFetchMock,
   jsonResponse,
   sharedItemsPage,
+  stubContentListGeometry,
 } from '../test-utils';
 
 // SHARE-ALBUM-02 frontend: roles, contribution, withdrawal, provenance.
@@ -32,6 +33,8 @@ beforeEach(() => {
     unobserve() {}
     disconnect() {}
   } as unknown as typeof ResizeObserver;
+  // The curation list is virtualized and needs a viewport to fill.
+  stubContentListGeometry();
 });
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -174,7 +177,10 @@ describe('AlbumSharePanel — roles', () => {
 // SHARE-ALBUM-03: the endpoint wraps the items with the album's concurrency
 // token, so a curator can reorder or remove without a second read.
 function contentPage(items: unknown[], over: Partial<Record<string, unknown>> = {}) {
-  return { version: 3, coverFileItemId: null, canEdit: true, items, ...over };
+  return {
+    version: 3, coverFileItemId: null, canEdit: true, items,
+    totalCount: items.length, nextCursor: null, ...over,
+  };
 }
 
 function contentItem(over: Partial<Record<string, unknown>> = {}) {
@@ -183,7 +189,7 @@ function contentItem(over: Partial<Record<string, unknown>> = {}) {
     fileItemId: 'f1',
     isCover: false,
     kind: 'image',
-    thumbnailUrl: '/api/files/f1/thumbnail?size=small',
+    thumbnailUrl: '/api/files/f1/thumbnail?size=micro',
     origin: 'owner',
     contributorDisplayName: null,
     contributorMaskedEmail: null,
@@ -197,7 +203,7 @@ const CONTRIBUTION = contentItem({
   albumItemId: 'ai-2',
   fileItemId: 'f2',
   origin: 'contribution',
-  thumbnailUrl: '/api/shared-albums/alb-1/media/f2/thumbnail',
+  thumbnailUrl: '/api/shared-albums/alb-1/media/f2/thumbnail?size=micro',
   contributorDisplayName: 'Bruno',
   contributorMaskedEmail: 'b•••o@example.com',
 });
@@ -235,13 +241,15 @@ describe('AlbumSharedContentPanel — owner moderation', () => {
     });
     renderContentPanel();
 
-    const removes = await screen.findAllByTestId('album-content-remove');
-    expect(removes).toHaveLength(2);
-    for (const button of removes) {
-      expect(button).toHaveTextContent(/rimuovi dall’album/i);
+    const rows = await screen.findAllByTestId('album-content-row');
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      // The row's single Actions control leads to the removal.
+      await userEvent.click(within(row).getByTestId('album-content-actions'));
+      expect(within(row).getByTestId('album-content-remove')).toHaveTextContent(/rimuovi dall’album/i);
+      // The word "elimina" must not appear anywhere in this surface.
+      expect(document.body.innerHTML).not.toMatch(/elimina/i);
     }
-    // The word "elimina" must not appear anywhere in this surface.
-    expect(document.body.innerHTML).not.toMatch(/elimina/i);
   });
 
   it('names the contributor in the removal confirmation and says the file survives', async () => {
@@ -252,22 +260,25 @@ describe('AlbumSharedContentPanel — owner moderation', () => {
     });
     renderContentPanel();
 
-    await userEvent.click(await screen.findByTestId('album-content-remove'));
+    await userEvent.click(await screen.findByTestId('album-content-actions'));
+    await userEvent.click(screen.getByTestId('album-content-remove'));
     const question = confirmSpy.mock.calls[0][0]!;
     expect(question).toContain('Bruno (b•••o@example.com)');
     expect(question).toMatch(/non viene eliminato/i);
   });
 
-  it('removes an item and refreshes', async () => {
-    let removed = false;
+  it('removes an item and drops it from the list', async () => {
     vi.stubGlobal('confirm', vi.fn(() => true));
     const spy = installFetchMock({
-      'GET /api/albums/alb-1/content': () => jsonResponse(contentPage(removed ? [] : [CONTRIBUTION])),
-      'DELETE /api/shared-albums/alb-1/items/ai-2': () => { removed = true; return emptyResponse(); },
+      'GET /api/albums/alb-1/content': () => jsonResponse(contentPage([CONTRIBUTION])),
+      'DELETE /api/shared-albums/alb-1/items/ai-2': () => jsonResponse({
+        albumId: 'alb-1', version: 4, name: 'Vacanze', description: null, coverFileItemId: null,
+      }),
     });
     renderContentPanel();
 
-    await userEvent.click(await screen.findByTestId('album-content-remove'));
+    await userEvent.click(await screen.findByTestId('album-content-actions'));
+    await userEvent.click(screen.getByTestId('album-content-remove'));
 
     expect(await screen.findByTestId('album-content-empty')).toBeInTheDocument();
     expect(spy.calls.some((c) => c.method === 'DELETE')).toBe(true);
@@ -285,6 +296,7 @@ describe('AlbumSharedContentPanel — owner moderation', () => {
     // No <img> for a source nobody can fetch.
     expect(screen.getByTestId('album-content-row').querySelector('img')).toBeNull();
     // …but it is still removable, so the owner can clear the row.
+    await userEvent.click(screen.getByTestId('album-content-actions'));
     expect(screen.getByTestId('album-content-remove')).toBeEnabled();
   });
 

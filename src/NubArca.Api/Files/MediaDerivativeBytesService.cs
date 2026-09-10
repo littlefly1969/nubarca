@@ -263,6 +263,19 @@ public sealed class MediaDerivativeBytesService
                     row.FileItemId, row.OwnerUserId, cancellationToken);
                 return outcome is DerivativeOutcome.Generated or DerivativeOutcome.SkippedExisting;
             }
+            if (row.Size == ThumbnailSizes.Micro)
+            {
+                // A curation icon is rendered from the gallery derivative, which
+                // the bundled image path does not produce; the lazy path does.
+                var micro = await _thumbnails.EnsureAsync(
+                    row.FileItemId, row.OwnerUserId, ThumbnailSizes.Micro, cancellationToken);
+                if (micro is null)
+                {
+                    return false;
+                }
+                await micro.Content.DisposeAsync();
+                return true;
+            }
 
             var result = await _thumbnails.EnsureImageDerivativesAsync(
                 row.FileItemId, row.OwnerUserId, new[] { row.Size }, cancellationToken);

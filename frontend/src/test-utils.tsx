@@ -28,6 +28,21 @@ export function triggerIntersection(): void {
   });
 }
 
+// The album content manager's list is VIRTUALIZED: it renders the rows that
+// fit its scroll container. jsdom lays nothing out — every element is 0 px
+// tall — so without this the list has no viewport and renders no row at all.
+// Gives the two things its virtualizer measures, the scroll container and each
+// row, a real height. Undone by `vi.restoreAllMocks()`.
+export function stubContentListGeometry(
+  { rowPx = 72, viewportPx = 600 }: { rowPx?: number; viewportPx?: number } = {},
+): void {
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('album-content-row')) return rowPx;
+    if (this.classList.contains('album-content-scroller')) return viewportPx;
+    return 0;
+  });
+}
+
 /**
  * Move ONE observed element across the viewport boundary, in act().
  *

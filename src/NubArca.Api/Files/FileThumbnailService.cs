@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Security;
 using NubArca.Api.Storage;
 using SixLabors.ImageSharp;
 
@@ -599,6 +600,11 @@ public sealed class FileThumbnailService : IFileThumbnailService
         // API. A successful (re)generation via ANY path clears the diagnostic
         // (DerivativeDiagnosticsService), so a later-fixed file is never wedged.
         var normalizedSize = ThumbnailSizes.Normalize(size);
+        if (normalizedSize == ThumbnailSizes.Micro)
+        {
+            return await EnsureMicroAsync(fileItemId, ownerUserId, cancellationToken);
+        }
+
         var nowUtc = _clock.GetUtcNow().UtcDateTime;
         var blocked = await _db.DerivativeDiagnostics.AsNoTracking().AnyAsync(d =>
             d.FileItemId == fileItemId
@@ -663,6 +669,107 @@ public sealed class FileThumbnailService : IFileThumbnailService
         }
 
         return await OpenAsync(fileItemId, ownerUserId, size, cancellationToken);
+    }
+
+    // The curation-list icon (ThumbnailSizes.Micro), rendered from the file's
+    // GALLERY derivative rather than from its original: the small thumbnail of
+    // a photo, the poster of a video. A 96 px icon does not justify decoding a
+    // 24-megapixel original, the parent is already oriented, and a video has no
+    // image to decode at all. Micro is therefore a cache of a cache — losing it,
+    // or its parent, only ever costs a regeneration.
+    //
+    // A video is held to the poster route's own gate (IsServerConfirmedVideo),
+    // so a spoofed video type gets no icon either. Null, indistinguishably, for
+    // missing / foreign / soft-deleted / ungated / failed.
+    private async Task<ThumbnailContent?> EnsureMicroAsync(
+        Guid fileItemId, Guid ownerUserId, CancellationToken cancellationToken)
+    {
+        if (!_options.Value.EnableThumbnails)
+        {
+            return null;
+        }
+
+        var media = await _db.FileItems.AsNoTracking()
+            .Where(f => f.Id == fileItemId && f.OwnerUserId == ownerUserId && f.DeletedAt == null)
+            .Select(f => new
+            {
+                Metadata = _db.BlobMetadata
+                    .Where(m => m.BlobObjectId == f.BlobObjectId)
+                    .Select(m => new
+                    {
+                        m.MediaCategory, m.DetectedContentType, m.VideoExtractionStatus, m.VideoCodec,
+                    })
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (media is null)
+        {
+            return null;
+        }
+
+        var parentSize = ThumbnailSizes.Small;
+        if (media.Metadata?.MediaCategory == MediaCategories.Video)
+        {
+            if (!SafeContentType.IsServerConfirmedVideo(
+                    media.Metadata.DetectedContentType,
+                    media.Metadata.VideoExtractionStatus,
+                    media.Metadata.VideoCodec))
+            {
+                return null;
+            }
+            parentSize = ThumbnailSizes.Poster;
+        }
+
+        var parent = await EnsureAsync(fileItemId, ownerUserId, parentSize, cancellationToken);
+        if (parent is null)
+        {
+            return null;
+        }
+        byte[] source;
+        await using (parent.Content)
+        {
+            using var buffer = new MemoryStream();
+            await parent.Content.CopyToAsync(buffer, cancellationToken);
+            source = buffer.ToArray();
+        }
+
+        try
+        {
+            var render = await _renderer.RenderAsync(
+                source,
+                new[]
+                {
+                    new DerivativeRequest(
+                        ThumbnailSizes.Micro,
+                        _mediaOptions.EdgeFor(ThumbnailSizes.Micro),
+                        _mediaOptions.QualityFor(ThumbnailSizes.Micro)),
+                },
+                cancellationToken);
+            var rendered = render.Results[0];
+            if (rendered is null)
+            {
+                return null;
+            }
+
+            var outcome = await StoreRenderedAsync(
+                fileItemId, ThumbnailSizes.Micro, rendered, render, new ImageDerivativesTimings(),
+                cancellationToken);
+            if (outcome.Outcome is not (DerivativeOutcome.Generated or DerivativeOutcome.SkippedExisting))
+            {
+                return null;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Micro thumbnail generation failed for file {FileItemId}.", fileItemId);
+            return null;
+        }
+
+        return await OpenAsync(fileItemId, ownerUserId, ThumbnailSizes.Micro, cancellationToken);
     }
 
     public async Task<ThumbnailContent?> OpenAsync(
