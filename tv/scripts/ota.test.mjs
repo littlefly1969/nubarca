@@ -116,7 +116,7 @@ function publication(id = randomUUID(), createdAt = new Date().toISOString(), ov
 
 test('release context derives runtime, channel, and update URL from the tracked contract', () => {
   const context = resolveReleaseContext(env);
-  assert.equal(context.runtimeVersion, 'nubarca-tv-native-11');
+  assert.equal(context.runtimeVersion, 'nubarca-tv-native-12');
   assert.equal(context.channel, 'production');
   assert.equal(context.updateUrl, `${origin}/api/tv-app/updates`);
   assert.throws(() => resolveReleaseContext({ ...env, NUBARCA_PUBLIC_ORIGIN: 'http://nubarca.example.com' }), /https/i);
@@ -195,7 +195,7 @@ test('bundle import rejects metadata tampering and immutable byte replacement', 
 
   metadata.channel = 'production';
   writeFileSync(metadataFile, JSON.stringify(metadata));
-  writeFileSync(join(root, 'publications', 'android', 'nubarca-tv-native-11', id, 'unexpected.txt'), 'different');
+  writeFileSync(join(root, 'publications', 'android', 'nubarca-tv-native-12', id, 'unexpected.txt'), 'different');
   assert.throws(() => importBundle(output, gitSha, importEnv, { nodeVersion: '22.22.0' }), /different bytes/i);
 });
 

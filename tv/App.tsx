@@ -38,6 +38,7 @@ import { PersonalLibraryScreen } from './src/screens/PersonalLibraryScreen';
 import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
+import { PartyDisplayScreen } from './src/screens/PartyDisplayScreen';
 import { exitTvApp } from './src/lib/tvPlatform';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
@@ -193,13 +194,8 @@ function AppInner(): React.JSX.Element {
             onSessionInvalid();
           }
         });
-      // The assignment is the owner's to change from the web at any time, so it
-      // is re-read on the same beat rather than trusted from startup. A failure
-      // keeps the value already on screen: the assignment did not change because
-      // one request did.
-      getTvSession()
-        .then((session) => { if (!cancelled) setAssignment(session.assignment ?? null); })
-        .catch(() => { /* the personal-status call above owns the 401 verdict */ });
+      // The assignment authority poll lives in its own effect below, at a rate
+      // that depends on whether a party is on screen.
     };
     check();
     const timer = setInterval(check, 60_000);
@@ -235,6 +231,46 @@ function AppInner(): React.JSX.Element {
     }, 15_000);
     return () => clearInterval(timer);
   }, [inPersonalArea, onLock, onSessionInvalid]);
+
+  // THE ASSIGNMENT IS THE CONTROL PLANE, and it is polled at two rates.
+  //
+  // GENERAL keeps the existing minute: nothing on screen depends on it, and a
+  // television idling in the album list has no reason to talk more often. While
+  // a PARTY is assigned it drops to five seconds, because the owner changing
+  // Party A to Party B — or ending the evening — has to reach the screen in the
+  // room before anybody notices it is wrong.
+  //
+  // Every read doubles as the session check: a definitive 401 tears the whole
+  // thing down through the same path a revoked session already used, while a
+  // transient network error must never take a party off a screen.
+  const assignedKey = assignment?.kind === 'party' && assignment.partyAvailable
+    ? assignment.albumId : null;
+  const partyRate = flow.name === 'partyDisplay' || assignedKey !== null;
+
+  useEffect(() => {
+    if (flow.name === 'loading' || flow.name === 'pairing') return;
+    let cancelled = false;
+    const read = () => {
+      getTvSession()
+        .then((session) => {
+          if (cancelled) return;
+          const next = session.assignment ?? null;
+          setAssignment(next);
+          rawDispatch({
+            type: 'ASSIGNMENT',
+            kind: next?.kind === 'party' && next.partyAvailable ? 'party' : 'general',
+            assignmentKey: next?.kind === 'party' && next.partyAvailable
+              ? next.albumId : null,
+          });
+        })
+        .catch((err: unknown) => {
+          if (!cancelled && err instanceof ApiError && err.status === 401) onSessionInvalid();
+        });
+    };
+    read();
+    const timer = setInterval(read, partyRate ? 5_000 : 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [flow.name, partyRate, onSessionInvalid]);
 
   // Entering Party always starts at the album list (personal/mode state never
   // leaks into Party, and Party never resumes mid-viewer from a previous run).
@@ -316,6 +352,9 @@ function AppInner(): React.JSX.Element {
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
           assignment={assignment}
         />
+      )}
+      {flow.name === 'partyDisplay' && (
+        <PartyDisplayScreen assignmentKey={flow.assignmentKey} />
       )}
       {flow.name === 'updates' && (
         <UpdateScreen

@@ -107,6 +107,25 @@ export function getTvSession(signal?: AbortSignal): Promise<TvSessionStatus> {
   return tvGet<TvSessionStatus>('/api/tv/session', undefined, signal);
 }
 
+// The television's permission to SHOW the party it is assigned to.
+//
+// Authenticated by the TV session cookie alone, and it takes no arguments on
+// purpose: the party comes from the device's own assignment, resolved
+// server-side. There is nothing here for a client to name, which is what makes
+// showing somebody else's party impossible rather than merely refused.
+//
+// The raw grant is returned once and is never persisted — not in AsyncStorage,
+// not anywhere. It lives in memory, goes into a URL fragment, and is replaced
+// by minting again.
+export interface TvPartyDisplayGrant {
+  grant: string;
+  expiresAt: string;
+}
+
+export function mintPartyDisplayGrant(signal?: AbortSignal): Promise<TvPartyDisplayGrant> {
+  return tvPost<TvPartyDisplayGrant>('/api/tv/party-display/grant', undefined, undefined, signal);
+}
+
 export function listTvAlbums(): Promise<TvAlbum[]> {
   return tvGet<TvAlbum[]>('/api/tv/albums');
 }

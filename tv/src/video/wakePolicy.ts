@@ -62,3 +62,27 @@ export function shouldKeepPhotoSlideshowAwake(inputs: WakeInputs): boolean {
 export function shouldRotateSlideshow(inputs: WakeInputs): boolean {
   return shouldKeepPhotoSlideshowAwake(inputs);
 }
+
+/** What a party display needs the screen for. */
+export interface PartyDisplayWakeInputs {
+  readonly hostActive: boolean;
+  /** True while the stage is actually on screen (not the native fallback). */
+  readonly showing: boolean;
+}
+
+/**
+ * Should NubArca hold the screen for a party display?
+ *
+ * A party on screen IS active playback: a television that dims in the middle of
+ * a round is as broken as one that dims during a slideshow. It lives HERE, in
+ * the module that already answers "hold the screen", rather than in a second
+ * wake lock of its own — two authorities is the failure this file exists to
+ * prevent, and the existing hook is already tag-scoped so two callers cannot
+ * release each other.
+ *
+ * False when the app is backgrounded, and false while the native fallback is up:
+ * there is nothing to watch behind an error card.
+ */
+export function shouldKeepPartyDisplayAwake(inputs: PartyDisplayWakeInputs): boolean {
+  return inputs.hostActive && inputs.showing;
+}

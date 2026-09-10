@@ -72,6 +72,10 @@ export type TvFlowState =
   | { name: 'pairing'; incomplete: boolean }
   | { name: 'mode'; notice: ModeNotice }
   | { name: 'party' }
+  // The assigned party's GAME, staged by the canonical web renderer. Keyed by
+  // the assignment so Party A -> Party B is a different state, not the same one
+  // with different contents -- which is what forces a teardown and a new grant.
+  | { name: 'partyDisplay'; assignmentKey: string }
   | { name: 'updates' }
   | { name: 'pin'; target: UnlockTarget }
   | { name: 'personalHome'; home: PersonalHomeInfo }
@@ -98,7 +102,11 @@ export type TvFlowEvent =
   | { type: 'OPEN_ALBUM'; album: PersonalAlbumRef }
   | { type: 'ALBUM_BACK' }
   | { type: 'LOCK'; reason?: 'pinChanged' }
-  | { type: 'PARTY_EXIT' };
+  | { type: 'PARTY_EXIT' }
+  // The owner's assignment, as the shell most recently read it. One event for
+  // every outcome, because the shell must react to a party arriving, changing
+  // and going away with the same authority.
+  | { type: 'ASSIGNMENT'; kind: 'general' | 'party'; assignmentKey: string | null };
 
 export const initialFlowState: TvFlowState = { name: 'loading' };
 
@@ -181,6 +189,28 @@ export function tvFlowReducer(state: TvFlowState, event: TvFlowEvent): TvFlowSta
         : state;
     case 'PARTY_EXIT':
       return state.name === 'party' ? { name: 'mode', notice: null } : state;
+
+    case 'ASSIGNMENT': {
+      // The assignment is the OWNER's decision and the shell follows it. It
+      // never overrides a personal screen: somebody standing in their own
+      // library must not have a party appear over it, and the party is still
+      // there when they leave.
+      if (isPersonalState(state) || state.name === 'pin'
+        || state.name === 'loading' || state.name === 'pairing'
+        || state.name === 'updates') {
+        return state;
+      }
+      if (event.kind === 'party' && event.assignmentKey !== null) {
+        // Already showing THIS party: nothing to do. Showing a different one:
+        // a new state, so the display tears down and mints a fresh grant.
+        return state.name === 'partyDisplay' && state.assignmentKey === event.assignmentKey
+          ? state
+          : { name: 'partyDisplay', assignmentKey: event.assignmentKey };
+      }
+      // GENERAL, or a party that cannot be shown: leave the display at once
+      // rather than keeping a stale one on screen.
+      return state.name === 'partyDisplay' ? { name: 'mode', notice: null } : state;
+    }
   }
 }
 
