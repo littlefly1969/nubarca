@@ -185,8 +185,12 @@ public sealed record PartyGuestContextDto(
     DateTime? EventStartsAt,
     string? AlbumName,
     int ItemCount,
+    // The invitation's hero before the party: the invitation's own photograph,
+    // else the album's CHOSEN cover, else null for a branded composition.
     string? CoverUrl,
-    IReadOnlyList<PartyGuestContentDto> Content,
+    // The GUEST projection of each slot: a photograph is an address on this
+    // token, never the owner's file id.
+    IReadOnlyList<PartyGuestContentViewDto> Content,
     PartyGuestCapabilitiesDto Capabilities,
     PartyGuestLibraryDto Library);
 

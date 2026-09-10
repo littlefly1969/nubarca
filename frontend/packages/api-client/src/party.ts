@@ -253,6 +253,11 @@ export function setPartyGuestContent(
     visibleLive: boolean;
     visibleAfter: boolean;
     content: Record<string, unknown>;
+    /**
+     * The slot's one photograph: any of the owner's own images, in the party's
+     * album or not. Choosing one files it nowhere. null clears it.
+     */
+    mediaFileItemId: string | null;
     version: number;
   },
   signal?: AbortSignal,
@@ -363,8 +368,8 @@ export type PartyGuestPhase = 'before' | 'live' | 'after';
 /** How much of that surface is open. */
 export type PartyGuestAccessMode = 'full' | 'library-only';
 
-/** One typed slot the host wrote. `content` is the shape its `kind` declares. */
-export interface PartyGuestContentSlot {
+/** What every projection of a slot shares. `content` is the shape its `kind` declares. */
+interface PartyGuestContentFields {
   kind: PartyGuestContentKind;
   enabled: boolean;
   visibleBefore: boolean;
@@ -372,6 +377,26 @@ export interface PartyGuestContentSlot {
   visibleAfter: boolean;
   content: Record<string, unknown>;
   version: number;
+}
+
+/**
+ * One slot as the OWNER edits it. `mediaFileItemId` is the photograph's
+ * reference as stored; `mediaUrl` is the owner's own preview of it, present only
+ * while the file still qualifies — an id with no url means the photograph went
+ * to Trash or into the Private Vault.
+ */
+export interface PartyGuestContentSlot extends PartyGuestContentFields {
+  mediaFileItemId: string | null;
+  mediaUrl: string | null;
+}
+
+/**
+ * One slot as a GUEST receives it. The photograph is an address on the guest's
+ * own token, present exactly when there is a picture to show — never the
+ * owner's file id.
+ */
+export interface PartyGuestContentView extends PartyGuestContentFields {
+  mediaUrl: string | null;
 }
 
 /** Where a capability LIVES, or nothing. The hub builds no route of its own. */
@@ -396,8 +421,13 @@ export interface PartyGuestContext {
   /** Named only where an album means something: at the party, and afterwards. */
   albumName: string | null;
   itemCount: number;
+  /**
+   * The invitation's hero before the party, already resolved by the server:
+   * the invitation's own photograph, else the album's chosen cover, else null
+   * for a composition.
+   */
   coverUrl: string | null;
-  content: PartyGuestContentSlot[];
+  content: PartyGuestContentView[];
   capabilities: PartyGuestCapabilities;
   library: PartyGuestLibrary;
 }

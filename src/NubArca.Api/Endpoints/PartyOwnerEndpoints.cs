@@ -51,7 +51,10 @@ public static class PartyOwnerEndpoints
         bool VisibleLive,
         bool VisibleAfter,
         System.Text.Json.JsonElement? Content,
-        int Version);
+        int Version,
+        // The slot's one photograph: any of the owner's own eligible images, in
+        // the party's album or not. Null clears it — PUT states the whole slot.
+        Guid? MediaFileItemId = null);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -248,7 +251,7 @@ public static class PartyOwnerEndpoints
                 ownerUserId, partyId, kind,
                 new PartyGuestContentWrite(
                     body.Enabled, body.VisibleBefore, body.VisibleLive, body.VisibleAfter,
-                    body.Content, body.Version),
+                    body.Content, body.Version, body.MediaFileItemId),
                 cancellationToken);
 
             return result.Outcome switch
@@ -259,6 +262,10 @@ public static class PartyOwnerEndpoints
                 PartyGuestContentOutcome.UnknownKind => Results.NotFound(),
                 PartyGuestContentOutcome.InvalidPayload =>
                     Results.BadRequest(new { error = "invalid_content" }),
+                // One answer for a missing, foreign, trashed, vaulted or
+                // non-image file, so it never says whether a file exists.
+                PartyGuestContentOutcome.InvalidMedia =>
+                    Results.BadRequest(new { error = "invalid_media" }),
                 PartyGuestContentOutcome.VersionConflict => Results.Json(
                     new { error = "version_conflict", content = result.Content },
                     statusCode: StatusCodes.Status409Conflict),

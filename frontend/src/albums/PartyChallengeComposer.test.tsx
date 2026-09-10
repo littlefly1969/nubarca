@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { PartyChallenge } from '@nubarca/api-client';
 import { I18nProvider } from '../i18n';
@@ -188,6 +188,52 @@ describe('the activity composer', () => {
     await openComposer(user);
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByTestId('party-composer')).not.toBeInTheDocument());
+  });
+
+  it('takes a new picture through the library upload without adding it to the album', async () => {
+    const created: { mediaFileItemId: string | null }[] = [];
+    const mock = mount([], 2, {
+      'POST /api/files': () => jsonResponse({
+        id: 'up1', name: 'poster.png', mimeType: 'image/png', sizeBytes: 10,
+        createdAt: '2026-09-10T10:00:00Z',
+      }),
+      [`POST ${DECK}`]: ({ body }: { body: string | null }) => {
+        created.push(JSON.parse(body!));
+        return jsonResponse(challenge({ id: 'c9', mediaFileItemId: 'up1' }));
+      },
+    });
+    const user = userEvent.setup();
+    const composer = await openComposer(user);
+    await user.type(within(composer).getByLabelText(/titolo/i), 'Canta');
+    await user.type(within(composer).getByLabelText(/cosa deve fare/i), 'Sali sul tavolo.');
+
+    fireEvent.change(within(composer).getByTestId('party-photo-upload-input'), {
+      target: { files: [new File(['x'], 'poster.png', { type: 'image/png' })] },
+    });
+    // The uploaded picture is chosen, beside — not inside — the album's own.
+    expect(await within(composer).findByTestId('party-photo-extra'))
+      .toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+    expect(within(composer).getByTestId('party-composer-preview')
+      .querySelector('img[src="/api/files/up1/thumbnail?size=small"]')).not.toBeNull();
+    await user.click(within(composer).getByTestId('party-composer-save'));
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0].mediaFileItemId).toBe('up1');
+    expect(mock.calls.some((c) => c.method === 'POST' && /\/api\/albums\/[^/]+\/items/.test(c.url)))
+      .toBe(false);
+  });
+
+  it('keeps showing an activity’s picture that is not one of the album’s', async () => {
+    mount([challenge({ mediaFileItemId: 'x1', mediaUrl: '/api/files/x1/thumbnail?size=medium' })], 2);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /modifica/i }));
+
+    const extra = within(screen.getByTestId('party-composer')).getByTestId('party-photo-extra');
+    expect(extra).toHaveAttribute('aria-pressed', 'true');
+    expect(extra.querySelector('img')).toHaveAttribute('src', '/api/files/x1/thumbnail?size=medium');
   });
 });
 

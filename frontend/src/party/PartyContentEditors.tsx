@@ -6,6 +6,7 @@ import {
   type PartyGuestContentSlot,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { PartySlotImageField } from './PartyImageField';
 
 // The owner's typed editors: six named shapes, one card each.
 //
@@ -16,6 +17,8 @@ import { useI18n } from '../i18n';
 //
 // Every card is its own draft with its OWN version: editing the menu never
 // contends with renaming the party, and a conflict refreshes just that card.
+// Choosing, replacing or removing the slot's photograph is an edit like any
+// other, saved with the rest of the card.
 
 type Draft = {
   enabled: boolean;
@@ -23,6 +26,9 @@ type Draft = {
   visibleLive: boolean;
   visibleAfter: boolean;
   content: Record<string, unknown>;
+  mediaFileItemId: string | null;
+  /** How the host previews the chosen photograph. Never sent. */
+  mediaPreviewUrl: string | null;
   version: number;
 };
 
@@ -32,6 +38,8 @@ const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
   visibleLive: slot.visibleLive,
   visibleAfter: slot.visibleAfter,
   content: { ...(slot.content ?? {}) },
+  mediaFileItemId: slot.mediaFileItemId ?? null,
+  mediaPreviewUrl: slot.mediaUrl ?? null,
   version: slot.version,
 });
 
@@ -41,10 +49,12 @@ const text = (content: Record<string, unknown>, key: string): string => {
 };
 
 export function PartyContentCard({
-  slot, partyId, phases, onSaved,
+  slot, partyId, albumId, phases, onSaved,
 }: {
   slot: PartyGuestContentSlot;
   partyId: string;
+  /** The party's album, offered as a place to choose a photograph from — or null. */
+  albumId: string | null;
   /** Which surfaces this card offers a visibility switch for. */
   phases: readonly ('before' | 'live' | 'after')[];
   onSaved(next: PartyGuestContentSlot): void;
@@ -52,7 +62,8 @@ export function PartyContentCard({
   const { t } = useI18n();
   const [draft, setDraft] = useState<Draft>(() => fromSlot(slot));
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'saved' | 'conflict' | 'failed'>('idle');
+  const [status, setStatus] =
+    useState<'idle' | 'saved' | 'conflict' | 'failed' | 'invalidMedia'>('idle');
 
   // Re-seeded when the SERVER's version moves — including after a conflict,
   // which is how the card adopts what actually happened.
@@ -64,13 +75,24 @@ export function PartyContentCard({
   async function save() {
     setBusy(true); setStatus('idle');
     try {
-      onSaved(await setPartyGuestContent(partyId, slot.kind, draft));
+      onSaved(await setPartyGuestContent(partyId, slot.kind, {
+        enabled: draft.enabled,
+        visibleBefore: draft.visibleBefore,
+        visibleLive: draft.visibleLive,
+        visibleAfter: draft.visibleAfter,
+        content: draft.content,
+        mediaFileItemId: draft.mediaFileItemId,
+        version: draft.version,
+      }));
       setStatus('saved');
     } catch (err) {
-      const body = (err as ApiError).body as { content?: PartyGuestContentSlot } | undefined;
+      const body = (err as ApiError).body as
+        { content?: PartyGuestContentSlot; error?: string } | undefined;
       if (err instanceof ApiError && err.status === 409 && body?.content) {
         onSaved(body.content);
         setStatus('conflict');
+      } else if (err instanceof ApiError && err.status === 400 && body?.error === 'invalid_media') {
+        setStatus('invalidMedia');
       } else {
         setStatus('failed');
       }
@@ -93,6 +115,19 @@ export function PartyContentCard({
       {draft.enabled && (
         <>
           <ContentFields kind={slot.kind} content={draft.content} busy={busy} set={set} />
+
+          <PartySlotImageField
+            kind={slot.kind}
+            albumId={albumId}
+            fileItemId={draft.mediaFileItemId}
+            previewUrl={draft.mediaPreviewUrl}
+            disabled={busy}
+            onChange={(next) => setDraft((d) => ({
+              ...d,
+              mediaFileItemId: next?.fileItemId ?? null,
+              mediaPreviewUrl: next?.previewUrl ?? null,
+            }))}
+          />
 
           <div className="party-content-visibility">
             {phases.map((phase) => {
@@ -126,6 +161,9 @@ export function PartyContentCard({
         <p className="inline-error" role="alert" data-testid={`party-content-conflict-${slot.kind}`}>
           {t('party.overview.conflict')}
         </p>
+      )}
+      {status === 'invalidMedia' && (
+        <p className="inline-error" role="alert">{t('partyContent.imageInvalid')}</p>
       )}
       {status === 'failed' && (
         <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>

@@ -1,0 +1,46 @@
+/* Choosing a Party feature's one photograph: a slot's, an activity's. */
+
+.party-image-field { display: flex; flex-direction: column; gap: 0.5rem; }
+.party-image-field-label { font-weight: 600; }
+
+.party-image-field-preview {
+  display: block;
+  width: min(100%, 16rem);
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 0.75rem;
+}
+
+.party-image-field-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.party-image-field-help { margin: 0; font-size: 0.85rem; opacity: 0.75; }
+
+.party-image-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.5rem, 1fr));
+  gap: 0.4rem;
+}
+
+.party-image-grid button {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  background: none;
+  cursor: pointer;
+}
+
+.party-image-grid button[aria-pressed='true'] { border-color: var(--accent, currentColor); }
+.party-image-grid img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+/* The composer's "upload new" row under its album grid. */
+.party-photo-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+
+@media (max-width: 40rem) {
+  .party-image-field-actions button { flex: 1 1 auto; }
+}

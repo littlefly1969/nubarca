@@ -1054,12 +1054,14 @@ of it. Once the party is over and guest access has closed, a still-open library
 produces **`library-only`**: the same QR, narrowed to a thank-you and the album.
 Both closed is the same generic unavailable an unknown token gets.
 
-**Media obeys the phase server-side.** `/items` and every media byte are refused
-before the party and once the memories close — hiding the gallery in a browser
-is not a rule. The one exception is the album's **chosen** cover, which is the
-invitation's hero: a photograph the host nominated to represent the album, and
-the only file id that resolves in `before`. An album with no chosen cover gets a
-branded composition instead.
+**Media obeys the phase server-side.** `/items` and every album media byte are
+refused before the party and once the memories close — hiding the gallery in a
+browser is not a rule. The one exception on the album route is the album's
+**chosen** cover, which is the invitation's hero when the invitation has no
+photograph of its own: a photograph the host nominated to represent the album,
+and the only ALBUM file id that resolves in `before`. A guest-content slot's
+photograph is not album media and is reached only through its slot (§14.3.4).
+With neither, the invitation gets a branded composition instead.
 
 ### 14.3.3 What a party tells its guests
 
@@ -1091,7 +1093,80 @@ are genuinely available, and the library's state. It carries no owner id, party
 id, album id, link id, token, hash, storage internal, GPS or AI internal, and it
 is deliberately not a row of `showX` booleans: absence IS the answer.
 
-### 14.3.4 Party teardown
+### 14.3.4 Party media references
+
+**Party does not own a second media library.** `FileItem` is the durable media
+object. `AlbumItem` means membership in an album: a row exists exactly when the
+file belongs to that album, and it carries no visibility flag. A Party feature
+may **reference** an owner's `FileItem` independently of album membership — a
+guest-content slot carries at most one photograph
+(`PartyGuestContent.MediaFileItemId`), an activity one picture
+(`PartyChallenge.MediaFileItemId`). Public access to such a file exists only
+through the Party relation that references it.
+
+```text
+FileItem ──► AlbumItem ──────────► album, slideshow, TV, share, export, download
+    └──────► Party reference ────► invitation, menu, activity, …
+```
+
+**Album membership ≠ Party media reference, and a Party reference never implies
+album membership.** A picture uploaded for the menu goes through the ordinary
+owner upload — quota, deduplication, thumbnails, metadata stripping, Trash — and
+is added to no album, so no album-shaped query (gallery, slideshow, TV, share,
+export, face search, download) acquired a filter for it, and none needs one.
+There is no `PartyMediaFile`, no hidden or technical album, and no Party asset
+store.
+
+**Album membership and a Party reference are independent; media-library
+eligibility is not.** Which RELATION authorizes a file is what changes when it
+is reached through a slot rather than through an `AlbumItem` — not whether it is
+media the product still shows. A file the owner moved out of their media library
+(`MediaLibraryState.Excluded`) is out of every media surface, Party and TV
+included, and reaching it through a slot must not bring it back. "Extra-album"
+is not another word for "excluded".
+
+**One eligibility rule, asked twice.** `PartyMediaReference` decides which files
+may be referenced: owner-owned, not in Trash, not in the Private Vault (the
+global query filter), in the ACTIVE media library — narrowed through
+`MediaLibraryScopePolicy`, the one policy every media surface uses, rather than a
+second copy of the same comparison — and SERVER-DETECTED as an image
+(`MediaCategory` image AND a non-null `DetectedContentType`, because ingestion
+falls back to the client MIME for the category when the sniffer recognises
+nothing). It is asked when the owner writes a reference (a missing, foreign,
+trashed, vaulted, excluded or non-image file gets one indistinguishable
+`invalid_media`) and again on every guest request, so a file that stops
+qualifying stops being served without the reference being rewritten. A reference
+a slot already holds is not re-judged on save, so a host whose photograph left
+the library can still fix a typo in the words; the guest projection and the
+bytes stop offering it immediately either way.
+
+**Authorization is derived from the relation; the bytes come from one
+pipeline.** A party token is not a grant over the owner's files. A slot's
+photograph is reachable only as `GET /api/party/{token}/content/{kind}/media`,
+which resolves the token, the guest's CURRENT surface and that slot — enabled,
+visible now, holding an eligible reference. An activity's picture is reachable
+through `/api/party/{token}/challenges/{id}/media` behind a running game, and on
+the owner's paired television through the album's game
+(`/api/tv/albums/{albumId}/party-playback/challenges/{id}/media`), never through
+`/api/tv/media/{file}`, which serves only TV albums. Everything else — including
+the same file through the album route `/api/party/{token}/media/{fileId}`, which
+keeps meaning album media plus the chosen-cover exception — is the same generic
+404. Each route authorizes and then calls one `ServeAuthorizedDerivativeAsync`:
+a derived rendition from the ordinary thumbnail pipeline, metadata-stripped,
+never the original and never an attachment. The guest context carries the
+address (`PartyGuestContentViewDto.MediaUrl`, versioned by the slot so a
+replaced photograph is a new URL under a day-long private cache), never the file
+id; the owner's projection carries the id.
+
+**The reference gives way to the file's lifecycle.** Both foreign keys are
+`ON DELETE SET NULL`: a permanent purge nulls the reference instead of being
+blocked by it, and the slot or activity survives without a picture. Trash and
+the Private Vault leave the id in place and are enforced at serving time.
+
+On the invitation the hero is resolved server-side: the invitation's own
+photograph, else the album's chosen cover, else a branded composition.
+
+### 14.3.5 Party teardown
 
 Tearing a party down **keeps its album**, and the guest media is FINALIZED
 before any party row is deleted. Owner-added media always survives — it was
@@ -1109,7 +1184,11 @@ party history has to be consulted. `PartyStateEraser` holds the list of what a
 party owns, shared with the album delete that erases a party from the other
 direction, so the two cannot drift.
 
-### 14.3.5 Party capabilities
+Files a party merely REFERENCED — a menu photograph, an activity's picture — are
+the owner's own and are never finalized: the references go with the party and
+the files stay in the library (§14.3.4).
+
+### 14.3.6 Party capabilities
 
 Party is a public projection over the party's main album. Its capability model supports:
 

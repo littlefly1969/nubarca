@@ -1796,6 +1796,30 @@ public static class TvEndpoints
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("CompleteTvPartyChallenge");
 
+        // The held activity's PICTURE, reached through the activity rather than
+        // through the file. An activity may use any of the owner's own images,
+        // including one in no album, so the television cannot be sent to
+        // /api/tv/media/{id}, which serves only its albums. The bytes are the
+        // same derived, metadata-stripped preview every Party surface serves.
+        app.MapGet("/api/tv/albums/{albumId:guid}/party-playback/challenges/{challengeId:guid}/media", async (
+            Guid albumId, Guid challengeId, HttpContext httpContext,
+            [FromServices] ITvPairingService tv,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerId = await tv.ResolveOwnerUserIdAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            if (ownerId is null) return Results.Unauthorized();
+            var fileId = await challenges.TvMediaFileAsync(ownerId.Value, albumId, challengeId, cancellationToken);
+            return fileId is Guid id
+                ? await PartyEndpoints.ServeAuthorizedDerivativeAsync(
+                    ownerId.Value, id, NubArca.Api.Party.PartyMediaKind.Image, "preview",
+                    httpContext, thumbnails, stripper, cancellationToken)
+                : Results.NotFound();
+        }).WithName("GetTvPartyChallengeMedia");
+
         // TV active face filter: a guest's face search reaches the TV ONLY after an
         // explicit "show these photos on TV" activation on the public party page (the
         // backend bridges the activation — the party client never calls /api/tv). The TV
