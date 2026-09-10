@@ -435,10 +435,48 @@ public sealed class PartyService : IPartyService
             }
         }
 
+        // PHASE 2, AND ONE UNIT OF WORK.
+        //
         // Everything a party owns, in foreign-key order — the one list, shared
         // with the album delete that erases a party from the other direction.
-        await _eraser.EraseAsync(partyId, albumId, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        // Every statement in it is an ExecuteDelete or an ExecuteUpdate, and
+        // each of those commits on its own unless a transaction says otherwise,
+        // so a failure partway through would leave a HALF-ERASED party: links
+        // gone but participants left, or a television reset to general with the
+        // party it pointed at still there. The eraser deliberately opens no
+        // transaction of its own — it participates in its caller's — so opening
+        // one is this method's job.
+        //
+        // It PARTICIPATES in a caller's transaction when there is one, exactly
+        // as AlbumService.DeleteAsync does, so a teardown can be one step of a
+        // larger unit of work rather than demanding to be the whole of it.
+        //
+        // Deliberately NOT wrapped around phase 1: each SoftDeleteAsync is the
+        // FileItem lifecycle's own unit of work, and a photograph already in
+        // Trash is a correct outcome the guest can still recover from. Widening
+        // this to cover them would put the canonical deletion path inside a
+        // transaction it does not expect, for no gain — if phase 1 fails the
+        // method has already thrown and the party is still standing.
+        var owned = _db.Database.CurrentTransaction is null;
+        var transaction = owned
+            ? await _db.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+        try
+        {
+            await _eraser.EraseAsync(partyId, albumId, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+            if (owned) await transaction!.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            // All of the party graph, or none of it.
+            if (owned) await transaction!.RollbackAsync(cancellationToken);
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+        }
 
         // The party is gone, so there is nothing to project. The outcome IS the
         // answer.
