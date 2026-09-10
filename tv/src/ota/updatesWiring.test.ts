@@ -177,7 +177,16 @@ test('the existing finishAndRemoveTask behaviour is untouched', async () => {
 test('the updater introduced no new native or JavaScript dependency', () => {
   // The bridge is the one already in the app, and the download reuses the
   // expo-file-system dependency the media cache already requires.
-  assert.equal(Object.keys(packageJson.dependencies).length, 11);
+  //
+  // TWELVE, not eleven, since the party display: react-native-webview is a
+  // NATIVE dependency and this guard is what makes that visible rather than
+  // incidental. It was raised deliberately, together with a new
+  // runtimeVersion and versionCode in release-contract.json, because a native
+  // contract change cannot reach an installed APK over the air — and the
+  // number is asserted here so the NEXT one is a decision too.
+  assert.equal(Object.keys(packageJson.dependencies).length, 12);
+  assert.ok(packageJson.dependencies['react-native-webview'],
+    'the party display stages the canonical web renderer; without this there is no display');
   assert.ok(packageJson.dependencies['expo-file-system']);
   assert.equal(packageJson.dependencies['expo-updates'] !== undefined, true);
   assert.doesNotMatch(pluginSource, /require\('(?!node:|expo\/config-plugins)/);
