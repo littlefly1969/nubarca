@@ -91,6 +91,10 @@ public sealed class PartyMediaReferenceTests : IDisposable
         await TrashAsync(party.Owner, trashed);
         var vaulted = await UploadPngAsync(party.Owner, "vaulted.png");
         await MoveToVaultAsync(party.Owner, vaulted);
+        // Moved out of the media library: out of every media surface, Party
+        // included — the same answer the album-scoped path has always given.
+        var excluded = await UploadPngAsync(party.Owner, "excluded.png");
+        await ExcludeAsync(party.Owner, excluded);
         var document = await UploadBytesAsync(
             party.Owner, "Antipasti\nPrimi\n"u8.ToArray(), "text/plain", "menu.txt");
         // The browser's word is not the rule: text that CLAIMS to be a PNG is
@@ -100,12 +104,13 @@ public sealed class PartyMediaReferenceTests : IDisposable
         var missing = Guid.NewGuid();
 
         var answers = new List<(HttpStatusCode Status, string Body)>();
-        foreach (var id in new[] { foreign, trashed, vaulted, document, disguised, missing })
+        foreach (var id in new[] { foreign, trashed, vaulted, excluded, document, disguised, missing })
         {
             var response = await WriteSlotAsync(party, "menu", Menu, id);
             answers.Add((response.StatusCode, await response.Content.ReadAsStringAsync()));
         }
 
+        Assert.Equal(7, answers.Count);
         Assert.All(answers, a => Assert.Equal(HttpStatusCode.BadRequest, a.Status));
         // Indistinguishable: a stranger's file and a file that does not exist
         // get the very same bytes back.
@@ -613,6 +618,101 @@ public sealed class PartyMediaReferenceTests : IDisposable
         Assert.Equal(
             HttpStatusCode.NotFound,
             (await TvAsync(cookie, HttpMethod.Get, $"/api/tv/media/{graphic}/preview")).StatusCode);
+
+        // And the media library reaches the stage too: a picture the owner moves
+        // out of it is withdrawn from the held activity as well.
+        await ExcludeAsync(party.Owner, graphic);
+        Assert.Equal(
+            HttpStatusCode.NotFound, (await TvAsync(cookie, HttpMethod.Get, url!)).StatusCode);
+        var withdrawn = await (await TvAsync(
+                cookie, HttpMethod.Get, $"/api/tv/albums/{party.AlbumId}/party-playback"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(
+            JsonValueKind.Null,
+            withdrawn.GetProperty("activeChallenge").GetProperty("mediaUrl").ValueKind);
+    }
+
+    // --- The media library is not optional ----------------------------------
+
+    [Fact]
+    public async Task A_File_Moved_Out_Of_The_Media_Library_Is_Not_A_Party_Photograph()
+    {
+        // Extra-album is not another word for excluded. A menu photograph need
+        // not belong to the album, but it is still ordinary media — and a file
+        // the owner moved OUT of their media library is out of every media
+        // surface, which is what the album-scoped Party path already said.
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "menu.png");
+        await ExcludeAsync(party.Owner, graphic);
+
+        var refused = await WriteSlotAsync(party, "menu", Menu, graphic);
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("invalid_media", await refused.Content.ReadAsStringAsync());
+        Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
+
+        // An ACTIVE file in no album at all is still perfectly good, so the
+        // album requirement has not crept back in with this rule.
+        await RestoreAsync(party.Owner, graphic);
+        (await WriteSlotAsync(party, "menu", Menu, graphic)).EnsureSuccessStatusCode();
+        Assert.False(await InAnyAlbumAsync(graphic));
+    }
+
+    [Fact]
+    public async Task Excluding_A_Referenced_Photograph_Withdraws_It_And_Restoring_Brings_It_Back()
+    {
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "menu.png");
+        (await WriteSlotAsync(party, "menu", Menu, graphic)).EnsureSuccessStatusCode();
+        var guest = Guest();
+        var url = await GuestMediaUrlAsync(guest, party.Token, "menu");
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(url)).StatusCode);
+
+        await ExcludeAsync(party.Owner, graphic);
+
+        // At once: no address in the guest's context, and the relation-scoped
+        // route is the same generic unavailable everything else gets.
+        Assert.Null(await GuestMediaUrlAsync(guest, party.Token, "menu"));
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync(url)).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await guest.GetAsync($"/api/party/{party.Token}/content/menu/media")).StatusCode);
+
+        // The words stay, and so does the reference the host wrote: they can fix
+        // a typo without being made to choose another photograph first.
+        var menu = await GuestSlotAsync(guest, party.Token, "menu");
+        Assert.Equal("Cena in giardino", menu.GetProperty("content").GetProperty("intro").GetString());
+        Assert.Equal(
+            graphic, (await OwnerSlotAsync(party, "menu")).GetProperty("mediaFileItemId").GetGuid());
+        (await WriteSlotAsync(party, "menu", new { intro = "Cena in terrazza" }, graphic, version: 1))
+            .EnsureSuccessStatusCode();
+
+        await RestoreAsync(party.Owner, graphic);
+
+        // Back in the library, back on the menu — and nobody rewrote the slot to
+        // get it there.
+        var restored = await GuestMediaUrlAsync(guest, party.Token, "menu");
+        Assert.NotNull(restored);
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(restored)).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_Activity_Cannot_Take_A_File_Moved_Out_Of_The_Media_Library()
+    {
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "activity.png");
+        await ExcludeAsync(party.Owner, graphic);
+
+        Assert.Equal(
+            HttpStatusCode.BadRequest,
+            (await party.Owner.PostAsJsonAsync(
+                $"/api/albums/{party.AlbumId}/party-challenges", ChallengeBody(graphic))).StatusCode);
+
+        // The same file, back in the library and still in no album, is accepted.
+        await RestoreAsync(party.Owner, graphic);
+        (await party.Owner.PostAsJsonAsync(
+            $"/api/albums/{party.AlbumId}/party-challenges", ChallengeBody(graphic)))
+            .EnsureSuccessStatusCode();
+        Assert.False(await InAnyAlbumAsync(graphic));
     }
 
     // --- helpers ------------------------------------------------------------
@@ -723,6 +823,17 @@ public sealed class PartyMediaReferenceTests : IDisposable
         var response = await owner.DeleteAsync($"/api/files/{fileId}");
         Assert.True(response.IsSuccessStatusCode, $"trashing the file answered {response.StatusCode}");
     }
+
+    // The ordinary media-library controls — the same routes the owner's
+    // "Esclusi" tab uses, so these tests exercise the real transition rather
+    // than writing the column themselves.
+    private static async Task ExcludeAsync(HttpClient owner, Guid fileId) =>
+        (await owner.PostAsJsonAsync(
+            "/api/media-library/exclude", new { fileIds = new[] { fileId } })).EnsureSuccessStatusCode();
+
+    private static async Task RestoreAsync(HttpClient owner, Guid fileId) =>
+        (await owner.PostAsJsonAsync(
+            "/api/media-library/restore", new { fileIds = new[] { fileId } })).EnsureSuccessStatusCode();
 
     private static async Task MoveToVaultAsync(HttpClient owner, Guid fileId)
     {

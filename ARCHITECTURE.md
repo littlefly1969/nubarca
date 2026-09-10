@@ -1117,15 +1117,28 @@ export, face search, download) acquired a filter for it, and none needs one.
 There is no `PartyMediaFile`, no hidden or technical album, and no Party asset
 store.
 
+**Album membership and a Party reference are independent; media-library
+eligibility is not.** Which RELATION authorizes a file is what changes when it
+is reached through a slot rather than through an `AlbumItem` — not whether it is
+media the product still shows. A file the owner moved out of their media library
+(`MediaLibraryState.Excluded`) is out of every media surface, Party and TV
+included, and reaching it through a slot must not bring it back. "Extra-album"
+is not another word for "excluded".
+
 **One eligibility rule, asked twice.** `PartyMediaReference` decides which files
 may be referenced: owner-owned, not in Trash, not in the Private Vault (the
-global query filter), and SERVER-DETECTED as an image — `MediaCategory` image
-AND a non-null `DetectedContentType`, because ingestion falls back to the client
-MIME for the category when the sniffer recognises nothing. It is asked when the
-owner writes a reference (a missing, foreign, trashed, vaulted or non-image file
-gets one indistinguishable `invalid_media`) and again on every guest request, so
-a file that stops qualifying stops being served without the reference being
-rewritten. A reference a slot already holds is not re-judged on save.
+global query filter), in the ACTIVE media library — narrowed through
+`MediaLibraryScopePolicy`, the one policy every media surface uses, rather than a
+second copy of the same comparison — and SERVER-DETECTED as an image
+(`MediaCategory` image AND a non-null `DetectedContentType`, because ingestion
+falls back to the client MIME for the category when the sniffer recognises
+nothing). It is asked when the owner writes a reference (a missing, foreign,
+trashed, vaulted, excluded or non-image file gets one indistinguishable
+`invalid_media`) and again on every guest request, so a file that stops
+qualifying stops being served without the reference being rewritten. A reference
+a slot already holds is not re-judged on save, so a host whose photograph left
+the library can still fix a typo in the words; the guest projection and the
+bytes stop offering it immediately either way.
 
 **Authorization is derived from the relation; the bytes come from one
 pipeline.** A party token is not a grant over the owner's files. A slot's

@@ -22,9 +22,10 @@ originating repository and is deliberately not reproduced here.
 - Guests see a picture only on the part of the page it belongs to, and only as a
   preview — no download, no original, no location data. Knowing the address of
   any other file gets them nowhere. A picture you move to the Trash simply
-  disappears from the page; deleting it for good leaves the menu or the game in
-  place, without the picture; and tearing a party down never deletes them —
-  they are yours.
+  disappears from the page, and so does one you move out of your media library —
+  a file that is out of the library is out of the party too. Deleting a picture
+  for good leaves the menu or the game in place, without the picture; and
+  tearing a party down never deletes them — they are yours.
 
 ### One QR code, from the invitation to the memories
 

@@ -650,8 +650,13 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   flag: a row still means "this file is in this album", so a menu graphic
   uploaded for the party lands in the owner's library through the ordinary
   upload and in NO album, and the slideshow, gallery, TV, shares, exports and
-  downloads never see it. Eligibility is ONE rule, `PartyMediaReference`:
-  owner-owned, not in Trash, not in the Private Vault, and a SERVER-DETECTED
+  downloads never see it. What is INDEPENDENT is album membership, not
+  media-library eligibility: a file the owner moved out of their library is out
+  of Party too, and "extra-album" is not another word for `Excluded`.
+  Eligibility is ONE rule, `PartyMediaReference`: owner-owned, not in Trash, not
+  in the Private Vault, in the ACTIVE media library (through
+  `MediaLibraryScopePolicy`, the one scope every media surface narrows by,
+  never a second comparison of its own), and a SERVER-DETECTED
   image — `MediaCategory` image AND a non-null `DetectedContentType`, because
   ingestion takes the category from the client MIME when the sniffer recognises
   nothing, so a text file sent as `image/png` has the category but not the
