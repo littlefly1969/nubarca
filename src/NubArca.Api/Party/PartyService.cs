@@ -423,7 +423,34 @@ public sealed class PartyService : IPartyService
                 .Select(u => u.FileItemId)
                 .ToListAsync(cancellationToken);
 
-            foreach (var fileItemId in doomed)
+            // ...UNLESS THE FILE HAS ANOTHER HOME.
+            //
+            // "The host never let this into their party" and "this photograph
+            // should not exist" are the same sentence only while the party is
+            // the file's only home. A FileItem is the LOGICAL file, so trashing
+            // it removes it from every album at once — and an owner who also
+            // filed it under another album has made a decision that a party's
+            // moderation has no standing to overturn. It happened: tearing down
+            // eight parties trashed five photographs out of five albums that had
+            // nothing to do with those evenings.
+            //
+            // `removed_from_album` is the clearest case of all. The file is not
+            // even a member of the party's album any more, so deleting it takes
+            // nothing away from anybody — it only destroys.
+            //
+            // The provenance row still goes either way, which is what the album
+            // being self-contained actually requires; what survives here is the
+            // FILE, not the party's claim over it.
+            var keptElsewhere = doomed.Count == 0
+                ? new HashSet<Guid>()
+                : (await _db.AlbumItems
+                    .AsNoTracking()
+                    .Where(i => doomed.Contains(i.FileItemId) && i.AlbumId != album)
+                    .Select(i => i.FileItemId)
+                    .Distinct()
+                    .ToListAsync(cancellationToken)).ToHashSet();
+
+            foreach (var fileItemId in doomed.Where(f => !keptElsewhere.Contains(f)))
             {
                 // SystemCleanup, deliberately: this is the consequence of a
                 // moderation decision the host already took, not an instruction
