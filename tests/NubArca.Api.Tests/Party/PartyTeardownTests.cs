@@ -102,6 +102,53 @@ public sealed class PartyTeardownTests : IDisposable
         Assert.Empty(await db.PartyUploadItems.ToListAsync());
     }
 
+    // The defect this closes, found in production: tearing down eight parties
+    // trashed five photographs out of five albums that had nothing to do with
+    // those evenings. A FileItem is the LOGICAL file, so a moderation decision
+    // taken inside one party was destroying media the owner had deliberately
+    // filed somewhere else.
+    [Fact]
+    public async Task A_Rejected_Upload_The_Owner_Also_Filed_Elsewhere_Is_Kept()
+    {
+        var party = await SeedRunningPartyAsync();
+
+        // Two guest uploads the host never let through. One lives only in the
+        // party; the other the owner also put in an album of their own.
+        var onlyHere = await SeedGuestUploadAsync(party, PartyUploadStatuses.RemovedFromAlbum);
+        var alsoElsewhere = await SeedGuestUploadAsync(party, PartyUploadStatuses.RemovedFromAlbum);
+
+        var otherAlbumId = (await (await party.Owner.PostAsJsonAsync(
+                "/api/albums", new { name = "Un altro album" }))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        (await party.Owner.PostAsJsonAsync(
+            $"/api/albums/{otherAlbumId}/items", new { fileItemId = alsoElsewhere }))
+            .EnsureSuccessStatusCode();
+
+        await TearDownAsync(party);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // The one that lived only in the party still goes to Trash: the rule is
+        // unchanged where nothing else laid claim to the file.
+        var doomed = await db.FileItems.IgnoreQueryFilters().SingleAsync(f => f.Id == onlyHere);
+        Assert.NotNull(doomed.DeletedAt);
+
+        // The one with another home survives, and is still IN that home.
+        var kept = await db.FileItems.IgnoreQueryFilters().SingleAsync(f => f.Id == alsoElsewhere);
+        Assert.Null(kept.DeletedAt);
+        var otherAlbumNow = await db.AlbumItems
+            .Where(ai => ai.AlbumId == otherAlbumId)
+            .Join(db.FileItems.Where(f => f.DeletedAt == null),
+                ai => ai.FileItemId, f => f.Id, (ai, f) => f.Id)
+            .ToListAsync();
+        Assert.Equal(new[] { alsoElsewhere }, otherAlbumNow);
+
+        // Survival is not the party keeping a claim on it: the provenance goes
+        // either way, which is what leaves the album self-contained.
+        Assert.Empty(await db.PartyUploadItems.ToListAsync());
+    }
+
     [Fact]
     public async Task The_Album_Survives_Self_Contained_And_Every_Party_Row_Is_Gone()
     {
