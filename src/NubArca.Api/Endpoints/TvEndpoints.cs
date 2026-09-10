@@ -162,6 +162,35 @@ public static class TvEndpoints
             return Results.Ok(new TvPairedDeviceDto(sessionId));
         }).WithName("GetTvPairedDevice").RequirePermission(Permissions.TvManage);
 
+        // A television asking for permission to SHOW the party it is assigned to.
+        //
+        // Under /api/tv because that is where its session cookie is sent, and
+        // authenticated by NOTHING ELSE: no owner cookie, no party token, and
+        // no body. The client cannot name a party — the assignment is
+        // server-side state, and a link id is an internal identifier no caller
+        // is trusted with. A television that is GENERAL, unassigned, or pointed
+        // at a party that has ended gets nothing.
+        app.MapPost("/api/tv/party-display/grant", async (
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyDisplayService display,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var result = await display.MintAsync(
+                httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            return result.Error switch
+            {
+                NubArca.Api.Party.PartyDisplayGrantError.NoSession => Results.Unauthorized(),
+                // Paired, but there is nothing to show. Not an error the
+                // television can fix by retrying with different input — it has
+                // none — so it is a plain 404 and the shell waits for the
+                // assignment to change.
+                NubArca.Api.Party.PartyDisplayGrantError.NotAssigned => Results.NotFound(),
+                _ => Results.Ok(new NubArca.Api.Party.PartyDisplayGrantDto(
+                    result.Token!, result.ExpiresAt!.Value)),
+            };
+        }).WithName("MintPartyDisplayGrant");
+
         app.MapDelete("/api/tv/session", async (
             HttpContext httpContext,
             [FromServices] ITvPairingService tv,

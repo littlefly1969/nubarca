@@ -30,7 +30,7 @@
     "20260905074138_AddPartyPrintStudio": {
       "automated": true,
       "previousApplicationCompatible": true,
-      "reason": "Creates only the three new party-print tables \u2014 profiles, idempotency requests, and the per-job source rows; the previous application neither reads nor writes them, and no existing table is altered."
+      "reason": "Creates only the three new party-print tables — profiles, idempotency requests, and the per-job source rows; the previous application neither reads nor writes them, and no existing table is altered."
     },
     "20260905080901_AddPartyPrintCapabilityToken": {
       "automated": true,
@@ -40,7 +40,7 @@
     "20260905191336_AddPartyPrintPerGuestBudget": {
       "automated": true,
       "previousApplicationCompatible": true,
-      "reason": "Adds four NOT NULL integer columns with defaultValue 0 \u2014 two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
+      "reason": "Adds four NOT NULL integer columns with defaultValue 0 — two per-guest ceilings on party_print_profiles and two per-guest print counters on party_participants. Existing rows take the default, which reads as \"no per-guest limit\" and \"nothing printed yet\"; the previous application neither reads nor writes any of them, so rolling back to it leaves the columns at values the new schema also accepts."
     },
     "20260905231112_AddPartyGameRuntime": {
       "automated": true,
@@ -96,6 +96,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one nullable uuid column (MediaFileItemId) to party_guest_contents, one lookup index on it and one on the existing party_challenges.MediaFileItemId, and two foreign keys to file_items with ON DELETE SET NULL. Nothing is backfilled and no existing value is rewritten. Before the party_challenges constraint is created the migration checks that every existing activity reference names a file_items row, and if one does not it raises an explicit exception inside its transaction, leaving the schema untouched; it never nulls or repairs such a reference itself. The previous application never reads or writes party_guest_contents.MediaFileItemId, so its inserts take null; it writes party_challenges.MediaFileItemId only after confirming that the owner's file exists, which the new constraint accepts; and when it permanently purges a file the database now nulls the reference instead of leaving it dangling, which that application already renders as an activity without a picture. Rolling back to it therefore leaves only values the new schema also accepts."
+    },
+    "20260910231201_AddPartyDisplayGrant": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only the new party_display_grants table with its primary key, one unique index on the token hash, three lookup indexes, a cascading foreign key to tv_sessions and a restricting one to party_album_links. No existing table, column, constraint or index changes. The previous application neither reads nor writes it, and it is written only by the display-grant mint, which no older client calls. Rolling back leaves at most a few short-lived rows the old application ignores; nothing else references the table, so its presence changes no existing query plan or constraint."
     }
   }
 }

@@ -785,6 +785,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IAdminUserService, AdminUserService>();
     builder.Services.AddScoped<ITvPairingService, TvPairingService>();
     builder.Services.AddScoped<ITvDisplayAssignmentService, TvDisplayAssignmentService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyDisplayService, NubArca.Api.Party.PartyDisplayService>();
     builder.Services.AddScoped<ITvMediaService, TvMediaService>();
     builder.Services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
     builder.Services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();
@@ -1491,6 +1492,7 @@ app.MapShareLinkEndpoints();
 app.MapPartyEndpoints();
 app.MapPartyOwnerEndpoints();
 app.MapPartyGameEndpoints();
+app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();
 app.MapPartyPrintOwnerEndpoints();
 

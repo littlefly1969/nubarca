@@ -384,6 +384,26 @@ public sealed class PartyLinkService : IPartyLinkService
         return result;
     }
 
+    public async Task<PartyAccess?> ResolveDisplayAsync(
+        Guid partyAlbumLinkId, CancellationToken cancellationToken = default)
+    {
+        // Selected by id rather than by token hash; everything after that is
+        // the SAME path a guest takes. A display that could see a party a guest
+        // could not would be a hole, and reproducing the policy here is how
+        // that hole gets made.
+        var link = await _db.PartyAlbumLinks
+            .AsNoTracking()
+            .Where(p => p.Id == partyAlbumLinkId)
+            .Select(p => new LinkRow(
+                p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
+                p.RequireUploadApproval,
+                p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
+    }
+
     public async Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default)
     {
