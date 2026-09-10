@@ -612,10 +612,12 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   check honest: a live capability outside the party is not a capability, so no
   endpoint grew an `if (status …)` and a surface the browser stops drawing cannot
   be reached by typing its route. `/items` and every media byte obey it too —
-  hiding a gallery in a browser is not a rule. The ONE exception is the album's
-  CHOSEN cover, which is the invitation's hero and the only file id that resolves
-  before the party; an album with no chosen cover gets a branded composition, not
-  a broken frame. Three things stay separate throughout: status is the phase, the
+  hiding a gallery in a browser is not a rule. The ONE exception on the album
+  route is the album's CHOSEN cover, which is the invitation's hero when the
+  invitation has no photograph of its own and the only ALBUM file id that
+  resolves before the party; a slot's own photograph is not album media and is
+  reached only through its slot. With neither, the invitation gets a branded
+  composition, not a broken frame. Three things stay separate throughout: status is the phase, the
   link is the capability and its revocation, and the windows are product
   decisions — a status never revokes a token, and a token is never invalid merely
   because the party has not started or has finished.
@@ -641,6 +643,38 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   SERVER's, each slot carries its OWN version (editing the menu never contends
   with renaming the party), and a slot that is disabled or scoped elsewhere is
   ABSENT from the guest context rather than sent with a flag to respect.
+- **A Party feature may REFERENCE an owner's file, and a reference is not album
+  membership.** `PartyGuestContent.MediaFileItemId` (one photograph per slot)
+  and `PartyChallenge.MediaFileItemId` point at the owner's ordinary `FileItem`.
+  There is no Party media library, no hidden album, and `AlbumItem` gained no
+  flag: a row still means "this file is in this album", so a menu graphic
+  uploaded for the party lands in the owner's library through the ordinary
+  upload and in NO album, and the slideshow, gallery, TV, shares, exports and
+  downloads never see it. Eligibility is ONE rule, `PartyMediaReference`:
+  owner-owned, not in Trash, not in the Private Vault, and a SERVER-DETECTED
+  image — `MediaCategory` image AND a non-null `DetectedContentType`, because
+  ingestion takes the category from the client MIME when the sniffer recognises
+  nothing, so a text file sent as `image/png` has the category but not the
+  detection. The rule is asked when the owner writes a reference and again on
+  every guest request, so a trashed or vaulted file stops being served with
+  nobody rewriting anything; a reference a slot ALREADY holds is not re-judged
+  on save, so a host can still fix a typo after the photo went to Trash. Three
+  things are easy to undo by accident. **The token is not a grant over the
+  owner's files**: a slot's photograph is served only by
+  `/api/party/{token}/content/{kind}/media`, which re-resolves the slot on the
+  guest's CURRENT surface; an activity's by `/challenges/{id}/media` behind a
+  running game (and on the owner's TV by its album's game, never by
+  `/api/tv/media/{file}`, which serves only TV albums); and
+  `/api/party/{token}/media/{fileId}` keeps meaning album media and refuses the
+  same file. **Authorization and bytes are separate**: each route authorizes
+  through its relation and then calls the one `ServeAuthorizedDerivativeAsync`
+  — derived, metadata-stripped, never an original, never an attachment — and the
+  guest DTO (`PartyGuestContentViewDto`) carries an address, never the file id.
+  And **both foreign keys are `ON DELETE SET NULL`**: a permanent purge nulls the
+  reference instead of being blocked by it, and a teardown deletes the
+  references and never the owner's files. On the invitation, the hero is the
+  invitation's own photograph, then the album's chosen cover, then a
+  composition.
 - **Tearing a party down keeps its album, and finalizes the guests' media
   first.** Owner-added media always survives — it was never a guest contribution.
   A guest upload survives if and only if its final `PartyUploadItem.Status` is

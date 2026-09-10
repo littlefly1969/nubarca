@@ -44,6 +44,21 @@ public class PartyGuestContent
     public string ContentJson { get; set; } = "{}";
 
     /// <summary>
+    /// The one photograph this slot may carry — the menu's food detail, the
+    /// venue's front door — or null.
+    ///
+    /// <para>A REFERENCE to the owner's ordinary <see cref="FileItem"/>: not a
+    /// copy, and not an album membership. It lives beside
+    /// <see cref="ContentJson"/> rather than inside it because it is a relation
+    /// the database holds to account — it becomes null when the file is
+    /// permanently deleted — and text a payload validator re-serializes is not.
+    /// Whether a guest may SEE it is decided on every request by
+    /// <c>PartyMediaReference</c>: a file sent to Trash or into the Private
+    /// Vault keeps its id here and simply stops being served.</para>
+    /// </summary>
+    public Guid? MediaFileItemId { get; set; }
+
+    /// <summary>
     /// Optimistic concurrency for THIS slot.
     ///
     /// <para>Its own, not the root's: editing the menu and renaming the party

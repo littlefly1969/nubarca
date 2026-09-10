@@ -1320,7 +1320,7 @@
 
 .party-after-cta:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 
-/* --- Typed content: text, and only text -------------------------------- */
+/* --- Typed content: text, and at most one photograph per slot ----------- */
 
 .party-content {
   display: flex;
@@ -1357,6 +1357,66 @@
 
 .party-menu-section { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.3rem; }
 .party-menu-section ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* A slot's photograph sits above its words, full width on a phone. It is a
+   picture and nothing else: no link, no zoom, no download. */
+.party-content-media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 1rem;
+  margin-bottom: 0.35rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* The menu is a CARD: its photograph is the lid, the courses are the page. Without
+   a photograph it is the same card with the words alone, never a bare list. */
+.party-content-block--menu {
+  gap: 0;
+  border-radius: 1.25rem;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.party-content-media--menu {
+  aspect-ratio: 4 / 3;
+  border-radius: 0;
+  margin: 0;
+}
+
+.party-menu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.1rem 1.1rem 1.25rem;
+}
+
+.party-menu-body h3 {
+  font-size: 1.05rem !important;
+  letter-spacing: 0.22em !important;
+  opacity: 0.9 !important;
+}
+
+.party-menu-body .party-menu-section .party-content-strong {
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.party-menu-body .party-menu-section ul { list-style: none; padding-left: 0; }
+
+/* The thank-you's photograph leads the After surface the way the invitation's
+   leads the Before one. */
+.party-after-cover {
+  width: min(100%, 20rem);
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 1.25rem;
+  margin-bottom: 0.75rem;
+}
 
 /* --- The party moving under a guest who is reading --------------------- */
 

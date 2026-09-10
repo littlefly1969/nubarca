@@ -6,6 +6,10 @@ import {
 } from '@nubarca/api-client';
 import { Modal } from '../components/Overlay';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
+import {
+  PartyImageUploadButton, partyImageUploadErrorKey,
+  type PartyImageChoice, type PartyImageUploadError,
+} from '../party/PartyImageField';
 import { useI18n, type MessageKey } from '../i18n';
 import './PartyDeck.css';
 
@@ -107,7 +111,19 @@ export function PartyChallengeComposer({
     [draft, initial],
   );
   const activityValid = draft.title.trim().length > 0 && draft.body.trim().length > 0;
-  const selectedMedia = media.find((x) => x.fileItemId === draft.mediaFileItemId);
+  // A picture need not be one of the album's. The host may upload a graphic
+  // here, or the activity may already carry one chosen before: it is the
+  // activity's picture all the same, and the grid and the preview show it —
+  // without it ever joining the album or the slideshow.
+  const [extra, setExtra] = useState<PartyImageChoice | null>(() =>
+    challenge?.mediaFileItemId && challenge.mediaUrl
+      && !media.some((x) => x.fileItemId === challenge.mediaFileItemId)
+      ? { fileItemId: challenge.mediaFileItemId, previewUrl: challenge.mediaUrl }
+      : null);
+  const [uploadError, setUploadError] = useState<PartyImageUploadError | null>(null);
+  const selectedPreview =
+    media.find((x) => x.fileItemId === draft.mediaFileItemId)?.thumbnailUrl
+    ?? (extra && extra.fileItemId === draft.mediaFileItemId ? extra.previewUrl : null);
   const index = STEPS.indexOf(step);
 
   const close = () => {
@@ -249,7 +265,7 @@ export function PartyChallengeComposer({
 
           <div className="field">
             <span className="field__label">{t('partyGame.photo')}</span>
-            {media.length === 0 ? (
+            {media.length === 0 && !extra ? (
               <p className="field__help">{t('partyComposer.photoEmpty')}</p>
             ) : (
               // A grid of the album's own photographs. Choosing a picture from a
@@ -266,6 +282,20 @@ export function PartyChallengeComposer({
                     {t('partyGame.noPhoto')}
                   </button>
                 </li>
+                {extra && (
+                  <li key={extra.fileItemId}>
+                    <button
+                      type="button"
+                      className={`party-photo-choice${draft.mediaFileItemId === extra.fileItemId ? ' is-selected' : ''}`}
+                      aria-pressed={draft.mediaFileItemId === extra.fileItemId}
+                      aria-label={t('partyContent.image')}
+                      data-testid="party-photo-extra"
+                      onClick={() => set('mediaFileItemId', extra.fileItemId)}
+                    >
+                      <img src={extra.previewUrl} alt="" loading="lazy" />
+                    </button>
+                  </li>
+                )}
                 {media.map((item) => (
                   <li key={item.fileItemId}>
                     <button
@@ -280,6 +310,25 @@ export function PartyChallengeComposer({
                   </li>
                 ))}
               </ul>
+            )}
+            {/* A picture that is not in the album — a graphic, a poster — goes
+                to the host's library through the ordinary upload and is filed
+                nowhere, so it can never turn up in the slideshow. */}
+            <div className="party-photo-upload">
+              <PartyImageUploadButton
+                testId="party-photo-upload"
+                disabled={saving}
+                onUploaded={(choice) => {
+                  setUploadError(null);
+                  setExtra(choice);
+                  set('mediaFileItemId', choice.fileItemId);
+                }}
+                onError={setUploadError}
+              />
+              <span className="field__help">{t('partyContent.imageHelp')}</span>
+            </div>
+            {uploadError && (
+              <p className="inline-error" role="alert">{t(partyImageUploadErrorKey(uploadError))}</p>
             )}
           </div>
 
@@ -370,7 +419,7 @@ export function PartyChallengeComposer({
               kind: draft.kind,
               title: draft.title,
               body: draft.body,
-              mediaUrl: selectedMedia?.thumbnailUrl ?? null,
+              mediaUrl: selectedPreview ?? null,
               durationSeconds: draft.durationSeconds,
             }}
           />

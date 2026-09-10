@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { installFetchMock, jsonResponse } from '../test-utils';
@@ -288,5 +288,155 @@ describe('unavailable', () => {
     expect(await screen.findByText(/non .* disponibile/i)).toBeInTheDocument();
     expect(screen.queryByTestId('party-before')).not.toBeInTheDocument();
     expect(screen.queryByTestId('party-after')).not.toBeInTheDocument();
+  });
+});
+
+// A slot's one photograph. The SERVER decides whether there is one and where it
+// lives — an address on this token, never a file id — so what is checked here is
+// the rendering: where it goes, that it is drawn once, that it never becomes a
+// download, and that a picture which fails to load leaves no hole.
+describe('a slot’s photograph', () => {
+  const MENU_MEDIA = `/api/party/${TOKEN}/content/menu/media?v=2`;
+  const withMedia = (kind: string, content: Record<string, unknown>, mediaUrl: string | null) =>
+    ({ ...slot(kind, content), mediaUrl });
+
+  it('puts the menu in a card with its photograph on top', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [withMedia('menu', {
+          intro: 'Cena in giardino',
+          sections: [{ title: 'Antipasti', items: ['Bruschetta'] }],
+        }, MENU_MEDIA)],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    const menu = document.querySelector<HTMLElement>('[data-content="menu"]')!;
+    const image = within(menu).getByTestId('party-content-media');
+    expect(image).toHaveAttribute('src', MENU_MEDIA);
+    // The picture first, then the menu itself.
+    expect(menu.firstElementChild).toBe(image);
+    expect(within(menu).getByText('Antipasti')).toBeInTheDocument();
+    expect(within(menu).getByText('Bruschetta')).toBeInTheDocument();
+  });
+
+  it('keeps a menu without a photograph a perfectly good menu', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [slot('menu', { intro: 'Cena', sections: [{ title: 'Primi', items: ['Risotto'] }] })],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    const menu = document.querySelector<HTMLElement>('[data-content="menu"]')!;
+    expect(menu.querySelector('img')).toBeNull();
+    expect(within(menu).getByText('Risotto')).toBeInTheDocument();
+  });
+
+  it('draws another slot’s photograph only when it has one', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [
+          withMedia('location', { venueName: 'Villa Aurora', address: 'Via Roma 1' },
+            `/api/party/${TOKEN}/content/location/media?v=1`),
+          slot('info', { title: 'Parcheggio', body: 'In fondo alla via' }),
+        ],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    expect(document.querySelector('[data-content="location"] img'))
+      .toHaveAttribute('src', `/api/party/${TOKEN}/content/location/media?v=1`);
+    expect(document.querySelector('[data-content="info"] img')).toBeNull();
+  });
+
+  it('draws the invitation’s own photograph once, as the hero', async () => {
+    const INVITATION_MEDIA = `/api/party/${TOKEN}/content/invitation/media?v=3`;
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        // The server has already put the invitation's photograph ahead of the
+        // album cover; the page follows it and does not draw it twice.
+        coverUrl: INVITATION_MEDIA,
+        content: [withMedia('invitation', { headline: 'Vieni!' }, INVITATION_MEDIA)],
+      })),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('party-invitation-hero')).toHaveAttribute('src', INVITATION_MEDIA);
+    expect(document.querySelectorAll(`img[src="${INVITATION_MEDIA}"]`)).toHaveLength(1);
+    expect(screen.getByText('Vieni!')).toBeInTheDocument();
+  });
+
+  it('shows the album’s chosen cover when the invitation has no photograph of its own', async () => {
+    const COVER = `/api/party/${TOKEN}/media/f1/preview`;
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        coverUrl: COVER,
+        content: [slot('invitation', { headline: 'Vieni!' })],
+      })),
+    });
+    render(page());
+
+    expect(await screen.findByTestId('party-invitation-hero')).toHaveAttribute('src', COVER);
+    expect(screen.queryByTestId('party-content-media')).not.toBeInTheDocument();
+  });
+
+  it('leaves the words and no broken frame when a photograph cannot be loaded', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        coverUrl: `/api/party/${TOKEN}/content/invitation/media?v=1`,
+        content: [withMedia('menu', { intro: 'Cena in giardino', sections: [] }, MENU_MEDIA)],
+      })),
+    });
+    render(page());
+
+    // Sent to Trash between the page loading and the picture arriving.
+    fireEvent.error(await screen.findByTestId('party-content-media'));
+    expect(screen.queryByTestId('party-content-media')).not.toBeInTheDocument();
+    expect(screen.getByText('Cena in giardino')).toBeInTheDocument();
+
+    fireEvent.error(screen.getByTestId('party-invitation-hero'));
+    expect(screen.queryByTestId('party-invitation-hero')).not.toBeInTheDocument();
+    expect(document.querySelector('.party-invitation-cover--blank')).toBeInTheDocument();
+  });
+
+  it('never turns a content photograph into a download', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [
+          withMedia('location', { venueName: 'Villa Aurora', address: 'Via Roma 1' },
+            `/api/party/${TOKEN}/content/location/media?v=1`),
+          withMedia('menu', { intro: 'Cena', sections: [] }, MENU_MEDIA),
+        ],
+      })),
+    });
+    render(page());
+
+    const content = await screen.findByTestId('party-content');
+    expect(content.querySelector('a[download]')).toBeNull();
+    // The only link is the maps link built from the address — nothing points
+    // at a photograph, and there is no button to save one.
+    const hrefs = Array.from(content.querySelectorAll('a')).map((a) => a.getAttribute('href') ?? '');
+    expect(hrefs.some((href) => href.includes('/content/'))).toBe(false);
+    expect(within(content).queryByRole('button')).toBeNull();
+  });
+
+  it('gives the thank-you its photograph afterwards', async () => {
+    const THANKS = `/api/party/${TOKEN}/content/thank-you/media?v=1`;
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        phase: 'after',
+        library: { available: false, accessEndsAt: null },
+        content: [withMedia('thank-you', { headline: 'Che serata!' }, THANKS)],
+      })),
+    });
+    render(page());
+
+    const after = await screen.findByTestId('party-after');
+    expect(within(after).getByTestId('party-content-media')).toHaveAttribute('src', THANKS);
+    expect(within(after).getByText('Che serata!')).toBeInTheDocument();
   });
 });

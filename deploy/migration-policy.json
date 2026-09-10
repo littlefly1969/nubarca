@@ -91,6 +91,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Creates only the new party_guest_contents table with its composite primary key and one restricting foreign key to parties. No existing table, column, constraint or index changes, and no data is written. The previous application neither reads nor writes it, so rolling back to that application leaves rows it simply ignores and writes nothing the new schema could reject."
+    },
+    "20260910171228_AddPartyMediaReferences": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds one nullable uuid column (MediaFileItemId) to party_guest_contents, one lookup index on it and one on the existing party_challenges.MediaFileItemId, and two foreign keys to file_items with ON DELETE SET NULL. Nothing is backfilled and no existing value is rewritten. Before the party_challenges constraint is created the migration checks that every existing activity reference names a file_items row, and if one does not it raises an explicit exception inside its transaction, leaving the schema untouched; it never nulls or repairs such a reference itself. The previous application never reads or writes party_guest_contents.MediaFileItemId, so its inserts take null; it writes party_challenges.MediaFileItemId only after confirming that the owner's file exists, which the new constraint accepts; and when it permanently purges a file the database now nulls the reference instead of leaving it dangling, which that application already renders as an activity without a picture. Rolling back to it therefore leaves only values the new schema also accepts."
     }
   }
 }

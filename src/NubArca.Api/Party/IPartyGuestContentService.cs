@@ -4,14 +4,19 @@ using NubArca.Api.Domain;
 namespace NubArca.Api.Party;
 
 /// <summary>
-/// One slot as the OWNER edits it: what it says, whether it is on, and which
-/// surfaces it belongs to.
+/// One slot as the OWNER edits it: what it says, whether it is on, which
+/// surfaces it belongs to, and the one photograph it may carry.
 ///
 /// <para>Every kind is always returned, whether or not the host has written it
 /// yet — a slot they have never touched comes back at version 0 with the
 /// product's own default visibility. That keeps the SERVER the source of truth
 /// for what "the menu belongs before and during" means, and leaves the editor a
 /// renderer rather than a second opinion.</para>
+///
+/// <para><c>MediaFileItemId</c> is the reference as stored. <c>MediaUrl</c> is
+/// the owner's own derived preview of it, present only while the file still
+/// qualifies as a Party reference — so a slot whose photograph went to Trash
+/// says so by carrying an id and no picture, rather than by losing the id.</para>
 /// </summary>
 public sealed record PartyGuestContentDto(
     string Kind,
@@ -20,7 +25,28 @@ public sealed record PartyGuestContentDto(
     bool VisibleLive,
     bool VisibleAfter,
     JsonElement Content,
-    int Version);
+    int Version,
+    Guid? MediaFileItemId = null,
+    string? MediaUrl = null);
+
+/// <summary>
+/// One slot as a GUEST receives it: the same words, and the photograph as an
+/// address on the guest's own token rather than as the owner's file id.
+///
+/// <para>A separate projection, not a filtered copy of the owner's: the guest
+/// has no use for the file id and no way to tell whether it is still servable,
+/// so the server says both at once — <c>MediaUrl</c> is present exactly when
+/// there is a picture to show.</para>
+/// </summary>
+public sealed record PartyGuestContentViewDto(
+    string Kind,
+    bool Enabled,
+    bool VisibleBefore,
+    bool VisibleLive,
+    bool VisibleAfter,
+    JsonElement Content,
+    int Version,
+    string? MediaUrl);
 
 /// <summary>What the owner writes into one slot.</summary>
 public sealed record PartyGuestContentWrite(
@@ -29,7 +55,8 @@ public sealed record PartyGuestContentWrite(
     bool VisibleLive,
     bool VisibleAfter,
     JsonElement? Content,
-    int Version);
+    int Version,
+    Guid? MediaFileItemId = null);
 
 public enum PartyGuestContentOutcome
 {
@@ -43,6 +70,13 @@ public enum PartyGuestContentOutcome
 
     /// <summary>Wrong shape for this kind, or past one of its stated limits.</summary>
     InvalidPayload,
+
+    /// <summary>
+    /// The photograph is not one this owner may put on a party: missing,
+    /// somebody else's, in Trash, in the Private Vault, or not an image. ONE
+    /// outcome for all of them, so the answer never says whether a file exists.
+    /// </summary>
+    InvalidMedia,
 
     /// <summary>Somebody else edited this slot since the caller read it.</summary>
     VersionConflict,
@@ -71,7 +105,8 @@ public interface IPartyGuestContentService
     ///
     /// <para>The version is the SLOT's own, never the party's: editing the menu
     /// and renaming the party are unrelated decisions, and making them contend
-    /// would lose somebody's menu because the date moved.</para>
+    /// would lose somebody's menu because the date moved. Changing the
+    /// photograph is an edit of the slot like any other.</para>
     /// </summary>
     Task<PartyGuestContentResult> UpsertAsync(
         Guid ownerUserId,
@@ -85,6 +120,27 @@ public interface IPartyGuestContentService
     /// phase, in product order. Read-only, and it never reveals a slot the host
     /// has turned off or scoped to another surface.
     /// </summary>
-    Task<IReadOnlyList<PartyGuestContentDto>> ForGuestAsync(
-        Guid partyId, PartyGuestPhase phase, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PartyGuestContentViewDto>> ForGuestAsync(
+        Guid partyId,
+        Guid ownerUserId,
+        PartyGuestPhase phase,
+        string token,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The file behind one slot's photograph, IF a guest standing in this phase
+    /// may see it: the slot exists, is enabled and visible here, holds a
+    /// reference, and that reference is still eligible. Null otherwise, and the
+    /// caller answers every null with the same 404.
+    ///
+    /// <para>This is the whole authority a party token has over an owner's file:
+    /// it reaches exactly the files a visible slot references, and none of the
+    /// owner's others however well their ids are guessed.</para>
+    /// </summary>
+    Task<Guid?> GuestMediaFileAsync(
+        Guid partyId,
+        Guid ownerUserId,
+        PartyGuestPhase phase,
+        string kind,
+        CancellationToken cancellationToken = default);
 }

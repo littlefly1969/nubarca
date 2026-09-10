@@ -98,16 +98,32 @@ public static class PartyEndpoints
                 cancellationToken: cancellationToken);
 
             var enc = Uri.EscapeDataString(token);
+            var content = await guestContent.ForGuestAsync(
+                access.PartyId, access.OwnerUserId, access.Experience.Phase, token, cancellationToken);
+
             // The cover is the invitation's hero as much as the gallery's face.
-            // Before the party it is the one file id that resolves at all, and
-            // only when the host CHOSE it: a photograph nominated to represent
-            // the album is a different thing from whichever one sorts first, and
-            // an invitation with no chosen cover gets a composition instead.
+            // Before the party it is the one ALBUM file id that resolves at all,
+            // and only when the host CHOSE it: a photograph nominated to
+            // represent the album is a different thing from whichever one sorts
+            // first, and an invitation with no chosen cover gets a composition.
             var heroCover = access.Experience.AllowsAlbumMedia
                 ? header.CoverFileItemId
                 : header.ChosenCoverFileItemId;
             var coverUrl = heroCover is Guid cover
                 ? $"/api/party/{enc}/media/{cover}/preview" : null;
+
+            // On the INVITATION the hero has one more source, and it comes first:
+            // the photograph the host put on the invitation itself. It is a Party
+            // reference, so it may be a file that is in no album at all, and it
+            // arrives as the invitation's own relation-scoped address — never
+            // through the album route, which would rightly refuse it. Without
+            // one, the chosen cover; without that, the page's composition.
+            if (access.Experience.Phase == NubArca.Api.Domain.PartyGuestPhase.Before)
+            {
+                coverUrl = content
+                    .FirstOrDefault(c => c.Kind == NubArca.Api.Domain.PartyGuestContentKinds.Invitation)
+                    ?.MediaUrl ?? coverUrl;
+            }
 
             // A capability the HOST is no longer permitted to run, or that does
             // not belong to this phase, is ABSENT from the hub — never a
@@ -138,9 +154,6 @@ public static class PartyEndpoints
                     .GetRequiredService<NubArca.Api.Party.IPartyPrintUrlProvider>()
                     .GetAsync(access.PartyAlbumLinkId, access.MainAlbumId, cancellationToken);
             }
-
-            var content = await guestContent.ForGuestAsync(
-                access.PartyId, access.Experience.Phase, cancellationToken);
 
             return Results.Ok(new NubArca.Api.Party.PartyGuestContextDto(
                 partyTitle,
@@ -251,25 +264,57 @@ public static class PartyEndpoints
             return result is null ? Results.NotFound() : Results.Ok(result);
         }).WithName("UnvotePartyChallenge").RequireRateLimiting(PartyMessageRateLimitPolicy);
 
+        // An activity's picture, reached THROUGH the activity. It is a Party
+        // reference rather than album media, so it deliberately does not go
+        // through the album route: the owner may give an activity any of their
+        // own images, and one that is in no album must work here while staying
+        // unreachable there. Outside a running game — no Games capability, which
+        // already folds in the phase — there is nothing to reach it through.
         app.MapGet("/api/party/{token}/challenges/{challengeId:guid}/media", async (
             string token, Guid challengeId, HttpContext httpContext,
-            [FromServices] AppDbContext db,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
-            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] NubArca.Api.Party.IPartyChallengeService challenges,
             [FromServices] IFileThumbnailService thumbnails,
             [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
             CancellationToken cancellationToken) =>
         {
             var access = await party.ResolvePublicAsync(token, cancellationToken);
             if (access is null || !access.Capabilities.Games) return Results.NotFound();
-            var fileId = await db.PartyChallenges.AsNoTracking()
-                .Where(x => x.Id == challengeId && x.AlbumId == access.MainAlbumId && x.IsEnabled)
-                .Select(x => x.MediaFileItemId).FirstOrDefaultAsync(cancellationToken);
+            var fileId = await challenges.GuestMediaFileAsync(access, challengeId, cancellationToken);
             return fileId is Guid id
-                ? await ServePartyMediaAsync(token, id, "preview", httpContext, party, partyMedia,
-                    thumbnails, stripper, cancellationToken)
+                ? await ServeAuthorizedDerivativeAsync(
+                    access.OwnerUserId, id, NubArca.Api.Party.PartyMediaKind.Image, "preview",
+                    httpContext, thumbnails, stripper, cancellationToken)
                 : Results.NotFound();
         }).WithName("GetPartyChallengeMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
+
+        // A guest-content slot's photograph — the menu's, the invitation's —
+        // reached THROUGH the slot. A party token is not a grant over the owner's
+        // files: it reaches exactly the file a slot on the guest's CURRENT
+        // surface references, and none of the owner's others, however well their
+        // ids are guessed. A slot that is missing, disabled, scoped to another
+        // phase or without a photograph, and a photograph that stopped
+        // qualifying, are all the same generic 404. Only the derived preview is
+        // served: seeing a picture on the menu is not permission to download
+        // the owner's original.
+        app.MapGet("/api/party/{token}/content/{kind}/media", async (
+            string token, string kind, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyGuestContentService guestContent,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var fileId = await guestContent.GuestMediaFileAsync(
+                access.PartyId, access.OwnerUserId, access.Experience.Phase, kind, cancellationToken);
+            return fileId is Guid id
+                ? await ServeAuthorizedDerivativeAsync(
+                    access.OwnerUserId, id, NubArca.Api.Party.PartyMediaKind.Image, "preview",
+                    httpContext, thumbnails, stripper, cancellationToken)
+                : Results.NotFound();
+        }).WithName("GetPartyContentMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/items", async (
             string token,
@@ -1243,6 +1288,7 @@ public static class PartyEndpoints
         NubArca.Api.Metadata.IImageMetadataStripper stripper,
         CancellationToken cancellationToken)
     {
+        // AUTHORIZATION, album-scoped: a displayable member of THIS album.
         var kind = await partyMedia.GetVisibleMediaKindAsync(
             ownerUserId, albumId, fileId, cancellationToken);
         if (kind is null)
@@ -1250,6 +1296,29 @@ public static class PartyEndpoints
             return Results.NotFound();
         }
 
+        return await ServeAuthorizedDerivativeAsync(
+            ownerUserId, fileId, kind.Value, variant, httpContext,
+            thumbnails, stripper, cancellationToken);
+    }
+
+    /// <summary>
+    /// The BYTES, for a file some relation has ALREADY authorized — album
+    /// membership, or a Party reference such as a menu's photograph or an
+    /// activity's picture. Authorization and byte serving are separate on
+    /// purpose: there are several ways to be allowed to see a file and exactly
+    /// one way its bytes leave the server — a derived rendition from the
+    /// ordinary thumbnail pipeline, metadata-stripped, never the original.
+    /// </summary>
+    internal static async Task<IResult> ServeAuthorizedDerivativeAsync(
+        Guid ownerUserId,
+        Guid fileId,
+        NubArca.Api.Party.PartyMediaKind kind,
+        string variant,
+        HttpContext httpContext,
+        IFileThumbnailService thumbnails,
+        NubArca.Api.Metadata.IImageMetadataStripper stripper,
+        CancellationToken cancellationToken)
+    {
         // Videos are view-only posters; no download.
         if (kind == NubArca.Api.Party.PartyMediaKind.Video && variant == "download")
         {

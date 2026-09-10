@@ -131,5 +131,18 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
             .WithMany()
             .HasForeignKey(c => c.PartyId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // The slot's photograph is a REFERENCE to the owner's ordinary file, and
+        // unlike the party's own rows it gives way to that file's lifecycle
+        // instead of blocking it. Every purge trigger ends in one DELETE of the
+        // file row, and SET NULL is what lets that DELETE succeed while the slot
+        // keeps its words. Trash and the Private Vault leave the id in place;
+        // they are enforced where the bytes are served.
+        builder.HasOne<FileItem>()
+            .WithMany()
+            .HasForeignKey(c => c.MediaFileItemId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(c => c.MediaFileItemId)
+            .HasDatabaseName("ix_party_guest_contents_media_file");
     }
 }

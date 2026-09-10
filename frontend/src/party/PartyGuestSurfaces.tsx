@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import type { PartyGuestContext } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
-import { PartyGuestContentSections, partyThankYou } from './PartyGuestContent';
+import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './PartyGuestContent';
 
 // The two surfaces the same QR shows outside the party itself.
 //
@@ -17,14 +18,7 @@ export function PartyBeforeHome({ context }: { context: PartyGuestContext }) {
   return (
     <div className="party-invitation" data-testid="party-before">
       <header className="party-invitation-hero">
-        {/* When there is no cover the hero is a composition rather than a
-            broken frame: an invitation with a hole in it is worse than one
-            without a photograph. */}
-        {context.coverUrl ? (
-          <img className="party-invitation-cover" src={context.coverUrl} alt="" />
-        ) : (
-          <div className="party-invitation-cover party-invitation-cover--blank" aria-hidden="true" />
-        )}
+        <InvitationHero src={context.coverUrl} />
         <p className="party-invitation-eyebrow">{t('partyGuest.invited')}</p>
         <h1 className="party-invitation-title">{context.title}</h1>
         {context.eventStartsAt && (
@@ -38,10 +32,30 @@ export function PartyBeforeHome({ context }: { context: PartyGuestContext }) {
         )}
       </header>
 
-      <PartyGuestContentSections slots={context.content} />
+      {/* The invitation's photograph IS the hero above, so the invitation's
+          section does not draw it a second time. */}
+      <PartyGuestContentSections slots={context.content} heroKind="invitation" />
 
       <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
     </div>
+  );
+}
+
+/**
+ * The invitation's hero. The SERVER has already chosen it — the invitation's
+ * own photograph, else the album's chosen cover — and with neither, or with a
+ * picture that fails to load, it is a composition rather than a broken frame:
+ * an invitation with a hole in it is worse than one without a photograph.
+ */
+function InvitationHero({ src }: { src: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  return src && failed !== src ? (
+    <img
+      className="party-invitation-cover" src={src} alt=""
+      data-testid="party-invitation-hero" onError={() => setFailed(src)}
+    />
+  ) : (
+    <div className="party-invitation-cover party-invitation-cover--blank" aria-hidden="true" />
   );
 }
 
@@ -58,6 +72,7 @@ export function PartyAfterHome({
   return (
     <div className="party-after" data-testid="party-after" data-access={context.accessMode}>
       <header className="party-after-hero">
+        <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" />
         <h1 className="party-after-title">
           {/* The host's own words when they wrote them, and the product's when
               they did not — an After surface is never blank. */}

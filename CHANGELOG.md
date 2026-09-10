@@ -6,6 +6,26 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### A photograph on the menu
+
+- **Every part of the invitation can carry a picture.** The invitation, where it
+  is, the dress code, the menu, a note and the thank-you can each show one. The
+  menu becomes a card — the dish on top, the courses below.
+- **The picture does not have to be in the party's album.** Pick one of the
+  album's photos, or upload a new one: a menu graphic, a map, a poster. An
+  uploaded picture goes into your library like any other file and is never added
+  to the album, so it never turns up in the slideshow or in the guests' gallery.
+- **The invitation can have its own cover.** When it has one it leads the
+  invitation; otherwise the album's chosen cover does, as before.
+- **Games can use any of your pictures**, not only the album's, and the
+  television shows them too.
+- Guests see a picture only on the part of the page it belongs to, and only as a
+  preview — no download, no original, no location data. Knowing the address of
+  any other file gets them nowhere. A picture you move to the Trash simply
+  disappears from the page; deleting it for good leaves the menu or the game in
+  place, without the picture; and tearing a party down never deletes them —
+  they are yours.
+
 ### One QR code, from the invitation to the memories
 
 - **The same QR is the invitation, the party, and the photographs afterwards.**

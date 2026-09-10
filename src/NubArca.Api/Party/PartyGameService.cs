@@ -296,10 +296,16 @@ public sealed class PartyGameService : IPartyGameService
             if (row is not null)
             {
                 phaseEndsAt = row.PhaseEndsAt;
+                // Offered only while the picture still qualifies as a Party
+                // reference — the stage shows an activity whose picture went to
+                // Trash without one, never with a frame that fails to load.
+                var mediaOk = row.MediaFileItemId is Guid mediaId
+                    && await PartyMediaReference.IsEligibleAsync(
+                        _db, access.OwnerUserId, mediaId, cancellationToken);
                 challenge = new PartyChallengePresentationDto(row.Id, row.Title, row.Body, row.Kind,
                     // Token-less sentinel; the endpoint rewrites it against the
                     // caller's own token, exactly as the guest challenge list does.
-                    row.MediaFileItemId is null ? null : $"/api/party/challenge-media/{row.Id}",
+                    mediaOk ? $"/api/party/challenge-media/{row.Id}" : null,
                     row.DurationSeconds, row.VotingMode, row.VoteQuestion);
 
                 if (PartyChallengeVotingModes.CollectsVotes(row.VotingMode))

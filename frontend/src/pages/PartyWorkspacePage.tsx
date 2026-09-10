@@ -230,6 +230,7 @@ export function PartyWorkspacePage() {
         {tab === 'before' && (
           <PartyContentTab
             partyId={party.id}
+            albumId={mainAlbumId}
             slots={contentSlots}
             onSlotSaved={onSlotSaved}
             kinds={['invitation', 'location', 'dress-code', 'menu', 'info']}
@@ -240,6 +241,7 @@ export function PartyWorkspacePage() {
           <div className="party-overview">
             <PartyContentTab
               partyId={party.id}
+              albumId={mainAlbumId}
               slots={contentSlots}
               onSlotSaved={onSlotSaved}
               kinds={['thank-you']}
@@ -270,6 +272,7 @@ export function PartyWorkspacePage() {
                 afterwards — the same cards, scoped to the After surface. */}
             <PartyContentTab
               partyId={party.id}
+              albumId={mainAlbumId}
               slots={contentSlots}
               onSlotSaved={onSlotSaved}
               kinds={['location', 'info']}
@@ -315,9 +318,11 @@ export function PartyWorkspacePage() {
 // is about. It renders the slots it is given rather than inventing any: an
 // untouched slot arrives at version 0 with the product's default visibility.
 function PartyContentTab({
-  partyId, slots, kinds, phases, onSlotSaved,
+  partyId, albumId, slots, kinds, phases, onSlotSaved,
 }: {
   partyId: string;
+  /** The party's album, offered as a place to choose a photograph from — or null. */
+  albumId: string | null;
   slots: readonly PartyGuestContentSlot[];
   kinds: readonly PartyGuestContentKind[];
   phases: readonly ('before' | 'live' | 'after')[];
@@ -332,6 +337,7 @@ function PartyContentTab({
             key={slot.kind}
             slot={slot}
             partyId={partyId}
+            albumId={albumId}
             phases={phases}
             onSaved={onSlotSaved}
           />

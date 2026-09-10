@@ -32,6 +32,11 @@ public sealed class PartyChallengeConfiguration : IEntityTypeConfiguration<Party
         b.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
         b.HasIndex(x => new { x.AlbumId, x.SortOrder, x.Id }).HasDatabaseName("ix_party_challenges_album_order");
         b.HasOne<Album>().WithMany().HasForeignKey(x => x.AlbumId).OnDelete(DeleteBehavior.Restrict);
+        // The activity's picture is a Party REFERENCE to the owner's file — the
+        // same contract as a guest-content slot's photograph. A permanent delete
+        // of the file nulls it and the activity survives without a picture.
+        b.HasOne<FileItem>().WithMany().HasForeignKey(x => x.MediaFileItemId).OnDelete(DeleteBehavior.SetNull);
+        b.HasIndex(x => x.MediaFileItemId).HasDatabaseName("ix_party_challenges_media_file");
     }
 }
 

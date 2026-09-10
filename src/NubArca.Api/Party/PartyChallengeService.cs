@@ -42,7 +42,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
     public async Task<PartyChallengeDto?> CreateAsync(Guid ownerId, Guid albumId, PartyChallengeWriteRequest request, CancellationToken ct = default)
     {
         if (!await OwnsAsync(ownerId, albumId, ct) || !Valid(request)
-            || !await MediaAllowedAsync(ownerId, albumId, request.MediaFileItemId, ct)) return null;
+            || !await MediaAllowedAsync(ownerId, request.MediaFileItemId, ct)) return null;
         var now = Now;
         var order = (await _db.PartyChallenges.Where(x => x.AlbumId == albumId)
             .Select(x => (int?)x.SortOrder).MaxAsync(ct) ?? -1) + 1;
@@ -62,7 +62,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
 
     public async Task<PartyChallengeDto?> UpdateAsync(Guid ownerId, Guid albumId, Guid challengeId, PartyChallengeWriteRequest request, CancellationToken ct = default)
     {
-        if (!Valid(request) || !await MediaAllowedAsync(ownerId, albumId, request.MediaFileItemId, ct)) return null;
+        if (!Valid(request) || !await MediaAllowedAsync(ownerId, request.MediaFileItemId, ct)) return null;
         var row = await _db.PartyChallenges
             .Where(x => x.Id == challengeId && x.AlbumId == albumId
                 && _db.Albums.Any(a => a.Id == albumId && a.OwnerUserId == ownerId))
@@ -130,12 +130,22 @@ public sealed class PartyChallengeService : IPartyChallengeService
         var voted = await _db.PartyChallengeVotes.AsNoTracking()
             .Where(x => x.PartyAlbumLinkId == linkId && x.PartyParticipantId == participantId)
             .Select(x => x.PartyChallengeId).ToListAsync(ct);
-        var items = await _db.PartyChallenges.AsNoTracking()
+        var rows = await _db.PartyChallenges.AsNoTracking()
             .Where(x => x.AlbumId == access.MainAlbumId && x.IsEnabled)
             .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
-            .Select(x => new PartyGuestChallengeDto(x.Id, x.Title, x.Body, x.Kind,
-                x.MediaFileItemId == null ? null : $"/api/party/challenge-media/{x.Id}", voted.Contains(x.Id)))
+            .Select(x => new { x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId })
             .ToListAsync(ct);
+        // A picture is offered only while its file still qualifies: an activity
+        // whose picture went to Trash is listed without one, never with a frame
+        // that would fail to load.
+        var eligible = await PartyMediaReference.EligibleAmongAsync(_db, access.OwnerUserId,
+            rows.Where(x => x.MediaFileItemId is not null).Select(x => x.MediaFileItemId!.Value).ToList(), ct);
+        var items = rows
+            .Select(x => new PartyGuestChallengeDto(x.Id, x.Title, x.Body, x.Kind,
+                x.MediaFileItemId is Guid media && eligible.Contains(media)
+                    ? $"/api/party/challenge-media/{x.Id}" : null,
+                voted.Contains(x.Id)))
+            .ToList();
         return new PartyGuestChallengesDto(state.Value.AlbumName, state.Value.Max,
             state.Value.Used, Math.Max(0, state.Value.Max - state.Value.Used), items);
     }
@@ -216,7 +226,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
         if (link is null) return await OwnsAsync(ownerId, albumId, ct)
             ? new PartyPlaybackSnapshotDto(PartyPlaybackModes.Media, null, null, 0) : null;
         var session = await EnsureSessionAsync(link, ct);
-        return await SnapshotAsync(session, ct);
+        return await SnapshotAsync(session, ownerId, ct);
     }
 
     public async Task<PartyPlaybackSnapshotDto?> OnMediaBoundaryAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
@@ -225,9 +235,9 @@ public sealed class PartyChallengeService : IPartyChallengeService
         if (link is null) return await GetSnapshotAsync(ownerId, albumId, ct);
         var session = await EnsureSessionAsync(link, ct);
         if (session.Mode == PartyPlaybackModes.ChallengeHold || session.NextChallengeAt > Now)
-            return await SnapshotAsync(session, ct);
+            return await SnapshotAsync(session, ownerId, ct);
         if (link.MaxChallengesPerSession is int max && session.CompletedCount >= max)
-            return await SnapshotAsync(session, ct);
+            return await SnapshotAsync(session, ownerId, ct);
 
         var completed = _db.PartyChallengeCompletions.Where(x => x.PartyAlbumLinkId == link.Id)
             .Select(x => x.PartyChallengeId);
@@ -247,7 +257,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
                     .SetProperty(x => x.NextChallengeAt, Deadline(link))
                     .SetProperty(x => x.Version, x => x.Version + 1)
                     .SetProperty(x => x.UpdatedAt, Now), ct);
-            return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ct);
+            return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ownerId, ct);
         }
         var pickedId = PartyChallengePolicy.Select(
             candidates.Select(x => new PartyChallengeCandidate(x.Row.Id, x.Votes)).ToList(),
@@ -268,7 +278,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
                 "party.challenge.revealed AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} PlaybackSessionId={PlaybackSessionId} ChallengeId={ChallengeId}",
                 albumId, link.Id, session.Id, picked.Id);
         }
-        return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ct);
+        return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ownerId, ct);
     }
 
     public async Task<PartyPlaybackSnapshotDto?> CompleteActiveAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
@@ -308,7 +318,35 @@ public sealed class PartyChallengeService : IPartyChallengeService
         await tx.CommitAsync(ct);
         var latest = await _db.PartyChallengeSessions.AsNoTracking()
             .SingleAsync(x => x.PartyAlbumLinkId == link.Id, ct);
-        return await SnapshotAsync(latest, ct);
+        return await SnapshotAsync(latest, ownerId, ct);
+    }
+
+    public async Task<Guid?> GuestMediaFileAsync(PartyAccess access, Guid challengeId, CancellationToken ct = default)
+    {
+        // The same gate the guest's challenge list stands behind: without a
+        // game on this link there is no deck to reach a picture through.
+        var gameOn = await _db.PartyAlbumLinks.AsNoTracking()
+            .AnyAsync(x => x.Id == access.PartyAlbumLinkId && x.AlbumId == access.MainAlbumId
+                && x.Enabled && x.GameEnabled, ct);
+        if (!gameOn) return null;
+        var mediaId = await _db.PartyChallenges.AsNoTracking()
+            .Where(x => x.Id == challengeId && x.AlbumId == access.MainAlbumId && x.IsEnabled)
+            .Select(x => x.MediaFileItemId).FirstOrDefaultAsync(ct);
+        return mediaId is Guid id && await PartyMediaReference.IsEligibleAsync(_db, access.OwnerUserId, id, ct)
+            ? id : null;
+    }
+
+    public async Task<Guid?> TvMediaFileAsync(Guid ownerId, Guid albumId, Guid challengeId, CancellationToken ct = default)
+    {
+        // The owner's television, through the album's running game. Not gated on
+        // IsEnabled: a held activity is presented until NEXT even if the host
+        // switched it off meanwhile, and its picture goes with it.
+        if (await ActiveGameLinkAsync(ownerId, albumId, ct) is null) return null;
+        var mediaId = await _db.PartyChallenges.AsNoTracking()
+            .Where(x => x.Id == challengeId && x.AlbumId == albumId)
+            .Select(x => x.MediaFileItemId).FirstOrDefaultAsync(ct);
+        return mediaId is Guid id && await PartyMediaReference.IsEligibleAsync(_db, ownerId, id, ct)
+            ? id : null;
     }
 
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;
@@ -362,7 +400,7 @@ public sealed class PartyChallengeService : IPartyChallengeService
         _db.PartyChallengeSessions.AsNoTracking()
             .SingleAsync(x => x.PartyAlbumLinkId == linkId, ct);
 
-    private async Task<PartyPlaybackSnapshotDto> SnapshotAsync(PartyChallengeSession session, CancellationToken ct)
+    private async Task<PartyPlaybackSnapshotDto> SnapshotAsync(PartyChallengeSession session, Guid ownerId, CancellationToken ct)
     {
         PartyChallengePresentationDto? active = null;
         if (session.ActiveChallengeId is Guid id)
@@ -377,11 +415,13 @@ public sealed class PartyChallengeService : IPartyChallengeService
             if (row is not null)
             {
                 var mediaOk = row.MediaFileItemId is Guid mediaId
-                    && await _db.AlbumItems.AsNoTracking()
-                        .AnyAsync(x => x.AlbumId == row.AlbumId && x.FileItemId == mediaId, ct);
+                    && await PartyMediaReference.IsEligibleAsync(_db, ownerId, mediaId, ct);
                 active = new PartyChallengePresentationDto(
                     row.Id, row.Title, row.Body, row.Kind,
-                    mediaOk ? $"/api/tv/media/{row.MediaFileItemId}/preview" : null,
+                    // Through the ACTIVITY, not /api/tv/media/{file}: that route
+                    // serves only the television's albums, and an activity's
+                    // picture may be in no album at all.
+                    mediaOk ? $"/api/tv/albums/{row.AlbumId}/party-playback/challenges/{row.Id}/media" : null,
                     row.DurationSeconds, row.VotingMode, row.VoteQuestion);
             }
         }
@@ -414,11 +454,11 @@ public sealed class PartyChallengeService : IPartyChallengeService
         return (row.Name, row.VotesPerGuest, used);
     }
 
-    private Task<bool> MediaAllowedAsync(Guid ownerId, Guid albumId, Guid? mediaId, CancellationToken ct) =>
-        mediaId is null ? Task.FromResult(true) :
-        _db.AlbumItems.AsNoTracking().AnyAsync(ai => ai.AlbumId == albumId && ai.FileItemId == mediaId
-            && _db.Albums.Any(a => a.Id == albumId && a.OwnerUserId == ownerId)
-            && _db.FileItems.Any(f => f.Id == mediaId && f.OwnerUserId == ownerId && f.DeletedAt == null), ct);
+    // An activity's picture is a Party REFERENCE, not an album membership: any of
+    // the owner's own eligible images, in the album or not, and choosing one
+    // files it nowhere. Ownership of the ALBUM is established by each caller.
+    private Task<bool> MediaAllowedAsync(Guid ownerId, Guid? mediaId, CancellationToken ct) =>
+        mediaId is Guid id ? PartyMediaReference.IsEligibleAsync(_db, ownerId, id, ct) : Task.FromResult(true);
 
     private static bool Valid(PartyChallengeWriteRequest r) =>
         !string.IsNullOrWhiteSpace(r.Title) && r.Title.Trim().Length <= PartyChallengeLimits.MaxTitleLength

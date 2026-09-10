@@ -12,4 +12,15 @@ public interface IPartyChallengeService
     Task<PartyPlaybackSnapshotDto?> GetSnapshotAsync(Guid ownerId, Guid albumId, CancellationToken ct = default);
     Task<PartyPlaybackSnapshotDto?> OnMediaBoundaryAsync(Guid ownerId, Guid albumId, CancellationToken ct = default);
     Task<PartyPlaybackSnapshotDto?> CompleteActiveAsync(Guid ownerId, Guid albumId, CancellationToken ct = default);
+
+    // The file behind an activity's picture, reached THROUGH the activity: the
+    // party's game is on, the activity is in its deck and enabled, and the
+    // picture is still an eligible Party reference. Album membership is not
+    // asked — an activity may use any of the owner's images. Null for everything
+    // else; the route answers every null with the same 404.
+    Task<Guid?> GuestMediaFileAsync(PartyAccess access, Guid challengeId, CancellationToken ct = default);
+
+    // The same question for the owner's own paired television, which reaches
+    // the held activity through its album's game rather than through a token.
+    Task<Guid?> TvMediaFileAsync(Guid ownerId, Guid albumId, Guid challengeId, CancellationToken ct = default);
 }
