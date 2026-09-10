@@ -1277,7 +1277,7 @@ public static class PartyEndpoints
             partyMedia, thumbnails, stripper, cancellationToken);
     }
 
-    private static async Task<IResult> ServeMediaCoreAsync(
+    internal static async Task<IResult> ServeMediaCoreAsync(
         Guid ownerUserId,
         Guid albumId,
         Guid fileId,

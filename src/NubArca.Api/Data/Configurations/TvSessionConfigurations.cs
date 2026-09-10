@@ -134,3 +134,46 @@ public sealed class TvPersonalUnlockGrantConfiguration
             .OnDelete(DeleteBehavior.Restrict);
     }
 }
+
+/// <summary>
+/// A television's permission to show one party. Mirrors
+/// <see cref="TvPersonalUnlockGrantConfiguration"/>, because it is the same
+/// kind of thing: a short-lived, hash-stored, device-bound capability.
+/// </summary>
+public sealed class PartyDisplayGrantConfiguration : IEntityTypeConfiguration<PartyDisplayGrant>
+{
+    public void Configure(EntityTypeBuilder<PartyDisplayGrant> builder)
+    {
+        builder.ToTable("party_display_grants");
+        builder.HasKey(x => x.Id);
+        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.Property(x => x.TokenHash).IsRequired().HasMaxLength(64).IsFixedLength();
+        builder.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.ExpiresAt).HasColumnType("timestamp with time zone");
+        builder.Property(x => x.RevokedAt).HasColumnType("timestamp with time zone");
+
+        // The lookup every request makes, and the reason a stolen database is
+        // not a stolen display: only the digest is here.
+        builder.HasIndex(x => x.TokenHash).IsUnique()
+            .HasDatabaseName("ux_party_display_grants_token_hash");
+        builder.HasIndex(x => x.TvSessionId)
+            .HasDatabaseName("ix_party_display_grants_session");
+        // "Which grants point at this party" — asked when a party ends.
+        builder.HasIndex(x => x.PartyAlbumLinkId)
+            .HasDatabaseName("ix_party_display_grants_link");
+        builder.HasIndex(x => x.ExpiresAt)
+            .HasDatabaseName("ix_party_display_grants_expires_at");
+
+        // Grants die with their television, exactly as unlock grants do.
+        builder.HasOne<TvSession>().WithMany().HasForeignKey(x => x.TvSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        // Restricting, not cascading — and that is a deliberate cost. A cascade
+        // would make grants vanish silently with their link, which reads as the
+        // safe choice right up to the moment a new teardown path forgets they
+        // exist. Restrict makes the database refuse instead, so PartyStateEraser
+        // has to name this table. The refusal IS bug #116's failure mode, which
+        // is why the eraser deletes these before the link rather than after.
+        builder.HasOne<PartyAlbumLink>().WithMany().HasForeignKey(x => x.PartyAlbumLinkId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}

@@ -230,6 +230,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<IAdminUserService, AdminUserService>();
             services.AddScoped<ITvPairingService, TvPairingService>();
             services.AddScoped<ITvDisplayAssignmentService, TvDisplayAssignmentService>();
+            services.AddScoped<NubArca.Api.Party.IPartyDisplayService, NubArca.Api.Party.PartyDisplayService>();
             services.AddScoped<ITvMediaService, TvMediaService>();
             services.AddScoped<ITvPersonalAreaService, TvPersonalAreaService>();
             services.AddScoped<ITvPersonalGalleryService, TvPersonalGalleryService>();

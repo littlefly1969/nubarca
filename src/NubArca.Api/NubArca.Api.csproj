@@ -28,6 +28,7 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
     <PackageReference Include="PdfPig" Version="0.1.16" />
     <PackageReference Include="PDFtoImage" Version="5.4.0" />
+    <PackageReference Include="QRCoder" Version="1.8.0" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <!-- Slice 100: optional high-performance libvips derivative backend.
          NetVips is the managed binding; NetVips.Native.linux-x64 bundles a
@@ -64,20 +65,12 @@
        the brand contract is that every served file is byte-identical to the
        package it came from. Nothing here resizes, recolours or redraws. -->
   <ItemGroup>
-    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-dark-960w.png"
-             Link="Assets\brand\nubarca-wordmark-on-dark-960w.png"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-light-480w.png"
-             Link="Assets\brand\nubarca-wordmark-on-light-480w.png"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-dark-960w.png" Link="Assets\brand\nubarca-wordmark-on-dark-960w.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\assets\brand\nubarca\runtime\web\nubarca-wordmark-on-light-480w.png" Link="Assets\brand\nubarca-wordmark-on-light-480w.png" CopyToOutputDirectory="PreserveNewest" />
     <!-- The approved product faces, from the manifested set whose hashes
          scripts/check-brand-invariants.py already verifies. -->
-    <Content Include="..\..\mobile\assets\fonts\SpaceGrotesk-Bold.ttf"
-             Link="Assets\fonts\SpaceGrotesk-Bold.ttf"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\..\mobile\assets\fonts\Exo2-Medium.ttf"
-             Link="Assets\fonts\Exo2-Medium.ttf"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\mobile\assets\fonts\SpaceGrotesk-Bold.ttf" Link="Assets\fonts\SpaceGrotesk-Bold.ttf" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\mobile\assets\fonts\Exo2-Medium.ttf" Link="Assets\fonts\Exo2-Medium.ttf" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

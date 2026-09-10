@@ -132,6 +132,15 @@ public sealed class PartyStateEraser : IPartyStateEraser
             .Where(p => linkIds.Contains(p.PartyAlbumLinkId))
             .ExecuteDeleteAsync(cancellationToken);
 
+        // A television's permission to SHOW this party. It carries a
+        // restricting key to the link for the same reason the assignment does,
+        // so it has to go before the link — and it goes rather than being
+        // revoked, because the party it names is about to stop existing and a
+        // revoked row pointing at nothing is not worth keeping.
+        await _db.PartyDisplayGrants
+            .Where(g => linkIds.Contains(g.PartyAlbumLinkId))
+            .ExecuteDeleteAsync(cancellationToken);
+
         // A paired television pointed at one of this party's links holds a
         // RESTRICTING foreign key to it, so it would block the delete the same
         // way every table above would. It is returned to the general NubArca TV

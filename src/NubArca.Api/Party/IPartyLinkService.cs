@@ -93,6 +93,15 @@ public interface IPartyLinkService
     // capability is not live, the party has closed guest access, it has no
     // main album, that album is no longer the owner's, or the owner's role no
     // longer carries `party.access` — every case a generic 404 upstream.
+    // Resolves a link BY ID, for a caller that has already proved its right to
+    // that link some other way — today, a television holding a display grant.
+    // It runs the same party/status/expiry/capability policy as the token
+    // paths, because a display must not become a way around any of it; the
+    // only thing it skips is the token, which a display deliberately does not
+    // have. Null when the link, its party or its phase no longer allows it.
+    Task<PartyAccess?> ResolveDisplayAsync(
+        Guid partyAlbumLinkId, CancellationToken cancellationToken = default);
+
     Task<PartyAccess?> ResolvePublicAsync(
         string token, CancellationToken cancellationToken = default);
 
