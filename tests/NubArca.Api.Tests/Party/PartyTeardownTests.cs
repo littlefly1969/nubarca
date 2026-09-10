@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Access;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Files;
+using NubArca.Api.Party;
 using NubArca.Api.Tests.Endpoints;
 
 namespace NubArca.Api.Tests.Party;
@@ -202,6 +204,103 @@ public sealed class PartyTeardownTests : IDisposable
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Empty(await db.Parties.ToListAsync());
+    }
+
+    // --- the party graph goes all at once, or not at all --------------------
+
+    [Fact]
+    public async Task The_Party_Graph_Is_Erased_Inside_A_Transaction()
+    {
+        // PartyStateEraser deliberately opens no transaction of its own — it
+        // participates in its caller's — and every statement in it is an
+        // ExecuteDelete or an ExecuteUpdate, each of which commits on its own
+        // unless one says otherwise. So the thing worth proving is that the
+        // caller opened one before the erasing started.
+        var party = await SeedRunningPartyAsync();
+        await SeedGuestUploadAsync(party, PartyUploadStatuses.Pending);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var spy = new TransactionWatchingEraser(db, new PartyStateEraser(db));
+        var service = new PartyService(
+            db, TimeProvider.System, spy, scope.ServiceProvider.GetRequiredService<IFileItemService>());
+
+        var version = await db.Parties.Where(p => p.Id == party.PartyId)
+            .Select(p => p.Version).SingleAsync();
+        var result = await service.TeardownAsync(party.OwnerId, party.PartyId, version);
+
+        Assert.Equal(PartyMutationOutcome.Ok, result.Outcome);
+        Assert.True(spy.SawTransaction, "the eraser ran outside a transaction");
+        // And it committed: the graph is gone, not merely rolled forward.
+        Assert.Empty(await db.Parties.ToListAsync());
+    }
+
+    [Fact]
+    public async Task An_Eraser_That_Fails_Halfway_Leaves_The_Party_Graph_Whole()
+    {
+        var party = await SeedRunningPartyAsync();
+        await SeedMessageAsync(party);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var service = new PartyService(
+            db, TimeProvider.System, new HalfwayFailingEraser(db),
+            scope.ServiceProvider.GetRequiredService<IFileItemService>());
+
+        var version = await db.Parties.Where(p => p.Id == party.PartyId)
+            .Select(p => p.Version).SingleAsync();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.TeardownAsync(party.OwnerId, party.PartyId, version));
+
+        // The eraser deleted the greetings and then failed. Neither the deletion
+        // nor anything after it stands: a half-erased party — links gone but
+        // participants left, a television reset with the party still there — is
+        // exactly what the transaction exists to prevent.
+        db.ChangeTracker.Clear();
+        Assert.Single(await db.Parties.ToListAsync());
+        Assert.Single(await db.PartyMessages.ToListAsync());
+        Assert.Single(await db.PartyAlbumLinks.ToListAsync());
+        Assert.Single(await db.PartyMediaSources.ToListAsync());
+    }
+
+    /// <summary>Records whether a transaction was open when the erasing began.</summary>
+    private sealed class TransactionWatchingEraser : IPartyStateEraser
+    {
+        private readonly AppDbContext _db;
+        private readonly IPartyStateEraser _inner;
+
+        internal bool SawTransaction { get; private set; }
+
+        internal TransactionWatchingEraser(AppDbContext db, IPartyStateEraser inner)
+        {
+            _db = db;
+            _inner = inner;
+        }
+
+        public Task EraseAsync(Guid partyId, Guid? albumId, CancellationToken cancellationToken = default)
+        {
+            SawTransaction = _db.Database.CurrentTransaction is not null;
+            return _inner.EraseAsync(partyId, albumId, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Deletes one real thing and then fails — the shape of a foreign key that
+    /// refuses partway down the list, without any fault-injection machinery.
+    /// </summary>
+    private sealed class HalfwayFailingEraser : IPartyStateEraser
+    {
+        private readonly AppDbContext _db;
+
+        internal HalfwayFailingEraser(AppDbContext db) => _db = db;
+
+        public async Task EraseAsync(
+            Guid partyId, Guid? albumId, CancellationToken cancellationToken = default)
+        {
+            await _db.PartyMessages.ExecuteDeleteAsync(cancellationToken);
+            throw new InvalidOperationException("the erasing stopped halfway");
+        }
     }
 
     // --- helpers ------------------------------------------------------------
