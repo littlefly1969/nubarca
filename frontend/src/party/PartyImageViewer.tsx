@@ -136,14 +136,17 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
       const [a, b] = [...pointers.current.values()];
       const distance = pinchDistance(a, b);
       if (pinchStart.current.distance > 0) {
-        const factor = distance / pinchStart.current.distance;
+        // Everything the update needs is read NOW, while this event still owns
+        // the refs. React runs the updater at its next render, which can come
+        // after a finger has lifted and `endPointer` has cleared `pinchStart`:
+        // reading the ref inside the updater threw there, and with no error
+        // boundary the whole party page went blank the moment a guest let go of
+        // a photograph they had just enlarged.
+        const nextScale = pinchStart.current.scale * (distance / pinchStart.current.distance);
         const centre = pinchCentre(a, b);
-        setTransform((cur) => zoomAt(
-          cur,
-          pinchStart.current!.scale * factor,
-          focalOf(centre.x, centre.y),
-          viewport(),
-        ));
+        const focal = focalOf(centre.x, centre.y);
+        const box = viewport();
+        setTransform((cur) => zoomAt(cur, nextScale, focal, box));
       }
       return;
     }
