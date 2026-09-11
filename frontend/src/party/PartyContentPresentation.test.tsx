@@ -131,6 +131,57 @@ describe('owner: choosing how the photograph is presented', () => {
   });
 });
 
+describe('owner: a poster whose photograph was permanently deleted', () => {
+  // ON DELETE SET NULL makes this state reachable and legitimate. The editor
+  // used to hide the selector (no id) while still sending `poster` + null, which
+  // the server refused — leaving the slot unsaveable until a new photo was
+  // chosen. It is now stated, and offers both ways out.
+  const lost = () => slot({
+    mediaFileItemId: null, mediaUrl: null, mediaPresentation: 'poster',
+  });
+
+  it('says so, instead of silently offering nothing', () => {
+    mountOwner(lost());
+    expect(screen.getByTestId('party-poster-lost-menu')).toBeInTheDocument();
+    expect(screen.getByText(/non è più disponibile/i)).toBeInTheDocument();
+  });
+
+  it('does not show the choice, because there is nothing to choose about', () => {
+    mountOwner(lost());
+    expect(screen.queryByTestId('party-presentation-menu')).not.toBeInTheDocument();
+  });
+
+  it('can still save other edits with the broken state untouched', async () => {
+    // The whole point: a host must be able to fix a typo while the picture is
+    // gone. The server tolerates a state the row is already in.
+    const user = userEvent.setup();
+    const { mock } = mountOwner(lost());
+
+    await user.click(screen.getByTestId('party-content-save-menu'));
+
+    const body = sentBody(mock);
+    expect(body.mediaPresentation).toBe('poster');
+    expect(body.mediaFileItemId).toBeNull();
+  });
+
+  it('offers the way back to in-page', async () => {
+    const user = userEvent.setup();
+    const { mock } = mountOwner(lost());
+
+    await user.click(screen.getByTestId('party-poster-lost-inline-menu'));
+    await user.click(screen.getByTestId('party-content-save-menu'));
+
+    const body = sentBody(mock);
+    expect(body.mediaPresentation).toBe('inline');
+    expect(body.mediaFileItemId).toBeNull();
+  });
+
+  it('shows no recovery notice for an ordinary inline slot with no photo', () => {
+    mountOwner(slot({ mediaFileItemId: null, mediaPresentation: 'inline' }));
+    expect(screen.queryByTestId('party-poster-lost-menu')).not.toBeInTheDocument();
+  });
+});
+
 describe('guest: inline versus poster', () => {
   it('renders an inline menu exactly as P4 did — photo, then the words', () => {
     mountGuest([view({ mediaUrl: '/api/party/t/content/menu/media?v=1' })]);

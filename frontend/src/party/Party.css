@@ -223,3 +223,17 @@
 }
 
 .party-presentation-note { margin: 0; }
+
+/* A poster whose photograph was permanently deleted. Stated, not silently
+   repaired: the record is the host's choice and only they can resolve it. */
+.party-presentation-lost {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--warning-border, rgb(255 180 80 / 45%));
+  border-radius: 0.7rem;
+}
+
+.party-presentation-lost p { margin: 0; }

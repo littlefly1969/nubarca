@@ -16,7 +16,9 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PartyGuestDock } from '../components/PartyGuestDock';
-import { PartyGuestContentSections, isOpenablePoster } from '../party/PartyGuestContent';
+import {
+  PartyGuestContentSections, hasPresentableContent, isOpenablePoster,
+} from '../party/PartyGuestContent';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -663,6 +665,15 @@ export function PartyPage() {
 
   const { context, items } = state;
 
+  // THE SURFACE IS A VALUE, AND THE OVERLAYS ARE NOT PART OF IT.
+  //
+  // Before, Live and After are three different pages; the full-screen viewer is
+  // the same thing on all three. Written as three early returns it was mounted
+  // only by whichever branch happened to carry it — which is exactly how
+  // `Menu ›` on the invitation came to update the URL and then show nothing at
+  // all. The surface is chosen here and the overlays are mounted ONCE below, so
+  // a fourth surface cannot silently arrive without them.
+  const surface = (() => {
   // Before and After are their own surfaces. The Live experience below is
   // unchanged — this is a fork at the top of the render, not a rewrite of what
   // follows it.
@@ -682,7 +693,7 @@ export function PartyPage() {
           section="home"
           phase="before"
           hasAlbum={false}
-          hasInfo={context.content.length > 0}
+          hasInfo={hasPresentableContent(context.content)}
           contributionUrl={null}
           onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           onAlbum={() => {}}
@@ -708,7 +719,7 @@ export function PartyPage() {
           section="home"
           phase="after"
           hasAlbum={context.library.available}
-          hasInfo={context.accessMode === 'full' && context.content.length > 0}
+          hasInfo={context.accessMode === 'full' && hasPresentableContent(context.content)}
           contributionUrl={null}
           onHome={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
           onAlbum={() => setShowMemories(true)}
@@ -993,7 +1004,7 @@ export function PartyPage() {
         visible={!heroOnScreen}
         section={galleryOnScreen ? 'album' : 'home'}
         phase="live"
-        hasInfo={context.content.length > 0}
+        hasInfo={hasPresentableContent(context.content)}
         contributionUrl={contributionUrl}
         onHome={() => scrollTo(heroRef.current)}
         onAlbum={() => scrollTo(galleryRef.current)}
@@ -1011,10 +1022,19 @@ export function PartyPage() {
         />
       )}
 
+    </main>
+  );
+  })();
+
+  return (
+    <>
+      {surface}
+
       {/* The gallery photograph. The medium PREVIEW, whole and uncropped — for a
           video this is the poster the party surface serves; there is no playback
           here. It keeps the download the server offered, which is the one thing
-          a content poster never has. */}
+          a content poster never has. Only the Live/memories surface has a
+          gallery, so `lightbox` is simply null on the other two. */}
       {lightbox && (
         <PartyImageViewer
           src={lightbox.previewUrl}
@@ -1026,7 +1046,9 @@ export function PartyPage() {
 
       {/* A content POSTER, in the same viewer and with no download at all: a
           Party reference authorizes looking at a derived, metadata-stripped
-          copy, and never bytes. */}
+          copy, and never bytes. Common to all three surfaces, because the
+          invitation's `Invito ›` and the memories' `Ringraziamento ›` are the
+          same act as the party's `Menu ›`. */}
       {posterSlot?.mediaUrl && (
         <PartyImageViewer
           src={posterSlot.mediaUrl}
@@ -1034,6 +1056,6 @@ export function PartyPage() {
           onClose={closePoster}
         />
       )}
-    </main>
+    </>
   );
 }

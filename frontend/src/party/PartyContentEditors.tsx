@@ -153,6 +153,27 @@ export function PartyContentCard({
             />
           )}
 
+          {/* A poster whose photograph was permanently deleted. The foreign key
+              is ON DELETE SET NULL, so this row is legitimate rather than
+              corrupt — and the server deliberately does NOT rewrite it to
+              inline, because that would publish the words the host replaced
+              with a picture. It is theirs to resolve, so it is stated plainly
+              and given both ways out. */}
+          {!draft.mediaFileItemId && draft.mediaPresentation === 'poster' && (
+            <div className="party-presentation-lost" data-testid={`party-poster-lost-${slot.kind}`}>
+              <p role="status">{t('partyContent.posterMediaLost')}</p>
+              <button
+                type="button"
+                className="row-action"
+                disabled={busy}
+                data-testid={`party-poster-lost-inline-${slot.kind}`}
+                onClick={() => setDraft((d) => ({ ...d, mediaPresentation: 'inline' }))}
+              >
+                {t('partyContent.posterMediaLostInline')}
+              </button>
+            </div>
+          )}
+
           <div className="party-content-visibility">
             {phases.map((phase) => {
               const key = phase === 'before'

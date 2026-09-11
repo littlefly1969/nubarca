@@ -428,6 +428,10 @@ const it = {
   'partyContent.venue': 'Luogo',
   'partyContent.address': 'Indirizzo',
   'partyContent.note': 'Nota',
+  'partyContent.posterMediaLost':
+    'L\'immagine a schermo intero non \u00e8 pi\u00f9 disponibile: \u00e8 stata eliminata '
+    + 'definitivamente. Scegli un\'altra foto qui sopra, oppure torna a mostrarla nella pagina.',
+  'partyContent.posterMediaLostInline': 'Mostra nella pagina',
   'partyContent.presentation': 'Come vuoi mostrare questa immagine?',
   'partyContent.presentationInline': 'Nella pagina',
   'partyContent.presentationInlineHelp': 'Foto sopra, contenuto sotto.',
