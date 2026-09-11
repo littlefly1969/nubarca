@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AlbumSharedContentPanel } from './AlbumSharedContentPanel';
 import {
@@ -28,9 +28,23 @@ const VIEWPORT_PX = 600;
 // magnitude below the album, whatever the album's size.
 const DOM_ROW_BOUND = 30;
 
+// Vitest's per-test budget is five seconds, which suits a unit test. One test
+// here mounts a 520-item list and walks thirteen pages of it through a mock
+// server, and on a cold run — which is what CI always does — that is honestly
+// longer. The waits stay well inside the budget, so a genuine hang still fails
+// rather than hanging the suite.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
+const PATIENCE_MS = 10_000;
+
+function settle<T>(assertion: () => T) {
+  return vi.waitFor(assertion, { timeout: PATIENCE_MS, interval: 25 });
+}
+
 let scrollToBefore: Element['scrollTo'] | undefined;
 
 beforeEach(() => {
+  configure({ asyncUtilTimeout: PATIENCE_MS });
   stubContentListGeometry({ rowPx: ROW_PX, viewportPx: VIEWPORT_PX });
   globalThis.ResizeObserver = class {
     observe() {}
@@ -46,6 +60,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  configure({ asyncUtilTimeout: 1000 });
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -159,7 +174,7 @@ const rowById = (id: string) => document.querySelector<HTMLElement>(`[data-item-
 const scroller = () => screen.getByTestId('album-content-scroller');
 
 async function opened() {
-  await vi.waitFor(() => expect(rendered().length).toBeGreaterThan(5));
+  await settle(() => expect(rendered().length).toBeGreaterThan(5));
 }
 
 // Sets the list's scroll offset and lets whatever it asks for arrive.
@@ -234,7 +249,7 @@ describe('AlbumSharedContentPanel at 520 items', () => {
     // Nearing its end: the next page, after the last row held, at the version
     // the first page was read at.
     await scrollListTo(26 * ROW_PX);
-    await vi.waitFor(() => expect(server.pageRequests).toHaveLength(2));
+    await settle(() => expect(server.pageRequests).toHaveLength(2));
     expect(server.pageRequests[1].get('cursor')).toBe('ai-039');
     expect(server.pageRequests[1].get('expectedVersion')).toBe('7');
 
@@ -258,7 +273,7 @@ describe('AlbumSharedContentPanel at 520 items', () => {
     await userEvent.click(within(third).getByTestId('album-content-move-last'));
 
     // O(1) whatever the album's size: never the id sequence.
-    await vi.waitFor(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 519 }]));
+    await settle(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 519 }]));
     const post = server.spy.calls.find((c) => c.method === 'POST')!;
     expect(post.url).toBe('/api/shared-albums/alb-1/items/ai-002/move');
     expect(post.body!.length).toBeLessThan(64);
@@ -267,9 +282,9 @@ describe('AlbumSharedContentPanel at 520 items', () => {
       .toHaveTextContent('Spostato in posizione 520 di 520.');
     // It left the rows held — which were not re-read — and focus stayed where
     // the user was, on the row that took its place.
-    await vi.waitFor(() => expect(renderedIds()).not.toContain('ai-002'));
+    await settle(() => expect(renderedIds()).not.toContain('ai-002'));
     expect(server.pageRequests).toHaveLength(1);
-    await vi.waitFor(() => expect(document.activeElement)
+    await settle(() => expect(document.activeElement)
       .toBe(within(rowById('ai-003')!).getByTestId('album-content-actions')));
 
     // Scrolling on continues at the new version and meets it at the very end,
@@ -290,13 +305,13 @@ describe('AlbumSharedContentPanel at 520 items', () => {
     await userEvent.click(within(later).getByTestId('album-content-actions'));
     await userEvent.click(within(later).getByTestId('album-content-move-first'));
 
-    await vi.waitFor(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 0 }]));
+    await settle(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 0 }]));
     expect(await screen.findByTestId('album-content-live'))
       .toHaveTextContent('Spostato in posizione 1 di 520.');
     // The list scrolled to the item's new place and focus went with it. "To the
     // start" is spent there, so focus rests on the row's Actions control.
-    await vi.waitFor(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-050'));
-    await vi.waitFor(() => expect(document.activeElement)
+    await settle(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-050'));
+    await settle(() => expect(document.activeElement)
       .toBe(within(rendered()[0]).getByTestId('album-content-actions')));
   });
 
@@ -308,19 +323,19 @@ describe('AlbumSharedContentPanel at 520 items', () => {
     await opened();
 
     const lastHeld = await revealRow('ai-039');
-    await vi.waitFor(() => expect(server.pageRequests).toHaveLength(2));
+    await settle(() => expect(server.pageRequests).toHaveLength(2));
     server.release('ai-039');
     await userEvent.click(within(lastHeld).getByTestId('album-content-actions'));
     await userEvent.click(within(lastHeld).getByTestId('album-content-move-down'));
 
-    await vi.waitFor(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 40 }]));
+    await settle(() => expect(server.moveBodies).toEqual([{ expectedVersion: 7, targetIndex: 40 }]));
     // The page in flight was read at the version the move replaced: cancelled,
     // and paging resumed at the new version after the last row now held.
-    await vi.waitFor(() => expect(server.pageRequests).toHaveLength(3));
+    await settle(() => expect(server.pageRequests).toHaveLength(3));
     expect(server.pageRequests[2].get('cursor')).toBe('ai-038');
     expect(server.pageRequests[2].get('expectedVersion')).toBe('8');
     // …and the item is where it was sent: right after the row that followed it.
-    await vi.waitFor(() => {
+    await settle(() => {
       const ids = renderedIds();
       expect(ids).toContain('ai-039');
       expect(ids.indexOf('ai-039')).toBe(ids.indexOf('ai-040') + 1);
@@ -342,9 +357,9 @@ describe('AlbumSharedContentPanel at 520 items', () => {
       .toHaveTextContent(/modificato da un altro utente/i);
     // Never retried: re-read from the top, at whatever version is current.
     expect(server.moveBodies).toHaveLength(1);
-    await vi.waitFor(() => expect(server.pageRequests).toHaveLength(2));
+    await settle(() => expect(server.pageRequests).toHaveLength(2));
     expect(server.pageRequests[1].get('cursor')).toBeNull();
-    await vi.waitFor(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-519'));
+    await settle(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-519'));
   });
 
   it('starts again at the current version when the album changes under a scroll', async () => {
@@ -358,8 +373,8 @@ describe('AlbumSharedContentPanel at 520 items', () => {
     expect(await screen.findByTestId('album-content-notice')).toHaveTextContent(/mentre lo scorrevi/i);
     expect(server.pageRequests[1].get('expectedVersion')).toBe('7');
     // …so the list was read again, from the top, instead of mixing two albums.
-    await vi.waitFor(() => expect(server.pageRequests[2]?.get('cursor')).toBeNull());
-    await vi.waitFor(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-519'));
+    await settle(() => expect(server.pageRequests[2]?.get('cursor')).toBeNull());
+    await settle(() => expect(rendered()[0]).toHaveAttribute('data-item-id', 'ai-519'));
     expect(renderedIds()).not.toContain('ai-000');
   });
 });
