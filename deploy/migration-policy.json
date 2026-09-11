@@ -101,6 +101,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Creates only the new party_display_grants table with its primary key, one unique index on the token hash, three lookup indexes, a cascading foreign key to tv_sessions and a restricting one to party_album_links. No existing table, column, constraint or index changes. The previous application neither reads nor writes it, and it is written only by the display-grant mint, which no older client calls. Rolling back leaves at most a few short-lived rows the old application ignores; nothing else references the table, so its presence changes no existing query plan or constraint."
+    },
+    "20260911160022_AddPartyContentMediaPresentation": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds one NOT NULL character varying(16) column (MediaPresentation) to party_guest_contents with defaultValue 'inline', and one check constraint restricting it to 'inline' or 'poster'. The generated SQL is exactly two ALTER TABLE ... ADD statements: no existing row is rewritten, no other column, constraint or index changes, and nothing is backfilled. Existing rows take the default, which is precisely the presentation they were already rendered with, so the upgrade changes no guest surface. The previous application never reads or writes the column, and its inserts omit it entirely, so the database supplies 'inline' and the constraint accepts it; rolling back to that application therefore leaves only values the new schema also accepts, and leaves every row meaning what it means today."
     }
   }
 }

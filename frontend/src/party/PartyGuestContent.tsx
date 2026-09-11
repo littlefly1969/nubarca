@@ -50,28 +50,87 @@ export function PartyContentImage({
   );
 }
 
+/**
+ * Is this slot presented as a poster the guest can open?
+ *
+ * Both halves matter. `poster` is the host's CHOICE and is never rewritten by
+ * the client — but a poster whose photograph stopped being servable has nothing
+ * to present, so it is not offered. It does not silently become `inline`
+ * either: that would publish words the host chose to replace with a picture.
+ */
+export function isOpenablePoster(slot: PartyGuestContentView): boolean {
+  return slot.mediaPresentation === 'poster' && !!slot.mediaUrl;
+}
+
 export function PartyGuestContentSections({
-  slots, heroKind,
+  slots, heroKind, onOpenPoster,
 }: {
   slots: readonly PartyGuestContentView[];
   /**
    * The kind whose photograph this surface already shows as its hero — the
    * invitation's, before the party — so it is not drawn a second time below.
+   * Only ever an INLINE slot: a poster is never a hero.
    */
   heroKind?: PartyGuestContentKind;
+  /** Opens a poster full-screen. Absent on a surface that offers no viewer. */
+  onOpenPoster?(kind: PartyGuestContentKind): void;
 }) {
   if (slots.length === 0) return null;
   return (
     <div className="party-content" data-testid="party-content">
-      {slots.map((slot) => (
+      {slots.map((slot) => (slot.mediaPresentation === 'poster' ? (
+        <PartyPosterRow key={slot.kind} slot={slot} onOpen={onOpenPoster} />
+      ) : (
         <PartyGuestContentSection
           key={slot.kind}
           slot={slot}
           mediaUrl={slot.kind === heroKind ? null : slot.mediaUrl ?? null}
         />
-      ))}
+      )))}
     </div>
   );
+}
+
+/**
+ * A poster slot, as a navigation affordance.
+ *
+ * The label is the KIND's, localized by the product — there is no
+ * `posterTitle`, no `customCta` and no `buttonText`, because a party that could
+ * name its own buttons is a page builder with extra steps. For `info` that
+ * means the row says "Informazioni" even when the payload carries a title of
+ * its own: one configuration fewer, and a surface whose rows all read alike.
+ *
+ * The slot's typed text is NOT rendered here. In poster mode the photograph is
+ * what the host chose to say; the words stay in `ContentJson` and come back
+ * untouched the moment they switch back.
+ */
+function PartyPosterRow({
+  slot, onOpen,
+}: {
+  slot: PartyGuestContentView;
+  onOpen?(kind: PartyGuestContentKind): void;
+}) {
+  const { t } = useI18n();
+  // Never a dead CTA: a poster with no servable photograph is simply absent.
+  if (!isOpenablePoster(slot) || !onOpen) return null;
+  return (
+    <section className="party-content-block party-content-block--poster" data-content={slot.kind}>
+      <button
+        type="button"
+        className="party-poster-row"
+        data-testid={`party-poster-open-${slot.kind}`}
+        onClick={() => onOpen(slot.kind)}
+      >
+        <span className="party-poster-row-label">{t(posterLabelKey(slot.kind))}</span>
+        <span className="party-poster-row-chevron" aria-hidden="true">›</span>
+      </button>
+    </section>
+  );
+}
+
+/** The product's own name for a kind, which is the only label a poster row has. */
+export function posterLabelKey(kind: PartyGuestContentKind) {
+  return `partyGuest.poster.${kind}` as 'partyGuest.poster.invitation';
 }
 
 function PartyGuestContentSection({
@@ -196,11 +255,22 @@ function PartyGuestContentSection({
   }
 }
 
-/** The thank-you, or the product's own words when the host wrote none. */
+/**
+ * The thank-you, or the product's own words when the host wrote none.
+ *
+ * A POSTER thank-you contributes neither. Its photograph is a document to be
+ * read whole, not a band across the top of the After page, and its words are
+ * what the host replaced with that picture — so the hero falls back to the
+ * product's greeting and the poster is offered separately, below. The stored
+ * text is untouched and returns the moment the host switches back.
+ */
 export function partyThankYou(
   slots: readonly PartyGuestContentView[],
 ): { headline: string | null; message: string | null; mediaUrl: string | null } {
   const slot = slots.find((s) => s.kind === 'thank-you');
+  if (slot && slot.mediaPresentation === 'poster') {
+    return { headline: null, message: null, mediaUrl: null };
+  }
   const payload = (slot?.content ?? {}) as Payload;
   return {
     headline: str(payload, 'headline'),

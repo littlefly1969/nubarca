@@ -21,7 +21,7 @@ function slot(over: Partial<PartyGuestContentSlot> = {}): PartyGuestContentSlot 
   return {
     kind: 'menu', enabled: true, visibleBefore: true, visibleLive: true, visibleAfter: false,
     content: { intro: 'Cena in giardino', sections: [] }, version: 1,
-    mediaFileItemId: null, mediaUrl: null, ...over,
+    mediaFileItemId: null, mediaUrl: null, mediaPresentation: 'inline', ...over,
   };
 }
 

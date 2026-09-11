@@ -54,7 +54,12 @@ public static class PartyOwnerEndpoints
         int Version,
         // The slot's one photograph: any of the owner's own eligible images, in
         // the party's album or not. Null clears it — PUT states the whole slot.
-        Guid? MediaFileItemId = null);
+        Guid? MediaFileItemId = null,
+        // How that photograph is presented: "inline" (the picture sits in the
+        // slot's composition) or "poster" (the picture IS the document, opened
+        // whole from a navigation row). Absent means inline, so a client written
+        // against P4 keeps writing exactly what it used to.
+        string? MediaPresentation = null);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -251,7 +256,9 @@ public static class PartyOwnerEndpoints
                 ownerUserId, partyId, kind,
                 new PartyGuestContentWrite(
                     body.Enabled, body.VisibleBefore, body.VisibleLive, body.VisibleAfter,
-                    body.Content, body.Version, body.MediaFileItemId),
+                    body.Content, body.Version, body.MediaFileItemId,
+                    body.MediaPresentation
+                        ?? NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline),
                 cancellationToken);
 
             return result.Outcome switch
@@ -266,6 +273,11 @@ public static class PartyOwnerEndpoints
                 // non-image file, so it never says whether a file exists.
                 PartyGuestContentOutcome.InvalidMedia =>
                     Results.BadRequest(new { error = "invalid_media" }),
+                // An unknown presentation, or "poster" with nothing to present.
+                // Its own code because it is the owner's to fix in one click,
+                // unlike a media reference they may no longer control.
+                PartyGuestContentOutcome.InvalidPresentation =>
+                    Results.BadRequest(new { error = "invalid_presentation" }),
                 PartyGuestContentOutcome.VersionConflict => Results.Json(
                     new { error = "version_conflict", content = result.Content },
                     statusCode: StatusCodes.Status409Conflict),

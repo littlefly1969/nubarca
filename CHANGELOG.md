@@ -6,6 +6,27 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### A picture can be the page, not just on it
+
+- **Every part of the invitation can now choose how its photo is shown.** Keep
+  it in the page as before — photo on top, your words underneath — or show it
+  full screen. Pick "A schermo intero" and the Party shows a line like
+  "Menu ›"; tapping it opens the picture whole.
+- **That means a menu you designed elsewhere finally reads properly.** A tall
+  1080x1920 graphic is shown entire instead of being cropped into a strip, and
+  guests can pinch to zoom in and read it.
+- **Back closes the picture and keeps you in the party** — the phone's own Back
+  gesture included. You land exactly where you were.
+- **Your text is never lost.** Switching to full screen hides it from guests;
+  switching back restores it exactly as you wrote it.
+- **The invitation's own photo still leads the page when it is shown in-page.**
+  Chosen as full screen instead, it is no longer cropped as the header: the
+  album's cover leads, and "Invito ›" opens the picture. The thank-you works the
+  same way.
+- Guests still only ever see a preview — no download, no original, no location
+  data — and a picture you move to the Trash simply stops being offered, with no
+  broken image and no dead link.
+
 ### The party's game, on the television in the room
 
 - **Point a paired television at a party and it shows the game.** No second QR

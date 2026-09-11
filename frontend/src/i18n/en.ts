@@ -417,6 +417,17 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.venue': 'Venue',
   'partyContent.address': 'Address',
   'partyContent.note': 'Note',
+  // How the slot's photograph is presented. Shown only once a photo exists:
+  // there is nothing to decide about an image that is not there.
+  'partyContent.presentation': 'How do you want to show this image?',
+  'partyContent.presentationInline': 'In the page',
+  'partyContent.presentationInlineHelp': 'Photo on top, content below.',
+  'partyContent.presentationPoster': 'Full screen',
+  'partyContent.presentationPosterHelp':
+    'The Party shows \u201c{label}\u201d. Tapping it opens the whole image.',
+  'partyContent.presentationTextKept':
+    'The text below stays saved, but guests see the image instead of it.',
+  'partyContent.presentationInvalid': 'Choose an image before showing it full screen.',
   'partyContent.image': 'Image',
   'partyContent.imageNone': 'No image.',
   'partyContent.imageUnavailable': 'The chosen image is no longer available: it is in Trash or the private vault.',
@@ -429,6 +440,15 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.imageDuplicate': 'Your library already has a file with this name. Rename it and try again.',
   'partyContent.imageUploadFailed': 'The image could not be uploaded.',
   'partyContent.imageInvalid': 'This image cannot be used. Choose another one.',
+  // A poster row's label is the KIND's, localized by the product. There is
+  // deliberately no per-slot caption: a party that could name its own buttons
+  // would be a page builder with extra steps.
+  'partyGuest.poster.invitation': 'Invitation',
+  'partyGuest.poster.location': 'Where',
+  'partyGuest.poster.dress-code': 'Dress code',
+  'partyGuest.poster.menu': 'Menu',
+  'partyGuest.poster.info': 'Information',
+  'partyGuest.poster.thank-you': 'Thank you',
   'partyContent.kind.invitation': 'Invitation',
   'partyContent.kind.location': 'Where',
   'partyContent.kind.dress-code': 'Dress code',

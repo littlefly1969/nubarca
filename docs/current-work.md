@@ -662,6 +662,19 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   SERVER's, each slot carries its OWN version (editing the menu never contends
   with renaming the party), and a slot that is disabled or scoped elsewhere is
   ABSENT from the guest context rather than sent with a flag to respect.
+  A slot answers THREE independent questions: what it says (`ContentJson`),
+  which image it uses (`MediaFileItemId`) and HOW that image participates
+  (`MediaPresentation`: `inline` or `poster`). `inline` is the default and is
+  what every row written before the column meant. `poster` makes the photograph
+  the guest-facing DOCUMENT: the surface shows a deterministic, product-labelled
+  row and opens the picture whole in the shared viewer, which is what lets a
+  1080x1920 graphic be read rather than cropped into a hero. It is a RENDERING
+  and not an authority — same reference, same eligibility rule, same
+  relation-scoped route, no download in either mode. Switching never destroys
+  the typed text, a poster is never the invitation's or the thank-you's hero
+  (both fall back to the cover/product greeting and offer the picture
+  separately), and a poster that stops being servable is withdrawn rather than
+  silently rewritten to `inline`, which would publish words the host replaced.
 - **A Party feature may REFERENCE an owner's file, and a reference is not album
   membership.** `PartyGuestContent.MediaFileItemId` (one photograph per slot)
   and `PartyChallenge.MediaFileItemId` point at the owner's ordinary `FileItem`.

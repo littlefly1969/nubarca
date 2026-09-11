@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { PartyGuestContext } from '@nubarca/api-client';
+import type { PartyGuestContentKind, PartyGuestContext } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './PartyGuestContent';
 
@@ -13,8 +13,19 @@ import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './P
 // AFTER changes the tone rather than the layout. A thank-you, and the memories
 // for as long as they last.
 
-export function PartyBeforeHome({ context }: { context: PartyGuestContext }) {
+export function PartyBeforeHome({
+  context, onOpenPoster,
+}: {
+  context: PartyGuestContext;
+  onOpenPoster?(kind: PartyGuestContentKind): void;
+}) {
   const { t, formatDate } = useI18n();
+  // The hero is the invitation's photograph only while it is INLINE — which is
+  // exactly what the server decided when it built `coverUrl`, so the two cannot
+  // disagree about whether that picture is already on screen. A poster
+  // invitation is not up there, so its row below must not be suppressed.
+  const invitation = context.content.find((s) => s.kind === 'invitation');
+  const invitationIsHero = invitation?.mediaPresentation !== 'poster';
   return (
     <div className="party-invitation" data-testid="party-before">
       <header className="party-invitation-hero">
@@ -32,9 +43,14 @@ export function PartyBeforeHome({ context }: { context: PartyGuestContext }) {
         )}
       </header>
 
-      {/* The invitation's photograph IS the hero above, so the invitation's
-          section does not draw it a second time. */}
-      <PartyGuestContentSections slots={context.content} heroKind="invitation" />
+      {/* An INLINE invitation photograph IS the hero above, so its section does
+          not draw it a second time. A poster one is not the hero and keeps its
+          own row, which is how a full-height invitation gets opened whole. */}
+      <PartyGuestContentSections
+        slots={context.content}
+        heroKind={invitationIsHero ? 'invitation' : undefined}
+        onOpenPoster={onOpenPoster}
+      />
 
       <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
     </div>
@@ -60,10 +76,11 @@ function InvitationHero({ src }: { src: string | null }) {
 }
 
 export function PartyAfterHome({
-  context, onOpenMemories,
+  context, onOpenMemories, onOpenPoster,
 }: {
   context: PartyGuestContext;
   onOpenMemories(): void;
+  onOpenPoster?(kind: PartyGuestContentKind): void;
 }) {
   const { t, formatDate } = useI18n();
   const thankYou = partyThankYou(context.content);
@@ -111,7 +128,9 @@ export function PartyAfterHome({
       {/* Library-only is a deliberate, minimal surface: the greeting and the
           photographs. Nothing the host wrote for the party is carried into it,
           because the visit is no longer a visit to the party. */}
-      {!libraryOnly && <PartyGuestContentSections slots={context.content} />}
+      {!libraryOnly && (
+        <PartyGuestContentSections slots={context.content} onOpenPoster={onOpenPoster} />
+      )}
     </div>
   );
 }

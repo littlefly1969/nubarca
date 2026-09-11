@@ -84,6 +84,19 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                     : PartyGuestContentOutcome.InvalidPayload);
         }
 
+        // The presentation is structural, so it is checked before anything is
+        // written and independently of the payload. "poster" without a
+        // photograph is refused rather than stored and rendered as nothing: a
+        // poster slot IS its picture, and the guest surface has no composition
+        // to fall back to. The frontend clears the presentation when the host
+        // removes the image; this is what makes that a rule rather than a habit.
+        if (!PartyGuestContentMediaPresentations.IsKnown(write.MediaPresentation)
+            || (write.MediaPresentation == PartyGuestContentMediaPresentations.Poster
+                && write.MediaFileItemId is null))
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPresentation);
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var row = await _db.PartyGuestContents
             .FirstOrDefaultAsync(c => c.PartyId == partyId && c.Kind == kind, cancellationToken);
@@ -140,6 +153,9 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         row.VisibleAfter = write.VisibleAfter;
         row.ContentJson = canonical;
         row.MediaFileItemId = write.MediaFileItemId;
+        // Changing HOW the photograph is presented is an edit of the slot like
+        // any other, so it moves the slot's own version — never the party's.
+        row.MediaPresentation = write.MediaPresentation;
         row.Version++;
         row.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -181,7 +197,8 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                 Parse(row.ContentJson), row.Version,
                 row.MediaFileItemId is Guid id && eligible.Contains(id)
                     ? MediaUrl(token, row.Kind, row.Version)
-                    : null))
+                    : null,
+                row.MediaPresentation))
             .ToList();
     }
 
@@ -227,7 +244,8 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         Parse(row.ContentJson), row.Version, row.MediaFileItemId,
         row.MediaFileItemId is Guid id && eligible.Contains(id)
             ? $"/api/files/{id}/thumbnail?size=medium"
-            : null);
+            : null,
+        row.MediaPresentation);
 
     private static PartyGuestContentDto Blank(string kind)
     {
@@ -235,7 +253,8 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         return new PartyGuestContentDto(
             kind, Enabled: false, before, live, after,
             Parse(PartyGuestContentPayload.Empty(kind)),
-            Version: 0);
+            Version: 0,
+            MediaPresentation: PartyGuestContentMediaPresentations.Inline);
     }
 
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement.Clone();

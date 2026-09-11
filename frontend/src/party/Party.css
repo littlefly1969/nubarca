@@ -187,3 +187,39 @@
   .party-primary-action button { width: 100%; }
   .party-teardown-confirm button { width: 100%; }
 }
+
+/* The presentation choice. Two options, each worth a sentence — a toggle would
+   say "on/off" about two things that are both something. */
+.party-presentation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border, rgb(255 255 255 / 14%));
+  border-radius: 0.7rem;
+}
+
+.party-presentation > legend {
+  padding: 0 0.35rem;
+  font-weight: 600;
+}
+
+.party-presentation-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.party-presentation-option input { margin-top: 0.25rem; }
+
+.party-presentation-title { display: block; font-weight: 600; }
+
+.party-presentation-help {
+  display: block;
+  opacity: 0.75;
+  font-size: 0.9em;
+}
+
+.party-presentation-note { margin: 0; }

@@ -258,6 +258,11 @@ export function setPartyGuestContent(
      * album or not. Choosing one files it nowhere. null clears it.
      */
     mediaFileItemId: string | null;
+    /**
+     * How to present it. The server refuses `poster` with no photograph, so a
+     * caller clearing the image clears this too.
+     */
+    mediaPresentation: PartyMediaPresentation;
     version: number;
   },
   signal?: AbortSignal,
@@ -368,6 +373,18 @@ export type PartyGuestPhase = 'before' | 'live' | 'after';
 /** How much of that surface is open. */
 export type PartyGuestAccessMode = 'full' | 'library-only';
 
+/**
+ * How a slot's photograph participates in the surface.
+ *
+ * `inline` — the picture sits in the slot's composition, above its words.
+ * `poster` — the picture IS the document: the Party shows a deterministic
+ * navigation row and opens it whole in the shared viewer.
+ *
+ * It selects a RENDERING and confers no authority: both resolve the same
+ * reference through the same rule, served by the same relation-scoped route.
+ */
+export type PartyMediaPresentation = 'inline' | 'poster';
+
 /** What every projection of a slot shares. `content` is the shape its `kind` declares. */
 interface PartyGuestContentFields {
   kind: PartyGuestContentKind;
@@ -377,6 +394,8 @@ interface PartyGuestContentFields {
   visibleAfter: boolean;
   content: Record<string, unknown>;
   version: number;
+  /** Absent on a pre-P5 payload, which meant `inline`. */
+  mediaPresentation: PartyMediaPresentation;
 }
 
 /**

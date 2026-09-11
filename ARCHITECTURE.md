@@ -1168,7 +1168,73 @@ the Private Vault leave the id in place and are enforced at serving time.
 On the invitation the hero is resolved server-side: the invitation's own
 photograph, else the album's chosen cover, else a branded composition.
 
-### 14.3.5 Party teardown
+### 14.3.5 How a slot presents its photograph
+
+**A Party content slot has three independent answers**, and conflating any two
+of them is what turns a typed surface into a page builder:
+
+```text
+what it says         -> typed ContentJson
+which image it uses  -> MediaFileItemId
+how that image
+participates         -> MediaPresentation: inline | poster
+```
+
+`inline` — the photograph participates in the slot's COMPOSITION: picture on
+top, the slot's words underneath. It is the default, it is what every row
+written before the column existed means, and it is P4 unchanged.
+
+`poster` — the photograph IS the guest-facing document. The Party surface
+exposes a deterministic navigation affordance ("Menu ›", "Dress code ›") and
+opens the picture whole in the shared viewer. That is what lets a host prepare a
+1080x1920 menu graphic elsewhere and have it read in full on a phone, instead of
+being cropped into a banner.
+
+`MediaPresentation` is a COLUMN rather than a field of `ContentJson`, for the
+same reason `MediaFileItemId` is: the surface reads it to decide what to render
+before it reads a word, and a payload validator re-serializes its shape per kind,
+which would turn one presentation rule into six. It is an application string with
+a database check constraint rather than a PostgreSQL enum, on the reasoning
+`PartyMediaSource.Role` already uses. The server refuses an unknown value and
+refuses `poster` with no reference, because a poster slot IS its picture and has
+no composition to fall back on.
+
+**It is a rendering, not an authority.** Both values resolve the same reference
+through the same `PartyMediaReference` rule and are served by the same
+relation-scoped `GET /api/party/{token}/content/{kind}/media` — there is
+deliberately no `/poster` and no `/fullscreen` route, and no download in either
+mode. A poster that stops being servable is simply not offered: no broken image,
+no dead row, and the stored choice is NOT rewritten to `inline`, because that
+would publish the words the host chose to replace with a picture.
+
+**Changing presentation never destroys content.** The typed text stays in
+`ContentJson` throughout, so `inline → poster → inline` restores it exactly. In
+poster mode the words are not rendered to the guest — the photograph is what the
+host chose to say — and the label on the row is the KIND's, localized by the
+product. There is no `posterTitle`, no `customCta` and no `buttonText`: a party
+that could name its own buttons would be the page builder this model exists to
+avoid. Changing it is an edit of the SLOT and moves the slot's own `Version`,
+never the party's.
+
+**On the invitation, a poster is not the hero.** The BEFORE hero precedence is
+the invitation's own photograph *only while it is inline*, then the album's
+chosen cover, then the branded composition — because a hero is a cropped band
+and a poster is a document meant to be read whole. A poster invitation is
+offered separately, as its own affordance. The thank-you follows the same
+semantics on the AFTER surface: a poster thank-you leaves the hero to the
+product's greeting and is opened from its own row.
+
+**One full-screen viewer.** The gallery photograph and a content poster are the
+same act — a guest looking at one picture — so they share `PartyImageViewer`:
+one focus trap, one Escape, one scroll lock, one uncropped fit, plus pinch/pan
+and double-tap whose decisions live as pure functions in `imageTransform.ts`.
+What is NOT shared is authority: the gallery may offer the download the server
+sent, and a content poster never can. A poster opens through a history entry
+(`?poster=<kind>`), so browser and Android Back close the picture and leave the
+guest in the party; the query names a kind and is never authority, so an invented
+value resolves against the server-authorized context and opens nothing.
+
+### 14.3.6 Party teardown
 
 Tearing a party down **keeps its album**, and the guest media is FINALIZED
 before any party row is deleted. Owner-added media always survives — it was
@@ -1190,7 +1256,7 @@ Files a party merely REFERENCED — a menu photograph, an activity's picture —
 the owner's own and are never finalized: the references go with the party and
 the files stay in the library (§14.3.4).
 
-### 14.3.6 Party capabilities
+### 14.3.7 Party capabilities
 
 Party is a public projection over the party's main album. Its capability model supports:
 
@@ -1207,7 +1273,7 @@ Party token validation always derives the currently visible item set from owner,
 
 Owner-side Party surfaces are gated by the same keys through the ordinary policy machinery (`.RequirePermission(Permissions.PartyAccess)`, `.RequirePartyGames()`, `.RequirePartyPrint()`). Moderating what guests already left is `party.access`, not `party.contributions`: closing the contribution channel must not lock the host out of the queue it filled.
 
-### 14.3.7 The display capability
+### 14.3.8 The display capability
 
 **A display is not a guest, and it holds a third kind of credential.** Party has
 the owner's cookie and the guest's token; a television standing in the corner of
@@ -1732,7 +1798,7 @@ assignment, the display grant, the flow lifecycle, the renderer watchdog, the
 native fallback and the keep-awake lock (the same `wakePolicy` lock the
 slideshow uses, not a second authority) — and the WebView owns presentation and
 nothing else. It carries no session cookie, no owner credential and no party
-token; the only thing it is given is the display grant of §14.3.7, in the
+token; the only thing it is given is the display grant of §14.3.8, in the
 fragment.
 
 **The assignment is the control plane**, so the shell polls
