@@ -62,6 +62,27 @@ export function isOpenablePoster(slot: PartyGuestContentView): boolean {
   return slot.mediaPresentation === 'poster' && !!slot.mediaUrl;
 }
 
+/**
+ * Is there anything for this surface to actually SHOW?
+ *
+ * Not `slots.length > 0`. A poster whose photograph stopped being servable
+ * renders nothing at all — correctly, since offering a dead row would be worse
+ * — so counting slots makes the dock offer an "Info" button that scrolls to an
+ * empty container. The question the dock is really asking is whether any slot
+ * would draw something, and that is this.
+ *
+ * An inline slot is presentable on its words alone (its photograph is optional
+ * and was always allowed to be absent); a poster slot is presentable only while
+ * it can still be opened.
+ */
+export function hasPresentableContent(
+  slots: readonly PartyGuestContentView[],
+): boolean {
+  return slots.some((slot) => (slot.mediaPresentation === 'poster'
+    ? isOpenablePoster(slot)
+    : true));
+}
+
 export function PartyGuestContentSections({
   slots, heroKind, onOpenPoster,
 }: {

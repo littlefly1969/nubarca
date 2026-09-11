@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DOUBLE_TAP_SCALE, IDENTITY, MAX_SCALE, MIN_SCALE,
+  DOUBLE_TAP_MS, DOUBLE_TAP_SCALE, IDENTITY, MAX_SCALE, MIN_SCALE, NO_TAP,
   clampScale, clampTransform, isZoomed, panBy, panBounds, pinchCentre, pinchDistance,
-  reset, toCssTransform, toggleZoom, zoomAt,
+  pointerDown, pointerMoved, pointerUp, reset, toCssTransform, toggleZoom, zoomAt,
 } from './imageTransform';
 
 // The viewer's gesture DECISIONS, tested directly.
@@ -101,5 +101,82 @@ describe('imageTransform', () => {
   it('measures a pinch from both pointers', () => {
     expect(pinchDistance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
     expect(pinchCentre({ x: 0, y: 0 }, { x: 10, y: 20 })).toEqual({ x: 5, y: 10 });
+  });
+});
+
+// Is this gesture a TAP?
+//
+// The sequence below is the bug that made this machine necessary: ending a
+// pinch lifts two fingers milliseconds apart, and a naive reading counted the
+// first as a tap and the second as its double — so the zoom a guest had just
+// set by pinching was toggled away under their fingers. jsdom cannot dispatch a
+// real two-finger pinch, but it can replay the exact event order, which is the
+// half that decided wrongly.
+
+describe('tap discrimination', () => {
+  it('does NOT fire a double tap at the end of a pinch', () => {
+    // pointer 1 down, pointer 2 down, pinch, pointer 1 up, pointer 2 up.
+    let s = pointerDown(NO_TAP);          // finger 1
+    s = pointerDown(s);                   // finger 2 -> multi-touch
+    s = pointerMoved(s);                  // the pinch itself
+    const firstUp = pointerUp(s, 1_000);  // finger 1 lifts
+    expect(firstUp.doubleTap).toBe(false);
+    // The second lift arrives milliseconds later — the exact shape that used to
+    // read as a double tap.
+    const secondUp = pointerUp(firstUp.state, 1_040);
+    expect(secondUp.doubleTap).toBe(false);
+    // And the gesture is fully spent, so nothing is left pending either.
+    expect(secondUp.state.down).toBe(0);
+    expect(secondUp.state.lastTapAt).toBe(0);
+  });
+
+  it('does NOT fire a double tap after a pan', () => {
+    let s = pointerDown(NO_TAP);
+    s = pointerMoved(s);                  // dragged past the slop
+    const up = pointerUp(s, 1_000);
+    expect(up.doubleTap).toBe(false);
+    // A quick touch straight afterwards is a FIRST tap, not a second one.
+    const next = pointerUp(pointerDown(up.state), 1_050);
+    expect(next.doubleTap).toBe(false);
+  });
+
+  it('still fires for two real single-finger taps', () => {
+    const first = pointerUp(pointerDown(NO_TAP), 1_000);
+    expect(first.doubleTap).toBe(false);
+    const second = pointerUp(pointerDown(first.state), 1_000 + DOUBLE_TAP_MS - 50);
+    expect(second.doubleTap).toBe(true);
+    // Spent: a third tap starts a new pair rather than firing again.
+    expect(second.state.lastTapAt).toBe(0);
+  });
+
+  it('does not fire when the two taps are too far apart', () => {
+    const first = pointerUp(pointerDown(NO_TAP), 1_000);
+    const second = pointerUp(pointerDown(first.state), 1_000 + DOUBLE_TAP_MS + 1);
+    expect(second.doubleTap).toBe(false);
+  });
+
+  it('a pinch between two taps cancels the pending one', () => {
+    const first = pointerUp(pointerDown(NO_TAP), 1_000);
+    // A pinch in between: two fingers down, both up.
+    let s = pointerDown(first.state);
+    s = pointerDown(s);
+    const a = pointerUp(s, 1_020);
+    const b = pointerUp(a.state, 1_040);
+    // A tap now is the first of a new pair, not the second of the old one.
+    const after = pointerUp(pointerDown(b.state), 1_060);
+    expect(after.doubleTap).toBe(false);
+  });
+
+  it('a real double tap still works right after a pinch', () => {
+    let s = pointerDown(NO_TAP);
+    s = pointerDown(s);
+    s = pointerMoved(s);
+    const a = pointerUp(s, 1_000);
+    const b = pointerUp(a.state, 1_020);
+    // Two clean taps afterwards behave normally: the pinch's flags were spent
+    // when its last finger lifted.
+    const t1 = pointerUp(pointerDown(b.state), 2_000);
+    const t2 = pointerUp(pointerDown(t1.state), 2_100);
+    expect(t2.doubleTap).toBe(true);
   });
 });

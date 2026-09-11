@@ -408,6 +408,88 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
         Assert.Equal("Cena in giardino", slot.GetProperty("content").GetProperty("intro").GetString());
     }
 
+    [Fact]
+    public async Task A_Poster_Left_Without_Media_By_A_Purge_Can_Still_Be_Edited()
+    {
+        // ON DELETE SET NULL makes `poster` + no reference a REACHABLE state, and
+        // the server deliberately does not rewrite it to inline on the host's
+        // behalf — that would publish the words they replaced with a picture. So
+        // the host must still be able to work on the slot: same asymmetry as the
+        // media reference, a state the row is already in is not re-judged.
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "purged.png");
+        var v = await VersionAsync(await WriteSlotAsync(
+            party, "menu", Menu, graphic, presentation: "poster"));
+        (await party.Owner.DeleteAsync($"/api/files/{graphic}")).EnsureSuccessStatusCode();
+        (await party.Owner.DeleteAsync($"/api/trash/files/{graphic}")).EnsureSuccessStatusCode();
+
+        // Editing the words while the picture is gone, presentation untouched.
+        var edited = await WriteSlotAsync(
+            party, "menu", new { intro = "Nuovo testo", sections = Array.Empty<object>() },
+            null, version: v, presentation: "poster");
+
+        Assert.Equal(HttpStatusCode.OK, edited.StatusCode);
+        var slot = await edited.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("poster", slot.GetProperty("mediaPresentation").GetString());
+        Assert.Equal("Nuovo testo", slot.GetProperty("content").GetProperty("intro").GetString());
+    }
+
+    [Fact]
+    public async Task A_Poster_Left_Without_Media_Can_Be_Returned_To_Inline()
+    {
+        // The other way out the editor offers.
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "purged.png");
+        var v = await VersionAsync(await WriteSlotAsync(
+            party, "menu", Menu, graphic, presentation: "poster"));
+        (await party.Owner.DeleteAsync($"/api/files/{graphic}")).EnsureSuccessStatusCode();
+        (await party.Owner.DeleteAsync($"/api/trash/files/{graphic}")).EnsureSuccessStatusCode();
+
+        var fixedUp = await WriteSlotAsync(
+            party, "menu", Menu, null, version: v, presentation: "inline");
+
+        Assert.Equal(HttpStatusCode.OK, fixedUp.StatusCode);
+        Assert.Equal("inline", (await fixedUp.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("mediaPresentation").GetString());
+    }
+
+    [Fact]
+    public async Task An_Inline_Slot_Still_Cannot_Become_A_Poster_Without_A_Photograph()
+    {
+        // Tolerating the state a purge leaves behind must not become a way to
+        // CREATE one. Nothing new may reach `poster` with nothing to present.
+        var party = await SeedPartyAsync();
+        var v = await VersionAsync(await WriteSlotAsync(party, "menu", Menu, null));
+
+        var refused = await WriteSlotAsync(
+            party, "menu", Menu, null, version: v, presentation: "poster");
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("invalid_presentation",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task A_Recovered_Poster_Takes_A_New_Photograph_And_Stays_A_Poster()
+    {
+        var party = await SeedPartyAsync();
+        var graphic = await UploadPngAsync(party.Owner, "purged.png");
+        var v = await VersionAsync(await WriteSlotAsync(
+            party, "menu", Menu, graphic, presentation: "poster"));
+        (await party.Owner.DeleteAsync($"/api/files/{graphic}")).EnsureSuccessStatusCode();
+        (await party.Owner.DeleteAsync($"/api/trash/files/{graphic}")).EnsureSuccessStatusCode();
+        var replacement = await UploadPngAsync(party.Owner, "replacement.png");
+
+        var saved = await WriteSlotAsync(
+            party, "menu", Menu, replacement, version: v, presentation: "poster");
+
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var slot = await saved.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("poster", slot.GetProperty("mediaPresentation").GetString());
+        Assert.Equal(replacement, slot.GetProperty("mediaFileItemId").GetGuid());
+    }
+
     // --- The invitation hero ------------------------------------------------
 
     [Fact]

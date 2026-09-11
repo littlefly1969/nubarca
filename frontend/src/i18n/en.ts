@@ -419,6 +419,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.note': 'Note',
   // How the slot's photograph is presented. Shown only once a photo exists:
   // there is nothing to decide about an image that is not there.
+  'partyContent.posterMediaLost':
+    'The full-screen image is no longer available — it was permanently deleted. '
+    + 'Choose another photo above, or go back to showing this in the page.',
+  'partyContent.posterMediaLostInline': 'Show in the page instead',
   'partyContent.presentation': 'How do you want to show this image?',
   'partyContent.presentationInline': 'In the page',
   'partyContent.presentationInlineHelp': 'Photo on top, content below.',

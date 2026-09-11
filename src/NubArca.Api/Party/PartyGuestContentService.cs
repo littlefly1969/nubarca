@@ -84,15 +84,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                     : PartyGuestContentOutcome.InvalidPayload);
         }
 
-        // The presentation is structural, so it is checked before anything is
-        // written and independently of the payload. "poster" without a
-        // photograph is refused rather than stored and rendered as nothing: a
-        // poster slot IS its picture, and the guest surface has no composition
-        // to fall back to. The frontend clears the presentation when the host
-        // removes the image; this is what makes that a rule rather than a habit.
-        if (!PartyGuestContentMediaPresentations.IsKnown(write.MediaPresentation)
-            || (write.MediaPresentation == PartyGuestContentMediaPresentations.Poster
-                && write.MediaFileItemId is null))
+        if (!PartyGuestContentMediaPresentations.IsKnown(write.MediaPresentation))
         {
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPresentation);
         }
@@ -131,6 +123,27 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             && !await PartyMediaReference.IsEligibleAsync(_db, ownerUserId, mediaId, cancellationToken))
         {
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidMedia);
+        }
+
+        // "poster" with no photograph cannot be CREATED — a poster slot IS its
+        // picture and the surface has no composition to fall back to. But it can
+        // legitimately EXIST: `MediaFileItemId` is ON DELETE SET NULL, so a
+        // permanent purge leaves exactly this row behind, and it is the host's
+        // recorded choice rather than a mistake to correct on their behalf.
+        //
+        // So the rule is the same asymmetry the media reference above already
+        // has: a state the row is ALREADY in is not re-judged, which is what
+        // lets the host fix a typo, rename the slot or change its visibility
+        // while the picture is gone. Nothing NEW may reach it, and the guest
+        // surface offers nothing either way.
+        var alreadyPosterWithoutMedia =
+            row?.MediaPresentation == PartyGuestContentMediaPresentations.Poster
+            && row.MediaFileItemId is null;
+        if (write.MediaPresentation == PartyGuestContentMediaPresentations.Poster
+            && write.MediaFileItemId is null
+            && !alreadyPosterWithoutMedia)
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPresentation);
         }
 
         if (row is null)

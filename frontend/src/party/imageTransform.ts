@@ -128,3 +128,82 @@ export const pinchDistance = (
 export const pinchCentre = (
   a: { x: number; y: number }, b: { x: number; y: number },
 ): { x: number; y: number } => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
+// --- Is this gesture a TAP? ------------------------------------------------
+//
+// A double tap must not be something a guest produces by accident, and the
+// naive "two pointerups close together" reading produces exactly that. Ending a
+// PINCH lifts two fingers milliseconds apart: the first up records a tap, the
+// second falls inside the window and fires — so the zoom the guest just set by
+// pinching is immediately toggled away. A pan followed by any quick touch is
+// the same bug with one finger.
+//
+// So a tap is defined by what the whole gesture did, not by one event: exactly
+// one pointer from beginning to end, and movement under the slop. This is a
+// pure machine for the same reason the transforms are — the sequence that broke
+// it can be replayed here exactly, which jsdom cannot do with real touches.
+
+/** Movement beyond this many CSS pixels means the guest was dragging, not tapping. */
+export const TAP_SLOP_PX = 10;
+
+/** How close two taps must be to read as one double tap. */
+export const DOUBLE_TAP_MS = 300;
+
+export interface TapState {
+  /** Pointers currently down. */
+  readonly down: number;
+  /** Has the CURRENT gesture ever had more than one pointer? */
+  readonly multiTouch: boolean;
+  /** Has the CURRENT gesture moved beyond the slop? */
+  readonly moved: boolean;
+  /** When the last real tap completed. 0 = none pending. */
+  readonly lastTapAt: number;
+}
+
+export const NO_TAP: TapState = {
+  down: 0, multiTouch: false, moved: false, lastTapAt: 0,
+};
+
+/** A pointer went down. The first one starts a gesture; a second disqualifies it. */
+export function pointerDown(state: TapState): TapState {
+  if (state.down === 0) {
+    // A fresh gesture: its own flags, but the pending tap survives, because a
+    // double tap is by definition two separate gestures.
+    return { down: 1, multiTouch: false, moved: false, lastTapAt: state.lastTapAt };
+  }
+  return { ...state, down: state.down + 1, multiTouch: true };
+}
+
+/** The gesture travelled past the slop, so it is a drag whatever happens next. */
+export function pointerMoved(state: TapState): TapState {
+  return state.moved ? state : { ...state, moved: true };
+}
+
+/**
+ * A pointer came up. Says whether THIS completed a double tap.
+ *
+ * A gesture that was not a tap also clears any pending one: half a double tap
+ * followed by a pinch is not half a double tap any more.
+ */
+export function pointerUp(
+  state: TapState, now: number,
+): { state: TapState; doubleTap: boolean } {
+  const down = Math.max(0, state.down - 1);
+  const wasSinglePointerGesture = state.down <= 1;
+  const isTap = wasSinglePointerGesture && !state.multiTouch && !state.moved;
+  // While fingers remain down the gesture's own flags stay with it; once the
+  // last one lifts they are spent.
+  const carried = down > 0
+    ? { multiTouch: state.multiTouch, moved: state.moved }
+    : { multiTouch: false, moved: false };
+
+  if (!isTap) {
+    return { state: { down, ...carried, lastTapAt: 0 }, doubleTap: false };
+  }
+
+  const doubleTap = state.lastTapAt !== 0 && now - state.lastTapAt < DOUBLE_TAP_MS;
+  return {
+    state: { down, ...carried, lastTapAt: doubleTap ? 0 : now },
+    doubleTap,
+  };
+}

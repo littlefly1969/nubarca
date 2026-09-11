@@ -4,8 +4,9 @@ import {
 } from 'react';
 import { useI18n } from '../i18n';
 import {
-  IDENTITY, type Transform, clampScale, isZoomed, panBy, pinchCentre, pinchDistance,
-  toCssTransform, toggleZoom, zoomAt,
+  IDENTITY, NO_TAP, TAP_SLOP_PX, type TapState, type Transform,
+  clampScale, isZoomed, panBy, pinchCentre, pinchDistance, pointerDown, pointerMoved,
+  pointerUp, toCssTransform, toggleZoom, zoomAt,
 } from './imageTransform';
 
 // THE Party full-screen image viewer. One component, two callers.
@@ -94,14 +95,23 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
 
   // Active pointers, so one finger drags and two pinch. A Map rather than a
   // count because a pinch needs both positions, and because a pointer that
-  // leaves without a matching up would otherwise leave the gesture stuck.
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  // leaves without a matching up would otherwise leave the gesture stuck. Each
+  // one remembers where it STARTED, which is what the tap slop measures from.
+  const pointers = useRef(new Map<number, {
+    x: number; y: number; originX: number; originY: number;
+  }>());
   const pinchStart = useRef<{ distance: number; scale: number } | null>(null);
-  const lastTap = useRef(0);
+  // Whether the gesture in progress could still be a tap. Pure machine, so the
+  // sequence that used to turn the end of a pinch into a double tap is a test
+  // rather than a thing to remember.
+  const tap = useRef<TapState>(NO_TAP);
 
   const onPointerDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    pointers.current.set(e.pointerId, {
+      x: e.clientX, y: e.clientY, originX: e.clientX, originY: e.clientY,
+    });
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    tap.current = pointerDown(tap.current);
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
       pinchStart.current = { distance: pinchDistance(a, b), scale: transform.scale };
@@ -111,8 +121,16 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
   const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     const previous = pointers.current.get(e.pointerId);
     if (!previous) return;
-    const next = { x: e.clientX, y: e.clientY };
+    const next = {
+      x: e.clientX, y: e.clientY,
+      originX: previous.originX, originY: previous.originY,
+    };
     pointers.current.set(e.pointerId, next);
+    // Measured from where this pointer STARTED, not from the last frame: a slow
+    // drag moves a pixel at a time and would never trip a per-frame threshold.
+    if (Math.hypot(next.x - next.originX, next.y - next.originY) > TAP_SLOP_PX) {
+      tap.current = pointerMoved(tap.current);
+    }
 
     if (pointers.current.size >= 2 && pinchStart.current) {
       const [a, b] = [...pointers.current.values()];
@@ -142,24 +160,30 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
     if (pointers.current.size < 2) pinchStart.current = null;
   }, []);
 
+  // A cancelled pointer ends its gesture without ever being a tap.
+  const onPointerCancel = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    tap.current = pointerUp(pointerMoved(tap.current), Date.now()).state;
+    endPointer(e);
+  }, [endPointer]);
+
   // Double tap / double click: zoom to where it happened, or go back to fit.
   const onDoubleActivate = useCallback((clientX: number, clientY: number) => {
     setTransform((cur) => toggleZoom(cur, focalOf(clientX, clientY), viewport()));
   }, [focalOf, viewport]);
 
   const onPointerUp = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
-    endPointer(e);
     // Touch has no dblclick worth relying on, so the tap cadence is measured
     // here. Mouse keeps its own `onDoubleClick`.
+    //
+    // The machine decides, and it only says yes for two separate gestures that
+    // each had ONE pointer and stayed inside the slop. Lifting the second finger
+    // of a pinch, or letting go after a pan, is not half of anything.
     if (e.pointerType === 'touch') {
-      const now = Date.now();
-      if (now - lastTap.current < 300) {
-        onDoubleActivate(e.clientX, e.clientY);
-        lastTap.current = 0;
-      } else {
-        lastTap.current = now;
-      }
+      const result = pointerUp(tap.current, Date.now());
+      tap.current = result.state;
+      if (result.doubleTap) onDoubleActivate(e.clientX, e.clientY);
     }
+    endPointer(e);
   }, [endPointer, onDoubleActivate]);
 
   const onWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
@@ -199,7 +223,7 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
-          onPointerCancel={endPointer}
+          onPointerCancel={onPointerCancel}
           onDoubleClick={(e) => onDoubleActivate(e.clientX, e.clientY)}
           onWheel={onWheel}
         >

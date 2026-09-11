@@ -247,6 +247,144 @@ describe('a Party content poster', () => {
   }, 25_000);
 });
 
+// The overlay is common to the three surfaces, and these are the tests that
+// would have caught it not being. The poster rows on Before and After updated
+// the URL and then showed nothing at all, because the viewer was mounted only
+// inside the Live branch — below two early returns it never reached.
+
+describe('the poster opens on EVERY surface, not only Live', () => {
+  it('opens from the invitation, before the party', async () => {
+    const user = userEvent.setup();
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({
+        kind: 'invitation',
+        content: { headline: 'Ci siamo' },
+        visibleBefore: true,
+        visibleLive: false,
+        mediaUrl: '/api/party/tok-1/content/invitation/media?v=3',
+      })],
+    }));
+    render(wrapper());
+
+    await user.click(await screen.findByTestId('party-poster-open-invitation'));
+
+    const viewer = await screen.findByTestId('party-image-viewer');
+    expect(viewer.querySelector('img'))
+      .toHaveAttribute('src', '/api/party/tok-1/content/invitation/media?v=3');
+    expect(screen.getByTestId('location')).toHaveTextContent('?poster=invitation');
+    // Still no download on the invitation either.
+    expect(within(viewer).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('opens a menu poster on the invitation too', async () => {
+    const user = userEvent.setup();
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({ visibleBefore: true, visibleLive: false })],
+    }));
+    render(wrapper());
+
+    await user.click(await screen.findByTestId('party-poster-open-menu'));
+
+    expect((await screen.findByTestId('party-image-viewer')).querySelector('img'))
+      .toHaveAttribute('src', MENU_MEDIA);
+  });
+
+  it('opens the thank-you from the memories surface', async () => {
+    const user = userEvent.setup();
+    mock(context({
+      phase: 'after',
+      content: [slot({
+        kind: 'thank-you',
+        content: { headline: 'Grazie!' },
+        visibleBefore: false,
+        visibleLive: false,
+        visibleAfter: true,
+        mediaUrl: '/api/party/tok-1/content/thank-you/media?v=3',
+      })],
+      library: { available: false, accessEndsAt: null },
+    }));
+    render(wrapper());
+
+    await user.click(await screen.findByTestId('party-poster-open-thank-you'));
+
+    expect((await screen.findByTestId('party-image-viewer')).querySelector('img'))
+      .toHaveAttribute('src', '/api/party/tok-1/content/thank-you/media?v=3');
+    expect(screen.getByTestId('location')).toHaveTextContent('?poster=thank-you');
+  });
+
+  it('Back closes the poster and keeps the invitation on screen', async () => {
+    const user = userEvent.setup();
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({ visibleBefore: true, visibleLive: false })],
+    }));
+    render(wrapper());
+    await user.click(await screen.findByTestId('party-poster-open-menu'));
+    await screen.findByTestId('party-image-viewer');
+
+    await user.click(screen.getByTestId('press-back'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('party-image-viewer')).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId('location')).toHaveTextContent('/party/tok-1');
+    // The invitation, not the party, and not a blank page.
+    expect(screen.getByTestId('party-before')).toBeInTheDocument();
+  });
+});
+
+describe('the Info dock follows what is actually presentable', () => {
+  it('offers Info when a poster can still be opened', async () => {
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({ visibleBefore: true, visibleLive: false })],
+    }));
+    render(wrapper());
+    await screen.findByTestId('party-poster-open-menu');
+    expect(screen.getByTestId('party-dock-info')).toBeInTheDocument();
+  });
+
+  it('offers no Info when the only slot is a poster with nothing to show', async () => {
+    // The section renders nothing — correctly — so a dock entry would scroll to
+    // an empty container. `content.length > 0` could not tell the difference.
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({ visibleBefore: true, visibleLive: false, mediaUrl: null })],
+    }));
+    render(wrapper());
+    await screen.findByTestId('party-before');
+    expect(screen.queryByTestId('party-dock-info')).not.toBeInTheDocument();
+  });
+
+  it('still offers Info for an inline slot with no photograph', async () => {
+    // An inline slot stands on its words; its photograph was always optional.
+    mock(context({
+      phase: 'before',
+      albumName: null,
+      itemCount: 0,
+      content: [slot({
+        visibleBefore: true, visibleLive: false,
+        mediaPresentation: 'inline', mediaUrl: null,
+      })],
+    }));
+    render(wrapper());
+    await screen.findByTestId('party-before');
+    expect(screen.getByTestId('party-dock-info')).toBeInTheDocument();
+  });
+});
+
 describe('the gallery viewer keeps what it had', () => {
   it('still offers the download the server sent', async () => {
     // The two callers share one viewer; they do not share authority. The
