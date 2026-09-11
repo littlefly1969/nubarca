@@ -606,7 +606,7 @@ The current context contains the following logical groups.
 | Sharing and collections | `ShareLink`, `Album`, `AlbumItem`, `AuditLog` | Owner-managed collections, public file capabilities, forensic events |
 | Durable operations | `BackgroundJob`, `AdminImportRun`, `AdminImportItem`, `RemoteUploadSession`, `RemoteUploadItem`, `RemoteUploadChunk` | Jobs, persisted import manifests, and staged-upload state |
 | Library organization | `MediaLibraryRule`, `PhotoOrganizerRun`, `PhotoOrganizerMove`, `PhotoExportSession`, `PhotoExportEntry`, `OwnerDeletedContentTombstone` | Visibility, deterministic moves, export snapshots, and re-import suppression |
-| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `Party`, `PartyMediaSource`, `PartyGuestContent`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, public event capabilities and moderation |
+| TV and Party | `TvPairingRequest`, `TvSession`, `TvPersonalPin`, `TvPersonalUnlockGrant`, `PartyDisplayGrant`, `Party`, `PartyMediaSource`, `PartyGuestContent`, `PartyAlbumLink`, `PartyUploadItem`, `PartyFaceSearchSession`, `PartyFaceSearchResult` | Limited TV identity, Personal Area authorization, paired-display authorization, public event capabilities and moderation |
 | AI foundation | `AiModel`, `AiProfile`, `BlobAiArtifactStatus`, `BlobEmbedding`, `AiAnnotation`, `AiIndexDiagnostic`, document schema entities | Provider/profile lifecycle, artifact state, vectors, diagnostics, future document/tag seams |
 | Face and People | `FaceDetection`, `FaceEmbedding`, `FaceCluster`, `FaceClusterMember`, `Person`, `PersonGroup`, `FaceAssignment`, `PersonFaceAssignment`, `IgnoredFace`, `AiSetting`, `FacePreview` | Blob-level face artifacts plus owner-level grouping, confirmation, ignore state, and display crops |
 | Private Vault | `PrivateVault`, `PrivateVaultAccessToken`; `PrivateVaultId` on normal tree rows | Exclusion-first private partition using the normal logical tree and original blobs |
@@ -1207,6 +1207,75 @@ Party token validation always derives the currently visible item set from owner,
 
 Owner-side Party surfaces are gated by the same keys through the ordinary policy machinery (`.RequirePermission(Permissions.PartyAccess)`, `.RequirePartyGames()`, `.RequirePartyPrint()`). Moderating what guests already left is `party.access`, not `party.contributions`: closing the contribution channel must not lock the host out of the queue it filled.
 
+### 14.3.7 The display capability
+
+**A display is not a guest, and it holds a third kind of credential.** Party has
+the owner's cookie and the guest's token; a television standing in the corner of
+a room is neither. The public party token opens the hub, uploads, prints, face
+search and the whole visitor surface, so handing one to a screen would give it
+authority it has no use for and no way to protect. `PartyDisplayGrant` does one
+thing: it reads the party its television is assigned to.
+
+The scheme is `TvPersonalUnlockGrant`'s, deliberately — a 256-bit token minted
+server-side, returned exactly once, stored only as its SHA-256, so a stolen
+database cannot impersonate a display. `POST /api/tv/party-display/grant` mints
+it and lives under `/api/tv` because that is where the television's path-scoped
+session cookie is sent; it accepts **no body**, and the client therefore cannot
+name a party. The assignment is server-side state and a `PartyAlbumLinkId` is an
+internal identifier no caller is trusted with, so the server walks
+`session → party assignment → link` itself. A television that is `general`,
+unassigned, or pointed at a party that has ended gets nothing — one answer for
+both, because a display has nothing to do in either case. Minting revokes that
+television's previous grants, so a remount cannot leave a second usable
+credential behind.
+
+**Expiry is not the revocation boundary.** The lifetime only bounds how long a
+leaked token stays useful; what decides validity is re-read on *every* request —
+the session is live, the television is still assigned to a party, the assignment
+still names **this** link, and the party behind it still resolves. Un-pairing a
+television or pointing it at a different party therefore kills the grant in the
+same instant rather than at `ExpiresAt`. The row is bound to the DEVICE, so an
+owner with two televisions has two grants and revoking one screen never darkens
+the other; it is bound to the LINK rather than the album for the same reason the
+assignment is, because re-enabling party mode mints a new link and a new party is
+a new party everywhere else in this feature. The foreign keys say both things:
+`TvSessionId` cascades, `PartyAlbumLinkId` restricts.
+
+**`/api/party-display/*` is a separate route family, and the separation is
+structural.** The guest participant cookie is path-scoped to `/api/party`, so a
+browser standing in front of these routes never sends it and these routes can
+never set one: a display cannot acquire a guest identity even by accident.
+Nothing here accepts a party token and nothing here mints a `PartyParticipant` —
+a screen that joined would inflate the very count it is showing. Authentication
+is a request **header**, never a query parameter, because a URL reaches access
+logs, browser history and `Referer`. The game snapshot is the SAME projection a
+guest television gets, from the same service, with `participantId: null` and
+`isDisplay: true` — so the secrecy table (participation always, the vote split
+only when the phase allows) is not reimplemented and cannot drift, while the
+control room can still report honestly whether a screen is on. An activity's
+photograph is served through the ordinary
+`ServeAuthorizedDerivativeAsync` boundary — derived, metadata-stripped, never an
+original — with the snapshot's media sentinel rewritten onto the display route
+rather than onto a token the display does not have.
+
+**The lobby's QR is returned as PIXELS.** The code necessarily encodes the
+party's own join URL, but the display must not *hold* that URL: a view token in a
+page is a guest capability sitting on a television. `GET
+/api/party-display/join-qr` derives the URL, encodes it and answers an SVG. The
+room can scan it; the television cannot use it, and the token is never
+serialized into a response body, a DTO or a log line.
+
+**One stage, two authorisations.** `/party-display/stage` renders the same
+canonical `PartyTvStage` — same scenes, same activity card, same CSS, same pure
+`stageScene` projection — as the public `/party/{token}/tv`. What differs is only
+how it is authorised, which is the whole reason it is a separate route: a second
+renderer would be a second account of what the game is doing in the same room.
+The grant arrives in the URL **fragment**, which browsers never send to a
+server, is stripped from history on first render, and is held in memory only —
+never `localStorage`, `sessionStorage`, a cookie or IndexedDB. A reload
+therefore has no credential and asks the native shell for a new one rather than
+inventing anything.
+
 ### 14.4 Anonymous Party upload
 
 Anonymous uploads are bounded by Party-specific size and rate limits, ingest through the same blob/file invariants, and are associated with the album and moderation row. Post-ingestion preview and face jobs use higher-priority lanes than global backfills so event content becomes usable quickly without bypassing durability.
@@ -1653,6 +1722,38 @@ TV media routes authorize the limited session or Personal grant, project only vi
 TV updates are stored under a dedicated `TvUpdates:RootPath`, separate from the frontend public root and normal blob stores. Operator scripts publish, roll back, and clean Expo update artifacts. The API serves the native update protocol with version/runtime/channel validation. The TV performs a non-blocking background check and defers activation until a later cold launch.
 
 APK distribution and OTA updates are different mechanisms: native/runtime changes still require a new APK; compatible JavaScript/assets can be delivered through the OTA publication path.
+
+### 21.5 The assigned party's stage
+
+A television assigned to a party shows that party's game through the **canonical
+web renderer**, hosted in a WebView. The split of authority is explicit: the
+native shell owns everything that is not the picture — pairing, the session, the
+assignment, the display grant, the flow lifecycle, the renderer watchdog, the
+native fallback and the keep-awake lock (the same `wakePolicy` lock the
+slideshow uses, not a second authority) — and the WebView owns presentation and
+nothing else. It carries no session cookie, no owner credential and no party
+token; the only thing it is given is the display grant of §14.3.7, in the
+fragment.
+
+**The assignment is the control plane**, so the shell polls
+`/api/tv/session` at two rates: the existing minute while the television is
+`general`, and five seconds while a party is on screen, because an owner moving
+Party A to Party B — or ending the evening — has to reach the screen in the room
+before anyone notices it is wrong. Every read doubles as the session check: a
+definitive `401` tears the session down through the path a revoked session
+already used, while a transient network error must never take a party off a
+screen. The flow state is **keyed by the assignment**, so Party A → Party B is a
+different state rather than the same one with different contents, which is what
+forces a teardown and a fresh grant. The assignment never overrides a personal
+screen: somebody standing in their own library must not have a party appear over
+it, and the party is still there when they leave.
+
+The page emits a renderer heartbeat over the WebView bridge, and the watchdog's
+clock is the SHELL's — the thing it measures is a page that may have stopped
+running its own. Silence is a dead renderer and is answered by a remount, then
+by an explicit native fallback rather than a frozen frame. Hosting a WebView is
+a native dependency, so this arrives as an APK/runtime release and never as an
+OTA (`docs/tv-release.md` §2).
 
 ## 22. Operational architecture
 
