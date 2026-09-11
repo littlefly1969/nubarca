@@ -27,7 +27,13 @@ public sealed record PartyGuestContentDto(
     JsonElement Content,
     int Version,
     Guid? MediaFileItemId = null,
-    string? MediaUrl = null);
+    string? MediaUrl = null,
+    /// <summary>
+    /// How that photograph participates in the guest surface: "inline" or
+    /// "poster". A slot the host has never written, and every row that predates
+    /// the column, is "inline" — which is what P4 rendered.
+    /// </summary>
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
 
 /// <summary>
 /// One slot as a GUEST receives it: the same words, and the photograph as an
@@ -46,7 +52,13 @@ public sealed record PartyGuestContentViewDto(
     bool VisibleAfter,
     JsonElement Content,
     int Version,
-    string? MediaUrl);
+    string? MediaUrl,
+    /// <summary>
+    /// How to present <c>MediaUrl</c>. It selects a RENDERING and confers no
+    /// authority: both values resolve the same reference through the same rule
+    /// and are served by the same relation-scoped route.
+    /// </summary>
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
 
 /// <summary>What the owner writes into one slot.</summary>
 public sealed record PartyGuestContentWrite(
@@ -56,7 +68,8 @@ public sealed record PartyGuestContentWrite(
     bool VisibleAfter,
     JsonElement? Content,
     int Version,
-    Guid? MediaFileItemId = null);
+    Guid? MediaFileItemId = null,
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
 
 public enum PartyGuestContentOutcome
 {
@@ -77,6 +90,13 @@ public enum PartyGuestContentOutcome
     /// outcome for all of them, so the answer never says whether a file exists.
     /// </summary>
     InvalidMedia,
+
+    /// <summary>
+    /// A presentation the product does not define, or "poster" with no
+    /// photograph to present. A poster slot IS its picture, so one without a
+    /// reference is not a state the guest surface could render.
+    /// </summary>
+    InvalidPresentation,
 
     /// <summary>Somebody else edited this slot since the caller read it.</summary>
     VersionConflict,

@@ -1,12 +1,13 @@
 import {
-  useCallback, useEffect, useRef, useState,
-  type KeyboardEvent as ReactKeyboardEvent, type ReactNode,
+  useCallback, useEffect, useMemo, useRef, useState,
+  type ReactNode,
 } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   deletePartyFaceSearch,
   getPartyGuestContext,
+  type PartyGuestContentKind,
   type PartyGuestContext,
   getPartyItems,
   type PartyItem,
@@ -15,7 +16,8 @@ import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PartyGuestDock } from '../components/PartyGuestDock';
-import { PartyGuestContentSections } from '../party/PartyGuestContent';
+import { PartyGuestContentSections, isOpenablePoster } from '../party/PartyGuestContent';
+import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
   PartyBeforeHome,
@@ -332,6 +334,16 @@ function sameItemIds(a: PartyItem[], b: PartyItem[]): boolean {
 export function PartyPage() {
   const { token } = useParams<{ token: string }>();
   const { t, tn } = useI18n();
+  const navigate = useNavigate();
+  // THE POSTER LIVES IN THE URL, and that is the whole reason Back works.
+  //
+  // Opening one pushes `?poster=<kind>`, so the browser's own Back — and
+  // Android's hardware Back, which is the same thing — closes the picture and
+  // returns to the party instead of leaving it. Nothing about the query is
+  // AUTHORITY: it names a kind, and the slot is then resolved against the
+  // server-authorized guest context, so an invented value opens nothing.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const posterParam = searchParams.get('poster');
   const [state, setState] = useState<State>({ kind: 'loading' });
   const [lightbox, setLightbox] = useState<PartyItem | null>(null);
   // The party moving under a guest who is reading is an OFFER, not a takeover.
@@ -349,7 +361,6 @@ export function PartyPage() {
   }, []);
   // The tile the viewer was opened from, so focus goes back to it on close.
   const viewerOpenerRef = useRef<HTMLElement | null>(null);
-  const viewerRef = useRef<HTMLDivElement>(null);
   // Phone-only face filter from a completed face search. The full album stays
   // in state (polling continues untouched); only the visible grid is narrowed.
   // The TV is NEVER affected by this — activation is a separate explicit action
@@ -427,28 +438,65 @@ export function PartyPage() {
     setLightbox(item);
   }, []);
 
-  // `aria-modal` claims the rest of the page is inert, so Tab must not walk out
-  // of the viewer into it. The surface holds at most two controls — close, and
-  // download for a photo — so the trap is this, rather than a reason to move a
-  // full-bleed photo viewer onto a primitive built around a titled header.
-  // A video has no download, so Tab simply keeps close focused.
-  const trapViewerFocus = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'Tab') return;
-    const focusable = Array.from(
-      viewerRef.current?.querySelectorAll<HTMLElement>('button, a[href]') ?? [],
-    );
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-    if (e.shiftKey && (active === first || !viewerRef.current?.contains(active))) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault();
-      first.focus();
+  // THE POSTER, RESOLVED AGAINST THE SERVER'S ANSWER — never against the query.
+  //
+  // `?poster=menu` names a kind and nothing more. What decides whether anything
+  // opens is the guest context: the slot has to exist, be on THIS surface (the
+  // server only sends the slots that are), be in poster mode, and still carry a
+  // servable address. So `?poster=random`, `?poster=menu` for a slot the host
+  // turned off, and a poster whose photograph went to Trash all open exactly
+  // nothing — the query is a bookmark, not a capability.
+  const posterSlot = useMemo(() => {
+    if (!posterParam || state.kind !== 'ready') return null;
+    const slot = state.context.content.find((s) => s.kind === posterParam);
+    return slot && isOpenablePoster(slot) ? slot : null;
+  }, [posterParam, state]);
+
+  // Did WE push this history entry? Close then means Back, so the entry is
+  // consumed rather than left behind. Someone who opened `?poster=menu`
+  // directly has no entry of ours to pop, and going back would take them out of
+  // NubArca entirely — so for them Close rewrites the URL in place.
+  const posterPushedRef = useRef(false);
+
+  const openPoster = useCallback((kind: PartyGuestContentKind) => {
+    posterPushedRef.current = true;
+    // A PUSH, deliberately: this is the entry Back consumes.
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('poster', kind);
+      return next;
+    });
+  }, [setSearchParams]);
+
+  const clearPosterParam = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete('poster');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
+  const closePoster = useCallback(() => {
+    if (posterPushedRef.current) {
+      posterPushedRef.current = false;
+      // Identical to the guest pressing Back, which is what makes the two
+      // routes out of a poster behave the same way.
+      navigate(-1);
+      return;
     }
-  }, []);
+    clearPosterParam();
+  }, [clearPosterParam, navigate]);
+
+  // A poster that stops being available while it is open — the party moved on,
+  // the host disabled the slot, the photograph went to Trash — closes on the
+  // next context refresh instead of showing stale authority. The query goes
+  // with it, so a reload does not try to reopen what is gone. Guarded on
+  // `ready`, or a poster deep link would be stripped before its context landed.
+  useEffect(() => {
+    if (state.kind !== 'ready' || !posterParam || posterSlot) return;
+    posterPushedRef.current = false;
+    clearPosterParam();
+  }, [clearPosterParam, posterParam, posterSlot, state.kind]);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) {
@@ -549,18 +597,13 @@ export function PartyPage() {
     setNewMoments(0);
   }, [readyItems]);
 
-  // The viewer owns the screen while it is open: Escape closes it, the page
-  // behind it does not scroll, and focus goes back to the tile it came from.
+  // Escape, the scroll lock and the focus trap belong to PartyImageViewer, which
+  // the gallery and a content poster share. What stays here is the one thing
+  // only this page knows: which tile the viewer was opened from, so focus goes
+  // back to it.
   useEffect(() => {
     if (!lightbox) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setLightbox(null); };
-    window.addEventListener('keydown', onKey);
-    const body = document.body;
-    const previousOverflow = body.style.overflow;
-    body.style.overflow = 'hidden';
     return () => {
-      window.removeEventListener('keydown', onKey);
-      body.style.overflow = previousOverflow;
       const opener = viewerOpenerRef.current;
       viewerOpenerRef.current = null;
       opener?.focus?.();
@@ -628,7 +671,7 @@ export function PartyPage() {
       <main className="party-guest-hub">
         <div className="party-guest-hub-state-page">
           <PartyHubTopBar />
-          <PartyBeforeHome context={context} />
+          <PartyBeforeHome context={context} onOpenPoster={openPoster} />
         </div>
         {/* Entering RELOADS: the new surface needs what the old one never asked
             for — an invitation fetched no gallery — so it is fetched now rather
@@ -654,7 +697,11 @@ export function PartyPage() {
       <main className="party-guest-hub">
         <div className="party-guest-hub-state-page">
           <PartyHubTopBar />
-          <PartyAfterHome context={context} onOpenMemories={() => setShowMemories(true)} />
+          <PartyAfterHome
+            context={context}
+            onOpenMemories={() => setShowMemories(true)}
+            onOpenPoster={openPoster}
+          />
         </div>
         <PartyGuestDock
           visible
@@ -847,7 +894,7 @@ export function PartyPage() {
       {/* What the host wants the guests to know DURING the party — where, what
           to wear, what there is to eat. It sits above the photographs and below
           the actions: information, not a capability, and never a dock item. */}
-      <PartyGuestContentSections slots={context.content} />
+      <PartyGuestContentSections slots={context.content} onOpenPoster={openPoster} />
 
       <section
         id="party-photos"
@@ -964,44 +1011,28 @@ export function PartyPage() {
         />
       )}
 
+      {/* The gallery photograph. The medium PREVIEW, whole and uncropped — for a
+          video this is the poster the party surface serves; there is no playback
+          here. It keeps the download the server offered, which is the one thing
+          a content poster never has. */}
       {lightbox && (
-        <div
-          className="party-guest-hub-viewer"
-          role="dialog"
-          aria-modal="true"
-          aria-label={lightbox.mediaType === 'video'
-            ? t('party.videoViewer')
-            : t('party.photoViewer')}
-          ref={viewerRef}
-          onClick={() => setLightbox(null)}
-          onKeyDown={trapViewerFocus}
-        >
-          <div className="party-guest-hub-viewer-inner" onClick={(e) => e.stopPropagation()}>
-            {/* The medium PREVIEW, whole and uncropped — for a video this is the
-                poster the party surface serves; there is no playback here. */}
-            <img className="party-guest-hub-viewer-img" src={lightbox.previewUrl} alt="" />
-            <div className="party-guest-hub-viewer-bar">
-              <button
-                type="button"
-                className="party-guest-hub-viewer-close"
-                data-testid="party-viewer-close"
-                autoFocus
-                onClick={() => setLightbox(null)}
-              >
-                {t('common.close')}
-              </button>
-              {lightbox.downloadUrl && (
-                <a
-                  className="party-guest-hub-viewer-download"
-                  href={lightbox.downloadUrl}
-                  download
-                >
-                  {t('common.download')}
-                </a>
-              )}
-            </div>
-          </div>
-        </div>
+        <PartyImageViewer
+          src={lightbox.previewUrl}
+          label={lightbox.mediaType === 'video' ? t('party.videoViewer') : t('party.photoViewer')}
+          downloadUrl={lightbox.downloadUrl}
+          onClose={() => setLightbox(null)}
+        />
+      )}
+
+      {/* A content POSTER, in the same viewer and with no download at all: a
+          Party reference authorizes looking at a derived, metadata-stripped
+          copy, and never bytes. */}
+      {posterSlot?.mediaUrl && (
+        <PartyImageViewer
+          src={posterSlot.mediaUrl}
+          label={t('party.photoViewer')}
+          onClose={closePoster}
+        />
       )}
     </main>
   );

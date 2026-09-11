@@ -59,6 +59,32 @@ public class PartyGuestContent
     public Guid? MediaFileItemId { get; set; }
 
     /// <summary>
+    /// HOW that photograph participates in the guest's surface — one of
+    /// <see cref="PartyGuestContentMediaPresentations"/>.
+    ///
+    /// <para>A slot answers three independent questions, and this is the third:
+    /// <see cref="ContentJson"/> is what it SAYS, <see cref="MediaFileItemId"/>
+    /// is WHICH image it uses, and this is HOW that image is presented. It lives
+    /// as a column rather than inside the payload because it is structural — the
+    /// surface reads it to decide what to render before it reads a word — and
+    /// because a payload validator re-serializes its shape per kind, which would
+    /// make one presentation rule six.</para>
+    ///
+    /// <para><c>inline</c> is the default and is what every P4 row means: the
+    /// photograph sits in the slot's composition, above its words. <c>poster</c>
+    /// means the photograph IS the document — the surface offers a deterministic
+    /// navigation affordance and opens it whole, which is what lets a host use a
+    /// 1080x1920 menu graphic without it being cropped into a banner.</para>
+    ///
+    /// <para>It is not a second way to hide text: a slot switched to
+    /// <c>poster</c> keeps every word it had, and switching back restores them
+    /// exactly. And it grants nothing — the same reference, resolved by the same
+    /// <c>PartyMediaReference</c> rule, served by the same relation-scoped
+    /// route.</para>
+    /// </summary>
+    public string MediaPresentation { get; set; } = PartyGuestContentMediaPresentations.Inline;
+
+    /// <summary>
     /// Optimistic concurrency for THIS slot.
     ///
     /// <para>Its own, not the root's: editing the menu and renaming the party
@@ -118,4 +144,31 @@ public static class PartyGuestContentKinds
         ThankYou => (false, false, true),
         _ => (true, true, false),
     };
+}
+
+/// <summary>
+/// The two ways a slot's photograph can participate in the guest's surface.
+///
+/// <para>Two, and deliberately not an open vocabulary: each one is a different
+/// thing for the renderer to DO, so a third would be a slice that decides what
+/// it means rather than a string somebody adds. Application strings rather than
+/// a PostgreSQL enum, on the same reasoning as
+/// <c>PartyMediaSource.Role</c> — a new value should cost code, not a
+/// migration and a database type.</para>
+/// </summary>
+public static class PartyGuestContentMediaPresentations
+{
+    /// <summary>The photograph is part of the slot's composition: picture, then words.</summary>
+    public const string Inline = "inline";
+
+    /// <summary>
+    /// The photograph is the guest-facing document. The surface shows a
+    /// deterministic navigation affordance and opens the picture full-screen.
+    /// </summary>
+    public const string Poster = "poster";
+
+    public static readonly IReadOnlyList<string> All = [Inline, Poster];
+
+    public static bool IsKnown(string? presentation) =>
+        presentation is not null && All.Contains(presentation);
 }

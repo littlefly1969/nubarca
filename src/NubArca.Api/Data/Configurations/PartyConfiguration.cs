@@ -101,7 +101,14 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
 {
     public void Configure(EntityTypeBuilder<PartyGuestContent> builder)
     {
-        builder.ToTable("party_guest_contents");
+        builder.ToTable("party_guest_contents", t =>
+            // The presentation vocabulary, held by the DATABASE as well as by
+            // the validator. Two values is a closed set, and a closed set that
+            // only the application enforces is one bad write away from a
+            // surface that cannot render its own row.
+            t.HasCheckConstraint(
+                "ck_party_guest_contents_media_presentation",
+                "\"MediaPresentation\" IN ('inline', 'poster')"));
 
         // The composite key IS the "at most one slot per kind" rule. Expressing
         // it as the key rather than as a surrogate id plus a unique index means
@@ -119,6 +126,15 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
         // PartyGuestContentPayload before anything is stored; this only stops a
         // corrupt write from being unbounded.
         builder.Property(c => c.ContentJson).IsRequired().HasMaxLength(16_384);
+
+        // NOT NULL with an 'inline' default, which is the whole upgrade story:
+        // every row written before this column existed means exactly what it
+        // rendered as, and an older application that never mentions the column
+        // still writes rows the constraint accepts.
+        builder.Property(c => c.MediaPresentation)
+            .IsRequired()
+            .HasMaxLength(16)
+            .HasDefaultValue(PartyGuestContentMediaPresentations.Inline);
 
         builder.Property(c => c.Version).HasDefaultValue(1);
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");

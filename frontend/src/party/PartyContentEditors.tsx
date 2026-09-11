@@ -4,6 +4,7 @@ import {
   setPartyGuestContent,
   type PartyGuestContentKind,
   type PartyGuestContentSlot,
+  type PartyMediaPresentation,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { PartySlotImageField } from './PartyImageField';
@@ -29,6 +30,7 @@ type Draft = {
   mediaFileItemId: string | null;
   /** How the host previews the chosen photograph. Never sent. */
   mediaPreviewUrl: string | null;
+  mediaPresentation: PartyMediaPresentation;
   version: number;
 };
 
@@ -40,6 +42,7 @@ const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
   content: { ...(slot.content ?? {}) },
   mediaFileItemId: slot.mediaFileItemId ?? null,
   mediaPreviewUrl: slot.mediaUrl ?? null,
+  mediaPresentation: slot.mediaPresentation ?? 'inline',
   version: slot.version,
 });
 
@@ -63,7 +66,8 @@ export function PartyContentCard({
   const [draft, setDraft] = useState<Draft>(() => fromSlot(slot));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] =
-    useState<'idle' | 'saved' | 'conflict' | 'failed' | 'invalidMedia'>('idle');
+    useState<'idle' | 'saved' | 'conflict' | 'failed' | 'invalidMedia' | 'invalidPresentation'>(
+      'idle');
 
   // Re-seeded when the SERVER's version moves — including after a conflict,
   // which is how the card adopts what actually happened.
@@ -82,6 +86,7 @@ export function PartyContentCard({
         visibleAfter: draft.visibleAfter,
         content: draft.content,
         mediaFileItemId: draft.mediaFileItemId,
+        mediaPresentation: draft.mediaPresentation,
         version: draft.version,
       }));
       setStatus('saved');
@@ -93,6 +98,9 @@ export function PartyContentCard({
         setStatus('conflict');
       } else if (err instanceof ApiError && err.status === 400 && body?.error === 'invalid_media') {
         setStatus('invalidMedia');
+      } else if (err instanceof ApiError && err.status === 400
+        && body?.error === 'invalid_presentation') {
+        setStatus('invalidPresentation');
       } else {
         setStatus('failed');
       }
@@ -126,8 +134,24 @@ export function PartyContentCard({
               ...d,
               mediaFileItemId: next?.fileItemId ?? null,
               mediaPreviewUrl: next?.previewUrl ?? null,
+              // Removing the photograph takes the choice with it: "full screen"
+              // with nothing to show is not a state, and the server refuses it.
+              // Choosing a DIFFERENT photograph keeps the current answer, which
+              // is what makes replacing a poster one click rather than three.
+              mediaPresentation: next ? d.mediaPresentation : 'inline',
             }))}
           />
+
+          {/* Only once there IS a photograph: there is nothing to decide about
+              an image that is not there. */}
+          {draft.mediaFileItemId && (
+            <PresentationChoice
+              kind={slot.kind}
+              value={draft.mediaPresentation}
+              disabled={busy}
+              onChange={(mediaPresentation) => setDraft((d) => ({ ...d, mediaPresentation }))}
+            />
+          )}
 
           <div className="party-content-visibility">
             {phases.map((phase) => {
@@ -165,10 +189,69 @@ export function PartyContentCard({
       {status === 'invalidMedia' && (
         <p className="inline-error" role="alert">{t('partyContent.imageInvalid')}</p>
       )}
+      {status === 'invalidPresentation' && (
+        <p className="inline-error" role="alert">{t('partyContent.presentationInvalid')}</p>
+      )}
       {status === 'failed' && (
         <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
       )}
     </section>
+  );
+}
+
+/**
+ * How this slot's photograph is presented, as a plain two-way choice.
+ *
+ * Radio buttons rather than a toggle because the two options are not on and
+ * off: each is a different thing the guest surface does, and each is worth a
+ * sentence. The poster option names the row the guest will actually see, built
+ * from the same localized kind label the surface renders — so what the host
+ * reads here is what appears there.
+ */
+function PresentationChoice({
+  kind, value, disabled, onChange,
+}: {
+  kind: PartyGuestContentKind;
+  value: PartyMediaPresentation;
+  disabled: boolean;
+  onChange(next: PartyMediaPresentation): void;
+}) {
+  const { t } = useI18n();
+  const rowLabel = t(`partyGuest.poster.${kind}` as 'partyGuest.poster.invitation');
+  return (
+    <fieldset className="party-presentation" data-testid={`party-presentation-${kind}`}>
+      <legend>{t('partyContent.presentation')}</legend>
+      {(['inline', 'poster'] as const).map((option) => (
+        <label className="party-presentation-option" key={option}>
+          <input
+            type="radio"
+            name={`presentation-${kind}`}
+            value={option}
+            checked={value === option}
+            disabled={disabled}
+            data-testid={`party-presentation-${kind}-${option}`}
+            onChange={() => onChange(option)}
+          />
+          <span>
+            <span className="party-presentation-title">
+              {t(option === 'inline'
+                ? 'partyContent.presentationInline'
+                : 'partyContent.presentationPoster')}
+            </span>
+            <span className="party-presentation-help">
+              {option === 'inline'
+                ? t('partyContent.presentationInlineHelp')
+                : t('partyContent.presentationPosterHelp').replace('{label}', rowLabel)}
+            </span>
+          </span>
+        </label>
+      ))}
+      {/* The words are not deleted, and saying so is the difference between a
+          presentation choice and losing an evening's typing. */}
+      {value === 'poster' && (
+        <p className="muted party-presentation-note">{t('partyContent.presentationTextKept')}</p>
+      )}
+    </fieldset>
   );
 }
 

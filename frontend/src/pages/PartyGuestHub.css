@@ -836,6 +836,23 @@
   min-height: 0;
 }
 
+/* The stage is what the gesture measures against, so it is the box the photo
+   fits inside rather than the photo itself. `touch-action: none` hands pinch
+   and drag to the handlers INSIDE the viewer only — the page's own browser
+   zoom is untouched, which NubArca's viewport deliberately allows. */
+.party-guest-hub-viewer-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.party-guest-hub-viewer-stage[data-zoomed='true'] { cursor: grab; }
+
 /* Contain, never crop: the viewer shows the whole photo. */
 .party-guest-hub-viewer-img {
   min-height: 0;
@@ -843,7 +860,46 @@
   max-height: 100%;
   object-fit: contain;
   border-radius: 0.85rem;
+  transform-origin: center center;
+  will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
 }
+
+/* A zoom is a direct manipulation, so it follows the fingers with no easing.
+   Nothing here animates, which is also why there is no reduced-motion case to
+   answer: the transform is applied, not transitioned. */
+
+/* A poster slot is a navigation affordance, not a card with contents: one row,
+   a product label and a chevron, sized for a thumb. */
+.party-content-block--poster { padding: 0; }
+
+.party-poster-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 6%);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.party-poster-row:hover { background: rgb(255 255 255 / 10%); }
+
+.party-poster-row:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+}
+
+.party-poster-row-chevron { opacity: 0.7; font-size: 1.25rem; line-height: 1; }
 
 .party-guest-hub-viewer-bar {
   flex: none;

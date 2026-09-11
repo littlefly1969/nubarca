@@ -118,11 +118,23 @@ public static class PartyEndpoints
             // arrives as the invitation's own relation-scoped address — never
             // through the album route, which would rightly refuse it. Without
             // one, the chosen cover; without that, the page's composition.
+            //
+            // ONLY while that photograph is INLINE. A hero is a cropped band
+            // across the top of a page, and a poster is a document the host
+            // prepared to be read whole — putting one in the other is how a
+            // 1080x1920 invitation loses its own words to a crop. A poster
+            // invitation therefore falls through to the chosen cover (or the
+            // composition) and is offered separately, as its own full-screen
+            // affordance, which is the point of having chosen poster at all.
             if (access.Experience.Phase == NubArca.Api.Domain.PartyGuestPhase.Before)
             {
-                coverUrl = content
-                    .FirstOrDefault(c => c.Kind == NubArca.Api.Domain.PartyGuestContentKinds.Invitation)
-                    ?.MediaUrl ?? coverUrl;
+                var invitation = content.FirstOrDefault(
+                    c => c.Kind == NubArca.Api.Domain.PartyGuestContentKinds.Invitation);
+                if (invitation?.MediaPresentation
+                    == NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline)
+                {
+                    coverUrl = invitation.MediaUrl ?? coverUrl;
+                }
             }
 
             // A capability the HOST is no longer permitted to run, or that does
