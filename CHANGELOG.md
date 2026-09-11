@@ -6,6 +6,28 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The party's game, on the television in the room
+
+- **Point a paired television at a party and it shows the game.** No second QR
+  code, no PIN, no walk to the television: the host assigns the screen from the
+  web, and the show appears on it. Changing which party a screen shows — or
+  ending the evening — reaches it within a few seconds.
+- **It is the same show a browser or a projector puts up.** One stage, one set
+  of scenes, one activity card, so a preview really does predict what the room
+  sees and two screens in the same room cannot tell two different stories.
+- **The screen is a screen, not a guest.** It never joins the party, so it never
+  counts as somebody who answered, and it cannot browse the album, upload,
+  print or search for faces. It shows the lobby's QR code as a picture, so the
+  room can scan it and the television cannot use it.
+- **Un-pairing a television, or pointing it somewhere else, takes effect at
+  once** rather than when a credential would have expired.
+- **A party on screen keeps the television awake**, exactly as a slideshow does,
+  and a renderer that stops responding is restarted rather than left frozen on
+  its last frame.
+- NubArca TV **1.0.11** (`versionCode` 13, runtime `nubarca-tv-native-12`).
+  Hosting the stage is a native change, so it arrives as an APK rather than an
+  over-the-air update.
+
 ### Curating a large album stays fast
 
 - **An album's Content panel opens straight away, whatever the album's size.**
