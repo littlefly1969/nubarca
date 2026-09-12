@@ -164,12 +164,44 @@
   backdrop-filter: blur(8px);
 }
 
+/* ---- Lobby -------------------------------------------------------------- */
+
+/* The lobby is composed from the TOP of the safe area down, not centred. It is
+   the one scene with something the room must do — scan — so the code gets
+   every pixel the words leave, instead of a fixed slice of the screen floating
+   in empty space.
+
+   The words keep EXACTLY the sizes every other scene uses (the eyebrow,
+   headline and sub rules above are shared, untouched). They never shrink and
+   never flex: when the viewport is short it is the code that gives way. */
+.party-stage-lobby {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2vh;
+  text-align: center;
+}
+.party-stage-lobby > .party-stage-eyebrow,
+.party-stage-lobby > .party-stage-headline,
+.party-stage-lobby > .party-stage-sub {
+  flex: none;
+}
+
+/* The join code: the remaining height, the full safe width. The box is a flex
+   item with a zero basis, so it is exactly the space left under the words and
+   can never push them — or itself — past the bottom of the safe area. The SVG
+   fills the box and scales with its own viewBox, whose default
+   `xMidYMid meet` makes the code the LARGEST SQUARE that fits: the smaller of
+   the remaining height and the safe width, centred, never distorted, never
+   clipped. The quiet zone is drawn inside the picture (the server's and the
+   public route's codes both carry four modules of it), so however large the
+   code is scaled, the white margin a phone's camera needs scales with it. */
 .party-stage-qr {
-  width: clamp(8rem, 22vh, 18rem);
-  aspect-ratio: 1;
-  padding: 0.8vh;
-  border-radius: var(--radius-card);
-  background: var(--brand-cloud-white);
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
 }
 .party-stage-qr svg { display: block; width: 100%; height: 100%; }
 

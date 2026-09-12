@@ -49,8 +49,12 @@ function useGameQr(token: string | undefined, wanted: boolean): string | null {
   useEffect(() => {
     if (!token || !wanted) { setSvg(null); return; }
     let cancelled = false;
+    // Four modules of quiet zone, drawn inside the picture — the same margin
+    // the paired display's server-built code carries. The stage scales the SVG
+    // to whatever the lobby leaves, so the margin has to scale with it rather
+    // than come from a padded frame around a fixed-size image.
     void QRCode.toString(`${window.location.origin}/party/${token}/game`,
-      { type: 'svg', margin: 1, width: 260 })
+      { type: 'svg', margin: 4, width: 260 })
       .then((value) => { if (!cancelled) setSvg(value); })
       .catch(() => { if (!cancelled) setSvg(null); });
     return () => { cancelled = true; };

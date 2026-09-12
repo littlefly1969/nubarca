@@ -203,6 +203,208 @@ describe('the party display surface', () => {
   });
 });
 
+describe('what the display page tells its native shell', () => {
+  function bridge(): string[] {
+    const posted: string[] = [];
+    vi.stubGlobal('ReactNativeWebView', { postMessage: (d: string) => posted.push(d) });
+    return posted;
+  }
+  const types = (posted: string[]) => posted.map((raw) => JSON.parse(raw).type as string);
+
+  it('announces its bridge protocol with every heartbeat', async () => {
+    const posted = bridge();
+    installFetchMock({ [`GET ${DISPLAY}`]: () => jsonResponse(snapshot()) });
+    mount();
+    await screen.findByTestId('party-tv-stage');
+    const beat = posted.map((raw) => JSON.parse(raw)).find((m) => m.type === 'display-heartbeat');
+    expect(beat.protocol).toBe(2);
+  });
+
+  it('says once that the first real snapshot is on screen, and that a live scene is up', async () => {
+    const posted = bridge();
+    installFetchMock({ [`GET ${DISPLAY}`]: () => jsonResponse(snapshot()) });
+    mount();
+    await waitFor(() => expect(types(posted)).toContain('display-ready'));
+    // More polls are more truth, not more "ready".
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(types(posted).filter((t) => t === 'display-ready')).toHaveLength(1);
+    const presentation = posted.map((raw) => JSON.parse(raw))
+      .filter((m) => m.type === 'display-presentation');
+    expect(presentation.at(-1)).toEqual({ type: 'display-presentation', active: true });
+    // Nothing the page tells the shell carries the credential.
+    for (const raw of posted) expect(raw).not.toContain(GRANT);
+  });
+
+  it('reports a refused grant as its own event, and holds nothing live on screen', async () => {
+    const posted = bridge();
+    installFetchMock({ [`GET ${DISPLAY}`]: () => errorResponse(401) });
+    mount();
+    // Distinct from silence: the renderer is alive, the CAPABILITY is not, and
+    // only the shell can mint another one.
+    await waitFor(() => expect(types(posted)).toContain('display-auth-failed'));
+    expect(types(posted)).not.toContain('display-ready');
+    const presentation = posted.map((raw) => JSON.parse(raw))
+      .filter((m) => m.type === 'display-presentation');
+    expect(presentation.at(-1)?.active).toBe(false);
+    for (const raw of posted) expect(raw).not.toContain(GRANT);
+  });
+});
+
+describe('what the display page fetches besides the snapshot', () => {
+  const svg = () => new Response('<svg viewBox="0 0 10 10" data-testid="qr"></svg>', {
+    status: 200, headers: { 'content-type': 'image/svg+xml' },
+  });
+
+  it('retries the lobby code after a failure that was not an answer', async () => {
+    let qrCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => jsonResponse(snapshot()),
+      [`GET ${QR}`]: () => {
+        qrCalls += 1;
+        if (qrCalls === 1) throw new TypeError('Failed to fetch');
+        return qrCalls === 2 ? errorResponse(503) : svg();
+      },
+    });
+    mount();
+    await waitFor(() => expect(qrCalls).toBe(1));
+    expect(screen.queryByTestId('party-stage-qr')).not.toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+    await waitFor(() => expect(qrCalls).toBe(2));
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_100); });
+    await waitFor(() => expect(screen.getByTestId('party-stage-qr')).toBeInTheDocument());
+    expect(qrCalls).toBe(3);
+  });
+
+  it('does not ask again when the server has answered', async () => {
+    let qrCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => jsonResponse(snapshot()),
+      [`GET ${QR}`]: () => { qrCalls += 1; return errorResponse(404); },
+    });
+    mount();
+    await waitFor(() => expect(qrCalls).toBe(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+    expect(qrCalls).toBe(1);
+  });
+
+  it('stops retrying the code the moment the lobby is gone', async () => {
+    let reads = 0;
+    let qrCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => {
+        reads += 1;
+        return jsonResponse(reads === 1 ? snapshot() : snapshot({
+          status: 'live', phase: 'challenge_active', roundNumber: 1, roundId: 'r1',
+          challenge: activity(),
+        }));
+      },
+      [`GET ${QR}`]: () => { qrCalls += 1; return errorResponse(503); },
+    });
+    mount();
+    await waitFor(() => expect(qrCalls).toBeGreaterThanOrEqual(1));
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    await waitFor(() => expect(screen.getByTestId('party-tv-stage'))
+      .toHaveAttribute('data-scene', 'active'));
+    const settled = qrCalls;
+    await act(async () => { await vi.advanceTimersByTimeAsync(90_000); });
+    expect(qrCalls).toBe(settled);
+  });
+
+  it('reports a refused code to the shell instead of retrying it', async () => {
+    const posted: string[] = [];
+    vi.stubGlobal('ReactNativeWebView', { postMessage: (d: string) => posted.push(d) });
+    let qrCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => jsonResponse(snapshot()),
+      [`GET ${QR}`]: () => { qrCalls += 1; return errorResponse(401); },
+    });
+    mount();
+    await waitFor(() => expect(posted.some((raw) => raw.includes('display-auth-failed'))).toBe(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+    expect(qrCalls).toBe(1);
+  });
+
+  it('retries the activity photograph after a failure that was not an answer', async () => {
+    const create = vi.fn(() => 'blob:retried');
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true, writable: true });
+    let mediaCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => jsonResponse(snapshot({
+        status: 'live', phase: 'challenge_active', roundNumber: 1, roundId: 'r1',
+        challenge: activity({ mediaUrl: '/api/party-display/challenges/c1/media' }),
+      })),
+      'GET /api/party-display/challenges/c1/media': () => {
+        mediaCalls += 1;
+        return mediaCalls === 1 ? errorResponse(502) : new Response('image-bytes', { status: 200 });
+      },
+    });
+    mount();
+    await waitFor(() => expect(mediaCalls).toBe(1));
+    expect(create).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(mediaCalls).toBe(2);
+  });
+
+  it("a new activity takes the last one's photograph down and cancels its work", async () => {
+    let n = 0;
+    const create = vi.fn(() => `blob:${n++}`);
+    const revoke = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: create, configurable: true, writable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revoke, configurable: true, writable: true });
+    let reads = 0;
+    let firstCalls = 0;
+    let secondCalls = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => {
+        reads += 1;
+        return jsonResponse(reads === 1
+          ? snapshot({
+            status: 'live', phase: 'challenge_active', roundNumber: 1, roundId: 'r1',
+            challenge: activity({ mediaUrl: '/api/party-display/challenges/c1/media' }),
+          })
+          : snapshot({
+            status: 'live', phase: 'challenge_active', roundNumber: 2, roundId: 'r2',
+            challenge: activity({ id: 'c2', title: 'Balla', mediaUrl: '/api/party-display/challenges/c2/media' }),
+          }));
+      },
+      'GET /api/party-display/challenges/c1/media': () => { firstCalls += 1; return new Response('one', { status: 200 }); },
+      'GET /api/party-display/challenges/c2/media': () => { secondCalls += 1; return errorResponse(503); },
+    });
+    mount();
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+    // The host moved on. The old picture is revoked at once rather than left
+    // on the new activity's card while the new one is still loading.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_600); });
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('blob:0'));
+    expect(document.querySelector('img[src="blob:0"]')).toBeNull();
+
+    // The new one keeps being asked for, on a backoff; the old one never again.
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(firstCalls).toBe(1);
+    expect(secondCalls).toBeGreaterThan(1);
+    expect(secondCalls).toBeLessThan(10);
+  });
+
+  it('reports a refused photograph to the shell', async () => {
+    const posted: string[] = [];
+    vi.stubGlobal('ReactNativeWebView', { postMessage: (d: string) => posted.push(d) });
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => jsonResponse(snapshot({
+        status: 'live', phase: 'challenge_active', roundNumber: 1, roundId: 'r1',
+        challenge: activity({ mediaUrl: '/api/party-display/challenges/c1/media' }),
+      })),
+      'GET /api/party-display/challenges/c1/media': () => errorResponse(401),
+    });
+    mount();
+    await waitFor(() => expect(posted.some((raw) => raw.includes('display-auth-failed'))).toBe(true));
+    // The photograph is fetched with the header, and the URL never carries it.
+    for (const raw of posted) expect(raw).not.toContain(GRANT);
+  });
+});
+
 describe('the public party television is unchanged', () => {
   it('still authorises with the party token and builds its own QR', async () => {
     const mock = installFetchMock({
