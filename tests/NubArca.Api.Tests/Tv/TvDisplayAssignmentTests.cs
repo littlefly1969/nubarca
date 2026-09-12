@@ -269,9 +269,11 @@ public sealed class TvDisplayAssignmentTests : IDisposable
         await AssignAsync(owner, sessionId, album);
         var after = await (await TvGet("/api/tv/albums", cookie)).Content.ReadAsStringAsync();
 
-        // This slice creates the CONCEPT of an assignment; it does not yet change
-        // what the television is served. A regression here would mean a party
-        // assignment had quietly become a content filter.
+        // An assignment decides what the television SHOWS (the presentation
+        // projected beside it, see TvPartyTakeoverTests) and lets that one
+        // device read that one party's album. It does not change the album LIST
+        // a general browse is served: a regression here would mean a party
+        // assignment had quietly become a content filter, or a way to browse.
         Assert.Equal(before, after);
         Assert.Equal(HttpStatusCode.OK, (await TvGet("/api/tv/session/heartbeat", cookie, post: true)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await TvGet("/api/tv/personal/status", cookie)).StatusCode);

@@ -86,11 +86,13 @@ public sealed class TvMediaService : ITvMediaService
     }
 
     public async Task<TvAlbumItemsDto?> ListItemsAsync(
-        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default)
+        Guid ownerUserId, Guid albumId, Guid? assignedPartyAlbumId,
+        CancellationToken cancellationToken = default)
     {
         var album = await _db.Albums
             .AsNoTracking()
-            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv)
+            .Where(a => a.Id == albumId && a.OwnerUserId == ownerUserId
+                && (a.ShowOnTv || a.Id == assignedPartyAlbumId))
             .Select(a => new { a.Id, a.Name })
             .FirstOrDefaultAsync(cancellationToken);
         if (album is null)
@@ -189,11 +191,13 @@ public sealed class TvMediaService : ITvMediaService
     }
 
     public async Task<bool> IsMediaVisibleAsync(
-        Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken = default)
+        Guid ownerUserId, Guid fileItemId, Guid? assignedPartyAlbumId,
+        CancellationToken cancellationToken = default)
     {
         // The file must be an owner-owned, active, non-vault FileItem (the
         // FileItems query below carries the Private-Vault global filter) that is a
-        // member of at least one of the owner's currently-enabled TV albums.
+        // member of at least one of the owner's currently-enabled TV albums — or
+        // of the live party album this particular television is assigned to.
         var fileOk = await _db.FileItems
             .AsNoTracking()
             .AnyAsync(
@@ -221,7 +225,8 @@ public sealed class TvMediaService : ITvMediaService
                 ai => ai.AlbumId,
                 a => a.Id,
                 (ai, a) => a)
-            .AnyAsync(a => a.OwnerUserId == ownerUserId && a.ShowOnTv, cancellationToken);
+            .AnyAsync(a => a.OwnerUserId == ownerUserId
+                && (a.ShowOnTv || a.Id == assignedPartyAlbumId), cancellationToken);
     }
 
     private static string ThumbnailUrl(Guid id) => $"/api/tv/media/{id}/thumbnail";

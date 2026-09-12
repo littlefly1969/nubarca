@@ -39,6 +39,13 @@ public interface ITvPairingService
     Task<Guid?> ResolveOwnerUserIdAsync(string? sessionToken,
         CancellationToken cancellationToken = default);
 
+    // The same resolution, plus the one extra thing a TV media route needs to
+    // know: the album of the LIVE party this television is assigned to, if any.
+    // Resolved in the same query and re-read on every call, so reassigning the
+    // television, revoking the party or unpairing closes it on the next request.
+    Task<TvViewer?> ResolveViewerAsync(string? sessionToken,
+        CancellationToken cancellationToken = default);
+
     // Owner-side management: list this owner's TV sessions (safe DTOs; no token
     // hash / secret / owner id), most recent first.
     Task<IReadOnlyList<TvDeviceDto>> ListOwnerSessionsAsync(Guid ownerUserId,
@@ -50,3 +57,16 @@ public interface ITvPairingService
     Task<bool> RevokeOwnerSessionAsync(Guid ownerUserId, Guid sessionId,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// A live TV session as a media route sees it. INTERNAL: it never reaches a
+/// client.
+///
+/// <para><c>AssignedPartyAlbumId</c> is the album of the party this television
+/// is assigned to, and only while that party's link is enabled, unrevoked and
+/// unexpired; null for a general television and for one assigned to a party
+/// that is over. It widens what THIS device may read by exactly one album —
+/// the one its owner told it to show — and nothing else: not the album list,
+/// not another television of the same owner.</para>
+/// </summary>
+public sealed record TvViewer(Guid OwnerUserId, Guid? AssignedPartyAlbumId);
