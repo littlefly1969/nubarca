@@ -23,15 +23,17 @@ public sealed class TvPairingService : ITvPairingService
     private readonly TimeProvider _clock;
     private readonly TvSessionOptions _options;
     private readonly IPasswordHasher<TvPersonalPin> _pinHasher;
+    private readonly ITvPartyPresentationService _presentation;
 
     public TvPairingService(
         AppDbContext db, TimeProvider clock, IOptions<TvSessionOptions> options,
-        IPasswordHasher<TvPersonalPin> pinHasher)
+        IPasswordHasher<TvPersonalPin> pinHasher, ITvPartyPresentationService presentation)
     {
         _db = db;
         _clock = clock;
         _options = options.Value;
         _pinHasher = pinHasher;
+        _presentation = presentation;
     }
 
     public async Task<TvPairingStartedDto> StartAsync(
@@ -347,27 +349,28 @@ public sealed class TvPairingService : ITvPairingService
         }
 
         var now = _clock.GetUtcNow().UtcDateTime;
-        // One read: the live session, and the album of the party it is assigned
-        // to — only while that party's link is still a live capability, and only
-        // one the SAME owner holds. A general row names no link (the check
-        // constraint says so), so the subquery is simply empty for it.
         var row = await _db.TvSessions
             .AsNoTracking()
             .Where(x => x.SessionTokenHash == hash && x.RevokedAt == null && x.ExpiresAt > now)
-            .Select(x => new
-            {
-                x.OwnerUserId,
-                AssignedPartyAlbumId = _db.PartyAlbumLinks.AsNoTracking()
-                    .Where(l => x.DisplayAssignment == TvDisplayAssignments.Party
-                        && l.Id == x.AssignedPartyAlbumLinkId
-                        && l.OwnerUserId == x.OwnerUserId
-                        && l.Enabled && l.RevokedAt == null
-                        && (l.ExpiresAt == null || l.ExpiresAt > now))
-                    .Select(l => (Guid?)l.AlbumId)
-                    .FirstOrDefault(),
-            })
+            .Select(x => new { x.OwnerUserId, x.DisplayAssignment, x.AssignedPartyAlbumLinkId })
             .FirstOrDefaultAsync(cancellationToken);
-        return row is null ? null : new TvViewer(row.OwnerUserId, row.AssignedPartyAlbumId);
+        if (row is null) return null;
+
+        // The assigned party's album counts ONLY while that party is
+        // display-resolvable by the SAME projection the control plane uses —
+        // not merely while its link looks enabled. The moment the television
+        // would be told `unavailable` (the party ended, its guest window closed,
+        // its host lost Party, …) the exception closes with it. And only for a
+        // party the same owner holds.
+        Guid? assignedAlbum = null;
+        if (row.DisplayAssignment == TvDisplayAssignments.Party
+            && row.AssignedPartyAlbumLinkId is Guid linkId)
+        {
+            var party = await _presentation.ProjectAsync(linkId, cancellationToken);
+            if (party.Showable && party.Access!.OwnerUserId == row.OwnerUserId)
+                assignedAlbum = party.AlbumId;
+        }
+        return new TvViewer(row.OwnerUserId, assignedAlbum);
     }
 
     public async Task<IReadOnlyList<TvDeviceDto>> ListOwnerSessionsAsync(

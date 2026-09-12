@@ -466,12 +466,20 @@ public sealed class PartyDisplayGrantTests : IDisposable
         return response.Headers.GetValues("Set-Cookie").Single();
     }
 
+    /// A LIVE party with its game on: the only state in which a display grant
+    /// can exist, because the grant follows the television's presentation and
+    /// the game takes the screen only while the party is live.
     private static async Task<Guid> PartyGameAlbumAsync(HttpClient owner, string name)
     {
         var album = (await (await owner.PostAsJsonAsync("/api/albums", new { name }))
             .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-settings", new { enabled = true }))
             .EnsureSuccessStatusCode();
+        var partyId = (await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/party-settings"))
+            .GetProperty("partyId").GetGuid();
+        var party = await owner.GetFromJsonAsync<JsonElement>($"/api/parties/{partyId}");
+        (await owner.PostAsJsonAsync($"/api/parties/{partyId}/start-live",
+            new { version = party.GetProperty("version").GetInt32() })).EnsureSuccessStatusCode();
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30,

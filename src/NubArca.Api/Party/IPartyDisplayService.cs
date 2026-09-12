@@ -24,8 +24,9 @@ public interface IPartyDisplayService
     ///
     /// <para>Resolves the assignment server-side — session → `party` assignment
     /// → link — and refuses a television that is GENERAL, unassigned, revoked,
-    /// expired, or pointed at a party that is no longer available. The raw
-    /// token is returned ONCE and never stored; only its SHA-256 is.</para>
+    /// expired, or pointed at a party whose projected presentation is not
+    /// `game` (not showable, not live, game off, or past its closing card). The
+    /// raw token is returned ONCE and never stored; only its SHA-256 is.</para>
     ///
     /// <para>Minting revokes this television's previous grants, so a remount
     /// cannot leave a second usable credential behind — and it does so under a
@@ -49,7 +50,10 @@ public interface IPartyDisplayService
     /// television is still assigned to a PARTY, the assignment still names THIS
     /// link, and the party behind the link still resolves. Un-pairing a
     /// television or pointing it somewhere else therefore kills the grant in
-    /// the same instant, long before <c>ExpiresAt</c> would.</para>
+    /// the same instant, long before <c>ExpiresAt</c> would. So does the party's
+    /// projected presentation leaving `game`: the capability follows the
+    /// presentation the control plane sends, and is honoured only while it is
+    /// the game.</para>
     /// </summary>
     Task<PartyAccess?> ResolveAsync(
         string? grantToken, CancellationToken cancellationToken = default);

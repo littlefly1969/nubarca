@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Tv;
 
 namespace NubArca.Api.Party;
 
@@ -20,9 +21,17 @@ namespace NubArca.Api.Party;
 /// <para>EXPIRY IS NOT THE REVOCATION BOUNDARY. <see cref="GrantLifetime"/>
 /// bounds the damage a leaked token could do; what decides validity is the
 /// whole chain re-read on every single request — session live, assignment
-/// still `party`, assignment still THIS link, party still resolvable. So
-/// un-pairing a television or pointing it elsewhere invalidates its grant in
-/// the same instant, and the four hours never come into it.</para>
+/// still `party`, assignment still THIS link, and that party's projected
+/// presentation still `game`. So un-pairing a television, pointing it
+/// elsewhere, switching the game off, the party leaving its live phase, or a
+/// finished game's closing card ending all invalidate the grant in the same
+/// instant, and the four hours never come into it.</para>
+///
+/// <para>THE CAPABILITY FOLLOWS THE PRESENTATION. A grant is minted, and
+/// honoured, only while <see cref="ITvPartyPresentationService"/> — the same
+/// projection the control plane sends the television — says `game`. There is
+/// no second account of "may this screen show the game" to drift from the
+/// first.</para>
 /// </summary>
 public sealed class PartyDisplayService : IPartyDisplayService
 {
@@ -43,16 +52,16 @@ public sealed class PartyDisplayService : IPartyDisplayService
 
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
-    private readonly IPartyLinkService _links;
+    private readonly ITvPartyPresentationService _presentation;
     private readonly ILogger<PartyDisplayService> _logger;
 
     public PartyDisplayService(
-        AppDbContext db, TimeProvider clock, IPartyLinkService links,
+        AppDbContext db, TimeProvider clock, ITvPartyPresentationService presentation,
         ILogger<PartyDisplayService> logger)
     {
         _db = db;
         _clock = clock;
-        _links = links;
+        _presentation = presentation;
         _logger = logger;
     }
 
@@ -68,10 +77,13 @@ public sealed class PartyDisplayService : IPartyDisplayService
             || session.AssignedPartyAlbumLinkId is not Guid linkId)
             return Refused(session.Id, "not_assigned");
 
-        // And the party must still be showable — a revoked or ended one is not
-        // something to mint a fresh credential for.
-        if (await _links.ResolveDisplayAsync(linkId, cancellationToken) is null)
-            return Refused(session.Id, "party_unavailable");
+        // And the party must want its GAME on this screen right now — the same
+        // projection the control plane sends the television. A party that is
+        // not showable, not live, has its game switched off, or whose finished
+        // game's closing card has ended is not something to mint a credential for.
+        var party = await _presentation.ProjectAsync(linkId, cancellationToken);
+        if (party.Presentation != TvPartyPresentations.Game)
+            return Refused(session.Id, party.Showable ? "not_game" : "party_unavailable");
 
         // THE BOUNDARY IS THE TELEVISION'S OWN ROW.
         //
@@ -181,10 +193,14 @@ public sealed class PartyDisplayService : IPartyDisplayService
             || row.AssignedPartyAlbumLinkId != row.PartyAlbumLinkId)
             return null;
 
-        // Finally the party's own policy — status, expiry, capabilities — from
-        // the same path a guest takes, so a display can never see a party a
-        // guest could not.
-        return await _links.ResolveDisplayAsync(row.PartyAlbumLinkId, cancellationToken);
+        // Finally the party itself, through the same projection the control
+        // plane uses: its own policy (status, windows, host permission — the
+        // guest's path, so a display never sees a party a guest could not), and
+        // its presentation still `game`. A grant that was good a second ago
+        // stops authorising the moment the party hands the screen back to its
+        // slideshow, without anything having to be written.
+        var party = await _presentation.ProjectAsync(row.PartyAlbumLinkId, cancellationToken);
+        return party.Presentation == TvPartyPresentations.Game ? party.Access : null;
     }
 
     public async Task<int> RevokeForSessionAsync(

@@ -52,8 +52,9 @@ public interface IPartyMessageService
     // the album is missing, foreign, or not TV-visible; an active party with
     // nothing to say yields an EMPTY list, which is what lets the TV tell "no
     // messages" apart from "no party" without a second call.
-    // `assignedPartyAlbumId` is the calling television's live party album,
-    // readable by that television even when it is not ShowOnTv.
+    // `assignedPartyAlbumId` is the calling television's assigned,
+    // display-resolvable party album, readable by that television even when it
+    // is not ShowOnTv.
     Task<TvPartyMessagesDto?> GetTvProjectionAsync(
         Guid ownerUserId, Guid albumId, Guid? assignedPartyAlbumId,
         CancellationToken cancellationToken = default);

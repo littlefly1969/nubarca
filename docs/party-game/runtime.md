@@ -429,7 +429,9 @@ which surface that party wants on the screen (`TvPartyPresentations`):
 | after `restart_game` → `lobby` | the canonical stage again |
 
 The display grant (a capability that reads exactly one party and nothing else)
-exists only while the stage is on screen. None of this touches the game: the
+is minted, and honoured on every request, only while this projection says
+`game`: past the closing card a grant still held stops working, and after
+`restart_game` the television mints a fresh one. None of this touches the game: the
 projection READS the session and never writes it. FINISHED stays FINISHED on the
 server however many televisions have gone back to their slideshow; the rounds
 and votes stay exactly as the game left them until the host restarts it. A

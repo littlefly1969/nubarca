@@ -415,6 +415,120 @@ public sealed class TvPartyTakeoverTests : IDisposable
     }
 
     [Fact]
+    public async Task A_display_grant_is_minted_and_honoured_only_while_the_presentation_is_game()
+    {
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairTvAsync(owner);
+        var album = await PartyAlbumAsync(owner, "Festa", game: true, live: false);
+        await AssignAsync(owner, await SingleSessionIdAsync(ownerId), album);
+        Guid challenge;
+        using (var scope = _factory.Services.CreateScope())
+            challenge = (await scope.ServiceProvider.GetRequiredService<AppDbContext>().PartyChallenges
+                .AsNoTracking().FirstAsync(c => c.AlbumId == album)).Id;
+        // Every display route answers to the same capability.
+        var routes = new[]
+        {
+            "/api/party-display/game", "/api/party-display/join-qr",
+            $"/api/party-display/challenges/{challenge}/media",
+        };
+
+        // Party not live → slideshow → no grant.
+        Assert.Equal("slideshow", await PresentationAsync(cookie));
+        Assert.Equal(HttpStatusCode.NotFound, (await RawMintAsync(cookie)).StatusCode);
+
+        // Live → game → a grant.
+        await TransitionAsync(owner, await PartyIdAsync(owner, album), "start-live");
+        Assert.Equal("game", await PresentationAsync(cookie));
+        var grant = await MintAsync(cookie);
+        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync(routes[0], grant.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync(routes[1], grant.Token)).StatusCode);
+
+        // Game switched off → slideshow: the live grant stops on EVERY display
+        // route at once, and no new grant is minted.
+        await SetGameAsync(owner, album, enabled: false);
+        Assert.Equal("slideshow", await PresentationAsync(cookie));
+        foreach (var route in routes)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync(route, grant.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await RawMintAsync(cookie)).StatusCode);
+
+        // Game back on → game → mintable.
+        await SetGameAsync(owner, album, enabled: true);
+        grant = await MintAsync(cookie);
+
+        // FINISHED, inside the first 15 s: the closing card's grant works, and
+        // a remount in that window could still mint.
+        var version = (await CommandAsync(owner, album, "start", 0)).GetProperty("version").GetInt32();
+        version = (await CommandAsync(owner, album, "finish", version)).GetProperty("version").GetInt32();
+        Assert.Equal("game", await PresentationAsync(cookie));
+        Assert.Equal("finished",
+            (await DisplayJsonAsync(routes[0], grant.Token)).GetProperty("phase").GetString());
+        grant = await MintAsync(cookie);
+        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync(routes[0], grant.Token)).StatusCode);
+
+        // FINISHED past the dwell: slideshow. The grant is no longer valid and
+        // a new mint is refused — while the game itself stays FINISHED.
+        await AgeFinishedAtAsync(album, TvPartyPresentations.FinishedDwell + TimeSpan.FromSeconds(1));
+        Assert.Equal("slideshow", await PresentationAsync(cookie));
+        foreach (var route in routes)
+            Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync(route, grant.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await RawMintAsync(cookie)).StatusCode);
+        Assert.Equal("finished", (await OwnerGameAsync(owner, album)).GetProperty("phase").GetString());
+
+        // restart_game → lobby → game → mintable again.
+        await CommandAsync(owner, album, "restart_game", version);
+        Assert.Equal("game", await PresentationAsync(cookie));
+        var fresh = await MintAsync(cookie);
+        Assert.Equal("lobby", (await DisplayJsonAsync(routes[0], fresh.Token)).GetProperty("phase").GetString());
+    }
+
+    [Fact]
+    public async Task An_off_tv_party_album_closes_the_moment_its_party_stops_being_showable()
+    {
+        var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var cookie = await PairTvAsync(owner);
+        var tv = await SingleSessionIdAsync(ownerId);
+        var album = await PartyAlbumAsync(owner, "Festa", game: false);
+        var photo = await AddPngAsync(owner, album, "festa.png");
+        (await owner.PatchAsJsonAsync($"/api/albums/{album}/tv-settings", new { showOnTv = false }))
+            .EnsureSuccessStatusCode();
+        await AssignAsync(owner, tv, album);
+
+        var items = $"/api/tv/albums/{album}/items";
+        var messages = $"/api/tv/albums/{album}/party-messages";
+        var thumbnail = $"/api/tv/media/{photo}/thumbnail";
+        Assert.Equal("slideshow", await PresentationAsync(cookie));
+        Assert.Equal(HttpStatusCode.OK, (await TvGet(items, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await TvGet(messages, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await TvGet(thumbnail, cookie)).StatusCode);
+
+        // The party's guest window closes while it is still being held. Nothing
+        // about the LINK changes — it stays enabled, unrevoked and unexpired, so
+        // a check of the link alone would keep the album open — but the display
+        // resolver refuses the party, and the control plane says so.
+        var partyId = await PartyIdAsync(owner, album);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.Parties.Where(p => p.Id == partyId).ExecuteUpdateAsync(
+                u => u.SetProperty(p => p.GuestAccessExpiresAt, (DateTime?)DateTime.UtcNow.AddMinutes(-1)));
+            var link = await db.PartyAlbumLinks.AsNoTracking().SingleAsync(l => l.AlbumId == album);
+            Assert.True(link.Enabled);
+            Assert.Null(link.RevokedAt);
+            Assert.True(link.ExpiresAt is null || link.ExpiresAt > DateTime.UtcNow);
+        }
+        Assert.Equal("unavailable", await PresentationAsync(cookie));
+
+        // …and the native read of the album closes with it.
+        Assert.Equal(HttpStatusCode.NotFound, (await TvGet(items, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await TvGet(messages, cookie)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await TvGet(thumbnail, cookie)).StatusCode);
+        // The general list never showed it and still does not.
+        Assert.DoesNotContain(album.ToString(),
+            await (await TvGet("/api/tv/albums", cookie)).Content.ReadAsStringAsync(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task A_display_grant_states_its_lifetime_as_a_server_measured_duration()
     {
         var (ownerId, owner) = await _factory.CreateAuthenticatedClientAsync();
@@ -481,20 +595,28 @@ public sealed class TvPartyTakeoverTests : IDisposable
         await AgeFinishedAtAsync(album, TimeSpan.FromMinutes(1));
         Assert.Equal("slideshow", await PresentationAsync(cookieA));
         Assert.Equal("slideshow", await PresentationAsync(cookieB));
+        // Both screens' grants stop with the game, and neither can mint another.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync("/api/party-display/game", renewedA.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync("/api/party-display/game", grantB.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await RawMintAsync(cookieA)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await RawMintAsync(cookieB)).StatusCode);
         await CommandAsync(owner, album, "restart_game", version);
         Assert.Equal("game", await PresentationAsync(cookieA));
         Assert.Equal("game", await PresentationAsync(cookieB));
+        // The takeover mints afresh on each screen, as the shells do.
+        var liveA = await MintAsync(cookieA);
+        var liveB = await MintAsync(cookieB);
 
         // A moving to another party leaves B exactly where it was.
         await AssignAsync(owner, tvA, await PartyAlbumAsync(owner, "Altro", game: true));
-        Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync("/api/party-display/game", renewedA.Token)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync("/api/party-display/game", grantB.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await DisplayAsync("/api/party-display/game", liveA.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync("/api/party-display/game", liveB.Token)).StatusCode);
         Assert.Equal(keyB, (await TvAssignmentAsync(cookieB)).GetProperty("assignmentKey").GetString());
 
         // Unpairing A leaves B exactly where it was.
         (await owner.DeleteAsync($"/api/tv-devices/{tvA}")).EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.Unauthorized, (await TvGet("/api/tv/session", cookieA)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync("/api/party-display/game", grantB.Token)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await DisplayAsync("/api/party-display/game", liveB.Token)).StatusCode);
         Assert.Equal("game", await PresentationAsync(cookieB));
     }
 

@@ -21,11 +21,14 @@ namespace NubArca.Api.Domain;
 /// television, or pointing it at a different party, kills the grant in the same
 /// instant rather than at <see cref="ExpiresAt"/>.</para>
 ///
-/// <para><b>It exists only while the game holds the screen.</b> A paired
-/// television mints one when the server's presentation for its party becomes
-/// `game`, holds it in memory for the WebView it is hosting, and simply stops
-/// using it when the presentation returns to the native slideshow; the next
-/// takeover mints again. The shell renews it before <see cref="ExpiresAt"/> by
+/// <para><b>It exists only while the game holds the screen</b>, and the
+/// server enforces that rather than trusting the television to stop: a grant
+/// is minted, and honoured on every display request, only while the party's
+/// projected presentation is `game` — the same projection the control plane
+/// sends. When the presentation returns to the native slideshow (game switched
+/// off, party no longer live, a finished game's closing card over) a grant
+/// still in someone's hands stops authorising at once; the next takeover mints
+/// a fresh one, which revokes it. The shell renews it before <see cref="ExpiresAt"/> by
 /// minting — which revokes this row — and re-mints on any display 401, so an
 /// evening longer than one lifetime needs nobody at the television.</para>
 ///

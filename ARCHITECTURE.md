@@ -1317,7 +1317,11 @@ sees the first one's grant; a mint whose assignment moved while it waited
 re-evaluates the claim, matches nothing and writes nothing. Two televisions lock
 two rows and never wait on each other. PostgreSQL tests race eight mints of one
 device and a mint against an assignment change on real connections. The grant
-exists only while the server's presentation for its party is `game`: the shell
+is minted, and honoured on every display request, only while the server's
+presentation for its party is `game` — both checks go through
+`ITvPartyPresentationService`, the control plane's own projection, so a game
+switched off, a party no longer live or a finished game past its closing card
+refuses a new grant and stops a live one at once. The shell
 mints it at takeover, renews it BEFORE expiry by minting again — scheduled from
 `expiresInSeconds`, a server-measured duration, so a television with a wrong
 clock neither loops nor lapses — and mints again on any display `401`, which the
@@ -1843,8 +1847,10 @@ never the old one with new contents:
   timing, wake, cache — stays the viewer's. An assigned television may read ITS
   party's album (items, greetings, media bytes) even when the album is not
   ShowOnTv: the grant is the assignment itself, re-read on every request
-  (`TvViewer`), for that one device and that one live link. The album list is
-  unchanged.
+  (`TvViewer`), for that one device and only while its party is
+  display-resolvable by the same projection — the moment the control plane
+  would say `unavailable`, for whatever reason, the album closes too. The album
+  list is unchanged.
 - **game** — the **canonical web renderer**, hosted in a WebView (below).
 - **unavailable** — a native card. Fail closed: never general, never another
   party. It is left only by a server read saying slideshow, game or general.
@@ -1856,7 +1862,10 @@ waiting to be taken over — so an assignment, a game starting, finishing or
 restarting all reach the room within one read. The read writes nothing; once a
 minute the same request is `POST /api/tv/session/heartbeat`, the only write,
 which keeps `LastSeenAt` honest. The FIRST read at boot already carries the
-presentation and the shell starts in it directly. At boot only a `401` unpairs:
+presentation and the shell starts in it directly — once the Personal Area status
+has confirmed the association is complete; a PIN-less association still goes to
+the incomplete-pairing recovery and never straight into a party. At boot only a
+`401` unpairs:
 a television that powers on before its Wi-Fi keeps its credential and retries on
 a capped backoff. The assignment **preempts every local surface** — mode
 selector, manual Party browsing, Updates, PIN entry, Personal Area, Beauty Lab.
