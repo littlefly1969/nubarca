@@ -404,6 +404,39 @@ An activity a round has played can no longer be deleted — the restricting
 foreign key would refuse anyway, and `PartyChallengeService.DeleteAsync` turns
 that into a clean `404` instead of an exception.
 
+## Where the game is shown
+
+Two kinds of screen show a game, and they render the SAME canonical
+`PartyTvStage` — same scenes, same activity card, same CSS, same pure
+`stageScene` projection. What differs is how they are authorised and what they
+do when the game is not on.
+
+**A browser or a projector** opens `/party/{token}/tv` with the party's own view
+token, polls the public snapshot, and shows whatever the game is doing — for as
+long as the page is open. At FINISHED it keeps showing the closing card; nothing
+takes it anywhere else.
+
+**A paired NubArca TV** is a native shell holding a `TvSession`, assigned to a
+party by its owner on the server. The server projects, beside the assignment,
+which surface that party wants on the screen (`TvPartyPresentations`):
+
+| game state | paired television shows |
+| --- | --- |
+| game off, host may not run games, or party not live | the party's native slideshow |
+| no session row yet, `lobby`, any round phase | the canonical stage (the takeover) |
+| `finished`, first 15 s after `FinishedAt` | the canonical stage (the closing card) |
+| `finished`, after that | the party's native slideshow |
+| after `restart_game` → `lobby` | the canonical stage again |
+
+The display grant (a capability that reads exactly one party and nothing else)
+exists only while the stage is on screen. None of this touches the game: the
+projection READS the session and never writes it. FINISHED stays FINISHED on the
+server however many televisions have gone back to their slideshow; the rounds
+and votes stay exactly as the game left them until the host restarts it. A
+television never joins, never votes, and never learns what a phase is — it is
+told one of four words (`general`, `slideshow`, `game`, `unavailable`) and mounts
+the matching surface.
+
 ## Deliberately not here
 
 The finished match's history. A restart discards the rounds and votes rather
