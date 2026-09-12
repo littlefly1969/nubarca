@@ -117,7 +117,11 @@ test('the stage is covered natively until it has proved itself', () => {
   // No white flash, no black flash, no browser error, no frame from before:
   // the native surface stays over the WebView until the renderer is alive AND
   // has drawn a real snapshot.
-  assert.match(screen, /const visible = grant\.kind === 'ready' && rendererVisible\(watchdog\)/);
+  assert.match(screen, /const visible = grant\.kind === 'ready' && !refused && rendererVisible\(watchdog\)/);
+  // A refused grant takes the page off screen at once: the server stops
+  // honouring a grant when the game hands the screen back, and the page's own
+  // "unavailable" card must never be what the room sees in between.
+  assert.match(screen, /const onAuthFailed = useCallback\(\(\) => \{\s*setRefused\(true\);/);
   assert.match(screen, /\{!visible && \(\s*<PartyNativeSurface/);
   // And the WebView's own ground is the stage's colour, not Android's white.
   assert.match(screen, /stage: \{ flex: 1, backgroundColor: PARTY_SURFACE_BACKGROUND \}/);
@@ -148,9 +152,20 @@ test('the control plane is one brisk read, whatever the television is showing', 
   assert.match(app, /err\.status === 401\) onSessionInvalid\(\)/);
 });
 
-test('the first read decides the first screen', () => {
+test('the first read decides the first screen, once the association is known complete', () => {
   assert.match(app, /const assignment = toAssignmentView\(session\.assignment\);/);
-  assert.match(app, /dispatch\(\{ type: 'SESSION_READY', assignment \}\)/);
+  // The Personal Area status is asked BEFORE the first screen is chosen, and
+  // the reducer's admission decides: an incomplete association never enters a
+  // party (flow.test.ts proves it).
+  assert.match(app, /const check = \(\) => \{\s*getTvPersonalStatus\(\)/);
+  assert.match(app,
+    /for \(const event of admissionEvents\(assignment, status\.pinConfigured\)\) dispatch\(event\);/);
+  assert.doesNotMatch(app, /dispatch\(\{ type: 'SESSION_READY', assignment \}\)/);
+  // Both doors — relaunch and completed pairing — go through it.
+  assert.match(app, /if \(!cancelled\) admit\(session\);/);
+  assert.match(app, /const onPaired = useCallback\(\(session: TvSessionStatus\) => \{\s*admit\(session\);/);
+  // A status check that got no answer is retried; only a 401 unpairs.
+  assert.match(app, /setTimeout\(check, backoffMs\(attempt\+\+\)\)/);
   // A television that boots before its network keeps its pairing: only a 401
   // unpairs at startup.
   assert.match(app, /err\.status === 401\) \{\s*dispatch\(\{ type: 'SESSION_INVALID' \}\);/);

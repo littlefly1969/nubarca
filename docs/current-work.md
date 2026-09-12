@@ -484,8 +484,10 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   B is always a fresh mount. The control plane is a five-second READ in the
   foreground whatever the television shows — a general one is the one waiting to
   be taken over — and the heartbeat POST, the only write, is the same read once
-  a minute; the first read at boot already decides the first screen, and at boot
-  only a `401` unpairs. The assignment PREEMPTS every local surface (mode
+  a minute; the first read at boot already decides the first screen, at boot
+  only a `401` unpairs, and a session is admitted into a party only after the
+  Personal Area status says its association is complete (a PIN-less one still
+  goes to the incomplete-pairing recovery, never straight into a party). The assignment PREEMPTS every local surface (mode
   selector, manual Party, Updates, PIN, Personal Area, Beauty Lab); preempting a
   personal screen is a LOCK in `flowEffects`, an unlock that lands after its PIN
   screen was preempted is revoked, and BACK at the root of an assigned party
@@ -493,10 +495,17 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   existing `ViewerScreen` behind a thin adapter, never a second slideshow. And
   an assigned television may read ITS party's album — items, greetings, media
   bytes — even when that album is not ShowOnTv: the grant is the assignment
-  re-read on every request (`TvViewer`), for that one device and that one live
-  link, and the album LIST is unchanged, so an assignment is not a way to browse.
+  re-read on every request (`TvViewer`), for that one device and only while its
+  party is display-resolvable by the control plane's own projection (never once
+  the television would be told `unavailable`, whatever the reason), and the
+  album LIST is unchanged, so an assignment is not a way to browse.
 - **The display grant lives only while the game holds the screen, and the shell
-  keeps it alive.** One live grant per television, minted under a write lock on
+  keeps it alive.** The server enforces the first half: a grant is minted, and
+  honoured on every `/api/party-display/*` request, only while the party's
+  projected presentation is `game` — through `ITvPartyPresentationService`, the
+  control plane's own projection — so a party that is not live, a game switched
+  off, or FINISHED past its closing card refuses a new grant and stops a live
+  one at that instant, with nothing written. One live grant per television, minted under a write lock on
   the television's own session row, so two mints racing (a remount and a
   renewal) are ordered and never leave two usable credentials — a race proved on
   real PostgreSQL. The shell renews before expiry from `expiresInSeconds` (a

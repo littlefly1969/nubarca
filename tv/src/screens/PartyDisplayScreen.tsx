@@ -81,6 +81,12 @@ export function PartyDisplayScreen({ albumName, onSessionInvalid, onRequestAssig
   const [watchdog, dispatch] = useReducer(reduceWatchdog, initialWatchdogState);
   // The page's own coarse signal: is a live scene of the party on screen.
   const [presentationActive, setPresentationActive] = useState(false);
+  // The page reported its grant refused. Whatever it draws from now on is not
+  // the party, so the native cover goes up at once and stays until a new grant
+  // has started a new renderer — or until the control plane moves the screen
+  // on, which is how a finished game's closing card ends: the server stops
+  // honouring the grant at the same moment it starts projecting the slideshow.
+  const [refused, setRefused] = useState(false);
   const hostActive = useHostActive();
   const webRef = useRef<WebView>(null);
   const baseUrl = getBaseUrl();
@@ -123,6 +129,7 @@ export function PartyDisplayScreen({ albumName, onSessionInvalid, onRequestAssig
         tvDebug('party', 'grant-mint-ok');
         setGrant({ kind: 'ready', token: minted.grant });
         setPresentationActive(false);
+        setRefused(false);
         // A new grant is a new renderer, from nothing, behind the cover.
         dispatch({ type: 'start' });
         next = setTimeout(() => setMintRequest((n) => n + 1), renewDelayMs(minted, Date.now()));
@@ -166,6 +173,7 @@ export function PartyDisplayScreen({ albumName, onSessionInvalid, onRequestAssig
   // control plane (the assignment may have moved), and mint again, backing off
   // if the refusals keep coming.
   const onAuthFailed = useCallback(() => {
+    setRefused(true);
     if (mintingRef.current || retryPendingRef.current || authRetryRef.current !== null) return;
     tvDebug('party', 'display-auth-failed');
     onRequestAssignmentRef.current();
@@ -232,7 +240,7 @@ export function PartyDisplayScreen({ albumName, onSessionInvalid, onRequestAssig
     }
   }, [onAuthFailed]);
 
-  const visible = grant.kind === 'ready' && rendererVisible(watchdog);
+  const visible = grant.kind === 'ready' && !refused && rendererVisible(watchdog);
 
   // A game on screen IS active playback, through the SAME lock the slideshow
   // uses rather than a second authority — the policy lives in wakePolicy.ts with
@@ -241,7 +249,9 @@ export function PartyDisplayScreen({ albumName, onSessionInvalid, onRequestAssig
   useScreenAwake(shouldKeepPartyDisplayAwake({ hostActive, showing: visible, presentationActive }));
 
   const stagePrefix = `${baseUrl}/party-display/`;
-  const coverMessage = grant.kind === 'waiting'
+  // A refused grant is usually the game handing the screen back; the card
+  // says nothing alarming while the control plane catches up.
+  const coverMessage = refused ? null : grant.kind === 'waiting'
     ? t(grant.failure === 'not-assigned' ? 'partyDisplay.unavailable' : 'partyDisplay.reconnecting')
     : showsNativeFallback(watchdog) || recovering(watchdog)
       ? t('partyDisplay.reconnecting')

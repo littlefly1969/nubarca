@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
-using NubArca.Api.Party;
 
 namespace NubArca.Api.Tv;
 
@@ -25,26 +24,26 @@ namespace NubArca.Api.Tv;
 ///
 /// <para>THE PRESENTATION IS PROJECTED, NEVER STORED. Beside a party
 /// assignment the television is told which surface that party wants right
-/// now (<see cref="TvPartyPresentations"/>). It is derived on every read from
-/// the same resolver that decides whether a display grant may be minted and
-/// from the game session's current status, so "the television is told to show
-/// the game" and "the television is allowed to show the game" cannot
-/// disagree. Nothing here writes game state.</para>
+/// now (<see cref="TvPartyPresentations"/>). It comes from
+/// <see cref="ITvPartyPresentationService"/> — the same projection the display
+/// grant is minted and honoured by, and the TV media gate reads — so "the
+/// television is told to show the game" and "the television is allowed to show
+/// the game" cannot disagree. Nothing here writes game state.</para>
 /// </summary>
 public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
-    private readonly IPartyLinkService _links;
+    private readonly ITvPartyPresentationService _presentation;
     private readonly ILogger<TvDisplayAssignmentService> _logger;
 
     public TvDisplayAssignmentService(
-        AppDbContext db, TimeProvider clock, IPartyLinkService links,
+        AppDbContext db, TimeProvider clock, ITvPartyPresentationService presentation,
         ILogger<TvDisplayAssignmentService> logger)
     {
         _db = db;
         _clock = clock;
-        _links = links;
+        _presentation = presentation;
         _logger = logger;
     }
 
@@ -111,7 +110,7 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
             "tv.assignment.set SessionId={SessionId} Kind={Kind} AlbumId={AlbumId}",
             tvSessionId, TvDisplayAssignments.Party, albumId);
 
-        var presentation = await PresentationAsync(party.LinkId, now, cancellationToken);
+        var presentation = (await _presentation.ProjectAsync(party.LinkId, cancellationToken)).Presentation;
         return TvAssignmentResult.Ok(new TvDisplayAssignmentDto(
             TvDisplayAssignments.Party, albumId, party.Name,
             presentation != TvPartyPresentations.Unavailable, presentation));
@@ -173,13 +172,12 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
 
         // One projection per PARTY, not per television: an owner with three
         // screens on one party asks the question once.
-        var now = _clock.GetUtcNow().UtcDateTime;
         var presentations = new Dictionary<Guid, string>();
         foreach (var linkId in rows
             .Where(x => x.DisplayAssignment == TvDisplayAssignments.Party)
             .Select(x => x.AssignedPartyAlbumLinkId)
             .OfType<Guid>().Distinct())
-            presentations[linkId] = await PresentationAsync(linkId, now, cancellationToken);
+            presentations[linkId] = (await _presentation.ProjectAsync(linkId, cancellationToken)).Presentation;
 
         return rows.ToDictionary(x => x.Id, x =>
             x.DisplayAssignment == TvDisplayAssignments.Party && x.AssignedPartyAlbumLinkId is Guid linkId
@@ -212,48 +210,9 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
         var name = row.AlbumId is not Guid albumId ? null : await _db.Albums.AsNoTracking()
             .Where(a => a.Id == albumId).Select(a => a.Name)
             .FirstOrDefaultAsync(cancellationToken);
-        var presentation = await PresentationAsync(
-            linkId, _clock.GetUtcNow().UtcDateTime, cancellationToken);
+        var presentation = (await _presentation.ProjectAsync(linkId, cancellationToken)).Presentation;
         return Party(row.AlbumId, name, presentation,
             TvPartyPresentations.AssignmentKey(tvSessionId, linkId));
-    }
-
-    /// <summary>
-    /// What the party named by <paramref name="linkId"/> wants on a paired
-    /// screen right now.
-    ///
-    /// <para>"Showable" is the display resolver's own answer — the SAME call
-    /// that decides whether a display grant may be minted — so a television is
-    /// never told to show a game it would then be refused a capability for.
-    /// "Game" additionally requires what the display snapshot requires: the
-    /// game switch on this link, the host's permission to run games, and the
-    /// link still describing the party's main album.</para>
-    /// </summary>
-    private async Task<string> PresentationAsync(
-        Guid linkId, DateTime now, CancellationToken cancellationToken)
-    {
-        var access = await _links.ResolveDisplayAsync(linkId, cancellationToken);
-        if (access is null) return TvPartyPresentations.Unavailable;
-
-        var state = await _db.PartyAlbumLinks.AsNoTracking()
-            .Where(l => l.Id == linkId)
-            .Select(l => new
-            {
-                GameShowable = l.GameEnabled && l.AlbumId == access.MainAlbumId,
-                Game = _db.PartyGameSessions.AsNoTracking()
-                    .Where(s => s.PartyAlbumLinkId == l.Id)
-                    .Select(s => new { s.Status, s.FinishedAt })
-                    .FirstOrDefault(),
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-
-        return TvPartyPresentations.Decide(
-            partyShowable: true,
-            gameEnabled: state?.GameShowable == true,
-            gamesPermitted: access.Capabilities.Games,
-            gameStatus: state?.Game?.Status,
-            finishedAt: state?.Game?.FinishedAt,
-            now: now);
     }
 
     /// <summary>

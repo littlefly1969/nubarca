@@ -784,6 +784,7 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<IAuthService, AuthService>();
     builder.Services.AddScoped<IAdminUserService, AdminUserService>();
     builder.Services.AddScoped<ITvPairingService, TvPairingService>();
+    builder.Services.AddScoped<ITvPartyPresentationService, TvPartyPresentationService>();
     builder.Services.AddScoped<ITvDisplayAssignmentService, TvDisplayAssignmentService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyDisplayService, NubArca.Api.Party.PartyDisplayService>();
     builder.Services.AddScoped<ITvMediaService, TvMediaService>();

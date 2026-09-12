@@ -224,6 +224,48 @@ public sealed class PartyDisplayTakeoverPostgresTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task A_grant_is_minted_and_honoured_only_while_its_party_wants_the_game()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        await using var db = NewContext();
+        var grant = await Display(db).MintAsync(TokenA);
+        Assert.Null(grant.Error);
+        Assert.NotNull(await Display(db).ResolveAsync(grant.Token));
+
+        // FINISHED, inside the closing card's dwell: still the game.
+        var now = DateTime.UtcNow;
+        db.PartyGameSessions.Add(new PartyGameSession
+        {
+            Id = Guid.NewGuid(), AlbumId = _albumA, PartyAlbumLinkId = _linkA,
+            Status = PartyGameStatuses.Finished, Phase = PartyGamePhases.Finished,
+            Version = 3, CreatedAt = now, UpdatedAt = now,
+            StartedAt = now.AddMinutes(-20), FinishedAt = now,
+        });
+        await db.SaveChangesAsync();
+        Assert.NotNull(await Display(db).ResolveAsync(grant.Token));
+
+        // Past the dwell the party wants its slideshow: the grant already in
+        // the television's hands stops authorising, and no new one is minted.
+        await db.PartyGameSessions.ExecuteUpdateAsync(
+            s => s.SetProperty(x => x.FinishedAt, (DateTime?)now.AddMinutes(-1)));
+        Assert.Equal(TvPartyPresentations.Slideshow, (await Assignments(db).ResolveAsync(_tvA)).Presentation);
+        Assert.Null(await Display(db).ResolveAsync(grant.Token));
+        Assert.Equal(PartyDisplayGrantError.NotAssigned, (await Display(db).MintAsync(TokenA)).Error);
+        Assert.Equal(1, await db.PartyDisplayGrants.CountAsync(g => g.TvSessionId == _tvA));
+
+        // restart_game → lobby: the game again, and a grant can be minted again.
+        await db.PartyGameSessions.ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.Status, PartyGameStatuses.Lobby)
+            .SetProperty(x => x.Phase, PartyGamePhases.Lobby)
+            .SetProperty(x => x.StartedAt, (DateTime?)null)
+            .SetProperty(x => x.FinishedAt, (DateTime?)null));
+        Assert.Equal(TvPartyPresentations.Game, (await Assignments(db).ResolveAsync(_tvA)).Presentation);
+        var again = await Display(db).MintAsync(TokenA);
+        Assert.Null(again.Error);
+        Assert.NotNull(await Display(db).ResolveAsync(again.Token));
+    }
+
+    [SkippableFact]
     public async Task Tearing_down_a_party_with_live_grants_is_all_or_nothing()
     {
         Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
@@ -275,11 +317,15 @@ public sealed class PartyDisplayTakeoverPostgresTests : IAsyncLifetime
 
     // --- helpers -----------------------------------------------------------
 
+    // ONE projection behind the grant and the control plane, as in production.
+    private TvPartyPresentationService Projection(AppDbContext db) =>
+        new(db, TimeProvider.System, new StubLinks(this));
+
     private PartyDisplayService Display(AppDbContext db) =>
-        new(db, TimeProvider.System, new StubLinks(this), NullLogger<PartyDisplayService>.Instance);
+        new(db, TimeProvider.System, Projection(db), NullLogger<PartyDisplayService>.Instance);
 
     private TvDisplayAssignmentService Assignments(AppDbContext db) =>
-        new(db, TimeProvider.System, new StubLinks(this), NullLogger<TvDisplayAssignmentService>.Instance);
+        new(db, TimeProvider.System, Projection(db), NullLogger<TvDisplayAssignmentService>.Instance);
 
     private AppDbContext NewContext() => new(_dbOptions!);
 

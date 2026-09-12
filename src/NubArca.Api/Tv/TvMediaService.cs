@@ -197,7 +197,8 @@ public sealed class TvMediaService : ITvMediaService
         // The file must be an owner-owned, active, non-vault FileItem (the
         // FileItems query below carries the Private-Vault global filter) that is a
         // member of at least one of the owner's currently-enabled TV albums — or
-        // of the live party album this particular television is assigned to.
+        // of the display-resolvable party album this particular television is
+        // assigned to.
         var fileOk = await _db.FileItems
             .AsNoTracking()
             .AnyAsync(

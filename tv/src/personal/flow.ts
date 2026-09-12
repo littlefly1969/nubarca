@@ -46,7 +46,8 @@
 //     an unlock that lands anywhere else is revoked on arrival;
 //   * after a session becomes ready the entry state is the SERVER's: its
 //     assigned party presentation, or mode selection — the previously selected
-//     mode is never auto-reopened;
+//     mode is never auto-reopened — and only once the association is known to
+//     be complete (admissionEvents);
 //   * BACK from the personal root LOCKS (never leaves the area unlocked); a
 //     LOCK caused by a PIN change carries a notice for the mode selector but
 //     stays on mode selection (the TV association itself is still valid);
@@ -291,6 +292,25 @@ export function isPersonalState(state: TvFlowState): boolean {
     || state.name === 'personalAlbums'
     || state.name === 'personalAlbumItems'
     || state.name === 'beautyLab';
+}
+
+/**
+ * How a VALIDATED session is admitted to its first screen — after a relaunch
+ * and after a completed pairing alike.
+ *
+ * The caller has read two things: the assignment (with its presentation) and
+ * the Personal Area status. A session whose owner has no PIN is an INCOMPLETE
+ * association and may run neither Party nor Personal — an assigned party
+ * included — so it is admitted WITHOUT its assignment and immediately handed
+ * to the existing ASSOCIATION_INCOMPLETE teardown: no party state is ever
+ * entered on the way, and App dispatches both in one tick so nothing in
+ * between is drawn. A complete one starts straight in the server's
+ * presentation, with no stop on the mode selector.
+ */
+export function admissionEvents(assignment: AssignmentView, pinConfigured: boolean): TvFlowEvent[] {
+  return pinConfigured
+    ? [{ type: 'SESSION_READY', assignment }]
+    : [{ type: 'SESSION_READY' }, { type: 'ASSOCIATION_INCOMPLETE' }];
 }
 
 export function flowEffects(

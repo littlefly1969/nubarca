@@ -1713,8 +1713,9 @@ public static class TvEndpoints
         // its media bytes — whether or not the album is ShowOnTv, because showing
         // that party is exactly what the owner assigned it to do. The grant is the
         // assignment itself, re-read on every request (TvViewer), so it covers
-        // only the assigned album, only while the party's link is live, and never
-        // another television of the same owner. The album LIST is unchanged:
+        // only the assigned album, only while that party is display-resolvable
+        // (the projection that would otherwise tell the television
+        // `unavailable`), and never another television of the same owner. The album LIST is unchanged:
         // an assignment is not a way to browse.
 
         app.MapGet("/api/tv/albums", async (
@@ -1754,7 +1755,7 @@ public static class TvEndpoints
             // Null → the album is missing, foreign, or no longer enabled for TV. All
             // collapse to a generic 404 (no existence leak, live revocation).
             // "Enabled for TV" is ShowOnTv, or — for THIS television only — being
-            // the album of the live party it is assigned to.
+            // the album of the display-resolvable party it is assigned to.
             var items = await media.ListItemsAsync(
                 ownerUserId.Value, albumId, viewer!.AssignedPartyAlbumId, cancellationToken);
             return items is null ? Results.NotFound() : Results.Ok(items);
@@ -2002,7 +2003,7 @@ public static class TvEndpoints
 
         // TV media bytes. Each endpoint resolves the TV session → owner, verifies the
         // file is currently allowlisted (member of one of the owner's ShowOnTv albums
-        // or of the album of the live party THIS television is assigned to,
+        // or of the album of the display-resolvable party THIS television is assigned to,
         // owner-owned, active, non-vault) and only then serves a DERIVED artifact
         // (small thumbnail / medium preview / video poster) or the range-streamed
         // video. Original full-resolution image bytes are never served here.

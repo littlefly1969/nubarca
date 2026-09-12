@@ -24,6 +24,7 @@ import {
   type TvSessionStatus,
 } from './src/api/tv';
 import {
+  admissionEvents,
   flowEffects,
   initialFlowState,
   isPersonalState,
@@ -126,16 +127,46 @@ function AppInner(): React.JSX.Element {
     rawDispatch(event);
   }, []);
 
-  const adoptSession = useCallback((session: TvSessionStatus) => {
-    const lang = toLanguage(session.language);
-    if (lang) setLanguage(lang);
-    // The FIRST read already carries the assignment and its presentation, and
-    // it is consumed here: a television assigned to a party starts in that
-    // party, without passing through the mode selector and discovering it on
-    // the next poll.
-    const assignment = toAssignmentView(session.assignment);
-    tvDebug('control', 'session-ready', assignment.presentation);
-    dispatch({ type: 'SESSION_READY', assignment });
+  // ADMISSION: the one door from "this session is valid" to the first screen,
+  // for a relaunch and a completed pairing alike.
+  //
+  // The FIRST session read already carries the assignment and its
+  // presentation, and it is consumed here: a television assigned to a party
+  // starts in that party, without passing through the mode selector and
+  // discovering it on the next poll. But the mode selector was also where an
+  // INCOMPLETE association (an owner without a Personal Area PIN — legacy or
+  // corrupted data) was caught, so the same existing check is asked here,
+  // BEFORE the first screen is chosen: such a session goes to the "pairing is
+  // incomplete" recovery and never straight into a party (admissionEvents).
+  //
+  // Only a 401 unpairs. Anything else that is not an answer is retried on a
+  // capped backoff; the television stays on its connecting screen meanwhile.
+  const admissionRef = useRef(0);
+  const admit = useCallback((session: TvSessionStatus) => {
+    const admission = ++admissionRef.current;
+    let attempt = 0;
+    const check = () => {
+      getTvPersonalStatus()
+        .then((status) => {
+          if (admissionRef.current !== admission) return;
+          const lang = toLanguage(session.language);
+          if (lang) setLanguage(lang);
+          const assignment = toAssignmentView(session.assignment);
+          tvDebug('control', 'session-ready', assignment.presentation,
+            status.pinConfigured ? 'association-complete' : 'association-incomplete');
+          // In one tick, so React commits only where they end.
+          for (const event of admissionEvents(assignment, status.pinConfigured)) dispatch(event);
+        })
+        .catch((err: unknown) => {
+          if (admissionRef.current !== admission) return;
+          if (err instanceof ApiError && err.status === 401) {
+            dispatch({ type: 'SESSION_INVALID' });
+            return;
+          }
+          setTimeout(check, backoffMs(attempt++));
+        });
+    };
+    check();
   }, [setLanguage, dispatch]);
 
   useEffect(() => {
@@ -159,7 +190,7 @@ function AppInner(): React.JSX.Element {
     const validate = () => {
       getTvSession()
         .then((session) => {
-          if (!cancelled) adoptSession(session);
+          if (!cancelled) admit(session);
         })
         .catch((err: unknown) => {
           if (cancelled) return;
@@ -181,12 +212,13 @@ function AppInner(): React.JSX.Element {
     return () => {
       cancelled = true;
       if (retry) clearTimeout(retry);
+      admissionRef.current += 1;
     };
-  }, [adoptSession, dispatch]);
+  }, [admit, dispatch]);
 
   const onPaired = useCallback((session: TvSessionStatus) => {
-    adoptSession(session);
-  }, [adoptSession]);
+    admit(session);
+  }, [admit]);
 
   // The limited TV session was revoked by the owner (or expired): tear down
   // EVERYTHING — in-memory personal grant, persisted cookie, cached derived

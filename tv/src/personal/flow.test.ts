@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  admissionEvents,
   flowEffects,
   initialFlowState,
+  isAssignedPartyState,
   isPersonalState,
   tvFlowReducer,
   type TvFlowEvent,
@@ -389,6 +391,35 @@ test('a revoked session tears an assigned party down like any other state', () =
     assert.equal(effects.clearSession, true);
     assert.deepEqual(tvFlowReducer(assigned, { type: 'ASSOCIATION_INCOMPLETE' }),
       { name: 'pairing', incomplete: true });
+  }
+});
+
+test('an incomplete association is never admitted into a party, even straight from startup', () => {
+  for (const from of [initialFlowState, pairing]) {
+    for (const assignmentView of [view('slideshow'), view('game'), view('unavailable'), general]) {
+      // Complete: one event, straight into the server's presentation.
+      const complete = admissionEvents(assignmentView, true);
+      assert.equal(complete.length, 1);
+      assert.equal(complete.reduce(tvFlowReducer, from).name,
+        assignmentView.presentation === 'general' ? 'mode'
+          : { slideshow: 'partySlideshow', game: 'partyGame', unavailable: 'partyUnavailable' }[
+            assignmentView.presentation]);
+
+      // Incomplete: the existing teardown, and NO party state on the way.
+      let state = from;
+      const visited: TvFlowState[] = [];
+      let effects = { dropGrant: false, clearSession: false };
+      for (const event of admissionEvents(assignmentView, false)) {
+        effects = flowEffects(state, event);
+        state = tvFlowReducer(state, event);
+        visited.push(state);
+      }
+      assert.deepEqual(state, { name: 'pairing', incomplete: true }, `${from.name} + ${assignmentView.presentation}`);
+      assert.equal(visited.some((s) => isAssignedPartyState(s)), false);
+      // The same effects as the incomplete association ever had.
+      assert.equal(effects.dropGrant, true);
+      assert.equal(effects.clearSession, true);
+    }
   }
 });
 
