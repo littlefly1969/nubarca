@@ -19,11 +19,18 @@ export interface TvPairingStatus {
 // `partyAvailable` is false when the assignment names a party that has since
 // been revoked or switched off — "that party is over", not "this is a general
 // television". No party link id and no token ever cross.
+//
+// `presentation` is what the party wants on that screen right now — its native
+// slideshow, its game on the canonical stage, or unavailable — projected by the
+// server from the party's own state. `assignmentKey` is only ever sent to the
+// television itself and is null here.
 export interface TvDisplayAssignment {
   kind: 'general' | 'party';
   albumId: string | null;
   albumName: string | null;
   partyAvailable: boolean;
+  presentation?: 'general' | 'slideshow' | 'game' | 'unavailable';
+  assignmentKey?: string | null;
 }
 
 // One party an owner may point a television at: their own albums with an active

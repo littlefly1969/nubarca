@@ -91,7 +91,11 @@ export function PartyTvStage({
       )}
 
       {!intro && scene === 'lobby' && (
-        <div className="party-stage-centre">
+        // The one scene where the room has to DO something — scan — so it is
+        // composed from the top of the safe area down: the words at the size
+        // every scene uses, then the code, which takes all the height they
+        // leave (see .party-stage-lobby).
+        <div className="party-stage-lobby" data-testid="party-stage-lobby">
           <p className="party-stage-eyebrow">{`${PRODUCT_NAME} · ${snapshot.albumName}`}</p>
           <h1 className="party-stage-headline">{t('partyStage.lobbyTitle')}</h1>
           <p className="party-stage-sub">{t('partyStage.lobbyBody')}</p>
