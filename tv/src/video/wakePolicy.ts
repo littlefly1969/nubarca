@@ -63,26 +63,40 @@ export function shouldRotateSlideshow(inputs: WakeInputs): boolean {
   return shouldKeepPhotoSlideshowAwake(inputs);
 }
 
-/** What a party display needs the screen for. */
+/** What a party GAME display needs the screen for. */
 export interface PartyDisplayWakeInputs {
   readonly hostActive: boolean;
-  /** True while the stage is actually on screen (not the native fallback). */
+  /**
+   * True while the stage is actually on screen: the renderer is alive and has
+   * drawn a real frame — not the native cover, not the fallback.
+   */
   readonly showing: boolean;
+  /**
+   * The canonical renderer's own coarse signal: a live scene of the party is
+   * on screen. It is the PAGE that decides, because only the page knows what
+   * it is showing; the shell never reinterprets a game phase. The lobby counts
+   * — it is a waiting screen with a code on it that guests must be able to
+   * scan — and so does the closing card while it is up. An error card does not.
+   */
+  readonly presentationActive: boolean;
 }
 
 /**
- * Should NubArca hold the screen for a party display?
+ * Should NubArca hold the screen for a party game display?
  *
- * A party on screen IS active playback: a television that dims in the middle of
+ * A game on screen IS active playback: a television that dims in the middle of
  * a round is as broken as one that dims during a slideshow. It lives HERE, in
  * the module that already answers "hold the screen", rather than in a second
  * wake lock of its own — two authorities is the failure this file exists to
  * prevent, and the existing hook is already tag-scoped so two callers cannot
  * release each other.
  *
- * False when the app is backgrounded, and false while the native fallback is up:
- * there is nothing to watch behind an error card.
+ * False when the app is backgrounded, while a native cover or fallback is up,
+ * and while the page says nothing live is on screen: there is nothing to watch
+ * behind an error card. When the game hands the screen back to the party's
+ * slideshow, this component unmounts and releases, and the slideshow's own
+ * policy above takes over — there is no hand-off to get wrong.
  */
 export function shouldKeepPartyDisplayAwake(inputs: PartyDisplayWakeInputs): boolean {
-  return inputs.hostActive && inputs.showing;
+  return inputs.hostActive && inputs.showing && inputs.presentationActive;
 }

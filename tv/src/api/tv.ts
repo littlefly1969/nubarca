@@ -25,11 +25,21 @@ export interface TvPairingStatus {
 // `partyAvailable` is false when the party named here has since been revoked or
 // switched off — an honest "that party is over" rather than a silent fall back
 // to the general experience. No party link id and no token ever cross.
+//
+// `presentation` is the server's answer to "which surface, right now": the
+// party's native slideshow, its game on the canonical web stage, or
+// unavailable. A PROJECTION of the party's state — never a game phase, which
+// this app does not know and must not learn. Absent on a server that predates
+// it (see lib/assignmentView for how that is read). `assignmentKey` is an
+// opaque identity of "this TV, this party link" that changes whenever the
+// party does; no endpoint accepts it.
 export interface TvDisplayAssignment {
   kind: 'general' | 'party';
   albumId: string | null;
   albumName: string | null;
   partyAvailable: boolean;
+  presentation?: 'general' | 'slideshow' | 'game' | 'unavailable';
+  assignmentKey?: string | null;
 }
 
 export interface TvSessionStatus {
@@ -107,6 +117,13 @@ export function getTvSession(signal?: AbortSignal): Promise<TvSessionStatus> {
   return tvGet<TvSessionStatus>('/api/tv/session', undefined, signal);
 }
 
+// The same answer as getTvSession, and the one read that also stamps the
+// session's LastSeenAt. The control plane reads briskly and beats rarely: the
+// read is free, the beat is a write (lib/assignmentView SESSION_HEARTBEAT_MS).
+export function heartbeatTvSession(signal?: AbortSignal): Promise<TvSessionStatus> {
+  return tvPost<TvSessionStatus>('/api/tv/session/heartbeat', undefined, undefined, signal);
+}
+
 // The television's permission to SHOW the party it is assigned to.
 //
 // Authenticated by the TV session cookie alone, and it takes no arguments on
@@ -116,10 +133,12 @@ export function getTvSession(signal?: AbortSignal): Promise<TvSessionStatus> {
 //
 // The raw grant is returned once and is never persisted — not in AsyncStorage,
 // not anywhere. It lives in memory, goes into a URL fragment, and is replaced
-// by minting again.
+// by minting again. `expiresInSeconds` is the lifetime as a server-measured
+// duration, which is what renewal is scheduled from (lib/partyDisplayGrant).
 export interface TvPartyDisplayGrant {
   grant: string;
   expiresAt: string;
+  expiresInSeconds?: number;
 }
 
 export function mintPartyDisplayGrant(signal?: AbortSignal): Promise<TvPartyDisplayGrant> {

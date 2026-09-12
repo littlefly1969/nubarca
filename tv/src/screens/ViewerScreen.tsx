@@ -79,6 +79,13 @@ interface Props {
   // brings new guest uploads. null for a non-party album (historical timing).
   partySlideshow?: PartySlideshowTiming | null;
   onSessionInvalid?: () => void;
+  // What the party refresh does when the album has nothing left to show, and
+  // when it is gone (404). Both default to onClose, which is right for a viewer
+  // opened from a grid. The ASSIGNED party slideshow has no grid to return to
+  // and supplies its own: an empty party waits for its first photograph, and a
+  // vanished one fails closed rather than navigating anywhere.
+  onEmpty?: () => void;
+  onGone?: () => void;
 }
 
 // Slideshow / single-item viewer. Remote-first: the D-pad drives it directly.
@@ -105,7 +112,7 @@ interface Props {
 export function ViewerScreen({
   items: initialItems, startIndex, autoPlay = false, onClose,
   albumId, albumName, partyEnabled = false, partyUrl = null, partyUploadUrl = null,
-  partySlideshow = null, onSessionInvalid,
+  partySlideshow = null, onSessionInvalid, onEmpty, onGone,
 }: Props) {
   const { t } = useI18n();
   const { width, height } = useWindowDimensions();
@@ -494,10 +501,12 @@ export function ViewerScreen({
   // session loss (401) exits cleanly.
   useEffect(() => {
     if (!partyEnabled || !albumId) return;
+    const whenEmpty = onEmpty ?? onClose;
+    const whenGone = onGone ?? onClose;
     const refresh = () => {
       listTvAlbumItems(albumId)
         .then((detail) => {
-          if (detail.items.length === 0) { onClose(); return; }
+          if (detail.items.length === 0) { whenEmpty(); return; }
           // Adopt refreshed timing regardless of whether the item list moved —
           // a settings change is not an item change.
           setTiming((current) => {
@@ -519,7 +528,7 @@ export function ViewerScreen({
           setIndex(remapIndexById(detail.items, currentId, indexRef.current));
         })
         .catch((err) => {
-          if (err instanceof ApiError && err.status === 404) { onClose(); return; }
+          if (err instanceof ApiError && err.status === 404) { whenGone(); return; }
           if (err instanceof ApiError && err.status === 401) { onSessionInvalid?.(); }
           // transient: keep the current slideshow
         });
@@ -527,7 +536,7 @@ export function ViewerScreen({
     refresh();
     const timer = setInterval(refresh, PARTY_ITEMS_POLL_MS);
     return () => clearInterval(timer);
-  }, [partyEnabled, albumId, onClose, onSessionInvalid]);
+  }, [partyEnabled, albumId, onClose, onEmpty, onGone, onSessionInvalid]);
 
   // A Hero holds the screen for a fixed time, then simply comes down. It does
   // NOT advance the wall itself — settling the deferred boundary is the single
