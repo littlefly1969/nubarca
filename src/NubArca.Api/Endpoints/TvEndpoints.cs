@@ -187,7 +187,8 @@ public static class TvEndpoints
                 // assignment to change.
                 NubArca.Api.Party.PartyDisplayGrantError.NotAssigned => Results.NotFound(),
                 _ => Results.Ok(new NubArca.Api.Party.PartyDisplayGrantDto(
-                    result.Token!, result.ExpiresAt!.Value)),
+                    result.Token!, result.ExpiresAt!.Value,
+                    (int)NubArca.Api.Party.PartyDisplayService.GrantLifetime.TotalSeconds)),
             };
         }).WithName("MintPartyDisplayGrant");
 
@@ -1706,6 +1707,15 @@ public static class TvEndpoints
         // paired TV owner's own albums that the owner has explicitly enabled for TV,
         // and re-check ShowOnTv on every call so disabling an album removes it live.
         // DTOs and media bytes are owner-private and carry no storage/blob/AI internals.
+        //
+        // One addition, for one television at a time: a TV the owner ASSIGNED to a
+        // party may also read that party's album — its items, its greetings and
+        // its media bytes — whether or not the album is ShowOnTv, because showing
+        // that party is exactly what the owner assigned it to do. The grant is the
+        // assignment itself, re-read on every request (TvViewer), so it covers
+        // only the assigned album, only while the party's link is live, and never
+        // another television of the same owner. The album LIST is unchanged:
+        // an assignment is not a way to browse.
 
         app.MapGet("/api/tv/albums", async (
             HttpContext httpContext,
@@ -1714,8 +1724,9 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
@@ -1732,8 +1743,9 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
@@ -1741,7 +1753,10 @@ public static class TvEndpoints
 
             // Null → the album is missing, foreign, or no longer enabled for TV. All
             // collapse to a generic 404 (no existence leak, live revocation).
-            var items = await media.ListItemsAsync(ownerUserId.Value, albumId, cancellationToken);
+            // "Enabled for TV" is ShowOnTv, or — for THIS television only — being
+            // the album of the live party it is assigned to.
+            var items = await media.ListItemsAsync(
+                ownerUserId.Value, albumId, viewer!.AssignedPartyAlbumId, cancellationToken);
             return items is null ? Results.NotFound() : Results.Ok(items);
         }).WithName("ListTvAlbumItems");
 
@@ -1768,15 +1783,16 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
 
             var projection = await messages.GetTvProjectionAsync(
-                ownerUserId.Value, albumId, cancellationToken);
+                ownerUserId.Value, albumId, viewer!.AssignedPartyAlbumId, cancellationToken);
             return projection is null ? Results.NotFound() : Results.Ok(projection);
         }).WithName("ListTvPartyMessages");
 
@@ -1868,8 +1884,9 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
@@ -1886,7 +1903,8 @@ public static class TvEndpoints
 
             // Reuse the album's live TV item list (same URL/name building + ShowOnTv +
             // moderation re-check), then keep only the matching ids in rank order.
-            var album = await media.ListItemsAsync(ownerUserId.Value, albumId, cancellationToken);
+            var album = await media.ListItemsAsync(
+                ownerUserId.Value, albumId, viewer!.AssignedPartyAlbumId, cancellationToken);
             if (album is null)
             {
                 return Results.Ok(inactive);
@@ -1926,8 +1944,9 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
@@ -1966,8 +1985,9 @@ public static class TvEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
@@ -1981,7 +2001,8 @@ public static class TvEndpoints
         }).WithName("GetTvFaceSearchThumbnail");
 
         // TV media bytes. Each endpoint resolves the TV session → owner, verifies the
-        // file is currently allowlisted (member of one of the owner's ShowOnTv albums,
+        // file is currently allowlisted (member of one of the owner's ShowOnTv albums
+        // or of the album of the live party THIS television is assigned to,
         // owner-owned, active, non-vault) and only then serves a DERIVED artifact
         // (small thumbnail / medium preview / video poster) or the range-streamed
         // video. Original full-resolution image bytes are never served here.
@@ -1993,13 +2014,14 @@ public static class TvEndpoints
             [FromServices] IFileThumbnailService thumbnails,
             CancellationToken cancellationToken) =>
         {
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
             {
                 return Results.NotFound();
             }
@@ -2023,13 +2045,14 @@ public static class TvEndpoints
             [FromServices] IFileThumbnailService thumbnails,
             CancellationToken cancellationToken) =>
         {
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
             {
                 return Results.NotFound();
             }
@@ -2054,13 +2077,14 @@ public static class TvEndpoints
             [FromServices] NubArca.Api.Data.AppDbContext db,
             CancellationToken cancellationToken) =>
         {
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
             {
                 return Results.NotFound();
             }
@@ -2108,10 +2132,11 @@ public static class TvEndpoints
             [FromServices] NubArca.Api.Data.AppDbContext db,
             CancellationToken cancellationToken) =>
         {
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null) return Results.Unauthorized();
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
                 return Results.NotFound();
 
             var ok = await db.FileItems.AsNoTracking()
@@ -2146,13 +2171,14 @@ public static class TvEndpoints
             [FromServices] VideoHlsServingService hlsServing,
             CancellationToken cancellationToken) =>
         {
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
             {
                 return Results.NotFound();
             }
@@ -2222,13 +2248,14 @@ public static class TvEndpoints
             {
                 return Results.NotFound();
             }
-            var ownerUserId = await tv.ResolveOwnerUserIdAsync(
+            var viewer = await tv.ResolveViewerAsync(
                 httpContext.Request.Cookies[TvPairingService.CookieName], cancellationToken);
+            var ownerUserId = viewer?.OwnerUserId;
             if (ownerUserId is null)
             {
                 return Results.Unauthorized();
             }
-            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, cancellationToken))
+            if (!await media.IsMediaVisibleAsync(ownerUserId.Value, fileId, viewer!.AssignedPartyAlbumId, cancellationToken))
             {
                 return Results.NotFound();
             }

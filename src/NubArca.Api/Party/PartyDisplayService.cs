@@ -66,38 +66,88 @@ public sealed class PartyDisplayService : IPartyDisplayService
         // The assignment is the ONLY way a party enters this method.
         if (session.DisplayAssignment != TvDisplayAssignments.Party
             || session.AssignedPartyAlbumLinkId is not Guid linkId)
-            return PartyDisplayGrantResult.Fail(PartyDisplayGrantError.NotAssigned);
+            return Refused(session.Id, "not_assigned");
 
         // And the party must still be showable — a revoked or ended one is not
         // something to mint a fresh credential for.
         if (await _links.ResolveDisplayAsync(linkId, cancellationToken) is null)
-            return PartyDisplayGrantResult.Fail(PartyDisplayGrantError.NotAssigned);
+            return Refused(session.Id, "party_unavailable");
 
-        // One live grant per television. A remount must not leave the previous
-        // credential usable behind it.
-        await _db.PartyDisplayGrants
-            .Where(g => g.TvSessionId == session.Id && g.RevokedAt == null)
-            .ExecuteUpdateAsync(
-                s => s.SetProperty(g => g.RevokedAt, _ => (DateTime?)now), cancellationToken);
-
-        var raw = NewToken();
-        var expiresAt = now.Add(GrantLifetime);
-        _db.PartyDisplayGrants.Add(new PartyDisplayGrant
+        // THE BOUNDARY IS THE TELEVISION'S OWN ROW.
+        //
+        // "Revoke the previous grant, insert a new one" is two statements, and
+        // two mints of the same television arriving together — a remount racing
+        // a renewal, a retry racing its own original — would otherwise both
+        // revoke the SAME earlier grant and both insert, leaving two usable
+        // credentials. So the transaction opens with a conditional update of
+        // the session row whose WHERE clause is the whole claim (still live,
+        // still assigned to THIS link) and which assigns a column to itself:
+        // it changes nothing, and exists to take that row's write lock. A second
+        // mint blocks on it, and when the first commits its revoke runs against
+        // a fresh snapshot that includes the grant the first one just wrote.
+        // It is the vote/close discipline of the Party Game, applied to a
+        // device. Opening with a write also means the transaction never
+        // upgrades a shared lock, which is the shape SQLite refuses to wait on.
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
+        try
         {
-            Id = Guid.NewGuid(),
-            TvSessionId = session.Id,
-            PartyAlbumLinkId = linkId,
-            TokenHash = HashToken(raw),
-            CreatedAt = now,
-            ExpiresAt = expiresAt,
-        });
-        await _db.SaveChangesAsync(cancellationToken);
+            var claimed = await _db.TvSessions
+                .Where(t => t.Id == session.Id && t.RevokedAt == null && t.ExpiresAt > now
+                    && t.DisplayAssignment == TvDisplayAssignments.Party
+                    && t.AssignedPartyAlbumLinkId == linkId)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.LastSeenAt, t => t.LastSeenAt),
+                    cancellationToken);
+            if (claimed == 0)
+            {
+                // The assignment moved (or the session ended) between the read
+                // above and the lock. Nothing has been written.
+                if (owned) await tx!.RollbackAsync(cancellationToken);
+                return Refused(session.Id, "assignment_changed");
+            }
 
-        // The line names the device and the link, never the token or its hash.
+            // One live grant per television. A remount must not leave the
+            // previous credential usable behind it.
+            await _db.PartyDisplayGrants
+                .Where(g => g.TvSessionId == session.Id && g.RevokedAt == null)
+                .ExecuteUpdateAsync(
+                    s => s.SetProperty(g => g.RevokedAt, _ => (DateTime?)now), cancellationToken);
+
+            var raw = NewToken();
+            var expiresAt = now.Add(GrantLifetime);
+            _db.PartyDisplayGrants.Add(new PartyDisplayGrant
+            {
+                Id = Guid.NewGuid(),
+                TvSessionId = session.Id,
+                PartyAlbumLinkId = linkId,
+                TokenHash = HashToken(raw),
+                CreatedAt = now,
+                ExpiresAt = expiresAt,
+            });
+            await _db.SaveChangesAsync(cancellationToken);
+            if (owned) await tx!.CommitAsync(cancellationToken);
+
+            // The line names the device and the link, never the token or its hash.
+            _logger.LogInformation(
+                "party.display.grant.mint TvSessionId={TvSessionId} LinkId={LinkId}",
+                session.Id, linkId);
+            return PartyDisplayGrantResult.Ok(raw, expiresAt);
+        }
+        finally
+        {
+            if (owned && tx is not null) await tx.DisposeAsync();
+        }
+    }
+
+    // A refusal is worth a line — it is how an operator tells "the television
+    // keeps asking and the party is off" from "the television is not asking" —
+    // but it names the device and a reason class, never a credential.
+    private PartyDisplayGrantResult Refused(Guid tvSessionId, string reason)
+    {
         _logger.LogInformation(
-            "party.display.grant.mint TvSessionId={TvSessionId} LinkId={LinkId}",
-            session.Id, linkId);
-        return PartyDisplayGrantResult.Ok(raw, expiresAt);
+            "party.display.grant.refused TvSessionId={TvSessionId} Reason={Reason}",
+            tvSessionId, reason);
+        return PartyDisplayGrantResult.Fail(PartyDisplayGrantError.NotAssigned);
     }
 
     public async Task<PartyAccess?> ResolveAsync(

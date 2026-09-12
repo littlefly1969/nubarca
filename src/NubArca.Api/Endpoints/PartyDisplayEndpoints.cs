@@ -114,11 +114,17 @@ public static class PartyDisplayEndpoints
 
             using var generator = new QRCodeGenerator();
             using var data = generator.CreateQrCode($"{origin}{joinUrl}", QRCodeGenerator.ECCLevel.M);
+            // A viewBox and no fixed size: the stage gives the code whatever
+            // room the lobby has left, and a fixed-pixel SVG would be clipped or
+            // stranded small inside it. The quiet zone is drawn INSIDE the
+            // picture, so however large it is scaled the white margin a phone
+            // needs scales with it.
             var svg = new SvgQRCode(data).GetGraphic(
                 pixelsPerModule: 8,
                 darkColorHex: "#0b1220",
                 lightColorHex: "#ffffff",
-                drawQuietZones: true);
+                drawQuietZones: true,
+                sizingMode: SvgQRCode.SizingMode.ViewBoxAttribute);
             return Results.Text(svg, "image/svg+xml");
         }).WithName("GetPartyDisplayJoinQr");
 

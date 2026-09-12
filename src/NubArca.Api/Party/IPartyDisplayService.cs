@@ -28,7 +28,14 @@ public interface IPartyDisplayService
     /// token is returned ONCE and never stored; only its SHA-256 is.</para>
     ///
     /// <para>Minting revokes this television's previous grants, so a remount
-    /// cannot leave a second usable credential behind.</para>
+    /// cannot leave a second usable credential behind — and it does so under a
+    /// write lock on the television's own session row, so two mints of the
+    /// same device arriving together are ORDERED rather than interleaved and
+    /// the loser's revoke sees the winner's grant. Two different televisions
+    /// lock two different rows and never wait on each other.</para>
+    ///
+    /// <para>The shell renews BEFORE expiry, by minting again: renewal is not a
+    /// separate operation, and there is no way to extend a grant.</para>
     /// </summary>
     Task<PartyDisplayGrantResult> MintAsync(
         string? sessionToken, CancellationToken cancellationToken = default);
@@ -84,4 +91,10 @@ public sealed record PartyDisplayGrantResult(
 
 /// What the television is handed. A lifetime and a secret, and nothing that
 /// identifies the party — the grant IS the reference to it.
-public sealed record PartyDisplayGrantDto(string Grant, DateTime ExpiresAt);
+///
+/// `ExpiresInSeconds` is the same lifetime as a DURATION, computed on the
+/// server. The shell schedules its renewal from it rather than by subtracting
+/// its own clock from `ExpiresAt`: a television whose clock is wrong by an hour
+/// would otherwise renew in a loop, or let the grant lapse — the same reason
+/// the control room is sent `displaySeenSecondsAgo` rather than a timestamp.
+public sealed record PartyDisplayGrantDto(string Grant, DateTime ExpiresAt, int ExpiresInSeconds);

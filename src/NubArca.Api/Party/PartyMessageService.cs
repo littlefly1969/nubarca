@@ -222,13 +222,17 @@ public sealed class PartyMessageService : IPartyMessageService
     }
 
     public async Task<TvPartyMessagesDto?> GetTvProjectionAsync(
-        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default)
+        Guid ownerUserId, Guid albumId, Guid? assignedPartyAlbumId,
+        CancellationToken cancellationToken = default)
     {
         // ShowOnTv is re-read here for the same reason every other TV endpoint
         // re-reads it: turning an album off must empty the TV on the next poll.
+        // The one exception is the calling television's own assigned party
+        // album, re-derived by the caller on every request.
         var albumOk = await _db.Albums
             .AsNoTracking()
-            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv,
+            .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId
+                    && (a.ShowOnTv || a.Id == assignedPartyAlbumId),
                 cancellationToken);
         if (!albumOk)
         {

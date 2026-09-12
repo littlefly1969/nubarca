@@ -1,13 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
+using NubArca.Api.Party;
 
 namespace NubArca.Api.Tv;
 
 /// <summary>
 /// Reads and writes what a paired television is for.
 ///
-/// <para>Two rules hold everywhere in this file.</para>
+/// <para>Three rules hold everywhere in this file.</para>
 ///
 /// <para>THE CALLER NAMES AN ALBUM, NEVER A LINK. A party link id is an internal
 /// identifier, and accepting one from a client would make "which party is this
@@ -21,18 +22,29 @@ namespace NubArca.Api.Tv;
 /// them, so a session id and an album id from two different accounts can never
 /// meet. A missing television, a foreign one, a revoked one and an expired one
 /// are the same answer, as everywhere else in this codebase.</para>
+///
+/// <para>THE PRESENTATION IS PROJECTED, NEVER STORED. Beside a party
+/// assignment the television is told which surface that party wants right
+/// now (<see cref="TvPartyPresentations"/>). It is derived on every read from
+/// the same resolver that decides whether a display grant may be minted and
+/// from the game session's current status, so "the television is told to show
+/// the game" and "the television is allowed to show the game" cannot
+/// disagree. Nothing here writes game state.</para>
 /// </summary>
 public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
 {
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
+    private readonly IPartyLinkService _links;
     private readonly ILogger<TvDisplayAssignmentService> _logger;
 
     public TvDisplayAssignmentService(
-        AppDbContext db, TimeProvider clock, ILogger<TvDisplayAssignmentService> logger)
+        AppDbContext db, TimeProvider clock, IPartyLinkService links,
+        ILogger<TvDisplayAssignmentService> logger)
     {
         _db = db;
         _clock = clock;
+        _links = links;
         _logger = logger;
     }
 
@@ -98,8 +110,11 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
         _logger.LogInformation(
             "tv.assignment.set SessionId={SessionId} Kind={Kind} AlbumId={AlbumId}",
             tvSessionId, TvDisplayAssignments.Party, albumId);
-        return TvAssignmentResult.Ok(
-            new TvDisplayAssignmentDto(TvDisplayAssignments.Party, albumId, party.Name, true));
+
+        var presentation = await PresentationAsync(party.LinkId, now, cancellationToken);
+        return TvAssignmentResult.Ok(new TvDisplayAssignmentDto(
+            TvDisplayAssignments.Party, albumId, party.Name,
+            presentation != TvPartyPresentations.Unavailable, presentation));
     }
 
     public async Task<IReadOnlyList<TvAssignablePartyDto>> ListAssignablePartiesAsync(
@@ -142,24 +157,35 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
                 // Left joins, because an assignment naming a party that has been
                 // revoked must still describe itself. Reporting nothing would
                 // read as "this television is general", which it is not.
-                Link = _db.PartyAlbumLinks.AsNoTracking()
+                AlbumId = _db.PartyAlbumLinks.AsNoTracking()
                     .Where(l => l.Id == x.AssignedPartyAlbumLinkId)
-                    .Select(l => new { l.AlbumId, l.Enabled, l.RevokedAt })
+                    .Select(l => (Guid?)l.AlbumId)
                     .FirstOrDefault(),
             })
             .ToListAsync(cancellationToken);
 
-        var albumIds = rows.Where(x => x.Link is not null).Select(x => x.Link!.AlbumId).Distinct().ToList();
+        var albumIds = rows.Where(x => x.AlbumId is not null).Select(x => x.AlbumId!.Value).Distinct().ToList();
         var names = albumIds.Count == 0
             ? new Dictionary<Guid, string>()
             : await _db.Albums.AsNoTracking()
                 .Where(a => albumIds.Contains(a.Id))
                 .ToDictionaryAsync(a => a.Id, a => a.Name, cancellationToken);
 
-        return rows.ToDictionary(x => x.Id, x => Describe(
-            x.DisplayAssignment, x.Link?.AlbumId,
-            x.Link is null ? null : names.GetValueOrDefault(x.Link.AlbumId),
-            available: x.Link is { Enabled: true, RevokedAt: null }));
+        // One projection per PARTY, not per television: an owner with three
+        // screens on one party asks the question once.
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var presentations = new Dictionary<Guid, string>();
+        foreach (var linkId in rows
+            .Where(x => x.DisplayAssignment == TvDisplayAssignments.Party)
+            .Select(x => x.AssignedPartyAlbumLinkId)
+            .OfType<Guid>().Distinct())
+            presentations[linkId] = await PresentationAsync(linkId, now, cancellationToken);
+
+        return rows.ToDictionary(x => x.Id, x =>
+            x.DisplayAssignment == TvDisplayAssignments.Party && x.AssignedPartyAlbumLinkId is Guid linkId
+                ? Party(x.AlbumId, x.AlbumId is Guid a ? names.GetValueOrDefault(a) : null,
+                    presentations[linkId], assignmentKey: null)
+                : TvDisplayAssignmentDto.General);
     }
 
     public async Task<TvDisplayAssignmentDto> ResolveAsync(
@@ -172,30 +198,74 @@ public sealed class TvDisplayAssignmentService : ITvDisplayAssignmentService
             .Select(x => new
             {
                 x.DisplayAssignment,
-                Link = _db.PartyAlbumLinks.AsNoTracking()
+                x.AssignedPartyAlbumLinkId,
+                AlbumId = _db.PartyAlbumLinks.AsNoTracking()
                     .Where(l => l.Id == x.AssignedPartyAlbumLinkId)
-                    .Select(l => new { l.AlbumId, l.Enabled, l.RevokedAt })
+                    .Select(l => (Guid?)l.AlbumId)
                     .FirstOrDefault(),
             })
             .FirstOrDefaultAsync(cancellationToken);
-        if (row is null) return TvDisplayAssignmentDto.General;
+        if (row is null || row.DisplayAssignment != TvDisplayAssignments.Party
+            || row.AssignedPartyAlbumLinkId is not Guid linkId)
+            return TvDisplayAssignmentDto.General;
 
-        var name = row.Link is null ? null : await _db.Albums.AsNoTracking()
-            .Where(a => a.Id == row.Link.AlbumId).Select(a => a.Name)
+        var name = row.AlbumId is not Guid albumId ? null : await _db.Albums.AsNoTracking()
+            .Where(a => a.Id == albumId).Select(a => a.Name)
             .FirstOrDefaultAsync(cancellationToken);
-        return Describe(row.DisplayAssignment, row.Link?.AlbumId, name,
-            available: row.Link is { Enabled: true, RevokedAt: null });
+        var presentation = await PresentationAsync(
+            linkId, _clock.GetUtcNow().UtcDateTime, cancellationToken);
+        return Party(row.AlbumId, name, presentation,
+            TvPartyPresentations.AssignmentKey(tvSessionId, linkId));
     }
 
     /// <summary>
-    /// One row's assignment as a DTO. A row whose link has gone — revoked, or
-    /// party mode switched off — stays a PARTY assignment and says the party is
-    /// not available, because "the party you chose is over" is a different fact
-    /// from "this television is a general television".
+    /// What the party named by <paramref name="linkId"/> wants on a paired
+    /// screen right now.
+    ///
+    /// <para>"Showable" is the display resolver's own answer — the SAME call
+    /// that decides whether a display grant may be minted — so a television is
+    /// never told to show a game it would then be refused a capability for.
+    /// "Game" additionally requires what the display snapshot requires: the
+    /// game switch on this link, the host's permission to run games, and the
+    /// link still describing the party's main album.</para>
     /// </summary>
-    private static TvDisplayAssignmentDto Describe(
-        string kind, Guid? albumId, string? albumName, bool available) =>
-        kind == TvDisplayAssignments.Party
-            ? new TvDisplayAssignmentDto(TvDisplayAssignments.Party, albumId, albumName, available)
-            : TvDisplayAssignmentDto.General;
+    private async Task<string> PresentationAsync(
+        Guid linkId, DateTime now, CancellationToken cancellationToken)
+    {
+        var access = await _links.ResolveDisplayAsync(linkId, cancellationToken);
+        if (access is null) return TvPartyPresentations.Unavailable;
+
+        var state = await _db.PartyAlbumLinks.AsNoTracking()
+            .Where(l => l.Id == linkId)
+            .Select(l => new
+            {
+                GameShowable = l.GameEnabled && l.AlbumId == access.MainAlbumId,
+                Game = _db.PartyGameSessions.AsNoTracking()
+                    .Where(s => s.PartyAlbumLinkId == l.Id)
+                    .Select(s => new { s.Status, s.FinishedAt })
+                    .FirstOrDefault(),
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return TvPartyPresentations.Decide(
+            partyShowable: true,
+            gameEnabled: state?.GameShowable == true,
+            gamesPermitted: access.Capabilities.Games,
+            gameStatus: state?.Game?.Status,
+            finishedAt: state?.Game?.FinishedAt,
+            now: now);
+    }
+
+    /// <summary>
+    /// One party assignment as a DTO. A row whose party can no longer be shown
+    /// — revoked, switched off, expired — stays a PARTY assignment and says the
+    /// party is unavailable, because "the party you chose is over" is a
+    /// different fact from "this television is a general television".
+    /// </summary>
+    private static TvDisplayAssignmentDto Party(
+        Guid? albumId, string? albumName, string presentation, string? assignmentKey) =>
+        new(TvDisplayAssignments.Party, albumId, albumName,
+            PartyAvailable: presentation != TvPartyPresentations.Unavailable,
+            Presentation: presentation,
+            AssignmentKey: assignmentKey);
 }

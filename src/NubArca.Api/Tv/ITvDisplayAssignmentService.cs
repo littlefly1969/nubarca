@@ -53,9 +53,11 @@ public interface ITvDisplayAssignmentService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// What THIS television is for, resolved for the device itself. Re-read on
-    /// every call, so an owner changing the assignment reaches the television on
-    /// its next poll rather than on its next pairing.
+    /// What THIS television is for, resolved for the device itself, together
+    /// with the presentation the party wants on it right now. Re-read on every
+    /// call, so an owner changing the assignment — or a game starting,
+    /// finishing or restarting — reaches the television on its next poll rather
+    /// than on its next pairing.
     /// </summary>
     Task<TvDisplayAssignmentDto> ResolveAsync(
         Guid tvSessionId, CancellationToken cancellationToken = default);
@@ -66,10 +68,22 @@ public interface ITvDisplayAssignmentService
 ///
 /// <para><c>AlbumId</c> and <c>AlbumName</c> are present only for a party
 /// assignment. <c>PartyAvailable</c> is false when the assignment names a party
-/// that has since been revoked or switched off — an honest "that party is over"
-/// rather than a silent fall back to whatever party the album has next, because
-/// re-enabling party mode mints a NEW link and a new party is a new party
-/// everywhere else in this feature.</para>
+/// that can no longer be shown — revoked, switched off, expired — an honest
+/// "that party is over" rather than a silent fall back to whatever party the
+/// album has next, because re-enabling party mode mints a NEW link and a new
+/// party is a new party everywhere else in this feature.</para>
+///
+/// <para><c>Presentation</c> is the server's answer to "which surface" — one
+/// of <see cref="TvPartyPresentations"/>: `general`, `slideshow`, `game` or
+/// `unavailable`. It is a projection of the party's current state, not a
+/// second assignment and not a game phase: the television learns what to
+/// mount and nothing about why. An APK built before it existed ignores the
+/// field and keeps its previous behaviour.</para>
+///
+/// <para><c>AssignmentKey</c> is set only on the television's OWN read: an
+/// opaque identity of "this device, this party link" that changes whenever the
+/// party does — including a new link for the same album — so the device knows
+/// to tear down and start again. It is accepted by no endpoint.</para>
 ///
 /// <para>It never carries the link id or any token. The album is the owner's
 /// own vocabulary and the only identifier that has to cross.</para>
@@ -78,7 +92,9 @@ public sealed record TvDisplayAssignmentDto(
     string Kind,
     Guid? AlbumId = null,
     string? AlbumName = null,
-    bool PartyAvailable = false)
+    bool PartyAvailable = false,
+    string Presentation = TvPartyPresentations.General,
+    string? AssignmentKey = null)
 {
     public static readonly TvDisplayAssignmentDto General = new(TvDisplayAssignments.General);
 }

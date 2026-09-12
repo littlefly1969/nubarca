@@ -12,12 +12,17 @@ public interface ITvMediaService
         Guid ownerUserId, CancellationToken cancellationToken = default);
 
     // Display items of one allowlisted album. Returns null (→ 404) when the album
-    // is missing, foreign, or not currently enabled for TV.
+    // is missing, foreign, or not currently enabled for TV. `assignedPartyAlbumId`
+    // is the calling television's live party album (TvViewer), which is readable
+    // by THAT television even when it is not ShowOnTv; null for everybody else.
     Task<TvAlbumItemsDto?> ListItemsAsync(
-        Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default);
+        Guid ownerUserId, Guid albumId, Guid? assignedPartyAlbumId,
+        CancellationToken cancellationToken = default);
 
     // True only when the file belongs to the owner, is active/non-vault, and is a
-    // member of at least one of the owner's ShowOnTv albums. Gate for media bytes.
+    // member of at least one of the owner's ShowOnTv albums — or of the calling
+    // television's live party album. Gate for media bytes.
     Task<bool> IsMediaVisibleAsync(
-        Guid ownerUserId, Guid fileItemId, CancellationToken cancellationToken = default);
+        Guid ownerUserId, Guid fileItemId, Guid? assignedPartyAlbumId,
+        CancellationToken cancellationToken = default);
 }
