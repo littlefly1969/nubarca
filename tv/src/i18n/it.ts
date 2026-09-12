@@ -57,9 +57,9 @@ const it = {
   'partyDisplay.brand': 'NubArca Party',
   'partyDisplay.reconnecting': 'Riconnessione allo schermo…',
   'partyDisplay.unavailable': 'Questo Party non è disponibile in questo momento.',
-  'mode.assignedParty': 'Questa TV è assegnata al Party: {name}.',
-  'mode.assignedPartyFallback': 'festa',
-  'mode.assignedPartyGone': 'Il Party assegnato a questa TV non è più disponibile.',
+  'partyDisplay.starting': 'Il gioco sta per cominciare…',
+  'partySlideshow.loading': 'Arrivano le foto della festa…',
+  'partySlideshow.waiting': 'In attesa delle prime foto della festa.',
   'mode.pinChangedNotice': 'Il PIN è stato modificato. Inserisci il nuovo PIN.',
 
   // Updates: the ONE update surface. No PIN, no personal data — it shows the

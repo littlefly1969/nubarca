@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useReducer, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
@@ -17,9 +17,9 @@ import {
 } from './src/api/personal';
 import {
   getTvSession,
+  heartbeatTvSession,
   type TvAlbum,
   type TvAlbumItem,
-  type TvDisplayAssignment,
   type TvPartySlideshow,
   type TvSessionStatus,
 } from './src/api/tv';
@@ -28,8 +28,16 @@ import {
   initialFlowState,
   isPersonalState,
   tvFlowReducer,
+  type TvFlowEvent,
   type TvFlowState,
 } from './src/personal/flow';
+import {
+  CONTROL_POLL_MS,
+  backoffMs,
+  shouldHeartbeat,
+  toAssignmentView,
+} from './src/lib/assignmentView';
+import { useHostActive } from './src/lib/useHostActive';
 import { PairingScreen } from './src/screens/PairingScreen';
 import { ModeSelectScreen } from './src/screens/ModeSelectScreen';
 import { PinEntryScreen } from './src/screens/PinEntryScreen';
@@ -39,17 +47,21 @@ import { PersonalAlbumsScreen } from './src/screens/PersonalAlbumsScreen';
 import { BeautyLabScreen } from './src/screens/BeautyLabScreen';
 import { UpdateScreen } from './src/screens/UpdateScreen';
 import { PartyDisplayScreen } from './src/screens/PartyDisplayScreen';
+import { PartySlideshowScreen } from './src/screens/PartySlideshowScreen';
+import { PartyNativeSurface } from './src/components/PartyNativeSurface';
 import { exitTvApp } from './src/lib/tvPlatform';
 import { AlbumsScreen } from './src/screens/AlbumsScreen';
 import { AlbumItemsScreen } from './src/screens/AlbumItemsScreen';
 import { ViewerScreen } from './src/screens/ViewerScreen';
 import { I18nProvider, useI18n, toLanguage } from './src/i18n';
 import { startBackgroundUpdateCheck } from './src/ota/expoUpdate';
+import { tvDebug } from './src/debug';
 
 // Top-level navigation is the explicit mode state machine in
-// src/personal/flow.ts (pairing → mode selection → Party | Personal Area).
-// Party keeps its own shallow sub-navigation below (albums → items → viewer),
-// unchanged from before; it is reset every time Party is entered.
+// src/personal/flow.ts (pairing → the server's assigned party, or mode
+// selection → Party | Personal Area). Manual Party browsing keeps its own
+// shallow sub-navigation below (albums → items → viewer), unchanged from
+// before; it is reset every time Party is entered.
 type PartyScreen =
   | { name: 'albums' }
   | { name: 'items'; album: TvAlbum }
@@ -101,10 +113,30 @@ function AppInner(): React.JSX.Element {
   // teardown effects (flowEffects) for the state they fire from.
   const flowRef = React.useRef<TvFlowState>(flow);
   flowRef.current = flow;
-  // What the owner has this television set to — general, or one specific party.
-  // Server-owned and re-read rather than remembered, so changing it on the web
-  // reaches this device without re-pairing it.
-  const [assignment, setAssignment] = useState<TvDisplayAssignment | null>(null);
+
+  // Every event that can take a screen away from somebody goes through here, so
+  // the teardown it requires — revoking the Personal grant, dropping the
+  // session — is decided by the pure flowEffects and cannot be forgotten at a
+  // call site.
+  const dispatch = useCallback((event: TvFlowEvent) => {
+    const effects = flowEffects(flowRef.current, event);
+    if (effects.revokeGrant) void lockTvPersonal();
+    if (effects.dropGrant) clearPersonalGrant();
+    if (effects.clearSession) clearSession();
+    rawDispatch(event);
+  }, []);
+
+  const adoptSession = useCallback((session: TvSessionStatus) => {
+    const lang = toLanguage(session.language);
+    if (lang) setLanguage(lang);
+    // The FIRST read already carries the assignment and its presentation, and
+    // it is consumed here: a television assigned to a party starts in that
+    // party, without passing through the mode selector and discovering it on
+    // the next poll.
+    const assignment = toAssignmentView(session.assignment);
+    tvDebug('control', 'session-ready', assignment.presentation);
+    dispatch({ type: 'SESSION_READY', assignment });
+  }, [setLanguage, dispatch]);
 
   useEffect(() => {
     // Fire-and-forget: startup never waits for the OTA server. A downloaded
@@ -112,59 +144,66 @@ function AppInner(): React.JSX.Element {
     startBackgroundUpdateCheck();
     configure(resolveBaseUrl());
     let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
     // On launch: rehydrate any persisted limited TV session cookie, then VALIDATE
     // it against GET /api/tv/session before trusting it. A live session lands on
-    // MODE SELECTION (never a remembered mode, never unlocked — the personal
-    // grant only ever lives in memory); a revoked/expired/absent session clears
-    // the stored cookie and shows pairing.
-    void restoreSession()
-      .then(() => getTvSession())
-      .then((session) => {
-        if (cancelled) return;
-        const lang = toLanguage(session.language);
-        if (lang) setLanguage(lang);
-        setAssignment(session.assignment ?? null);
-        rawDispatch({ type: 'SESSION_READY' });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        clearPersonalGrant();
-        clearSession();
-        rawDispatch({ type: 'SESSION_INVALID' });
-      });
+    // the server's assigned party or on MODE SELECTION (never a remembered mode,
+    // never unlocked — the personal grant only ever lives in memory).
+    //
+    // Only the server saying "this session is not valid" (401) unpairs. A
+    // television that powers on before its Wi-Fi is up, or while the server is
+    // restarting, keeps its credential and keeps asking on a capped backoff:
+    // losing the pairing to a slow network would take a party screen out of
+    // service until somebody found a phone to pair it again.
+    const validate = () => {
+      getTvSession()
+        .then((session) => {
+          if (!cancelled) adoptSession(session);
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          if (err instanceof ApiError && err.status === 401) {
+            dispatch({ type: 'SESSION_INVALID' });
+            return;
+          }
+          retry = setTimeout(validate, backoffMs(attempt++));
+        });
+    };
+    void restoreSession().then((stored) => {
+      if (cancelled) return;
+      if (!stored) {
+        dispatch({ type: 'SESSION_INVALID' });
+        return;
+      }
+      validate();
+    });
     return () => {
       cancelled = true;
+      if (retry) clearTimeout(retry);
     };
-  }, [setLanguage]);
+  }, [adoptSession, dispatch]);
 
   const onPaired = useCallback((session: TvSessionStatus) => {
-    const lang = toLanguage(session.language);
-    if (lang) setLanguage(lang);
-    setAssignment(session.assignment ?? null);
-    rawDispatch({ type: 'SESSION_READY' });
-  }, [setLanguage]);
+    adoptSession(session);
+  }, [adoptSession]);
 
   // The limited TV session was revoked by the owner (or expired): tear down
   // EVERYTHING — in-memory personal grant, persisted cookie, cached derived
   // media — and return to pairing. Valid from every state (mode selector, PIN
-  // entry, Personal Area, Party).
+  // entry, Personal Area, manual Party, an assigned party).
   const onSessionInvalid = useCallback(() => {
-    const effects = flowEffects(flowRef.current, { type: 'SESSION_INVALID' });
-    if (effects.dropGrant) clearPersonalGrant();
-    if (effects.clearSession) clearSession();
-    rawDispatch({ type: 'SESSION_INVALID' });
-  }, []);
+    tvDebug('control', 'session-invalid');
+    dispatch({ type: 'SESSION_INVALID' });
+  }, [dispatch]);
 
   // Paired session whose owner has NO Personal Area PIN: legacy/corrupted
   // state the atomic pairing flow can no longer produce. Tear down (grant,
   // persisted cookie, cached media) and show the "pairing is incomplete"
   // recovery — re-pairing forcibly creates the PIN.
   const onAssociationIncomplete = useCallback(() => {
-    const effects = flowEffects(flowRef.current, { type: 'ASSOCIATION_INCOMPLETE' });
-    if (effects.dropGrant) clearPersonalGrant();
-    if (effects.clearSession) clearSession();
-    rawDispatch({ type: 'ASSOCIATION_INCOMPLETE' });
-  }, []);
+    dispatch({ type: 'ASSOCIATION_INCOMPLETE' });
+  }, [dispatch]);
 
   // Leaving the Personal Area root: lock IMMEDIATELY. lockTvPersonal drops the
   // in-memory grant synchronously and then best-effort revokes it server-side
@@ -176,10 +215,16 @@ function AppInner(): React.JSX.Element {
     rawDispatch({ type: 'LOCK', reason });
   }, []);
 
-  // The mode selector performs no API calls by itself, so a revoked session —
-  // or an invalid PIN-less association — would otherwise sit there looking
-  // usable. Validate on entry and every 60s: 401 → pairing (full teardown);
-  // pinConfigured=false → incomplete-association recovery.
+  // The unlock arrives through dispatch so that one landing after the PIN
+  // screen was preempted by a party is revoked instead of kept (flowEffects).
+  const onUnlocked = useCallback((home: { displayName: string; galleryAvailable: boolean }) => {
+    dispatch({ type: 'UNLOCKED', home });
+  }, [dispatch]);
+
+  // The mode selector performs no API calls by itself, so an invalid PIN-less
+  // association would otherwise sit there looking usable. Validate on entry
+  // and every 60s: pinConfigured=false → incomplete-association recovery.
+  // (A revoked session is caught faster by the control plane below.)
   useEffect(() => {
     if (flow.name !== 'mode') return;
     let cancelled = false;
@@ -194,8 +239,6 @@ function AppInner(): React.JSX.Element {
             onSessionInvalid();
           }
         });
-      // The assignment authority poll lives in its own effect below, at a rate
-      // that depends on whether a party is on screen.
     };
     check();
     const timer = setInterval(check, 60_000);
@@ -232,45 +275,73 @@ function AppInner(): React.JSX.Element {
     return () => clearInterval(timer);
   }, [inPersonalArea, onLock, onSessionInvalid]);
 
-  // THE ASSIGNMENT IS THE CONTROL PLANE, and it is polled at two rates.
+  // THE ASSIGNMENT IS THE CONTROL PLANE.
   //
-  // GENERAL keeps the existing minute: nothing on screen depends on it, and a
-  // television idling in the album list has no reason to talk more often. While
-  // a PARTY is assigned it drops to five seconds, because the owner changing
-  // Party A to Party B — or ending the evening — has to reach the screen in the
-  // room before anybody notices it is wrong.
+  // While the television is paired and in the foreground it reads its session
+  // every CONTROL_POLL_MS, whatever it is showing: that interval is the bound
+  // on a takeover — an owner assigning a party, a game starting, finishing or
+  // restarting — and a general television is exactly the one waiting to be
+  // taken over. The read writes nothing; once a minute the same request is the
+  // session HEARTBEAT instead, which is what keeps LastSeenAt honest without a
+  // write every five seconds.
   //
   // Every read doubles as the session check: a definitive 401 tears the whole
   // thing down through the same path a revoked session already used, while a
-  // transient network error must never take a party off a screen.
-  const assignedKey = assignment?.kind === 'party' && assignment.partyAvailable
-    ? assignment.albumId : null;
-  const partyRate = flow.name === 'partyDisplay' || assignedKey !== null;
+  // transient network error must never take a party off a screen. Behind HOME
+  // nothing is read; the first read on return is immediate.
+  const hostActive = useHostActive();
+  const sessionLive = flow.name !== 'loading' && flow.name !== 'pairing';
+  const lastHeartbeatAtRef = useRef<number | null>(null);
+  const readControlPlaneRef = useRef<() => void>(() => { /* not running */ });
 
   useEffect(() => {
-    if (flow.name === 'loading' || flow.name === 'pairing') return;
+    if (!sessionLive || !hostActive) return;
     let cancelled = false;
+    let inFlight = false;
     const read = () => {
-      getTvSession()
+      if (inFlight) return;
+      inFlight = true;
+      const now = Date.now();
+      const beat = shouldHeartbeat(lastHeartbeatAtRef.current, now);
+      (beat ? heartbeatTvSession() : getTvSession())
         .then((session) => {
+          if (beat) lastHeartbeatAtRef.current = now;
           if (cancelled) return;
-          const next = session.assignment ?? null;
-          setAssignment(next);
-          rawDispatch({
-            type: 'ASSIGNMENT',
-            kind: next?.kind === 'party' && next.partyAvailable ? 'party' : 'general',
-            assignmentKey: next?.kind === 'party' && next.partyAvailable
-              ? next.albumId : null,
-          });
+          const view = toAssignmentView(session.assignment);
+          const before = flowRef.current;
+          if (tvFlowReducer(before, { type: 'ASSIGNMENT', view }) !== before) {
+            tvDebug('control', 'assignment-changed', before.name, view.presentation);
+          }
+          dispatch({ type: 'ASSIGNMENT', view });
         })
         .catch((err: unknown) => {
           if (!cancelled && err instanceof ApiError && err.status === 401) onSessionInvalid();
-        });
+        })
+        .finally(() => { inFlight = false; });
     };
+    readControlPlaneRef.current = read;
     read();
-    const timer = setInterval(read, partyRate ? 5_000 : 60_000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [flow.name, partyRate, onSessionInvalid]);
+    const timer = setInterval(read, CONTROL_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      readControlPlaneRef.current = () => { /* not running */ };
+    };
+  }, [sessionLive, hostActive, dispatch, onSessionInvalid]);
+
+  // Something on screen has evidence the assignment moved — a display grant
+  // refused, an album gone. Ask now rather than at the next tick.
+  const refreshControlPlane = useCallback(() => readControlPlaneRef.current(), []);
+
+  // The assigned slideshow's album answered 404. Fail closed at once, and let
+  // the next server read say what the television is for now.
+  const onPartyContentGone = useCallback(() => {
+    tvDebug('control', 'party-content-gone');
+    dispatch({ type: 'PARTY_CONTENT_GONE' });
+    refreshControlPlane();
+  }, [dispatch, refreshControlPlane]);
+
+  const exitApp = useCallback(() => { void exitTvApp(); }, []);
 
   // Entering Party always starts at the album list (personal/mode state never
   // leaks into Party, and Party never resumes mid-viewer from a previous run).
@@ -305,8 +376,13 @@ function AppInner(): React.JSX.Element {
     return () => sub.remove();
   }, [flow.name, partyScreen.name]);
 
-  // THE NAVIGATION ROOT. Mode selection and pairing are the top of the stack:
-  // one more BACK must CLOSE NubArca TV.
+  // THE NAVIGATION ROOT. Mode selection and pairing are the top of the stack,
+  // and so is an ASSIGNED party — its game, its unavailable card, and its
+  // slideshow (whose viewer calls exitApp itself, after its own overlay and
+  // face-filter steps). One more BACK must CLOSE NubArca TV. It must never
+  // take an assigned television back to the general experience: that is the
+  // owner's decision, made on the web, and the next launch returns straight to
+  // the party.
   //
   // This used to call BackHandler.exitApp(), which maps to
   // Activity.moveTaskToBack(true) — it BACKGROUNDS the task. On a physical Fire
@@ -319,14 +395,15 @@ function AppInner(): React.JSX.Element {
   // on BACK, and reaching the mode selector means every media screen has already
   // unmounted and released.
   useEffect(() => {
-    if (flow.name !== 'mode' && flow.name !== 'pairing') return;
+    if (flow.name !== 'mode' && flow.name !== 'pairing'
+      && flow.name !== 'partyGame' && flow.name !== 'partyUnavailable') return;
     const onBackPress = () => {
-      void exitTvApp();
+      exitApp();
       return true;
     };
     const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
     return () => sub.remove();
-  }, [flow.name]);
+  }, [flow.name, exitApp]);
 
   return (
     <>
@@ -350,11 +427,38 @@ function AppInner(): React.JSX.Element {
           onChooseBeautyLab={() => rawDispatch({ type: 'CHOOSE_BEAUTY_LAB' })}
           onChooseUpdates={() => rawDispatch({ type: 'CHOOSE_UPDATES' })}
           notice={flow.notice === 'pinChanged' ? t('mode.pinChangedNotice') : null}
-          assignment={assignment}
         />
       )}
-      {flow.name === 'partyDisplay' && (
-        <PartyDisplayScreen assignmentKey={flow.assignmentKey} />
+      {/* The assigned party, in the presentation the server projects for it.
+          Each is keyed by the server's assignment key, so a different party is
+          a different mount — never the old one with new contents. */}
+      {flow.name === 'partySlideshow' && flow.party.albumId !== null && (
+        <PartySlideshowScreen
+          key={flow.party.key}
+          albumId={flow.party.albumId}
+          albumName={flow.party.albumName}
+          onExit={exitApp}
+          onGone={onPartyContentGone}
+          onSessionInvalid={onSessionInvalid}
+        />
+      )}
+      {flow.name === 'partyGame' && (
+        <PartyDisplayScreen
+          key={flow.party.key}
+          albumName={flow.party.albumName}
+          onSessionInvalid={onSessionInvalid}
+          onRequestAssignment={refreshControlPlane}
+        />
+      )}
+      {(flow.name === 'partyUnavailable'
+        || (flow.name === 'partySlideshow' && flow.party.albumId === null)) && (
+        // Fail CLOSED: no other party, no general experience, no stale frame —
+        // a native card that says what is true, until the server says more.
+        <PartyNativeSurface
+          albumName={flow.party.albumName}
+          message={t('partyDisplay.unavailable')}
+          testID="party-unavailable"
+        />
       )}
       {flow.name === 'updates' && (
         <UpdateScreen
@@ -365,7 +469,7 @@ function AppInner(): React.JSX.Element {
       {flow.name === 'pin' && (
         <PinEntryScreen
           onCancel={() => rawDispatch({ type: 'PIN_CANCELLED' })}
-          onUnlocked={(home) => rawDispatch({ type: 'UNLOCKED', home })}
+          onUnlocked={onUnlocked}
           onSessionInvalid={onSessionInvalid}
           onAssociationIncomplete={onAssociationIncomplete}
         />

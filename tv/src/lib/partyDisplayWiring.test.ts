@@ -1,34 +1,38 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { read } from '../testing/sourceText.ts';
-import { tvFlowReducer, type TvFlowState } from '../personal/flow.ts';
 
 const source = (relativePath: string) => read(import.meta.url, relativePath);
 
 const app = source('../../App.tsx');
 const screen = source('../screens/PartyDisplayScreen.tsx');
+const slideshow = source('../screens/PartySlideshowScreen.tsx');
+const surface = source('../components/PartyNativeSurface.tsx');
 const tvApi = source('../api/tv.ts');
+const grantModule = source('./partyDisplayGrant.ts');
 const wakePolicy = source('../video/wakePolicy.ts');
 
-// The security boundary of the party display, asserted structurally.
+// The security boundary and the wiring of the party takeover, asserted
+// structurally.
 //
 // Most of what makes this safe is an ABSENCE — no party token, no session
 // cookie in the WebView, no guest join, nothing persisted — and an absence is
 // exactly what a behavioural test cannot see. Comments are stripped before
 // matching (testing/sourceText), so the prose explaining a rule cannot make the
-// rule's assertion pass.
+// rule's assertion pass. The DECISIONS (flow, watchdog, grant, presentation)
+// are pure modules with their own behavioural tests; this file only proves the
+// screens are wired to them.
 
 test('the television never holds a party token or a guest identity', () => {
   // The public party surface is a GUEST capability. A display must never
   // address it, and the native client has no code that could.
-  assert.doesNotMatch(app, /\/api\/party\//);
+  for (const file of [app, screen, slideshow, surface]) {
+    assert.doesNotMatch(file, /\/api\/party\//);
+    // No guest join, ever: a display that became a participant would inflate
+    // the very count the stage is showing.
+    assert.doesNotMatch(file, /game\/join|joinPartyGame/);
+  }
   assert.doesNotMatch(tvApi, /\/api\/party\/\{?token/);
-  assert.doesNotMatch(screen, /\/api\/party\//);
-
-  // No guest join, ever: a display that became a participant would inflate the
-  // very count the stage is showing.
-  assert.doesNotMatch(app, /game\/join|joinPartyGame/);
-  assert.doesNotMatch(screen, /game\/join|joinPartyGame/);
 
   // The mint takes no arguments: the party comes from the device's own
   // assignment, resolved server-side, so there is nothing here to point
@@ -37,14 +41,18 @@ test('the television never holds a party token or a guest identity', () => {
   assert.match(tvApi, /tvPost<TvPartyDisplayGrant>\('\/api\/tv\/party-display\/grant'/);
 });
 
-test('the grant is never persisted anywhere', () => {
+test('the grant is never persisted, logged, or put anywhere but the fragment', () => {
   // It lives in memory and in a URL fragment, and a reload legitimately has
   // none — the shell mints another rather than the page inventing one.
-  for (const file of [app, screen, tvApi]) {
+  for (const file of [app, screen, tvApi, grantModule]) {
     assert.doesNotMatch(file, /AsyncStorage[\s\S]{0,200}grant/i);
     assert.doesNotMatch(file, /localStorage|sessionStorage/);
   }
-  assert.match(screen, /#grant=\$\{encodeURIComponent/);
+  assert.match(grantModule, /#grant=\$\{encodeURIComponent\(grant\)\}/);
+  assert.match(screen, /source=\{\{ uri: stageUrl\(baseUrl, grant\.token\) \}\}/);
+  // The debug log names events, never the credential.
+  assert.doesNotMatch(screen, /tvDebug\([^)]*(token|minted\.grant|stageUrl)/);
+  assert.doesNotMatch(app, /tvDebug\([^)]*(cookie|grant)/i);
 });
 
 test('the WebView is display-only and fails closed on navigation', () => {
@@ -70,81 +78,119 @@ test('the WebView is display-only and fails closed on navigation', () => {
   assert.doesNotMatch(screen, /TvSession|NubArca\.TvSession/);
 });
 
+test('every way a renderer can fail reaches the watchdog', () => {
+  assert.match(screen, /onRenderProcessGone=\{\(\) => dispatch\(\{ type: 'renderer-gone' \}\)\}/);
+  assert.match(screen, /onContentProcessDidTerminate=\{\(\) => dispatch\(\{ type: 'renderer-gone' \}\)\}/);
+  // A document that never arrived (frontend down, proxy error) is a failed
+  // renderer too, not a page to leave on screen.
+  assert.match(screen, /onError=\{\(\) => dispatch\(\{ type: 'load-error' \}\)\}/);
+  assert.match(screen, /onHttpError=\{\(\) => dispatch\(\{ type: 'load-error' \}\)\}/);
+  // The shell's own clock drives it, and it is paused behind HOME.
+  assert.match(screen, /setInterval\(\(\) => dispatch\(\{ type: 'tick' \}\), 1_000\)/);
+  assert.match(screen, /dispatch\(\{ type: 'resume' \}\)/);
+  // A new grant is a new renderer; the key is the watchdog's generation.
+  assert.match(screen, /dispatch\(\{ type: 'start' \}\)/);
+  assert.match(screen, /key=\{`stage-\$\{watchdog\.generation\}`\}/);
+  // The renderer is mounted only while the watchdog says so: a probe during
+  // the fallback is a REAL mount.
+  assert.match(screen, /grant\.kind === 'ready' && watchdog\.mounted && \(/);
+});
+
+test('the heartbeat and the capability are two different signals', () => {
+  // A living page whose grant was refused is not silent, so the watchdog would
+  // never notice it. The refusal has its own path: re-mint.
+  assert.match(screen, /case 'auth-failed':\s*onAuthFailed\(\);/);
+  assert.match(screen, /case 'heartbeat':\s*dispatch\(\{ type: 'heartbeat' \}\);/);
+  // The grant is renewed before it lapses, from the server's duration.
+  assert.match(screen, /renewDelayMs\(minted, Date\.now\(\)\)/);
+  // A failed mint is classified and retried; it never becomes a final state.
+  assert.match(screen, /classifyMintFailure\(/);
+  assert.match(screen, /mintRetryDelayMs\(failure, mintFailuresRef\.current\+\+\)/);
+  // A renewal that fails transiently keeps the working stage it already has.
+  assert.match(screen, /current\.kind === 'ready' && failure === 'transient'\s*\?\s*current/);
+  // One pending retry answers every refusal reported meanwhile.
+  assert.match(screen,
+    /if \(mintingRef\.current \|\| retryPendingRef\.current \|\| authRetryRef\.current !== null\) return;/);
+});
+
+test('the stage is covered natively until it has proved itself', () => {
+  // No white flash, no black flash, no browser error, no frame from before:
+  // the native surface stays over the WebView until the renderer is alive AND
+  // has drawn a real snapshot.
+  assert.match(screen, /const visible = grant\.kind === 'ready' && rendererVisible\(watchdog\)/);
+  assert.match(screen, /\{!visible && \(\s*<PartyNativeSurface/);
+  // And the WebView's own ground is the stage's colour, not Android's white.
+  assert.match(screen, /stage: \{ flex: 1, backgroundColor: PARTY_SURFACE_BACKGROUND \}/);
+});
+
 test('the display holds the screen through the EXISTING keep-awake, not a second one', () => {
   // One module answers "hold the screen" for the whole app. A second wake lock
   // would be the second authority wakePolicy exists to prevent.
-  assert.match(screen, /useScreenAwake\(shouldKeepPartyDisplayAwake\(/);
+  assert.match(screen,
+    /useScreenAwake\(shouldKeepPartyDisplayAwake\(\{ hostActive, showing: visible, presentationActive \}\)\)/);
   assert.match(wakePolicy, /export function shouldKeepPartyDisplayAwake/);
-  assert.doesNotMatch(screen, /activateKeepAwake|deactivateKeepAwake/);
+  for (const file of [screen, slideshow]) {
+    assert.doesNotMatch(file, /activateKeepAwake|deactivateKeepAwake/);
+  }
 });
 
-test('the assignment is polled briskly while a party is on screen', () => {
-  // GENERAL keeps its minute; a party drops to five seconds, because an owner
-  // ending the evening has to reach the screen in the room.
-  assert.match(app, /partyRate \? 5_000 : 60_000/);
+test('the control plane is one brisk read, whatever the television is showing', () => {
+  // The takeover bound: every five seconds while paired and in the foreground,
+  // general included — a general television is the one waiting to be taken over.
+  assert.match(app, /setInterval\(read, CONTROL_POLL_MS\)/);
+  assert.doesNotMatch(app, /partyRate|60_000 : |5_000 : 60_000/);
+  assert.match(app, /if \(!sessionLive \|\| !hostActive\) return;/);
+  // The heartbeat is the same read once a minute, so presence is not stale and
+  // there is no write every five seconds.
+  assert.match(app, /beat \? heartbeatTvSession\(\) : getTvSession\(\)/);
+  assert.match(tvApi, /tvPost<TvSessionStatus>\('\/api\/tv\/session\/heartbeat'/);
   // And the same read is the session check.
   assert.match(app, /err\.status === 401\) onSessionInvalid\(\)/);
 });
 
+test('the first read decides the first screen', () => {
+  assert.match(app, /const assignment = toAssignmentView\(session\.assignment\);/);
+  assert.match(app, /dispatch\(\{ type: 'SESSION_READY', assignment \}\)/);
+  // A television that boots before its network keeps its pairing: only a 401
+  // unpairs at startup.
+  assert.match(app, /err\.status === 401\) \{\s*dispatch\(\{ type: 'SESSION_INVALID' \}\);/);
+  assert.match(app, /retry = setTimeout\(validate, backoffMs\(attempt\+\+\)\)/);
+});
+
+test('each assigned presentation is its own mount, keyed by the party', () => {
+  assert.match(app, /<PartySlideshowScreen\s+key=\{flow\.party\.key\}/);
+  assert.match(app, /<PartyDisplayScreen\s+key=\{flow\.party\.key\}/);
+  // BACK at the root of an assigned party closes the app; nothing local takes
+  // it back to general.
+  assert.match(app, /flow\.name !== 'partyGame' && flow\.name !== 'partyUnavailable'/);
+  assert.match(app, /onExit=\{exitApp\}/);
+});
+
+test('the assigned slideshow is the existing viewer, not a second slideshow', () => {
+  assert.match(slideshow, /<ViewerScreen/);
+  assert.match(slideshow, /autoPlay/);
+  // Timing, playback, greetings, challenge holds and live refresh are the
+  // viewer's. The adapter re-implements none of them.
+  assert.doesNotMatch(slideshow,
+    /photoSlideMs|listTvPartyMessages|getTvPartyPlayback|advanceTvPartyBoundary|TvVideoPlayer|SlideImage/);
+  // It fails closed on a vanished album and waits on an empty one.
+  assert.match(slideshow, /onGone=\{onGone\}/);
+  assert.match(slideshow, /const onEmpty = useCallback\(\(\) => setLoad\(\{ kind: 'empty' \}\), \[\]\)/);
+  assert.match(slideshow, /onEmpty=\{onEmpty\}/);
+});
+
 test('there is no second Party Game state machine on the television', () => {
-  // The shell knows about an ASSIGNMENT. It does not know what a phase is,
-  // when voting opens, or which challenge is current — those stay server-side
-  // and reach the room through the canonical web stage.
-  for (const file of [app, screen]) {
-    assert.doesNotMatch(file, /voting_open|challenge_reveal|voting_closed|reveal_result/);
+  // The shell knows about an ASSIGNMENT and a PRESENTATION. It does not know
+  // what a phase is, when voting opens, or which challenge is current — those
+  // stay server-side and reach the room through the canonical web stage.
+  for (const file of [app, screen, slideshow, grantModule]) {
+    assert.doesNotMatch(file, /voting_open|challenge_reveal|challenge_active|voting_closed|reveal_result|'finished'|'lobby'/);
     assert.doesNotMatch(file, /stageScene|PartyChallengeCard/);
   }
 });
 
 test('no spike harness reached the product', () => {
-  for (const file of [app, screen]) {
+  for (const file of [app, screen, slideshow]) {
     assert.doesNotMatch(file, /WebViewSpike|webviewSpike|Replica stage|memory stress/i);
   }
-});
-
-// --- the flow, which is where takeover actually happens ---------------------
-
-const mode: TvFlowState = { name: 'mode', notice: null };
-const display = (assignmentKey: string): TvFlowState => ({ name: 'partyDisplay', assignmentKey });
-
-test('an assigned party takes the screen, and giving it up returns to the shell', () => {
-  const taken = tvFlowReducer(mode, { type: 'ASSIGNMENT', kind: 'party', assignmentKey: 'a1' });
-  assert.deepEqual(taken, display('a1'));
-
-  // PARTY -> GENERAL leaves at once rather than keeping a stale party up.
-  assert.deepEqual(
-    tvFlowReducer(taken, { type: 'ASSIGNMENT', kind: 'general', assignmentKey: null }),
-    mode);
-});
-
-test('Party A to Party B is a different state, so the display remounts', () => {
-  const a = display('a1');
-  // The same party is a no-op: a poll every five seconds must not restart the
-  // show twenty times a minute.
-  assert.equal(tvFlowReducer(a, { type: 'ASSIGNMENT', kind: 'party', assignmentKey: 'a1' }), a);
-
-  // A different one is a different state, which is what forces a teardown and
-  // a fresh grant rather than the old party flashing in the new one's place.
-  assert.deepEqual(
-    tvFlowReducer(a, { type: 'ASSIGNMENT', kind: 'party', assignmentKey: 'a2' }),
-    display('a2'));
-});
-
-test('a party never appears over somebody standing in their own library', () => {
-  const personal: TvFlowState = {
-    name: 'personalLibrary', home: { displayName: 'Ada', galleryAvailable: true },
-  };
-  const assignment = { type: 'ASSIGNMENT' as const, kind: 'party' as const, assignmentKey: 'a1' };
-  assert.equal(tvFlowReducer(personal, assignment), personal);
-  assert.equal(tvFlowReducer({ name: 'pin', target: 'personal' }, assignment).name, 'pin');
-  // Nor before there is a session to trust.
-  assert.equal(tvFlowReducer({ name: 'loading' }, assignment).name, 'loading');
-  assert.equal(
-    tvFlowReducer({ name: 'pairing', incomplete: false }, assignment).name, 'pairing');
-});
-
-test('a revoked session still tears the display down like any other state', () => {
-  assert.deepEqual(
-    tvFlowReducer(display('a1'), { type: 'SESSION_INVALID' }),
-    { name: 'pairing', incomplete: false });
 });

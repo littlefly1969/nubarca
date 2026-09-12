@@ -54,9 +54,9 @@ const en: Partial<Record<TvMessageKey, string>> = {
   'partyDisplay.brand': 'NubArca Party',
   'partyDisplay.reconnecting': 'Reconnecting to the screen…',
   'partyDisplay.unavailable': 'This party is not available right now.',
-  'mode.assignedParty': 'This TV is assigned to the party: {name}.',
-  'mode.assignedPartyFallback': 'party',
-  'mode.assignedPartyGone': 'The party assigned to this TV is no longer available.',
+  'partyDisplay.starting': 'The game is about to begin…',
+  'partySlideshow.loading': 'Bringing up the party photos…',
+  'partySlideshow.waiting': "Waiting for the party's first photos.",
   'mode.pinChangedNotice': 'The PIN was changed. Enter the new PIN.',
 
   'beautyLab.title': 'Beauty Lab',
