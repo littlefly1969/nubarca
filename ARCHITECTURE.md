@@ -1307,6 +1307,24 @@ assignment is, because re-enabling party mode mints a new link and a new party i
 a new party everywhere else in this feature. The foreign keys say both things:
 `TvSessionId` cascades, `PartyAlbumLinkId` restricts.
 
+**One live grant per television, and minting is ordered.** "Revoke the previous
+grant, insert the next" is two statements, so the mint transaction opens with a
+conditional self-assigning update of the television's OWN session row — still
+live, still assigned to this link — which takes that row's write lock before
+anything is revoked. Two mints of one device (a remount racing a renewal, a
+retry racing its original) are therefore serialised, and the second one's revoke
+sees the first one's grant; a mint whose assignment moved while it waited
+re-evaluates the claim, matches nothing and writes nothing. Two televisions lock
+two rows and never wait on each other. PostgreSQL tests race eight mints of one
+device and a mint against an assignment change on real connections. The grant
+exists only while the server's presentation for its party is `game`: the shell
+mints it at takeover, renews it BEFORE expiry by minting again — scheduled from
+`expiresInSeconds`, a server-measured duration, so a television with a wrong
+clock neither loops nor lapses — and mints again on any display `401`, which the
+page reports as its own event. A transient mint failure is retried on a capped
+backoff for as long as the presentation stays `game`; a `404` fails closed and
+asks the control plane; a `401` is the session, and goes to pairing.
+
 **`/api/party-display/*` is a separate route family, and the separation is
 structural.** The guest participant cookie is path-scoped to `/api/party`, so a
 browser standing in front of these routes never sends it and these routes can
@@ -1789,37 +1807,93 @@ TV updates are stored under a dedicated `TvUpdates:RootPath`, separate from the 
 
 APK distribution and OTA updates are different mechanisms: native/runtime changes still require a new APK; compatible JavaScript/assets can be delivered through the OTA publication path.
 
-### 21.5 The assigned party's stage
+### 21.5 The assigned party on screen
 
-A television assigned to a party shows that party's game through the **canonical
-web renderer**, hosted in a WebView. The split of authority is explicit: the
-native shell owns everything that is not the picture — pairing, the session, the
-assignment, the display grant, the flow lifecycle, the renderer watchdog, the
-native fallback and the keep-awake lock (the same `wakePolicy` lock the
-slideshow uses, not a second authority) — and the WebView owns presentation and
-nothing else. It carries no session cookie, no owner credential and no party
-token; the only thing it is given is the display grant of §14.3.8, in the
-fragment.
+A television assigned to a party is **taken over by it**. The assignment (§ the
+TV pairing model) says WHICH party; beside it `/api/tv/session` projects the
+**presentation** that party wants on the screen right now, decided on the server
+by `TvPartyPresentations.Decide` from the party's own state:
 
-**The assignment is the control plane**, so the shell polls
-`/api/tv/session` at two rates: the existing minute while the television is
-`general`, and five seconds while a party is on screen, because an owner moving
-Party A to Party B — or ending the evening — has to reach the screen in the room
-before anyone notices it is wrong. Every read doubles as the session check: a
-definitive `401` tears the session down through the path a revoked session
-already used, while a transient network error must never take a party off a
-screen. The flow state is **keyed by the assignment**, so Party A → Party B is a
-different state rather than the same one with different contents, which is what
-forces a teardown and a fresh grant. The assignment never overrides a personal
-screen: somebody standing in their own library must not have a party appear over
-it, and the party is still there when they leave.
+| party state | presentation |
+| --- | --- |
+| the display resolver refuses the link (revoked, off, expired, host lost Party) | `unavailable` |
+| no game switched on, host may not run games, or the party is not live | `slideshow` |
+| game switched on and the party live: no match yet, lobby, any round phase | `game` |
+| game `finished`, first `FinishedDwell` (15 s) after `FinishedAt` | `game` (the closing card) |
+| game `finished`, after the dwell | `slideshow` |
 
-The page emits a renderer heartbeat over the WebView bridge, and the watchdog's
-clock is the SHELL's — the thing it measures is a page that may have stopped
-running its own. Silence is a dead renderer and is answered by a remount, then
-by an explicit native fallback rather than a frozen frame. Hosting a WebView is
-a native dependency, so this arrives as an APK/runtime release and never as an
-OTA (`docs/tv-release.md` §2).
+It is a PROJECTION and never a transition: nothing writes game state, FINISHED
+stays FINISHED, and `restart_game → lobby` brings the takeover back with no
+special case. "Showable" is the same resolver that decides whether a display
+grant may be minted, and "game" additionally requires what the display snapshot
+requires plus the host's phase-folded Games capability — so a television is
+never told to show a game it would be refused, nor a lobby whose code leads
+guests to a game they cannot join. The shell knows four words and no phase.
+
+The shell mounts one surface per presentation, each keyed by an opaque
+`assignmentKey` (a digest of session + link that no endpoint accepts), so
+Party A → Party B — including a new link for the same album — is a new mount and
+never the old one with new contents:
+
+- **slideshow** — the existing native `ViewerScreen`, opened in autoplay by a
+  thin adapter (`PartySlideshowScreen`) that adds only what "assigned" means: an
+  empty party waits for its first photograph, a vanished album fails closed,
+  BACK closes the app, and a return from HOME starts the show again. Every
+  slideshow policy — video/HLS, guest uploads, greetings, challenge holds,
+  timing, wake, cache — stays the viewer's. An assigned television may read ITS
+  party's album (items, greetings, media bytes) even when the album is not
+  ShowOnTv: the grant is the assignment itself, re-read on every request
+  (`TvViewer`), for that one device and that one live link. The album list is
+  unchanged.
+- **game** — the **canonical web renderer**, hosted in a WebView (below).
+- **unavailable** — a native card. Fail closed: never general, never another
+  party. It is left only by a server read saying slideshow, game or general.
+
+**The assignment is the control plane and it is server-authoritative.** While
+paired and in the foreground the shell reads `/api/tv/session` every five
+seconds whatever it is showing — a general television is exactly the one
+waiting to be taken over — so an assignment, a game starting, finishing or
+restarting all reach the room within one read. The read writes nothing; once a
+minute the same request is `POST /api/tv/session/heartbeat`, the only write,
+which keeps `LastSeenAt` honest. The FIRST read at boot already carries the
+presentation and the shell starts in it directly. At boot only a `401` unpairs:
+a television that powers on before its Wi-Fi keeps its credential and retries on
+a capped backoff. The assignment **preempts every local surface** — mode
+selector, manual Party browsing, Updates, PIN entry, Personal Area, Beauty Lab.
+Preempting a personal screen is a LOCK (`flowEffects`: the grant is dropped and
+revoked, the private screen unmounts), and an unlock that lands after its PIN
+screen was preempted is revoked on arrival. BACK at the root of an assigned
+party closes the app; nothing local returns an assigned television to general.
+
+**The stage.** The split of authority is explicit: the native shell owns
+everything that is not the picture — pairing, the session, the control plane,
+the display grant and its renewal, the flow lifecycle, the renderer watchdog,
+the native cover and fallback, and the keep-awake lock (the same `wakePolicy`
+lock the slideshow uses, not a second authority) — and the WebView owns
+presentation and nothing else. It carries no session cookie, no owner
+credential and no party token; the only thing it is given is the display grant
+of §14.3.8, in the fragment. The page tells the shell four things over the
+bridge, each meaning exactly one thing: `display-heartbeat` (its JavaScript is
+alive), `display-ready` (its first valid snapshot is drawn), `display-auth-failed`
+(the CAPABILITY was refused — distinct from silence, because a living page with
+a dead grant never goes quiet) and `display-presentation` (whether a live scene
+is up, the only input the keep-awake policy takes from it). A native cover stays
+over the WebView until the renderer is both alive and drawn, so a takeover, a
+remount and a renewal all look like a change of programme — never a white page,
+a black one, a browser error, or a frame of the previous party.
+
+**The watchdog's clock is the SHELL's** — the thing it measures is a page that
+may have stopped running its own. A renderer that is killed, whose document
+fails to load (`onError` / `onHttpError`), that never produces a first heartbeat
+within 30 s, or that falls silent for 10 s after one is REPLACED: five fast
+remounts 2 s apart, then a native fallback that stays up while a real probe
+renderer is mounted behind it every 60 s. The fallback comes down only when a
+probe has beaten AND drawn a snapshot; a crash cycle is forgiven only after 60 s
+of health, so a page that beats once and dies still exhausts it. Duplicate
+reports of one death are one death, and nothing is measured across a stay
+behind HOME. Hosting a WebView is a native dependency, shipped in runtime
+`nubarca-tv-native-12` (`docs/tv-release.md` §2); the takeover built on it adds
+no native module.
 
 ## 22. Operational architecture
 

@@ -53,6 +53,28 @@ scripts/test-backend-fast.sh --no-restore --no-build
 scripts/test-backend-full.sh --logger "trx;LogFileName=backend.trx"
 ```
 
+## Party stage layout in a real browser
+
+The frontend suite runs in jsdom, which has no layout engine. It proves the
+party lobby's structure and CSS contract (`src/party/PartyTvStageLobby.test.tsx`)
+but cannot measure it. `frontend/scripts/check-party-stage-layout.mjs` does:
+it renders the lobby with the real global stylesheet, fonts and
+`PartyTvStage.css` in headless Chromium at 960x540 (a 1080p Fire TV panel at
+devicePixelRatio 2), 1280x720, 1920x1080, 854x480, 640x360 and a short 960x400,
+and asserts that every element stays inside the overscan safe area, nothing
+scrolls, the words start at the top at exactly the approved sizes, and the QR is
+square and fills the height they leave.
+
+```bash
+cd frontend
+npm run check:stage-layout                       # or:
+node scripts/check-party-stage-layout.mjs --screenshots /tmp/stage-shots
+```
+
+It needs a Chromium binary (`CHROME_BIN`, Playwright's cache, or a system
+install) and is a QA tool rather than a CI job. Run it after any change to
+`PartyTvStage.css` or the lobby markup.
+
 ## Test-host isolation and reuse
 
 `SqliteWebApplicationFactory` preserves one database and storage root per test

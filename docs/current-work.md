@@ -463,7 +463,56 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   foreign key and would otherwise block the delete the way every Party table
   once did. The television READS its assignment on `/api/tv/session` and can
   never set one — those routes live outside `/api/tv`, where its path-scoped
-  cookie is not even sent.
+  cookie is not even sent — and it FOLLOWS it: the assignment changes what the
+  television shows (next entry).
+- **An assigned television is taken over by its party, and the SERVER picks the
+  surface.** Beside a party assignment `/api/tv/session` projects a
+  `presentation` — `slideshow`, `game` or `unavailable` (`general` otherwise) —
+  from the party's own state in `TvPartyPresentations.Decide`: `game` while a
+  game is switched on, the host may run one and the party is LIVE (the Games
+  capability is phase-folded: before or after the party the lobby's code would
+  lead nowhere), from before the first match through every phase; `slideshow`
+  otherwise; `unavailable` when the display resolver refuses the link — fail
+  closed, never general, never another party, never the new link of the same
+  album. It is a PROJECTION: FINISHED stays FINISHED, the television returns to
+  the slideshow because the projection says so once `FinishedDwell` (15 s from
+  the session's `FinishedAt`, on the server's clock) has passed, and
+  `restart_game → lobby` brings the takeover back with no special case. Five
+  things are easy to undo by accident. The shell never learns a phase: it
+  switches on four words and mounts one surface per word, keyed by an opaque
+  `assignmentKey` (session + link digest, accepted by no endpoint) so Party A →
+  B is always a fresh mount. The control plane is a five-second READ in the
+  foreground whatever the television shows — a general one is the one waiting to
+  be taken over — and the heartbeat POST, the only write, is the same read once
+  a minute; the first read at boot already decides the first screen, and at boot
+  only a `401` unpairs. The assignment PREEMPTS every local surface (mode
+  selector, manual Party, Updates, PIN, Personal Area, Beauty Lab); preempting a
+  personal screen is a LOCK in `flowEffects`, an unlock that lands after its PIN
+  screen was preempted is revoked, and BACK at the root of an assigned party
+  closes the app rather than returning it to general. The slideshow is the
+  existing `ViewerScreen` behind a thin adapter, never a second slideshow. And
+  an assigned television may read ITS party's album — items, greetings, media
+  bytes — even when that album is not ShowOnTv: the grant is the assignment
+  re-read on every request (`TvViewer`), for that one device and that one live
+  link, and the album LIST is unchanged, so an assignment is not a way to browse.
+- **The display grant lives only while the game holds the screen, and the shell
+  keeps it alive.** One live grant per television, minted under a write lock on
+  the television's own session row, so two mints racing (a remount and a
+  renewal) are ordered and never leave two usable credentials — a race proved on
+  real PostgreSQL. The shell renews before expiry from `expiresInSeconds` (a
+  server-measured duration; the device clock is not trusted), re-mints when the
+  page reports `display-auth-failed` — a capability failure is not silence, and
+  the heartbeat only ever means "the JavaScript is alive" — retries transient
+  mint failures on a capped backoff while the presentation is still `game`,
+  fails closed on a `404` and pairs on a `401`. The watchdog keeps the
+  hardware-verified 2 s / 10 s / 2 s / 5 numbers and adds a 30 s first-heartbeat
+  deadline, a slow retry that MOUNTS a real probe behind the native fallback
+  (lifted only by heartbeat + first snapshot), a crash cycle forgiven after 60 s
+  of health, idempotent death reports and top-level load errors. A native cover
+  stays over the WebView until the page is alive and drawn. The page retries the
+  lobby QR and activity photographs on a capped backoff, cancelled when the
+  scene or the activity changes; keep-awake takes only the page's coarse
+  `display-presentation` signal.
 - **OTA isolation is structural.** Publications and channel pointers are keyed by
   runtime version, so bundles built for one native contract cannot be offered to
   a device asking for another.

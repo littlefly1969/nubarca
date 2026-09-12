@@ -27,6 +27,37 @@ originating repository and is deliberately not reproduced here.
   data — and a picture you move to the Trash simply stops being offered, with no
   broken image and no dead link.
 
+### The party takes over the television by itself
+
+- **Assign a television to a party and it switches within seconds** — no remote,
+  no menu. A television that was already assigned starts straight in its party
+  when it is switched on, and one that powers up before its Wi-Fi keeps its
+  pairing and simply waits for the network.
+- **The photos when there is no game, the game when there is.** The screen shows
+  the party's own slideshow — photos, videos, guests' uploads and greetings —
+  and hands over to the game's lobby, with its join code, as soon as the host
+  has a game ready and the party is live. When the game ends, the closing card
+  stays up for a moment and the slideshow comes back on its own; start the game
+  again and the lobby returns.
+- **A much bigger join code.** The lobby now starts at the top of the screen with
+  its words at the same size as before, and the code fills all the space that
+  is left — about three times larger on a Fire TV — with its white margin intact
+  and nothing reaching the edges of the screen.
+- **A party screen is a party screen.** An assignment takes over whatever the
+  television was showing, including somebody's Personal Area, which is locked on
+  the way out. A party that has been switched off says so; it never falls back
+  to the menu or to another party.
+- **Long evenings look after themselves.** The screen's permission renews itself
+  before it runs out, a stage that freezes, crashes or never starts is replaced
+  automatically, the join code and activity photos are fetched again after a
+  network hiccup, and several televisions can show the same party
+  independently.
+- **"Last seen" in your device list stays current** for televisions showing a
+  party.
+- The takeover is JavaScript on NubArca TV's current native runtime
+  (`nubarca-tv-native-12`): it needs the server and web update first, and no
+  new APK.
+
 ### The party's game, on the television in the room
 
 - **Point a paired television at a party and it shows the game.** No second QR

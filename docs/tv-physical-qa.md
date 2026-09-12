@@ -164,6 +164,76 @@ During playback, where the hardware allows:
 - [ ] Actions launcher, filters and People stay inside the safe area
 - [ ] no focus ring is clipped
 
+## M. Party takeover (paired Fire TV)
+
+The takeover's decisions are pure and tested (`personal/flow.ts`,
+`lib/partyDisplayWatchdog.ts`, `lib/partyDisplayGrant.ts`,
+`lib/assignmentView.ts`), and the lobby layout is measured in a real browser
+(`frontend/scripts/check-party-stage-layout.mjs`). What only a panel can say is
+listed here. For the run, flip `TV_DEBUG_MEDIA` in `tv/src/debug.ts` locally
+(never commit it) and follow `adb logcat | grep '\[tv\]'`: the `control`
+and `party` lines name every assignment, presentation, grant, mount, heartbeat,
+recovery and fallback — never a token, a grant, a cookie or a URL.
+
+Set up: a party with a game and at least two enabled activities, a few photos in
+its album, the party LIVE, and the TV assigned to it from the web.
+
+**Lobby layout** (the 1080p panel, i.e. a 960x540 logical viewport)
+
+- [ ] eyebrow, title and subtitle are the approved size (compare with a photo
+      of the previous build)
+- [ ] the title starts at the top safe area, not in the middle
+- [ ] the QR is far larger than before and entirely visible
+- [ ] its white quiet zone is intact on all four sides
+- [ ] nothing is clipped, nothing touches the physical edge, no scrollbar
+- [ ] a phone scans it from a normal sofa distance and opens the game
+
+**Takeover**
+
+- [ ] TV on the party slideshow; the host switches the game on → lobby within
+      about five seconds, with no remote press
+- [ ] no white or black flash and no browser error on the way: the native
+      "NubArca Party" card covers the change
+- [ ] a TV left on the mode selector is taken over the same way
+- [ ] a TV sitting in the Personal Area is taken over; re-entering the Personal
+      Area afterwards asks for the code again
+
+**End of game**
+
+- [ ] the host ends the game: the closing card is readable for ~15 s
+- [ ] the TV then returns to the slideshow on its own and it plays
+- [ ] the control room still says FINISHED
+
+**Restart**
+
+- [ ] while the slideshow plays after FINISHED, the host restarts the game → the
+      lobby returns within about five seconds, with the same QR
+
+**Recovery** — the native shell must survive every one of these
+
+- [ ] kill the renderer (`adb shell am kill` is not enough; use
+      `chrome://inspect` → Terminate, or memory pressure): replaced within a few
+      seconds
+- [ ] a renderer that never starts (block the frontend host on the router
+      before takeover): the native card stays, then the fallback, then the stage
+      comes back by itself when the host is unblocked
+- [ ] wedge (pause the page's JS from `chrome://inspect`): replaced after ~10 s
+- [ ] Wi-Fi off/on during a round: the stage shows its last scene marked
+      "reconnecting", then catches up
+- [ ] backend container stopped/started: the shell keeps its pairing, waits,
+      and resumes
+- [ ] frontend container stopped/started: fallback, then the stage returns
+- [ ] grant renewal: shorten `PartyDisplayService.GrantLifetime` on a test
+      server to a few minutes; the stage renews with at most a brief native card
+- [ ] HOME during the game and back: the stage continues; HOME during the
+      slideshow and back: the slideshow restarts by itself
+- [ ] BACK on the lobby, on the native fallback and on the slideshow closes the
+      app; relaunching returns straight to the party
+
+**Two televisions** on the same party: both show the game; unplugging one, or
+assigning it elsewhere, changes nothing on the other; FINISHED and restart move
+both.
+
 ## Evidence to capture
 
 Run at: video playing · video paused · after HOME · after return · after output
