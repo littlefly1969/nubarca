@@ -31,12 +31,8 @@
   font-family: var(--font-ui);
 }
 
-/* Which of the four activity kinds this is, said in words by the eyebrow and
-   reinforced — never replaced — by an accent. Four hues, all existing tokens. */
-.party-activity[data-kind='dare'] { --activity-accent: var(--accent); }
-.party-activity[data-kind='penalty'] { --activity-accent: var(--danger); }
-.party-activity[data-kind='guess'] { --activity-accent: var(--accent-secondary); }
-.party-activity[data-kind='custom'] { --activity-accent: var(--text-secondary); }
+/* The four per-kind accents are gone with the category itself. An activity is
+   an activity — the card draws no taxonomy and derives no colour from one. */
 
 .party-activity-card {
   box-sizing: border-box;
@@ -93,7 +89,6 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
-.party-activity-kind { color: var(--activity-accent); }
 .party-activity-context { color: var(--text-muted); letter-spacing: 0.08em; }
 
 .party-activity-title {

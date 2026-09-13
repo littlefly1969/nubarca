@@ -171,20 +171,22 @@ export function PartyGameSettings({
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
   const [draft, setDraft] = useState({
-    gameEnabled: false, minChallengeIntervalSeconds: '300',
+    gameEnabled: false, priorityVotingEnabled: false, minChallengeIntervalSeconds: '300',
     maxChallengeIntervalSeconds: '540', votesPerGuest: '3', maxChallengesPerSession: '',
   });
 
   useEffect(() => {
     setDraft({
       gameEnabled: party.gameEnabled ?? false,
+      priorityVotingEnabled: party.priorityVotingEnabled ?? false,
       minChallengeIntervalSeconds: String(party.minChallengeIntervalSeconds ?? 300),
       maxChallengeIntervalSeconds: String(party.maxChallengeIntervalSeconds ?? 540),
       votesPerGuest: String(party.votesPerGuest ?? 3),
       maxChallengesPerSession:
         party.maxChallengesPerSession == null ? '' : String(party.maxChallengesPerSession),
     });
-  }, [party.albumId, party.gameEnabled, party.minChallengeIntervalSeconds,
+  }, [party.albumId, party.gameEnabled, party.priorityVotingEnabled,
+    party.minChallengeIntervalSeconds,
     party.maxChallengeIntervalSeconds, party.votesPerGuest, party.maxChallengesPerSession]);
 
   const min = Number(draft.minChallengeIntervalSeconds);
@@ -204,6 +206,7 @@ export function PartyGameSettings({
     try {
       onUpdated(await setPartyGameSettings(albumId, {
         gameEnabled: draft.gameEnabled,
+        priorityVotingEnabled: draft.priorityVotingEnabled,
         minChallengeIntervalSeconds: min,
         maxChallengeIntervalSeconds: max,
         votesPerGuest: Number(draft.votesPerGuest),
@@ -225,20 +228,29 @@ export function PartyGameSettings({
         />
         <span>{t('partyGame.enable')}</span>
       </label>
+
+      {/* The guests' pre-game preferences. ADVISORY, and the copy says so:
+          they tell the host what the room wants and choose nothing by
+          themselves. Only two decisions — whether to ask, and how many each
+          guest may pick — because that is the whole of the feature. */}
+      <label className="party-toggle">
+        <input
+          type="checkbox" checked={draft.priorityVotingEnabled}
+          aria-label={t('partyGame.priorityVoting')}
+          data-testid="party-game-priority-voting"
+          onChange={(e) => setDraft((d) => ({ ...d, priorityVotingEnabled: e.target.checked }))}
+        />
+        <span>{t('partyGame.priorityVoting')}</span>
+      </label>
+      <p className="muted">{t('partyGame.priorityVotingHelp')}</p>
+
       <div className="party-game-grid">
-        <label>{t('partyGame.minInterval')}
-          <input type="number" min="30" max="86400" value={draft.minChallengeIntervalSeconds}
-            onChange={(e) => setDraft((d) => ({ ...d, minChallengeIntervalSeconds: e.target.value }))} /></label>
-        <label>{t('partyGame.maxInterval')}
-          <input type="number" min="30" max="86400" value={draft.maxChallengeIntervalSeconds}
-            onChange={(e) => setDraft((d) => ({ ...d, maxChallengeIntervalSeconds: e.target.value }))} /></label>
-        <label>{t('partyGame.votesPerGuest')}
-          <input type="number" min="1" max="20" value={draft.votesPerGuest}
-            onChange={(e) => setDraft((d) => ({ ...d, votesPerGuest: e.target.value }))} /></label>
-        <label>{t('partyGame.maxPerSession')}
-          <input type="number" min="1" max="100" placeholder={t('partyGame.unlimited')}
-            value={draft.maxChallengesPerSession}
-            onChange={(e) => setDraft((d) => ({ ...d, maxChallengesPerSession: e.target.value }))} /></label>
+        {draft.priorityVotingEnabled && (
+          <label>{t('partyGame.votesPerGuest')}
+            <input type="number" min="1" max="20" value={draft.votesPerGuest}
+              aria-label={t('partyGame.votesPerGuest')}
+              onChange={(e) => setDraft((d) => ({ ...d, votesPerGuest: e.target.value }))} /></label>
+        )}
       </div>
       {!valid && <p className="inline-error">{t('partyGame.invalid')}</p>}
       <button type="button" disabled={saving || !valid} onClick={() => void save()}>

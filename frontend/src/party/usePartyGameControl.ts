@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ApiError, PartyGameConflict, getPartyGameSnapshot, sendPartyGameCommand,
-  type PartyGameCommand, type PartyGameCommandCode, type PartyGameSnapshot,
+  ApiError, PartyGameConflict, getPartyGameSnapshot, planPartyGame, sendPartyGameCommand,
+  type PartyGameCommand, type PartyGameCommandCode, type PartyGamePlanAction,
+  type PartyGameSnapshot,
 } from '@nubarca/api-client';
 
 // The owner's connection to their own game: read it, and move it.
@@ -28,9 +29,16 @@ export interface PartyGameControl {
   stale: boolean;
   /** The command in flight, so a surface can disable exactly one control. */
   pending: PartyGameCommand | null;
+  /** True while a PLAN edit is in flight. Separate from `pending` because the
+   * plan and the phase are two different things a host may be touching, and one
+   * disabled flag for both would grey out the primary button every time
+   * somebody reordered the queue. */
+  planning: boolean;
   /** Set when the last command was refused, cleared by the next success. */
   refusal: PartyGameCommandCode | null;
   run(command: PartyGameCommand): Promise<void>;
+  /** One edit to the plan, on the same version contract as a command. */
+  plan(action: PartyGamePlanAction, challengeId: string, position?: number): Promise<void>;
   refresh(): void;
 }
 
@@ -39,6 +47,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
   const [connection, setConnection] = useState<ControlConnection>('loading');
   const [stale, setStale] = useState(false);
   const [pending, setPending] = useState<PartyGameCommand | null>(null);
+  const [planning, setPlanning] = useState(false);
   const [refusal, setRefusal] = useState<PartyGameCommandCode | null>(null);
   const [tick, setTick] = useState(0);
   const hasSnapshot = useRef(false);
@@ -133,5 +142,35 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
     }
   }, [albumId, snapshot, pending]);
 
-  return { snapshot, connection, stale, pending, refusal, run, refresh };
+  // The plan and the phase share the version contract, the refusal recovery and
+  // the in-flight guard, because they are two writes to one authoritative game.
+  const plan = useCallback(async (
+    action: PartyGamePlanAction, challengeId: string, position?: number,
+  ) => {
+    if (!albumId || !snapshot || pending || planning) return;
+    setPlanning(true);
+    setRefusal(null);
+    inFlight.current = true;
+    try {
+      setSnapshot(await planPartyGame(albumId, action, challengeId, snapshot.version, position));
+      setConnection('ready');
+      setStale(false);
+    } catch (error) {
+      if (error instanceof PartyGameConflict) {
+        if (error.snapshot) {
+          setSnapshot(error.snapshot as PartyGameSnapshot);
+          setConnection('ready');
+          setStale(false);
+        }
+        setRefusal(error.code as PartyGameCommandCode);
+      } else {
+        setStale(true);
+      }
+    } finally {
+      inFlight.current = false;
+      setPlanning(false);
+    }
+  }, [albumId, snapshot, pending, planning]);
+
+  return { snapshot, connection, stale, pending, planning, refusal, run, plan, refresh };
 }

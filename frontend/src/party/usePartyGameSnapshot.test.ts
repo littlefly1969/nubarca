@@ -12,7 +12,8 @@ function snapshot(): PartyGamePublicSnapshot {
   return {
     albumName: 'Festa', status: 'live', phase: 'voting_open', version: 3,
     roundNumber: 1, totalChallenges: 2, phaseEndsAt: null, roundId: 'r1',
-    myVote: null, voting: { received: 1, eligible: 4, yes: null, no: null, passed: null },
+    myVote: null, preferences: null,
+    voting: { received: 1, eligible: 4, yes: null, no: null, passed: null },
     challenge: {
       id: 'c1', title: 'Canta', body: 'Sali sul tavolo.', kind: 'dare',
       mediaUrl: null, durationSeconds: null, votingMode: 'binary', voteQuestion: null,

@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router';
 import QRCode from 'qrcode';
 import { useEffect } from 'react';
 import {
-  partyGameDisplayState, type PartyGameCommand, type PartyGameSnapshot,
+  partyGameDisplayState, type PartyGameCommand, type PartyGamePlanAction,
+  type PartyGamePlanEntry, type PartyGameSnapshot,
 } from '@nubarca/api-client';
 import { Modal } from '../components/Overlay';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
@@ -39,6 +40,7 @@ const COMMAND_LABEL: Record<PartyGameCommand, MessageKey> = {
   skip_challenge: 'partyControl.skip',
   finish: 'partyControl.finish',
   restart_game: 'partyControl.restart',
+  return_to_party: 'partyControl.returnToParty',
 };
 
 // The two commands a host must not send by accident: one ends the evening, the
@@ -54,6 +56,7 @@ const REFUSAL_LABEL: Record<string, MessageKey> = {
   illegal_transition: 'partyControl.refusedIllegal',
   no_challenges: 'partyControl.refusedEmpty',
   game_disabled: 'partyControl.refusedDisabled',
+  invalid_plan: 'partyControl.refusedPlan',
   conflict: 'partyControl.refusedGeneric',
 };
 
@@ -64,13 +67,14 @@ const PHASE_LABEL: Record<PartyGameSnapshot['phase'], MessageKey> = {
   voting_open: 'partyControl.phaseVoting',
   voting_closed: 'partyControl.phaseClosed',
   result: 'partyControl.phaseResult',
+  intermission: 'partyControl.phaseIntermission',
   finished: 'partyControl.phaseFinished',
 };
 
 export function PartyControlRoomPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const { t } = useI18n();
-  const { snapshot, connection, stale, pending, refusal, run, refresh } =
+  const { snapshot, connection, stale, pending, planning, refusal, run, plan, refresh } =
     usePartyGameControl(albumId);
   const [confirming, setConfirming] = useState<PartyGameCommand | null>(null);
   const remaining = useCountdown(
@@ -179,7 +183,6 @@ export function PartyControlRoomPage() {
               mode="compact"
               testId="party-control-current"
               challenge={{
-                kind: snapshot.currentChallenge.kind,
                 title: snapshot.currentChallenge.title,
                 body: snapshot.currentChallenge.body,
                 mediaUrl: snapshot.currentChallenge.mediaUrl,
@@ -215,7 +218,6 @@ export function PartyControlRoomPage() {
               mode="compact"
               testId="party-control-next"
               challenge={{
-                kind: snapshot.nextChallenge.kind,
                 title: snapshot.nextChallenge.title,
                 body: snapshot.nextChallenge.body,
                 mediaUrl: snapshot.nextChallenge.mediaUrl,
@@ -273,6 +275,18 @@ export function PartyControlRoomPage() {
         )}
       </div>
 
+      {/* THE PLAN. What is left to play, in the order it will be played, with
+          what the room asked for beside it. The host reorders the future and
+          sets aside what there is no time for; the past and the present carry
+          no controls at all, because neither is plannable. */}
+      <PartyPlanPanel
+        plan={snapshot.plan ?? []}
+        priorityVotingEnabled={snapshot.priorityVotingEnabled}
+        preferencesOpen={snapshot.preferencesOpen}
+        busy={planning || pending !== null}
+        onPlan={(action, id, position) => void plan(action, id, position)}
+      />
+
       {confirming && confirmation && (
         <Modal
           title={t(confirmation.title)}
@@ -296,6 +310,118 @@ export function PartyControlRoomPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/**
+ * The evening, as something the host can still change.
+ *
+ * Three rules are visible in the markup rather than stated in a comment
+ * somewhere else. A `played` or `current` row has no controls — the server
+ * refuses to move either, so offering the button would be offering a refusal.
+ * An excluded activity KEEPS its preference count, because "the room wanted
+ * this and there was no time" is worth seeing. And the order is the server's:
+ * every control sends one action and re-renders from the snapshot that comes
+ * back, so nothing here decides what is played next.
+ */
+function PartyPlanPanel({
+  plan, priorityVotingEnabled, preferencesOpen, busy, onPlan,
+}: {
+  plan: PartyGamePlanEntry[];
+  priorityVotingEnabled: boolean;
+  preferencesOpen: boolean;
+  busy: boolean;
+  onPlan(action: PartyGamePlanAction, challengeId: string, position?: number): void;
+}) {
+  const { t } = useI18n();
+  if (plan.length === 0) return null;
+  // Positions are 1-based on the wire and 0-based in a move, and only the rows
+  // that actually have one take part in a reorder.
+  const queued = plan.filter((x) => x.position !== null);
+
+  return (
+    <section className="party-control-plan" data-testid="party-control-plan">
+      <div className="party-control-plan-head">
+        <h3>{t('partyPlan.title')}</h3>
+        <p className="muted">
+          {priorityVotingEnabled
+            ? t(preferencesOpen ? 'partyPlan.preferencesOpen' : 'partyPlan.preferencesClosed')
+            : t('partyPlan.preferencesOff')}
+        </p>
+      </div>
+      <ol className="party-control-plan-list">
+        {plan.map((entry) => {
+          const at = entry.position === null ? -1 : queued.findIndex((x) => x.id === entry.id);
+          const movable = entry.state === 'remaining' && entry.position !== null;
+          return (
+            <li
+              key={entry.id}
+              data-state={entry.state}
+              data-excluded={entry.excluded ? 'true' : undefined}
+              data-testid={`party-plan-${entry.id}`}
+            >
+              <span className="party-control-plan-position">
+                {entry.position ?? '—'}
+              </span>
+              {entry.mediaUrl && <img src={entry.mediaUrl} alt="" loading="lazy" />}
+              <span className="party-control-plan-copy">
+                <strong>{entry.title}</strong>
+                <span className="party-control-plan-meta">
+                  <span data-testid={`party-plan-state-${entry.id}`}>
+                    {t(entry.state === 'played' ? 'partyPlan.played'
+                      : entry.state === 'current' ? 'partyPlan.current'
+                      : entry.excluded ? 'partyPlan.excluded'
+                      : !entry.isEnabled ? 'partyPlan.off'
+                      : 'partyPlan.remaining')}
+                  </span>
+                  {priorityVotingEnabled && (
+                    <span
+                      className="party-control-plan-votes"
+                      data-testid={`party-plan-votes-${entry.id}`}
+                    >
+                      {t('partyPlan.preferences', { count: entry.preferenceVotes })}
+                    </span>
+                  )}
+                </span>
+              </span>
+              {/* Absent, never disabled, for anything the server would refuse. */}
+              {movable && (
+                <span className="party-control-plan-actions">
+                  <button
+                    type="button" disabled={busy || at === 0}
+                    data-testid={`party-plan-next-${entry.id}`}
+                    onClick={() => onPlan('move', entry.id, 0)}
+                  >
+                    {t('partyPlan.playNext')}
+                  </button>
+                  <button
+                    type="button" aria-label={t('partyGame.moveUp')}
+                    disabled={busy || at <= 0}
+                    onClick={() => onPlan('move', entry.id, at - 1)}
+                  >↑</button>
+                  <button
+                    type="button" aria-label={t('partyGame.moveDown')}
+                    disabled={busy || at < 0 || at === queued.length - 1}
+                    onClick={() => onPlan('move', entry.id, at + 1)}
+                  >↓</button>
+                </span>
+              )}
+              {entry.state === 'remaining' && (
+                <button
+                  type="button"
+                  className="party-control-plan-toggle"
+                  disabled={busy}
+                  data-testid={`party-plan-toggle-${entry.id}`}
+                  onClick={() => onPlan(entry.excluded ? 'include' : 'exclude', entry.id)}
+                >
+                  {t(entry.excluded ? 'partyPlan.include' : 'partyPlan.exclude')}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

@@ -19,6 +19,7 @@ import { PartyGuestDock } from '../components/PartyGuestDock';
 import {
   PartyGuestContentSections, hasPresentableContent, isOpenablePoster,
 } from '../party/PartyGuestContent';
+import { PartyGameAffordance } from '../party/PartyGameAffordance';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -732,7 +733,6 @@ export function PartyPage() {
   const albumName = context.albumName ?? context.title;
   const coverUrl = context.coverUrl;
   const contributionUrl = context.capabilities.contributionUrl;
-  const gameEnabled = context.capabilities.gameUrl !== null;
   const printUrl = context.capabilities.printUrl;
   const gameUrl = context.capabilities.gameUrl;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
@@ -795,17 +795,6 @@ export function PartyPage() {
       variant: 'activity',
       badgeKey: 'partyHub.live',
       available: Boolean(gameUrl),
-    },
-    {
-      // Only when the owner turned the party game on.
-      id: 'challenges',
-      titleKey: 'partyHub.vote',
-      descriptionKey: 'partyHub.voteHelp',
-      icon: <TrophyIcon />,
-      target: { kind: 'route', to: `/party/${token ?? ''}/challenges` },
-      variant: 'activity',
-      badgeKey: 'partyHub.live',
-      available: gameEnabled && Boolean(token),
     },
     {
       // Printing is PHYSICAL, so this card appears only when a sheet would
@@ -880,6 +869,12 @@ export function PartyPage() {
       </header>
 
       <div className="party-guest-hub-body">
+      {/* THERE IS ONE GAME, and this is the way into it for a guest who is
+          already here. The deck card below is where it LIVES; this says what it
+          is doing right now, so nobody has to find the QR card on the table
+          again when the host starts. It is a link, never a redirect. */}
+      {gameUrl && token && <PartyGameAffordance token={token} gameUrl={gameUrl} />}
+
       <CapabilityDeck capabilities={visibleCapabilities} />
 
       {/* While a search is applied the album is NOT the whole album, so the page

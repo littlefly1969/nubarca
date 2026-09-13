@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   createPartyChallenge, updatePartyChallenge,
-  type AlbumItemSummary, type PartyChallenge, type PartyChallengeKind,
+  type AlbumItemSummary, type PartyChallenge,
   type PartyChallengeVotingMode,
 } from '@nubarca/api-client';
 import { Modal } from '../components/Overlay';
@@ -43,20 +43,20 @@ const STEP_LABEL: Record<Step, MessageKey> = {
   preview: 'partyComposer.stepPreview',
 };
 
-const KINDS: PartyChallengeKind[] = ['dare', 'penalty', 'guess', 'custom'];
-const KIND_LABEL: Record<PartyChallengeKind, MessageKey> = {
-  dare: 'partyChallenges.kind.dare',
-  penalty: 'partyChallenges.kind.penalty',
-  guess: 'partyChallenges.kind.guess',
-  custom: 'partyChallenges.kind.custom',
-};
-
 // The four durations a host actually reaches for. The number field stays, for
 // the fifth.
 const DURATION_PRESETS = [30, 60, 120, 300];
 
+// THE CATEGORY IS GONE FROM THE DRAFT, not merely hidden.
+//
+// `PartyChallenge.kind` still exists — in the domain, the column and the wire —
+// because the adaptive game it was designed for will read it. What it never
+// was, is a decision the host had to make: a room is shown an activity, not a
+// taxonomy, and asking "dare, penalty, guess or custom?" was a required step
+// that changed nothing anybody sees. Omitting the field from the write is what
+// makes that true on the server too: a new activity becomes `custom`, and an
+// existing one keeps whatever it was written with.
 interface Draft {
-  kind: PartyChallengeKind;
   title: string;
   body: string;
   mediaFileItemId: string | null;
@@ -68,7 +68,6 @@ interface Draft {
 
 function draftFrom(challenge: PartyChallenge | null): Draft {
   return {
-    kind: challenge?.kind ?? 'dare',
     title: challenge?.title ?? '',
     body: challenge?.body ?? '',
     mediaFileItemId: challenge?.mediaFileItemId ?? null,
@@ -138,7 +137,6 @@ export function PartyChallengeComposer({
     const value = {
       title: draft.title.trim(),
       body: draft.body.trim(),
-      kind: draft.kind,
       mediaFileItemId: draft.mediaFileItemId,
       isEnabled: draft.isEnabled,
       durationSeconds: draft.durationSeconds,
@@ -224,24 +222,6 @@ export function PartyChallengeComposer({
 
       {step === 'activity' && (
         <div className="form-grid">
-          <div className="field">
-            <span className="field__label" id="party-composer-kind">{t('partyGame.kind')}</span>
-            <div className="media-kind-tabs" role="radiogroup" aria-labelledby="party-composer-kind">
-              {KINDS.map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  role="radio"
-                  aria-checked={draft.kind === kind}
-                  className={`media-kind-tab${draft.kind === kind ? ' is-active' : ''}`}
-                  onClick={() => set('kind', kind)}
-                >
-                  {t(KIND_LABEL[kind])}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <label className="field">
             <span className="field__label">{t('partyGame.challengeTitle')}</span>
             <input
@@ -416,7 +396,6 @@ export function PartyChallengeComposer({
             context={{ round: position, total }}
             voting={draft.votingMode === 'binary' ? 'closed' : null}
             challenge={{
-              kind: draft.kind,
               title: draft.title,
               body: draft.body,
               mediaUrl: selectedPreview ?? null,

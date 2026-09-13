@@ -1,5 +1,4 @@
-import type { PartyChallengeKind } from '@nubarca/api-client';
-import { useI18n, type MessageKey } from '../i18n';
+import { useI18n } from '../i18n';
 import './PartyChallengeCard.css';
 
 // THE renderer for a party activity. There is exactly one, and everything that
@@ -41,7 +40,6 @@ export interface PartyChallengeCardContext {
  * not have an opinion about which one it was handed.
  */
 export interface PartyChallengeCardChallenge {
-  kind: PartyChallengeKind;
   title: string;
   body: string;
   mediaUrl?: string | null;
@@ -59,13 +57,6 @@ export interface PartyChallengeCardProps {
   className?: string;
   testId?: string;
 }
-
-const KIND_LABEL: Record<PartyChallengeKind, MessageKey> = {
-  dare: 'partyChallenges.kind.dare',
-  penalty: 'partyChallenges.kind.penalty',
-  guess: 'partyChallenges.kind.guess',
-  custom: 'partyChallenges.kind.custom',
-};
 
 /**
  * A duration in the units a host thinks in.
@@ -107,7 +98,6 @@ export function PartyChallengeCard({
     <div
       className={`party-activity${className ? ` ${className}` : ''}`}
       data-mode={mode}
-      data-kind={challenge.kind}
       data-media={hasMedia ? 'true' : 'false'}
       data-testid={testId ?? 'party-activity-card'}
     >
@@ -120,14 +110,18 @@ export function PartyChallengeCard({
           </div>
         )}
         <div className="party-activity-copy">
-          <p className="party-activity-eyebrow">
-            <span className="party-activity-kind">{t(KIND_LABEL[challenge.kind])}</span>
-            {context && (
+          {/* THE CATEGORY IS NOT DRAWN, and nor is a colour derived from it.
+              `kind` survives in the domain for the adaptive game, and a room
+              being shown an activity has no use for a taxonomy — so the eyebrow
+              carries only where the evening is, and only when a surface says
+              so. */}
+          {context && (
+            <p className="party-activity-eyebrow">
               <span className="party-activity-context">
                 {t('partyActivity.round', { round: context.round, total: context.total })}
               </span>
-            )}
-          </p>
+            </p>
+          )}
           <h2 className="party-activity-title">{title}</h2>
           {challenge.body.trim() && <p className="party-activity-body">{challenge.body}</p>}
           {meta && (

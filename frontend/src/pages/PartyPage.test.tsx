@@ -120,8 +120,11 @@ describe('PartyPage (public party landing)', () => {
     expect(await screen.findByRole('link', { name: /Condividi un momento/i }))
       .toHaveAttribute('href', '/party/upload-token/upload');
     expect(screen.getAllByRole('link', { name: /Condividi un momento/i })).toHaveLength(1);
-    expect(screen.getByRole('link', { name: /Sfide e votazioni/i }))
-      .toHaveAttribute('href', '/party/tok-1/challenges');
+    // ONE game entry. "Game" and "Vote the challenges" were two cards for two
+    // different votes, and a guest could not tell which one the host meant.
+    expect(screen.getByRole('link', { name: /Il gioco dal vivo/i }))
+      .toHaveAttribute('href', '/party/tok-1/game');
+    expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
     expect(screen.getByTestId('party-hub-cover')).toHaveStyle({
       backgroundImage: 'url("/api/party/tok-1/media/f1/preview")',
     });
@@ -250,16 +253,15 @@ describe('PartyPage (public party landing)', () => {
     // A real destination is a real link; an action that opens something in
     // place is a real button. Never a clickable div either way.
     //
-    // Four links, because the hosted game and its activity deck are two cards
-    // and the server turns them on together — `gameUrl` is the one signal, and
-    // a party with the game on has always had both.
-    expect(within(deck).getAllByRole('link')).toHaveLength(4);
+    // Three links: the dedication, the ONE game, and the album. The activity
+    // deck used to be a fourth card for a second vote, and there is now one
+    // Party Game that holds both halves in the phases the server owns.
+    expect(within(deck).getAllByRole('link')).toHaveLength(3);
     expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
       .toHaveAttribute('href', '#party-photos');
-    expect(within(deck).getByRole('link', { name: /Sfide e votazioni/i }))
-      .toHaveAttribute('href', '/party/tok-1/challenges');
-    expect(within(deck).getByRole('link', { name: /Gioco/i }))
+    expect(within(deck).getByRole('link', { name: /Il gioco dal vivo/i }))
       .toHaveAttribute('href', '/party/tok-1/game');
+    expect(within(deck).queryByRole('link', { name: /Sfide e votazioni/i })).toBeNull();
 
     const face = within(deck).getByRole('button', { name: /Trova le tue foto/i });
     expect(face.tagName).toBe('BUTTON');
@@ -268,11 +270,13 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.queryByTestId('party-face-open')).not.toBeInTheDocument();
   });
 
-  it('drops the challenges capability when the party game is off', async () => {
+  it('drops the game capability when the party game is off', async () => {
     mockHub({ gameEnabled: false });
     render(wrapper());
     const deck = await screen.findByRole('navigation', { name: /Cosa vuoi fare\?/i });
-    expect(within(deck).queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
+    expect(within(deck).queryByRole('link', { name: /Il gioco dal vivo/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-capability-game')).not.toBeInTheDocument();
+    // The retired second entry is absent in both directions.
     expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
     // The rest of the deck is unaffected: dedication and album still link out,
     // and the face action is still a button.
@@ -852,7 +856,6 @@ describe('PartyPage (public party landing)', () => {
         'party-capability-face:signature',
         'party-capability-dedication:activity',
         'party-capability-game:activity',
-        'party-capability-challenges:activity',
         'party-capability-album:utility',
       ]);
   });
@@ -874,20 +877,20 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.queryByRole('link', { name: /Il gioco dal vivo/i })).not.toBeInTheDocument();
   });
 
-  it('renders the challenges capability ONLY when the party game is enabled', async () => {
+  it('offers ONE game entry, never two', async () => {
+    // THE DEFECT THIS CLOSES: the hub used to render "Game" and "Vote the
+    // challenges" side by side, from one `gameEnabled` signal, as if a guest
+    // were meant to choose between them. One of them chose which activity the
+    // slideshow would interrupt with; the other decided whether an activity had
+    // been done. There is now one Party Game and one card that reaches it.
     mockHub({ gameEnabled: true });
-    const on = render(wrapper());
-    expect(await screen.findByTestId('party-capability-challenges')).toBeInTheDocument();
-    // The route is unchanged by the gating rework.
-    expect(screen.getByRole('link', { name: /Sfide e votazioni/i }))
-      .toHaveAttribute('href', '/party/tok-1/challenges');
-    on.unmount();
-
-    mockHub({ gameEnabled: false });
     render(wrapper());
     await screen.findByTestId('party-capability-album');
+
     expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Sfide e votazioni/i })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('a[href^="/party/tok-1/game"]')).toHaveLength(1);
+    expect(document.querySelectorAll('a[href$="/challenges"]')).toHaveLength(0);
   });
 
   it('renders the print capability ONLY while the server offers a print URL', async () => {
@@ -940,7 +943,7 @@ describe('PartyPage (public party landing)', () => {
     // an unavailable capability is an absent one.
     const page = document.body.textContent ?? '';
     expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo/i);
-    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(5);
+    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(4);
     expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
     expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
   });
