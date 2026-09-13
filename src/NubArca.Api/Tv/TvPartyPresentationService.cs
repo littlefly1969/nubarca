@@ -85,9 +85,9 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
             gameEnabled: link.GameEnabled && link.AlbumId == access.MainAlbumId,
             gamesPermitted: access.Capabilities.Games,
             gameStatus: link.Game?.Status,
+            gamePhase: link.Game?.Phase,
             finishedAt: link.Game?.FinishedAt,
-            now: _clock.GetUtcNow().UtcDateTime,
-            gamePhase: link.Game?.Phase);
+            now: _clock.GetUtcNow().UtcDateTime);
         return new TvPartyState(presentation, link.AlbumId, access);
     }
 }

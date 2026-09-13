@@ -16,8 +16,29 @@ public sealed class TvPartyPresentationTests
 
     private static string Decide(
         bool showable = true, bool gameEnabled = true, bool gamesPermitted = true,
-        string? status = null, DateTime? finishedAt = null, DateTime? now = null) =>
-        TvPartyPresentations.Decide(showable, gameEnabled, gamesPermitted, status, finishedAt, now ?? Now);
+        string? status = null, string? phase = null, DateTime? finishedAt = null,
+        DateTime? now = null) =>
+        TvPartyPresentations.Decide(
+            showable, gameEnabled, gamesPermitted, status, phase, finishedAt, now ?? Now);
+
+    [Fact]
+    public void An_intermission_hands_the_television_back_with_no_dwell()
+    {
+        // The game is LIVE and paused, which is the whole point: the status says
+        // nothing has ended, and only the phase says the room has the screen.
+        Assert.Equal(TvPartyPresentations.Slideshow, Decide(
+            status: PartyGameStatuses.Live, phase: PartyGamePhases.Intermission));
+
+        // No dwell, unlike a finished match: the answer does not depend on when.
+        Assert.Equal(TvPartyPresentations.Slideshow, Decide(
+            status: PartyGameStatuses.Live, phase: PartyGamePhases.Intermission,
+            finishedAt: Now, now: Now.AddSeconds(1)));
+
+        // And it is the phase alone that says so — every other phase of a live
+        // game keeps the television.
+        foreach (var phase in PartyGamePhases.All.Where(p => p != PartyGamePhases.Intermission))
+            Assert.Equal(TvPartyPresentations.Game, Decide(status: PartyGameStatuses.Live, phase: phase));
+    }
 
     [Fact]
     public void A_party_that_cannot_be_shown_is_unavailable_whatever_its_game_is_doing()
