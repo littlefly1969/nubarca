@@ -471,12 +471,15 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   from the party's own state in `TvPartyPresentations.Decide`: `game` while a
   game is switched on, the host may run one and the party is LIVE (the Games
   capability is phase-folded: before or after the party the lobby's code would
-  lead nowhere), from before the first match through every phase; `slideshow`
-  otherwise; `unavailable` when the display resolver refuses the link — fail
+  lead nowhere), from before the first match through every phase EXCEPT
+  `intermission`; `slideshow` otherwise; `unavailable` when the display resolver
+  refuses the link — fail
   closed, never general, never another party, never the new link of the same
   album. It is a PROJECTION: FINISHED stays FINISHED, the television returns to
   the slideshow because the projection says so once `FinishedDwell` (15 s from
-  the session's `FinishedAt`, on the server's clock) has passed, and
+  the session's `FinishedAt`, on the server's clock) has passed, an
+  `intermission` returns it with NO dwell at all (a closing card is for a room
+  that is not waiting; "back to the party" is said to one that is), and
   `restart_game → lobby` brings the takeover back with no special case. Five
   things are easy to undo by accident. The shell never learns a phase: it
   switches on four words and mounts one surface per word, keyed by an opaque
@@ -833,23 +836,39 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   out of the queue it filled.
 - **Party publishes one Guest Hub QR; the old capabilities remain capabilities.**
   The view token's `/party/{token}` route is the canonical mobile Hub and the
-  only link rendered as a QR. Browse/download, face search, contribution and
-  challenge voting are entries in that Hub. The distinct upload token and
+  only link rendered as a QR. Browse/download, face search, contribution, the
+  Game and printing are entries in that Hub — and the GAME is ONE entry. The hub
+  used to render "Game" and "Vote the challenges" side by side from one signal,
+  as if a guest were meant to choose between two words for two different votes;
+  `/party/{token}/challenges` now redirects to `/party/{token}/game`. A guest
+  already on the hub never needs a second QR either: the party carries a
+  persistent, non-invasive bar naming what the game is doing (*choose the
+  activities* / *game in progress* / *vote now* / *game paused*, and NOTHING once
+  the match is over, because a dead CTA is the one thing every Party surface
+  refuses) and offering one tap. It is a link and never a takeover — the guest
+  decides — and it reads the PUBLIC snapshot without joining, because a hub that
+  minted a participant would count everybody who ever opened the party in the one
+  number the control room reads out loud. The television's QR stays what it is:
+  the way in for somebody not yet at the party. The distinct upload token and
   `/party/{uploadToken}/upload` route are deliberately still valid for already
   printed codes; hiding the second QR is a presentation change, not a token
   migration or redirect that could weaken its upload-only authority.
-- **A Party challenge is revealed on a boundary and completed by the existing
-  NEXT, with database state as the authority.** Album-scoped challenge content
-  survives link rotation; votes, completion history and the one playback
-  session are link-scoped. A conditional participant update owns the total vote
-  budget and a unique `(link, participant, challenge)` index owns one-vote
-  idempotency. `PartyChallengeSession` freezes `ChallengeHold`, active challenge
-  and next deadline across TV reconnects. Deadline expiry never interrupts a
-  medium: the next natural boundary selects `MostVotedRemaining`; no timeout can
-  leave Hold, and the existing remote NEXT performs one version-guarded
-  completion before normal playback resumes. Existing links default the game
-  OFF, so clients that never call the additive endpoints retain the previous
-  Party behaviour.
+- **The interval-driven challenge HOLD is retired, and a guest's vote chose the
+  last thing it will ever choose.** `PartyChallengeSession` used to freeze the
+  slideshow on the `MostVotedRemaining` activity at a media boundary and wait for
+  the remote's NEXT — the room decided and nobody conducted. The Party Game
+  replaced all of it, so `PartyChallengePolicy.Select` and the whole hold are
+  gone: nothing selects an activity from votes, and nothing interrupts a
+  slideshow. The three TV routes (`party-playback`, `/boundary`, `/next`) still
+  answer, inertly, and write NO row — an installed TV APK calls them on every
+  photograph, and a 404 per boundary is a worse answer than "the slideshow
+  continues", which is why retiring a behaviour is not the same as breaking a
+  client. The table survives in the schema and is simply never reached; the
+  "currently held, immutable until NEXT" guard on deleting an activity went with
+  it, because a stale row must not block a host for ever. What SURVIVES of that
+  feature is its storage: `PartyChallengeVote` and the participant's conditional
+  vote-budget claim are now the PRE-GAME PREFERENCE (next entry), which is why
+  there is no third voting system.
 - **A party MESSAGE is scoped to the Party link, and its authority is a
   capability rather than a role.** `PartyMessage` is a text-only domain beside
   the media pipeline — no `FileItem`, no blob, no derivative — so `TvAlbumItem`
@@ -1558,6 +1577,96 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   See [docs/party-game/README.md](party-game/README.md),
   [docs/party-game/runtime.md](party-game/runtime.md) and
   [docs/party-game/ux-integration-contract.md](party-game/ux-integration-contract.md).
+
+- **There are TWO party votes and they never meet.** A PREFERENCE is cast before
+  the match, on an ACTIVITY, and says "I would like to see this"; a LIVE VOTE is
+  cast during an activity, on a ROUND, and says "they did it". They share the
+  anonymous `PartyParticipant` the party already had and nothing else — no
+  table, no budget, no phase and no consequence. Preferences reuse
+  `PartyChallengeVote` and the participant's `ChallengeVoteCount` claim precisely
+  so this is not a third voting system, and `PartyGamePreferencePolicy` is the
+  one pure rule the guest surface, the write path and the control room all ask:
+  OFFERED while the Games capability holds (phase-folded, so only while the party
+  is LIVE), the game is on and `PriorityVotingEnabled` is on; OPEN while the
+  match has not begun — no session row, or one still in its `lobby`. Four things
+  are easy to undo by accident. Preferences are ADVISORY by construction: there
+  is no code path from one to the game moving, and the tests assert that
+  negatively against persisted rows rather than against status codes — they pick
+  no activity, interrupt no slideshow, enter no `yes`/`no` result and move no
+  phase. The first `start` freezes them and `restart_game` REOPENS them without
+  deleting one, because they belong to the party and the guests who cast them
+  rather than to the match that was discarded. An INTERMISSION is deliberately
+  not open — the match has begun, and a preference arriving then would change a
+  count the host is reading while they plan. And the GUEST surface carries no
+  vote counts at all: a guest choosing must not be told what everybody else
+  picked first, so the numbers reach the host, in the control room, where they
+  inform a decision. The retired guest routes still answer for printed QR codes
+  and are ONE thin adapter over the preference path — two write paths onto one
+  table is how the budget claim, the uniqueness race and the lobby gate would
+  come to disagree.
+
+- **The host plans the FUTURE, and the past and the present are not plannable.**
+  The owner snapshot carries a `plan`: the whole deck in play order with each
+  entry's state (`played` / `current` / `remaining`), its position among the
+  activities the game would actually play, whether it is enabled, whether it is
+  excluded from this match, and the preferences the room cast for it.
+  `POST …/party-game/plan` takes `move`, `exclude` or `include`, quotes
+  `expectedVersion` like every other owner write and spends a version when the
+  authoritative plan changes; it moves no phase, so a host may plan from the
+  lobby, mid-activity or in an intermission. Anything already played and whatever
+  is on the screen is `invalid_plan` — refused out loud rather than silently
+  reordered around — and a move renumbers the remaining activities into the
+  `SortOrder` slots they already occupied, so a played round keeps the number it
+  had. **An exclusion destroys no preference**: "the room wanted this and there
+  was no time" is information about the evening, and deleting the count would
+  erase the evidence the host's own decision was about. `party_game_exclusions`
+  is keyed on the SESSION, so a restart discards it with the rest of the match.
+
+- **INTERMISSION is a pause, and it is not FINISHED.** `return_to_party` is
+  legal only from `RESULT` and COMPLETES the round the room just saw the outcome
+  of: a pause happens between two finished activities, never instead of
+  finishing one. The status stays `live`; the rounds, the plan and the
+  preferences all survive. What hands the television back is the presentation
+  projection reading the phase — `TvPartyPresentations.Decide` answers
+  `slideshow` for `intermission`, immediately and with no dwell, because a
+  FINISHED game earns its 15-second closing card while a host who has just said
+  "back to the party" is standing in front of a room expecting the music.
+  `next_challenge` resumes on the same edge it takes from a result, minus the
+  round to complete, and the takeover returns with no special case. The session
+  clears `CurrentRoundId` on the way in, so the control room never describes an
+  activity nobody is looking at.
+
+- **`PartyChallenge.Kind` is dormant metadata, not behaviour.** The column, its
+  four values and the wire field all stay, for the adaptive game they were
+  designed for. What went is the DECISION: the composer no longer asks (a room is
+  shown an activity, not a taxonomy, and "dare, penalty, guess or custom?" was a
+  required step that changed nothing anybody sees), the canonical card draws
+  neither the word nor a `data-kind` a stylesheet could colour by, and the four
+  per-kind accents are gone with it. `kind` is OPTIONAL on the write in both
+  directions: omitted, a new activity becomes `custom` and an EXISTING one keeps
+  whatever it was written with — which is what makes the composer's silence
+  preserve history instead of rewriting it. A client that still sends one still
+  has to send a value the domain knows.
+
+- **Duplicating a party copies the DECISIONS and none of the history.** Title,
+  windows, guest slots, the deck (new ids, same title/body/`kind`/media/enabled/
+  order/duration/voting mode/question), the slideshow timings, the quotas, both
+  approval modes, the game switches, the preference budget and the print budgets
+  travel. Participants, preferences, votes, rounds, uploads, greetings, prints,
+  face searches, televisions, display grants, the heartbeat and every token do
+  not — last year's guests did not attend this year's party, and last year's QR
+  must open nothing. Three things are easy to undo by accident. **Media is
+  SHARED, not copied**: the clone gets its own album with its own membership rows
+  pointing at the same `FileItem`s and therefore the same blobs, so nothing is
+  re-uploaded and either party can be edited freely. **The clone is a DRAFT that
+  already has its capability** — the new link carries the settings that live on
+  it and therefore new tokens, while the party's own `draft` status is what makes
+  the public seam refuse every one of them until the host publishes. And the
+  clone's ALBUM needs its own name, numbered until it is free: album names are
+  unique per owner and a party title is not, so taking the title verbatim failed
+  on the constraint the second time anybody duplicated anything. Print counters
+  and the public print sequence restart at zero; paper spent at another party is
+  not this party's history.
 
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 

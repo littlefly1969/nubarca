@@ -7,31 +7,41 @@ described here is the **performance** of that content: one session per party
 link, one round per activity played, one phase saying where the room currently
 is. The server owns all of it.
 
-## Why a second session type exists
+## The interval-driven hold is retired
 
-`PartyChallengeSession` already existed and is untouched. It drives the older
-behaviour where the slideshow interrupts itself on a timer, shows the most-voted
-dare, and resumes on NEXT — the room chooses what happens, and nobody is
-conducting.
+`PartyChallengeSession` drove the older behaviour: the slideshow interrupted
+itself on a timer, showed the most-voted dare, and resumed on NEXT. **That
+behaviour is gone.** A guest's pre-game preference no longer selects anything,
+freezes nothing and interrupts no slideshow — see
+[Pre-game preferences](#pre-game-preferences-advisory-by-construction).
 
-`PartyGameSession` is a **hosted game**. The owner conducts it, the deck is
-played in the order the owner arranged, and every phase change is a deliberate
-command. The two coexist on the same album and the same party link without
-interacting; they answer different questions, so merging them would have made
-one row mean two things.
+The three TV endpoints (`party-playback`, `/boundary`, `/next`) still answer,
+inertly, and write no row: an already-installed TV APK calls them on every
+photograph, and a 404 per boundary is a worse answer than "the slideshow
+continues". The table survives in the schema and is simply never reached.
+
+The TV app's own `PartyChallengeHold` screen is likewise left in place and is
+now unreachable: the server only ever answers `mode: "media"`, so the branch
+that mounts it is never taken. Deleting it would need a new APK to change
+anything an installed device does, and the SERVER is where the retirement is
+enforced — which is the point.
+
+`PartyGameSession` is the **hosted game** and the only runtime there is. The
+owner conducts it, the deck is played in the order the owner arranged, and every
+phase change is a deliberate command.
 
 ## State machine
 
 ```
 LOBBY --start--> CHALLENGE_REVEAL --start_challenge--> CHALLENGE_ACTIVE
-                        ^                                     |
-                        |                               open_voting
-         next_challenge |                                     v
-                        |                               VOTING_OPEN
-                        |                                     |
-                        |                               close_voting
-                        |                                     v
-                     RESULT <--reveal_result--     VOTING_CLOSED
+                      ^   ^                                   |
+                      |   |                             open_voting
+       next_challenge |   | next_challenge                    v
+                      |   |                             VOTING_OPEN
+                      |   INTERMISSION                        |
+                      |        ^                        close_voting
+                      |        | return_to_party              v
+                     RESULT ---+        <--reveal_result-- VOTING_CLOSED
                         |
          next_challenge | (no activity left)
                         v
@@ -41,6 +51,24 @@ LOBBY --start--> CHALLENGE_REVEAL --start_challenge--> CHALLENGE_ACTIVE
 `skip_challenge` leaves any unresolved round phase — reveal, active,
 voting_open, voting_closed — for the next activity, or for FINISHED when there
 is none. `finish` is legal from every phase except FINISHED.
+
+### INTERMISSION — the game gives the room back to the party
+
+`return_to_party` is legal only from `RESULT`, and it COMPLETES the round the
+room just saw the outcome of: a pause is something that happens between two
+finished activities, never a way to abandon one. The status stays `live`, the
+rounds stay, the host's plan stays, and the guests' preferences stay.
+
+What hands the television back is not a status change but the presentation
+projection reading the phase: `TvPartyPresentations.Decide` answers `slideshow`
+for `intermission`, immediately and with no dwell. (A FINISHED game earns its
+15-second closing card because nobody is waiting for anything; a host who has
+just said "back to the party" is standing in front of a room expecting the
+music.) `next_challenge` resumes and the takeover returns with no special case —
+the same edge `next_challenge` takes from a result, minus the round to complete.
+
+It is deliberately NOT `FINISHED`. A finished match is over and the only way back
+is `restart_game`, which DISCARDS it.
 
 ```
 FINISHED --restart_game--> LOBBY
@@ -196,6 +224,77 @@ A client that skipped a response because `version` had not changed would sit on
 a stale vote count for a whole round. Nothing in this repository does that, and
 nothing should start.
 
+## Pre-game preferences — advisory by construction
+
+**The two votes are not the same vote.** A PREFERENCE is cast before the match,
+on an ACTIVITY, and says "I would like to see this". A LIVE VOTE is cast during
+an activity, on a ROUND, and says "they did it". They share the anonymous
+`PartyParticipant` the party already had and nothing else — no table, no budget,
+no phase and no consequence.
+
+Preferences reuse `PartyChallengeVote` (`(link, participant, challenge)`, unique)
+and the participant's `ChallengeVoteCount` budget claim, so this is not a third
+voting system. `PartyAlbumLink.PriorityVotingEnabled` switches them on (off by
+default, which is what every party before the column meant) and `VotesPerGuest`
+bounds how many each guest may pick.
+
+`PartyGamePreferencePolicy` is the whole rule, as one pure function the guest
+surface, the write path and the control room all ask:
+
+- **offered** while the party's Games capability holds (phase-folded, so only
+  while the party is LIVE), the game is switched on, and priority voting is on;
+- **open** while the match has not begun — no session row, or one still in its
+  `lobby`.
+
+The first `start` freezes them. `restart_game` returns the session to its lobby
+and therefore reopens them, **without deleting one**: the preferences belong to
+the party and the guests who cast them, not to the match that was discarded, so
+a replay starts from what the room already said. An INTERMISSION is deliberately
+not open — the match has begun, and a preference arriving now would change a
+count the host is looking at while they plan.
+
+What they explicitly do NOT do: choose the next activity, interrupt the
+slideshow, enter the `yes`/`no` result, or move a phase. There is no code path
+from a preference to the game moving, and
+[`PartyGamePreferenceTests`](../../tests/NubArca.Api.Tests/Party/PartyGamePreferenceTests.cs)
+asserts each of those negatively, against persisted rows.
+
+The guest surface carries no vote counts, deliberately: a guest choosing must
+not be told what everybody else picked first. The counts reach the **host**, in
+the control room, where they inform a decision.
+
+## The plan — what is left, in what order
+
+The owner snapshot carries a `plan`: the whole deck in play order, each entry
+with its `state` (`played` / `current` / `remaining`), its 1-based `position`
+among the activities the game would actually play, whether it `isEnabled`,
+whether it is `excluded` from this match, and its `preferenceVotes`.
+
+`POST /api/albums/{albumId}/party-game/plan` takes one action — `move`,
+`exclude` or `include` — quotes `expectedVersion` like every other owner write,
+and spends a version when it changes the authoritative plan. It moves no phase,
+so a host may plan from the lobby, during an activity, or in an intermission.
+
+Two rules hold it:
+
+- **The past and the present are not plannable.** Anything already played, and
+  whatever is on the screen right now, is `invalid_plan` — refused out loud
+  rather than silently reordered around.
+- **An exclusion destroys no preference.** "The room wanted this and there was
+  no time" is information about the evening, and deleting the count would erase
+  the evidence the host's own decision was about. `party_game_exclusions` is
+  keyed on the SESSION, so a `restart_game` discards it with the rest of the
+  match.
+
+`exclude` is deliberately NOT the same as switching an activity off in the deck.
+`IsEnabled` is a DECK decision that outlives every match, and turning it off
+still releases the guests' preferences and refunds their budget — the activity
+is being withdrawn from the party, so what they spent on it comes back. An
+exclusion says "not tonight" about one match and keeps both.
+
+A move renumbers the remaining activities into the `SortOrder` slots they
+already occupied between them, so every played activity keeps the number it had.
+
 ## Voting
 
 The room answers one question per round: did they do it? `yes` or `no`, one
@@ -331,6 +430,16 @@ above.
 | `GET` | `/api/party/{token}/game` | anonymous, view token |
 | `POST` | `/api/party/{token}/game/join` | anonymous, view token |
 | `POST` | `/api/party/{token}/game/vote` | anonymous, view token |
+| `POST` | `/api/albums/{albumId}/party-game/plan` | owner cookie |
+| `POST` | `/api/party/{token}/game/preferences` | anonymous, view token |
+
+The retired guest routes `GET /api/party/{token}/challenges` and
+`PUT`/`DELETE .../challenges/{id}/vote` still answer, for printed QR codes and
+older clients, and are now one thin adapter over the preference path — there is
+one write path onto `PartyChallengeVote`, not two. Every refusal collapses to the
+generic `404`, because a client that predates the preference surface has no
+vocabulary for "the match has started". The web route `/party/{token}/challenges`
+redirects to `/party/{token}/game`.
 
 The owner snapshot carries `availableCommands` — the server's own answer to
 "what may I do now" — so a control room can omit an illegal command rather than
@@ -344,9 +453,9 @@ off all collapse to `404`, as everywhere else in Party.
 
 The public snapshot is a strict subset: album name, status, phase, version,
 round number, total activities, the phase deadline, the activity itself, the
-round id, the participation counts and this caller's own answer — the last
-three only where they apply, and the activity only in the phases that put it on
-a screen. No session id, no round history, no command vocabulary, no next
+round id, the participation counts, this caller's own answer and the pre-game
+preference surface — the last four only where they apply, and the activity only
+in the phases that put it on a screen. No session id, no round history, no command vocabulary, no next
 activity, and no result until it is revealed. The activity's media URL is built
 by the endpoint against the caller's own token; the service returns a token-less
 sentinel, exactly as the guest challenge list does.
@@ -360,6 +469,15 @@ sentinel, exactly as the guest challenge list does.
   mints a new link, so a new party genuinely is a new game.
 - `Version` defaults to 1 and is the concurrency token.
 - Check constraints pin `Status` and `Phase` to the vocabulary above.
+
+`party_game_exclusions`
+
+- unique on `(session, challenge)` — "not in this match" is a fact, not a
+  quantity, so two control-room devices excluding the same activity at once
+  leave one row.
+- Cascades from the session; RESTRICTS on the challenge, so deleting an activity
+  a host has set aside goes through `PartyChallengeService.DeleteAsync`, which
+  removes the exclusion with it.
 
 `party_game_votes`
 
