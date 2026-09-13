@@ -1,5 +1,20 @@
 # Party Guest Hub + “Il festeggiato deve…”
 
+> **SUPERSEDED — kept as the record of what this slice designed.**
+>
+> Two things below are no longer how the product works. The **ChallengeHold**
+> (a media boundary picking the most-voted activity and freezing the slideshow
+> until NEXT) is **retired**: a guest's vote selects nothing and interrupts
+> nothing. And the hub's **“Vota le sfide”** entry is gone — there is one Party
+> Game, `/party/{token}/game`, and `/party/{token}/challenges` redirects to it.
+>
+> What survived is the storage: `PartyChallengeVote` and the participant's
+> conditional vote-budget claim are now the **pre-game preference**, which is
+> advisory and informs the host's planning rather than choosing anything.
+>
+> Current behaviour: [party-game/README.md](party-game/README.md) and
+> [party-game/runtime.md](party-game/runtime.md).
+
 ## Gate 0 — integration map
 
 This slice extends the existing Party capability. It does not introduce a

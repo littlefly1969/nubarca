@@ -91,9 +91,17 @@ way to pin a dark presentation without hardcoding colour.
 ```
 /party/:token                 PartyPage           guest hub
 /party/:token/upload          PartyUploadPage     contribution
-/party/:token/challenges      PartyChallengesPage challenge voting (pre-game)
+/party/:token/game            PartyGamePage       THE game (lobby + preferences,
+                                                  watch, vote, wait, result,
+                                                  intermission, end)
+/party/:token/tv              PartyTvStagePage    the room's screen
+/party/:token/challenges      →  redirect to /game
 /party/:token/print           PartyPrintPage      print studio
 ```
+
+`/challenges` was a SECOND vote wearing the same word as the game, and the hub
+offered both at once. It is now a redirect, kept only for printed material and a
+guest's own history — the token is unchanged and no capability moves.
 
 New Party Game guest and TV surfaces extend this family. They do **not**
 introduce a second public token scheme.
