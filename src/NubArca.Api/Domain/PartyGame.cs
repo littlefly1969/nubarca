@@ -135,8 +135,14 @@ public static class PartyGamePhases
     /// lobby IS the takeover (it shows the join code). Only an intermission and
     /// a match that is over hand the screen back, and the second does so after a
     /// dwell the projection owns.
+    ///
+    /// <para>A null phase is NO SESSION YET, which is the lobby before anybody
+    /// has pressed start — the join code is on the screen, so the game holds it.
+    /// Accepting null is what lets the one caller that matters,
+    /// <c>TvPartyPresentations.Decide</c>, ask this question about a party whose
+    /// game has never run without first inventing a phase for it.</para>
     /// </summary>
-    public static bool HoldsTheScreen(string phase) => phase != Intermission;
+    public static bool HoldsTheScreen(string? phase) => phase != Intermission;
 
     /// <summary>
     /// Phases in which an activity is on screen, and therefore the only phases

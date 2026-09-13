@@ -83,14 +83,22 @@ public static class TvPartyPresentations
     /// screen changes on the next poll. Nothing is written either way — the
     /// phase is the game's, and this only reads it.</para>
     /// </summary>
+    /// <param name="gamePhase">
+    /// The session's phase, or null when no session exists yet. REQUIRED, and
+    /// deliberately not defaulted: a caller that omitted it would silently get
+    /// the pre-intermission answer and leave a television on the game while the
+    /// room is dancing, which is the one failure this rule exists to prevent.
+    /// </param>
     public static string Decide(
         bool partyShowable, bool gameEnabled, bool gamesPermitted,
-        string? gameStatus, DateTime? finishedAt, DateTime now,
-        string? gamePhase = null)
+        string? gameStatus, string? gamePhase, DateTime? finishedAt, DateTime now)
     {
         if (!partyShowable) return Unavailable;
         if (!gameEnabled || !gamesPermitted) return Slideshow;
-        if (gamePhase == PartyGamePhases.Intermission) return Slideshow;
+        // WHO HOLDS THE SCREEN is the phase vocabulary's own question, asked
+        // here rather than restated: a second copy of "intermission means hand
+        // it back" is a second thing to remember when a phase is added.
+        if (!PartyGamePhases.HoldsTheScreen(gamePhase)) return Slideshow;
         if (gameStatus != PartyGameStatuses.Finished) return Game;
         return finishedAt is DateTime at && now < at + FinishedDwell ? Game : Slideshow;
     }
