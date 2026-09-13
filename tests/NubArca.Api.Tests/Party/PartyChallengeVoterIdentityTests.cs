@@ -253,7 +253,7 @@ public sealed class PartyChallengeVoterIdentityTests : IDisposable
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30, maxChallengeIntervalSeconds = 60,
-            votesPerGuest, maxChallengesPerSession = (int?)null,
+            votesPerGuest, maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
         var names = new[] { "Uno", "Due", "Tre" };

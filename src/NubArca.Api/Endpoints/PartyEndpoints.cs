@@ -971,7 +971,8 @@ public static class PartyEndpoints
             var ownerId = httpContext.GetCurrentUserId()!.Value;
             if (!await party.UpdateGameSettingsAsync(ownerId, id, body.GameEnabled,
                 body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
-                body.VotesPerGuest, body.MaxChallengesPerSession, cancellationToken))
+                body.VotesPerGuest, body.MaxChallengesPerSession, body.PriorityVotingEnabled,
+                cancellationToken))
                 return Results.NotFound();
             return Results.Ok(await party.GetOwnerStatusAsync(ownerId, id, cancellationToken));
         }).WithName("SetPartyGameSettings").RequirePartyGames();

@@ -126,22 +126,26 @@ public sealed class PartyGuestFoldActorTests : IDisposable
         // guest gave after the new session existed. A fold must never overwrite
         // what a guest did with what they did earlier.
         var party = await SetUpAsync();
-        await SeedChallengeAsync(party.Album);
-        var round = await OpenVotingAsync(party);
-        var challenge = await WithDbAsync(db => db.PartyChallenges.Select(c => c.Id).FirstAsync());
+        var challenge = await SeedChallengeAsync(party.Album);
 
         var legacy = FakeToken();
         var legacyId = await SeedLegacyAsync(party.LinkId, legacy);
         await SeedChallengeVoteAsync(party.LinkId, legacyId, challenge);
-        await SeedGameVoteAsync(round, legacyId, PartyGameVoteValues.Yes);
 
-        // The browser's new identity, with its own answer to both questions.
+        // The browser's new identity, with its own PREFERENCE. It is cast in
+        // the lobby because that is when preferences are open — the first
+        // `start` freezes them, which is the whole point of the pre-game
+        // surface and has nothing to do with the fold being tested here.
         var browser = _factory.CreateClient();
         (await browser.PostAsync($"/api/party/{party.View}/game/join", null))
             .EnsureSuccessStatusCode();
         (await browser.PutAsync(
             $"/api/party/{party.View}/challenges/{challenge}/vote", null))
             .EnsureSuccessStatusCode();
+
+        // ...and its own answer to the LIVE question, once the match is running.
+        var round = await OpenVotingAsync(party);
+        await SeedGameVoteAsync(round, legacyId, PartyGameVoteValues.Yes);
         (await browser.PostAsJsonAsync($"/api/party/{party.View}/game/vote",
             new { roundId = round, value = "no" })).EnsureSuccessStatusCode();
 
@@ -413,7 +417,7 @@ public sealed class PartyGuestFoldActorTests : IDisposable
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
         var status = await ReadAsync(await owner.GetAsync($"/api/albums/{album}/party-settings"));

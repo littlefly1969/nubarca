@@ -414,7 +414,7 @@ public sealed class PartyGameRestartTests : IDisposable
         {
             gameEnabled = enabled, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
     private static async Task<string> ViewTokenAsync(HttpClient owner, Guid album) =>

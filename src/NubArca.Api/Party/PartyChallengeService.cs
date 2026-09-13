@@ -7,20 +7,17 @@ namespace NubArca.Api.Party;
 public sealed class PartyChallengeService : IPartyChallengeService
 {
     private readonly AppDbContext _db;
-    private readonly IPartyParticipantService _participants;
+    private readonly IPartyGameService _game;
     private readonly TimeProvider _clock;
-    private readonly ILogger<PartyChallengeService> _logger;
 
     public PartyChallengeService(
         AppDbContext db,
-        IPartyParticipantService participants,
-        TimeProvider clock,
-        ILogger<PartyChallengeService> logger)
+        IPartyGameService game,
+        TimeProvider clock)
     {
         _db = db;
-        _participants = participants;
+        _game = game;
         _clock = clock;
-        _logger = logger;
     }
 
     public async Task<PartyChallengeListDto?> ListOwnerAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
@@ -49,7 +46,15 @@ public sealed class PartyChallengeService : IPartyChallengeService
         var row = new PartyChallenge
         {
             Id = Guid.NewGuid(), AlbumId = albumId, Title = request.Title!.Trim(),
-            Body = request.Body!.Trim(), Kind = request.Kind!, MediaFileItemId = request.MediaFileItemId,
+            // KIND IS DORMANT METADATA. The composer no longer asks for one —
+            // the product's activities are activities, and a category the room
+            // never sees was decoration on a form — so a new one is `custom`.
+            // The column, the values and the wire field all stay for the
+            // adaptive game they were designed for, and an existing activity
+            // keeps whatever it was written with.
+            Body = request.Body!.Trim(),
+            Kind = request.Kind ?? PartyChallengeKinds.Custom,
+            MediaFileItemId = request.MediaFileItemId,
             IsEnabled = request.IsEnabled, SortOrder = order, CreatedAt = now, UpdatedAt = now,
             DurationSeconds = request.DurationSeconds,
             VotingMode = request.VotingMode ?? PartyChallengeVotingModes.Binary,
@@ -71,7 +76,9 @@ public sealed class PartyChallengeService : IPartyChallengeService
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         row.Title = request.Title!.Trim();
         row.Body = request.Body!.Trim();
-        row.Kind = request.Kind!;
+        // An omitted kind KEEPS the one this activity already has, which is what
+        // makes the composer's silence preserve history rather than rewrite it.
+        row.Kind = request.Kind ?? row.Kind;
         row.MediaFileItemId = request.MediaFileItemId;
         row.IsEnabled = request.IsEnabled;
         row.DurationSeconds = request.DurationSeconds;
@@ -94,10 +101,12 @@ public sealed class PartyChallengeService : IPartyChallengeService
         if (!await OwnsAsync(ownerId, albumId, ct)) return false;
         var exists = await _db.PartyChallenges.AnyAsync(x => x.Id == challengeId && x.AlbumId == albumId, ct);
         if (!exists) return false;
-        // A challenge currently held is immutable until NEXT; deleting it
-        // underneath a TV would violate reconnect-safe presentation.
-        if (await _db.PartyChallengeSessions.AnyAsync(x => x.ActiveChallengeId == challengeId, ct)) return false;
-        // The same reason, for the hosted game: a round is the record of what a
+        // The retired hold's "currently held, immutable until NEXT" guard is
+        // gone with the hold itself: nothing freezes the slideshow on an
+        // activity any more, so a stale legacy row must not block a host from
+        // deleting one for ever.
+        //
+        // For the hosted game the rule stands: a round is the record of what a
         // room was shown. Deleting its activity would rewrite the evening, and
         // the round's restricting foreign key would refuse anyway — this turns
         // that into a clean answer instead of a DbUpdateException.
@@ -105,6 +114,10 @@ public sealed class PartyChallengeService : IPartyChallengeService
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
         await ReleaseVotesForChallengeAsync(challengeId, ct);
         await _db.PartyChallengeCompletions.Where(x => x.PartyChallengeId == challengeId).ExecuteDeleteAsync(ct);
+        // A host's "not tonight" for an activity that no longer exists is not a
+        // decision worth keeping — unlike a round, it records no experience — so
+        // it goes with the activity rather than blocking its deletion.
+        await _db.PartyGameExclusions.Where(x => x.PartyChallengeId == challengeId).ExecuteDeleteAsync(ct);
         await _db.PartyChallenges.Where(x => x.Id == challengeId && x.AlbumId == albumId).ExecuteDeleteAsync(ct);
         await tx.CommitAsync(ct);
         return true;
@@ -150,176 +163,64 @@ public sealed class PartyChallengeService : IPartyChallengeService
             state.Value.Used, Math.Max(0, state.Value.Max - state.Value.Used), items);
     }
 
+    /// <summary>
+    /// The RETIRED guest vote route, kept for printed QR codes and older
+    /// clients, and now one thin adapter over the pre-game preference path.
+    ///
+    /// <para>It writes nothing of its own. Having two write paths onto one table
+    /// is how the budget claim, the uniqueness race and the lobby gate would
+    /// come to disagree — so this one asks the game service and translates the
+    /// answer back into the shape the old endpoint promised.</para>
+    ///
+    /// <para>Every refusal collapses to null, which the route answers as the
+    /// same generic 404 an unknown token gets: a client that predates the
+    /// preference surface has no vocabulary for "the match has started".</para>
+    /// </summary>
     public async Task<PartyVoteResultDto?> VoteAsync(
         PartyAccess access, Guid participantId, Guid challengeId, bool voted, CancellationToken ct = default)
     {
-        var linkId = access.PartyAlbumLinkId;
-        var state = await GuestStateAsync(access, participantId, linkId, ct);
-        if (state is null) return null;
-        var eligible = await _db.PartyChallenges.AsNoTracking()
-            .AnyAsync(x => x.Id == challengeId && x.AlbumId == access.MainAlbumId && x.IsEnabled, ct);
-        if (!eligible) return null;
-
-        // The conditional participant UPDATE and the unique vote index are the
-        // concurrency authorities. Read-committed avoids turning a harmless
-        // loser into a PostgreSQL serialization error under simultaneous taps.
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
-        var existing = await _db.PartyChallengeVotes
-            .FirstOrDefaultAsync(x => x.PartyAlbumLinkId == linkId
-                && x.PartyParticipantId == participantId && x.PartyChallengeId == challengeId, ct);
-        if (voted && existing is null)
-        {
-            if (!await _participants.TryClaimChallengeVoteAsync(participantId, state.Value.Max, ct))
-            {
-                await tx.RollbackAsync(ct);
-                return new PartyVoteResultDto(false, state.Value.Used, 0);
-            }
-            _db.PartyChallengeVotes.Add(new PartyChallengeVote
-            {
-                Id = Guid.NewGuid(), PartyAlbumLinkId = linkId,
-                PartyParticipantId = participantId, PartyChallengeId = challengeId, CreatedAt = Now,
-            });
-            try
-            {
-                await _db.SaveChangesAsync(ct);
-                _logger.LogInformation(
-                    "party.challenge.voted AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} ChallengeId={ChallengeId}",
-                    access.MainAlbumId, linkId, challengeId);
-            }
-            catch (DbUpdateException)
-            {
-                // A concurrent identical PUT won the unique vote insert. The
-                // conditional counter claim is in this transaction, so rollback
-                // restores it and the request returns the now-authoritative
-                // idempotent state rather than a 500.
-                await tx.RollbackAsync(ct);
-                _db.ChangeTracker.Clear();
-                var concurrentUsed = await _db.PartyChallengeVotes.AsNoTracking()
-                    .CountAsync(x => x.PartyAlbumLinkId == linkId
-                        && x.PartyParticipantId == participantId, ct);
-                var existsNow = await _db.PartyChallengeVotes.AsNoTracking()
-                    .AnyAsync(x => x.PartyAlbumLinkId == linkId
-                        && x.PartyParticipantId == participantId
-                        && x.PartyChallengeId == challengeId, ct);
-                return new PartyVoteResultDto(existsNow, concurrentUsed,
-                    Math.Max(0, state.Value.Max - concurrentUsed));
-            }
-        }
-        else if (!voted && existing is not null)
-        {
-            _db.PartyChallengeVotes.Remove(existing);
-            await _db.SaveChangesAsync(ct);
-            await _participants.ReleaseChallengeVoteAsync(participantId, ct);
-            _logger.LogInformation(
-                "party.challenge.unvoted AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} ChallengeId={ChallengeId}",
-                access.MainAlbumId, linkId, challengeId);
-        }
-        await tx.CommitAsync(ct);
-        var used = await _db.PartyChallengeVotes.AsNoTracking()
-            .CountAsync(x => x.PartyAlbumLinkId == linkId && x.PartyParticipantId == participantId, ct);
-        return new PartyVoteResultDto(voted, used, Math.Max(0, state.Value.Max - used));
+        var result = await _game.SetPreferenceAsync(access, participantId, challengeId, voted, ct);
+        if (result.Error is PartyGamePreferenceError.NotFound
+            or PartyGamePreferenceError.NotJoined
+            or PartyGamePreferenceError.UnknownChallenge
+            or PartyGamePreferenceError.Closed) return null;
+        if (result.Preferences is not PartyGamePreferencesDto preferences) return null;
+        var selected = preferences.Items.FirstOrDefault(x => x.Id == challengeId)?.Selected ?? false;
+        return new PartyVoteResultDto(selected, preferences.VotesUsed, preferences.VotesRemaining);
     }
 
-    public async Task<PartyPlaybackSnapshotDto?> GetSnapshotAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
-    {
-        var link = await ActiveGameLinkAsync(ownerId, albumId, ct);
-        if (link is null) return await OwnsAsync(ownerId, albumId, ct)
-            ? new PartyPlaybackSnapshotDto(PartyPlaybackModes.Media, null, null, 0) : null;
-        var session = await EnsureSessionAsync(link, ct);
-        return await SnapshotAsync(session, ownerId, ct);
-    }
+    // --- THE RETIRED INTERVAL-DRIVEN HOLD -----------------------------------
+    //
+    // These three endpoints are what the older Party TV slideshow called on
+    // every media boundary: the room's votes chose an activity, the slideshow
+    // FROZE on it, and the remote's NEXT released it. The Party Game replaced
+    // all of it — the host conducts, the server owns the phase, and the guests'
+    // pre-game preferences are ADVISORY — so a preference no longer selects
+    // anything and nothing interrupts the slideshow.
+    //
+    // They answer, inertly, rather than being deleted: an already-installed TV
+    // APK calls them on every photograph, and a 404 per boundary is a worse
+    // answer than "the slideshow continues". Nothing here writes a row, which is
+    // the whole of the retirement — `PartyChallengeSession` survives in the
+    // schema and simply stops being reached.
+    //
+    // The activity MEDIA route below is deliberately still real: it serves the
+    // owner's own television, which reaches an activity's picture through its
+    // album's game rather than through a hold.
 
-    public async Task<PartyPlaybackSnapshotDto?> OnMediaBoundaryAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
-    {
-        var link = await ActiveGameLinkAsync(ownerId, albumId, ct);
-        if (link is null) return await GetSnapshotAsync(ownerId, albumId, ct);
-        var session = await EnsureSessionAsync(link, ct);
-        if (session.Mode == PartyPlaybackModes.ChallengeHold || session.NextChallengeAt > Now)
-            return await SnapshotAsync(session, ownerId, ct);
-        if (link.MaxChallengesPerSession is int max && session.CompletedCount >= max)
-            return await SnapshotAsync(session, ownerId, ct);
+    public async Task<PartyPlaybackSnapshotDto?> GetSnapshotAsync(
+        Guid ownerId, Guid albumId, CancellationToken ct = default)
+        => await OwnsAsync(ownerId, albumId, ct)
+            ? new PartyPlaybackSnapshotDto(PartyPlaybackModes.Media, null, null, 0)
+            : null;
 
-        var completed = _db.PartyChallengeCompletions.Where(x => x.PartyAlbumLinkId == link.Id)
-            .Select(x => x.PartyChallengeId);
-        var candidates = await _db.PartyChallenges.AsNoTracking()
-            .Where(x => x.AlbumId == albumId && x.IsEnabled && !completed.Contains(x.Id))
-            .Select(x => new
-            {
-                Row = x,
-                Votes = _db.PartyChallengeVotes.Count(v => v.PartyAlbumLinkId == link.Id && v.PartyChallengeId == x.Id),
-            }).ToListAsync(ct);
-        if (candidates.Count == 0)
-        {
-            await _db.PartyChallengeSessions
-                .Where(x => x.Id == session.Id && x.Version == session.Version
-                    && x.Mode == PartyPlaybackModes.Media)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(x => x.NextChallengeAt, Deadline(link))
-                    .SetProperty(x => x.Version, x => x.Version + 1)
-                    .SetProperty(x => x.UpdatedAt, Now), ct);
-            return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ownerId, ct);
-        }
-        var pickedId = PartyChallengePolicy.Select(
-            candidates.Select(x => new PartyChallengeCandidate(x.Row.Id, x.Votes)).ToList(),
-            Random.Shared.Next());
-        var picked = candidates.Single(x => x.Row.Id == pickedId).Row;
-        var affected = await _db.PartyChallengeSessions
-            .Where(x => x.Id == session.Id && x.Version == session.Version
-                && x.Mode == PartyPlaybackModes.Media)
-            .ExecuteUpdateAsync(setters => setters
-                .SetProperty(x => x.Mode, PartyPlaybackModes.ChallengeHold)
-                .SetProperty(x => x.ActiveChallengeId, picked.Id)
-                .SetProperty(x => x.NextChallengeAt, (DateTime?)null)
-                .SetProperty(x => x.Version, x => x.Version + 1)
-                .SetProperty(x => x.UpdatedAt, Now), ct);
-        if (affected == 1)
-        {
-            _logger.LogInformation(
-                "party.challenge.revealed AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} PlaybackSessionId={PlaybackSessionId} ChallengeId={ChallengeId}",
-                albumId, link.Id, session.Id, picked.Id);
-        }
-        return await SnapshotAsync(await ReloadSessionAsync(link.Id, ct), ownerId, ct);
-    }
+    public Task<PartyPlaybackSnapshotDto?> OnMediaBoundaryAsync(
+        Guid ownerId, Guid albumId, CancellationToken ct = default)
+        => GetSnapshotAsync(ownerId, albumId, ct);
 
-    public async Task<PartyPlaybackSnapshotDto?> CompleteActiveAsync(Guid ownerId, Guid albumId, CancellationToken ct = default)
-    {
-        var link = await ActiveGameLinkAsync(ownerId, albumId, ct);
-        if (link is null) return await GetSnapshotAsync(ownerId, albumId, ct);
-        // Versioned conditional UPDATE provides compare-and-swap semantics;
-        // read-committed lets a duplicate NEXT observe 0 affected rows rather
-        // than surfacing a serializable-transaction retry to the TV.
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
-        var session = await _db.PartyChallengeSessions.AsNoTracking()
-            .FirstAsync(x => x.PartyAlbumLinkId == link.Id, ct);
-        if (session.Mode == PartyPlaybackModes.ChallengeHold && session.ActiveChallengeId is Guid active)
-        {
-            var now = Now;
-            var deadline = Deadline(link);
-            var affected = await _db.PartyChallengeSessions
-                .Where(x => x.Id == session.Id && x.Version == session.Version
-                    && x.Mode == PartyPlaybackModes.ChallengeHold && x.ActiveChallengeId == active)
-                .ExecuteUpdateAsync(setters => setters
-                    .SetProperty(x => x.Mode, PartyPlaybackModes.Media)
-                    .SetProperty(x => x.ActiveChallengeId, (Guid?)null)
-                    .SetProperty(x => x.CompletedCount, x => x.CompletedCount + 1)
-                    .SetProperty(x => x.NextChallengeAt, deadline)
-                    .SetProperty(x => x.Version, x => x.Version + 1)
-                    .SetProperty(x => x.UpdatedAt, now), ct);
-            if (affected == 1)
-            {
-                _db.PartyChallengeCompletions.Add(new PartyChallengeCompletion
-                    { Id = Guid.NewGuid(), PartyAlbumLinkId = link.Id, PartyChallengeId = active, CompletedAt = now });
-                await _db.SaveChangesAsync(ct);
-                _logger.LogInformation(
-                    "party.challenge.completed AlbumId={AlbumId} PartyAlbumLinkId={PartyAlbumLinkId} PlaybackSessionId={PlaybackSessionId} ChallengeId={ChallengeId}",
-                    albumId, link.Id, session.Id, active);
-            }
-        }
-        await tx.CommitAsync(ct);
-        var latest = await _db.PartyChallengeSessions.AsNoTracking()
-            .SingleAsync(x => x.PartyAlbumLinkId == link.Id, ct);
-        return await SnapshotAsync(latest, ownerId, ct);
-    }
+    public Task<PartyPlaybackSnapshotDto?> CompleteActiveAsync(
+        Guid ownerId, Guid albumId, CancellationToken ct = default)
+        => GetSnapshotAsync(ownerId, albumId, ct);
 
     public async Task<Guid?> GuestMediaFileAsync(PartyAccess access, Guid challengeId, CancellationToken ct = default)
     {
@@ -350,83 +251,6 @@ public sealed class PartyChallengeService : IPartyChallengeService
     }
 
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;
-    private DateTime Deadline(PartyAlbumLink link) =>
-        PartyChallengePolicy.NextDeadline(Now, link.MinChallengeIntervalSeconds, link.MaxChallengeIntervalSeconds,
-            Random.Shared.Next(link.MaxChallengeIntervalSeconds - link.MinChallengeIntervalSeconds + 1));
-
-    private async Task<PartyChallengeSession> EnsureSessionAsync(PartyAlbumLink link, CancellationToken ct)
-    {
-        var row = await _db.PartyChallengeSessions.FirstOrDefaultAsync(x => x.PartyAlbumLinkId == link.Id, ct);
-        if (row is not null)
-        {
-            if (row.Mode == PartyPlaybackModes.Media && row.NextChallengeAt is null)
-            {
-                row.NextChallengeAt = Deadline(link);
-                row.Version++;
-                row.UpdatedAt = Now;
-                try
-                {
-                    await _db.SaveChangesAsync(ct);
-                }
-                catch (DbUpdateConcurrencyException)
-                {
-                    _db.ChangeTracker.Clear();
-                    return await ReloadSessionAsync(link.Id, ct);
-                }
-            }
-            return row;
-        }
-        row = new PartyChallengeSession
-        {
-            Id = Guid.NewGuid(), PartyAlbumLinkId = link.Id, Mode = PartyPlaybackModes.Media,
-            NextChallengeAt = Deadline(link), CreatedAt = Now, UpdatedAt = Now,
-        };
-        _db.PartyChallengeSessions.Add(row);
-        try
-        {
-            await _db.SaveChangesAsync(ct);
-            return row;
-        }
-        catch (DbUpdateException)
-        {
-            // Snapshot polling and the first media boundary may arrive together.
-            // The unique link index elects one session; the loser adopts it.
-            _db.ChangeTracker.Clear();
-            return await ReloadSessionAsync(link.Id, ct);
-        }
-    }
-
-    private Task<PartyChallengeSession> ReloadSessionAsync(Guid linkId, CancellationToken ct) =>
-        _db.PartyChallengeSessions.AsNoTracking()
-            .SingleAsync(x => x.PartyAlbumLinkId == linkId, ct);
-
-    private async Task<PartyPlaybackSnapshotDto> SnapshotAsync(PartyChallengeSession session, Guid ownerId, CancellationToken ct)
-    {
-        PartyChallengePresentationDto? active = null;
-        if (session.ActiveChallengeId is Guid id)
-        {
-            var row = await _db.PartyChallenges.AsNoTracking().Where(x => x.Id == id)
-                .Select(x => new
-                {
-                    x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId, x.AlbumId,
-                    x.DurationSeconds, x.VotingMode, x.VoteQuestion,
-                })
-                .FirstOrDefaultAsync(ct);
-            if (row is not null)
-            {
-                var mediaOk = row.MediaFileItemId is Guid mediaId
-                    && await PartyMediaReference.IsEligibleAsync(_db, ownerId, mediaId, ct);
-                active = new PartyChallengePresentationDto(
-                    row.Id, row.Title, row.Body, row.Kind,
-                    // Through the ACTIVITY, not /api/tv/media/{file}: that route
-                    // serves only the television's albums, and an activity's
-                    // picture may be in no album at all.
-                    mediaOk ? $"/api/tv/albums/{row.AlbumId}/party-playback/challenges/{row.Id}/media" : null,
-                    row.DurationSeconds, row.VotingMode, row.VoteQuestion);
-            }
-        }
-        return new PartyPlaybackSnapshotDto(session.Mode, active, session.NextChallengeAt, session.CompletedCount);
-    }
 
     private Task<bool> OwnsAsync(Guid ownerId, Guid albumId, CancellationToken ct) =>
         _db.Albums.AsNoTracking().AnyAsync(x => x.Id == albumId && x.OwnerUserId == ownerId, ct);
@@ -444,11 +268,16 @@ public sealed class PartyChallengeService : IPartyChallengeService
     private async Task<(string AlbumName, int Max, int Used)?> GuestStateAsync(
         PartyAccess access, Guid participantId, Guid linkId, CancellationToken ct)
     {
+        // The SAME availability the preference surface has — the host asked the
+        // room, or nobody is choosing anything. A legacy client reaching this
+        // route on a party whose host never switched priority voting on gets the
+        // generic 404 rather than a list of activities it could never vote for.
         var row = await _db.PartyAlbumLinks.AsNoTracking()
-            .Where(x => x.Id == linkId && x.AlbumId == access.MainAlbumId && x.Enabled && x.GameEnabled)
+            .Where(x => x.Id == linkId && x.AlbumId == access.MainAlbumId && x.Enabled
+                && x.GameEnabled && x.PriorityVotingEnabled)
             .Join(_db.Albums.AsNoTracking(), x => x.AlbumId, a => a.Id,
                 (x, a) => new { a.Name, x.VotesPerGuest }).FirstOrDefaultAsync(ct);
-        if (row is null) return null;
+        if (row is null || !access.Capabilities.Games) return null;
         var used = await _db.PartyChallengeVotes.AsNoTracking()
             .CountAsync(x => x.PartyAlbumLinkId == linkId && x.PartyParticipantId == participantId, ct);
         return (row.Name, row.VotesPerGuest, used);
@@ -463,7 +292,10 @@ public sealed class PartyChallengeService : IPartyChallengeService
     private static bool Valid(PartyChallengeWriteRequest r) =>
         !string.IsNullOrWhiteSpace(r.Title) && r.Title.Trim().Length <= PartyChallengeLimits.MaxTitleLength
         && !string.IsNullOrWhiteSpace(r.Body) && r.Body.Trim().Length <= PartyChallengeLimits.MaxBodyLength
-        && PartyChallengeKinds.IsKnown(r.Kind)
+        // Null means "the composer did not ask", which is now the ordinary case.
+        // A value that IS present still has to be one the domain knows, so an
+        // older client cannot write a category nothing can read back.
+        && (r.Kind is null || PartyChallengeKinds.IsKnown(r.Kind))
         && PartyChallengeLimits.IsValidDuration(r.DurationSeconds)
         // Null means "keep the default", so only a value that is present has to
         // be a mode the runtime can actually run.

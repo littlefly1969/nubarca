@@ -57,7 +57,10 @@ public static class PartyGameRateLimits
     // accommodates well over thirty simultaneous displays on one address.
     public const int DefaultReadPermitsPerAddress = 900;
 
-    // A guest changing their mind every two seconds for a whole minute.
+    // A guest changing their mind every two seconds for a whole minute. It also
+    // carries the pre-game preferences, which cost at most VotesPerGuest taps
+    // (capped at 20) plus a few changes of mind — comfortably inside this, and
+    // in a different part of the evening besides.
     public const int DefaultVotePermitsPerGuest = 30;
 
     // First votes from a large room, before the cookie the response mints.

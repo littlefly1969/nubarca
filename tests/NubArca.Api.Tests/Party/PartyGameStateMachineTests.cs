@@ -51,6 +51,27 @@ public sealed class PartyGameStateMachineTests
         [(PartyGamePhases.Result, PartyGameCommands.Finish, false)] =
             (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.CompleteRound),
 
+        // BACK TO THE PARTY, and out of it again. `return_to_party` resolves the
+        // round the room just saw the outcome of — exactly as next_challenge
+        // does — and is stated for both answers to "is there another activity",
+        // because a host may want the room back with a spent deck. Resuming
+        // starts the next round without completing anything: the one on the way
+        // in was already completed, which is what makes the pause lossless.
+        [(PartyGamePhases.Result, PartyGameCommands.ReturnToParty, true)] =
+            (PartyGamePhases.Intermission, PartyGameStatuses.Live, PartyGameRoundEffect.CompleteRound),
+        [(PartyGamePhases.Result, PartyGameCommands.ReturnToParty, false)] =
+            (PartyGamePhases.Intermission, PartyGameStatuses.Live, PartyGameRoundEffect.CompleteRound),
+
+        [(PartyGamePhases.Intermission, PartyGameCommands.NextChallenge, true)] =
+            (PartyGamePhases.ChallengeReveal, PartyGameStatuses.Live, PartyGameRoundEffect.StartRound),
+        [(PartyGamePhases.Intermission, PartyGameCommands.NextChallenge, false)] =
+            (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.None),
+        // Nothing is running in a pause, so finishing resolves nothing.
+        [(PartyGamePhases.Intermission, PartyGameCommands.Finish, true)] =
+            (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.None),
+        [(PartyGamePhases.Intermission, PartyGameCommands.Finish, false)] =
+            (PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.None),
+
         // The one backwards edge. Stated for BOTH answers to "is there another
         // activity", because the ordinary way to reach `finished` is to run out
         // of them — a restart that needed an unplayed activity would be illegal

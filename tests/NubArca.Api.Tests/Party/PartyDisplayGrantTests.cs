@@ -484,7 +484,7 @@ public sealed class PartyDisplayGrantTests : IDisposable
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
         foreach (var title in new[] { "Uno", "Due" })
             (await owner.PostAsJsonAsync($"/api/albums/{album}/party-challenges", new

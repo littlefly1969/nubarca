@@ -701,7 +701,7 @@ public sealed class TvPartyTakeoverTests : IDisposable
         {
             gameEnabled = enabled, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
     private static async Task AddChallengesAsync(HttpClient owner, Guid album)

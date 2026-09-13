@@ -424,7 +424,7 @@ public sealed class PartyTeardownTests : IDisposable
         {
             gameEnabled = true, minChallengeIntervalSeconds = 300,
             maxChallengeIntervalSeconds = 540, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
         var lobby = await party.Owner.GetFromJsonAsync<JsonElement>(
             $"/api/albums/{party.AlbumId}/party-game");

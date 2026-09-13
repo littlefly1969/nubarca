@@ -69,18 +69,28 @@ public static class TvPartyPresentations
     /// <item>party cannot be shown → <see cref="Unavailable"/></item>
     /// <item>no game switched on, or no game can be played right now → <see cref="Slideshow"/></item>
     /// <item>no game yet, or a game in progress → <see cref="Game"/> (the lobby is the takeover)</item>
+    /// <item>game paused between activities → <see cref="Slideshow"/>, immediately</item>
     /// <item>game finished → <see cref="Game"/> for <see cref="FinishedDwell"/>, then <see cref="Slideshow"/></item>
     /// </list>
     ///
     /// <para>`restart_game` puts the session back in the lobby, which is the
     /// second rule again: the takeover returns with no special case.</para>
+    ///
+    /// <para>The INTERMISSION is the same idea from the other direction, and it
+    /// is deliberately NOT a dwell. A finished game earns its closing card
+    /// because nobody is waiting for anything; a host who has just said "back to
+    /// the party" is standing in front of a room expecting the music, so the
+    /// screen changes on the next poll. Nothing is written either way — the
+    /// phase is the game's, and this only reads it.</para>
     /// </summary>
     public static string Decide(
         bool partyShowable, bool gameEnabled, bool gamesPermitted,
-        string? gameStatus, DateTime? finishedAt, DateTime now)
+        string? gameStatus, DateTime? finishedAt, DateTime now,
+        string? gamePhase = null)
     {
         if (!partyShowable) return Unavailable;
         if (!gameEnabled || !gamesPermitted) return Slideshow;
+        if (gamePhase == PartyGamePhases.Intermission) return Slideshow;
         if (gameStatus != PartyGameStatuses.Finished) return Game;
         return finishedAt is DateTime at && now < at + FinishedDwell ? Game : Slideshow;
     }

@@ -37,7 +37,11 @@ public sealed record AlbumPartyStatusDto(
     int MinChallengeIntervalSeconds = PartyChallengeDefaults.MinIntervalSeconds,
     int MaxChallengeIntervalSeconds = PartyChallengeDefaults.MaxIntervalSeconds,
     int VotesPerGuest = PartyChallengeDefaults.VotesPerGuest,
-    int? MaxChallengesPerSession = null);
+    int? MaxChallengesPerSession = null,
+    // Whether the guests are asked which activities they would like to see,
+    // before the match starts. Off by default, which is what every party before
+    // the column meant.
+    bool PriorityVotingEnabled = false);
 
 // Derived public URLs for an active party link (relative, e.g. "/party/{token}"
 // and "/party/{token}/upload"). Never a token hash. UploadUrl is null when the
@@ -371,7 +375,11 @@ public sealed record PartyChallengeReorderRequest(IReadOnlyList<Guid>? Challenge
 
 public sealed record PartyGameSettingsRequest(
     bool GameEnabled, int MinChallengeIntervalSeconds, int MaxChallengeIntervalSeconds,
-    int VotesPerGuest, int? MaxChallengesPerSession);
+    int VotesPerGuest, int? MaxChallengesPerSession,
+    // Nullable so a client written before pre-game preferences existed keeps
+    // whatever the host already configured rather than silently switching them
+    // off on its next save.
+    bool? PriorityVotingEnabled = null);
 
 public sealed record PartyGuestChallengeDto(
     Guid Id, string Title, string Body, string Kind, string? MediaUrl, bool Voted);

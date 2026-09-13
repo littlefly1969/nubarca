@@ -159,7 +159,7 @@ public sealed class PartyGameVotingTests : IDisposable
         {
             gameEnabled = false, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
         // Not a conflict: there is no game here any more, which is the same
@@ -355,6 +355,10 @@ public sealed class PartyGameVotingTests : IDisposable
         [
             "albumName", "status", "phase", "version", "roundNumber",
             "totalChallenges", "phaseEndsAt", "challenge", "roundId", "voting", "myVote",
+            // The pre-game preference surface. It is a guest-visible contract
+            // like every other field here, and it carries no vote counts: a
+            // guest choosing must not be told what everybody else picked first.
+            "preferences",
         ];
         string[] allowedChallenge =
         [
@@ -362,6 +366,8 @@ public sealed class PartyGameVotingTests : IDisposable
             "durationSeconds", "votingMode", "voteQuestion",
         ];
         string[] allowedVoting = ["received", "eligible", "yes", "no", "passed"];
+        string[] allowedPreferences = ["open", "votesPerGuest", "votesUsed", "votesRemaining", "items"];
+        string[] allowedPreferenceItem = ["id", "title", "body", "mediaUrl", "selected"];
 
         var party = await OpenVotingAsync();
         var guest = _factory.CreateClient();
@@ -370,6 +376,10 @@ public sealed class PartyGameVotingTests : IDisposable
         Assert.Equal(allowed.Order(), Names(snapshot).Order());
         Assert.Equal(allowedChallenge.Order(), Names(snapshot.GetProperty("challenge")).Order());
         Assert.Equal(allowedVoting.Order(), Names(snapshot.GetProperty("voting")).Order());
+        var preferences = snapshot.GetProperty("preferences");
+        Assert.Equal(allowedPreferences.Order(), Names(preferences).Order());
+        Assert.Equal(allowedPreferenceItem.Order(),
+            Names(preferences.GetProperty("items")[0]).Order());
 
         // And the same after the host reveals, when the snapshot says the most
         // it will ever say.
@@ -397,7 +407,7 @@ public sealed class PartyGameVotingTests : IDisposable
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30, maxChallengeIntervalSeconds = 60,
-            votesPerGuest = 3, maxChallengesPerSession = (int?)null,
+            votesPerGuest = 3, maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
         for (var i = 0; i < challenges; i++)
             (await owner.PostAsJsonAsync($"/api/albums/{album}/party-challenges", new

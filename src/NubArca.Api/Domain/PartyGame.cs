@@ -107,11 +107,36 @@ public static class PartyGamePhases
     public const string VotingOpen = "voting_open";
     public const string VotingClosed = "voting_closed";
     public const string Result = "result";
+
+    /// <summary>
+    /// The game is alive and nothing is being played: the host has sent the room
+    /// back to the party between two activities.
+    ///
+    /// <para>It is deliberately NOT <see cref="Finished"/>. A finished game is
+    /// over — its television dwells on the closing card and then leaves, and the
+    /// only way back is <c>restart_game</c>, which DISCARDS the match. An
+    /// intermission keeps every round that has been played, keeps the plan the
+    /// host is still editing, and resumes with <c>next_challenge</c>. The
+    /// television returns to the party slideshow because the presentation
+    /// projection says so, not because the game ended.</para>
+    /// </summary>
+    public const string Intermission = "intermission";
+
     public const string Finished = "finished";
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(
-        [Lobby, ChallengeReveal, ChallengeActive, VotingOpen, VotingClosed, Result, Finished],
+        [Lobby, ChallengeReveal, ChallengeActive, VotingOpen, VotingClosed, Result,
+            Intermission, Finished],
         StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether the room's screen belongs to the GAME in this phase. False in the
+    /// lobby-before-the-first-match sense is deliberately not the rule here: the
+    /// lobby IS the takeover (it shows the join code). Only an intermission and
+    /// a match that is over hand the screen back, and the second does so after a
+    /// dwell the projection owns.
+    /// </summary>
+    public static bool HoldsTheScreen(string phase) => phase != Intermission;
 
     /// <summary>
     /// Phases in which an activity is on screen, and therefore the only phases
@@ -151,6 +176,18 @@ public static class PartyGameCommands
     public const string Finish = "finish";
 
     /// <summary>
+    /// Give the room back to the party between two activities.
+    ///
+    /// <para>Legal only from <c>result</c>, because it RESOLVES the round the
+    /// room just saw the outcome of: an intermission is a pause between
+    /// activities, never a way to leave one unfinished. <c>next_challenge</c>
+    /// from the intermission resumes exactly where <c>next_challenge</c> from
+    /// the result would have gone, which is what makes it a pause rather than a
+    /// second way to end a game.</para>
+    /// </summary>
+    public const string ReturnToParty = "return_to_party";
+
+    /// <summary>
     /// Play the same party again. Legal only from <c>finished</c>, and the only
     /// command whose effect is to DISCARD rather than to advance: the rounds and
     /// votes of the game that just ended go, and the session returns to its
@@ -165,7 +202,7 @@ public static class PartyGameCommands
 
     public static readonly IReadOnlySet<string> All = new HashSet<string>(
         [Start, StartChallenge, OpenVoting, CloseVoting, RevealResult, NextChallenge, SkipChallenge,
-            Finish, RestartGame],
+            Finish, RestartGame, ReturnToParty],
         StringComparer.Ordinal);
 
     public static bool IsKnown(string? value) => value is not null && All.Contains(value);
@@ -211,6 +248,66 @@ public static class PartyGameVoteValues
 
     public static readonly IReadOnlySet<string> All =
         new HashSet<string>([Yes, No], StringComparer.Ordinal);
+
+    public static bool IsKnown(string? value) => value is not null && All.Contains(value);
+}
+
+/// <summary>
+/// One activity the host has decided NOT to play in this match.
+///
+/// <para>It is a decision about the MATCH, not about the deck. The activity
+/// keeps its <see cref="PartyChallenge.IsEnabled"/>, its position and — the
+/// point of the row existing at all — every guest preference cast for it: the
+/// room said it wanted this, and the host deciding there is no time for it
+/// tonight does not unsay that. Deleting the preferences would destroy the one
+/// piece of evidence the exclusion is a judgement about.</para>
+///
+/// <para>Keyed on the SESSION rather than the link, because "this match" is
+/// what a session is. A restart discards it with the rounds and lets the host
+/// plan the replay from a clean deck.</para>
+/// </summary>
+public sealed class PartyGameExclusion
+{
+    public Guid Id { get; set; }
+    public Guid PartyGameSessionId { get; set; }
+    public Guid PartyChallengeId { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Where one activity stands in the match, as the control room reads it.
+/// Wire values, like every other Party Game vocabulary.
+/// </summary>
+public static class PartyGamePlanStates
+{
+    /// The room has already seen it — completed or abandoned. Immutable.
+    public const string Played = "played";
+
+    /// It is on the screen right now. Immutable.
+    public const string Current = "current";
+
+    /// Still to come, and the only state the host may reorder or exclude.
+    public const string Remaining = "remaining";
+}
+
+/// <summary>
+/// The host's PLANNING vocabulary — what to play next, and what not to play at
+/// all tonight. Separate from <see cref="PartyGameCommands"/> because these move
+/// no phase: they edit the plan the phase-advancing commands then walk.
+/// </summary>
+public static class PartyGamePlanActions
+{
+    /// Put one remaining activity at a position among the remaining ones.
+    public const string Move = "move";
+
+    /// Do not play it in this match. Reversible, and it destroys no preference.
+    public const string Exclude = "exclude";
+
+    /// Put an excluded activity back into the match.
+    public const string Include = "include";
+
+    public static readonly IReadOnlySet<string> All =
+        new HashSet<string>([Move, Exclude, Include], StringComparer.Ordinal);
 
     public static bool IsKnown(string? value) => value is not null && All.Contains(value);
 }

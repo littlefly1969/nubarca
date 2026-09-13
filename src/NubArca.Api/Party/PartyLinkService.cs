@@ -221,7 +221,7 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.MaxMessagesPerParticipant,
                 p.GameEnabled, p.MinChallengeIntervalSeconds,
                 p.MaxChallengeIntervalSeconds, p.VotesPerGuest,
-                p.MaxChallengesPerSession,
+                p.MaxChallengesPerSession, p.PriorityVotingEnabled,
             })
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -249,7 +249,10 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.MinChallengeIntervalSeconds ?? PartyChallengeDefaults.MinIntervalSeconds,
             active?.MaxChallengeIntervalSeconds ?? PartyChallengeDefaults.MaxIntervalSeconds,
             active?.VotesPerGuest ?? PartyChallengeDefaults.VotesPerGuest,
-            active?.MaxChallengesPerSession);
+            active?.MaxChallengesPerSession,
+            // Same rule as every other sub-switch: an inert link is not holding
+            // a party to anything.
+            partyMode && active!.PriorityVotingEnabled);
     }
 
     public async Task<bool> UpdateSlideshowSettingsAsync(
@@ -295,6 +298,7 @@ public sealed class PartyLinkService : IPartyLinkService
         Guid ownerUserId, Guid albumId, bool gameEnabled,
         int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
         int votesPerGuest, int? maxChallengesPerSession,
+        bool? priorityVotingEnabled = null,
         CancellationToken cancellationToken = default)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
@@ -310,6 +314,9 @@ public sealed class PartyLinkService : IPartyLinkService
         link.MaxChallengeIntervalSeconds = maxChallengeIntervalSeconds;
         link.VotesPerGuest = votesPerGuest;
         link.MaxChallengesPerSession = maxChallengesPerSession;
+        // Omitted means "unchanged": a client that predates pre-game
+        // preferences must not switch them off by saving the rest of the form.
+        if (priorityVotingEnabled is bool priority) link.PriorityVotingEnabled = priority;
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
         if (!gameEnabled)
@@ -587,6 +594,9 @@ public sealed class PartyLinkService : IPartyLinkService
     private string DeriveToken(Guid linkId) => Derive(linkId.ToByteArray());
 
     public string DeriveViewToken(Guid linkId) => DeriveToken(linkId);
+
+    public (string ViewTokenHash, string UploadTokenHash) MintTokenHashes(Guid linkId) =>
+        (HashToken(DeriveToken(linkId)), HashToken(DeriveUploadToken(linkId)));
 
     // upload token = HMAC over linkId ++ "upload" — a DISTINCT high-entropy value
     // from the view token for the same link, so the two are independently

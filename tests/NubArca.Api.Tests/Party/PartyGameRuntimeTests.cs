@@ -67,7 +67,10 @@ public sealed class PartyGameRuntimeTests : IDisposable
         Assert.Equal("voting_closed", s.GetProperty("phase").GetString());
         s = await CommandAsync(owner, album, "reveal_result", 4);
         Assert.Equal("result", s.GetProperty("phase").GetString());
-        Assert.Equal(["next_challenge", "finish"], Commands(s));
+        // Three at a result, in the order a control room should offer them: the
+        // next activity, the pause that hands the room back to the party, and
+        // then the one that ends the evening.
+        Assert.Equal(["next_challenge", "return_to_party", "finish"], Commands(s));
 
         s = await CommandAsync(owner, album, "next_challenge", 5);
         Assert.Equal("challenge_reveal", s.GetProperty("phase").GetString());
@@ -429,7 +432,7 @@ public sealed class PartyGameRuntimeTests : IDisposable
         {
             gameEnabled = enabled, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
     private static async Task<string> ViewTokenAsync(HttpClient owner, Guid album)

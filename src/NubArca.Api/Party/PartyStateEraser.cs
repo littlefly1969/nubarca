@@ -73,6 +73,11 @@ public sealed class PartyStateEraser : IPartyStateEraser
         await _db.PartyGameRounds
             .Where(r => gameSessionIds.Contains(r.PartyGameSessionId))
             .ExecuteDeleteAsync(cancellationToken);
+        // The host's "not tonight" decisions. They name a CHALLENGE, so they go
+        // before the deck is deleted below, for the same reason a round does.
+        await _db.PartyGameExclusions
+            .Where(e => gameSessionIds.Contains(e.PartyGameSessionId))
+            .ExecuteDeleteAsync(cancellationToken);
         await _db.PartyGameSessions
             .Where(g => gameSessionIds.Contains(g.Id))
             .ExecuteDeleteAsync(cancellationToken);
