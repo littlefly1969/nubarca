@@ -73,11 +73,22 @@ public interface IPartyLinkService
         int? maxMessagesPerParticipant,
         CancellationToken cancellationToken = default);
 
+    // `priorityVotingEnabled` is nullable for the same reason every other
+    // optional settings field is: omitted means unchanged, so a client written
+    // before pre-game preferences existed cannot switch them off by saving the
+    // rest of the form.
     Task<bool> UpdateGameSettingsAsync(
         Guid ownerUserId, Guid albumId, bool gameEnabled,
         int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds,
         int votesPerGuest, int? maxChallengesPerSession,
+        bool? priorityVotingEnabled = null,
         CancellationToken cancellationToken = default);
+
+    // The STORED DIGESTS for a brand-new link id: both tokens, derived and
+    // hashed by the one service that holds the secret. It returns hashes rather
+    // than values on purpose — a raw token is never persisted and never needs to
+    // leave this service, so a caller minting a link never handles one.
+    (string ViewTokenHash, string UploadTokenHash) MintTokenHashes(Guid linkId);
 
     // Reproduces the public VIEW token for a link, which is what lets an
     // owner-authorized surface name a guest or television URL without the raw

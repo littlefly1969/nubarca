@@ -380,7 +380,10 @@ public sealed class PartyDisplayTakeoverPostgresTests : IAsyncLifetime
             throw new NotSupportedException();
         public Task<bool> UpdateGameSettingsAsync(Guid ownerUserId, Guid albumId, bool gameEnabled,
             int minChallengeIntervalSeconds, int maxChallengeIntervalSeconds, int votesPerGuest,
-            int? maxChallengesPerSession, CancellationToken cancellationToken = default) =>
+            int? maxChallengesPerSession, bool? priorityVotingEnabled = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public (string ViewTokenHash, string UploadTokenHash) MintTokenHashes(Guid linkId) =>
             throw new NotSupportedException();
         public string DeriveViewToken(Guid linkId) => throw new NotSupportedException();
         public Task<PartyAccess?> ResolvePublicAsync(string token, CancellationToken cancellationToken = default) =>

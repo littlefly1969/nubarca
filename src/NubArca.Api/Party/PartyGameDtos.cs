@@ -50,6 +50,32 @@ public sealed record PartyGameVotingDto(
     int? No = null,
     bool? Passed = null);
 
+/// <summary>
+/// One activity as the host PLANNING the evening sees it: where it sits, what
+/// the room asked for, and whether it is still to come.
+///
+/// <para><c>State</c> is <see cref="PartyGamePlanStates"/>, and it is the whole
+/// authority over what may be edited: <c>played</c> and <c>current</c> are
+/// history and the present, and the control room offers no control over either.
+/// <c>Position</c> is 1-based among the REMAINING activities and is null for
+/// the other two, because "third in the queue" is not a thing a finished round
+/// has.</para>
+///
+/// <para><c>PreferenceVotes</c> is what the room said before the match. It is
+/// reported for every entry, including an excluded one: a host who has decided
+/// not to play something should still be able to see what they are setting
+/// aside, and the number is evidence rather than a score.</para>
+/// </summary>
+public sealed record PartyGamePlanEntryDto(
+    Guid Id,
+    string Title,
+    string? MediaUrl,
+    string State,
+    int? Position,
+    bool IsEnabled,
+    bool Excluded,
+    int PreferenceVotes);
+
 public sealed record PartyGameSnapshotDto(
     Guid AlbumId,
     Guid? SessionId,
@@ -67,6 +93,16 @@ public sealed record PartyGameSnapshotDto(
     PartyGameChallengeDto? NextChallenge,
     IReadOnlyList<string> AvailableCommands,
     PartyGameVotingDto? Voting = null,
+    // --- The plan, and whether the room was asked ---
+    // The whole deck in play order with its state, the host's exclusions and
+    // the preferences the room cast. Always present (empty for an empty deck),
+    // because a control room that had to ask a second endpoint what it is
+    // conducting would render the evening in two reads that can disagree.
+    IReadOnlyList<PartyGamePlanEntryDto>? Plan = null,
+    bool PriorityVotingEnabled = false,
+    // Whether the guests may still change their preferences. The host reads it
+    // to know whether the numbers beside each activity are final.
+    bool PreferencesOpen = false,
     // --- What the room looks like from the control room ---
     // How many guests are in it, whether a screen is showing the game, and
     // where the two surfaces live. All owner-facing, none of it derivable
@@ -104,7 +140,12 @@ public sealed record PartyGamePublicSnapshotDto(
     PartyGameVotingDto? Voting = null,
     // This caller's own current answer, when this caller has one. Null for a
     // television, which holds no participant cookie and is never given one.
-    string? MyVote = null);
+    string? MyVote = null,
+    // The pre-game preference surface, or null when the host did not ask the
+    // room. It travels WITH the snapshot rather than on an endpoint of its own
+    // because a phone in the lobby needs both halves — what the game is doing,
+    // and what it may still choose — and two reads can disagree about which.
+    PartyGamePreferencesDto? Preferences = null);
 
 public enum PartyGameVoteError
 {
@@ -168,7 +209,28 @@ public enum PartyGameCommandError
 
     /// `start` with an empty deck.
     NoChallenges,
+
+    /// <summary>
+    /// A planning action that cannot be carried out: an unknown action, an
+    /// activity that is not in this deck, or one the host may not move —
+    /// anything already played, and whatever is on the screen right now. The
+    /// past and the present are not plannable, and refusing out loud is better
+    /// than silently reordering around them.
+    /// </summary>
+    InvalidPlan,
 }
+
+/// <summary>
+/// One edit to the plan: move a remaining activity, or decide it is not being
+/// played tonight.
+///
+/// <para>It quotes <c>ExpectedVersion</c> like every other owner command and
+/// spends one, because the plan IS the authoritative order the game will walk —
+/// two hosts reordering the same deck from two phones must not silently
+/// overwrite one another any more than two hosts advancing a phase may.</para>
+/// </summary>
+public sealed record PartyGamePlanRequest(
+    string? Action, Guid? ChallengeId, int? Position, int? ExpectedVersion);
 
 /// <summary>
 /// The outcome of an owner command. A refusal still carries the CURRENT

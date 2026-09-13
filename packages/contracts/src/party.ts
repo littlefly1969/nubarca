@@ -54,8 +54,14 @@ export interface AlbumPartyStatus {
   gameEnabled?: boolean;
   minChallengeIntervalSeconds?: number;
   maxChallengeIntervalSeconds?: number;
+  /** How many activities ONE guest may put a pre-game preference on. */
   votesPerGuest?: number;
   maxChallengesPerSession?: number | null;
+  /** Whether the guests are asked which activities they would like to see,
+   * before the match starts. Off by default, and advisory: the preferences
+   * inform the host's planning and choose nothing by themselves. Optional for
+   * a backend that predates them. */
+  priorityVotingEnabled?: boolean;
 }
 
 // ── Validation ranges (§33, §34) ───────────────────────────────────────────
@@ -124,6 +130,10 @@ export interface PartyGameSettings {
   votesPerGuest: number;
   /** null means no cap for the session. */
   maxChallengesPerSession: number | null;
+  /** Whether the guests are asked which activities they would like to see.
+   * Omitted means unchanged, so a client that predates pre-game preferences
+   * cannot switch them off by saving the rest of the form. */
+  priorityVotingEnabled?: boolean;
 }
 
 export function invalidGameFields(s: PartyGameSettings): string[] {

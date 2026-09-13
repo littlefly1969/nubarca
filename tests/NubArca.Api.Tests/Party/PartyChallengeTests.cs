@@ -132,39 +132,58 @@ public sealed class PartyChallengeTests : IDisposable
             $"/api/party/{ViewToken(aStatus)}/challenges/{foreign}/vote", null)).StatusCode);
     }
 
+    /// <summary>
+    /// THE OLD AUTOMATIC EFFECT IS GONE, and this is the test that says so.
+    ///
+    /// <para>A guest preference used to select an activity, freeze the party
+    /// slideshow on it and wait for the remote's NEXT. A preference is now
+    /// ADVISORY: it tells the host what the room wants and chooses nothing. The
+    /// television therefore keeps playing photographs through every boundary,
+    /// however many preferences the room has cast, and no hold row, no
+    /// completion row and no interruption is written.</para>
+    ///
+    /// <para>The endpoints answer rather than 404 because an installed TV APK
+    /// calls them on every photograph — retiring the behaviour is not the same
+    /// as breaking the client.</para>
+    /// </summary>
     [Fact]
-    public async Task Boundary_holds_reconnects_and_next_completes_once()
+    public async Task A_preference_never_interrupts_the_slideshow()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var album = await CreateAlbumAsync(owner, "Festa");
-        await EnableAsync(owner, album);
+        var status = await EnableAsync(owner, album);
         await EnableGameAsync(owner, album, 3);
         var challenge = await CreateChallengeAsync(owner, album, "Canta");
         var cookie = await PairTvAsync(owner);
 
+        // The room says it wants this one, as loudly as it can.
+        var guest = _factory.CreateClient();
+        var token = ViewToken(status);
+        (await guest.GetAsync($"/api/party/{token}/challenges")).EnsureSuccessStatusCode();
+        (await guest.PutAsync($"/api/party/{token}/challenges/{challenge}/vote", null))
+            .EnsureSuccessStatusCode();
+
         var initial = await TvAsync(cookie, HttpMethod.Get, $"/api/tv/albums/{album}/party-playback");
         Assert.Equal("media", initial.GetProperty("mode").GetString());
-        using (var scope = _factory.Services.CreateScope())
+
+        // Every boundary, and then NEXT: the slideshow never leaves `media`.
+        foreach (var _ in Enumerable.Range(0, 3))
         {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var session = await db.PartyChallengeSessions.SingleAsync();
-            session.NextChallengeAt = DateTime.UtcNow.AddSeconds(-1);
-            await db.SaveChangesAsync();
+            var boundary = await TvAsync(
+                cookie, HttpMethod.Post, $"/api/tv/albums/{album}/party-playback/boundary");
+            Assert.Equal("media", boundary.GetProperty("mode").GetString());
+            Assert.Equal(JsonValueKind.Null, boundary.GetProperty("activeChallenge").ValueKind);
         }
-
-        var hold = await TvAsync(cookie, HttpMethod.Post, $"/api/tv/albums/{album}/party-playback/boundary");
-        Assert.Equal("challenge_hold", hold.GetProperty("mode").GetString());
-        Assert.Equal(challenge, hold.GetProperty("activeChallenge").GetProperty("id").GetGuid());
-        var reconnect = await TvAsync(cookie, HttpMethod.Get, $"/api/tv/albums/{album}/party-playback");
-        Assert.Equal(challenge, reconnect.GetProperty("activeChallenge").GetProperty("id").GetGuid());
-
         var next = await TvAsync(cookie, HttpMethod.Post, $"/api/tv/albums/{album}/party-playback/next");
         Assert.Equal("media", next.GetProperty("mode").GetString());
-        var duplicate = await TvAsync(cookie, HttpMethod.Post, $"/api/tv/albums/{album}/party-playback/next");
-        Assert.Equal(1, duplicate.GetProperty("completedCount").GetInt32());
+
+        // Nothing was written on the way: no hold session, no completion — and
+        // the preference itself is untouched, because it was never spent.
         using var verify = _factory.Services.CreateScope();
-        Assert.Equal(1, await verify.ServiceProvider.GetRequiredService<AppDbContext>()
-            .PartyChallengeCompletions.CountAsync());
+        var db = verify.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Empty(await db.PartyChallengeSessions.ToListAsync());
+        Assert.Empty(await db.PartyChallengeCompletions.ToListAsync());
+        Assert.Equal(1, await db.PartyChallengeVotes.CountAsync());
     }
 
     private static async Task<Guid> CreateAlbumAsync(HttpClient owner, string name)
@@ -183,13 +202,16 @@ public sealed class PartyChallengeTests : IDisposable
         await PartyTestHost.StartAsync(owner, settings);
         return settings;
     }
-    private static async Task EnableGameAsync(HttpClient owner, Guid album, int votes)
+    // The pre-game preference surface is what these guest routes ARE now, so
+    // every one of them needs the host to have asked the room.
+    private static async Task EnableGameAsync(
+        HttpClient owner, Guid album, int votes, bool priorityVoting = true)
     {
         var response = await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = votes,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = priorityVoting,
         });
         response.EnsureSuccessStatusCode();
     }

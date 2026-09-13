@@ -61,4 +61,48 @@ public interface IPartyGameService
     Task<PartyGameVoteResult> VoteAsync(
         PartyAccess access, Guid? participantId, Guid? roundId, string? value,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Edits the host's PLAN: moves one activity that is still to come, or
+    /// takes it out of this match.
+    ///
+    /// <para>It is an owner command like any other — it quotes a version, it
+    /// refuses a stale caller with the current snapshot, and it spends a
+    /// version when it changes anything — because the order the game will walk
+    /// is authoritative state and not a client's preference. It moves no phase:
+    /// a host may plan the rest of the evening from the lobby, from an
+    /// intermission, or while an activity is on the screen.</para>
+    ///
+    /// <para>What it may NOT touch is the past and the present. A played round
+    /// is what the room experienced and a current one is on the screen; both are
+    /// <see cref="PartyGameCommandError.InvalidPlan"/> rather than quietly
+    /// skipped, so a control room that offered the control learns it was wrong.</para>
+    /// </summary>
+    Task<PartyGameCommandResult> PlanAsync(
+        Guid ownerUserId, Guid albumId, PartyGamePlanRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The guest's pre-game preferences. Null when this party does not offer
+    /// them at all — the game is off, or the host did not ask the room.
+    /// </summary>
+    /// <param name="participantId">
+    /// The caller's own identity when it has one. A caller without one still
+    /// sees the activities (there is nothing private about the host's deck) and
+    /// simply has nothing selected.
+    /// </param>
+    Task<PartyGamePreferencesDto?> GetPreferencesAsync(
+        PartyAccess access, Guid? participantId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Adds or removes one preference, or refuses it.
+    ///
+    /// <para>Advisory by construction: it writes a
+    /// <see cref="Domain.PartyChallengeVote"/> and claims a slot of the guest's
+    /// budget, and it touches no session, no round, no phase and no result.
+    /// There is no path from this method to the game moving.</para>
+    /// </summary>
+    Task<PartyGamePreferenceResult> SetPreferenceAsync(
+        PartyAccess access, Guid? participantId, Guid? challengeId, bool selected,
+        CancellationToken cancellationToken = default);
 }

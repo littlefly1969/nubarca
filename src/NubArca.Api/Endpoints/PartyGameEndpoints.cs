@@ -112,6 +112,38 @@ public static class PartyGameEndpoints
             return Results.Ok(result.Snapshot);
         }).WithName("ExecutePartyGameCommand").RequirePartyGames();
 
+        // Owner: one edit to the PLAN — move a remaining activity, or decide it
+        // is not being played tonight.
+        //
+        // A sibling of the command route rather than part of it: a command moves
+        // the game's PHASE and a plan edit moves the order it will walk, and
+        // collapsing the two into one verb would give the control room a
+        // vocabulary in which "next" and "third from now" are the same kind of
+        // word. It quotes a version and refuses like every other owner write.
+        app.MapPost("/api/albums/{albumId:guid}/party-game/plan", async (
+            Guid albumId, HttpContext httpContext,
+            [FromServices] IPartyGameService game,
+            [FromBody] PartyGamePlanRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            if (body?.Action is null || body.ChallengeId is null || body.ExpectedVersion is null)
+                return Results.BadRequest();
+            var ownerId = httpContext.GetCurrentUserId()!.Value;
+            var result = await game.PlanAsync(ownerId, albumId, body, cancellationToken);
+            if (result.Error is PartyGameCommandError error)
+            {
+                return error switch
+                {
+                    PartyGameCommandError.NotFound => Results.NotFound(),
+                    PartyGameCommandError.UnknownCommand => Results.BadRequest(),
+                    _ => Results.Json(new PartyGameCommandRefusalDto(
+                        Code(error), result.Snapshot), statusCode: StatusCodes.Status409Conflict),
+                };
+            }
+            return Results.Ok(result.Snapshot);
+        }).WithName("PlanPartyGame").RequirePartyGames();
+
         // Public: what a guest phone or a television may know. Anonymous,
         // token-scoped, re-validated on every request, and rate limited on the
         // same policy as the rest of the public party reads.
@@ -167,6 +199,48 @@ public static class PartyGameEndpoints
             var snapshot = await game.GetPublicSnapshotAsync(access, participantId, false, cancellationToken);
             return snapshot is null ? Results.NotFound() : Results.Ok(WithTokenMedia(snapshot, token));
         }).WithName("JoinPartyGame").RequireRateLimiting(ReadPolicy);
+
+        // One preference, added or removed. BEFORE the match, never during it.
+        //
+        // It is a different endpoint from the vote for the same reason it is a
+        // different feature: this one names an ACTIVITY and says "I would like
+        // to see this", and the vote names a ROUND and says "they did it". They
+        // share the anonymous participant and nothing else — no budget, no
+        // table, no phase and no consequence — and one endpoint taking both
+        // would be the first step back towards them feeding each other.
+        //
+        // Identity is resolved, never minted, exactly as the vote does it.
+        app.MapPost("/api/party/{token}/game/preferences", async (
+            string token, HttpContext httpContext,
+            [FromServices] IPartyLinkService party,
+            [FromServices] IPartyParticipantService participants,
+            [FromServices] IPartyGameService game,
+            [FromBody] PartyGamePreferenceRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            if (body?.ChallengeId is null || body.Selected is null) return Results.BadRequest();
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null || !access.Capabilities.Games) return Results.NotFound();
+
+            var participantId = await PartyGuestSession.ResolveAsync(
+                httpContext, participants, access.PartyAlbumLinkId, cancellationToken);
+            var result = await game.SetPreferenceAsync(
+                access, participantId, body.ChallengeId, body.Selected.Value, cancellationToken);
+            if (result.Error is PartyGamePreferenceError error)
+            {
+                return error switch
+                {
+                    PartyGamePreferenceError.NotFound => Results.NotFound(),
+                    _ => Results.Json(new PartyGamePreferenceRefusalDto(
+                            PreferenceCode(error),
+                            result.Preferences is null
+                                ? null : WithTokenPreferenceMedia(result.Preferences, token)),
+                        statusCode: StatusCodes.Status409Conflict),
+                };
+            }
+            return Results.Ok(WithTokenPreferenceMedia(result.Preferences!, token));
+        }).WithName("SetPartyGamePreference").RequireRateLimiting(VotePolicy);
 
         // One tap. The body says which round it is answering and what it says;
         // everything else — who is voting, whether voting is open, whether this
@@ -226,14 +300,34 @@ public static class PartyGameEndpoints
     private static PartyGamePublicSnapshotDto WithTokenMedia(
         PartyGamePublicSnapshotDto snapshot, string token)
     {
-        if (snapshot.Challenge?.MediaUrl is null) return snapshot;
+        var addressed = snapshot.Preferences is null
+            ? snapshot
+            : snapshot with { Preferences = WithTokenPreferenceMedia(snapshot.Preferences, token) };
+        if (addressed.Challenge?.MediaUrl is null) return addressed;
         var enc = Uri.EscapeDataString(token);
-        return snapshot with
+        return addressed with
         {
-            Challenge = snapshot.Challenge with
+            Challenge = addressed.Challenge with
             {
-                MediaUrl = $"/api/party/{enc}/challenges/{snapshot.Challenge.Id}/media",
+                MediaUrl = $"/api/party/{enc}/challenges/{addressed.Challenge.Id}/media",
             },
+        };
+    }
+
+    /// The same rewrite for the pre-game list: the service never learns which
+    /// token asked, and the address is built here against the caller's own.
+    private static PartyGamePreferencesDto WithTokenPreferenceMedia(
+        PartyGamePreferencesDto preferences, string token)
+    {
+        if (preferences.Items.All(x => x.MediaUrl is null)) return preferences;
+        var enc = Uri.EscapeDataString(token);
+        return preferences with
+        {
+            Items = preferences.Items
+                .Select(x => x.MediaUrl is null
+                    ? x
+                    : x with { MediaUrl = $"/api/party/{enc}/challenges/{x.Id}/media" })
+                .ToList(),
         };
     }
 
@@ -261,6 +355,16 @@ public static class PartyGameEndpoints
         PartyGameCommandError.VersionConflict => "version_conflict",
         PartyGameCommandError.IllegalTransition => "illegal_transition",
         PartyGameCommandError.NoChallenges => "no_challenges",
+        PartyGameCommandError.InvalidPlan => "invalid_plan",
+        _ => "conflict",
+    };
+
+    private static string PreferenceCode(PartyGamePreferenceError error) => error switch
+    {
+        PartyGamePreferenceError.Closed => "preferences_closed",
+        PartyGamePreferenceError.NotJoined => "not_joined",
+        PartyGamePreferenceError.UnknownChallenge => "unknown_challenge",
+        PartyGamePreferenceError.LimitReached => "limit_reached",
         _ => "conflict",
     };
 
@@ -280,3 +384,8 @@ public sealed record PartyGameCommandRefusalDto(string Code, PartyGameSnapshotDt
 
 /// A refused vote, with the state it was measured against.
 public sealed record PartyGameVoteRefusalDto(string Code, PartyGamePublicSnapshotDto? Snapshot);
+
+/// A refused preference, with the surface it was measured against — so a phone
+/// that tapped one too many, or tapped after the host started, re-renders
+/// correctly instead of showing an error and staying wrong.
+public sealed record PartyGamePreferenceRefusalDto(string Code, PartyGamePreferencesDto? Preferences);

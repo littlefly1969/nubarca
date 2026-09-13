@@ -122,6 +122,10 @@ public class AppDbContext : DbContext
     public DbSet<PartyGameSession> PartyGameSessions => Set<PartyGameSession>();
     public DbSet<PartyGameRound> PartyGameRounds => Set<PartyGameRound>();
     public DbSet<PartyGameVote> PartyGameVotes => Set<PartyGameVote>();
+
+    // Activities the host has taken out of THIS match. The deck keeps them; the
+    // guests' preferences for them are deliberately kept too.
+    public DbSet<PartyGameExclusion> PartyGameExclusions => Set<PartyGameExclusion>();
     public DbSet<PartyDisplayGrant> PartyDisplayGrants => Set<PartyDisplayGrant>();
 
     // Short-lived anonymous "find your face" searches within a party album, and

@@ -74,7 +74,7 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
                 l.GameEnabled,
                 Game = _db.PartyGameSessions.AsNoTracking()
                     .Where(s => s.PartyAlbumLinkId == l.Id)
-                    .Select(s => new { s.Status, s.FinishedAt })
+                    .Select(s => new { s.Status, s.Phase, s.FinishedAt })
                     .FirstOrDefault(),
             })
             .FirstOrDefaultAsync(cancellationToken);
@@ -86,7 +86,8 @@ public sealed class TvPartyPresentationService : ITvPartyPresentationService
             gamesPermitted: access.Capabilities.Games,
             gameStatus: link.Game?.Status,
             finishedAt: link.Game?.FinishedAt,
-            now: _clock.GetUtcNow().UtcDateTime);
+            now: _clock.GetUtcNow().UtcDateTime,
+            gamePhase: link.Game?.Phase);
         return new TvPartyState(presentation, link.AlbumId, access);
     }
 }

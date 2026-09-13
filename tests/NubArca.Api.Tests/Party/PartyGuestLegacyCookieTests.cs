@@ -288,7 +288,7 @@ public sealed class PartyGuestLegacyCookieTests : IDisposable
         (await owner.PatchAsJsonAsync($"/api/albums/{album}/party-game-settings", new
         {
             gameEnabled = true, minChallengeIntervalSeconds = 30, maxChallengeIntervalSeconds = 60,
-            votesPerGuest = 3, maxChallengesPerSession = (int?)null,
+            votesPerGuest = 3, maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
         if (withGame)
         {

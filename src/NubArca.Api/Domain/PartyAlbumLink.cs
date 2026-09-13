@@ -140,6 +140,26 @@ public class PartyAlbumLink
     public DateTime? LastDisplaySeenAt { get; set; }
     public int MinChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MinIntervalSeconds;
     public int MaxChallengeIntervalSeconds { get; set; } = PartyChallengeDefaults.MaxIntervalSeconds;
+
+    /// <summary>
+    /// Whether guests may say which activities they would LIKE to see, before
+    /// the match begins.
+    ///
+    /// <para>Off by default, which is what every party written before this
+    /// column meant: the deck is the host's alone. Switching it on opens the
+    /// pre-game preference surface and nothing else — the preferences are
+    /// ADVISORY. They pick no activity, interrupt no slideshow, enter no
+    /// yes/no result and move no phase. What they do is tell the host what the
+    /// room wants, in the control room, while the host plans.</para>
+    /// </summary>
+    public bool PriorityVotingEnabled { get; set; }
+
+    /// <summary>
+    /// How many activities ONE guest may put a preference on. Shared with the
+    /// retired interval-driven vote, which spent the same budget through the
+    /// same participant counter — reusing it is what keeps this from becoming a
+    /// third voting system.
+    /// </summary>
     public int VotesPerGuest { get; set; } = PartyChallengeDefaults.VotesPerGuest;
     public int? MaxChallengesPerSession { get; set; }
 

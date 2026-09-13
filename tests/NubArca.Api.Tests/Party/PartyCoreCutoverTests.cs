@@ -324,7 +324,7 @@ public sealed class PartyCoreCutoverTests : IDisposable
             minChallengeIntervalSeconds = 300,
             maxChallengeIntervalSeconds = 540,
             votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
         var before = await owner.GetFromJsonAsync<JsonElement>($"/api/parties/{partyId}");

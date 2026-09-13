@@ -592,22 +592,12 @@ public sealed class PartyMediaReferenceTests : IDisposable
         await StartAsync(party);
         var cookie = await PairTvAsync(party.Owner);
 
-        (await TvAsync(cookie, HttpMethod.Get, $"/api/tv/albums/{party.AlbumId}/party-playback"))
-            .EnsureSuccessStatusCode();
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            var session = await db.PartyChallengeSessions.SingleAsync();
-            session.NextChallengeAt = DateTime.UtcNow.AddSeconds(-1);
-            await db.SaveChangesAsync();
-        }
-
-        var hold = await (await TvAsync(
-            cookie, HttpMethod.Post, $"/api/tv/albums/{party.AlbumId}/party-playback/boundary"))
-            .Content.ReadFromJsonAsync<JsonElement>();
-        var url = hold.GetProperty("activeChallenge").GetProperty("mediaUrl").GetString();
-        Assert.Equal(
-            $"/api/tv/albums/{party.AlbumId}/party-playback/challenges/{challengeId}/media", url);
+        // The route is reached DIRECTLY. The interval-driven hold that used to
+        // put an activity on the television is retired — a guest preference no
+        // longer selects anything — but the activity's picture is still served
+        // to the owner's own paired screen through its album's game, and that
+        // grant is what this test is about.
+        var url = $"/api/tv/albums/{party.AlbumId}/party-playback/challenges/{challengeId}/media";
 
         var image = await TvAsync(cookie, HttpMethod.Get, url!);
         Assert.Equal(HttpStatusCode.OK, image.StatusCode);
@@ -624,12 +614,6 @@ public sealed class PartyMediaReferenceTests : IDisposable
         await ExcludeAsync(party.Owner, graphic);
         Assert.Equal(
             HttpStatusCode.NotFound, (await TvAsync(cookie, HttpMethod.Get, url!)).StatusCode);
-        var withdrawn = await (await TvAsync(
-                cookie, HttpMethod.Get, $"/api/tv/albums/{party.AlbumId}/party-playback"))
-            .Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal(
-            JsonValueKind.Null,
-            withdrawn.GetProperty("activeChallenge").GetProperty("mediaUrl").ValueKind);
     }
 
     // --- The media library is not optional ----------------------------------
@@ -802,7 +786,7 @@ public sealed class PartyMediaReferenceTests : IDisposable
         {
             gameEnabled = enabled, minChallengeIntervalSeconds = 30,
             maxChallengeIntervalSeconds = 60, votesPerGuest = 3,
-            maxChallengesPerSession = (int?)null,
+            maxChallengesPerSession = (int?)null, priorityVotingEnabled = true,
         })).EnsureSuccessStatusCode();
 
     private static object ChallengeBody(Guid? mediaFileItemId) => new

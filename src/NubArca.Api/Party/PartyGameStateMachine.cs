@@ -41,12 +41,17 @@ public sealed record PartyGameTransition(
 /// The Party Game transition matrix, as a pure function.
 ///
 /// The whole machine lives here so it can be exhausted by tests without a
-/// database, a clock or an HTTP request — the same reason
-/// <see cref="PartyChallengePolicy"/> is pure. The service applies transitions;
-/// it never decides one.
+/// database, a clock or an HTTP request. The service applies transitions; it
+/// never decides one.
 ///
 /// LOBBY → CHALLENGE_REVEAL → CHALLENGE_ACTIVE → VOTING_OPEN → VOTING_CLOSED
 ///       → RESULT → CHALLENGE_REVEAL → … → FINISHED
+///
+/// RESULT → INTERMISSION → CHALLENGE_REVEAL is the loop through the party
+/// itself: <c>return_to_party</c> completes the round and gives the room back
+/// to the slideshow, and <c>next_challenge</c> resumes. It is a PAUSE and not
+/// an ending — the rounds, the plan and the guests' preferences all survive it,
+/// which is exactly what distinguishes it from FINISHED.
 ///
 /// FINISHED → LOBBY is the one backwards edge, and it belongs to
 /// <c>restart_game</c>: the same party plays again on the same link, with the
@@ -116,6 +121,29 @@ public static class PartyGameStateMachine
                 : new(PartyGamePhases.Finished, PartyGameStatuses.Finished,
                     PartyGameRoundEffect.CompleteRound),
 
+            // Back to the party, between two activities. The round is COMPLETED,
+            // exactly as next_challenge completes it — the room saw the outcome,
+            // and an intermission is a pause after a finished activity rather
+            // than a way to abandon one. The status stays `live`: the game is
+            // not over, it is waiting. What hands the television back is the
+            // presentation projection reading this phase, not a status change.
+            //
+            // It ignores hasNextChallenge on purpose. A host may want the room
+            // back even when the deck is spent; the intermission's own
+            // next_challenge is then the command that finishes the game.
+            (PartyGamePhases.Result, PartyGameCommands.ReturnToParty) =>
+                new(PartyGamePhases.Intermission, PartyGameStatuses.Live,
+                    PartyGameRoundEffect.CompleteRound),
+
+            // Resuming. The same edge next_challenge takes from a result, minus
+            // the round to complete — this one was resolved on the way in, which
+            // is what makes the pause lossless.
+            (PartyGamePhases.Intermission, PartyGameCommands.NextChallenge) => hasNextChallenge
+                ? new(PartyGamePhases.ChallengeReveal, PartyGameStatuses.Live,
+                    PartyGameRoundEffect.StartRound)
+                : new(PartyGamePhases.Finished, PartyGameStatuses.Finished,
+                    PartyGameRoundEffect.None),
+
             // Skip abandons an unresolved round. Legal for as long as the round
             // is unresolved, which is every phase up to and including
             // VOTING_CLOSED — a host who has lost the room should not have to
@@ -131,7 +159,7 @@ public static class PartyGameStateMachine
             // Finishing is legal from anywhere the game is not already over. It
             // resolves the current round if the room saw its outcome and
             // abandons it otherwise.
-            (PartyGamePhases.Lobby, PartyGameCommands.Finish) =>
+            (PartyGamePhases.Lobby or PartyGamePhases.Intermission, PartyGameCommands.Finish) =>
                 new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.None),
             (PartyGamePhases.Result, PartyGameCommands.Finish) =>
                 new(PartyGamePhases.Finished, PartyGameStatuses.Finished, PartyGameRoundEffect.CompleteRound),
@@ -173,10 +201,14 @@ public static class PartyGameStateMachine
         var ordered = new[]
         {
             PrimaryCommand(phase, currentActivityVotes),
+            // Second, and only where it is legal: from a result, "back to the
+            // party" is the other thing a host might reasonably want, and it
+            // belongs above the two commands that end something.
+            PartyGameCommands.ReturnToParty,
             PartyGameCommands.SkipChallenge,
             PartyGameCommands.Finish,
         };
-        var legal = new List<string>(3);
+        var legal = new List<string>(4);
         foreach (var command in ordered)
         {
             if (command is null || legal.Contains(command)) continue;
@@ -200,6 +232,10 @@ public static class PartyGameStateMachine
         PartyGamePhases.VotingOpen => PartyGameCommands.CloseVoting,
         PartyGamePhases.VotingClosed => PartyGameCommands.RevealResult,
         PartyGamePhases.Result => PartyGameCommands.NextChallenge,
+        // A pause has exactly one way forward, and it is the same word: the
+        // next activity. Nothing else about the game changed while the room was
+        // dancing.
+        PartyGamePhases.Intermission => PartyGameCommands.NextChallenge,
         // Finished is terminal for the MATCH, not for the party: its one action
         // is to play again, so the control room still has a single primary
         // button rather than a dead end.

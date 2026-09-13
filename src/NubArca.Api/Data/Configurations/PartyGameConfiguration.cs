@@ -13,7 +13,7 @@ public sealed class PartyGameSessionConfiguration : IEntityTypeConfiguration<Par
             t.HasCheckConstraint("ck_party_game_sessions_status",
                 "\"Status\" IN ('lobby','live','finished')");
             t.HasCheckConstraint("ck_party_game_sessions_phase",
-                "\"Phase\" IN ('lobby','challenge_reveal','challenge_active','voting_open','voting_closed','result','finished')");
+                "\"Phase\" IN ('lobby','challenge_reveal','challenge_active','voting_open','voting_closed','result','intermission','finished')");
             t.HasCheckConstraint("ck_party_game_sessions_round_number", "\"CurrentRoundNumber\" >= 0");
         });
         b.HasKey(x => x.Id);
@@ -107,6 +107,31 @@ public sealed class PartyGameVoteConfiguration : IEntityTypeConfiguration<PartyG
         b.HasOne<PartyGameRound>().WithMany().HasForeignKey(x => x.PartyGameRoundId)
             .OnDelete(DeleteBehavior.Cascade);
         b.HasOne<PartyParticipant>().WithMany().HasForeignKey(x => x.PartyParticipantId)
+            .OnDelete(DeleteBehavior.Restrict);
+    }
+}
+
+public sealed class PartyGameExclusionConfiguration : IEntityTypeConfiguration<PartyGameExclusion>
+{
+    public void Configure(EntityTypeBuilder<PartyGameExclusion> b)
+    {
+        b.ToTable("party_game_exclusions");
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).ValueGeneratedNever();
+        b.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
+
+        // "Not in this match" is a fact, not a quantity. Two control-room
+        // devices excluding the same activity at once must leave one row, and
+        // the database is what says so rather than a check the planner performs
+        // and then hopes still holds.
+        b.HasIndex(x => new { x.PartyGameSessionId, x.PartyChallengeId }).IsUnique()
+            .HasDatabaseName("ux_party_game_exclusions_session_challenge");
+
+        b.HasOne<PartyGameSession>().WithMany().HasForeignKey(x => x.PartyGameSessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        // Restricting, exactly as a round's is: deleting an activity a host has
+        // deliberately set aside would silently rewrite the plan.
+        b.HasOne<PartyChallenge>().WithMany().HasForeignKey(x => x.PartyChallengeId)
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

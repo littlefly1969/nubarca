@@ -247,5 +247,8 @@ public sealed class PartyGameRestartPostgresTests : IAsyncLifetime
             new PartyLinkService(
                 db, TimeProvider.System, new PartyService(db, TimeProvider.System, new PartyStateEraser(db), null!),
                 new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()),
+            new PartyParticipantService(
+                db, TimeProvider.System,
+                new PartyGuestIdentity(new ConfigurationBuilder().Build())),
             NullLogger<PartyGameService>.Instance);
 }
