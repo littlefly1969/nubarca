@@ -201,6 +201,11 @@ public static class AuditActions
     // are decisions about what the event IS; the metadata line exists for the
     // one field in it that governs access — when the guests stop.
     public const string PartyCreate = "party.create";
+
+    // A party made from another party's CONFIGURATION. Distinct from a create
+    // because the interesting fact is which evening it was copied from, and a
+    // plain create line would lose it.
+    public const string PartyDuplicate = "party.duplicate";
     public const string PartyUpdate = "party.update";
     public const string PartyMediaSourceSet = "party.media_source.set";
 
