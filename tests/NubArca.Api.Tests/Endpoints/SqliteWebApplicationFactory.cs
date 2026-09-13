@@ -274,6 +274,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
     services.AddScoped<
         NubArca.Api.Party.IPartyStateEraser, NubArca.Api.Party.PartyStateEraser>();
     services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
+    services.AddScoped<
+        NubArca.Api.Party.IPartyDuplicator, NubArca.Api.Party.PartyDuplicator>();
             services.AddScoped<
                 NubArca.Api.Party.IPartyCapabilityPolicy, NubArca.Api.Party.PartyCapabilityPolicy>();
             // The six typed slots a party tells its guests. Not a page builder:

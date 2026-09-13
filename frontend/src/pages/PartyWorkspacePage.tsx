@@ -5,6 +5,7 @@ import {
   getAlbumPartySettings,
   getParty,
   listPartyGuestContent,
+  duplicateParty,
   tearDownParty,
   transitionParty,
   updateParty,
@@ -559,8 +560,58 @@ function PartyOverview({
         </ol>
       </section>
 
+      <PartyDuplicateSection party={party} />
+
       <PartyTeardownSection party={party} onPartyUpdated={onPartyUpdated} />
     </div>
+  );
+}
+
+// Setting the same evening up again.
+//
+// A host who runs a monthly party rebuilds the same thing every time: the
+// slots, the deck, the timings, the quotas, the print budgets. This copies the
+// DECISIONS and none of the history — the clone is a Draft with its own album,
+// its own deck and brand-new tokens, and nobody who came to the party being
+// copied is in it.
+//
+// The copy is stated plainly before the host presses, because "duplicate" is a
+// word that could mean anything from an alias to a second copy of every
+// photograph, and it is neither: the photographs are SHARED through ordinary
+// album membership, so the clone can be edited freely and no byte is written
+// twice.
+function PartyDuplicateSection({ party }: { party: Party }) {
+  const { t } = useI18n();
+  const { invalidateAuth } = useAuth();
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function run() {
+    setBusy(true); setFailed(false);
+    try {
+      const copy = await duplicateParty(party.id);
+      // Straight into the copy: the host duplicated it in order to edit it.
+      navigate(`/parties/${copy.id}`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
+      setFailed(true);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <section className="party-card" data-testid="party-duplicate">
+      <h3>{t('party.duplicate.heading')}</h3>
+      <p className="muted">{t('party.duplicate.help')}</p>
+      <p className="muted">{t('party.duplicate.excludes')}</p>
+      <button
+        type="button" className="row-action" data-testid="party-duplicate-start"
+        disabled={busy} onClick={() => void run()}
+      >
+        {busy ? t('party.duplicate.busy') : t('party.duplicate.start')}
+      </button>
+      {failed && <p className="inline-error" role="alert">{t('party.duplicate.failed')}</p>}
+    </section>
   );
 }
 

@@ -844,6 +844,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyStateEraser, NubArca.Api.Party.PartyStateEraser>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyService, NubArca.Api.Party.PartyService>();
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyDuplicator, NubArca.Api.Party.PartyDuplicator>();
     // What the HOST's role permits their party to offer. Scoped, because it
     // reads current database state on every request through
     // IUserPermissionService — which is what makes revoking a Party permission

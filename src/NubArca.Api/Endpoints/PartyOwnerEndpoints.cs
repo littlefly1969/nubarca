@@ -30,6 +30,13 @@ public static class PartyOwnerEndpoints
     public sealed record CreatePartyRequest(
         string? Title, string? Description, DateTime? EventStartsAt);
 
+    /// <summary>
+    /// A copy, optionally renamed. An omitted title keeps the original's, which
+    /// is what "duplicate" plainly means; the host renames it afterwards on the
+    /// same form they would have used anyway.
+    /// </summary>
+    public sealed record DuplicatePartyRequest(string? Title);
+
     public sealed record UpdatePartyRequest(
         string? Title,
         string? Description,
@@ -107,6 +114,33 @@ public static class PartyOwnerEndpoints
                 new { status = created.Status }, cancellationToken);
             return Results.Created($"/api/parties/{created.Id}", created);
         }).WithName("CreateParty").RequirePermission(Permissions.PartyAccess);
+
+        // A party made from another party's CONFIGURATION — the same evening,
+        // set up again. It copies decisions and no history: the clone is a Draft
+        // with its own album, its own deck and brand-new tokens, and none of the
+        // guests, preferences, votes, uploads, greetings, prints or televisions
+        // of the party it was copied from.
+        app.MapPost("/api/parties/{partyId:guid}/duplicate", async (
+            Guid partyId,
+            HttpContext httpContext,
+            [FromServices] IPartyDuplicator duplicator,
+            [FromServices] IAuditLogger audit,
+            [FromBody] DuplicatePartyRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await duplicator.DuplicateAsync(
+                ownerUserId, partyId, body?.Title, cancellationToken);
+            if (result.Outcome != PartyMutationOutcome.Ok) return ToResult(result);
+
+            var created = result.Party!;
+            await audit.LogAsync(
+                ownerUserId, AuditActions.PartyDuplicate, AuditEntityTypes.Party, created.Id,
+                httpContext.Connection.RemoteIpAddress?.ToString(),
+                // The source is the fact a plain create line would lose.
+                new { sourcePartyId = partyId, status = created.Status }, cancellationToken);
+            return Results.Created($"/api/parties/{created.Id}", created);
+        }).WithName("DuplicateParty").RequirePermission(Permissions.PartyAccess);
 
         app.MapGet("/api/parties/{partyId:guid}", async (
             Guid partyId,
