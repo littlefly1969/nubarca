@@ -84,7 +84,6 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
               <PartyChallengeCard
                 mode="compact"
                 challenge={{
-                  kind: item.kind,
                   title: item.title,
                   body: item.body,
                   mediaUrl: item.mediaUrl,

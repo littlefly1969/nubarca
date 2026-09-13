@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import type { PartyChallengeKind } from '@nubarca/api-client';
 import { I18nProvider } from '../i18n';
 import {
   PartyChallengeCard, splitActivityDuration,
@@ -10,7 +9,6 @@ import {
 afterEach(cleanup);
 
 const MODES: PartyChallengeCardMode[] = ['preview', 'tv', 'compact'];
-const KINDS: PartyChallengeKind[] = ['dare', 'penalty', 'guess', 'custom'];
 
 const LONG_TITLE = 'Un titolo deliberatamente lunghissimo che nessun host '
   + 'ragionevole scriverebbe ma che il renderer deve comunque reggere senza rompere nulla';
@@ -18,7 +16,7 @@ const LONG_BODY = Array.from({ length: 12 }, (_, i) =>
   `Riga ${i + 1} di istruzioni molto dettagliate per questa attività.`).join(' ');
 
 function challenge(over: Partial<PartyChallengeCardChallenge> = {}): PartyChallengeCardChallenge {
-  return { kind: 'dare', title: 'Canta una canzone', body: 'Sali sul tavolo.', ...over };
+  return { title: 'Canta una canzone', body: 'Sali sul tavolo.', ...over };
 }
 
 function renderCard(props: Parameters<typeof PartyChallengeCard>[0]) {
@@ -48,16 +46,23 @@ describe('the canonical activity card', () => {
     expect(new Set(shapes.map((s) => s.html)).size).toBe(1);
   });
 
-  it('names the activity kind in words, so meaning never rests on colour alone', () => {
-    const labels: Record<PartyChallengeKind, RegExp> = {
-      dare: /^sfida$/i, penalty: /^penitenza$/i, guess: /^indovina$/i, custom: /^attività$/i,
-    };
-    for (const kind of KINDS) {
-      cleanup();
-      renderCard({ challenge: challenge({ kind }), mode: 'tv' });
-      expect(card()).toHaveAttribute('data-kind', kind);
-      expect(within(card()).getByText(labels[kind])).toBeInTheDocument();
+  it('draws no category at all — not a word, and not an attribute to colour by', () => {
+    // `PartyChallenge.kind` still exists in the domain for the adaptive game.
+    // It is not a thing a room is shown: the card names the activity and never
+    // files it, so there is nothing here for a stylesheet to hang a hue on.
+    renderCard({ challenge: challenge(), mode: 'tv' });
+    expect(card()).not.toHaveAttribute('data-kind');
+    for (const label of [/^sfida$/i, /^penitenza$/i, /^indovina$/i, /^attività$/i]) {
+      expect(within(card()).queryByText(label)).not.toBeInTheDocument();
     }
+  });
+
+  it('shows the eyebrow only when a surface says where the evening is', () => {
+    renderCard({ challenge: challenge(), mode: 'tv' });
+    expect(card().querySelector('.party-activity-eyebrow')).toBeNull();
+    cleanup();
+    renderCard({ challenge: challenge(), mode: 'tv', context: { round: 2, total: 5 } });
+    expect(card().querySelector('.party-activity-eyebrow')).not.toBeNull();
   });
 
   it('drops the media column entirely when there is no photograph', () => {

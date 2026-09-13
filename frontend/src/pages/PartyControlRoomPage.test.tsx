@@ -13,6 +13,15 @@ vi.mock('qrcode', () => ({ default: { toString: () => Promise.resolve('<svg />')
 const ALBUM = 'a1';
 const READ = `/api/albums/${ALBUM}/party-game`;
 const COMMANDS = `/api/albums/${ALBUM}/party-game/commands`;
+const PLAN = `/api/albums/${ALBUM}/party-game/plan`;
+
+function planEntry(over: Partial<PartyGameSnapshot['plan'][number]> = {}) {
+  return {
+    id: 'c1', title: 'Canta', mediaUrl: null, state: 'remaining' as const,
+    position: 1, isEnabled: true, excluded: false, preferenceVotes: 0,
+    ...over,
+  };
+}
 
 function activity(over: Partial<NonNullable<PartyGameSnapshot['currentChallenge']>> = {}) {
   return {
@@ -30,7 +39,8 @@ function snapshot(over: Partial<PartyGameSnapshot> = {}): PartyGameSnapshot {
     phaseStartedAt: '2026-09-06T20:00:00Z', phaseEndsAt: null,
     currentChallenge: activity(), nextChallenge: activity({ id: 'c2', title: 'Ballo' }),
     availableCommands: ['start_challenge', 'skip_challenge', 'finish'],
-    voting: null, guestsPresent: 7, displaySeenSecondsAgo: 2,
+    voting: null, plan: [], priorityVotingEnabled: false, preferencesOpen: false,
+    guestsPresent: 7, displaySeenSecondsAgo: 2,
     tvUrl: '/party/tok-1/tv', guestUrl: '/party/tok-1/game',
     ...over,
   };
@@ -340,6 +350,143 @@ describe('the control room', () => {
     await advance(3_000);
     await waitFor(() => expect(screen.getByText(/riconnessione/i)).toBeInTheDocument());
     expect(screen.getByTestId('party-control-primary')).toBeInTheDocument();
+  });
+});
+
+describe('the plan the host is still editing', () => {
+  const plan = [
+    planEntry({ id: 'p1', title: 'Giocata', state: 'played', position: null, preferenceVotes: 4 }),
+    planEntry({ id: 'p2', title: 'Sullo schermo', state: 'current', position: null, preferenceVotes: 1 }),
+    planEntry({ id: 'p3', title: 'Prossima', position: 1, preferenceVotes: 7 }),
+    planEntry({ id: 'p4', title: 'Poi', position: 2, preferenceVotes: 2 }),
+  ];
+
+  it('shows the order, the preferences and what each activity is doing', async () => {
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({ plan, priorityVotingEnabled: true, preferencesOpen: false })),
+    });
+    mount();
+
+    const panel = await screen.findByTestId('party-control-plan');
+    expect(within(panel).getByTestId('party-plan-state-p1')).toHaveTextContent(/giocata/i);
+    expect(within(panel).getByTestId('party-plan-state-p2')).toHaveTextContent(/schermo/i);
+    expect(within(panel).getByTestId('party-plan-state-p3')).toHaveTextContent(/da giocare/i);
+    // The room's own numbers, beside the activity they were cast for — and the
+    // one already played keeps its own, because it records what the room wanted.
+    expect(within(panel).getByTestId('party-plan-votes-p3')).toHaveTextContent('7');
+    expect(within(panel).getByTestId('party-plan-votes-p1')).toHaveTextContent('4');
+    expect(panel).toHaveTextContent(/scelte degli ospiti sono definitive/i);
+  });
+
+  it('offers no control at all over the past and the present', async () => {
+    // ABSENT, not disabled — the server refuses both, so offering the button
+    // would be offering a refusal.
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({ plan, priorityVotingEnabled: true })),
+    });
+    mount();
+    const panel = await screen.findByTestId('party-control-plan');
+    for (const id of ['p1', 'p2']) {
+      expect(within(panel).queryByTestId(`party-plan-next-${id}`)).not.toBeInTheDocument();
+      expect(within(panel).queryByTestId(`party-plan-toggle-${id}`)).not.toBeInTheDocument();
+    }
+    expect(within(panel).getByTestId('party-plan-next-p4')).toBeInTheDocument();
+    expect(within(panel).getByTestId('party-plan-toggle-p3')).toBeInTheDocument();
+  });
+
+  it('quotes the version on screen when it moves an activity', async () => {
+    const sent: unknown[] = [];
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({ plan, priorityVotingEnabled: true })),
+      [`POST ${PLAN}`]: ({ body }: { body: string | null }) => {
+        sent.push(JSON.parse(body ?? '{}'));
+        return jsonResponse(snapshot({ version: 4, plan, priorityVotingEnabled: true }));
+      },
+    });
+    mount();
+    const panel = await screen.findByTestId('party-control-plan');
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      .click(within(panel).getByTestId('party-plan-next-p4'));
+
+    // "Play next" is a move to the front of the remaining queue, on the same
+    // optimistic-concurrency contract every other owner write uses.
+    expect(sent).toEqual([
+      { action: 'move', challengeId: 'p4', expectedVersion: 3, position: 0 },
+    ]);
+  });
+
+  it('excludes an activity and offers to put it back', async () => {
+    const sent: unknown[] = [];
+    const excluded = plan.map((x) => x.id === 'p3'
+      ? { ...x, excluded: true, position: null } : x);
+    let current = snapshot({ plan, priorityVotingEnabled: true });
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(current),
+      [`POST ${PLAN}`]: ({ body }: { body: string | null }) => {
+        sent.push(JSON.parse(body ?? '{}'));
+        current = snapshot({ version: 4, plan: excluded, priorityVotingEnabled: true });
+        return jsonResponse(current);
+      },
+    });
+    mount();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.click(within(await screen.findByTestId('party-control-plan'))
+      .getByTestId('party-plan-toggle-p3'));
+
+    expect(sent).toEqual([{ action: 'exclude', challengeId: 'p3', expectedVersion: 3, position: null }]);
+    // The preferences are still reported: "the room wanted this and there was
+    // no time" is information, not something to erase.
+    await waitFor(() => expect(screen.getByTestId('party-plan-state-p3'))
+      .toHaveTextContent(/non stasera/i));
+    expect(screen.getByTestId('party-plan-votes-p3')).toHaveTextContent('7');
+    expect(screen.getByTestId('party-plan-toggle-p3')).toHaveTextContent(/rimettila/i);
+  });
+
+  it('re-renders from the truth when a plan edit is refused as stale', async () => {
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({ plan, priorityVotingEnabled: true })),
+      [`POST ${PLAN}`]: () => errorResponse(409, {
+        code: 'version_conflict',
+        snapshot: snapshot({
+          version: 9, phase: 'result', plan, priorityVotingEnabled: true,
+          availableCommands: ['next_challenge', 'return_to_party', 'finish'],
+        }),
+      }),
+    });
+    mount();
+    const panel = await screen.findByTestId('party-control-plan');
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      .click(within(panel).getByTestId('party-plan-next-p4'));
+
+    // The refusal IS the recovery: named, and the screen behind it correct.
+    expect(await screen.findByTestId('party-control-refusal')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('party-control-primary'))
+      .toHaveAttribute('data-command', 'next_challenge'));
+  });
+
+  it('says plainly when the host never asked the room', async () => {
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({ plan, priorityVotingEnabled: false })),
+    });
+    mount();
+    const panel = await screen.findByTestId('party-control-plan');
+    expect(panel).toHaveTextContent(/non hai chiesto agli ospiti/i);
+    // No count is shown, because there is nothing to count.
+    expect(within(panel).queryByTestId('party-plan-votes-p3')).not.toBeInTheDocument();
+  });
+
+  it('offers the pause beside the next activity at a result', async () => {
+    installFetchMock({
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        phase: 'result',
+        availableCommands: ['next_challenge', 'return_to_party', 'finish'],
+      })),
+    });
+    mount();
+    expect(await screen.findByTestId('party-control-primary'))
+      .toHaveAttribute('data-command', 'next_challenge');
+    expect(screen.getByTestId('party-control-return_to_party'))
+      .toHaveTextContent(/torna alla festa/i);
   });
 });
 

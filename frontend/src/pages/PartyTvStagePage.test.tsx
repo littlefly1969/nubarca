@@ -19,7 +19,7 @@ function snapshot(over: Partial<PartyGamePublicSnapshot> = {}): PartyGamePublicS
     albumName: 'Festa di Anna',
     status: 'live', phase: 'challenge_reveal', version: 2,
     roundNumber: 1, totalChallenges: 4, phaseEndsAt: null,
-    roundId: 'r1', myVote: null, voting: null,
+    roundId: 'r1', myVote: null, voting: null, preferences: null,
     challenge: {
       id: 'c1', title: 'Canta', body: 'Sali sul tavolo.', kind: 'dare',
       mediaUrl: null, durationSeconds: null, votingMode: 'binary', voteQuestion: null,
@@ -93,7 +93,8 @@ describe('the television stage', () => {
     mount();
     const card = await screen.findByTestId('party-stage-card');
     expect(card).toHaveAttribute('data-mode', 'tv');
-    expect(card).toHaveAttribute('data-kind', 'dare');
+    // No category on the television either: the room is shown an activity.
+    expect(card).not.toHaveAttribute('data-kind');
     expect(card).toHaveTextContent('Canta');
     expect(card).toHaveTextContent(/attività 1 di 4/i);
   });

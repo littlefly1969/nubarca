@@ -117,7 +117,7 @@ export function PartyTvStage({
             testId="party-stage-card"
             className="party-stage-card"
             challenge={{
-              kind: challenge.kind, title: challenge.title, body: challenge.body,
+              title: challenge.title, body: challenge.body,
               mediaUrl: mediaUrlOverride ?? challenge.mediaUrl, durationSeconds: challenge.durationSeconds,
             }}
             context={{ round: snapshot.roundNumber, total: snapshot.totalChallenges }}

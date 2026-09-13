@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
-  PartyGameConflict, partyGameYesPercent, submitPartyGameVote,
-  type PartyGamePublicSnapshot, type PartyGameVoteCode, type PartyGameVoteValue,
+  PartyGameConflict, partyGameYesPercent, setPartyGamePreference, submitPartyGameVote,
+  type PartyGamePreferences, type PartyGamePublicSnapshot, type PartyGameVoteCode,
+  type PartyGameVoteValue,
 } from '@nubarca/api-client';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
@@ -23,7 +24,8 @@ import './PartyGamePage.css';
 // neither: it is quiet between votes on purpose, because during an activity the
 // interesting thing is happening in the room and not on anybody's phone.
 
-type Scene = 'lobby' | 'watch' | 'vote' | 'waiting' | 'result' | 'finished';
+type Scene =
+  | 'lobby' | 'watch' | 'vote' | 'waiting' | 'result' | 'intermission' | 'finished';
 
 /** The server's phase, as the one thing a guest is being asked to do. */
 export function guestScene(snapshot: PartyGamePublicSnapshot | null): Scene {
@@ -33,6 +35,9 @@ export function guestScene(snapshot: PartyGamePublicSnapshot | null): Scene {
     case 'voting_open': return 'vote';
     case 'voting_closed': return 'waiting';
     case 'result': return 'result';
+    // A pause, not an ending. The party is what is happening; this phone says
+    // so and waits, and the server brings it back.
+    case 'intermission': return 'intermission';
     case 'challenge_reveal':
     case 'challenge_active': return 'watch';
     default: return 'lobby';
@@ -46,9 +51,51 @@ export function PartyGamePage() {
     usePartyGameSnapshot(token, { join: true });
   const [sending, setSending] = useState<PartyGameVoteValue | null>(null);
   const [voteError, setVoteError] = useState(false);
+  // The preference surface the phone is holding: whatever the last snapshot
+  // said, or the answer the last tap produced. Both come from the server —
+  // nothing here is optimistic — and a tap simply does not have to wait out a
+  // poll to show what it did.
+  const [preferences, setPreferences] = useState<PartyGamePreferences | null>(null);
+  const [preferenceBusy, setPreferenceBusy] = useState<string | null>(null);
+  const [preferenceError, setPreferenceError] = useState(false);
 
   const scene = guestScene(snapshot);
   const roundId = snapshot?.roundId ?? null;
+  const serverPreferences = snapshot?.preferences ?? null;
+
+  // EVERY SNAPSHOT THAT ARRIVES WINS, which is the same rule the rest of this
+  // page follows: the server is the only authority, and a poll landing after a
+  // tap carries the truth that tap produced. Keying this on anything but the
+  // arriving snapshot — the in-flight flag, say — would re-run it when the tap
+  // FINISHED and put the previous poll's answer back on screen, silently
+  // undoing what the guest just did.
+  useEffect(() => {
+    setPreferences(serverPreferences);
+  }, [serverPreferences]);
+
+  const choose = useCallback(async (challengeId: string, selected: boolean) => {
+    if (!token || preferenceBusy) return;
+    setPreferenceBusy(challengeId);
+    setPreferenceError(false);
+    try {
+      setPreferences(await setPartyGamePreference(token, challengeId, selected));
+    } catch (error) {
+      // A refusal carries the state it was measured against — here the whole
+      // preference surface, because the budget is spent or the host has already
+      // started — so the list ends the tap CORRECT rather than merely told off.
+      if (error instanceof PartyGameConflict && error.snapshot) {
+        setPreferences(error.snapshot as PartyGamePreferences);
+        // "You have used them all" needs no re-read; anything else means the
+        // game itself may have moved under this phone.
+        if (error.code !== 'limit_reached') refresh();
+      } else {
+        setPreferenceError(true);
+        refresh();
+      }
+    } finally {
+      setPreferenceBusy(null);
+    }
+  }, [token, preferenceBusy, refresh]);
 
   // A new round is a new question: whatever went wrong with the last one is not
   // this one's problem.
@@ -135,6 +182,51 @@ export function PartyGamePage() {
           </section>
         )}
 
+        {/* PREFERENCES, and only in the lobby. They are ADVISORY: nothing here
+            chooses what is played, interrupts anything or enters a result — the
+            host reads what the room asked for and decides. The list is absent
+            entirely when this party does not offer them. */}
+        {scene === 'lobby' && preferences && (
+          <section className="party-game-preferences" data-testid="party-game-preferences">
+            <h2>{t('partyPreferences.title')}</h2>
+            <p className="party-game-preferences-help">
+              {preferences.open
+                ? t('partyPreferences.help', { count: preferences.votesRemaining })
+                : t('partyPreferences.closed')}
+            </p>
+            {preferenceError && (
+              <p className="inline-error" role="alert">{t('partyPreferences.failed')}</p>
+            )}
+            {preferences.items.length === 0 ? (
+              <p className="party-game-preferences-empty">{t('partyPreferences.empty')}</p>
+            ) : (
+              <ul className="party-game-preference-list">
+                {preferences.items.map((item) => (
+                  <li key={item.id} className={item.selected ? 'is-selected' : undefined}>
+                    <button
+                      type="button"
+                      aria-pressed={item.selected}
+                      data-testid={`party-preference-${item.id}`}
+                      disabled={
+                        !preferences.open
+                        || preferenceBusy !== null
+                        || (!item.selected && preferences.votesRemaining === 0)
+                      }
+                      onClick={() => void choose(item.id, !item.selected)}
+                    >
+                      {item.mediaUrl && <img src={item.mediaUrl} alt="" loading="lazy" />}
+                      <span className="party-game-preference-copy">
+                        <strong>{item.title}</strong>
+                        <span>{item.body}</span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+
         {scene === 'watch' && (
           <section className="party-game-message">
             <p className="party-game-eyebrow">
@@ -146,7 +238,7 @@ export function PartyGamePage() {
                 mode="compact"
                 testId="party-game-summary"
                 challenge={{
-                  kind: challenge.kind, title: challenge.title, body: challenge.body,
+                  title: challenge.title, body: challenge.body,
                   mediaUrl: challenge.mediaUrl, durationSeconds: challenge.durationSeconds,
                 }}
               />
@@ -213,6 +305,16 @@ export function PartyGamePage() {
                   ? 'partyGuestGame.resultPassed' : 'partyGuestGame.resultFailed')}</h1>
               </>
             )}
+          </section>
+        )}
+
+        {scene === 'intermission' && (
+          <section className="party-game-message" data-testid="party-game-intermission">
+            <h1>{t('partyGuestGame.intermissionTitle')}</h1>
+            <p>{t('partyGuestGame.intermissionBody')}</p>
+            <Link className="party-game-retry" to={`/party/${token}`}>
+              {t('partyGuestGame.backToParty')}
+            </Link>
           </section>
         )}
 

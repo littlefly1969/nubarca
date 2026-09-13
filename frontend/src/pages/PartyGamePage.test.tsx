@@ -11,6 +11,19 @@ const TOKEN = 'tok-1';
 const READ = `/api/party/${TOKEN}/game`;
 const JOIN = `/api/party/${TOKEN}/game/join`;
 const VOTE = `/api/party/${TOKEN}/game/vote`;
+const PREFS = `/api/party/${TOKEN}/game/preferences`;
+
+function item(over: Record<string, unknown> = {}) {
+  return { id: 'c1', title: 'Canta', body: 'Sali sul tavolo.', mediaUrl: null, selected: false, ...over };
+}
+
+function preferences(over: Record<string, unknown> = {}) {
+  return {
+    open: true, votesPerGuest: 2, votesUsed: 0, votesRemaining: 2,
+    items: [item(), item({ id: 'c2', title: 'Ballo' })],
+    ...over,
+  } as NonNullable<PartyGamePublicSnapshot['preferences']>;
+}
 
 function snapshot(over: Partial<PartyGamePublicSnapshot> = {}): PartyGamePublicSnapshot {
   return {
@@ -23,6 +36,7 @@ function snapshot(over: Partial<PartyGamePublicSnapshot> = {}): PartyGamePublicS
     phaseEndsAt: null,
     roundId: 'r1',
     myVote: null,
+    preferences: null,
     voting: { received: 2, eligible: 5, yes: null, no: null, passed: null },
     challenge: {
       id: 'c1', title: 'Canta', body: 'Sali sul tavolo.', kind: 'dare',
@@ -77,6 +91,105 @@ describe('the guest live game', () => {
     mount();
     expect(await screen.findByText(/il gioco sta per iniziare/i)).toBeInTheDocument();
     expect(screen.getByTestId('party-game-page')).toHaveAttribute('data-scene', 'lobby');
+  });
+
+  // --- The pre-game preferences, and the pause -----------------------------
+
+  it('lets a guest choose activities in the lobby, and says how many are left', async () => {
+    const posted: unknown[] = [];
+    const chosen = preferences({
+      votesUsed: 1, votesRemaining: 1,
+      items: [item({ selected: true }), item({ id: 'c2', title: 'Ballo' })],
+    });
+    let current = snapshot({
+      status: 'lobby', phase: 'lobby', challenge: null, voting: null, roundId: null,
+      preferences: preferences(),
+    });
+    installFetchMock({
+      [`POST ${JOIN}`]: () => jsonResponse(current),
+      [`GET ${READ}`]: () => jsonResponse(current),
+      [`POST ${PREFS}`]: ({ body }: { body: string | null }) => {
+        posted.push(JSON.parse(body ?? '{}'));
+        // The server records it, so the NEXT poll says so too. A mock whose
+        // read disagreed with its own write would be testing an optimistic
+        // update this page deliberately does not do.
+        current = { ...current, preferences: chosen };
+        return jsonResponse(chosen);
+      },
+    });
+    mount();
+    const list = await screen.findByTestId('party-game-preferences');
+    expect(list).toHaveTextContent(/quali prove vorresti vedere/i);
+    expect(list).toHaveTextContent(/2 scelte/i);
+
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      .click(screen.getByTestId('party-preference-c1'));
+
+    expect(posted).toEqual([{ challengeId: 'c1', selected: true }]);
+    await waitFor(() => expect(screen.getByTestId('party-preference-c1'))
+      .toHaveAttribute('aria-pressed', 'true'));
+    expect(screen.getByTestId('party-game-preferences')).toHaveTextContent(/1 scelte/i);
+  });
+
+  it('stops offering choices once the host has started, without losing them', async () => {
+    const frozen = preferences({
+      open: false, votesUsed: 1, votesRemaining: 1,
+      items: [item({ selected: true }), item({ id: 'c2', title: 'Ballo' })],
+    });
+    installFetchMock({
+      [`POST ${JOIN}`]: () => jsonResponse(snapshot({
+        status: 'lobby', phase: 'lobby', challenge: null, voting: null, roundId: null,
+        preferences: frozen,
+      })),
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        status: 'lobby', phase: 'lobby', challenge: null, voting: null, roundId: null,
+        preferences: frozen,
+      })),
+    });
+    mount();
+    const list = await screen.findByTestId('party-game-preferences');
+    expect(list).toHaveTextContent(/scelte sono chiuse/i);
+    // Read-only, not erased: what this guest asked for is still shown as theirs.
+    expect(screen.getByTestId('party-preference-c1')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('party-preference-c1')).toBeDisabled();
+    expect(screen.getByTestId('party-preference-c2')).toBeDisabled();
+  });
+
+  it('offers no preferences at all when the host did not ask the room', async () => {
+    // Absence IS the answer, exactly as it is for every other Party capability.
+    installFetchMock({
+      [`POST ${JOIN}`]: () => jsonResponse(snapshot({
+        status: 'lobby', phase: 'lobby', challenge: null, voting: null, roundId: null,
+      })),
+      [`GET ${READ}`]: () => jsonResponse(snapshot({
+        status: 'lobby', phase: 'lobby', challenge: null, voting: null, roundId: null,
+      })),
+    });
+    mount();
+    await screen.findByTestId('party-game-page');
+    expect(screen.queryByTestId('party-game-preferences')).not.toBeInTheDocument();
+  });
+
+  it('says the party continues during an intermission, and comes back by itself', async () => {
+    let current = snapshot({
+      status: 'live', phase: 'intermission', challenge: null, voting: null, roundId: null,
+    });
+    installFetchMock({
+      [`POST ${JOIN}`]: () => jsonResponse(current),
+      [`GET ${READ}`]: () => jsonResponse(current),
+    });
+    mount();
+    expect(await screen.findByTestId('party-game-intermission')).toBeInTheDocument();
+    expect(screen.getByTestId('party-game-page')).toHaveAttribute('data-scene', 'intermission');
+    // A pause is not an ending: nothing here says the game is over.
+    expect(screen.queryByText(/il gioco è finito/i)).not.toBeInTheDocument();
+
+    // The server resumes it; the phone follows on its next poll, with nobody
+    // reloading anything.
+    current = snapshot({ phase: 'challenge_reveal' });
+    await advance(3_000);
+    await waitFor(() => expect(screen.getByTestId('party-game-page'))
+      .toHaveAttribute('data-scene', 'watch'));
   });
 
   it('sends the guest to the screen while the activity is happening', async () => {

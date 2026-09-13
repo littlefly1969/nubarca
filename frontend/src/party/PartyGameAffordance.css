@@ -1,0 +1,59 @@
+/* A persistent, non-invasive signpost on the party itself.
+   It sits in the page flow rather than over it: a guest reading the menu is not
+   interrupted, and a bar that covered the photographs would be a takeover by
+   another name. */
+
+.party-game-affordance {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-md, 12px);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  text-decoration: none;
+}
+
+.party-game-affordance-dot {
+  flex: none;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Only the one beat that is actually urgent pulses, and only where motion is
+   welcome. A bar that animated all evening would stop meaning anything. */
+.party-game-affordance[data-beat='vote'] .party-game-affordance-dot {
+  animation: party-game-affordance-pulse 1.4s ease-in-out infinite;
+}
+.party-game-affordance[data-beat='paused'] .party-game-affordance-dot {
+  background: var(--text-muted);
+}
+
+@keyframes party-game-affordance-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .party-game-affordance[data-beat='vote'] .party-game-affordance-dot { animation: none; }
+}
+
+.party-game-affordance-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-weight: 600;
+}
+
+.party-game-affordance-go {
+  flex: none;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--accent);
+}

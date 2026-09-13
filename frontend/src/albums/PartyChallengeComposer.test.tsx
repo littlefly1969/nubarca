@@ -77,7 +77,9 @@ describe('the activity composer', () => {
     const preview = within(composer).getByTestId('party-composer-preview');
     // The canonical card, in preview mode, with the round context the TV uses.
     expect(preview).toHaveAttribute('data-mode', 'preview');
-    expect(preview).toHaveAttribute('data-kind', 'dare');
+    // No category, and nothing for a stylesheet to colour by: `kind` survives
+    // in the domain for the adaptive game and is not a thing the room is shown.
+    expect(preview).not.toHaveAttribute('data-kind');
     expect(within(preview).getByText('Canta')).toBeInTheDocument();
     expect(within(preview).getByText(/attività 1 di 1/i)).toBeInTheDocument();
   });
@@ -105,11 +107,26 @@ describe('the activity composer', () => {
     await waitFor(() => expect(posted).toHaveLength(1));
     const sent = JSON.parse(posted[0]);
     expect(sent).toMatchObject({
-      title: 'Canta', body: 'Sali sul tavolo.', kind: 'dare',
+      title: 'Canta', body: 'Sali sul tavolo.',
       durationSeconds: 120, votingMode: 'binary', voteQuestion: 'Ce l’ha fatta?',
     });
+    // The composer asks for no category, so it SENDS none: the server gives a
+    // new activity `custom` and leaves an existing one's kind alone. Sending a
+    // default here is what would quietly rewrite somebody's history.
+    expect(sent).not.toHaveProperty('kind');
     // The instructions carry the instructions and nothing else.
     expect(sent.body).toBe('Sali sul tavolo.');
+  });
+
+  it('never asks for a category, and never offers one', async () => {
+    mount([]);
+    const user = userEvent.setup();
+    const composer = await openComposer(user);
+    // The four words the composer used to open with. An activity is an
+    // activity; the taxonomy stayed in the domain and left the form.
+    for (const label of [/sfida/i, /penitenza/i, /indovina/i, /^attività$/i]) {
+      expect(within(composer).queryByRole('radio', { name: label })).not.toBeInTheDocument();
+    }
   });
 
   it('hides the vote question when nobody is voting', async () => {
@@ -153,7 +170,6 @@ describe('the activity composer', () => {
 
     expect(within(composer).getByLabelText(/titolo/i)).toHaveValue('Ballo');
     expect(within(composer).getByLabelText(/cosa deve fare/i)).toHaveValue('Tre minuti di liscio.');
-    expect(within(composer).getByRole('radio', { name: /penitenza/i })).toHaveAttribute('aria-checked', 'true');
     expect(within(composer).getByRole('button', { name: 'IMG_0001.jpg' })).toHaveAttribute('aria-pressed', 'true');
 
     await user.click(within(composer).getByRole('button', { name: /avanti/i }));

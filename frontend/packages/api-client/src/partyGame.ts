@@ -25,6 +25,12 @@ export type PartyGamePhase =
   | 'voting_open'
   | 'voting_closed'
   | 'result'
+  // The game is alive and nothing is being played: the host sent the room back
+  // to the party between two activities. It is NOT `finished` — every round
+  // played, the host's plan and the guests' preferences all survive it, and
+  // `next_challenge` resumes. The television returns to the party slideshow
+  // because the server's presentation projection says so.
+  | 'intermission'
   | 'finished';
 
 export type PartyGameCommand =
@@ -41,7 +47,10 @@ export type PartyGameCommand =
   // go, while the link, its token, the guests and everything they contributed
   // stay. The version still moves FORWARD, so a command written during the game
   // that just ended remains stale.
-  | 'restart_game';
+  | 'restart_game'
+  // Give the room back to the party between two activities. Legal only from
+  // `result`, because it RESOLVES the round the room just saw the outcome of.
+  | 'return_to_party';
 
 export type PartyGameVoteValue = 'yes' | 'no';
 
@@ -68,6 +77,36 @@ export interface PartyGameChallenge {
   votingMode: PartyChallengeVotingMode;
   voteQuestion: string | null;
 }
+
+/** Where one activity stands in the match, as the control room reads it. */
+export type PartyGamePlanState = 'played' | 'current' | 'remaining';
+
+/**
+ * One activity as the host PLANNING the evening sees it.
+ *
+ * `state` is the whole authority over what may be edited: `played` and
+ * `current` are the past and the present, and the control room offers no
+ * control over either. `position` is 1-based among the activities the game
+ * would actually play, and null for everything else — an excluded or
+ * switched-off activity has no turn to number.
+ *
+ * `preferenceVotes` is what the room asked for BEFORE the match. It is carried
+ * for every entry including an excluded one: a host setting something aside
+ * should still see what they are setting aside.
+ */
+export interface PartyGamePlanEntry {
+  id: string;
+  title: string;
+  mediaUrl: string | null;
+  state: PartyGamePlanState;
+  position: number | null;
+  isEnabled: boolean;
+  excluded: boolean;
+  preferenceVotes: number;
+}
+
+/** Move a remaining activity, or decide it is not being played tonight. */
+export type PartyGamePlanAction = 'move' | 'exclude' | 'include';
 
 /** The owner's complete view. Everything a control room renders comes from one. */
 export interface PartyGameSnapshot {
@@ -97,6 +136,16 @@ export interface PartyGameSnapshot {
    */
   availableCommands: PartyGameCommand[];
   voting: PartyGameVoting | null;
+  /**
+   * The whole deck in play order with its state, the host's exclusions and the
+   * preferences the room cast. Always present — empty for an empty deck — so a
+   * control room never renders the evening from two reads that can disagree.
+   */
+  plan: PartyGamePlanEntry[];
+  /** Whether the host asked the room which activities it would like to see. */
+  priorityVotingEnabled: boolean;
+  /** Whether the guests may still change their preferences. */
+  preferencesOpen: boolean;
   /** Guests seen recently on this party link. */
   guestsPresent: number;
   /**
@@ -141,10 +190,54 @@ export interface PartyGamePublicSnapshot {
   voting: PartyGameVoting | null;
   /** This caller's own answer. Always null for a television: it holds no session. */
   myVote: PartyGameVoteValue | null;
+  /**
+   * The pre-game preference surface, or null when the host did not ask the
+   * room. It travels WITH the snapshot because a phone in the lobby needs both
+   * halves — what the game is doing, and what it may still choose.
+   */
+  preferences: PartyGamePreferences | null;
+}
+
+/**
+ * One activity a guest may say they would like to see.
+ *
+ * It deliberately carries NO vote count: a guest choosing must not be told what
+ * everybody else picked first. The counts exist to inform the HOST's planning,
+ * and the control room is where they are shown.
+ */
+export interface PartyGamePreferenceItem {
+  id: string;
+  title: string;
+  body: string;
+  mediaUrl: string | null;
+  selected: boolean;
+}
+
+/**
+ * The guest's pre-game preferences.
+ *
+ * They are ADVISORY. They choose no activity, interrupt no slideshow, enter no
+ * yes/no result and move no phase — the host reads them and decides. `open`
+ * closes at the first `start` and reopens on `restart_game`, and nothing is
+ * ever deleted: a replay starts from what the room already said.
+ */
+export interface PartyGamePreferences {
+  open: boolean;
+  votesPerGuest: number;
+  votesUsed: number;
+  votesRemaining: number;
+  items: PartyGamePreferenceItem[];
 }
 
 export type PartyGameCommandCode =
-  | 'game_disabled' | 'version_conflict' | 'illegal_transition' | 'no_challenges' | 'conflict';
+  | 'game_disabled' | 'version_conflict' | 'illegal_transition' | 'no_challenges'
+  // A planning action that cannot be carried out: an unknown activity, or one
+  // the host may not move — anything already played, and whatever is on screen.
+  | 'invalid_plan'
+  | 'conflict';
+
+export type PartyGamePreferenceCode =
+  | 'preferences_closed' | 'not_joined' | 'unknown_challenge' | 'limit_reached' | 'conflict';
 
 export type PartyGameVoteCode =
   | 'voting_closed'
@@ -169,6 +262,8 @@ export class PartyGameConflict<TCode extends string, TSnapshot> extends Error {
 
 export type PartyGameCommandConflict = PartyGameConflict<PartyGameCommandCode, PartyGameSnapshot>;
 export type PartyGameVoteConflict = PartyGameConflict<PartyGameVoteCode, PartyGamePublicSnapshot>;
+export type PartyGamePreferenceConflict =
+  PartyGameConflict<PartyGamePreferenceCode, PartyGamePreferences>;
 
 // --- Owner ----------------------------------------------------------------
 
@@ -188,6 +283,33 @@ export async function sendPartyGameCommand(
   try {
     return await api<PartyGameSnapshot>(`/api/albums/${albumId}/party-game/commands`, {
       method: 'POST', json: { command, expectedVersion }, signal,
+    });
+  } catch (error) {
+    throw asConflict<PartyGameCommandCode, PartyGameSnapshot>(error);
+  }
+}
+
+/**
+ * One edit to the plan. Quotes a version like every other owner write, because
+ * the order the game will walk is authoritative state and two hosts reordering
+ * one deck from two phones must not silently overwrite each other.
+ *
+ * `position` is 0-based among the activities still to come, and is meaningful
+ * only for `move`; 0 is "play this next".
+ */
+export async function planPartyGame(
+  albumId: string,
+  action: PartyGamePlanAction,
+  challengeId: string,
+  expectedVersion: number,
+  position?: number,
+  signal?: AbortSignal,
+): Promise<PartyGameSnapshot> {
+  try {
+    return await api<PartyGameSnapshot>(`/api/albums/${albumId}/party-game/plan`, {
+      method: 'POST',
+      json: { action, challengeId, expectedVersion, position: position ?? null },
+      signal,
     });
   } catch (error) {
     throw asConflict<PartyGameCommandCode, PartyGameSnapshot>(error);
@@ -217,6 +339,38 @@ export function joinPartyGame(
 ): Promise<PartyGamePublicSnapshot> {
   return api<PartyGamePublicSnapshot>(
     `/api/party/${encodeURIComponent(token)}/game/join`, { method: 'POST', signal });
+}
+
+/**
+ * Adds or removes one pre-game preference.
+ *
+ * A different call from the vote because it is a different feature: this one
+ * names an ACTIVITY and says "I would like to see this"; the vote names a ROUND
+ * and says "they did it". They share the anonymous participant and nothing
+ * else. The response is the whole preference surface, so a phone re-renders
+ * from one answer.
+ */
+export async function setPartyGamePreference(
+  token: string, challengeId: string, selected: boolean, signal?: AbortSignal,
+): Promise<PartyGamePreferences> {
+  try {
+    const body = await api<PartyGamePreferences>(
+      `/api/party/${encodeURIComponent(token)}/game/preferences`,
+      { method: 'POST', json: { challengeId, selected }, signal });
+    return body;
+  } catch (error) {
+    throw asPreferenceConflict(error);
+  }
+}
+
+function asPreferenceConflict(error: unknown): unknown {
+  if (error instanceof ApiError && error.status === 409) {
+    const body = error.body as
+      { code?: PartyGamePreferenceCode; preferences?: PartyGamePreferences } | null;
+    return new PartyGameConflict<PartyGamePreferenceCode, PartyGamePreferences>(
+      body?.code ?? 'conflict', body?.preferences ?? null);
+  }
+  return error;
 }
 
 export async function submitPartyGameVote(

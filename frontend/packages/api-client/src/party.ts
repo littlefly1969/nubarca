@@ -143,6 +143,25 @@ export function setPartyMainMediaSource(
   return api<Party>(`/api/parties/${partyId}/media/main`, { method: 'PUT', json: body, signal });
 }
 
+/**
+ * A party made from another party's CONFIGURATION — the same evening, set up
+ * again.
+ *
+ * It copies decisions and no history. The clone is a Draft with its own album
+ * (the same photographs, shared through ordinary membership rows — no byte is
+ * duplicated), its own deck, its own settings and brand-new tokens, and none of
+ * the guests, preferences, votes, rounds, uploads, greetings, prints,
+ * televisions or display grants of the party it was copied from. An omitted
+ * title keeps the original's.
+ */
+export function duplicateParty(
+  partyId: string, title?: string, signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}/duplicate`, {
+    method: 'POST', json: { title: title ?? null }, signal,
+  });
+}
+
 // Tearing a party down KEEPS its album. The photographs the guests were allowed
 // to see stay; the ones the host never let through go to Trash the ordinary way;
 // the party's own rows go with it.
@@ -174,6 +193,10 @@ export function setPartyGameSettings(
     gameEnabled: boolean; minChallengeIntervalSeconds: number;
     maxChallengeIntervalSeconds: number; votesPerGuest: number;
     maxChallengesPerSession: number | null;
+    // Whether the guests are asked which activities they would like to see,
+    // before the match starts, and how many each may pick (`votesPerGuest`).
+    // Omitted means unchanged, so a save cannot switch them off by accident.
+    priorityVotingEnabled?: boolean;
   },
   signal?: AbortSignal,
 ): Promise<AlbumPartyStatus> {
@@ -617,8 +640,17 @@ export interface PartyChallenge extends PartyChallengeRules {
   updatedAt: string;
 }
 export interface PartyChallengeList { albumId: string; items: PartyChallenge[]; }
+/**
+ * A write from the composer.
+ *
+ * `kind` is OPTIONAL and the composer no longer sends one: the product's
+ * activities are activities, and a category the room never sees was decoration
+ * on a form. The field stays on the wire for the adaptive game it was designed
+ * for — omitted, the server gives a new activity `custom` and leaves an
+ * existing one's kind exactly as it was.
+ */
 export interface PartyChallengeWrite extends PartyChallengeRules {
-  title: string; body: string; kind: PartyChallengeKind;
+  title: string; body: string; kind?: PartyChallengeKind;
   mediaFileItemId: string | null; isEnabled: boolean;
 }
 export function listPartyChallenges(albumId: string, signal?: AbortSignal): Promise<PartyChallengeList> {
