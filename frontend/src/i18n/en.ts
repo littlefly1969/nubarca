@@ -481,6 +481,12 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.textAlign': 'Text alignment',
   'partyContent.textAlignLeft': 'Left',
   'partyContent.textAlignCenter': 'Centered',
+  'partyCover.invitation.heading': 'Invitation cover',
+  'partyCover.invitation.help':
+    'The photo at the top of the invitation, with the party’s name and date on it. Without one, the album’s chosen cover is used.',
+  'partyCover.live.heading': 'Party cover',
+  'partyCover.live.help':
+    'The photo at the top of the page while the party is on, and in the memories. Without one, the invitation cover carries on.',
   // A poster row's label is the KIND's, localized by the product. There is
   // deliberately no per-slot caption: a party that could name its own buttons
   // would be a page builder with extra steps.
