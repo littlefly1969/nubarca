@@ -612,6 +612,68 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
 
     private HttpClient Guest() => _factory.CreateClient();
 
+    // --- The words' alignment: a fourth independent answer ------------------
+
+    /// Absent and null mean the same thing on the wire: "the surface decides".
+    private static string? TextAlignOf(JsonElement slot) =>
+        slot.TryGetProperty("textAlign", out var align) && align.ValueKind == JsonValueKind.String
+            ? align.GetString()
+            : null;
+
+    [Fact]
+    public async Task A_Slot_Carries_No_Alignment_Until_The_Host_Chooses_One()
+    {
+        // Null is "the surface's own default" — what every row written before
+        // the choice existed must keep meaning, and what a save that never
+        // mentions it must keep writing.
+        var party = await SeedPartyAsync();
+        Assert.Null(TextAlignOf(await OwnerSlotAsync(party, "menu")));
+
+        await VersionAsync(await WriteSlotAsync(party, "menu", Menu, null));
+        Assert.Null(TextAlignOf(await OwnerSlotAsync(party, "menu")));
+    }
+
+    [Fact]
+    public async Task A_Chosen_Alignment_Reaches_The_Guest_And_Survives_A_Save_That_Omits_It()
+    {
+        var party = await SeedPartyAsync();
+        var version = await VersionAsync(await party.Owner.PutAsJsonAsync(
+            $"/api/parties/{party.PartyId}/guest-content/menu",
+            new
+            {
+                enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+                content = Menu, mediaFileItemId = (Guid?)null, version = 0, textAlign = "center",
+            }));
+
+        Assert.Equal("center", TextAlignOf(await OwnerSlotAsync(party, "menu")));
+        Assert.Equal("center", TextAlignOf(
+            await GuestSlotAsync(_factory.CreateClient(), party.Token, "menu")));
+
+        // A client that predates the choice saves the rest of the card and
+        // sends no alignment at all. The host's choice is not reset by it.
+        await VersionAsync(await WriteSlotAsync(party, "menu", Menu, null, version));
+        Assert.Equal("center", TextAlignOf(await OwnerSlotAsync(party, "menu")));
+    }
+
+    [Fact]
+    public async Task An_Unknown_Alignment_Is_Refused_And_Nothing_Is_Written()
+    {
+        var party = await SeedPartyAsync();
+        var refused = await party.Owner.PutAsJsonAsync(
+            $"/api/parties/{party.PartyId}/guest-content/menu",
+            new
+            {
+                enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+                content = Menu, mediaFileItemId = (Guid?)null, version = 0, textAlign = "justify",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            "invalid_content",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
+    }
+
     private async Task<SeededParty> SeedPartyAsync()
     {
         var (ownerId, owner) = await _factory.CreatePermissionClientAsync(

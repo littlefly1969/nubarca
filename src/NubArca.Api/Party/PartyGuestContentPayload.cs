@@ -29,7 +29,7 @@ public sealed record PartyMenuSection(string Title, IReadOnlyList<string> Items)
 
 public sealed record PartyMenuContent(string? Intro, IReadOnlyList<PartyMenuSection> Sections);
 
-public sealed record PartyInfoContent(string Title, string Body);
+public sealed record PartyInfoContent(string? Title, string? Body);
 
 public sealed record PartyThankYouContent(string? Headline, string? Message);
 
@@ -133,8 +133,12 @@ public static class PartyGuestContentPayload
     private static PartyDressCodeContent ReadDressCode(JsonElement e) =>
         new(Required(e, "headline", MaxHeadline), Optional(e, "description", MaxLongText));
 
+    // Both optional, like the invitation's and the thank-you's. A note is often
+    // one sentence, and the editor never said either field was required — so a
+    // host who wrote only the text was refused with no reason given. A slot with
+    // neither renders nothing, which the guest surface already handles.
     private static PartyInfoContent ReadInfo(JsonElement e) =>
-        new(Required(e, "title", MaxHeadline), Required(e, "body", MaxLongText));
+        new(Optional(e, "title", MaxHeadline), Optional(e, "body", MaxLongText));
 
     private static PartyThankYouContent ReadThankYou(JsonElement e) =>
         new(Optional(e, "headline", MaxHeadline), Optional(e, "message", MaxLongText));

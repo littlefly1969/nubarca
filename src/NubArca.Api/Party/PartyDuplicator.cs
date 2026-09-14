@@ -24,11 +24,16 @@ namespace NubArca.Api.Party;
 /// Removing a photograph from the clone leaves the original untouched for
 /// exactly that reason.</para>
 ///
-/// <para>THE CLONE IS A DRAFT THAT ALREADY HAS ITS CAPABILITY. The new link is
+/// <para>THE CLONE IS PUBLISHED WHEN ITS CAPABILITY TRAVELS. The new link is
 /// minted with new ids and therefore new tokens, which is what carries the
-/// settings that live on it; the party itself stays <c>draft</c>, so the public
-/// seam refuses every one of those tokens until the host publishes. A copy is
-/// not a party until somebody says it is.</para>
+/// settings that live on it — and an active link on a draft party is a state no
+/// other path produces: enabling the capability IS publishing the party
+/// (<c>PartyLinkService.EnableAsync</c>), and the owner surface shows a link as
+/// live because of it. A draft clone therefore handed its host a guest link
+/// that answered "not found", which read as a link into the party just copied.
+/// Publishing exposes nothing: nobody holds the new tokens until the host
+/// shares them. A source with no link yields a draft with no link, exactly as a
+/// party created from nothing does.</para>
 /// </summary>
 public interface IPartyDuplicator
 {
@@ -110,6 +115,7 @@ public sealed class PartyDuplicator : IPartyDuplicator
                 EventStartsAt = source.EventStartsAt,
                 GuestAccessExpiresAt = source.GuestAccessExpiresAt,
                 LibraryAccessExpiresAt = source.LibraryAccessExpiresAt,
+                // Published below if, and only if, the capability travels.
                 Status = PartyStatuses.Draft,
                 LiveStartedAt = null,
                 LiveEndedAt = null,
@@ -193,6 +199,7 @@ public sealed class PartyDuplicator : IPartyDuplicator
                     ContentJson = slot.ContentJson,
                     MediaFileItemId = slot.MediaFileItemId,
                     MediaPresentation = slot.MediaPresentation,
+                    TextAlign = slot.TextAlign,
                     Version = 1,
                     CreatedAt = now,
                     UpdatedAt = now,
@@ -274,6 +281,14 @@ public sealed class PartyDuplicator : IPartyDuplicator
                 link.TokenHash = viewHash;
                 link.UploadTokenHash = uploadHash;
                 _db.PartyAlbumLinks.Add(link);
+
+                // An active link IS a published party. Through the domain
+                // transition, never by assigning the word, exactly as
+                // EnableAsync does it.
+                if (PartyLifecycle.Target(party.Status, PartyLifecycleAction.Publish) is string published)
+                {
+                    party.Status = published;
+                }
             }
 
             // The print SETTINGS — which station, which printer, which budgets,

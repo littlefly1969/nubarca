@@ -102,13 +102,20 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
     public void Configure(EntityTypeBuilder<PartyGuestContent> builder)
     {
         builder.ToTable("party_guest_contents", t =>
+        {
             // The presentation vocabulary, held by the DATABASE as well as by
             // the validator. Two values is a closed set, and a closed set that
             // only the application enforces is one bad write away from a
             // surface that cannot render its own row.
             t.HasCheckConstraint(
                 "ck_party_guest_contents_media_presentation",
-                "\"MediaPresentation\" IN ('inline', 'poster')"));
+                "\"MediaPresentation\" IN ('inline', 'poster')");
+            // The same for the alignment. NULL passes a CHECK by definition,
+            // which is exactly "the surface's own default".
+            t.HasCheckConstraint(
+                "ck_party_guest_contents_text_align",
+                "\"TextAlign\" IN ('left', 'center')");
+        });
 
         // The composite key IS the "at most one slot per kind" rule. Expressing
         // it as the key rather than as a surrogate id plus a unique index means
@@ -135,6 +142,10 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
             .IsRequired()
             .HasMaxLength(16)
             .HasDefaultValue(PartyGuestContentMediaPresentations.Inline);
+
+        // Nullable and without a default: an older application never mentions
+        // it, and a row it writes means "the surface decides", as before.
+        builder.Property(c => c.TextAlign).HasMaxLength(16);
 
         builder.Property(c => c.Version).HasDefaultValue(1);
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");

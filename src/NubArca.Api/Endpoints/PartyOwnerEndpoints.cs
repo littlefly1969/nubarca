@@ -66,7 +66,11 @@ public static class PartyOwnerEndpoints
         // slot's composition) or "poster" (the picture IS the document, opened
         // whole from a navigation row). Absent means inline, so a client written
         // against P4 keeps writing exactly what it used to.
-        string? MediaPresentation = null);
+        string? MediaPresentation = null,
+        // How the slot's words are aligned: "left" or "center". Absent means
+        // UNCHANGED, so a client that predates the choice cannot reset it by
+        // saving the rest of the card.
+        string? TextAlign = null);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -292,7 +296,8 @@ public static class PartyOwnerEndpoints
                     body.Enabled, body.VisibleBefore, body.VisibleLive, body.VisibleAfter,
                     body.Content, body.Version, body.MediaFileItemId,
                     body.MediaPresentation
-                        ?? NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline),
+                        ?? NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline,
+                    body.TextAlign),
                 cancellationToken);
 
             return result.Outcome switch

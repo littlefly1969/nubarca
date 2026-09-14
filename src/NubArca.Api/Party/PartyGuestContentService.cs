@@ -89,6 +89,13 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPresentation);
         }
 
+        // An alignment is one of two words or no choice at all. Anything else is
+        // a malformed slot, and is answered like one.
+        if (write.TextAlign is not null && !PartyGuestContentTextAligns.IsKnown(write.TextAlign))
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var row = await _db.PartyGuestContents
             .FirstOrDefaultAsync(c => c.PartyId == partyId && c.Kind == kind, cancellationToken);
@@ -169,6 +176,9 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         // Changing HOW the photograph is presented is an edit of the slot like
         // any other, so it moves the slot's own version — never the party's.
         row.MediaPresentation = write.MediaPresentation;
+        // Omitted means UNCHANGED: the host's choice survives a client that
+        // does not know it exists.
+        row.TextAlign = write.TextAlign ?? row.TextAlign;
         row.Version++;
         row.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -211,7 +221,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                 row.MediaFileItemId is Guid id && eligible.Contains(id)
                     ? MediaUrl(token, row.Kind, row.Version)
                     : null,
-                row.MediaPresentation))
+                row.MediaPresentation, row.TextAlign))
             .ToList();
     }
 
@@ -258,7 +268,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         row.MediaFileItemId is Guid id && eligible.Contains(id)
             ? $"/api/files/{id}/thumbnail?size=medium"
             : null,
-        row.MediaPresentation);
+        row.MediaPresentation, row.TextAlign);
 
     private static PartyGuestContentDto Blank(string kind)
     {
