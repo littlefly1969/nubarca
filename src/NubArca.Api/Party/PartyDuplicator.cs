@@ -208,6 +208,7 @@ public sealed class PartyDuplicator : IPartyDuplicator
                     MediaCropZoom = slot.MediaCropZoom,
                     MediaCropCenterX = slot.MediaCropCenterX,
                     MediaCropCenterY = slot.MediaCropCenterY,
+                    TextPlacement = slot.TextPlacement,
                     Version = 1,
                     CreatedAt = now,
                     UpdatedAt = now,

@@ -122,6 +122,14 @@ public class PartyGuestContent
     public double? MediaCropCenterY { get; set; }
 
     /// <summary>
+    /// Where the slot's words sit when it has an inline photograph — one of
+    /// <see cref="PartyGuestContentTextPlacements"/> — or null for below it.
+    /// "overlay" lays them across the lower part of the picture, the way the
+    /// cover carries the party's name, while the picture keeps its frame.
+    /// </summary>
+    public string? TextPlacement { get; set; }
+
+    /// <summary>
     /// Optimistic concurrency for THIS slot.
     ///
     /// <para>Its own, not the root's: editing the menu and renaming the party
@@ -251,4 +259,18 @@ public static class PartyGuestContentMediaOrientations
         double.IsFinite(zoom) && zoom >= 1 && zoom <= MaxZoom
         && double.IsFinite(centerX) && centerX >= 0 && centerX <= 1
         && double.IsFinite(centerY) && centerY >= 0 && centerY <= 1;
+}
+
+/// <summary>
+/// Where a slot's words sit beside its inline photograph: below it — the
+/// default, "below" on the wire and null in the row — or on it.
+/// </summary>
+public static class PartyGuestContentTextPlacements
+{
+    /// <summary>The wire's word for the default. Never stored.</summary>
+    public const string Below = "below";
+
+    public const string Overlay = "overlay";
+
+    public static bool IsKnownWire(string? placement) => placement is Below or Overlay;
 }

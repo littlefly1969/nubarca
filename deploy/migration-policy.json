@@ -126,6 +126,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds four NULLABLE columns to party_guest_contents with no default — MediaOrientation character varying(16), and MediaCropZoom, MediaCropCenterX and MediaCropCenterY double precision — plus two check constraints: the orientation is 'portrait' or 'landscape', and the crop lies inside the print editor's limits (zoom 1..4, centre 0..1). No existing row is rewritten and nothing is backfilled; NULL passes both constraints by definition. Every existing row reads NULL, which the application defines as 'the whole photograph' — the section photo shown at its own proportions instead of the previous fixed landscape crop, which is the rendering change this release intends. The previous application never reads or writes these columns and its inserts omit them, so it keeps writing NULL; rolling back to it leaves only values the new schema accepts, and a host's frame is merely ignored (the old landscape crop returns), never a failed request or a rejected write."
+    },
+    "20260914171437_AddPartyContentTextPlacement": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds one NULLABLE character varying(16) column (TextPlacement) to party_guest_contents with no default, and one check constraint restricting it to 'overlay'. The generated SQL is exactly two ALTER TABLE ... ADD statements: no existing row is rewritten and nothing is backfilled. Every existing row reads NULL, which the application defines as 'the words below the photograph' — exactly how every slot rendered before the column existed — and NULL passes the constraint by definition. The previous application never reads or writes the column and its inserts omit it, so it keeps writing NULL; rolling back to it leaves only values the new schema accepts, and a host's 'on the photograph' choice is merely ignored (the words return below), never a failed request or a rejected write."
     }
   }
 }

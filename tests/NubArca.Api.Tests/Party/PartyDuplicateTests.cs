@@ -143,7 +143,8 @@ public sealed class PartyDuplicateTests : IDisposable
             await db.PartyGuestContents.Where(x => x.PartyId == source.PartyId)
                 .ExecuteUpdateAsync(u => u
                     .SetProperty(x => x.TextAlign, PartyGuestContentTextAligns.Center)
-                    .SetProperty(x => x.MediaOrientation, PartyGuestContentMediaOrientations.Portrait));
+                    .SetProperty(x => x.MediaOrientation, PartyGuestContentMediaOrientations.Portrait)
+                    .SetProperty(x => x.TextPlacement, PartyGuestContentTextPlacements.Overlay));
         }
 
         var clone = await (await owner.PostAsJsonAsync(
@@ -172,6 +173,7 @@ public sealed class PartyDuplicateTests : IDisposable
         Assert.Equal("Festa di Anna", context.GetProperty("title").GetString());
         Assert.Equal("center", context.GetProperty("content")[0].GetProperty("textAlign").GetString());
         Assert.Equal("portrait", context.GetProperty("content")[0].GetProperty("mediaOrientation").GetString());
+        Assert.Equal("overlay", context.GetProperty("content")[0].GetProperty("textPlacement").GetString());
     }
 
     [Fact]

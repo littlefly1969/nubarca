@@ -82,7 +82,10 @@ public static class PartyOwnerEndpoints
         // the whole photograph; absent leaves it. The crop is the print
         // editor's zoom and centre; absent leaves it.
         string? MediaOrientation = null,
-        NubArca.Api.Party.PartyMediaCropDto? MediaCrop = null);
+        NubArca.Api.Party.PartyMediaCropDto? MediaCrop = null,
+        // "below" or "overlay": the words under the photograph, or on it.
+        // Absent leaves the host's choice as it is.
+        string? TextPlacement = null);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -346,7 +349,7 @@ public static class PartyOwnerEndpoints
                     body.Content, body.Version, body.MediaFileItemId,
                     body.MediaPresentation
                         ?? NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline,
-                    body.TextAlign, body.MediaOrientation, body.MediaCrop),
+                    body.TextAlign, body.MediaOrientation, body.MediaCrop, body.TextPlacement),
                 cancellationToken);
 
             return result.Outcome switch

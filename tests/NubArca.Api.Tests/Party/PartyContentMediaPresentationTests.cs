@@ -773,6 +773,50 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
         Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
     }
 
+    // --- Where the words sit -------------------------------------------------
+
+    private static string? PlacementOf(JsonElement slot) =>
+        slot.TryGetProperty("textPlacement", out var p) && p.ValueKind == JsonValueKind.String
+            ? p.GetString() : null;
+
+    private static Task<HttpResponseMessage> PutInfoAsync(
+        SeededParty party, int version, string? placement) =>
+        party.Owner.PutAsJsonAsync($"/api/parties/{party.PartyId}/guest-content/info", new
+        {
+            enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+            content = new { title = "Parcheggio", body = "Nel cortile" },
+            mediaFileItemId = party.AlbumPhotoId, version, textPlacement = placement,
+        });
+
+    [Fact]
+    public async Task The_Words_Sit_Below_The_Photograph_Until_The_Host_Puts_Them_On_It()
+    {
+        var party = await SeedPartyAsync();
+        var version = await VersionAsync(await PutInfoAsync(party, 0, null));
+        Assert.Null(PlacementOf(await OwnerSlotAsync(party, "info")));
+
+        version = await VersionAsync(await PutInfoAsync(party, version, "overlay"));
+        Assert.Equal("overlay", PlacementOf(
+            await GuestSlotAsync(_factory.CreateClient(), party.Token, "info")));
+
+        // Omitted leaves it; "below" is the default again, stored as nothing.
+        version = await VersionAsync(await PutInfoAsync(party, version, null));
+        Assert.Equal("overlay", PlacementOf(await OwnerSlotAsync(party, "info")));
+        await VersionAsync(await PutInfoAsync(party, version, "below"));
+        Assert.Null(PlacementOf(await OwnerSlotAsync(party, "info")));
+    }
+
+    [Fact]
+    public async Task An_Unknown_Placement_Is_Refused_And_Nothing_Is_Written()
+    {
+        var party = await SeedPartyAsync();
+
+        var refused = await PutInfoAsync(party, 0, "sideways");
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(0, (await OwnerSlotAsync(party, "info")).GetProperty("version").GetInt32());
+    }
+
     private async Task<SeededParty> SeedPartyAsync()
     {
         var (ownerId, owner) = await _factory.CreatePermissionClientAsync(
