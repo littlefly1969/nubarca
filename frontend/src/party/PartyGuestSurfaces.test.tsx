@@ -76,8 +76,10 @@ describe('the invitation', () => {
     render(page());
 
     await screen.findByTestId('party-before');
-    expect(document.querySelector('.party-invitation-cover--blank')).toBeInTheDocument();
-    expect(document.querySelector('img.party-invitation-cover')).toBeNull();
+    // The party's own composition, not an empty frame.
+    const cover = screen.getByTestId('party-invitation-hero');
+    expect(cover).toHaveAttribute('data-cover', 'fallback');
+    expect(cover.style.backgroundImage).toBe('');
   });
 
   it('renders content in the PRODUCT order, whatever order it is written in', async () => {
@@ -110,6 +112,27 @@ describe('the invitation', () => {
     await screen.findByTestId('party-before');
     // An optional field that is absent renders nothing, not an empty heading.
     expect(screen.queryByTestId('party-content')?.textContent ?? '').toBe('');
+  });
+
+  it('opens on the party’s cover: invited, name and date first, the host’s words after', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        coverUrl: `/api/party/${TOKEN}/content/invitation/media?v=2`,
+        content: [slot('invitation', { headline: 'Vieni a festeggiare' })],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    const hero = document.querySelector<HTMLElement>('header.party-guest-hub-hero')!;
+    // The very structure the party uses for its own first photograph.
+    expect(hero).toContainElement(screen.getByTestId('party-invitation-hero'));
+    expect(within(hero).getByRole('heading', { level: 1 })).toHaveTextContent('Festa di Marta');
+    expect(hero.querySelector('time')).toHaveAttribute('dateTime', '2027-06-12T18:30:00Z');
+    // ...and what the host wrote comes after it, never before or inside it.
+    const words = screen.getByText('Vieni a festeggiare');
+    expect(hero).not.toContainElement(words);
+    expect(hero.compareDocumentPosition(words) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('offers Home and Info in the dock, and never an album', async () => {
@@ -365,8 +388,12 @@ describe('a slot’s photograph', () => {
     });
     render(page());
 
-    expect(await screen.findByTestId('party-invitation-hero')).toHaveAttribute('src', INVITATION_MEDIA);
-    expect(document.querySelectorAll(`img[src="${INVITATION_MEDIA}"]`)).toHaveLength(1);
+    const cover = await screen.findByTestId('party-invitation-hero');
+    expect(cover).toHaveAttribute('data-cover', 'photo');
+    expect(cover.style.backgroundImage).toContain(INVITATION_MEDIA);
+    // Once: the cover IS the invitation's photograph, so its section below
+    // draws no second copy of it.
+    expect(document.querySelectorAll(`img[src="${INVITATION_MEDIA}"]`)).toHaveLength(0);
     expect(screen.getByText('Vieni!')).toBeInTheDocument();
   });
 
@@ -380,7 +407,7 @@ describe('a slot’s photograph', () => {
     });
     render(page());
 
-    expect(await screen.findByTestId('party-invitation-hero')).toHaveAttribute('src', COVER);
+    expect((await screen.findByTestId('party-invitation-hero')).style.backgroundImage).toContain(COVER);
     expect(screen.queryByTestId('party-content-media')).not.toBeInTheDocument();
   });
 
@@ -398,9 +425,11 @@ describe('a slot’s photograph', () => {
     expect(screen.queryByTestId('party-content-media')).not.toBeInTheDocument();
     expect(screen.getByText('Cena in giardino')).toBeInTheDocument();
 
-    fireEvent.error(screen.getByTestId('party-invitation-hero'));
-    expect(screen.queryByTestId('party-invitation-hero')).not.toBeInTheDocument();
-    expect(document.querySelector('.party-invitation-cover--blank')).toBeInTheDocument();
+    // The cover is a decorative background layer, as the party's is: a picture
+    // that never arrives leaves the brand colour, never a broken-image frame.
+    const cover = screen.getByTestId('party-invitation-hero');
+    expect(cover.tagName).toBe('DIV');
+    expect(cover).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('never turns a content photograph into a download', async () => {
@@ -438,5 +467,36 @@ describe('a slot’s photograph', () => {
     const after = await screen.findByTestId('party-after');
     expect(within(after).getByTestId('party-content-media')).toHaveAttribute('src', THANKS);
     expect(within(after).getByText('Che serata!')).toBeInTheDocument();
+  });
+});
+
+describe('the host’s alignment', () => {
+  it('aligns each slot’s words as the host chose, and a section reads left by default', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [
+          { ...slot('invitation', { headline: 'Benvenuti' }), textAlign: 'center' },
+          slot('info', { title: 'Parcheggio', body: 'Nel cortile' }),
+        ],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    expect(document.querySelector('[data-content="invitation"]')).toHaveAttribute('data-align', 'center');
+    expect(document.querySelector('[data-content="info"]')).toHaveAttribute('data-align', 'left');
+  });
+
+  it('centres the thank-you unless the host chose the left edge', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        phase: 'after',
+        content: [{ ...slot('thank-you', { headline: 'Grazie!' }), textAlign: 'left' }],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-after');
+    expect(document.querySelector('.party-after-hero')).toHaveAttribute('data-align', 'left');
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import type { ReactNode } from 'react';
 import type { PartyGuestContentKind, PartyGuestContext } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './PartyGuestContent';
@@ -14,10 +14,12 @@ import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './P
 // for as long as they last.
 
 export function PartyBeforeHome({
-  context, onOpenPoster,
+  context, onOpenPoster, topBar,
 }: {
   context: PartyGuestContext;
   onOpenPoster?(kind: PartyGuestContentKind): void;
+  /** The brand row, drawn INSIDE the cover exactly as it is at the party. */
+  topBar?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
   // The hero is the invitation's photograph only while it is INLINE — which is
@@ -28,50 +30,52 @@ export function PartyBeforeHome({
   const invitationIsHero = invitation?.mediaPresentation !== 'poster';
   return (
     <div className="party-invitation" data-testid="party-before">
-      <header className="party-invitation-hero">
-        <InvitationHero src={context.coverUrl} />
-        <p className="party-invitation-eyebrow">{t('partyGuest.invited')}</p>
-        <h1 className="party-invitation-title">{context.title}</h1>
-        {context.eventStartsAt && (
-          <p className="party-invitation-date">
-            <time dateTime={context.eventStartsAt}>
-              {formatDate(context.eventStartsAt, {
-                dateStyle: 'long', timeStyle: 'short',
-              })}
-            </time>
-          </p>
-        )}
+      {/* THE SAME COVER AS THE PARTY. The invitation's photograph is drawn the
+          way the party draws its own — full-bleed, faded into the page, with the
+          brand row and the headline sitting inside it — so the evening opens on
+          the picture it will continue on. It is a decorative background layer,
+          like the party's: the title is the heading, and a picture that fails
+          to load leaves the brand colour rather than a broken frame. */}
+      <header className="party-guest-hub-hero party-invitation-hero">
+        <div
+          className="party-guest-hub-hero-cover"
+          data-testid="party-invitation-hero"
+          data-cover={context.coverUrl ? 'photo' : 'fallback'}
+          style={context.coverUrl ? { backgroundImage: `url("${context.coverUrl}")` } : undefined}
+          aria-hidden="true"
+        />
+        {topBar}
+        {/* "You're invited", the name and the date come FIRST, on the picture,
+            and what the host wrote follows below. */}
+        <div className="party-guest-hub-headline">
+          <p className="party-guest-hub-eyebrow">{t('partyGuest.invited')}</p>
+          <h1 className="party-guest-hub-title">{context.title}</h1>
+          {context.eventStartsAt && (
+            <p className="party-guest-hub-meta party-invitation-date">
+              <time dateTime={context.eventStartsAt}>
+                {formatDate(context.eventStartsAt, {
+                  dateStyle: 'long', timeStyle: 'short',
+                })}
+              </time>
+            </p>
+          )}
+        </div>
       </header>
 
-      {/* An INLINE invitation photograph IS the hero above, so its section does
-          not draw it a second time. A poster one is not the hero and keeps its
-          own row, which is how a full-height invitation gets opened whole. */}
-      <PartyGuestContentSections
-        slots={context.content}
-        heroKind={invitationIsHero ? 'invitation' : undefined}
-        onOpenPoster={onOpenPoster}
-      />
+      <div className="party-invitation-body">
+        {/* An INLINE invitation photograph IS the cover above, so its section
+            does not draw it a second time. A poster one is not the cover and
+            keeps its own row, which is how a full-height invitation gets opened
+            whole. */}
+        <PartyGuestContentSections
+          slots={context.content}
+          heroKind={invitationIsHero ? 'invitation' : undefined}
+          onOpenPoster={onOpenPoster}
+        />
 
-      <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
+        <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
+      </div>
     </div>
-  );
-}
-
-/**
- * The invitation's hero. The SERVER has already chosen it — the invitation's
- * own photograph, else the album's chosen cover — and with neither, or with a
- * picture that fails to load, it is a composition rather than a broken frame:
- * an invitation with a hole in it is worse than one without a photograph.
- */
-function InvitationHero({ src }: { src: string | null }) {
-  const [failed, setFailed] = useState<string | null>(null);
-  return src && failed !== src ? (
-    <img
-      className="party-invitation-cover" src={src} alt=""
-      data-testid="party-invitation-hero" onError={() => setFailed(src)}
-    />
-  ) : (
-    <div className="party-invitation-cover party-invitation-cover--blank" aria-hidden="true" />
   );
 }
 
@@ -88,7 +92,7 @@ export function PartyAfterHome({
 
   return (
     <div className="party-after" data-testid="party-after" data-access={context.accessMode}>
-      <header className="party-after-hero">
+      <header className="party-after-hero" data-align={thankYou.textAlign}>
         <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" />
         <h1 className="party-after-title">
           {/* The host's own words when they wrote them, and the product's when

@@ -681,10 +681,11 @@ export function PartyPage() {
   if (shownPhase === 'before') {
     return (
       <main className="party-guest-hub">
-        <div className="party-guest-hub-state-page">
-          <PartyHubTopBar />
-          <PartyBeforeHome context={context} onOpenPoster={openPoster} />
-        </div>
+        {/* The invitation opens on the party's own cover, with the brand row
+            inside it, rather than on a padded page above a card. */}
+        <PartyBeforeHome
+          context={context} onOpenPoster={openPoster} topBar={<PartyHubTopBar />}
+        />
         {/* Entering RELOADS: the new surface needs what the old one never asked
             for — an invitation fetched no gallery — so it is fetched now rather
             than half-rendered from stale state. */}

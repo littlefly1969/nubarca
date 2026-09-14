@@ -5,8 +5,10 @@ import {
   type PartyGuestContentKind,
   type PartyGuestContentSlot,
   type PartyMediaPresentation,
+  type PartyTextAlign,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { defaultTextAlign } from './PartyGuestContent';
 import { PartySlotImageField } from './PartyImageField';
 
 // The owner's typed editors: six named shapes, one card each.
@@ -31,6 +33,8 @@ type Draft = {
   /** How the host previews the chosen photograph. Never sent. */
   mediaPreviewUrl: string | null;
   mediaPresentation: PartyMediaPresentation;
+  /** The host's alignment, or null while they have not chosen one. */
+  textAlign: PartyTextAlign | null;
   version: number;
 };
 
@@ -43,6 +47,7 @@ const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
   mediaFileItemId: slot.mediaFileItemId ?? null,
   mediaPreviewUrl: slot.mediaUrl ?? null,
   mediaPresentation: slot.mediaPresentation ?? 'inline',
+  textAlign: slot.textAlign ?? null,
   version: slot.version,
 });
 
@@ -66,8 +71,8 @@ export function PartyContentCard({
   const [draft, setDraft] = useState<Draft>(() => fromSlot(slot));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] =
-    useState<'idle' | 'saved' | 'conflict' | 'failed' | 'invalidMedia' | 'invalidPresentation'>(
-      'idle');
+    useState<'idle' | 'saved' | 'conflict' | 'failed' | 'invalidMedia' | 'invalidPresentation'
+      | 'invalidContent'>('idle');
 
   // Re-seeded when the SERVER's version moves — including after a conflict,
   // which is how the card adopts what actually happened.
@@ -87,6 +92,8 @@ export function PartyContentCard({
         content: draft.content,
         mediaFileItemId: draft.mediaFileItemId,
         mediaPresentation: draft.mediaPresentation,
+        // null until the host picks, which the server reads as "unchanged".
+        textAlign: draft.textAlign,
         version: draft.version,
       }));
       setStatus('saved');
@@ -101,6 +108,11 @@ export function PartyContentCard({
       } else if (err instanceof ApiError && err.status === 400
         && body?.error === 'invalid_presentation') {
         setStatus('invalidPresentation');
+      } else if (err instanceof ApiError && err.status === 400
+        && body?.error === 'invalid_content') {
+        // A required field left empty. Said plainly: "could not save" under a
+        // form that looks complete is what made a host give up on a slot.
+        setStatus('invalidContent');
       } else {
         setStatus('failed');
       }
@@ -123,6 +135,13 @@ export function PartyContentCard({
       {draft.enabled && (
         <>
           <ContentFields kind={slot.kind} content={draft.content} busy={busy} set={set} />
+
+          <TextAlignChoice
+            kind={slot.kind}
+            value={draft.textAlign ?? defaultTextAlign(slot.kind)}
+            disabled={busy}
+            onChange={(textAlign) => setDraft((d) => ({ ...d, textAlign }))}
+          />
 
           <PartySlotImageField
             kind={slot.kind}
@@ -213,6 +232,11 @@ export function PartyContentCard({
       {status === 'invalidPresentation' && (
         <p className="inline-error" role="alert">{t('partyContent.presentationInvalid')}</p>
       )}
+      {status === 'invalidContent' && (
+        <p className="inline-error" role="alert" data-testid={`party-content-invalid-${slot.kind}`}>
+          {t('partyContent.invalidContent')}
+        </p>
+      )}
       {status === 'failed' && (
         <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
       )}
@@ -276,6 +300,45 @@ function PresentationChoice({
   );
 }
 
+/**
+ * Where the slot's words sit: at the left edge, or centred.
+ *
+ * Offered on every slot that has words, as a plain two-way choice. What it
+ * shows selected is what the guest sees today — the surface's own default until
+ * the host picks — so opening a card and saving it changes nothing.
+ */
+function TextAlignChoice({
+  kind, value, disabled, onChange,
+}: {
+  kind: PartyGuestContentKind;
+  value: PartyTextAlign;
+  disabled: boolean;
+  onChange(next: PartyTextAlign): void;
+}) {
+  const { t } = useI18n();
+  return (
+    <fieldset className="party-presentation" data-testid={`party-text-align-${kind}`}>
+      <legend>{t('partyContent.textAlign')}</legend>
+      {(['left', 'center'] as const).map((option) => (
+        <label className="party-presentation-option" key={option}>
+          <input
+            type="radio"
+            name={`text-align-${kind}`}
+            value={option}
+            checked={value === option}
+            disabled={disabled}
+            data-testid={`party-text-align-${kind}-${option}`}
+            onChange={() => onChange(option)}
+          />
+          <span className="party-presentation-title">
+            {t(option === 'left' ? 'partyContent.textAlignLeft' : 'partyContent.textAlignCenter')}
+          </span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
 function ContentFields({
   kind, content, busy, set,
 }: {
@@ -285,17 +348,23 @@ function ContentFields({
   set(key: string, value: string): void;
 }) {
   const { t } = useI18n();
-  const field = (key: string, labelKey: Parameters<typeof t>[0], long = false) => (
+  // `required` mirrors the SERVER's rule for this kind, so the form says up
+  // front what a save would be refused for rather than after the fact.
+  const field = (
+    key: string,
+    labelKey: Parameters<typeof t>[0],
+    { long = false, required = false }: { long?: boolean; required?: boolean } = {},
+  ) => (
     <label className="party-field" key={key}>
-      <span>{t(labelKey)}</span>
+      <span>{t(labelKey)}{required && <span aria-hidden="true"> *</span>}</span>
       {long ? (
         <textarea
-          rows={3} value={text(content, key)} disabled={busy}
+          rows={3} value={text(content, key)} disabled={busy} required={required}
           aria-label={t(labelKey)} onChange={(e) => set(key, e.target.value)}
         />
       ) : (
         <input
-          value={text(content, key)} disabled={busy}
+          value={text(content, key)} disabled={busy} required={required}
           aria-label={t(labelKey)} onChange={(e) => set(key, e.target.value)}
         />
       )}
@@ -304,26 +373,31 @@ function ContentFields({
 
   switch (kind) {
     case 'invitation':
-      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', true)}</>;
+      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', { long: true })}</>;
     case 'location':
       return (
         <>
-          {field('venueName', 'partyContent.venue')}
-          {field('address', 'partyContent.address')}
-          {field('note', 'partyContent.note', true)}
+          {field('venueName', 'partyContent.venue', { required: true })}
+          {field('address', 'partyContent.address', { required: true })}
+          {field('note', 'partyContent.note', { long: true })}
         </>
       );
     case 'dress-code':
-      return <>{field('headline', 'partyContent.headline')}{field('description', 'partyContent.message', true)}</>;
+      return (
+        <>
+          {field('headline', 'partyContent.headline', { required: true })}
+          {field('description', 'partyContent.message', { long: true })}
+        </>
+      );
     case 'menu':
       // The sections are edited as a whole in a later slice; for now the intro
       // is what an owner can write here, and an existing menu's sections are
       // preserved untouched because the draft carries them through.
-      return <>{field('intro', 'partyContent.message', true)}</>;
+      return <>{field('intro', 'partyContent.message', { long: true })}</>;
     case 'info':
-      return <>{field('title', 'partyContent.headline')}{field('body', 'partyContent.message', true)}</>;
+      return <>{field('title', 'partyContent.headline')}{field('body', 'partyContent.message', { long: true })}</>;
     default:
-      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', true)}</>;
+      return <>{field('headline', 'partyContent.headline')}{field('message', 'partyContent.message', { long: true })}</>;
   }
 }
 

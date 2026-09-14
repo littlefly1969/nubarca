@@ -168,3 +168,57 @@ describe('a slot’s photograph', () => {
     expect(screen.getByTestId('party-image-upload-menu')).toBeInTheDocument();
   });
 });
+
+describe('a slot’s words', () => {
+  it('sends no alignment until the host picks one, and shows the default selected', async () => {
+    const { mock, onSaved } = mount(slot());
+    const user = userEvent.setup();
+
+    // The menu is a section, and a section reads left until the host says so.
+    expect(screen.getByTestId('party-text-align-menu-left')).toBeChecked();
+    await user.click(screen.getByTestId('party-content-save-menu'));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    // null is "unchanged" to the server: opening a card and saving it changes
+    // nothing about how the guest sees it.
+    expect(sentBody(mock).textAlign).toBeNull();
+  });
+
+  it('saves the alignment the host chose', async () => {
+    const { mock, onSaved } = mount(slot());
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('party-text-align-menu-center'));
+    await user.click(screen.getByTestId('party-content-save-menu'));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(sentBody(mock).textAlign).toBe('center');
+  });
+
+  it('shows a stored choice, and the thank-you centred until one is made', () => {
+    mount(slot({ textAlign: 'center' }));
+    expect(screen.getByTestId('party-text-align-menu-center')).toBeChecked();
+    cleanup();
+
+    mount(slot({ kind: 'thank-you', content: { headline: 'Grazie', message: null } }));
+    expect(screen.getByTestId('party-text-align-thank-you-center')).toBeChecked();
+  });
+
+  it('marks the fields the server requires, and says so when a save is refused for them', async () => {
+    mount(
+      slot({ kind: 'location', content: { venueName: '', address: 'Via Roma 1', note: null } }),
+      {
+        [`PUT /api/parties/${PARTY}/guest-content/location`]: () =>
+          errorResponse(400, { error: 'invalid_content' }),
+      },
+    );
+    const user = userEvent.setup();
+
+    const [venue, address, note] = screen.getAllByRole('textbox');
+    expect(venue).toBeRequired();
+    expect(address).toBeRequired();
+    expect(note).not.toBeRequired();
+
+    await user.click(screen.getByTestId('party-content-save-location'));
+    // Not the generic "could not save": the host is told what to do.
+    expect(await screen.findByTestId('party-content-invalid-location')).toBeInTheDocument();
+  });
+});

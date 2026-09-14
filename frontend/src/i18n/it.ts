@@ -320,7 +320,7 @@ const it = {
     'Prima che il game inizi gli ospiti indicano le loro preferite. Sono indicazioni: le vedi in regia e decidi tu cosa si gioca.',
   'party.duplicate.heading': 'Duplica festa',
   'party.duplicate.help':
-    'Prepara di nuovo la stessa serata: titolo, date, pagine per gli ospiti, prove, slideshow, limiti e budget di stampa. La nuova festa è una bozza con un album e un QR tutti suoi, e le foto sono condivise, non copiate.',
+    'Prepara di nuovo la stessa serata: titolo, date, pagine per gli ospiti, prove, slideshow, limiti e budget di stampa. La nuova festa è pronta, con un album e un QR tutti suoi, e le foto sono condivise, non copiate.',
   'party.duplicate.excludes':
     'Non porta con sé nulla di quello che è successo: ospiti, preferenze, voti, caricamenti, messaggi, stampe, schermi e i vecchi link restano sull’originale.',
   'party.duplicate.start': 'Duplica festa',
@@ -486,6 +486,10 @@ const it = {
   'partyContent.imageDuplicate': 'Nella libreria c’è già un file con questo nome. Rinominalo e riprova.',
   'partyContent.imageUploadFailed': 'Non è stato possibile caricare l’immagine.',
   'partyContent.imageInvalid': 'Questa immagine non può essere usata. Scegline un’altra.',
+  'partyContent.invalidContent': 'Compila i campi segnati con *.',
+  'partyContent.textAlign': 'Allineamento del testo',
+  'partyContent.textAlignLeft': 'A sinistra',
+  'partyContent.textAlignCenter': 'Centrato',
   // L'etichetta di una riga poster e' quella del TIPO, localizzata dal prodotto.
   'partyGuest.poster.invitation': 'Invito',
   'partyGuest.poster.location': 'Dove',
