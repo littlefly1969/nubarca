@@ -323,6 +323,8 @@ export function setPartyGuestContent(
     mediaOrientation?: PartyMediaOrientation | 'auto';
     /** Where a fixed frame sits. Omitted or null leaves it; "auto" clears it. */
     mediaCrop?: PartyMediaCrop | null;
+    /** Where the words sit; omitted leaves it as it is. */
+    textPlacement?: PartyTextPlacement;
     version: number;
   },
   signal?: AbortSignal,
@@ -465,6 +467,12 @@ export interface PartyMediaCrop {
   centerY: number;
 }
 
+/**
+ * Where a slot's words sit beside its inline photograph: below it — the
+ * default — or on it, across the lower part of the picture.
+ */
+export type PartyTextPlacement = 'below' | 'overlay';
+
 /** What every projection of a slot shares. `content` is the shape its `kind` declares. */
 interface PartyGuestContentFields {
   kind: PartyGuestContentKind;
@@ -481,6 +489,8 @@ interface PartyGuestContentFields {
   /** The inline photograph's frame, or null/absent for the whole photograph. */
   mediaOrientation?: PartyMediaOrientation | null;
   mediaCrop?: PartyMediaCrop | null;
+  /** "overlay" puts the words on the photograph; absent or null is below it. */
+  textPlacement?: 'overlay' | null;
 }
 
 /**

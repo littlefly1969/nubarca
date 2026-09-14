@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type {
   PartyGuestContentKind, PartyGuestContentView, PartyMediaCrop, PartyMediaOrientation,
   PartyTextAlign,
@@ -58,30 +58,41 @@ export const SLOT_FRAME_ASPECT: Record<PartyMediaOrientation, number> = {
  * load removes the frame instead of leaving a broken-image icon where it was.
  */
 export function PartyContentImage({
-  src, className = 'party-content-media', frame,
+  src, className = 'party-content-media', frame, overlay,
 }: {
   src: string | null;
   className?: string;
   /** The host's frame. No orientation is the whole photograph. */
   frame?: { mediaOrientation?: PartyMediaOrientation | null; mediaCrop?: PartyMediaCrop | null };
+  /**
+   * Words to lay across the lower part of the picture, the way the cover carries
+   * the party's name. A picture that is not there, or fails to load, leaves them
+   * in the page as ordinary text rather than floating over nothing.
+   */
+  overlay?: ReactNode;
 }) {
   const [failed, setFailed] = useState<string | null>(null);
   // The photograph's own shape, learned when it loads: a fixed frame needs it to
   // place the crop exactly where the host put it.
   const [aspect, setAspect] = useState<number | null>(null);
-  if (!src || failed === src) return null;
+  if (!src || failed === src) return overlay ? <>{overlay}</> : null;
+
+  const words = overlay
+    ? <div className="party-content-overlay-text">{overlay}</div>
+    : null;
 
   const orientation = frame?.mediaOrientation ?? null;
   if (!orientation) {
     // The WHOLE photograph at its own proportions — the default, so a portrait
     // picture is never cut into a landscape band nobody asked for.
-    return (
+    const picture = (
       <img
         className={className} src={src} alt="" loading="lazy" decoding="async"
         data-testid="party-content-media" data-frame="whole"
         onError={() => setFailed(src)}
       />
     );
+    return words ? <div className="party-content-overlay">{picture}{words}</div> : picture;
   }
 
   const slotAspect = SLOT_FRAME_ASPECT[orientation];
@@ -108,8 +119,27 @@ export function PartyContentImage({
           top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
         } : { width: '100%', height: '100%', left: 0, top: 0 }}
       />
+      {words}
     </div>
   );
+}
+
+/**
+ * A section's photograph and its words, in the order the host chose: the words
+ * below the picture — the default — or on it, across its lower part. Without a
+ * picture the words simply follow, whatever was chosen.
+ */
+function SlotPhoto({
+  slot, mediaUrl, words,
+}: {
+  slot: PartyGuestContentView;
+  mediaUrl: string | null;
+  words: ReactNode;
+}) {
+  const onPhoto = slot.textPlacement === 'overlay' && !!mediaUrl && !!words;
+  return onPhoto
+    ? <PartyContentImage src={mediaUrl} frame={slot} overlay={words} />
+    : <><PartyContentImage src={mediaUrl} frame={slot} />{words}</>;
 }
 
 /**
@@ -225,11 +255,15 @@ function PartyGuestContentSection({
       const headline = str(payload, 'headline');
       const message = str(payload, 'message');
       if (!headline && !message && !mediaUrl) return null;
-      return (
-        <section className="party-content-block" data-content="invitation" data-align={align}>
-          <PartyContentImage src={mediaUrl} frame={slot} />
+      const words = headline || message ? (
+        <>
           {headline && <h2 className="party-content-headline">{headline}</h2>}
           {message && <p className="party-content-body">{message}</p>}
+        </>
+      ) : null;
+      return (
+        <section className="party-content-block" data-content="invitation" data-align={align}>
+          <SlotPhoto slot={slot} mediaUrl={mediaUrl} words={words} />
         </section>
       );
     }
@@ -246,10 +280,8 @@ function PartyGuestContentSection({
         ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
           [venue, address].filter(Boolean).join(' '))}`
         : null;
-      return (
-        <section className="party-content-block" data-content="location" data-align={align}>
-          <PartyContentImage src={mediaUrl} frame={slot} />
-          <h3>{t('partyGuest.location')}</h3>
+      const words = venue || address ? (
+        <>
           {venue && <p className="party-content-strong">{venue}</p>}
           {address && <p className="party-content-body">{address}</p>}
           {note && <p className="party-content-note">{note}</p>}
@@ -260,6 +292,14 @@ function PartyGuestContentSection({
               </a>
             </p>
           )}
+        </>
+      ) : null;
+      // The section's TITLE comes first, above its photograph: it is what says a
+      // new part of the page begins.
+      return (
+        <section className="party-content-block" data-content="location" data-align={align}>
+          <h3>{t('partyGuest.location')}</h3>
+          <SlotPhoto slot={slot} mediaUrl={mediaUrl} words={words} />
         </section>
       );
     }
@@ -268,12 +308,16 @@ function PartyGuestContentSection({
       const headline = str(payload, 'headline');
       const description = str(payload, 'description');
       if (!headline && !mediaUrl) return null;
-      return (
-        <section className="party-content-block" data-content="dress-code" data-align={align}>
-          <PartyContentImage src={mediaUrl} frame={slot} />
-          <h3>{t('partyGuest.dressCode')}</h3>
+      const words = headline || description ? (
+        <>
           {headline && <p className="party-content-strong">{headline}</p>}
           {description && <p className="party-content-body">{description}</p>}
+        </>
+      ) : null;
+      return (
+        <section className="party-content-block" data-content="dress-code" data-align={align}>
+          <h3>{t('partyGuest.dressCode')}</h3>
+          <SlotPhoto slot={slot} mediaUrl={mediaUrl} words={words} />
         </section>
       );
     }
@@ -283,31 +327,34 @@ function PartyGuestContentSection({
       const sections = Array.isArray(payload.sections) ? payload.sections : [];
       if (!intro && sections.length === 0 && !mediaUrl) return null;
       // A card rather than a list: the photograph is its lid when there is one,
-      // and the courses read as a menu either way.
+      // and the courses read as a menu either way. The title sits above the
+      // card, like every section's.
       return (
-        <section className="party-content-block party-content-block--menu" data-content="menu" data-align={align}>
-          <PartyContentImage src={mediaUrl} frame={slot} className="party-content-media party-content-media--menu" />
-          <div className="party-menu-body">
-            <h3>{t('partyGuest.menu')}</h3>
-            {intro && <p className="party-content-body">{intro}</p>}
-            {sections.map((raw, index) => {
-              const section = (raw ?? {}) as Payload;
-              const title = str(section, 'title');
-              const items = Array.isArray(section.items) ? section.items : [];
-              if (!title && items.length === 0) return null;
-              return (
-                <div className="party-menu-section" key={`${title ?? ''}-${index}`}>
-                  {title && <p className="party-content-strong">{title}</p>}
-                  {items.length > 0 && (
-                    <ul>
-                      {items.map((item, i) => (
-                        <li key={`${String(item)}-${i}`}>{String(item)}</li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
+        <section className="party-content-block" data-content="menu" data-align={align}>
+          <h3>{t('partyGuest.menu')}</h3>
+          <div className="party-menu-card">
+            <PartyContentImage src={mediaUrl} frame={slot} className="party-content-media party-content-media--menu" />
+            <div className="party-menu-body">
+              {intro && <p className="party-content-body">{intro}</p>}
+              {sections.map((raw, index) => {
+                const section = (raw ?? {}) as Payload;
+                const title = str(section, 'title');
+                const items = Array.isArray(section.items) ? section.items : [];
+                if (!title && items.length === 0) return null;
+                return (
+                  <div className="party-menu-section" key={`${title ?? ''}-${index}`}>
+                    {title && <p className="party-content-strong">{title}</p>}
+                    {items.length > 0 && (
+                      <ul>
+                        {items.map((item, i) => (
+                          <li key={`${String(item)}-${i}`}>{String(item)}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </section>
       );
@@ -319,9 +366,11 @@ function PartyGuestContentSection({
       if (!title && !body && !mediaUrl) return null;
       return (
         <section className="party-content-block" data-content="info" data-align={align}>
-          <PartyContentImage src={mediaUrl} frame={slot} />
           {title && <h3>{title}</h3>}
-          {body && <p className="party-content-body">{body}</p>}
+          <SlotPhoto
+            slot={slot} mediaUrl={mediaUrl}
+            words={body ? <p className="party-content-body">{body}</p> : null}
+          />
         </section>
       );
     }
@@ -348,6 +397,7 @@ export function partyThankYou(
   headline: string | null; message: string | null; mediaUrl: string | null;
   textAlign: PartyTextAlign;
   mediaOrientation: PartyMediaOrientation | null; mediaCrop: PartyMediaCrop | null;
+  textPlacement: 'overlay' | null;
 } {
   const slot = slots.find((s) => s.kind === 'thank-you');
   // The host's alignment governs the hero's words even when they are the
@@ -356,7 +406,7 @@ export function partyThankYou(
   if (slot && slot.mediaPresentation === 'poster') {
     return {
       headline: null, message: null, mediaUrl: null, textAlign,
-      mediaOrientation: null, mediaCrop: null,
+      mediaOrientation: null, mediaCrop: null, textPlacement: null,
     };
   }
   const payload = (slot?.content ?? {}) as Payload;
@@ -367,5 +417,6 @@ export function partyThankYou(
     textAlign,
     mediaOrientation: slot?.mediaOrientation ?? null,
     mediaCrop: slot?.mediaCrop ?? null,
+    textPlacement: slot?.textPlacement === 'overlay' ? 'overlay' : null,
   };
 }

@@ -264,3 +264,30 @@ describe('a slot’s photograph frame', () => {
     expect(screen.queryByTestId('party-frame-menu')).not.toBeInTheDocument();
   });
 });
+
+describe('a slot’s words on its photograph', () => {
+  const info = (over: Partial<PartyGuestContentSlot> = {}) => slot({
+    kind: 'info', content: { title: 'Parcheggio', body: 'Nel cortile' },
+    mediaFileItemId: 'f1', mediaUrl: '/api/files/f1/thumbnail?size=medium', ...over,
+  });
+
+  it('keeps the words below by default, and can put them on the photograph', async () => {
+    const { mock, onSaved } = mount(info(), {
+      [`PUT /api/parties/${PARTY}/guest-content/info`]: ({ body }) =>
+        jsonResponse({ ...info(), ...JSON.parse(body!), version: 2 }),
+    });
+    const user = userEvent.setup();
+
+    expect(screen.getByTestId('party-text-placement-info-below')).toBeChecked();
+    await user.click(screen.getByTestId('party-text-placement-info-overlay'));
+    await user.click(screen.getByTestId('party-content-save-info'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(sentBody(mock).textPlacement).toBe('overlay');
+  });
+
+  it('does not offer it for the menu, a card with a list', () => {
+    mount(slot({ mediaFileItemId: 'f1', mediaUrl: '/api/files/f1/thumbnail?size=medium' }));
+    expect(screen.queryByTestId('party-text-placement-menu')).not.toBeInTheDocument();
+  });
+});

@@ -78,20 +78,36 @@ export function PartyAfterHome({
 }) {
   const { t, formatDate } = useI18n();
   const thankYou = partyThankYou(context.content);
+  const thankYouWords = (
+    <>
+      <h1 className="party-after-title">
+        {/* The host's own words when they wrote them, and the product's when
+            they did not — an After surface is never blank. */}
+        {thankYou.headline ?? t('partyGuest.thankYouHeadline')}
+      </h1>
+      <p className="party-after-message">
+        {thankYou.message ?? t('partyGuest.thankYouMessage')}
+      </p>
+    </>
+  );
   const libraryOnly = context.accessMode === 'library-only';
 
   return (
     <div className="party-after" data-testid="party-after" data-access={context.accessMode}>
       <header className="party-after-hero" data-align={thankYou.textAlign}>
-        <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" frame={thankYou} />
-        <h1 className="party-after-title">
-          {/* The host's own words when they wrote them, and the product's when
-              they did not — an After surface is never blank. */}
-          {thankYou.headline ?? t('partyGuest.thankYouHeadline')}
-        </h1>
-        <p className="party-after-message">
-          {thankYou.message ?? t('partyGuest.thankYouMessage')}
-        </p>
+        {/* The greeting on the photograph when the host chose so — across its
+            lower part, like the cover — and below it otherwise. */}
+        {thankYou.textPlacement === 'overlay' && thankYou.mediaUrl ? (
+          <PartyContentImage
+            src={thankYou.mediaUrl} className="party-after-cover" frame={thankYou}
+            overlay={thankYouWords}
+          />
+        ) : (
+          <>
+            <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" frame={thankYou} />
+            {thankYouWords}
+          </>
+        )}
         <p className="party-after-party">{context.title}</p>
       </header>
 
