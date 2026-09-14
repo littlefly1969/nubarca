@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Audit;
@@ -119,19 +120,9 @@ public static class PartyEndpoints
             //
             // The invitation SLOT's photograph is not a candidate: it is part of
             // what the invitation says, and sits in its section.
-            var chosenCover = await NubArca.Api.Party.PartyCoverPolicy.ResolveAsync(
-                db, access, root?.InvitationCoverFileItemId, root?.LiveCoverFileItemId,
-                cancellationToken);
-            var albumCover = access.Experience.AllowsAlbumMedia
-                ? header.CoverFileItemId
-                : header.ChosenCoverFileItemId;
-            var coverUrl = chosenCover is { } pick
-                // The party's version is the cache key: choosing a cover spends
-                // one, so a phone never keeps yesterday's picture.
-                ? $"/api/party/{enc}/cover/{pick.Which}/media?v={root!.Version}"
-                : albumCover is Guid cover
-                    ? $"/api/party/{enc}/media/{cover}/preview"
-                    : null;
+            var coverUrl = await GuestCoverUrlAsync(
+                db, access, header, root?.InvitationCoverFileItemId, root?.LiveCoverFileItemId,
+                root?.Version ?? 0, enc, cancellationToken);
 
             // A capability the HOST is no longer permitted to run, or that does
             // not belong to this phase, is ABSENT from the hub — never a
@@ -185,6 +176,62 @@ public static class PartyEndpoints
                     access.Experience.LibraryAvailable,
                     access.Experience.LibraryAccessEndsAt)));
         }).WithName("GetPartyAlbum").RequireRateLimiting(PartyPublicRateLimitPolicy);
+
+        // THE LINK PREVIEW: what a chat app draws when somebody pastes a party's
+        // link — the party's name, one line about it, and the picture its page
+        // opens on. The frontend's nginx sends only link-preview fetchers here
+        // (a person gets the SPA), because those fetchers run no JavaScript.
+        //
+        // It says exactly what opening the link would show and nothing more.
+        // A token that does not open a party — unknown, draft, revoked, over —
+        // gets the generic NubArca card: one answer for all of them. Not audited
+        // as a view: a crawler drawing a card is not a guest visiting.
+        app.MapGet("/api/party/{token}/link-preview", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyMediaService partyMedia,
+            [FromServices] AppDbContext db,
+            [FromServices] IOptionsMonitor<NubArca.Api.Auth.Recovery.MailOptions> mail,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var english = httpContext.Request.Headers.AcceptLanguage.ToString()
+                .StartsWith("en", StringComparison.OrdinalIgnoreCase);
+            var origin = NubArca.Api.Party.PartyLinkPreview.Origin(mail.CurrentValue.PublicOrigin);
+            const string html = "text/html; charset=utf-8";
+
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            var header = access is null
+                ? null
+                : await partyMedia.GetAlbumAsync(access.OwnerUserId, access.MainAlbumId, cancellationToken);
+            var root = access is null
+                ? null
+                : await db.Parties.AsNoTracking()
+                    .Where(p => p.Id == access.PartyId)
+                    .Select(p => new
+                    {
+                        p.Title, p.EventStartsAt, p.Version,
+                        p.InvitationCoverFileItemId, p.LiveCoverFileItemId,
+                    })
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (access is null || header is null || root is null)
+            {
+                return Results.Content(NubArca.Api.Party.PartyLinkPreview.Generic(origin), html);
+            }
+
+            var enc = Uri.EscapeDataString(token);
+            var cover = await GuestCoverUrlAsync(
+                db, access, header, root.InvitationCoverFileItemId, root.LiveCoverFileItemId,
+                root.Version, enc, cancellationToken);
+            return Results.Content(NubArca.Api.Party.PartyLinkPreview.ForParty(
+                origin,
+                $"/party/{enc}",
+                root.Title,
+                NubArca.Api.Party.PartyLinkPreview.Describe(
+                    access.Experience.Phase, root.EventStartsAt, english),
+                cover), html);
+        }).WithName("GetPartyLinkPreview").RequireRateLimiting(PartyPublicRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/challenges", async (
             string token, HttpContext httpContext,
@@ -1521,6 +1568,38 @@ public static class PartyEndpoints
     private static int? Unlimited(int max) => max > 0 ? max : null;
 
     private static int? Remaining(int max, int used) => max > 0 ? Math.Max(0, max - used) : null;
+
+    /// <summary>
+    /// The picture a guest page opens on, as an address on this token: the
+    /// party's own cover choice (<c>PartyCoverPolicy</c>), else the album's
+    /// cover the way this phase may show it — before the party only one the host
+    /// CHOSE, because the gallery is closed and whichever photo sorts first is
+    /// not a decision — else nothing, and the page draws its composition. One
+    /// rule for the page and for its link preview.
+    /// </summary>
+    private static async Task<string?> GuestCoverUrlAsync(
+        AppDbContext db,
+        NubArca.Api.Party.PartyAccess access,
+        NubArca.Api.Party.PartyAlbumHeader header,
+        Guid? invitationCover,
+        Guid? liveCover,
+        int partyVersion,
+        string enc,
+        CancellationToken cancellationToken)
+    {
+        var chosen = await NubArca.Api.Party.PartyCoverPolicy.ResolveAsync(
+            db, access, invitationCover, liveCover, cancellationToken);
+        var albumCover = access.Experience.AllowsAlbumMedia
+            ? header.CoverFileItemId
+            : header.ChosenCoverFileItemId;
+        return chosen is { } pick
+            // The party's version is the cache key: choosing a cover spends one,
+            // so a phone never keeps yesterday's picture.
+            ? $"/api/party/{enc}/cover/{pick.Which}/media?v={partyVersion}"
+            : albumCover is Guid cover
+                ? $"/api/party/{enc}/media/{cover}/preview"
+                : null;
+    }
 
     private static void SetNoStore(HttpContext context)
     {
