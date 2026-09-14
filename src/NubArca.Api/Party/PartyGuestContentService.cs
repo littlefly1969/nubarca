@@ -96,6 +96,21 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
         }
 
+        // The photograph's frame: a known format or "auto", and a crop inside
+        // the print editor's limits. Anything else is a malformed slot.
+        if (write.MediaOrientation is not null
+            && write.MediaOrientation != PartyGuestContentMediaOrientations.Auto
+            && !PartyGuestContentMediaOrientations.IsKnown(write.MediaOrientation))
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
+        }
+        if (write.MediaCrop is { } requestedCrop
+            && !PartyGuestContentMediaOrientations.IsValidCrop(
+                requestedCrop.Zoom, requestedCrop.CenterX, requestedCrop.CenterY))
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var row = await _db.PartyGuestContents
             .FirstOrDefaultAsync(c => c.PartyId == partyId && c.Kind == kind, cancellationToken);
@@ -167,6 +182,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             _db.PartyGuestContents.Add(row);
         }
 
+        var previousMediaFileItemId = row.MediaFileItemId;
         row.Enabled = write.Enabled;
         row.VisibleBefore = write.VisibleBefore;
         row.VisibleLive = write.VisibleLive;
@@ -179,6 +195,29 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         // Omitted means UNCHANGED: the host's choice survives a client that
         // does not know it exists.
         row.TextAlign = write.TextAlign ?? row.TextAlign;
+
+        // The frame. Omitted means unchanged; "auto" is the whole photograph and
+        // takes any crop with it. A crop belongs to ONE picture, so choosing a
+        // different photograph without saying where it sits starts it centred.
+        if (write.MediaOrientation == PartyGuestContentMediaOrientations.Auto)
+        {
+            row.MediaOrientation = null;
+            row.MediaCropZoom = row.MediaCropCenterX = row.MediaCropCenterY = null;
+        }
+        else
+        {
+            row.MediaOrientation = write.MediaOrientation ?? row.MediaOrientation;
+            if (write.MediaCrop is { } chosenCrop)
+            {
+                row.MediaCropZoom = chosenCrop.Zoom;
+                row.MediaCropCenterX = chosenCrop.CenterX;
+                row.MediaCropCenterY = chosenCrop.CenterY;
+            }
+            else if (previousMediaFileItemId != row.MediaFileItemId)
+            {
+                row.MediaCropZoom = row.MediaCropCenterX = row.MediaCropCenterY = null;
+            }
+        }
         row.Version++;
         row.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -221,7 +260,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                 row.MediaFileItemId is Guid id && eligible.Contains(id)
                     ? MediaUrl(token, row.Kind, row.Version)
                     : null,
-                row.MediaPresentation, row.TextAlign))
+                row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row)))
             .ToList();
     }
 
@@ -268,7 +307,14 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         row.MediaFileItemId is Guid id && eligible.Contains(id)
             ? $"/api/files/{id}/thumbnail?size=medium"
             : null,
-        row.MediaPresentation, row.TextAlign);
+        row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row));
+
+    /// A crop is all three numbers or none of them.
+    private static PartyMediaCropDto? Crop(PartyGuestContent row) =>
+        row.MediaCropZoom is double zoom && row.MediaCropCenterX is double x
+            && row.MediaCropCenterY is double y
+            ? new PartyMediaCropDto(zoom, x, y)
+            : null;
 
     private static PartyGuestContentDto Blank(string kind)
     {
