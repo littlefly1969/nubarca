@@ -6,6 +6,25 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Two covers: one for the invitation, one for the party
+
+- **The invitation has its own cover.** In the Invito tab, "Copertina
+  dell'invito" chooses the photo at the top of the invitation — the full-width
+  picture with "Sei invitato", the party's name and its date on it. It can come
+  from the album or be uploaded, and choosing it adds nothing to the album.
+  Without one, the album's chosen cover is used, as before.
+- **The party can open on a different one.** In the Live tab, "Copertina della
+  festa" chooses the photo at the top of the page while the party is on, and in
+  the memories. Without one, the invitation's cover carries on, then the
+  album's.
+- **The invitation's own photo stays with its words.** The photo added to the
+  Invito section no longer becomes the cover: it sits in its section above the
+  text, and can be shown full screen, exactly like every other section.
+- **A copied party keeps both covers.**
+- **For parties that already exist:** where the Invito section's photo used to
+  be the cover, it now appears in the section. Choose it as "Copertina
+  dell'invito" to put it back at the top.
+
 ### A copied party works at once, and you choose how its words sit
 
 - **A duplicated party is ready to share straight away.** Its new guest link
