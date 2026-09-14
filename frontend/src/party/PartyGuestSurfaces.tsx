@@ -83,7 +83,7 @@ export function PartyAfterHome({
   return (
     <div className="party-after" data-testid="party-after" data-access={context.accessMode}>
       <header className="party-after-hero" data-align={thankYou.textAlign}>
-        <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" />
+        <PartyContentImage src={thankYou.mediaUrl} className="party-after-cover" frame={thankYou} />
         <h1 className="party-after-title">
           {/* The host's own words when they wrote them, and the product's when
               they did not — an After surface is never blank. */}

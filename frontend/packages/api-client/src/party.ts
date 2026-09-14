@@ -319,6 +319,10 @@ export function setPartyGuestContent(
      * so saving the rest of the card never resets it.
      */
     textAlign?: PartyTextAlign | null;
+    /** "auto" returns to the whole photograph; omitted leaves the frame. */
+    mediaOrientation?: PartyMediaOrientation | 'auto';
+    /** Where a fixed frame sits. Omitted or null leaves it; "auto" clears it. */
+    mediaCrop?: PartyMediaCrop | null;
     version: number;
   },
   signal?: AbortSignal,
@@ -447,6 +451,20 @@ export type PartyMediaPresentation = 'inline' | 'poster';
  */
 export type PartyTextAlign = 'left' | 'center';
 
+/**
+ * How a slot's inline photograph is framed in its section. Absent or null is
+ * the whole photograph at its own proportions; a fixed format crops it where
+ * the host placed it, with the party print's own crop maths.
+ */
+export type PartyMediaOrientation = 'portrait' | 'landscape';
+
+/** Where a fixed frame sits: the print editor's zoom (1..4) and centre (0..1). */
+export interface PartyMediaCrop {
+  zoom: number;
+  centerX: number;
+  centerY: number;
+}
+
 /** What every projection of a slot shares. `content` is the shape its `kind` declares. */
 interface PartyGuestContentFields {
   kind: PartyGuestContentKind;
@@ -460,6 +478,9 @@ interface PartyGuestContentFields {
   mediaPresentation: PartyMediaPresentation;
   /** The host's alignment, or null/absent for the surface's own default. */
   textAlign?: PartyTextAlign | null;
+  /** The inline photograph's frame, or null/absent for the whole photograph. */
+  mediaOrientation?: PartyMediaOrientation | null;
+  mediaCrop?: PartyMediaCrop | null;
 }
 
 /**

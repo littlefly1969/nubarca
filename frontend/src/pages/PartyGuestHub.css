@@ -1427,6 +1427,28 @@
   margin: 0;
 }
 
+/* The whole photograph at its own proportions: the default frame. */
+.party-content-media[data-frame='whole'],
+.party-after-cover[data-frame='whole'] {
+  aspect-ratio: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+/* A fixed frame the host placed the photograph in — its aspect arrives inline —
+   with the picture positioned inside it by the party print's crop maths. */
+.party-content-media[data-frame='fixed'],
+.party-after-cover[data-frame='fixed'] {
+  position: relative;
+  overflow: hidden;
+}
+
+.party-content-frame-img {
+  position: absolute;
+  max-width: none;
+  object-fit: cover;
+}
+
 .party-menu-body {
   display: flex;
   flex-direction: column;

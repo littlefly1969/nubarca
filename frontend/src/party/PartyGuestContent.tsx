@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type {
-  PartyGuestContentKind, PartyGuestContentView, PartyTextAlign,
+  PartyGuestContentKind, PartyGuestContentView, PartyMediaCrop, PartyMediaOrientation,
+  PartyTextAlign,
 } from '@nubarca/api-client';
+import { cropFor, DEFAULT_CROP_VIEW } from '../pages/partyPrintGeometry';
 import { useI18n } from '../i18n';
 
 // The six typed slots, rendered as TEXT — and, where the host chose one, ONE
@@ -39,6 +41,16 @@ export function defaultTextAlign(kind: PartyGuestContentKind): PartyTextAlign {
 }
 
 /**
+ * The two fixed frames a section photograph may be placed in, as width / height:
+ * portrait 4:5 — a phone-shaped picture that does not tower over the words —
+ * and landscape 3:2, the band every section used before the choice existed.
+ */
+export const SLOT_FRAME_ASPECT: Record<PartyMediaOrientation, number> = {
+  portrait: 4 / 5,
+  landscape: 3 / 2,
+};
+
+/**
  * A slot's one photograph, or nothing at all.
  *
  * The server offers an address only for a file it will serve, but a file can
@@ -46,19 +58,57 @@ export function defaultTextAlign(kind: PartyGuestContentKind): PartyTextAlign {
  * load removes the frame instead of leaving a broken-image icon where it was.
  */
 export function PartyContentImage({
-  src, className = 'party-content-media',
+  src, className = 'party-content-media', frame,
 }: {
   src: string | null;
   className?: string;
+  /** The host's frame. No orientation is the whole photograph. */
+  frame?: { mediaOrientation?: PartyMediaOrientation | null; mediaCrop?: PartyMediaCrop | null };
 }) {
   const [failed, setFailed] = useState<string | null>(null);
+  // The photograph's own shape, learned when it loads: a fixed frame needs it to
+  // place the crop exactly where the host put it.
+  const [aspect, setAspect] = useState<number | null>(null);
   if (!src || failed === src) return null;
+
+  const orientation = frame?.mediaOrientation ?? null;
+  if (!orientation) {
+    // The WHOLE photograph at its own proportions — the default, so a portrait
+    // picture is never cut into a landscape band nobody asked for.
+    return (
+      <img
+        className={className} src={src} alt="" loading="lazy" decoding="async"
+        data-testid="party-content-media" data-frame="whole"
+        onError={() => setFailed(src)}
+      />
+    );
+  }
+
+  const slotAspect = SLOT_FRAME_ASPECT[orientation];
+  const crop = aspect ? cropFor(aspect, slotAspect, frame?.mediaCrop ?? DEFAULT_CROP_VIEW) : null;
   return (
-    <img
-      className={className} src={src} alt="" loading="lazy" decoding="async"
-      data-testid="party-content-media"
-      onError={() => setFailed(src)}
-    />
+    <div
+      className={className} data-frame="fixed" data-orientation={orientation}
+      style={{ aspectRatio: `${slotAspect}` }}
+    >
+      <img
+        className="party-content-frame-img" src={src} alt="" loading="lazy" decoding="async"
+        data-testid="party-content-media"
+        onLoad={(event) => {
+          const { naturalWidth, naturalHeight } = event.currentTarget;
+          if (naturalWidth > 0 && naturalHeight > 0) setAspect(naturalWidth / naturalHeight);
+        }}
+        onError={() => setFailed(src)}
+        // Until its shape is known the frame is simply filled; the host's exact
+        // crop — the party print's own maths — follows the moment it arrives.
+        style={crop ? {
+          width: `${100 / crop.cropWidth}%`,
+          height: `${100 / crop.cropHeight}%`,
+          left: `${(-crop.cropX * 100) / crop.cropWidth}%`,
+          top: `${(-crop.cropY * 100) / crop.cropHeight}%`,
+        } : { width: '100%', height: '100%', left: 0, top: 0 }}
+      />
+    </div>
   );
 }
 
@@ -177,7 +227,7 @@ function PartyGuestContentSection({
       if (!headline && !message && !mediaUrl) return null;
       return (
         <section className="party-content-block" data-content="invitation" data-align={align}>
-          <PartyContentImage src={mediaUrl} />
+          <PartyContentImage src={mediaUrl} frame={slot} />
           {headline && <h2 className="party-content-headline">{headline}</h2>}
           {message && <p className="party-content-body">{message}</p>}
         </section>
@@ -198,7 +248,7 @@ function PartyGuestContentSection({
         : null;
       return (
         <section className="party-content-block" data-content="location" data-align={align}>
-          <PartyContentImage src={mediaUrl} />
+          <PartyContentImage src={mediaUrl} frame={slot} />
           <h3>{t('partyGuest.location')}</h3>
           {venue && <p className="party-content-strong">{venue}</p>}
           {address && <p className="party-content-body">{address}</p>}
@@ -220,7 +270,7 @@ function PartyGuestContentSection({
       if (!headline && !mediaUrl) return null;
       return (
         <section className="party-content-block" data-content="dress-code" data-align={align}>
-          <PartyContentImage src={mediaUrl} />
+          <PartyContentImage src={mediaUrl} frame={slot} />
           <h3>{t('partyGuest.dressCode')}</h3>
           {headline && <p className="party-content-strong">{headline}</p>}
           {description && <p className="party-content-body">{description}</p>}
@@ -236,7 +286,7 @@ function PartyGuestContentSection({
       // and the courses read as a menu either way.
       return (
         <section className="party-content-block party-content-block--menu" data-content="menu" data-align={align}>
-          <PartyContentImage src={mediaUrl} className="party-content-media party-content-media--menu" />
+          <PartyContentImage src={mediaUrl} frame={slot} className="party-content-media party-content-media--menu" />
           <div className="party-menu-body">
             <h3>{t('partyGuest.menu')}</h3>
             {intro && <p className="party-content-body">{intro}</p>}
@@ -269,7 +319,7 @@ function PartyGuestContentSection({
       if (!title && !body && !mediaUrl) return null;
       return (
         <section className="party-content-block" data-content="info" data-align={align}>
-          <PartyContentImage src={mediaUrl} />
+          <PartyContentImage src={mediaUrl} frame={slot} />
           {title && <h3>{title}</h3>}
           {body && <p className="party-content-body">{body}</p>}
         </section>
@@ -297,13 +347,17 @@ export function partyThankYou(
 ): {
   headline: string | null; message: string | null; mediaUrl: string | null;
   textAlign: PartyTextAlign;
+  mediaOrientation: PartyMediaOrientation | null; mediaCrop: PartyMediaCrop | null;
 } {
   const slot = slots.find((s) => s.kind === 'thank-you');
   // The host's alignment governs the hero's words even when they are the
   // product's own greeting: it is a choice about the place, not the sentence.
   const textAlign = slot?.textAlign ?? defaultTextAlign('thank-you');
   if (slot && slot.mediaPresentation === 'poster') {
-    return { headline: null, message: null, mediaUrl: null, textAlign };
+    return {
+      headline: null, message: null, mediaUrl: null, textAlign,
+      mediaOrientation: null, mediaCrop: null,
+    };
   }
   const payload = (slot?.content ?? {}) as Payload;
   return {
@@ -311,5 +365,7 @@ export function partyThankYou(
     message: str(payload, 'message'),
     mediaUrl: slot?.mediaUrl ?? null,
     textAlign,
+    mediaOrientation: slot?.mediaOrientation ?? null,
+    mediaCrop: slot?.mediaCrop ?? null,
   };
 }

@@ -5,10 +5,14 @@ import {
   type PartyGuestContentKind,
   type PartyGuestContentSlot,
   type PartyMediaPresentation,
+  type PartyMediaCrop,
+  type PartyMediaOrientation,
   type PartyTextAlign,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
-import { defaultTextAlign } from './PartyGuestContent';
+import { DEFAULT_CROP_VIEW, MAX_ZOOM } from '../pages/partyPrintGeometry';
+import { defaultTextAlign, SLOT_FRAME_ASPECT } from './PartyGuestContent';
+import { PhotoCropFrame } from './PhotoCropFrame';
 import { PartySlotImageField } from './PartyImageField';
 
 // The owner's typed editors: six named shapes, one card each.
@@ -35,6 +39,9 @@ type Draft = {
   mediaPresentation: PartyMediaPresentation;
   /** The host's alignment, or null while they have not chosen one. */
   textAlign: PartyTextAlign | null;
+  /** The inline photograph's frame: null is the whole photograph. */
+  mediaOrientation: PartyMediaOrientation | null;
+  mediaCrop: PartyMediaCrop | null;
   version: number;
 };
 
@@ -48,6 +55,10 @@ const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
   mediaPreviewUrl: slot.mediaUrl ?? null,
   mediaPresentation: slot.mediaPresentation ?? 'inline',
   textAlign: slot.textAlign ?? null,
+  // Only the two formats the editor knows; anything else is the whole photo.
+  mediaOrientation: slot.mediaOrientation === 'portrait' || slot.mediaOrientation === 'landscape'
+    ? slot.mediaOrientation : null,
+  mediaCrop: slot.mediaCrop ?? null,
   version: slot.version,
 });
 
@@ -94,6 +105,10 @@ export function PartyContentCard({
         mediaPresentation: draft.mediaPresentation,
         // null until the host picks, which the server reads as "unchanged".
         textAlign: draft.textAlign,
+        // Always stated: "auto" is the whole photograph, and a fixed frame
+        // carries where it sits — centred until the host moves it.
+        mediaOrientation: draft.mediaOrientation ?? 'auto',
+        mediaCrop: draft.mediaOrientation ? draft.mediaCrop ?? DEFAULT_CROP_VIEW : null,
         version: draft.version,
       }));
       setStatus('saved');
@@ -158,6 +173,8 @@ export function PartyContentCard({
               // Choosing a DIFFERENT photograph keeps the current answer, which
               // is what makes replacing a poster one click rather than three.
               mediaPresentation: next ? d.mediaPresentation : 'inline',
+              // A crop belongs to one picture: a new one starts centred.
+              mediaCrop: null,
             }))}
           />
 
@@ -169,6 +186,20 @@ export function PartyContentCard({
               value={draft.mediaPresentation}
               disabled={busy}
               onChange={(mediaPresentation) => setDraft((d) => ({ ...d, mediaPresentation }))}
+            />
+          )}
+
+          {/* How the photograph sits in its section — only for one that IS in
+              the section: a poster is opened whole and needs no frame. */}
+          {draft.mediaFileItemId && draft.mediaPresentation === 'inline' && (
+            <PhotoFrameChoice
+              kind={slot.kind}
+              previewUrl={draft.mediaPreviewUrl}
+              orientation={draft.mediaOrientation}
+              crop={draft.mediaCrop}
+              disabled={busy}
+              onChange={(mediaOrientation, mediaCrop) =>
+                setDraft((d) => ({ ...d, mediaOrientation, mediaCrop }))}
             />
           )}
 
@@ -335,6 +366,79 @@ function TextAlignChoice({
           </span>
         </label>
       ))}
+    </fieldset>
+  );
+}
+
+/**
+ * How a section photograph is framed: the whole picture, or a fixed portrait or
+ * landscape frame the host places it in — the party print's own crop editor,
+ * dragged or moved with the arrow keys, with a zoom beside it.
+ */
+function PhotoFrameChoice({
+  kind, previewUrl, orientation, crop, disabled, onChange,
+}: {
+  kind: PartyGuestContentKind;
+  previewUrl: string | null;
+  orientation: PartyMediaOrientation | null;
+  crop: PartyMediaCrop | null;
+  disabled: boolean;
+  onChange(orientation: PartyMediaOrientation | null, crop: PartyMediaCrop | null): void;
+}) {
+  const { t } = useI18n();
+  // The photograph's shape, learned from the preview as it loads.
+  const [aspect, setAspect] = useState(1);
+  const view = crop ?? DEFAULT_CROP_VIEW;
+  return (
+    <fieldset className="party-presentation" data-testid={`party-frame-${kind}`}>
+      <legend>{t('partyContent.frame')}</legend>
+      {(['whole', 'portrait', 'landscape'] as const).map((option) => (
+        <label className="party-presentation-option" key={option}>
+          <input
+            type="radio"
+            name={`frame-${kind}`}
+            value={option}
+            checked={(orientation ?? 'whole') === option}
+            disabled={disabled}
+            data-testid={`party-frame-${kind}-${option}`}
+            // A new format starts centred: a crop is only meaningful in the
+            // frame it was made for.
+            onChange={() => onChange(option === 'whole' ? null : option, null)}
+          />
+          <span className="party-presentation-title">
+            {t(`partyContent.frame.${option}` as 'partyContent.frame.whole')}
+          </span>
+        </label>
+      ))}
+      {orientation && previewUrl && (
+        <div className="party-frame-editor">
+          <PhotoCropFrame
+            src={previewUrl}
+            aspect={aspect}
+            slotAspect={SLOT_FRAME_ASPECT[orientation]}
+            view={view}
+            label={t('partyContent.frameHelp')}
+            onAspect={(width, height) => { if (width > 0 && height > 0) setAspect(width / height); }}
+            onChange={(next) => onChange(orientation, next)}
+            testId={`party-frame-crop-${kind}`}
+          />
+          <p className="muted">{t('partyContent.frameHelp')}</p>
+          <label className="party-field">
+            <span>{t('partyContent.frameZoom')}</span>
+            <input
+              type="range" min={1} max={MAX_ZOOM} step={0.05} value={view.zoom}
+              disabled={disabled} aria-label={t('partyContent.frameZoom')}
+              onChange={(event) => onChange(orientation, { ...view, zoom: Number(event.target.value) })}
+            />
+          </label>
+          <button
+            type="button" className="row-action" disabled={disabled}
+            onClick={() => onChange(orientation, null)}
+          >
+            {t('partyContent.frameReset')}
+          </button>
+        </div>
+      )}
     </fieldset>
   );
 }
