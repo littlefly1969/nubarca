@@ -286,6 +286,11 @@ export function setPartyGuestContent(
      * caller clearing the image clears this too.
      */
     mediaPresentation: PartyMediaPresentation;
+    /**
+     * The words' alignment. Omitted or null leaves the stored choice as it is,
+     * so saving the rest of the card never resets it.
+     */
+    textAlign?: PartyTextAlign | null;
     version: number;
   },
   signal?: AbortSignal,
@@ -408,6 +413,12 @@ export type PartyGuestAccessMode = 'full' | 'library-only';
  */
 export type PartyMediaPresentation = 'inline' | 'poster';
 
+/**
+ * How a slot's words are aligned. Absent or null means the surface's own
+ * default: left in a section, centred in the thank-you.
+ */
+export type PartyTextAlign = 'left' | 'center';
+
 /** What every projection of a slot shares. `content` is the shape its `kind` declares. */
 interface PartyGuestContentFields {
   kind: PartyGuestContentKind;
@@ -419,6 +430,8 @@ interface PartyGuestContentFields {
   version: number;
   /** Absent on a pre-P5 payload, which meant `inline`. */
   mediaPresentation: PartyMediaPresentation;
+  /** The host's alignment, or null/absent for the surface's own default. */
+  textAlign?: PartyTextAlign | null;
 }
 
 /**

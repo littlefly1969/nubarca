@@ -253,6 +253,7 @@ describe('guest: the thank-you', () => {
       headline: 'Grazie!',
       message: 'È stata una serata bellissima',
       mediaUrl: '/thanks.jpg',
+      textAlign: 'center',
     });
   });
 
@@ -265,7 +266,9 @@ describe('guest: the thank-you', () => {
       mediaPresentation: 'poster',
       mediaUrl: '/thanks.jpg',
     })]);
-    expect(result).toEqual({ headline: null, message: null, mediaUrl: null });
+    expect(result).toEqual({
+      headline: null, message: null, mediaUrl: null, textAlign: 'center',
+    });
   });
 
   it('a poster thank-you is offered as its own row', () => {

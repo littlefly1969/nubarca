@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import type { PartyGuestContentKind, PartyGuestContentView } from '@nubarca/api-client';
+import type {
+  PartyGuestContentKind, PartyGuestContentView, PartyTextAlign,
+} from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 
 // The six typed slots, rendered as TEXT — and, where the host chose one, ONE
@@ -25,6 +27,16 @@ const str = (payload: Payload, key: string): string | null => {
   const value = payload[key];
   return typeof value === 'string' && value.trim() !== '' ? value : null;
 };
+
+/**
+ * Where a slot's words sit until the host chooses: at the left edge in a
+ * section, centred in the thank-you, which is the After page's hero. The one
+ * place both the editor and the guest surface ask, so what the editor shows
+ * selected is exactly what the guest sees.
+ */
+export function defaultTextAlign(kind: PartyGuestContentKind): PartyTextAlign {
+  return kind === 'thank-you' ? 'center' : 'left';
+}
 
 /**
  * A slot's one photograph, or nothing at all.
@@ -162,6 +174,7 @@ function PartyGuestContentSection({
 }) {
   const { t } = useI18n();
   const payload = slot.content ?? {};
+  const align = slot.textAlign ?? defaultTextAlign(slot.kind);
 
   switch (slot.kind) {
     case 'invitation': {
@@ -169,7 +182,7 @@ function PartyGuestContentSection({
       const message = str(payload, 'message');
       if (!headline && !message && !mediaUrl) return null;
       return (
-        <section className="party-content-block" data-content="invitation">
+        <section className="party-content-block" data-content="invitation" data-align={align}>
           <PartyContentImage src={mediaUrl} />
           {headline && <h2 className="party-content-headline">{headline}</h2>}
           {message && <p className="party-content-body">{message}</p>}
@@ -190,7 +203,7 @@ function PartyGuestContentSection({
           [venue, address].filter(Boolean).join(' '))}`
         : null;
       return (
-        <section className="party-content-block" data-content="location">
+        <section className="party-content-block" data-content="location" data-align={align}>
           <PartyContentImage src={mediaUrl} />
           <h3>{t('partyGuest.location')}</h3>
           {venue && <p className="party-content-strong">{venue}</p>}
@@ -212,7 +225,7 @@ function PartyGuestContentSection({
       const description = str(payload, 'description');
       if (!headline && !mediaUrl) return null;
       return (
-        <section className="party-content-block" data-content="dress-code">
+        <section className="party-content-block" data-content="dress-code" data-align={align}>
           <PartyContentImage src={mediaUrl} />
           <h3>{t('partyGuest.dressCode')}</h3>
           {headline && <p className="party-content-strong">{headline}</p>}
@@ -228,7 +241,7 @@ function PartyGuestContentSection({
       // A card rather than a list: the photograph is its lid when there is one,
       // and the courses read as a menu either way.
       return (
-        <section className="party-content-block party-content-block--menu" data-content="menu">
+        <section className="party-content-block party-content-block--menu" data-content="menu" data-align={align}>
           <PartyContentImage src={mediaUrl} className="party-content-media party-content-media--menu" />
           <div className="party-menu-body">
             <h3>{t('partyGuest.menu')}</h3>
@@ -261,7 +274,7 @@ function PartyGuestContentSection({
       const body = str(payload, 'body');
       if (!title && !body && !mediaUrl) return null;
       return (
-        <section className="party-content-block" data-content="info">
+        <section className="party-content-block" data-content="info" data-align={align}>
           <PartyContentImage src={mediaUrl} />
           {title && <h3>{title}</h3>}
           {body && <p className="party-content-body">{body}</p>}
@@ -287,15 +300,22 @@ function PartyGuestContentSection({
  */
 export function partyThankYou(
   slots: readonly PartyGuestContentView[],
-): { headline: string | null; message: string | null; mediaUrl: string | null } {
+): {
+  headline: string | null; message: string | null; mediaUrl: string | null;
+  textAlign: PartyTextAlign;
+} {
   const slot = slots.find((s) => s.kind === 'thank-you');
+  // The host's alignment governs the hero's words even when they are the
+  // product's own greeting: it is a choice about the place, not the sentence.
+  const textAlign = slot?.textAlign ?? defaultTextAlign('thank-you');
   if (slot && slot.mediaPresentation === 'poster') {
-    return { headline: null, message: null, mediaUrl: null };
+    return { headline: null, message: null, mediaUrl: null, textAlign };
   }
   const payload = (slot?.content ?? {}) as Payload;
   return {
     headline: str(payload, 'headline'),
     message: str(payload, 'message'),
     mediaUrl: slot?.mediaUrl ?? null,
+    textAlign,
   };
 }

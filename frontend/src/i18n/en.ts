@@ -309,7 +309,7 @@ const en: Partial<Record<MessageKey, string>> = {
     'Before the game starts, guests pick their favourites. The choices are advisory: you see them in the control room and decide what is played.',
   'party.duplicate.heading': 'Duplicate the party',
   'party.duplicate.help':
-    'Sets the same evening up again: title, dates, guest pages, activities, slideshow, allowances and print budgets. The new party is a draft with its own album and its own QR code, and the photos are shared rather than copied.',
+    'Sets the same evening up again: title, dates, guest pages, activities, slideshow, allowances and print budgets. The new party is ready with its own album and its own QR code, and the photos are shared rather than copied.',
   'party.duplicate.excludes':
     'It carries over nothing that happened: guests, choices, votes, uploads, messages, prints, screens and the old links all stay with the original.',
   'party.duplicate.start': 'Duplicate the party',
@@ -477,6 +477,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.imageDuplicate': 'Your library already has a file with this name. Rename it and try again.',
   'partyContent.imageUploadFailed': 'The image could not be uploaded.',
   'partyContent.imageInvalid': 'This image cannot be used. Choose another one.',
+  'partyContent.invalidContent': 'Fill in the fields marked with *.',
+  'partyContent.textAlign': 'Text alignment',
+  'partyContent.textAlignLeft': 'Left',
+  'partyContent.textAlignCenter': 'Centered',
   // A poster row's label is the KIND's, localized by the product. There is
   // deliberately no per-slot caption: a party that could name its own buttons
   // would be a page builder with extra steps.
