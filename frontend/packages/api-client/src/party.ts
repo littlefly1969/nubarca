@@ -81,6 +81,16 @@ export interface Party {
    * games are scoped to a link that names it.
    */
   canChangeMainMediaSource: boolean;
+  /**
+   * The invitation's cover as stored, and the owner's own preview of it — an
+   * id with no url means the photograph went to Trash or into the Private
+   * Vault. Null: the album's chosen cover opens the invitation.
+   */
+  invitationCoverFileItemId?: string | null;
+  invitationCoverUrl?: string | null;
+  /** The cover while the party is on. Null: the invitation's cover continues. */
+  liveCoverFileItemId?: string | null;
+  liveCoverUrl?: string | null;
 }
 
 /** What a party card needs, and deliberately nothing else. */
@@ -141,6 +151,24 @@ export function setPartyMainMediaSource(
   signal?: AbortSignal,
 ): Promise<Party> {
   return api<Party>(`/api/parties/${partyId}/media/main`, { method: 'PUT', json: body, signal });
+}
+
+/**
+ * The party's two covers, stated whole: the invitation's, and the one that
+ * takes over while the party is on. null means none chosen — the next cover in
+ * line applies. A photograph that is not one of the owner's own images is
+ * refused as `invalid_media`; choosing one files it in no album.
+ */
+export function setPartyCovers(
+  partyId: string,
+  body: {
+    invitationCoverFileItemId: string | null;
+    liveCoverFileItemId: string | null;
+    version: number;
+  },
+  signal?: AbortSignal,
+): Promise<Party> {
+  return api<Party>(`/api/parties/${partyId}/covers`, { method: 'PUT', json: body, signal });
 }
 
 /**

@@ -490,6 +490,12 @@ const it = {
   'partyContent.textAlign': 'Allineamento del testo',
   'partyContent.textAlignLeft': 'A sinistra',
   'partyContent.textAlignCenter': 'Centrato',
+  'partyCover.invitation.heading': 'Copertina dell’invito',
+  'partyCover.invitation.help':
+    'La foto in alto nell’invito, con il nome e la data della festa. Senza una foto scelta si usa la copertina dell’album.',
+  'partyCover.live.heading': 'Copertina della festa',
+  'partyCover.live.help':
+    'La foto in alto nella pagina durante la festa e nei ricordi. Senza una foto scelta resta la copertina dell’invito.',
   // L'etichetta di una riga poster e' quella del TIPO, localizzata dal prodotto.
   'partyGuest.poster.invitation': 'Invito',
   'partyGuest.poster.location': 'Dove',

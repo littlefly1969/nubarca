@@ -22,20 +22,15 @@ export function PartyBeforeHome({
   topBar?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
-  // The hero is the invitation's photograph only while it is INLINE — which is
-  // exactly what the server decided when it built `coverUrl`, so the two cannot
-  // disagree about whether that picture is already on screen. A poster
-  // invitation is not up there, so its row below must not be suppressed.
-  const invitation = context.content.find((s) => s.kind === 'invitation');
-  const invitationIsHero = invitation?.mediaPresentation !== 'poster';
   return (
     <div className="party-invitation" data-testid="party-before">
-      {/* THE SAME COVER AS THE PARTY. The invitation's photograph is drawn the
-          way the party draws its own — full-bleed, faded into the page, with the
-          brand row and the headline sitting inside it — so the evening opens on
-          the picture it will continue on. It is a decorative background layer,
-          like the party's: the title is the heading, and a picture that fails
-          to load leaves the brand colour rather than a broken frame. */}
+      {/* THE SAME COVER AS THE PARTY, drawn the way the party draws its own —
+          full-bleed, faded into the page, with the brand row and the headline
+          inside it. The SERVER chose the picture: the host's invitation cover,
+          else the album's chosen cover. The invitation's own photograph is not
+          it, and stays in its section below. A decorative background layer, as
+          the party's is: a picture that fails to load leaves the brand colour
+          rather than a broken frame. */}
       <header className="party-guest-hub-hero party-invitation-hero">
         <div
           className="party-guest-hub-hero-cover"
@@ -63,15 +58,10 @@ export function PartyBeforeHome({
       </header>
 
       <div className="party-invitation-body">
-        {/* An INLINE invitation photograph IS the cover above, so its section
-            does not draw it a second time. A poster one is not the cover and
-            keeps its own row, which is how a full-height invitation gets opened
-            whole. */}
-        <PartyGuestContentSections
-          slots={context.content}
-          heroKind={invitationIsHero ? 'invitation' : undefined}
-          onOpenPoster={onOpenPoster}
-        />
+        {/* The invitation's own photograph is part of what it SAYS: it sits in
+            its section above the words, or opens whole from its row, by the
+            same rules as every other slot — never up in the cover. */}
+        <PartyGuestContentSections slots={context.content} onOpenPoster={onOpenPoster} />
 
         <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
       </div>

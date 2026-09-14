@@ -21,6 +21,7 @@ import { PartyAlbumSection } from '../party/PartyAlbumSection';
 import { PartyGuestAccessSection } from '../party/PartyGuestAccessSection';
 import { PartyLiveTab } from '../party/PartyLiveTab';
 import { PartyContentCard } from '../party/PartyContentEditors';
+import { PartyCoverCard } from '../party/PartyCoverCard';
 import {
   PARTY_TIMELINE,
   mainMediaSource,
@@ -229,14 +230,22 @@ export function PartyWorkspacePage() {
           />
         )}
         {tab === 'before' && (
-          <PartyContentTab
-            partyId={party.id}
-            albumId={mainAlbumId}
-            slots={contentSlots}
-            onSlotSaved={onSlotSaved}
-            kinds={['invitation', 'location', 'dress-code', 'menu', 'info']}
-            phases={['before', 'live']}
-          />
+          <div className="party-overview">
+            {/* The photograph at the top of the invitation, decided once for the
+                whole page — separate from the invitation slot's own. */}
+            <PartyCoverCard
+              party={party} which="invitation" albumId={mainAlbumId}
+              onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
+            />
+            <PartyContentTab
+              partyId={party.id}
+              albumId={mainAlbumId}
+              slots={contentSlots}
+              onSlotSaved={onSlotSaved}
+              kinds={['invitation', 'location', 'dress-code', 'menu', 'info']}
+              phases={['before', 'live']}
+            />
+          </div>
         )}
         {tab === 'after' && (
           <div className="party-overview">
@@ -282,11 +291,19 @@ export function PartyWorkspacePage() {
           </div>
         )}
         {tab === 'live' && (
-          <PartyLiveTab
-            albumId={mainAlbumId}
-            albumParty={albumParty}
-            onAlbumPartyUpdated={setAlbumParty}
-          />
+          <div className="party-overview">
+            {/* The first choice for the party's own cover while it is on; the
+                invitation's carries on without it. */}
+            <PartyCoverCard
+              party={party} which="live" albumId={mainAlbumId}
+              onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
+            />
+            <PartyLiveTab
+              albumId={mainAlbumId}
+              albumParty={albumParty}
+              onAlbumPartyUpdated={setAlbumParty}
+            />
+          </div>
         )}
         {tab === 'photos' && (
           <section className="party-card" data-testid="party-photos">

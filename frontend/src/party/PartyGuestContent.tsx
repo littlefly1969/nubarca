@@ -96,15 +96,9 @@ export function hasPresentableContent(
 }
 
 export function PartyGuestContentSections({
-  slots, heroKind, onOpenPoster,
+  slots, onOpenPoster,
 }: {
   slots: readonly PartyGuestContentView[];
-  /**
-   * The kind whose photograph this surface already shows as its hero — the
-   * invitation's, before the party — so it is not drawn a second time below.
-   * Only ever an INLINE slot: a poster is never a hero.
-   */
-  heroKind?: PartyGuestContentKind;
   /** Opens a poster full-screen. Absent on a surface that offers no viewer. */
   onOpenPoster?(kind: PartyGuestContentKind): void;
 }) {
@@ -117,7 +111,7 @@ export function PartyGuestContentSections({
         <PartyGuestContentSection
           key={slot.kind}
           slot={slot}
-          mediaUrl={slot.kind === heroKind ? null : slot.mediaUrl ?? null}
+          mediaUrl={slot.mediaUrl ?? null}
         />
       )))}
     </div>

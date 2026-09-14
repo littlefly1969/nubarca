@@ -376,25 +376,26 @@ describe('a slot’s photograph', () => {
     expect(document.querySelector('[data-content="info"] img')).toBeNull();
   });
 
-  it('draws the invitation’s own photograph once, as the hero', async () => {
+  it('keeps the invitation’s own photograph in its section, above its words, under the cover', async () => {
+    const COVER = `/api/party/${TOKEN}/cover/invitation/media?v=4`;
     const INVITATION_MEDIA = `/api/party/${TOKEN}/content/invitation/media?v=3`;
     installFetchMock({
       [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
-        // The server has already put the invitation's photograph ahead of the
-        // album cover; the page follows it and does not draw it twice.
-        coverUrl: INVITATION_MEDIA,
+        // The cover is the host's invitation cover; the slot's photograph is a
+        // different picture with a different job.
+        coverUrl: COVER,
         content: [withMedia('invitation', { headline: 'Vieni!' }, INVITATION_MEDIA)],
       })),
     });
     render(page());
 
-    const cover = await screen.findByTestId('party-invitation-hero');
-    expect(cover).toHaveAttribute('data-cover', 'photo');
-    expect(cover.style.backgroundImage).toContain(INVITATION_MEDIA);
-    // Once: the cover IS the invitation's photograph, so its section below
-    // draws no second copy of it.
-    expect(document.querySelectorAll(`img[src="${INVITATION_MEDIA}"]`)).toHaveLength(0);
-    expect(screen.getByText('Vieni!')).toBeInTheDocument();
+    expect((await screen.findByTestId('party-invitation-hero')).style.backgroundImage).toContain(COVER);
+    const section = document.querySelector<HTMLElement>('[data-content="invitation"]')!;
+    const photo = section.querySelector(`img[src="${INVITATION_MEDIA}"]`)!;
+    expect(photo).toBeInTheDocument();
+    // The photograph first, then the words: the rule every section follows.
+    expect(photo.compareDocumentPosition(within(section).getByText('Vieni!'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows the album’s chosen cover when the invitation has no photograph of its own', async () => {
