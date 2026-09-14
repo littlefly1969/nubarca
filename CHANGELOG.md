@@ -6,6 +6,22 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### A party's link shows its own card; clearer section titles; words on a photo
+
+- **Sharing a party's link shows the party.** In WhatsApp, Telegram and other
+  chats, a party's link is drawn with the party's own name, a line such as
+  "Sei invitato · 10 febbraio 2027", and the photo its page opens on — instead
+  of the NubArca card. A link that no longer opens a party shows the plain
+  NubArca card. Chats keep a preview they have already drawn, so a cover
+  changed afterwards may take a while to appear there.
+- **Section titles stand out.** "Dove", "Dress code", "Menù" and the info's own
+  title are larger, bold and always centred, above the section's photo, so it
+  is clear where a new section begins.
+- **A section's words can sit on its photo.** With a photo shown in the page,
+  "Testo della sezione" offers "Sotto la foto" or "Sopra la foto": the words
+  then run across the lower part of the picture, on a dark shade, like the
+  cover — and the photo keeps its frame. The menu keeps its card.
+
 ### Section photos keep their shape, or sit where you put them
 
 - **A photo in a section is shown whole.** Every section photo — invitation,
