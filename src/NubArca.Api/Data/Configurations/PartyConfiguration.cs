@@ -141,6 +141,10 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
                 "ck_party_guest_contents_media_crop",
                 "\"MediaCropZoom\" BETWEEN 1 AND 4 AND \"MediaCropCenterX\" BETWEEN 0 AND 1 "
                 + "AND \"MediaCropCenterY\" BETWEEN 0 AND 1");
+            // Below is the absence of a choice; the only stored one is on the picture.
+            t.HasCheckConstraint(
+                "ck_party_guest_contents_text_placement",
+                "\"TextPlacement\" IN ('overlay')");
         });
 
         // The composite key IS the "at most one slot per kind" rule. Expressing
@@ -173,6 +177,7 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
         // it, and a row it writes means "the surface decides", as before.
         builder.Property(c => c.TextAlign).HasMaxLength(16);
         builder.Property(c => c.MediaOrientation).HasMaxLength(16);
+        builder.Property(c => c.TextPlacement).HasMaxLength(16);
 
         builder.Property(c => c.Version).HasDefaultValue(1);
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");

@@ -111,6 +111,12 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
             return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
         }
 
+        if (write.TextPlacement is not null
+            && !PartyGuestContentTextPlacements.IsKnownWire(write.TextPlacement))
+        {
+            return new PartyGuestContentResult(PartyGuestContentOutcome.InvalidPayload);
+        }
+
         var now = _clock.GetUtcNow().UtcDateTime;
         var row = await _db.PartyGuestContents
             .FirstOrDefaultAsync(c => c.PartyId == partyId && c.Kind == kind, cancellationToken);
@@ -218,6 +224,15 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                 row.MediaCropZoom = row.MediaCropCenterX = row.MediaCropCenterY = null;
             }
         }
+
+        // Where the words sit. "below" is the default and is stored as null;
+        // omitted leaves the host's choice as it is.
+        if (write.TextPlacement is not null)
+        {
+            row.TextPlacement = write.TextPlacement == PartyGuestContentTextPlacements.Overlay
+                ? PartyGuestContentTextPlacements.Overlay
+                : null;
+        }
         row.Version++;
         row.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
@@ -260,7 +275,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
                 row.MediaFileItemId is Guid id && eligible.Contains(id)
                     ? MediaUrl(token, row.Kind, row.Version)
                     : null,
-                row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row)))
+                row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row), row.TextPlacement))
             .ToList();
     }
 
@@ -307,7 +322,7 @@ public sealed class PartyGuestContentService : IPartyGuestContentService
         row.MediaFileItemId is Guid id && eligible.Contains(id)
             ? $"/api/files/{id}/thumbnail?size=medium"
             : null,
-        row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row));
+        row.MediaPresentation, row.TextAlign, row.MediaOrientation, Crop(row), row.TextPlacement);
 
     /// A crop is all three numbers or none of them.
     private static PartyMediaCropDto? Crop(PartyGuestContent row) =>

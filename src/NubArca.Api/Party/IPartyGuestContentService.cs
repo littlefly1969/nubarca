@@ -50,7 +50,12 @@ public sealed record PartyGuestContentDto(
     /// Where a fixed frame sits on the photograph: the print editor's zoom and
     /// centre. Null is centred and not enlarged; on a write, null leaves it.
     /// </summary>
-    PartyMediaCropDto? MediaCrop = null);
+    PartyMediaCropDto? MediaCrop = null,
+    /// <summary>
+    /// Where the words sit beside an inline photograph: "overlay" on it, null
+    /// below it. On a write, null leaves it and "below" returns to the default.
+    /// </summary>
+    string? TextPlacement = null);
 
 /// <summary>
 /// One slot as a GUEST receives it: the same words, and the photograph as an
@@ -92,7 +97,12 @@ public sealed record PartyGuestContentViewDto(
     /// Where a fixed frame sits on the photograph: the print editor's zoom and
     /// centre. Null is centred and not enlarged; on a write, null leaves it.
     /// </summary>
-    PartyMediaCropDto? MediaCrop = null);
+    PartyMediaCropDto? MediaCrop = null,
+    /// <summary>
+    /// Where the words sit beside an inline photograph: "overlay" on it, null
+    /// below it. On a write, null leaves it and "below" returns to the default.
+    /// </summary>
+    string? TextPlacement = null);
 
 /// <summary>What the owner writes into one slot.</summary>
 public sealed record PartyGuestContentWrite(
@@ -120,7 +130,12 @@ public sealed record PartyGuestContentWrite(
     /// Where a fixed frame sits on the photograph: the print editor's zoom and
     /// centre. Null is centred and not enlarged; on a write, null leaves it.
     /// </summary>
-    PartyMediaCropDto? MediaCrop = null);
+    PartyMediaCropDto? MediaCrop = null,
+    /// <summary>
+    /// Where the words sit beside an inline photograph: "overlay" on it, null
+    /// below it. On a write, null leaves it and "below" returns to the default.
+    /// </summary>
+    string? TextPlacement = null);
 
 public enum PartyGuestContentOutcome
 {
