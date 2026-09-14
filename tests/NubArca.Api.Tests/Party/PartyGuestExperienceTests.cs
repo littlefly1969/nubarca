@@ -422,6 +422,39 @@ public sealed class PartyGuestExperienceTests : IDisposable
     }
 
     [Fact]
+    public async Task An_Info_Note_Saves_With_Only_A_Title_Or_Only_A_Body()
+    {
+        // The editor never marked either field as required, and a host who
+        // wrote one sentence was refused with no reason given. The note is now
+        // as optional as the invitation's words. A location still needs its
+        // name AND its address — which the editor now marks as such.
+        var party = await SeedPartyAsync();
+        async Task<HttpStatusCode> PutAsync(string kind, object content, int version) =>
+            (await party.Owner.PutAsJsonAsync(
+                $"/api/parties/{party.PartyId}/guest-content/{kind}",
+                new
+                {
+                    enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+                    content, version,
+                })).StatusCode;
+
+        Assert.Equal(HttpStatusCode.OK, await PutAsync("info", new { body = "Parcheggio nel cortile" }, 0));
+        Assert.Equal(HttpStatusCode.OK, await PutAsync("info", new { title = "Parcheggio" }, 1));
+
+        var refused = await party.Owner.PutAsJsonAsync(
+            $"/api/parties/{party.PartyId}/guest-content/location",
+            new
+            {
+                enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+                content = new { address = "Via Roma 1" }, version = 0,
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            "invalid_content",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+    }
+
+    [Fact]
     public async Task Every_Kind_Comes_Back_With_The_Products_Own_Defaults()
     {
         var party = await SeedPartyAsync();

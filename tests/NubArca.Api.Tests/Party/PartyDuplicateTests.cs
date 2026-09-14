@@ -49,8 +49,10 @@ public sealed class PartyDuplicateTests : IDisposable
         Assert.NotEqual(source.PartyId, clonePartyId);
         Assert.NotEqual(source.AlbumId, cloneAlbumId);
 
-        // A copy is not a party until somebody says it is.
-        Assert.Equal(PartyStatuses.Draft, clone.GetProperty("status").GetString());
+        // Its capability travelled, and an active capability IS a published
+        // party — the state every other path produces, and the one the owner
+        // surface's "the guest link is live" relies on.
+        Assert.Equal(PartyStatuses.Published, clone.GetProperty("status").GetString());
         Assert.Equal(1, clone.GetProperty("version").GetInt32());
         Assert.Equal(JsonValueKind.Null, clone.GetProperty("liveStartedAt").ValueKind);
         Assert.Equal(JsonValueKind.Null, clone.GetProperty("liveEndedAt").ValueKind);
@@ -123,6 +125,51 @@ public sealed class PartyDuplicateTests : IDisposable
         Assert.NotEmpty(await db.PartyParticipants.Where(x => x.PartyAlbumLinkId == sourceLink.Id).ToListAsync());
         Assert.NotEmpty(await db.PartyChallengeVotes.Where(x => x.PartyAlbumLinkId == sourceLink.Id).ToListAsync());
         Assert.NotEmpty(await db.PartyGameVotes.ToListAsync());
+    }
+
+    [Fact]
+    public async Task The_clones_guest_link_opens_the_clone_and_survives_the_original_being_deleted()
+    {
+        // What a host did in production: duplicate, delete the original at
+        // once, then open the new guest link. A DRAFT clone answered that link
+        // with "not found" — which read as a link into the party just deleted.
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var source = await RunAPartyAsync(owner);
+
+        // The host's alignment is a decision like any other, so it travels too.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            await db.PartyGuestContents.Where(x => x.PartyId == source.PartyId)
+                .ExecuteUpdateAsync(u => u.SetProperty(
+                    x => x.TextAlign, PartyGuestContentTextAligns.Center));
+        }
+
+        var clone = await (await owner.PostAsJsonAsync(
+                $"/api/parties/{source.PartyId}/duplicate", new { title = (string?)null }))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        var cloneAlbumId = clone.GetProperty("mediaSources")[0].GetProperty("albumId").GetGuid();
+        var settings = await owner.GetFromJsonAsync<JsonElement>(
+            $"/api/albums/{cloneAlbumId}/party-settings");
+        Assert.True(settings.GetProperty("partyMode").GetBoolean());
+        var cloneToken = settings.GetProperty("partyUrl").GetString()!["/party/".Length..];
+        Assert.NotEqual(source.Token, cloneToken);
+
+        var guest = _factory.CreateClient();
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync($"/api/party/{cloneToken}")).StatusCode);
+
+        var original = await owner.GetFromJsonAsync<JsonElement>($"/api/parties/{source.PartyId}");
+        (await owner.DeleteAsync(
+                $"/api/parties/{source.PartyId}?version={original.GetProperty("version").GetInt32()}"))
+            .EnsureSuccessStatusCode();
+
+        // The original's link went with it; the copy's is untouched.
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync($"/api/party/{source.Token}")).StatusCode);
+        var opened = await guest.GetAsync($"/api/party/{cloneToken}");
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        var context = await opened.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Festa di Anna", context.GetProperty("title").GetString());
+        Assert.Equal("center", context.GetProperty("content")[0].GetProperty("textAlign").GetString());
     }
 
     [Fact]

@@ -33,7 +33,13 @@ public sealed record PartyGuestContentDto(
     /// "poster". A slot the host has never written, and every row that predates
     /// the column, is "inline" — which is what P4 rendered.
     /// </summary>
-    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline,
+    /// <summary>
+    /// How the slot's WORDS are aligned: "left", "center", or null for the
+    /// surface's own default (left in a section, centred in the thank-you). On
+    /// a write, null leaves the stored choice exactly as it is.
+    /// </summary>
+    string? TextAlign = null);
 
 /// <summary>
 /// One slot as a GUEST receives it: the same words, and the photograph as an
@@ -58,7 +64,13 @@ public sealed record PartyGuestContentViewDto(
     /// authority: both values resolve the same reference through the same rule
     /// and are served by the same relation-scoped route.
     /// </summary>
-    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline,
+    /// <summary>
+    /// How the slot's WORDS are aligned: "left", "center", or null for the
+    /// surface's own default (left in a section, centred in the thank-you). On
+    /// a write, null leaves the stored choice exactly as it is.
+    /// </summary>
+    string? TextAlign = null);
 
 /// <summary>What the owner writes into one slot.</summary>
 public sealed record PartyGuestContentWrite(
@@ -69,7 +81,13 @@ public sealed record PartyGuestContentWrite(
     JsonElement? Content,
     int Version,
     Guid? MediaFileItemId = null,
-    string MediaPresentation = PartyGuestContentMediaPresentations.Inline);
+    string MediaPresentation = PartyGuestContentMediaPresentations.Inline,
+    /// <summary>
+    /// How the slot's WORDS are aligned: "left", "center", or null for the
+    /// surface's own default (left in a section, centred in the thank-you). On
+    /// a write, null leaves the stored choice exactly as it is.
+    /// </summary>
+    string? TextAlign = null);
 
 public enum PartyGuestContentOutcome
 {

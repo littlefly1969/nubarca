@@ -85,6 +85,21 @@ public class PartyGuestContent
     public string MediaPresentation { get; set; } = PartyGuestContentMediaPresentations.Inline;
 
     /// <summary>
+    /// How the slot's WORDS are aligned — one of
+    /// <see cref="PartyGuestContentTextAligns"/> — or null for the surface's own
+    /// default.
+    ///
+    /// <para>A fourth independent answer, a column for the same reason
+    /// <see cref="MediaPresentation"/> is: it is structural, read before a word
+    /// is rendered, and one rule across six payload shapes rather than six. Null
+    /// rather than a stored default because the right default differs by WHERE
+    /// the words land — a section reads left, the thank-you sits centred in its
+    /// hero — and every row written before the choice existed must keep looking
+    /// exactly as it did.</para>
+    /// </summary>
+    public string? TextAlign { get; set; }
+
+    /// <summary>
     /// Optimistic concurrency for THIS slot.
     ///
     /// <para>Its own, not the root's: editing the menu and renaming the party
@@ -171,4 +186,18 @@ public static class PartyGuestContentMediaPresentations
 
     public static bool IsKnown(string? presentation) =>
         presentation is not null && All.Contains(presentation);
+}
+
+/// <summary>
+/// The two ways a host may align what a slot says. Closed for the same reason
+/// the presentations are: each value is something the renderer DOES.
+/// </summary>
+public static class PartyGuestContentTextAligns
+{
+    public const string Left = "left";
+    public const string Center = "center";
+
+    public static readonly IReadOnlyList<string> All = [Left, Center];
+
+    public static bool IsKnown(string? align) => align is not null && All.Contains(align);
 }
