@@ -338,8 +338,9 @@ describe('a slot’s photograph', () => {
     const menu = document.querySelector<HTMLElement>('[data-content="menu"]')!;
     const image = within(menu).getByTestId('party-content-media');
     expect(image).toHaveAttribute('src', MENU_MEDIA);
-    // The picture first, then the menu itself.
-    expect(menu.firstElementChild).toBe(image);
+    // The section's title above the card; in the card, the picture first.
+    expect(menu.firstElementChild?.tagName).toBe('H3');
+    expect(menu.querySelector('.party-menu-card')!.firstElementChild).toBe(image);
     expect(within(menu).getByText('Antipasti')).toBeInTheDocument();
     expect(within(menu).getByText('Bruschetta')).toBeInTheDocument();
   });
@@ -499,5 +500,53 @@ describe('the host’s alignment', () => {
 
     await screen.findByTestId('party-after');
     expect(document.querySelector('.party-after-hero')).toHaveAttribute('data-align', 'left');
+  });
+});
+
+describe('a section’s title, and its words on the photograph', () => {
+  const PHOTO = `/api/party/${TOKEN}/content/location/media?v=1`;
+  const location = (over: Record<string, unknown> = {}) => ({
+    ...slot('location', { venueName: 'Villa Aurora', address: 'Via Roma 1' }), ...over,
+  });
+
+  it('puts the section title first, above its photograph', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({ content: [location({ mediaUrl: PHOTO })] })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    const block = document.querySelector<HTMLElement>('[data-content="location"]')!;
+    expect(block.firstElementChild?.tagName).toBe('H3');
+    expect(document.querySelector('.party-content-overlay-text')).toBeNull();
+  });
+
+  it('lays the words across the photograph when the host chose so, the title still above', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [location({ mediaUrl: PHOTO, textPlacement: 'overlay' })],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    const block = document.querySelector<HTMLElement>('[data-content="location"]')!;
+    const overlay = block.querySelector<HTMLElement>('.party-content-overlay-text')!;
+    expect(within(overlay).getByText('Villa Aurora')).toBeInTheDocument();
+    expect(overlay.parentElement).toContainElement(within(block).getByTestId('party-content-media'));
+    expect(block.firstElementChild?.tagName).toBe('H3');
+  });
+
+  it('keeps the words in the page when there is no photograph to put them on', async () => {
+    installFetchMock({
+      [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({
+        content: [location({ textPlacement: 'overlay' })],
+      })),
+    });
+    render(page());
+
+    await screen.findByTestId('party-before');
+    expect(document.querySelector('.party-content-overlay-text')).toBeNull();
+    expect(screen.getByText('Villa Aurora')).toBeInTheDocument();
   });
 });

@@ -497,6 +497,9 @@ const it = {
   'partyContent.frameHelp': 'Trascina per spostare la foto, o usa le frecce.',
   'partyContent.frameZoom': 'Ingrandimento',
   'partyContent.frameReset': 'Ricentra',
+  'partyContent.textPlacement': 'Testo della sezione',
+  'partyContent.textPlacementBelow': 'Sotto la foto',
+  'partyContent.textPlacementOverlay': 'Sopra la foto',
   'partyCover.invitation.heading': 'Copertina dell’invito',
   'partyCover.invitation.help':
     'La foto in alto nell’invito, con il nome e la data della festa. Senza una foto scelta si usa la copertina dell’album.',

@@ -1375,21 +1375,36 @@
    only the other choice needs saying. */
 .party-content-block[data-align='center'] { text-align: center; }
 
-.party-content-block h2,
+/* A section's TITLE — "Dove", "Dress code", "Menù", the note's own title — is
+   what says a new part of the page begins, so it reads as one: larger, bold,
+   always centred whatever the words below are aligned to, with a short rule
+   under it. */
 .party-content-block h3 {
-  margin: 0;
-  font-size: 0.8rem;
+  margin: 0.25rem 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  opacity: 0.65;
-  font-weight: 600;
+  text-align: center;
+  opacity: 0.95;
 }
 
+.party-content-block h3::after {
+  content: '';
+  display: block;
+  width: 2rem;
+  height: 2px;
+  margin: 0.45rem auto 0;
+  border-radius: 999px;
+  background: var(--brand-cyan-glow, currentColor);
+}
+
+/* The invitation's own headline is the host's words, not a section title: it
+   follows the section's alignment. */
 .party-content-headline {
-  font-size: clamp(1.2rem, 4.5vw, 1.5rem) !important;
-  letter-spacing: normal !important;
-  text-transform: none !important;
-  opacity: 1 !important;
+  margin: 0;
+  font-size: clamp(1.2rem, 4.5vw, 1.5rem);
+  font-weight: 600;
 }
 
 .party-content-body { margin: 0; line-height: 1.55; white-space: pre-line; }
@@ -1413,7 +1428,7 @@
 
 /* The menu is a CARD: its photograph is the lid, the courses are the page. Without
    a photograph it is the same card with the words alone, never a bare list. */
-.party-content-block--menu {
+.party-menu-card {
   gap: 0;
   border-radius: 1.25rem;
   overflow: hidden;
@@ -1448,6 +1463,41 @@
   max-width: none;
   object-fit: cover;
 }
+
+/* A section's words ON its photograph, across the lower part — the way the cover
+   carries the party's name — while the picture keeps its frame. */
+.party-content-overlay {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+}
+
+.party-content-overlay > .party-content-media,
+.party-content-overlay > .party-after-cover {
+  margin: 0;
+  border-radius: 0;
+}
+
+.party-content-overlay-text {
+  position: absolute;
+  inset: auto 0 0 0;
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 2.75rem 1rem 1rem;
+  color: var(--brand-cloud-white, #fff);
+  background: linear-gradient(
+    180deg,
+    rgb(10 15 26 / 0%) 0%,
+    rgb(10 15 26 / 62%) 38%,
+    rgb(10 15 26 / 88%) 100%
+  );
+  text-shadow: 0 1px 2px rgb(0 0 0 / 45%);
+}
+
+.party-content-overlay-text a { color: inherit; }
 
 .party-menu-body {
   display: flex;

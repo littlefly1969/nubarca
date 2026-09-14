@@ -488,6 +488,9 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.frameHelp': 'Drag to move the photo, or use the arrow keys.',
   'partyContent.frameZoom': 'Zoom',
   'partyContent.frameReset': 'Centre it again',
+  'partyContent.textPlacement': 'Section text',
+  'partyContent.textPlacementBelow': 'Below the photo',
+  'partyContent.textPlacementOverlay': 'On the photo',
   'partyCover.invitation.heading': 'Invitation cover',
   'partyCover.invitation.help':
     'The photo at the top of the invitation, with the party’s name and date on it. Without one, the album’s chosen cover is used.',

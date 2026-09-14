@@ -8,6 +8,7 @@ import {
   type PartyMediaCrop,
   type PartyMediaOrientation,
   type PartyTextAlign,
+  type PartyTextPlacement,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { DEFAULT_CROP_VIEW, MAX_ZOOM } from '../pages/partyPrintGeometry';
@@ -42,6 +43,8 @@ type Draft = {
   /** The inline photograph's frame: null is the whole photograph. */
   mediaOrientation: PartyMediaOrientation | null;
   mediaCrop: PartyMediaCrop | null;
+  /** The words on the photograph, or null for below it. */
+  textPlacement: 'overlay' | null;
   version: number;
 };
 
@@ -59,6 +62,7 @@ const fromSlot = (slot: PartyGuestContentSlot): Draft => ({
   mediaOrientation: slot.mediaOrientation === 'portrait' || slot.mediaOrientation === 'landscape'
     ? slot.mediaOrientation : null,
   mediaCrop: slot.mediaCrop ?? null,
+  textPlacement: slot.textPlacement === 'overlay' ? 'overlay' : null,
   version: slot.version,
 });
 
@@ -109,6 +113,7 @@ export function PartyContentCard({
         // carries where it sits — centred until the host moves it.
         mediaOrientation: draft.mediaOrientation ?? 'auto',
         mediaCrop: draft.mediaOrientation ? draft.mediaCrop ?? DEFAULT_CROP_VIEW : null,
+        textPlacement: draft.textPlacement ?? 'below',
         version: draft.version,
       }));
       setStatus('saved');
@@ -200,6 +205,19 @@ export function PartyContentCard({
               disabled={busy}
               onChange={(mediaOrientation, mediaCrop) =>
                 setDraft((d) => ({ ...d, mediaOrientation, mediaCrop }))}
+            />
+          )}
+
+          {/* Where the words sit — only where there is a picture in the page to
+              put them on. The menu is a card with a list, not a caption. */}
+          {draft.mediaFileItemId && draft.mediaPresentation === 'inline' && slot.kind !== 'menu' && (
+            <TextPlacementChoice
+              kind={slot.kind}
+              value={draft.textPlacement ?? 'below'}
+              disabled={busy}
+              onChange={(placement) => setDraft((d) => ({
+                ...d, textPlacement: placement === 'overlay' ? 'overlay' : null,
+              }))}
             />
           )}
 
@@ -439,6 +457,41 @@ function PhotoFrameChoice({
           </button>
         </div>
       )}
+    </fieldset>
+  );
+}
+
+/** The words below the photograph, or on it — across its lower part, like the cover. */
+function TextPlacementChoice({
+  kind, value, disabled, onChange,
+}: {
+  kind: PartyGuestContentKind;
+  value: PartyTextPlacement;
+  disabled: boolean;
+  onChange(next: PartyTextPlacement): void;
+}) {
+  const { t } = useI18n();
+  return (
+    <fieldset className="party-presentation" data-testid={`party-text-placement-${kind}`}>
+      <legend>{t('partyContent.textPlacement')}</legend>
+      {(['below', 'overlay'] as const).map((option) => (
+        <label className="party-presentation-option" key={option}>
+          <input
+            type="radio"
+            name={`text-placement-${kind}`}
+            value={option}
+            checked={value === option}
+            disabled={disabled}
+            data-testid={`party-text-placement-${kind}-${option}`}
+            onChange={() => onChange(option)}
+          />
+          <span className="party-presentation-title">
+            {t(option === 'below'
+              ? 'partyContent.textPlacementBelow'
+              : 'partyContent.textPlacementOverlay')}
+          </span>
+        </label>
+      ))}
     </fieldset>
   );
 }

@@ -256,6 +256,7 @@ describe('guest: the thank-you', () => {
       textAlign: 'center',
       mediaOrientation: null,
       mediaCrop: null,
+      textPlacement: null,
     });
   });
 
@@ -270,7 +271,7 @@ describe('guest: the thank-you', () => {
     })]);
     expect(result).toEqual({
       headline: null, message: null, mediaUrl: null, textAlign: 'center',
-      mediaOrientation: null, mediaCrop: null,
+      mediaOrientation: null, mediaCrop: null, textPlacement: null,
     });
   });
 
