@@ -25,7 +25,21 @@ public sealed record PartyDto(
     /// into a domain migration. Carried on the DTO so the owner surface can say
     /// so plainly instead of discovering it from a refusal.
     /// </summary>
-    bool CanChangeMainMediaSource);
+    bool CanChangeMainMediaSource,
+    /// <summary>
+    /// The invitation's cover as stored, and the owner's own preview of it while
+    /// the file still qualifies — an id with no url means the photograph went to
+    /// Trash or into the Private Vault, exactly as a slot's does. Null means the
+    /// album's chosen cover opens the invitation.
+    /// </summary>
+    Guid? InvitationCoverFileItemId = null,
+    string? InvitationCoverUrl = null,
+    /// <summary>
+    /// The cover that takes over while the party is on. Null means the
+    /// invitation's cover continues, and then the album's.
+    /// </summary>
+    Guid? LiveCoverFileItemId = null,
+    string? LiveCoverUrl = null);
 
 /// <summary>
 /// One album a party draws on, named for the owner. Carries the album's NAME
@@ -95,6 +109,10 @@ public enum PartyMutationOutcome
 
     /// <summary>That album is already another party's main source.</summary>
     AlbumAlreadyInUse,
+
+    /// A cover photograph the owner may not put on a party: missing, foreign,
+    /// trashed, vaulted or not an image — one answer for all of them.
+    InvalidMedia,
 }
 
 public sealed record PartyMutationResult(PartyMutationOutcome Outcome, PartyDto? Party = null)
@@ -191,6 +209,24 @@ public interface IPartyService
         Guid ownerUserId,
         Guid partyId,
         Guid albumId,
+        int expectedVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// States the party's two covers whole: the invitation's, and the one that
+    /// takes over while the party is on. Null for either means none chosen.
+    ///
+    /// <para>A NEW photograph must be one this owner may put on a party
+    /// (<see cref="PartyMutationOutcome.InvalidMedia"/> otherwise); one the
+    /// party already holds is not re-judged, so a host whose cover went to Trash
+    /// can still change the other one. Quotes the party's version and spends
+    /// one — unless nothing changed, which writes nothing.</para>
+    /// </summary>
+    Task<PartyMutationResult> SetCoversAsync(
+        Guid ownerUserId,
+        Guid partyId,
+        Guid? invitationCoverFileItemId,
+        Guid? liveCoverFileItemId,
         int expectedVersion,
         CancellationToken cancellationToken = default);
 

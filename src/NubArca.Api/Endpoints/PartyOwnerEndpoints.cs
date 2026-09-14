@@ -48,6 +48,13 @@ public static class PartyOwnerEndpoints
     public sealed record SetPartyMainMediaSourceRequest(Guid AlbumId, int Version);
 
     /// <summary>
+    /// The party's two covers, stated whole. Null means "none chosen": the next
+    /// cover in line applies. PUT states both, as the slot PUT states a slot.
+    /// </summary>
+    public sealed record SetPartyCoversRequest(
+        Guid? InvitationCoverFileItemId, Guid? LiveCoverFileItemId, int Version);
+
+    /// <summary>
     /// One typed slot as the owner writes it. <c>Content</c> is raw JSON on the
     /// wire and validated SERVER-SIDE against the shape its kind declares, so
     /// knowing the route is not permission to store arbitrary documents.
@@ -230,6 +237,43 @@ public static class PartyOwnerEndpoints
             return ToResult(result);
         }).WithName("SetPartyMainMediaSource").RequirePermission(Permissions.PartyAccess);
 
+        // The two photographs that open the party's pages: the invitation's, and
+        // the one that takes over while the party is on. PUT because it states
+        // both choices whole.
+        app.MapPut("/api/parties/{partyId:guid}/covers", async (
+            Guid partyId,
+            HttpContext httpContext,
+            [FromServices] IPartyService parties,
+            [FromServices] IAuditLogger audit,
+            [FromBody] SetPartyCoversRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            if (body is null)
+            {
+                return Results.BadRequest(new { error = "Missing request body." });
+            }
+
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await parties.SetCoversAsync(
+                ownerUserId, partyId, body.InvitationCoverFileItemId, body.LiveCoverFileItemId,
+                body.Version, cancellationToken);
+            if (result.Outcome == PartyMutationOutcome.Ok)
+            {
+                // That a choice was made, never which file: an id in an audit
+                // line is a pointer into somebody's library.
+                await audit.LogAsync(
+                    ownerUserId, AuditActions.PartyCoversSet, AuditEntityTypes.Party, partyId,
+                    httpContext.Connection.RemoteIpAddress?.ToString(),
+                    new
+                    {
+                        invitationCover = body.InvitationCoverFileItemId is not null,
+                        liveCover = body.LiveCoverFileItemId is not null,
+                    },
+                    cancellationToken);
+            }
+            return ToResult(result);
+        }).WithName("SetPartyCovers").RequirePermission(Permissions.PartyAccess);
+
         // Tearing a party down keeps its ALBUM. The photographs the guests were
         // allowed to see stay exactly where they are; the ones the host never
         // let through go to Trash the ordinary way, and the party's own rows —
@@ -397,6 +441,11 @@ public static class PartyOwnerEndpoints
         PartyMutationOutcome.AlbumAlreadyInUse => Results.Json(
             new { error = "album_already_in_use", party = result.Party },
             statusCode: StatusCodes.Status409Conflict),
+
+        // The guest-content route's rule: one answer for a missing, foreign,
+        // trashed, vaulted or non-image file, so it never says which.
+        PartyMutationOutcome.InvalidMedia =>
+            Results.BadRequest(new { error = "invalid_media" }),
 
         _ => Results.NotFound(),
     };

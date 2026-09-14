@@ -493,19 +493,24 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
     // --- The invitation hero ------------------------------------------------
 
     [Fact]
-    public async Task An_Inline_Invitation_Photograph_Is_The_Hero()
+    public async Task An_Inline_Invitation_Photograph_Stays_In_Its_Section()
     {
+        // The cover is its own decision now. An inline invitation photograph is
+        // drawn in its section, above its words, like any other slot's — and
+        // with no cover chosen the page keeps its composition.
         var party = await SeedPartyAsync();
         var graphic = await UploadPngAsync(party.Owner, "invite.png");
         await WriteSlotAsync(
             party, "invitation", new { headline = "Ci siamo", message = "Vi aspettiamo" },
             graphic, before: true, live: false, presentation: "inline");
+        var guest = Guest();
 
-        var context = await Guest().GetFromJsonAsync<JsonElement>($"/api/party/{party.Token}");
-
-        var cover = context.GetProperty("coverUrl").GetString();
+        var context = await guest.GetFromJsonAsync<JsonElement>($"/api/party/{party.Token}");
+        Assert.Equal(JsonValueKind.Null, context.GetProperty("coverUrl").ValueKind);
         Assert.StartsWith(
-            $"/api/party/{party.Token}/content/invitation/media", cover, StringComparison.Ordinal);
+            $"/api/party/{party.Token}/content/invitation/media",
+            (await GuestSlotAsync(guest, party.Token, "invitation")).GetProperty("mediaUrl").GetString(),
+            StringComparison.Ordinal);
     }
 
     [Fact]

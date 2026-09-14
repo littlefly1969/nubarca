@@ -93,6 +93,27 @@ public class Party
     public DateTime? LibraryAccessExpiresAt { get; set; }
 
     /// <summary>
+    /// The photograph at the top of the INVITATION, or null for the album's
+    /// chosen cover.
+    ///
+    /// <para>A party-level decision, separate from the invitation slot's own
+    /// photograph — which is part of what the invitation SAYS, and sits in its
+    /// section like any other slot's. A reference to one of the owner's
+    /// ordinary files, judged by the same rule as a slot photograph
+    /// (<c>PartyMediaReference</c>): it may be in no album at all, choosing it
+    /// files it nowhere, and it becomes null if the file is permanently
+    /// deleted. Read only through <c>PartyCoverPolicy</c>.</para>
+    /// </summary>
+    public Guid? InvitationCoverFileItemId { get; set; }
+
+    /// <summary>
+    /// The photograph at the top of the party WHILE IT IS ON, and of its
+    /// memories — the first choice there, ahead of everything else. Null means
+    /// the invitation's cover continues, and after it the album's.
+    /// </summary>
+    public Guid? LiveCoverFileItemId { get; set; }
+
+    /// <summary>
     /// Optimistic concurrency, the same plain incrementing int
     /// <see cref="Album"/> uses and for the same reason: PostgreSQL's xmin
     /// cannot be exercised by the SQLite the endpoint tests run against, and a

@@ -510,6 +510,56 @@ public sealed class PartyService : IPartyService
         return PartyMutationResult.Ok(null!);
     }
 
+    public async Task<PartyMutationResult> SetCoversAsync(
+        Guid ownerUserId,
+        Guid partyId,
+        Guid? invitationCoverFileItemId,
+        Guid? liveCoverFileItemId,
+        int expectedVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var party = await _db.Parties
+            .FirstOrDefaultAsync(p => p.Id == partyId && p.OwnerUserId == ownerUserId, cancellationToken);
+        if (party is null)
+        {
+            return PartyMutationResult.Refused(PartyMutationOutcome.NotFound);
+        }
+        if (party.Version != expectedVersion)
+        {
+            return PartyMutationResult.Refused(
+                PartyMutationOutcome.VersionConflict, await ProjectAsync(party, cancellationToken));
+        }
+
+        // The same asymmetry a slot photograph has: a NEW reference must qualify,
+        // one the party already holds is not re-judged.
+        foreach (var (next, current) in new[]
+        {
+            (invitationCoverFileItemId, party.InvitationCoverFileItemId),
+            (liveCoverFileItemId, party.LiveCoverFileItemId),
+        })
+        {
+            if (next is Guid id && id != current
+                && !await PartyMediaReference.IsEligibleAsync(_db, ownerUserId, id, cancellationToken))
+            {
+                return PartyMutationResult.Refused(PartyMutationOutcome.InvalidMedia);
+            }
+        }
+
+        if (party.InvitationCoverFileItemId == invitationCoverFileItemId
+            && party.LiveCoverFileItemId == liveCoverFileItemId)
+        {
+            // Already true: nothing to write and no version to spend.
+            return PartyMutationResult.Ok(await ProjectAsync(party, cancellationToken));
+        }
+
+        party.InvitationCoverFileItemId = invitationCoverFileItemId;
+        party.LiveCoverFileItemId = liveCoverFileItemId;
+        party.Version++;
+        party.UpdatedAt = _clock.GetUtcNow().UtcDateTime;
+        await _db.SaveChangesAsync(cancellationToken);
+        return PartyMutationResult.Ok(await ProjectAsync(party, cancellationToken));
+    }
+
     private async Task<PartyDto> ProjectAsync(Domain.Party party, CancellationToken cancellationToken)
     {
         var sources = await _db.PartyMediaSources
@@ -529,6 +579,18 @@ public sealed class PartyService : IPartyService
             .AsNoTracking()
             .AnyAsync(l => l.PartyId == party.Id, cancellationToken);
 
+        // The two covers, each with the owner's own preview while its file still
+        // qualifies — the same "id without a url" signal a slot photograph gives.
+        var coverIds = new[] { party.InvitationCoverFileItemId, party.LiveCoverFileItemId }
+            .OfType<Guid>().Distinct().ToList();
+        var eligibleCovers = coverIds.Count == 0
+            ? new HashSet<Guid>()
+            : await PartyMediaReference.EligibleAmongAsync(
+                _db, party.OwnerUserId, coverIds, cancellationToken);
+        string? CoverPreview(Guid? id) => id is Guid file && eligibleCovers.Contains(file)
+            ? $"/api/files/{file}/thumbnail?size=medium"
+            : null;
+
         return new PartyDto(
             party.Id, party.Title, party.Description, party.Status,
             party.EventStartsAt, party.LiveStartedAt, party.LiveEndedAt,
@@ -537,6 +599,10 @@ public sealed class PartyService : IPartyService
             sources
                 .Select(s => new PartyMediaSourceDto(s.AlbumId, s.Name, s.Role, s.SortOrder))
                 .ToList(),
-            CanChangeMainMediaSource: !everHadCapability);
+            CanChangeMainMediaSource: !everHadCapability,
+            InvitationCoverFileItemId: party.InvitationCoverFileItemId,
+            InvitationCoverUrl: CoverPreview(party.InvitationCoverFileItemId),
+            LiveCoverFileItemId: party.LiveCoverFileItemId,
+            LiveCoverUrl: CoverPreview(party.LiveCoverFileItemId));
     }
 }

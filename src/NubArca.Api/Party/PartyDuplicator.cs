@@ -115,6 +115,10 @@ public sealed class PartyDuplicator : IPartyDuplicator
                 EventStartsAt = source.EventStartsAt,
                 GuestAccessExpiresAt = source.GuestAccessExpiresAt,
                 LibraryAccessExpiresAt = source.LibraryAccessExpiresAt,
+                // Both covers are decisions about how the evening LOOKS, so they
+                // travel — as references to the same files, never as copies.
+                InvitationCoverFileItemId = source.InvitationCoverFileItemId,
+                LiveCoverFileItemId = source.LiveCoverFileItemId,
                 // Published below if, and only if, the capability travels.
                 Status = PartyStatuses.Draft,
                 LiveStartedAt = null,
