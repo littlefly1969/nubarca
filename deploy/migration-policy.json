@@ -121,6 +121,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds two NULLABLE uuid columns (InvitationCoverFileItemId, LiveCoverFileItemId) to parties with no default, one plain index on each, and one foreign key from each to file_items with ON DELETE SET NULL. No existing row is rewritten and nothing is backfilled: every existing party reads NULL for both, which the application defines as 'no cover chosen' — the invitation falls back to the album's chosen cover and the party to the album's cover, i.e. the album-derived covers these pages already used. The previous application never reads or writes either column and its inserts omit them, so it keeps writing NULL; the foreign keys constrain only values the new application writes, and SET NULL on a permanent file delete is simply a reference that no longer exists. Rolling back to the previous application therefore leaves only values the new schema accepts: a cover a host chose is ignored (and the old invitation rendering returns), never a failed request or a rejected write."
+    },
+    "20260914135548_AddPartyContentMediaFrame": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds four NULLABLE columns to party_guest_contents with no default — MediaOrientation character varying(16), and MediaCropZoom, MediaCropCenterX and MediaCropCenterY double precision — plus two check constraints: the orientation is 'portrait' or 'landscape', and the crop lies inside the print editor's limits (zoom 1..4, centre 0..1). No existing row is rewritten and nothing is backfilled; NULL passes both constraints by definition. Every existing row reads NULL, which the application defines as 'the whole photograph' — the section photo shown at its own proportions instead of the previous fixed landscape crop, which is the rendering change this release intends. The previous application never reads or writes these columns and its inserts omit them, so it keeps writing NULL; rolling back to it leaves only values the new schema accepts, and a host's frame is merely ignored (the old landscape crop returns), never a failed request or a rejected write."
     }
   }
 }

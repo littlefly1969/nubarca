@@ -100,6 +100,28 @@ public class PartyGuestContent
     public string? TextAlign { get; set; }
 
     /// <summary>
+    /// How the INLINE photograph is framed in its section — one of
+    /// <see cref="PartyGuestContentMediaOrientations"/> — or null for the whole
+    /// photograph at its own proportions.
+    ///
+    /// <para>Null is the default because a fixed band is a choice, not a
+    /// given: a portrait photograph cropped into a landscape strip is exactly
+    /// what a host could not undo before this existed. A fixed format crops,
+    /// and the three numbers below say where — the same zoom and centre the
+    /// party print's crop editor stores, with the same limits.</para>
+    /// </summary>
+    public string? MediaOrientation { get; set; }
+
+    /// <summary>How far in, from 1 (the frame filled) to <see cref="PartyGuestContentMediaOrientations.MaxZoom"/>.</summary>
+    public double? MediaCropZoom { get; set; }
+
+    /// <summary>The centre of what shows, as fractions of the photograph (0..1).</summary>
+    public double? MediaCropCenterX { get; set; }
+
+    /// <summary>The centre of what shows, as fractions of the photograph (0..1).</summary>
+    public double? MediaCropCenterY { get; set; }
+
+    /// <summary>
     /// Optimistic concurrency for THIS slot.
     ///
     /// <para>Its own, not the root's: editing the menu and renaming the party
@@ -200,4 +222,33 @@ public static class PartyGuestContentTextAligns
     public static readonly IReadOnlyList<string> All = [Left, Center];
 
     public static bool IsKnown(string? align) => align is not null && All.Contains(align);
+}
+
+/// <summary>
+/// The fixed formats a slot's inline photograph may be framed in. The whole
+/// photograph is the absence of one — "auto" on the wire, null in the row.
+/// </summary>
+public static class PartyGuestContentMediaOrientations
+{
+    public const string Portrait = "portrait";
+    public const string Landscape = "landscape";
+
+    /// <summary>The wire's word for "the whole photograph". Never stored.</summary>
+    public const string Auto = "auto";
+
+    public static readonly IReadOnlyList<string> All = [Portrait, Landscape];
+
+    public static bool IsKnown(string? orientation) =>
+        orientation is not null && All.Contains(orientation);
+
+    /// <summary>
+    /// The print crop editor's limit, mirrored: past it a picture is visibly
+    /// soft, so the editor does not go there.
+    /// </summary>
+    public const double MaxZoom = 4;
+
+    public static bool IsValidCrop(double zoom, double centerX, double centerY) =>
+        double.IsFinite(zoom) && zoom >= 1 && zoom <= MaxZoom
+        && double.IsFinite(centerX) && centerX >= 0 && centerX <= 1
+        && double.IsFinite(centerY) && centerY >= 0 && centerY <= 1;
 }

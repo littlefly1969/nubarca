@@ -39,7 +39,18 @@ public sealed record PartyGuestContentDto(
     /// surface's own default (left in a section, centred in the thank-you). On
     /// a write, null leaves the stored choice exactly as it is.
     /// </summary>
-    string? TextAlign = null);
+    string? TextAlign = null,
+    /// <summary>
+    /// How the inline photograph is framed: "portrait", "landscape", or null
+    /// for the whole photograph. On a write, null leaves it as it is and
+    /// "auto" returns to the whole photograph.
+    /// </summary>
+    string? MediaOrientation = null,
+    /// <summary>
+    /// Where a fixed frame sits on the photograph: the print editor's zoom and
+    /// centre. Null is centred and not enlarged; on a write, null leaves it.
+    /// </summary>
+    PartyMediaCropDto? MediaCrop = null);
 
 /// <summary>
 /// One slot as a GUEST receives it: the same words, and the photograph as an
@@ -70,7 +81,18 @@ public sealed record PartyGuestContentViewDto(
     /// surface's own default (left in a section, centred in the thank-you). On
     /// a write, null leaves the stored choice exactly as it is.
     /// </summary>
-    string? TextAlign = null);
+    string? TextAlign = null,
+    /// <summary>
+    /// How the inline photograph is framed: "portrait", "landscape", or null
+    /// for the whole photograph. On a write, null leaves it as it is and
+    /// "auto" returns to the whole photograph.
+    /// </summary>
+    string? MediaOrientation = null,
+    /// <summary>
+    /// Where a fixed frame sits on the photograph: the print editor's zoom and
+    /// centre. Null is centred and not enlarged; on a write, null leaves it.
+    /// </summary>
+    PartyMediaCropDto? MediaCrop = null);
 
 /// <summary>What the owner writes into one slot.</summary>
 public sealed record PartyGuestContentWrite(
@@ -87,7 +109,18 @@ public sealed record PartyGuestContentWrite(
     /// surface's own default (left in a section, centred in the thank-you). On
     /// a write, null leaves the stored choice exactly as it is.
     /// </summary>
-    string? TextAlign = null);
+    string? TextAlign = null,
+    /// <summary>
+    /// How the inline photograph is framed: "portrait", "landscape", or null
+    /// for the whole photograph. On a write, null leaves it as it is and
+    /// "auto" returns to the whole photograph.
+    /// </summary>
+    string? MediaOrientation = null,
+    /// <summary>
+    /// Where a fixed frame sits on the photograph: the print editor's zoom and
+    /// centre. Null is centred and not enlarged; on a write, null leaves it.
+    /// </summary>
+    PartyMediaCropDto? MediaCrop = null);
 
 public enum PartyGuestContentOutcome
 {
@@ -182,3 +215,9 @@ public interface IPartyGuestContentService
         string kind,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// A crop the way the party print's editor holds it: how far in (1..4) and what
+/// is in the middle, as fractions of the photograph.
+/// </summary>
+public sealed record PartyMediaCropDto(double Zoom, double CenterX, double CenterY);

@@ -141,8 +141,9 @@ public sealed class PartyDuplicateTests : IDisposable
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.PartyGuestContents.Where(x => x.PartyId == source.PartyId)
-                .ExecuteUpdateAsync(u => u.SetProperty(
-                    x => x.TextAlign, PartyGuestContentTextAligns.Center));
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(x => x.TextAlign, PartyGuestContentTextAligns.Center)
+                    .SetProperty(x => x.MediaOrientation, PartyGuestContentMediaOrientations.Portrait));
         }
 
         var clone = await (await owner.PostAsJsonAsync(
@@ -170,6 +171,7 @@ public sealed class PartyDuplicateTests : IDisposable
         var context = await opened.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("Festa di Anna", context.GetProperty("title").GetString());
         Assert.Equal("center", context.GetProperty("content")[0].GetProperty("textAlign").GetString());
+        Assert.Equal("portrait", context.GetProperty("content")[0].GetProperty("mediaOrientation").GetString());
     }
 
     [Fact]

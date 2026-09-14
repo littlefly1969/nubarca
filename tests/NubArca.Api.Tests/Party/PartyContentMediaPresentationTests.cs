@@ -679,6 +679,100 @@ public sealed class PartyContentMediaPresentationTests : IDisposable
         Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
     }
 
+    // --- The inline photograph's frame ---------------------------------------
+
+    private static Task<HttpResponseMessage> WriteFramedAsync(
+        SeededParty party, Guid? media, int version, string? orientation, object? crop) =>
+        party.Owner.PutAsJsonAsync($"/api/parties/{party.PartyId}/guest-content/menu", new
+        {
+            enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+            content = Menu, mediaFileItemId = media, version,
+            mediaOrientation = orientation, mediaCrop = crop,
+        });
+
+    /// Absent and null mean the same thing on the wire: the whole photograph.
+    private static (string? Orientation, JsonElement? Crop) FrameOf(JsonElement slot) => (
+        slot.TryGetProperty("mediaOrientation", out var o) && o.ValueKind == JsonValueKind.String
+            ? o.GetString() : null,
+        slot.TryGetProperty("mediaCrop", out var c) && c.ValueKind == JsonValueKind.Object
+            ? c : null);
+
+    [Fact]
+    public async Task A_Photograph_Is_Whole_Until_The_Host_Frames_It()
+    {
+        var party = await SeedPartyAsync();
+        await VersionAsync(await WriteSlotAsync(party, "menu", Menu, party.AlbumPhotoId));
+
+        var (orientation, crop) = FrameOf(await OwnerSlotAsync(party, "menu"));
+        Assert.Null(orientation);
+        Assert.Null(crop);
+    }
+
+    [Fact]
+    public async Task A_Framed_Photograph_Reaches_The_Guest_And_Survives_A_Save_That_Omits_It()
+    {
+        var party = await SeedPartyAsync();
+        var version = await VersionAsync(await WriteFramedAsync(
+            party, party.AlbumPhotoId, 0, "portrait", new { zoom = 2.0, centerX = 0.3, centerY = 0.6 }));
+
+        var (orientation, crop) = FrameOf(
+            await GuestSlotAsync(_factory.CreateClient(), party.Token, "menu"));
+        Assert.Equal("portrait", orientation);
+        Assert.Equal(2.0, crop!.Value.GetProperty("zoom").GetDouble());
+        Assert.Equal(0.3, crop.Value.GetProperty("centerX").GetDouble());
+        Assert.Equal(0.6, crop.Value.GetProperty("centerY").GetDouble());
+
+        // A client that predates the frame saves the rest of the card and sends
+        // no frame at all. The host's choice is not reset by it.
+        await VersionAsync(await WriteSlotAsync(party, "menu", Menu, party.AlbumPhotoId, version));
+        (orientation, crop) = FrameOf(await OwnerSlotAsync(party, "menu"));
+        Assert.Equal("portrait", orientation);
+        Assert.NotNull(crop);
+    }
+
+    [Fact]
+    public async Task Auto_Returns_To_The_Whole_Photograph_And_A_New_Photograph_Starts_Centred()
+    {
+        var party = await SeedPartyAsync();
+        var version = await VersionAsync(await WriteFramedAsync(
+            party, party.AlbumPhotoId, 0, "landscape", new { zoom = 1.5, centerX = 0.5, centerY = 0.2 }));
+
+        // A different photograph with no word about where it sits: the format
+        // stays, the crop — which belonged to the old picture — does not.
+        var other = await UploadPngAsync(party.Owner, "altra.png");
+        version = await VersionAsync(await WriteFramedAsync(party, other, version, null, null));
+        var (orientation, crop) = FrameOf(await OwnerSlotAsync(party, "menu"));
+        Assert.Equal("landscape", orientation);
+        Assert.Null(crop);
+
+        // "auto" is the whole photograph again, and takes any crop with it.
+        await VersionAsync(await WriteFramedAsync(
+            party, other, version, "auto", new { zoom = 1.5, centerX = 0.5, centerY = 0.2 }));
+        (orientation, crop) = FrameOf(await OwnerSlotAsync(party, "menu"));
+        Assert.Null(orientation);
+        Assert.Null(crop);
+    }
+
+    [Theory]
+    [InlineData("sideways", 1.0, 0.5, 0.5)]
+    [InlineData("portrait", 5.0, 0.5, 0.5)]
+    [InlineData("portrait", 0.5, 0.5, 0.5)]
+    [InlineData("portrait", 1.0, 1.5, 0.5)]
+    public async Task A_Frame_Outside_The_Print_Editors_Limits_Is_Refused(
+        string orientation, double zoom, double centerX, double centerY)
+    {
+        var party = await SeedPartyAsync();
+
+        var refused = await WriteFramedAsync(
+            party, party.AlbumPhotoId, 0, orientation, new { zoom, centerX, centerY });
+
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal(
+            "invalid_content",
+            (await refused.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        Assert.Equal(0, (await OwnerSlotAsync(party, "menu")).GetProperty("version").GetInt32());
+    }
+
     private async Task<SeededParty> SeedPartyAsync()
     {
         var (ownerId, owner) = await _factory.CreatePermissionClientAsync(

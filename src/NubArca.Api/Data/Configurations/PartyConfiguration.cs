@@ -131,6 +131,16 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
             t.HasCheckConstraint(
                 "ck_party_guest_contents_text_align",
                 "\"TextAlign\" IN ('left', 'center')");
+            // The photograph's frame: a closed format, and a crop inside the
+            // print editor's own limits. NULL passes both, which is "the whole
+            // photograph" and "centred, not enlarged".
+            t.HasCheckConstraint(
+                "ck_party_guest_contents_media_orientation",
+                "\"MediaOrientation\" IN ('portrait', 'landscape')");
+            t.HasCheckConstraint(
+                "ck_party_guest_contents_media_crop",
+                "\"MediaCropZoom\" BETWEEN 1 AND 4 AND \"MediaCropCenterX\" BETWEEN 0 AND 1 "
+                + "AND \"MediaCropCenterY\" BETWEEN 0 AND 1");
         });
 
         // The composite key IS the "at most one slot per kind" rule. Expressing
@@ -162,6 +172,7 @@ public class PartyGuestContentConfiguration : IEntityTypeConfiguration<PartyGues
         // Nullable and without a default: an older application never mentions
         // it, and a row it writes means "the surface decides", as before.
         builder.Property(c => c.TextAlign).HasMaxLength(16);
+        builder.Property(c => c.MediaOrientation).HasMaxLength(16);
 
         builder.Property(c => c.Version).HasDefaultValue(1);
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");

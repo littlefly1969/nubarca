@@ -77,7 +77,12 @@ public static class PartyOwnerEndpoints
         // How the slot's words are aligned: "left" or "center". Absent means
         // UNCHANGED, so a client that predates the choice cannot reset it by
         // saving the rest of the card.
-        string? TextAlign = null);
+        string? TextAlign = null,
+        // The inline photograph's frame: "portrait", "landscape", or "auto" for
+        // the whole photograph; absent leaves it. The crop is the print
+        // editor's zoom and centre; absent leaves it.
+        string? MediaOrientation = null,
+        NubArca.Api.Party.PartyMediaCropDto? MediaCrop = null);
 
     public static IEndpointRouteBuilder MapPartyOwnerEndpoints(this IEndpointRouteBuilder app)
     {
@@ -341,7 +346,7 @@ public static class PartyOwnerEndpoints
                     body.Content, body.Version, body.MediaFileItemId,
                     body.MediaPresentation
                         ?? NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline,
-                    body.TextAlign),
+                    body.TextAlign, body.MediaOrientation, body.MediaCrop),
                 cancellationToken);
 
             return result.Outcome switch
