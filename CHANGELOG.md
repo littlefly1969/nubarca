@@ -6,6 +6,19 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Section photos keep their shape, or sit where you put them
+
+- **A photo in a section is shown whole.** Every section photo — invitation,
+  location, dress code, menu, info, thank-you — used to be cut into a
+  landscape band, so a portrait photo lost its top and bottom. It now appears
+  whole, at its own proportions.
+- **Or choose its format, as in the photo print.** Under the photo, "Formato
+  della foto" offers Intera, Verticale or Orizzontale. With a fixed format you
+  drag the photo (or use the arrow keys) and zoom to choose what shows — the
+  same frame the photo print uses.
+- The invitation and party covers, and photos shown full screen, are
+  unchanged.
+
 ### Two covers: one for the invitation, one for the party
 
 - **The invitation has its own cover.** In the Invito tab, "Copertina
