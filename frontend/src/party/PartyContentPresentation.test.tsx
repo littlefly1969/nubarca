@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { PartyGuestContentSlot, PartyGuestContentView } from '@nubarca/api-client';
 import { I18nProvider } from '../i18n';
@@ -254,6 +254,8 @@ describe('guest: the thank-you', () => {
       message: 'È stata una serata bellissima',
       mediaUrl: '/thanks.jpg',
       textAlign: 'center',
+      mediaOrientation: null,
+      mediaCrop: null,
     });
   });
 
@@ -268,6 +270,7 @@ describe('guest: the thank-you', () => {
     })]);
     expect(result).toEqual({
       headline: null, message: null, mediaUrl: null, textAlign: 'center',
+      mediaOrientation: null, mediaCrop: null,
     });
   });
 
@@ -277,5 +280,30 @@ describe('guest: the thank-you', () => {
       mediaPresentation: 'poster', mediaUrl: '/thanks.jpg',
     })]);
     expect(screen.getByTestId('party-poster-open-thank-you')).toHaveTextContent(/Ringraziamento/i);
+  });
+});
+
+describe('guest: a section photograph’s frame', () => {
+  it('shows the whole photograph unless the host framed it', () => {
+    mountGuest([view({ kind: 'info', content: { title: 'Parcheggio', body: null }, mediaUrl: '/p.jpg' })]);
+    expect(screen.getByTestId('party-content-media')).toHaveAttribute('data-frame', 'whole');
+  });
+
+  it('places a framed photograph in its portrait frame, cropped where the host put it', () => {
+    mountGuest([view({
+      kind: 'info', content: { title: 'Parcheggio', body: null }, mediaUrl: '/p.jpg',
+      mediaOrientation: 'portrait', mediaCrop: { zoom: 2, centerX: 0.3, centerY: 0.5 },
+    })]);
+    const img = screen.getByTestId('party-content-media');
+    const frame = img.parentElement!;
+    expect(frame).toHaveAttribute('data-frame', 'fixed');
+    expect(frame).toHaveAttribute('data-orientation', 'portrait');
+
+    // Once the picture's shape is known, the crop is the print's own maths: a
+    // 4:3 photograph in a 4:5 frame at zoom 2 shows 0.3 of its width.
+    Object.defineProperty(img, 'naturalWidth', { value: 1600 });
+    Object.defineProperty(img, 'naturalHeight', { value: 1200 });
+    fireEvent.load(img);
+    expect(parseFloat(img.style.width)).toBeCloseTo(100 / 0.3, 1);
   });
 });

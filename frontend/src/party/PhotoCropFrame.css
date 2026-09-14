@@ -1,0 +1,24 @@
+/* The frame a photograph is placed in by hand. Shared by the party print and
+   the invitation's section photographs, so both move the same way. */
+
+.photo-crop {
+  position: relative;
+  align-self: center;
+  width: min(100%, 22rem);
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: rgb(10 15 26 / 70%);
+  touch-action: none;
+  cursor: grab;
+}
+
+.photo-crop:active {
+  cursor: grabbing;
+}
+
+.photo-crop-img {
+  position: absolute;
+  max-width: none;
+  object-fit: cover;
+  user-select: none;
+}

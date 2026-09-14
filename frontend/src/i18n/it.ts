@@ -490,6 +490,13 @@ const it = {
   'partyContent.textAlign': 'Allineamento del testo',
   'partyContent.textAlignLeft': 'A sinistra',
   'partyContent.textAlignCenter': 'Centrato',
+  'partyContent.frame': 'Formato della foto',
+  'partyContent.frame.whole': 'Intera',
+  'partyContent.frame.portrait': 'Verticale',
+  'partyContent.frame.landscape': 'Orizzontale',
+  'partyContent.frameHelp': 'Trascina per spostare la foto, o usa le frecce.',
+  'partyContent.frameZoom': 'Ingrandimento',
+  'partyContent.frameReset': 'Ricentra',
   'partyCover.invitation.heading': 'Copertina dell’invito',
   'partyCover.invitation.help':
     'La foto in alto nell’invito, con il nome e la data della festa. Senza una foto scelta si usa la copertina dell’album.',

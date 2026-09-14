@@ -303,21 +303,6 @@
 
 /* Framing ---------------------------------------------------------------- */
 
-.party-print-crop {
-  position: relative;
-  align-self: center;
-  width: min(100%, 22rem);
-  overflow: hidden;
-  border-radius: 0.75rem;
-  background: rgb(10 15 26 / 70%);
-  touch-action: none;
-  cursor: grab;
-}
-
-.party-print-crop:active {
-  cursor: grabbing;
-}
-
 .party-print-framed {
   position: absolute;
   max-width: none;

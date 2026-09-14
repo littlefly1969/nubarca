@@ -481,6 +481,13 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.textAlign': 'Text alignment',
   'partyContent.textAlignLeft': 'Left',
   'partyContent.textAlignCenter': 'Centered',
+  'partyContent.frame': 'Photo format',
+  'partyContent.frame.whole': 'Whole photo',
+  'partyContent.frame.portrait': 'Portrait',
+  'partyContent.frame.landscape': 'Landscape',
+  'partyContent.frameHelp': 'Drag to move the photo, or use the arrow keys.',
+  'partyContent.frameZoom': 'Zoom',
+  'partyContent.frameReset': 'Centre it again',
   'partyCover.invitation.heading': 'Invitation cover',
   'partyCover.invitation.help':
     'The photo at the top of the invitation, with the party’s name and date on it. Without one, the album’s chosen cover is used.',

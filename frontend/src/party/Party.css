@@ -237,3 +237,11 @@
 }
 
 .party-presentation-lost p { margin: 0; }
+
+/* The section photograph's frame editor: the crop, its help, its zoom. */
+.party-frame-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}

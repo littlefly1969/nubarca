@@ -222,3 +222,45 @@ describe('a slot’s words', () => {
     expect(await screen.findByTestId('party-content-invalid-location')).toBeInTheDocument();
   });
 });
+
+describe('a slot’s photograph frame', () => {
+  const withPhoto = (over: Partial<PartyGuestContentSlot> = {}) => slot({
+    mediaFileItemId: 'f1', mediaUrl: '/api/files/f1/thumbnail?size=medium', ...over,
+  });
+
+  it('keeps the whole photograph unless the host frames it, and says so to the server', async () => {
+    const { mock, onSaved } = mount(withPhoto());
+    const user = userEvent.setup();
+
+    expect(screen.getByTestId('party-frame-menu-whole')).toBeChecked();
+    expect(screen.queryByTestId('party-frame-crop-menu')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('party-content-save-menu'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(sentBody(mock).mediaOrientation).toBe('auto');
+    expect(sentBody(mock).mediaCrop).toBeNull();
+  });
+
+  it('frames it in portrait, placed by hand exactly as in the print', async () => {
+    const { mock, onSaved } = mount(withPhoto());
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('party-frame-menu-portrait'));
+    const frame = screen.getByTestId('party-frame-crop-menu');
+    frame.focus();
+    await user.keyboard('{ArrowRight}');
+    await user.click(screen.getByTestId('party-content-save-menu'));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    const body = sentBody(mock);
+    expect(body.mediaOrientation).toBe('portrait');
+    expect(body.mediaCrop.zoom).toBe(1);
+    expect(body.mediaCrop.centerX).toBeCloseTo(0.52);
+    expect(body.mediaCrop.centerY).toBe(0.5);
+  });
+
+  it('offers no frame for a poster, which is opened whole', () => {
+    mount(withPhoto({ mediaPresentation: 'poster' }));
+    expect(screen.queryByTestId('party-frame-menu')).not.toBeInTheDocument();
+  });
+});
