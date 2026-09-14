@@ -83,7 +83,11 @@ public static class PartyEndpoints
             // things since the host could rename either without the other.
             var root = await db.Parties.AsNoTracking()
                 .Where(p => p.Id == access.PartyId)
-                .Select(p => new { p.Title, p.EventStartsAt })
+                .Select(p => new
+                {
+                    p.Title, p.EventStartsAt, p.Version,
+                    p.InvitationCoverFileItemId, p.LiveCoverFileItemId,
+                })
                 .FirstOrDefaultAsync(cancellationToken);
             var partyTitle = root?.Title ?? header.Name;
             var eventStartsAt = root?.EventStartsAt;
@@ -101,41 +105,33 @@ public static class PartyEndpoints
             var content = await guestContent.ForGuestAsync(
                 access.PartyId, access.OwnerUserId, access.Experience.Phase, token, cancellationToken);
 
-            // The cover is the invitation's hero as much as the gallery's face.
-            // Before the party it is the one ALBUM file id that resolves at all,
-            // and only when the host CHOSE it: a photograph nominated to
-            // represent the album is a different thing from whichever one sorts
-            // first, and an invitation with no chosen cover gets a composition.
-            var heroCover = access.Experience.AllowsAlbumMedia
+            // WHICH PHOTOGRAPH OPENS THE PAGE. The party's own choices come first
+            // (PartyCoverPolicy): on the invitation its cover; at the party and
+            // in the memories the live cover, then the invitation's. Each is a
+            // Party reference that may be in no album, so it arrives on its own
+            // relation-scoped address rather than the album route, which would
+            // rightly refuse it.
+            //
+            // Without one, the album — before the party only a cover the host
+            // CHOSE, because the gallery is closed and whichever photo sorts
+            // first is not a decision; afterwards its cover as every surface
+            // resolves it. Without that, the page's composition.
+            //
+            // The invitation SLOT's photograph is not a candidate: it is part of
+            // what the invitation says, and sits in its section.
+            var chosenCover = await NubArca.Api.Party.PartyCoverPolicy.ResolveAsync(
+                db, access, root?.InvitationCoverFileItemId, root?.LiveCoverFileItemId,
+                cancellationToken);
+            var albumCover = access.Experience.AllowsAlbumMedia
                 ? header.CoverFileItemId
                 : header.ChosenCoverFileItemId;
-            var coverUrl = heroCover is Guid cover
-                ? $"/api/party/{enc}/media/{cover}/preview" : null;
-
-            // On the INVITATION the hero has one more source, and it comes first:
-            // the photograph the host put on the invitation itself. It is a Party
-            // reference, so it may be a file that is in no album at all, and it
-            // arrives as the invitation's own relation-scoped address — never
-            // through the album route, which would rightly refuse it. Without
-            // one, the chosen cover; without that, the page's composition.
-            //
-            // ONLY while that photograph is INLINE. A hero is a cropped band
-            // across the top of a page, and a poster is a document the host
-            // prepared to be read whole — putting one in the other is how a
-            // 1080x1920 invitation loses its own words to a crop. A poster
-            // invitation therefore falls through to the chosen cover (or the
-            // composition) and is offered separately, as its own full-screen
-            // affordance, which is the point of having chosen poster at all.
-            if (access.Experience.Phase == NubArca.Api.Domain.PartyGuestPhase.Before)
-            {
-                var invitation = content.FirstOrDefault(
-                    c => c.Kind == NubArca.Api.Domain.PartyGuestContentKinds.Invitation);
-                if (invitation?.MediaPresentation
-                    == NubArca.Api.Domain.PartyGuestContentMediaPresentations.Inline)
-                {
-                    coverUrl = invitation.MediaUrl ?? coverUrl;
-                }
-            }
+            var coverUrl = chosenCover is { } pick
+                // The party's version is the cache key: choosing a cover spends
+                // one, so a phone never keeps yesterday's picture.
+                ? $"/api/party/{enc}/cover/{pick.Which}/media?v={root!.Version}"
+                : albumCover is Guid cover
+                    ? $"/api/party/{enc}/media/{cover}/preview"
+                    : null;
 
             // A capability the HOST is no longer permitted to run, or that does
             // not belong to this phase, is ABSENT from the hub — never a
@@ -327,6 +323,30 @@ public static class PartyEndpoints
                     httpContext, thumbnails, stripper, cancellationToken)
                 : Results.NotFound();
         }).WithName("GetPartyContentMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
+
+        // THE COVER, on its own relation-scoped address. Only the photograph the
+        // page is showing RIGHT NOW resolves — asked through the same policy the
+        // guest context used — so the invitation's cover stops answering here
+        // the moment a live cover outranks it, neither answers for a file that
+        // stopped qualifying, and no other file of the owner's answers at all.
+        // Only the derived preview is served, never the original.
+        app.MapGet("/api/party/{token}/cover/{which}/media", async (
+            string token, string which, HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] AppDbContext db,
+            [FromServices] IFileThumbnailService thumbnails,
+            [FromServices] NubArca.Api.Metadata.IImageMetadataStripper stripper,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var chosen = await NubArca.Api.Party.PartyCoverPolicy.ResolveAsync(db, access, cancellationToken);
+            return chosen is { } pick && pick.Which == which
+                ? await ServeAuthorizedDerivativeAsync(
+                    access.OwnerUserId, pick.FileId, NubArca.Api.Party.PartyMediaKind.Image, "preview",
+                    httpContext, thumbnails, stripper, cancellationToken)
+                : Results.NotFound();
+        }).WithName("GetPartyCoverMedia").RequireRateLimiting(PartyPublicMediaRateLimitPolicy);
 
         app.MapGet("/api/party/{token}/items", async (
             string token,

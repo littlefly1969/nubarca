@@ -378,53 +378,65 @@ public sealed class PartyMediaReferenceTests : IDisposable
         Assert.Null(await GuestMediaUrlAsync(guest, party.Token, "menu"));
     }
 
-    // --- The invitation's hero ----------------------------------------------
+    // --- The invitation's cover ---------------------------------------------
 
     [Fact]
-    public async Task The_Invitations_Own_Photo_Outranks_The_Album_Cover()
+    public async Task The_Invitation_Slot_Photo_Stays_In_Its_Section_And_Never_Becomes_The_Cover()
     {
+        // The slot's photograph is part of what the invitation SAYS. The cover
+        // is a separate decision, and the album's chosen cover still leads when
+        // the host made no other.
         var party = await SeedPartyAsync();
         await SetCoverAsync(party.AlbumId, party.AlbumPhotoId);
         var portrait = await UploadPngAsync(party.Owner, "invito.png");
         (await WriteSlotAsync(party, "invitation", new { headline = "Vieni!" }, portrait))
             .EnsureSuccessStatusCode();
-
         var guest = Guest();
-        var cover = (await guest.GetFromJsonAsync<JsonElement>($"/api/party/{party.Token}"))
-            .GetProperty("coverUrl").GetString();
 
-        Assert.StartsWith($"/api/party/{party.Token}/content/invitation/media", cover);
-        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(cover)).StatusCode);
-        // A photograph that is in no album became the hero without being filed.
-        Assert.False(await InAnyAlbumAsync(portrait));
+        Assert.Equal(
+            $"/api/party/{party.Token}/media/{party.AlbumPhotoId}/preview",
+            (await CoverAsync(guest, party.Token)).GetString());
+        var slotPhoto = await GuestMediaUrlAsync(guest, party.Token, "invitation");
+        Assert.StartsWith($"/api/party/{party.Token}/content/invitation/media", slotPhoto);
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(slotPhoto!)).StatusCode);
     }
 
     [Fact]
-    public async Task Without_Its_Own_Photo_The_Invitation_Falls_Back_To_The_Chosen_Cover_Then_To_None()
+    public async Task The_Invitation_Cover_Is_The_Chosen_Photo_Then_The_Album_Cover_Then_None()
     {
         var party = await SeedPartyAsync();
-        (await WriteSlotAsync(party, "invitation", new { headline = "Vieni!" }, null))
-            .EnsureSuccessStatusCode();
         var guest = Guest();
 
         // Neither: the page draws its composition.
         Assert.Equal(JsonValueKind.Null, (await CoverAsync(guest, party.Token)).ValueKind);
 
-        // The chosen cover, exactly as before this slice.
+        // The album's chosen cover.
         await SetCoverAsync(party.AlbumId, party.AlbumPhotoId);
         Assert.Equal(
             $"/api/party/{party.Token}/media/{party.AlbumPhotoId}/preview",
             (await CoverAsync(guest, party.Token)).GetString());
 
-        // An invitation photo that stops qualifying hands the hero back to it.
+        // The host's invitation cover outranks it: a photograph in no album, on
+        // its own relation-scoped address, and filed nowhere by being chosen.
         var portrait = await UploadPngAsync(party.Owner, "invito.png");
-        (await WriteSlotAsync(party, "invitation", new { headline = "Vieni!" }, portrait, version: 1))
-            .EnsureSuccessStatusCode();
-        Assert.Contains("/content/invitation/media", (await CoverAsync(guest, party.Token)).GetString());
+        var version = (await party.Owner.GetFromJsonAsync<JsonElement>($"/api/parties/{party.PartyId}"))
+            .GetProperty("version").GetInt32();
+        (await party.Owner.PutAsJsonAsync($"/api/parties/{party.PartyId}/covers", new
+        {
+            invitationCoverFileItemId = portrait, liveCoverFileItemId = (Guid?)null, version,
+        })).EnsureSuccessStatusCode();
+        var cover = (await CoverAsync(guest, party.Token)).GetString()!;
+        Assert.StartsWith($"/api/party/{party.Token}/cover/invitation/media", cover);
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(cover)).StatusCode);
+        Assert.False(await InAnyAlbumAsync(portrait));
+
+        // A cover that stops qualifying hands the page back to the album's, and
+        // its address stops answering.
         await TrashAsync(party.Owner, portrait);
         Assert.Equal(
             $"/api/party/{party.Token}/media/{party.AlbumPhotoId}/preview",
             (await CoverAsync(guest, party.Token)).GetString());
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync(cover)).StatusCode);
     }
 
     // --- Lifecycle ----------------------------------------------------------

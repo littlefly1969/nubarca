@@ -208,6 +208,9 @@ public static class AuditActions
     public const string PartyDuplicate = "party.duplicate";
     public const string PartyUpdate = "party.update";
     public const string PartyMediaSourceSet = "party.media_source.set";
+    // Which photographs open the invitation and the party. The ids are the
+    // owner's own files; the line records that a choice was made, not what.
+    public const string PartyCoversSet = "party.covers.set";
 
     // The party's rows are gone after this; this line is the only remaining
     // record that the evening existed.

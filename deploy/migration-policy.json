@@ -116,6 +116,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one NULLABLE character varying(16) column (TextAlign) to party_guest_contents with no default, and one check constraint restricting it to 'left' or 'center'. The generated SQL is exactly two ALTER TABLE ... ADD statements: no existing row is rewritten, nothing is backfilled, and no other column, constraint or index changes. Every existing row reads NULL, which the application defines as 'the surface's own default' — left in a section, centred in the thank-you — i.e. exactly how each row rendered before the column existed, so the upgrade changes no guest surface. NULL passes a CHECK by definition. The previous application never reads or writes the column and its inserts omit it, so it keeps writing NULL; rolling back to it therefore leaves only values the new schema accepts, and a host's explicit choice is merely ignored (rendered with the default) rather than causing a failed request or a rejected write."
+    },
+    "20260914123145_AddPartyCovers": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds two NULLABLE uuid columns (InvitationCoverFileItemId, LiveCoverFileItemId) to parties with no default, one plain index on each, and one foreign key from each to file_items with ON DELETE SET NULL. No existing row is rewritten and nothing is backfilled: every existing party reads NULL for both, which the application defines as 'no cover chosen' — the invitation falls back to the album's chosen cover and the party to the album's cover, i.e. the album-derived covers these pages already used. The previous application never reads or writes either column and its inserts omit them, so it keeps writing NULL; the foreign keys constrain only values the new application writes, and SET NULL on a permanent file delete is simply a reference that no longer exists. Rolling back to the previous application therefore leaves only values the new schema accepts: a cover a host chose is ignored (and the old invitation rendering returns), never a failed request or a rejected write."
     }
   }
 }

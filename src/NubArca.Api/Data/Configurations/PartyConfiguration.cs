@@ -43,6 +43,22 @@ public class PartyConfiguration : IEntityTypeConfiguration<Domain.Party>
             .WithMany()
             .HasForeignKey(p => p.OwnerUserId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // The two covers are REFERENCES to ordinary files, held to account the
+        // way a slot photograph is: a permanent delete nulls them, and the page
+        // falls back to the next cover in line rather than to a broken frame.
+        builder.HasOne<FileItem>()
+            .WithMany()
+            .HasForeignKey(p => p.InvitationCoverFileItemId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(p => p.InvitationCoverFileItemId)
+            .HasDatabaseName("ix_parties_invitation_cover_file");
+        builder.HasOne<FileItem>()
+            .WithMany()
+            .HasForeignKey(p => p.LiveCoverFileItemId)
+            .OnDelete(DeleteBehavior.SetNull);
+        builder.HasIndex(p => p.LiveCoverFileItemId)
+            .HasDatabaseName("ix_parties_live_cover_file");
     }
 }
 
