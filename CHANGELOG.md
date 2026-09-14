@@ -6,6 +6,26 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### A copied party works at once, and you choose how its words sit
+
+- **A duplicated party is ready to share straight away.** Its new guest link
+  used to answer "album not found" until the copy was published — which looked
+  like a link into the party you had just copied, especially right after
+  deleting it. The copy is now published with its own new link and QR, exactly
+  like a party you switch on yourself; nobody has that link until you share it.
+- **Info saves with just a title or just a text.** It used to need both, and
+  said only that it could not save. The fields that really are required — the
+  venue's name and address, the dress code's title — are now marked with \*,
+  and a refused save tells you to fill them in.
+- **Every block of text can be left-aligned or centred.** Each part of the
+  invitation — invitation, location, dress code, menu, info, thank-you — has an
+  "Allineamento del testo" choice. Until you pick one, everything looks exactly
+  as it did.
+- **The invitation opens on its photo the way the party does.** The
+  invitation's photo (or the album cover) now fills the top of the page and
+  fades into it, with "Sei invitato", the party's name and its date on the
+  picture — and your invitation text right below.
+
 ### A picture can be the page, not just on it
 
 - **Every part of the invitation can now choose how its photo is shown.** Keep
