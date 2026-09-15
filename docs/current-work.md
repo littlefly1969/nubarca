@@ -1668,6 +1668,34 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and the public print sequence restart at zero; paper spent at another party is
   not this party's history.
 
+- **The guest list is a private Before domain, and its link is not the party's.**
+  `PartyInvitationGroup` / `PartyGuest` / `PartyRsvp` / `PartyRsvpQuestion` /
+  `PartyRsvpAnswer` / `PartyInvitationDelivery` are the host's private facts, and a
+  group's personal token (`HMAC(Party:TokenSecret, CapabilityId ‖
+  "invitation-rsvp")`, stored only as its SHA-256) opens THAT group's invitation and
+  reply and nothing live: no upload, game, print, greeting or face search. It is
+  resolved under `/api/party-invitations/{token}` and drawn at
+  `/party/invite/{token}`, never under `/api/party/{token}`. Five things are easy
+  to undo by accident. **`PartyParticipant` stays the anonymous runtime browser
+  identity, and nothing binds the two** — opening or answering an invitation
+  mints no participant and sets no cookie, and nothing infers a binding from an
+  email, a name or a device. **Every write to a group spends its version first**,
+  through one conditional `UPDATE … WHERE Version = @quoted` issued inside the
+  transaction — guest replies, owner edits, rotation and removal alike — so a
+  stale writer writes nothing rather than half a family. **A send is idempotent
+  through its ledger row**: `(group, ClientRequestId)` is unique, the row is
+  committed `pending` before SMTP, a replay returns the row and never calls SMTP,
+  and an attempt that died after SMTP stays `pending` ("esito non confermato")
+  until the host presses resend, which is a new click. **The first send from a
+  Draft publishes through `PartyLifecycle`** quoting the party version the page
+  read, and a failed email leaves the party published. **A changed recipient
+  address rotates the link**, and only deliveries that carried the CURRENT
+  generation count as "sent" — which is also what gates reminders. Replies are
+  writable only while `published`; "required" means required of a group that is
+  coming; duplicate copies active question definitions and nothing of the list;
+  `PartyStateEraser` erases all six tables explicitly. See
+  [party-rsvp.md](party-rsvp.md).
+
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
 Known, scoped, deliberately NOT fixed by the portrait/rotation slice.

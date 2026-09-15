@@ -243,6 +243,34 @@ public sealed class PartyDuplicator : IPartyDuplicator
                 });
             }
 
+            // The questions the host ASKS — active ones only, with new ids and no
+            // answers. They are a decision about the invitation, like its slots.
+            // The guest list itself is what an evening produced and none of it
+            // travels: no group, no name, address or phone, no +1, no RSVP, no
+            // dietary note, no answer, no personal link and no email. Last
+            // year's guests were not invited to this party.
+            var questions = await _db.PartyRsvpQuestions.AsNoTracking()
+                .Where(q => q.PartyId == partyId && q.IsActive)
+                .OrderBy(q => q.SortOrder).ThenBy(q => q.CreatedAt)
+                .ToListAsync(cancellationToken);
+            foreach (var question in questions)
+            {
+                _db.PartyRsvpQuestions.Add(new PartyRsvpQuestion
+                {
+                    Id = Guid.NewGuid(),
+                    PartyId = party.Id,
+                    Prompt = question.Prompt,
+                    Kind = question.Kind,
+                    Required = question.Required,
+                    OptionsJson = question.OptionsJson,
+                    IsActive = true,
+                    SortOrder = question.SortOrder,
+                    Version = 1,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                });
+            }
+
             // THE CAPABILITY, and every setting that lives on it: slideshow
             // timings, per-guest quotas, both approval modes, the game switches
             // and the pre-game preference budget. New id, therefore new tokens —
