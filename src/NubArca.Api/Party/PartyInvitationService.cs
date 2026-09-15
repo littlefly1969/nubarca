@@ -174,6 +174,11 @@ public sealed class PartyInvitationService : IPartyInvitationService
         var removed = named.Keys.Where(id => !kept.Contains(id)).ToList();
         if (removed.Count > 0)
         {
+            // A person taken off the list takes their arrival with them: it was
+            // a fact about that guest, and it names them by key.
+            await _db.PartyGuestAttendances
+                .Where(a => removed.Contains(a.PartyGuestId))
+                .ExecuteDeleteAsync(cancellationToken);
             await _db.PartyRsvps.Where(r => removed.Contains(r.PartyGuestId)).ExecuteDeleteAsync(cancellationToken);
             await _db.PartyGuests.Where(g => removed.Contains(g.Id)).ExecuteDeleteAsync(cancellationToken);
         }

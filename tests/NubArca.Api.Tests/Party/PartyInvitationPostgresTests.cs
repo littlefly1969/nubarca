@@ -107,7 +107,11 @@ public sealed class PartyInvitationPostgresTests : IAsyncLifetime
 
     private static PartyRsvpService Rsvp(AppDbContext db) =>
         new(db, TimeProvider.System, new FixedPartyCapabilityPolicy(),
-            new PartyGuestContentService(db, TimeProvider.System), new PartyMediaService(db));
+            new PartyGuestContentService(db, TimeProvider.System), new PartyMediaService(db),
+            new PartyLinkService(
+                db, TimeProvider.System,
+                new PartyService(db, TimeProvider.System, new PartyStateEraser(db), null!),
+                new FixedPartyCapabilityPolicy(), new ConfigurationBuilder().Build()));
 
     private PartyInvitationService Invitations(AppDbContext db) =>
         new(db, TimeProvider.System, _tokens, _email, Mail());

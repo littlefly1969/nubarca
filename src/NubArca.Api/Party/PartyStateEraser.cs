@@ -176,6 +176,14 @@ public sealed class PartyStateEraser : IPartyStateEraser
             .Where(q => q.PartyId == partyId)
             .ExecuteDeleteAsync(cancellationToken);
 
+        // ATTENDANCE. A guest's arrival went with the guest list above; the
+        // people recorded who were not on it hold a restricting key to the
+        // party itself, so they go before the root. Neither was ever tied to a
+        // participant, so the participants' own erasure above owes them nothing.
+        await _db.PartyAttendanceGuests
+            .Where(g => g.PartyId == partyId)
+            .ExecuteDeleteAsync(cancellationToken);
+
         // What the party told its guests, and where it drew its media from.
         await _db.PartyGuestContents
             .Where(c => c.PartyId == partyId)
@@ -193,10 +201,11 @@ public sealed class PartyStateEraser : IPartyStateEraser
 
     /// <summary>
     /// Everything a set of invitation groups owns, in foreign-key order: the
-    /// delivery ledger, the group's answers, each person's RSVP, the people, and
-    /// the groups themselves — which takes each group's personal link with it,
-    /// since the hash lives on the row. Used by the party's erasure above and by
-    /// removing a single group, so what a group owns is stated once, here.
+    /// delivery ledger, the group's answers, each person's arrival and RSVP, the
+    /// people, and the groups themselves — which takes each group's personal
+    /// link with it, since the hash lives on the row. Used by the party's
+    /// erasure above and by removing a single group, so what a group owns is
+    /// stated once, here.
     /// </summary>
     internal static async Task EraseInvitationGroupsAsync(
         AppDbContext db, IQueryable<PartyInvitationGroup> groups, CancellationToken cancellationToken)
@@ -211,6 +220,10 @@ public sealed class PartyStateEraser : IPartyStateEraser
             .ExecuteDeleteAsync(cancellationToken);
         await db.PartyRsvpAnswers
             .Where(a => groupIds.Contains(a.PartyInvitationGroupId))
+            .ExecuteDeleteAsync(cancellationToken);
+        // Each person's ARRIVAL names the person, so it goes before them.
+        await db.PartyGuestAttendances
+            .Where(a => guestIds.Contains(a.PartyGuestId))
             .ExecuteDeleteAsync(cancellationToken);
         await db.PartyRsvps
             .Where(r => guestIds.Contains(r.PartyGuestId))

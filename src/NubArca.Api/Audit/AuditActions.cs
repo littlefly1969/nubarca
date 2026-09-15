@@ -231,6 +231,15 @@ public static class AuditActions
     public const string PartyRsvpQuestionCreate = "party.rsvp_question.create";
     public const string PartyRsvpQuestionUpdate = "party.rsvp_question.update";
 
+    // Attendance. Every line names the party and a guest or a recorded person
+    // by id — never a name. Only a request that changed something is recorded:
+    // a repeated check-in or a replayed add is not an event.
+    public const string PartyAttendanceCheckIn = "party.attendance.check_in";
+    public const string PartyAttendanceUndo = "party.attendance.undo";
+    public const string PartyAttendanceOtherCreate = "party.attendance.other_create";
+    public const string PartyAttendanceOtherUpdate = "party.attendance.other_update";
+    public const string PartyAttendanceOtherDelete = "party.attendance.other_delete";
+
     // Public read-only party album links. Enable/revoke are owner actions;
     // public_view is logged on an anonymous album open (no token/hash recorded).
     public const string PartyEnable = "party.enable";

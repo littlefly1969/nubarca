@@ -33,19 +33,22 @@ public sealed class PartyRsvpService : IPartyRsvpService
     private readonly IPartyCapabilityPolicy _capabilities;
     private readonly IPartyGuestContentService _content;
     private readonly IPartyMediaService _media;
+    private readonly IPartyLinkService _links;
 
     public PartyRsvpService(
         AppDbContext db,
         TimeProvider clock,
         IPartyCapabilityPolicy capabilities,
         IPartyGuestContentService content,
-        IPartyMediaService media)
+        IPartyMediaService media,
+        IPartyLinkService links)
     {
         _db = db;
         _clock = clock;
         _capabilities = capabilities;
         _content = content;
         _media = media;
+        _links = links;
     }
 
     public static string ContentMediaUrl(string encodedToken, string kind, int version) =>
@@ -138,8 +141,40 @@ public sealed class PartyRsvpService : IPartyRsvpService
                 party.EventStartsAt,
                 PartyGuestPhases.Wire(access.Experience.Phase),
                 coverUrl,
-                content),
+                content,
+                await PublicPartyUrlAsync(access, cancellationToken)),
             await InvitationAsync(access, cancellationToken));
+    }
+
+    /// <summary>
+    /// "Entra nel Party": the party's own public address, while the party is
+    /// live and only if that address really opens it now — judged by the ONE
+    /// resolver the QR itself goes through, so a revoked, expired or disabled
+    /// link, a host who may no longer run parties, or a party with no QR at all
+    /// is simply no button. It hands over nothing the room's QR does not: the
+    /// same capability, the same quotas, and a participant minted the way any
+    /// browser's is. Nothing here binds this group to whoever follows it.
+    /// </summary>
+    private async Task<string?> PublicPartyUrlAsync(
+        PartyInvitationAccess access, CancellationToken cancellationToken)
+    {
+        if (!access.CanCheckIn)
+        {
+            return null;
+        }
+        var linkId = await _db.PartyAlbumLinks.AsNoTracking()
+            .Where(l => l.PartyId == access.PartyId && l.Enabled && l.RevokedAt == null)
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l => (Guid?)l.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (linkId is not Guid id)
+        {
+            return null;
+        }
+        var publicToken = _links.DeriveViewToken(id);
+        return await _links.ResolvePublicAsync(publicToken, cancellationToken) is null
+            ? null
+            : $"/party/{publicToken}";
     }
 
     public async Task<(string Which, Guid FileId, Guid? AlbumId)?> CoverAsync(
@@ -195,18 +230,24 @@ public sealed class PartyRsvpService : IPartyRsvpService
             .Select(g => new { g.Label, g.Version, g.MaxAdditionalGuests })
             .FirstAsync(cancellationToken);
 
+        // Each person's own arrival rides along — and only THIS group's people
+        // are in the query, so no other group's arrival can reach this link.
         var guests = await (
             from guest in _db.PartyGuests.AsNoTracking()
             where guest.PartyInvitationGroupId == access.GroupId
             join r in _db.PartyRsvps.AsNoTracking() on guest.Id equals r.PartyGuestId into rsvps
             from r in rsvps.DefaultIfEmpty()
+            join a in _db.PartyGuestAttendances.AsNoTracking() on guest.Id equals a.PartyGuestId into arrivals
+            from a in arrivals.DefaultIfEmpty()
             orderby guest.IsAdditionalGuest, guest.SortOrder, guest.CreatedAt
             select new PartyInvitationGuestDto(
                 guest.Id,
                 guest.Name,
                 guest.IsAdditionalGuest,
                 r == null ? PartyRsvpStatuses.Pending : r.Status,
-                r == null ? null : r.DietaryNotes)).ToListAsync(cancellationToken);
+                r == null ? null : r.DietaryNotes,
+                a == null ? null : a.CheckedInAt,
+                a == null ? null : a.Source)).ToListAsync(cancellationToken);
 
         // ACTIVE questions only. An answer to a question the host has since
         // retired stays in the host's history and is not the guest's form.
@@ -233,7 +274,8 @@ public sealed class PartyRsvpService : IPartyRsvpService
                 PartyRsvpQuestionRules.ParseOptions(q.OptionsJson),
                 answers.TryGetValue(q.Id, out var json)
                     ? JsonDocument.Parse(json).RootElement.Clone()
-                    : null)).ToList());
+                    : null)).ToList(),
+            access.CanCheckIn);
     }
 
     public async Task<PartyRsvpResult> SubmitAsync(
@@ -329,6 +371,11 @@ public sealed class PartyRsvpService : IPartyRsvpService
             .ToList();
         if (droppedExtras.Count > 0)
         {
+            // Replies close before arrivals open, so a dropped +1 has none; the
+            // statement keeps the restricting key from deciding that for us.
+            await _db.PartyGuestAttendances
+                .Where(a => droppedExtras.Contains(a.PartyGuestId))
+                .ExecuteDeleteAsync(cancellationToken);
             await _db.PartyRsvps.Where(r => droppedExtras.Contains(r.PartyGuestId)).ExecuteDeleteAsync(cancellationToken);
             await _db.PartyGuests.Where(g => droppedExtras.Contains(g.Id)).ExecuteDeleteAsync(cancellationToken);
         }
