@@ -6,6 +6,40 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Guest list, personal invitations and RSVP
+
+- **An "Invitati" tab in every party.** Between "Prima" and "Live", the host
+  keeps the guest list: a person, a couple or a family per invitation, each with
+  the address the invitation goes to, an optional phone number for the host's own
+  records, and how many companions (+1) they may bring. At the top: Invitati,
+  Risposte mancanti, Confermati and Persone attese. The list can be searched by
+  name, email or phone.
+- **A personal invitation by email.** "Invia invito" sends the group its own
+  link, from the installation's usual mail server. It opens the party's own
+  invitation — cover, date, "Dove", "Dress code", "Menù" — with the group's reply
+  in it. No NubArca account is needed. The first invitation sent publishes the
+  party; sending never starts it.
+- **Replies person by person.** Each person answers "Ci sarò" or "Non ci sarò",
+  with allergies or dietary notes; a family may answer in parts and change its
+  mind until the party starts. The group adds its companions by name, within the
+  host's limit. The host may ask up to 20 questions — short text, single choice,
+  or yes/no — and a required one is required only of those coming. A question
+  that has been answered can be deactivated but not reworded.
+- **Resend and reminders.** "Invia di nuovo" resends the same link; "Invia
+  promemoria" appears only for a group that received its invitation and still has
+  somebody who has not replied. A double click never sends two emails, a failed
+  delivery says so and changes no reply, and an attempt whose outcome was never
+  confirmed is shown as exactly that.
+- **The link is personal, and stays so.** It opens that group's invitation and
+  nothing else: no uploads, no game, no printing, no greetings, and nobody
+  else's names. Changing the address, or "Genera un nuovo link", makes the old
+  link stop working at once. Once the party is on, the invitation shows the reply
+  and takes no new one.
+- **The party's QR is unchanged.** Guests who scan it at the party are the same
+  anonymous browsers as before; answering an invitation does not sign anybody in
+  or link the two. Duplicating a party copies its questions and none of its
+  guests; deleting a party deletes its guest list.
+
 ### A party's link shows its own card; clearer section titles; words on a photo
 
 - **Sharing a party's link shows the party.** In WhatsApp, Telegram and other
