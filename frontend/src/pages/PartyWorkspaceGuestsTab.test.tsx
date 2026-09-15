@@ -52,13 +52,18 @@ it('offers the guest list as a tab between Before and Live, and opens it', async
   expect(tabs.map((tab) => tab.id)).toEqual([
     'party-tab-overview', 'party-tab-before', 'party-tab-guests', 'party-tab-live', 'party-tab-after', 'party-tab-photos',
   ]);
-  expect(screen.getByTestId('party-tab-guests')).toHaveTextContent('Invitati');
+  // "Ospiti", not "Invitati": a party may be open and invite nobody at all.
+  expect(screen.getByTestId('party-tab-guests')).toHaveTextContent('Ospiti');
   // Nothing is asked of the guest list until the host opens it.
   expect(mock.calls.some((c) => c.url.endsWith('/guest-list'))).toBe(false);
 
   await userEvent.click(screen.getByTestId('party-tab-guests'));
 
-  expect(await screen.findByTestId('party-guests-metrics')).toBeInTheDocument();
+  // With no invitation this is an OPEN party, and the tab says so rather than
+  // asking for a guest list it does not need — which stays on offer, folded.
+  expect(await screen.findByTestId('party-guests-open')).toBeInTheDocument();
   expect(screen.getByTestId('party-tab-guests')).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByTestId('party-guests-metrics')).not.toBeInTheDocument();
+  expect(screen.getByTestId('party-guests-manage')).toHaveTextContent('Lista invitati (facoltativa)');
   expect(screen.getByTestId('party-guests-empty')).toBeInTheDocument();
 });

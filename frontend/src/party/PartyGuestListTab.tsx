@@ -20,6 +20,7 @@ import {
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { newClientRequestId } from './clientRequestId';
+import { PartyAttendanceCard } from './PartyAttendanceCard';
 import { PartyRsvpQuestionsCard } from './PartyRsvpQuestionsCard';
 import './PartyGuestList.css';
 
@@ -132,8 +133,22 @@ export function PartyGuestListTab({
   const summary = list.summary;
   const questionPrompt = (id: string) => list.questions.find((q) => q.id === id);
 
-  return (
-    <div className="party-overview" data-testid="party-guests">
+  // NO PARTY "TYPE". A party with no invitation is an open party — the QR
+  // admits anybody — and the guest list is an optional tool it may pick up;
+  // a party with a list becomes a mixed one the moment somebody not on it is
+  // recorded at the door. Which of these a party is follows from the rows.
+  const openParty = list.groups.length === 0;
+  const attendanceOpen = party.status === 'live' || party.status === 'ended';
+  // While the party is on (and after), arriving is what the tab is for, and the
+  // invitation machinery folds away beneath it; an open party keeps its
+  // optional guest list folded in every phase.
+  const folded = openParty || attendanceOpen;
+  // The arrivals are re-read whenever the list they are drawn from changes.
+  const refreshKey = list.groups.map((g) => `${g.id}:${g.version}`).join(',');
+
+  const management = (
+    <>
+      {!openParty && (
       <section className="party-card" aria-labelledby="party-guests-heading">
         <h3 id="party-guests-heading">{t('party.guests.heading')}</h3>
         <dl className="party-guests-metrics" data-testid="party-guests-metrics">
@@ -159,6 +174,10 @@ export function PartyGuestListTab({
           <p className="muted">{t('party.guests.publishNote')}</p>
         )}
       </section>
+      )}
+      {openParty && !list.mailAvailable && (
+        <p className="muted" role="note" data-testid="party-guests-mail-unavailable">{t('party.guests.mailUnavailable')}</p>
+      )}
 
       <section className="party-card">
         <div className="party-guests-toolbar">
@@ -347,6 +366,26 @@ export function PartyGuestListTab({
         onChanged={setList}
         onRefused={(err, fallback) => refused(err, fallback)}
       />
+    </>
+  );
+
+  return (
+    <div className="party-overview" data-testid="party-guests">
+      {attendanceOpen && <PartyAttendanceCard partyId={party.id} refreshKey={refreshKey} />}
+      {!attendanceOpen && openParty && (
+        <section className="party-card" data-testid="party-guests-open" aria-labelledby="party-guests-open-heading">
+          <h3 id="party-guests-open-heading">{t('party.guests.open.heading')}</h3>
+          <p>{t('party.guests.open.body')}</p>
+          <p className="muted">{t('party.guests.open.attendanceLater')}</p>
+        </section>
+      )}
+      {folded ? (
+        <details className="party-advanced party-guests-manage" data-testid="party-guests-manage">
+          <summary>{openParty ? t('party.guests.optional.summary') : t('party.guests.manage.summary')}</summary>
+          {openParty && <p className="muted">{t('party.guests.optional.help')}</p>}
+          {management}
+        </details>
+      ) : management}
     </div>
   );
 }
