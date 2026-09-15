@@ -6,6 +6,44 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Who arrived: attendance for open and invited parties
+
+- **"Ospiti", not "Invitati".** The tab is now called "Ospiti", because a party
+  can be open and invite nobody. It holds the guest list and replies when there
+  are any, and — once the party is on — who has arrived. There is no party type
+  to choose: a party with no invitation is an open party, one with a guest list
+  is an invited party, and recording somebody who was not on the list simply
+  makes it a mixed one.
+- **An open party works exactly as before.** Its QR, page, photos, game,
+  printing and television need no guest list at all. Before it starts, the tab
+  says the party is open to anyone with the QR, and offers the guest list as an
+  option rather than asking for one. While it is on, the host can record people
+  by hand under "Presenze registrate" — and the page says plainly that this is
+  who was recorded, not a count of everyone there.
+- **At an invited party: Attesi, Arrivati, Mancano, Altri arrivi.** Each person
+  shows what they answered and whether they arrived — "Aveva declinato · Arrivo
+  alle 20:14" is a perfectly good row. One search covers names, invitation names
+  and other arrivals, with the filters Tutti, Da arrivare, Arrivati and Inattesi.
+  A +1 is checked in on their own. "Aggiungi persona" records somebody who was
+  not on the list; a double tap still records them once.
+- **"Sono qui" on the personal invitation.** While the party is on, each group
+  can mark its own people as arrived from its invitation link, and take back its
+  own mark. It sees only its own people; an arrival recorded at the door is left
+  to the host. The host's "Segna l'arrivo" and "Annulla check-in" remain for
+  everybody else, and after the party the host can still correct the list.
+- **"Entra nel Party".** From the invitation, a live party's own page is one tap
+  away — the same page, powers and limits as scanning the QR in the room. It
+  appears only when that page is actually open.
+- **Arriving is its own fact.** It never changes anybody's reply, scanning the
+  QR never counts as arriving, and arriving does not tie a name to a phone.
+  Arrivals appear on no public page, television, game, print, preview or other
+  guest's invitation. Duplicating a party copies none of them; deleting a party
+  deletes them.
+- **For operators.** This release's database migration also needs the manual
+  review path rather than the guided update: after it, rolling back to the
+  previous server version is not guaranteed to be able to delete parties or
+  guests.
+
 ### Guest list, personal invitations and RSVP
 
 - **An "Invitati" tab in every party.** Between "Prima" and "Live", the host

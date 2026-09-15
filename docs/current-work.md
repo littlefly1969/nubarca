@@ -1668,6 +1668,27 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   and the public print sequence restart at zero; paper spent at another party is
   not this party's history.
 
+- **An arrival is its own fact, and the guest list is optional.** Attendance
+  (`PartyGuestAttendance` for a person on the list, `PartyAttendanceGuest` for
+  anybody else) is separate from what a person declared (`PartyRsvp`) and from the
+  anonymous browser (`PartyParticipant`): `PartyGuest ≠ PartyAttendanceGuest ≠
+  PartyParticipant`. There is no party type — a party with no invitation group is
+  an open party and no Party feature requires a group, a guest or an RSVP. Four
+  things are easy to undo by accident. **An arrival never writes an RSVP** —
+  `declined + arrived` is valid and stays declined. **The public QR never records
+  an arrival, and nothing binds a guest to a participant**: "Entra nel Party" on a
+  live invitation is navigation to the party's own public page (only when
+  `ResolvePublicAsync` would open it), never an identity carried across. **One
+  row per guest, two sources**: the host's check-in and the group's own "Sono qui"
+  (invitation token, own group only, Live only) write the same row; the first to
+  succeed fixes `CheckedInAt` and `Source` (`owner`/`invitation`, a closed check
+  constraint), and a group may take back only its own mark. **Host writes are open
+  in Live and Ended only** (`409 attendance_not_open` before); an other arrival is
+  idempotent by `(PartyId, ClientRequestId)` and renamed by `Version`. Its
+  migration is NOT automated and NOT previous-application compatible, for the same
+  restricting-key reason as the guest list's. See
+  [party-attendance.md](party-attendance.md).
+
 - **The guest list is a private Before domain, and its link is not the party's.**
   `PartyInvitationGroup` / `PartyGuest` / `PartyRsvp` / `PartyRsvpQuestion` /
   `PartyRsvpAnswer` / `PartyInvitationDelivery` are the host's private facts, and a

@@ -26,6 +26,18 @@ rules that are easy to break by accident.
   who answered "Mario, attending" and the phone that scans the room's QR are two
   separate facts. `PartyGuest.Id` is stable, so a future, proof-based binding can
   be added when a feature needs one; there is deliberately no unused column for it.
+- **Who actually arrived is a fourth fact**, described in
+  [party-attendance.md](party-attendance.md): `PartyGuestAttendance` for a person on
+  the list, `PartyAttendanceGuest` for anybody else. An arrival never changes an
+  RSVP, and the QR never records one:
+
+  ```text
+  PartyGuest ≠ PartyAttendanceGuest ≠ PartyParticipant
+  ```
+
+- **The guest list is optional.** A party with no invitation group is an open party
+  — its QR admits anybody — and no Party feature requires a group, a guest or an
+  RSVP. There is no party type: open, invited and mixed follow from the rows.
 
 ## The schema
 
@@ -111,7 +123,14 @@ memories. It is the same 404 as an unknown token; there is no "expired" answer.
 **The RSVP token grants no live powers.** It opens the party's public face — title,
 date, cover, the guest-content slots of the current phase — and that group's own
 people, answers and questions. Upload, greetings, the game, printing and face
-search do not accept it and are not drawn for it. The cover is the party's own
+search do not accept it and are not drawn for it. While the party is **live** it
+does two more things, both described in [party-attendance.md](party-attendance.md):
+"Sono qui" records the arrival of one of the group's own people (and takes back
+the group's own mark), and the view carries `party.partyUrl` — the party's own
+public page, only when that page would really open — for "Entra nel Party". That
+is navigation to the same capability the room's QR opens; the invitation token
+itself still reaches no live capability, and nothing binds the group to the
+participant its phone becomes there. The cover is the party's own
 cover choice (the same `PartyCoverPolicy` the QR's page uses), else the album's
 **chosen** cover only — this link was never a way into the album, so it never
 falls back to whichever photograph sorts first. Slot photographs and covers are
@@ -163,7 +182,10 @@ that party's, so a foreign object is the same 404 as a missing one.
 `PartyRsvpSummary`): *Invitati* = named guests; *Risposte mancanti* = named guests
 still pending; *Confermati* = every guest, named or +1, attending; *Assenti* =
 named guests who declined; *Persone attese* = Confermati. A group is unanswered
-when a named guest is pending. None of it is attendance; nobody checked in.
+when a named guest is pending. None of it is attendance: who actually arrived is
+a separate projection with its own counts (`PartyAttendanceSummaryDto`, see
+[party-attendance.md](party-attendance.md)), and an arrival never changes any of
+the numbers above.
 
 ### Questions
 
@@ -243,18 +265,23 @@ Personal invitation and RSVP JSON are `Cache-Control: no-store`.
   group, a name, an address, a phone, a +1, an RSVP, a note, an answer, a personal
   link or a delivery.
 - **Teardown explicitly erases the new rows** in foreign-key order —
-  deliveries, answers, RSVPs, guests, groups, then questions — through
+  deliveries, answers, arrivals, RSVPs, guests, groups, then questions — through
   `PartyStateEraser`, the single explicit list of what a party owns. Removing one
   group uses the same `EraseInvitationGroupsAsync`, and touches neither the party's
-  public capability nor any participant.
+  public capability nor any participant. A person's arrival goes with the person:
+  editing a named guest off a group, or a group's reply dropping a +1, deletes
+  their `PartyGuestAttendance` first. Duplicating copies no arrival.
 
 ## Deliberately absent
 
 No scheduled or automatic reminders, no SMS or WhatsApp provider, no campaign or
-newsletter system, no mail queue, no CSV import, no "maybe", no check-in, no
-seating, no generic form builder, no sub-events, no automatic guest ↔ participant
-binding, and no second invitation app: the personal invitation is the party's own
+newsletter system, no mail queue, no CSV import, no "maybe", no seating, no
+generic form builder, no sub-events, no automatic guest ↔ participant binding,
+and no second invitation app: the personal invitation is the party's own
 invitation surface (`PartyBeforeHome`) with the group's reply composed into it.
+Check-in now exists as its own domain — see
+[party-attendance.md](party-attendance.md) — and still binds no guest to a
+participant.
 
 ## Known limitation
 
