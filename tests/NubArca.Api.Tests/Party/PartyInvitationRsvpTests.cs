@@ -428,6 +428,71 @@ public sealed class PartyInvitationRsvpTests : IDisposable
     }
 
     [Fact]
+    public async Task Once_only_the_memories_remain_the_qr_opens_them_and_the_invitation_is_gone()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner, "Festa finita");
+        var (_, viewToken, _) = await OpenPublicQrAsync(owner, partyId);
+
+        // A photograph the invitation shows twice: as its cover, and in a section
+        // that stays on after the party.
+        var photo = await UploadPhotoAsync(owner);
+        var party = await GetPartyAsync(owner, partyId);
+        (await owner.PutAsJsonAsync($"/api/parties/{partyId}/covers", new
+        {
+            invitationCoverFileItemId = photo, liveCoverFileItemId = (Guid?)null,
+            version = party.GetProperty("version").GetInt32(),
+        })).EnsureSuccessStatusCode();
+        (await owner.PutAsJsonAsync($"/api/parties/{partyId}/guest-content/location", new
+        {
+            enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = true,
+            content = new { venueName = "Villa dei Fiori", address = "Via Roma 1, Milano" },
+            version = 0, mediaFileItemId = photo,
+        })).EnsureSuccessStatusCode();
+        var groupId = (await AddGroupAsync(owner, partyId, "Sara", "sara@example.com", 0, "Sara")).GetProperty("id").GetGuid();
+        var token = await InviteAsync(_factory, owner, partyId, groupId);
+        await AdvanceAsync(owner, partyId, "start-live");
+        await AdvanceAsync(owner, partyId, "end-live");
+
+        // Ended, with the guest experience still FULL: the invitation is read,
+        // read-only, and its photographs are served on its own token.
+        var guest = _factory.CreateClient();
+        var ended = await ViewAsync(guest, token);
+        Assert.Equal("after", ended.GetProperty("party").GetProperty("phase").GetString());
+        Assert.False(ended.GetProperty("invitation").GetProperty("canRespond").GetBoolean());
+        var coverUrl = ended.GetProperty("party").GetProperty("coverUrl").GetString()!;
+        var slotUrl = ended.GetProperty("party").GetProperty("content")[0].GetProperty("mediaUrl").GetString()!;
+        Assert.StartsWith($"/api/party-invitations/", coverUrl);
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(coverUrl)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await guest.GetAsync(slotUrl)).StatusCode);
+
+        // Guest access closes; the memories stay open.
+        party = await GetPartyAsync(owner, partyId);
+        (await owner.PatchAsJsonAsync($"/api/parties/{partyId}", new
+        {
+            title = "Festa finita",
+            guestAccessExpiresAt = DateTime.UtcNow.AddHours(-1),
+            libraryAccessExpiresAt = DateTime.UtcNow.AddDays(7),
+            version = party.GetProperty("version").GetInt32(),
+        })).EnsureSuccessStatusCode();
+
+        // The party's QR still opens the memories…
+        var qr = await guest.GetAsync($"/api/party/{viewToken}");
+        Assert.Equal(HttpStatusCode.OK, qr.StatusCode);
+        Assert.Equal("library-only",
+            (await qr.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("accessMode").GetString());
+
+        // …and the personal link opens nothing: not the group, not its reply,
+        // not a picture — the same answer an unknown token gets.
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync($"/api/party-invitations/{token}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await RsvpAsync(guest, token, Reply(ended, Statuses(("Sara", "declined"))))).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync(coverUrl)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await guest.GetAsync(slotUrl)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await guest.GetAsync($"/api/party-invitations/{token}/content/location/media")).StatusCode);
+    }
+
+    [Fact]
     public async Task A_retired_questions_answer_stays_the_hosts_and_leaves_the_guests_form()
     {
         var (_, owner) = await NewHostAsync(_factory);

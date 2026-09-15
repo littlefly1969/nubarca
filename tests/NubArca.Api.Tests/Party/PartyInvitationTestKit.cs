@@ -84,6 +84,16 @@ internal static class PartyInvitationTestKit
         return (albumId, viewToken, uploadToken);
     }
 
+    /// <summary>One of the owner's own photographs, in no album.</summary>
+    internal static async Task<Guid> UploadPhotoAsync(HttpClient owner, string name = "photo.png")
+    {
+        var part = new ByteArrayContent(NubArca.Api.Tests.Metadata.ImageFixtures.PlainPng());
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        var upload = await owner.PostAsync("/api/files", new MultipartFormDataContent { { part, "file", name } });
+        upload.EnsureSuccessStatusCode();
+        return (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    }
+
     internal static object GroupBody(
         string label, string email, int maxAdditionalGuests, IEnumerable<object> guests,
         int version = 0, string? phone = null) =>

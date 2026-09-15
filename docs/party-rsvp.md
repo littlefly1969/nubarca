@@ -51,14 +51,41 @@ token hash, "options exist exactly for a single choice", and "a completed delive
 has a completion time". A unique index on the token hash is the public lookup; a
 unique index on `(group, request id)` is the idempotency rule.
 
+The two columns that hold serialized JSON — `party_rsvp_questions.OptionsJson`
+and `party_rsvp_answers.ValueJson` — are `text`. The DOMAIN bounds what they
+hold (twenty options of 120 code points; a 500-code-point answer), and JSON
+escaping may spend twelve characters on one code point, so a column length would
+be a second, stricter rule that only the database enforces. Plain-text columns
+(`varchar(n)`) count characters, which in PostgreSQL are code points, and match
+their validators exactly.
+
+**The migration needs manual release review.** It is classified
+`automated: false`, `previousApplicationCompatible: false`: the schema is
+additive, but once the new application has written guest-list rows for a party,
+the previous backend's teardown (`PartyStateEraser`, also used when an album is
+deleted) does not know these tables, and their restricting foreign keys refuse
+its delete of that party. An image-only rollback is therefore not guaranteed
+safe, and the guided updater refuses the release by design; it takes the manual
+path in `deploy/FAST_DEPLOY.md` §4.3.
+
 ## The personal token
 
-- `raw = base64url(HMAC-SHA256(Party:TokenSecret, CapabilityId ‖ "invitation-rsvp"))`.
-  Keyed like the party's own tokens, bound to its purpose by the context string,
-  and derived from a random id that is never exposed. It is **not** the party's
-  public token and shares nothing with `PartyAlbumLink`.
+- `raw = base64url(HMAC-SHA256(secret, CapabilityId ‖ "invitation-rsvp"))`,
+  bound to its purpose by the context string and derived from a random id that
+  is never exposed. It is **not** the party's public token and shares nothing
+  with `PartyAlbumLink`.
 - **The raw token never persists and is never logged**, and neither is its hash
   or a URL containing it. The database stores `SHA-256(raw)` only.
+- **There is no known fallback key.** The database stores each group's
+  `CapabilityId`, so a key readable in the source would turn a database dump into
+  every group's working link. The key is `Party:InvitationTokenSecret`
+  (`Party__InvitationTokenSecret`), else a `Party:TokenSecret` the operator
+  explicitly configured — the purpose context keeps the two capabilities apart
+  under one key — else the API and worker **refuse to start**. The party links'
+  own historical fallback (`PartyLinkService.DefaultSecret`) is untouched and is
+  never used for an invitation. An installation that never set
+  `Party__TokenSecret` can set only `Party__InvitationTokenSecret`, leaving every
+  existing party QR exactly as it was.
 - **Rotation** replaces the capability id and hash; every link sent before stops
   resolving at once. The owner can rotate explicitly, and **changing the recipient
   email rotates automatically** (case-insensitive: the case of an address is not a
@@ -74,6 +101,13 @@ judged by the same `PartyGuestExperience` the QR uses (a Draft is nothing), and 
 host's `party.access` by the same `IPartyCapabilityPolicy`. Unknown, rotated,
 removed, Draft, closed and permission-revoked all collapse to one generic 404.
 
+**The invitation lives only while the guest experience is `Full`.** Once guest
+access has closed and only the memories remain (`PartyGuestAccessMode.LibraryOnly`),
+the party's QR still opens the album — and the personal link opens nothing: not
+the group, not its reply, not a cover or a section photograph. An RSVP link is
+not a way into the library, and a group's names, notes and answers are not
+memories. It is the same 404 as an unknown token; there is no "expired" answer.
+
 **The RSVP token grants no live powers.** It opens the party's public face — title,
 date, cover, the guest-content slots of the current phase — and that group's own
 people, answers and questions. Upload, greetings, the game, printing and face
@@ -88,7 +122,8 @@ ordinary state: the invitation works from its metadata and its slots.
 ## Replying
 
 - **Writable only while the party is `published`.** Live and Ended still show the
-  invitation and the group's answers, read-only (`409 rsvp_closed` on a write).
+  invitation and the group's answers, read-only (`409 rsvp_closed` on a write),
+  for as long as guest access is still full.
 - **The whole form, every time.** The server validates the entire graph before
   writing any of it: every named guest exactly once, known statuses, never back to
   `pending` once answered, +1s within the allowance and named, answers only to

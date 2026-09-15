@@ -1675,8 +1675,16 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   "invitation-rsvp")`, stored only as its SHA-256) opens THAT group's invitation and
   reply and nothing live: no upload, game, print, greeting or face search. It is
   resolved under `/api/party-invitations/{token}` and drawn at
-  `/party/invite/{token}`, never under `/api/party/{token}`. Five things are easy
-  to undo by accident. **`PartyParticipant` stays the anonymous runtime browser
+  `/party/invite/{token}`, never under `/api/party/{token}`, and only while the
+  guest experience is FULL — once only the memories remain, the QR opens them and
+  the personal link is the same 404 as an unknown one. **Its key has no
+  built-in fallback**: `Party:InvitationTokenSecret`, else an explicitly
+  configured `Party:TokenSecret`, else the API and worker refuse to start, since
+  a key public in the source plus the stored capability ids would make a
+  database dump into every group's link. Its migration is classified NOT
+  automated and NOT previous-application compatible: the old teardown does not
+  know the new restricting child tables. Five things are easy to undo by
+  accident. **`PartyParticipant` stays the anonymous runtime browser
   identity, and nothing binds the two** — opening or answering an invitation
   mints no participant and sets no cookie, and nothing infers a binding from an
   email, a name or a device. **Every write to a group spends its version first**,

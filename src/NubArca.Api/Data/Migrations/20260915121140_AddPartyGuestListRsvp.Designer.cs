@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260915092059_AddPartyGuestListRsvp")]
+    [Migration("20260915121140_AddPartyGuestListRsvp")]
     partial class AddPartyGuestListRsvp
     {
         /// <inheritdoc />
@@ -4704,8 +4704,7 @@ namespace NubArca.Api.Data.Migrations
 
                     b.Property<string>("ValueJson")
                         .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
+                        .HasColumnType("text");
 
                     b.HasKey("PartyInvitationGroupId", "PartyRsvpQuestionId");
 
@@ -4734,8 +4733,7 @@ namespace NubArca.Api.Data.Migrations
                         .HasColumnType("character varying(16)");
 
                     b.Property<string>("OptionsJson")
-                        .HasMaxLength(8192)
-                        .HasColumnType("character varying(8192)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("PartyId")
                         .HasColumnType("uuid");

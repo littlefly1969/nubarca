@@ -4701,8 +4701,7 @@ namespace NubArca.Api.Data.Migrations
 
                     b.Property<string>("ValueJson")
                         .IsRequired()
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
+                        .HasColumnType("text");
 
                     b.HasKey("PartyInvitationGroupId", "PartyRsvpQuestionId");
 
@@ -4731,8 +4730,7 @@ namespace NubArca.Api.Data.Migrations
                         .HasColumnType("character varying(16)");
 
                     b.Property<string>("OptionsJson")
-                        .HasMaxLength(8192)
-                        .HasColumnType("character varying(8192)");
+                        .HasColumnType("text");
 
                     b.Property<Guid>("PartyId")
                         .HasColumnType("uuid");

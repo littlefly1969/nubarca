@@ -188,6 +188,9 @@ internal sealed class MigrateOnStartupFactory : WebApplicationFactory<Program>
         builder.UseSetting("ConnectionStrings:Postgres", _connectionString);
         builder.UseSetting("Database:MigrateOnStartup", _migrateOnStartup ? "true" : "false");
         builder.UseSetting("Storage:RootPath", _storageRoot);
+        // A host with a database refuses to start without an invitation
+        // signing secret; this one is the test's.
+        builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
     }
 
     protected override void Dispose(bool disposing)

@@ -41,7 +41,12 @@ public sealed class PartyInvitationPostgresTests : IAsyncLifetime
     private readonly Guid _marioId = Guid.NewGuid();
     private readonly Guid _lauraId = Guid.NewGuid();
     private readonly Guid _questionId = Guid.NewGuid();
-    private readonly PartyInvitationTokens _tokens = new(new ConfigurationBuilder().Build());
+    private readonly PartyInvitationTokens _tokens = new(new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [PartyInvitationTokens.InvitationSecretKey] = "pg-test-invitation-secret",
+        })
+        .Build());
     private readonly RecordingEmailSender _email = new();
     private Guid _capabilityId;
 
@@ -289,6 +294,31 @@ public sealed class PartyInvitationPostgresTests : IAsyncLifetime
 
         Assert.Contains(await db.Database.GetAppliedMigrationsAsync(), m => m.EndsWith("_AddPartyGuestListRsvp"));
 
+        // The two columns holding serialized JSON are TEXT: the domain bounds
+        // what they hold, never the length of its escaped form.
+        var jsonColumns = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT table_name || '.' || column_name || '=' || data_type AS \"Value\" "
+                + "FROM information_schema.columns "
+                + "WHERE (table_name = 'party_rsvp_answers' AND column_name = 'ValueJson') "
+                + "OR (table_name = 'party_rsvp_questions' AND column_name = 'OptionsJson')")
+            .ToListAsync();
+        Assert.Equal(
+            new[] { "party_rsvp_answers.ValueJson=text", "party_rsvp_questions.OptionsJson=text" },
+            jsonColumns.Order());
+
+        // And every foreign key of the six tables still RESTRICTS: what a party
+        // owns is erased out loud, never by a cascade.
+        var deleteRules = await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT c.confdeltype::text AS \"Value\" FROM pg_constraint c "
+                + "JOIN pg_class t ON t.oid = c.conrelid WHERE c.contype = 'f' AND t.relname IN "
+                + "('party_invitation_groups', 'party_guests', 'party_rsvps', 'party_rsvp_questions', "
+                + "'party_rsvp_answers', 'party_invitation_deliveries')")
+            .ToListAsync();
+        Assert.Equal(7, deleteRules.Count);
+        Assert.All(deleteRules, rule => Assert.Equal("r", rule));
+
         var indexes = await db.Database
             .SqlQueryRaw<string>("SELECT indexname AS \"Value\" FROM pg_indexes WHERE tablename LIKE 'party_%'")
             .ToListAsync();
@@ -338,6 +368,101 @@ public sealed class PartyInvitationPostgresTests : IAsyncLifetime
         await AssertRefusedAsync(db, "23505", insertDelivery, Guid.NewGuid(), _groupId, click, _capabilityId);
         await AssertRefusedAsync(db, "23514",
             "UPDATE party_invitation_deliveries SET \"Status\" = 'sent' WHERE \"ClientRequestId\" = {0}", click);
+    }
+
+    // --- Unicode against the storage contract ------------------------------------
+
+    private PartyRsvpWrite Coming(int version, Guid extraQuestion, JsonElement extraAnswer) => new(
+        version,
+        [new PartyRsvpGuestWrite(_marioId, PartyRsvpStatuses.Attending, null),
+         new PartyRsvpGuestWrite(_lauraId, PartyRsvpStatuses.Declined, null)],
+        [],
+        [new PartyRsvpAnswerWrite(_questionId, JsonDocument.Parse("\"Carne\"").RootElement),
+         new PartyRsvpAnswerWrite(extraQuestion, extraAnswer)]);
+
+    private static JsonElement JsonString(string value) =>
+        JsonDocument.Parse(JsonSerializer.Serialize(value)).RootElement.Clone();
+
+    [SkippableFact]
+    public async Task Five_hundred_emoji_are_stored_whole_and_the_five_hundred_and_first_is_refused_first()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var dedication = Guid.NewGuid();
+        await using (var db = NewContext())
+        {
+            db.PartyRsvpQuestions.Add(new PartyRsvpQuestion
+            {
+                Id = dedication, PartyId = _partyId, Prompt = "Una dedica?", Kind = PartyRsvpQuestionKinds.ShortText,
+                IsActive = true, SortOrder = 1, Version = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+        var text = string.Concat(Enumerable.Repeat("🎉", PartyInvitationLimits.MaxShortTextAnswerLength));
+
+        await using (var db = NewContext())
+        {
+            var saved = await Rsvp(db).SubmitAsync(Token, Coming(1, dedication, JsonString(text)));
+            Assert.Equal(PartyRsvpOutcome.Ok, saved.Outcome);
+            Assert.Equal(text, saved.View!.Invitation.Questions.Single(q => q.Id == dedication).Answer!.Value.GetString());
+        }
+
+        await using (var verify = NewContext())
+        {
+            var stored = await verify.PartyRsvpAnswers.SingleAsync(a => a.PartyRsvpQuestionId == dedication);
+            // Its escaped JSON is longer than any length a column could have
+            // guessed for it — and it is stored whole.
+            Assert.True(stored.ValueJson.Length > 2048);
+            Assert.Equal(text, JsonSerializer.Deserialize<string>(stored.ValueJson));
+            var reread = await Rsvp(verify).ViewAsync((await Rsvp(verify).ResolveAsync(Token))!, Token);
+            Assert.Equal(text, reread.Invitation.Questions.Single(q => q.Id == dedication).Answer!.Value.GetString());
+        }
+
+        // One more code point is the DOMAIN's refusal, before anything is written.
+        await using (var db = NewContext())
+        {
+            var refused = await Rsvp(db).SubmitAsync(Token, Coming(2, dedication, JsonString(text + "🎉")));
+            Assert.Equal(PartyRsvpOutcome.InvalidRequest, refused.Outcome);
+            Assert.Equal("invalid_answer", refused.Error);
+        }
+        await using (var after = NewContext())
+        {
+            Assert.Equal(2, (await after.PartyInvitationGroups.SingleAsync()).Version);
+            Assert.Equal(text, JsonSerializer.Deserialize<string>(
+                (await after.PartyRsvpAnswers.SingleAsync(a => a.PartyRsvpQuestionId == dedication)).ValueJson));
+        }
+    }
+
+    [SkippableFact]
+    public async Task Twenty_options_of_a_hundred_and_twenty_code_points_are_stored_whole_and_answerable()
+    {
+        Skip.IfNot(_fixture.Available, "Docker is not available; integration test skipped.");
+        var options = Enumerable.Range(0, PartyInvitationLimits.MaxOptions)
+            .Select(i => $"{i:D2}" + string.Concat(Enumerable.Repeat("🎉", PartyInvitationLimits.MaxOptionLength - 2)))
+            .ToArray();
+        Assert.All(options, o => Assert.Equal(PartyInvitationLimits.MaxOptionLength, PartyInvitationLimits.CodePoints(o)));
+
+        Guid questionId;
+        await using (var db = NewContext())
+        {
+            var created = await Invitations(db).CreateQuestionAsync(
+                _ownerId, _partyId,
+                new PartyRsvpQuestionWrite("Quale festa?", PartyRsvpQuestionKinds.SingleChoice, false, options));
+            Assert.Equal(PartyInvitationOutcome.Ok, created.Outcome);
+            var question = created.GuestList!.Questions.Single(q => q.Prompt == "Quale festa?");
+            Assert.Equal(options, question.Options);
+            questionId = question.Id;
+        }
+
+        await using (var verify = NewContext())
+        {
+            var stored = await verify.PartyRsvpQuestions.SingleAsync(q => q.Id == questionId);
+            Assert.True(stored.OptionsJson!.Length > 8192);
+            Assert.Equal(options, PartyRsvpQuestionRules.ParseOptions(stored.OptionsJson));
+
+            var answered = await Rsvp(verify).SubmitAsync(Token, Coming(1, questionId, JsonString(options[7])));
+            Assert.Equal(PartyRsvpOutcome.Ok, answered.Outcome);
+            Assert.Equal(options[7], answered.View!.Invitation.Questions.Single(q => q.Id == questionId).Answer!.Value.GetString());
+        }
     }
 
     private static async Task AssertRefusedAsync(AppDbContext db, string sqlState, string sql, params object[] args)

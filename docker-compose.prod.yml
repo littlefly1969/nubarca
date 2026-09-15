@@ -322,6 +322,9 @@ services:
       # Party public links/uploads. TokenSecret should be set in production; an
       # empty value keeps the app fallback for existing/dev deployments.
       Party__TokenSecret: ${Party__TokenSecret:-}
+      # Personal party invitations have NO fallback: the API refuses to start
+      # unless this or an explicit Party__TokenSecret is set.
+      Party__InvitationTokenSecret: ${Party__InvitationTokenSecret:-}
       Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
       # Party face search (public "find your face") — public endpoint tunables.
       # Selfies are downscaled client-side, so the caps are generous safety bounds.
@@ -585,6 +588,7 @@ services:
       # Party public links/uploads; mirror api so any party-related worker/CLI
       # path reads the same production config.
       Party__TokenSecret: ${Party__TokenSecret:-}
+      Party__InvitationTokenSecret: ${Party__InvitationTokenSecret:-}
       Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
       Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
       Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}

@@ -765,6 +765,16 @@ var connectionString = builder.Configuration.GetConnectionString("Postgres");
 
 if (!string.IsNullOrWhiteSpace(connectionString))
 {
+    // FAIL CLOSED, at startup. Personal party invitations are signed with an
+    // operator secret and have no built-in one: a key readable in the source,
+    // together with the capability ids the database stores, would turn a dump
+    // into every guest group's working link. Refusing to start is the answer a
+    // missing key gets — never a known key, and never a 500 at the first send.
+    if (NubArca.Api.Party.PartyInvitationTokens.SecretFrom(builder.Configuration) is null)
+    {
+        throw NubArca.Api.Party.PartyInvitationTokens.MissingSecret();
+    }
+
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseNpgsql(connectionString));
 

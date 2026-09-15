@@ -35,6 +35,9 @@ public sealed class PostgresWebApplicationFactory : WebApplicationFactory<Progra
         builder.UseSetting("Storage:RootPath", StorageRoot);
         // The worker stays OFF; the smoke test drives JobProcessor explicitly.
         builder.UseSetting("Jobs:WorkerEnabled", "false");
+        // A host with a database refuses to start without an invitation
+        // signing secret; this one is the test's. Settings below may override.
+        builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
         foreach (var (key, value) in _settings)
         {
             builder.UseSetting(key, value);
