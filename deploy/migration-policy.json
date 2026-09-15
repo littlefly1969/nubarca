@@ -131,6 +131,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Adds one NULLABLE character varying(16) column (TextPlacement) to party_guest_contents with no default, and one check constraint restricting it to 'overlay'. The generated SQL is exactly two ALTER TABLE ... ADD statements: no existing row is rewritten and nothing is backfilled. Every existing row reads NULL, which the application defines as 'the words below the photograph' — exactly how every slot rendered before the column existed — and NULL passes the constraint by definition. The previous application never reads or writes the column and its inserts omit it, so it keeps writing NULL; rolling back to it leaves only values the new schema accepts, and a host's 'on the photograph' choice is merely ignored (the words return below), never a failed request or a rejected write."
+    },
+    "20260915092059_AddPartyGuestListRsvp": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Creates only six new owner-private Party tables (party_invitation_groups, party_guests, party_rsvps, party_rsvp_questions, party_rsvp_answers, party_invitation_deliveries) with their indexes, check constraints and restricting foreign keys to parties and to each other. No existing table, column, index or constraint is altered and nothing is backfilled. The previous application neither reads nor writes the new tables, so rolling back to it leaves them untouched and every existing Party request behaves exactly as before."
     }
   }
 }

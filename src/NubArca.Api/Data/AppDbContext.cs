@@ -102,6 +102,17 @@ public class AppDbContext : DbContext
     // Deliberately not a page builder — see PartyGuestContent.
     public DbSet<PartyGuestContent> PartyGuestContents => Set<PartyGuestContent>();
 
+    // The guest list: who the host invited, their personal RSVP capability, what
+    // each person answered, the host's closed-vocabulary questions and the
+    // outbound invitation ledger. Owner-private PII, and a DIFFERENT identity
+    // from PartyParticipant — see PartyInvitationGroup.
+    public DbSet<PartyInvitationGroup> PartyInvitationGroups => Set<PartyInvitationGroup>();
+    public DbSet<PartyGuest> PartyGuests => Set<PartyGuest>();
+    public DbSet<PartyRsvp> PartyRsvps => Set<PartyRsvp>();
+    public DbSet<PartyRsvpQuestion> PartyRsvpQuestions => Set<PartyRsvpQuestion>();
+    public DbSet<PartyRsvpAnswer> PartyRsvpAnswers => Set<PartyRsvpAnswer>();
+    public DbSet<PartyInvitationDelivery> PartyInvitationDeliveries => Set<PartyInvitationDelivery>();
+
     // PUBLIC read-only party access links (token hash only). A CAPABILITY over
     // a party: PartyId is its identity, while OwnerUserId/AlbumId remain as a
     // compatibility projection of the party and its main media source.
