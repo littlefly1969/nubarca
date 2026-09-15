@@ -142,7 +142,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
-                "PartyGameRead", "PartyGameVote",
+                "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
@@ -307,6 +307,13 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
             services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
             services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
+            // The guest list and the personal invitation. Mirrors Program.cs.
+            services.AddSingleton<NubArca.Api.Party.PartyInvitationTokens>();
+            services.AddScoped<NubArca.Api.Party.IPartyInvitationService, NubArca.Api.Party.PartyInvitationService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyInvitationDeliveryService,
+                NubArca.Api.Party.PartyInvitationDeliveryService>();
+            services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
             services.AddScoped<StorageReconciliationService>();
             // Slice 97: refcount audit/repair.
             services.AddScoped<BlobReferenceAuditService>();
