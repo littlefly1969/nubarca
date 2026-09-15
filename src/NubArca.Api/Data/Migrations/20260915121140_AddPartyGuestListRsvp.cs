@@ -50,7 +50,7 @@ namespace NubArca.Api.Data.Migrations
                     Prompt = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
                     Kind = table.Column<string>(type: "character varying(16)", maxLength: 16, nullable: false),
                     Required = table.Column<bool>(type: "boolean", nullable: false),
-                    OptionsJson = table.Column<string>(type: "character varying(8192)", maxLength: 8192, nullable: true),
+                    OptionsJson = table.Column<string>(type: "text", nullable: true),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
                     SortOrder = table.Column<int>(type: "integer", nullable: false),
                     Version = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
@@ -128,7 +128,7 @@ namespace NubArca.Api.Data.Migrations
                 {
                     PartyInvitationGroupId = table.Column<Guid>(type: "uuid", nullable: false),
                     PartyRsvpQuestionId = table.Column<Guid>(type: "uuid", nullable: false),
-                    ValueJson = table.Column<string>(type: "character varying(2048)", maxLength: 2048, nullable: false),
+                    ValueJson = table.Column<string>(type: "text", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },

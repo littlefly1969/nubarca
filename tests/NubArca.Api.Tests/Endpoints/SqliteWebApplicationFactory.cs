@@ -131,6 +131,9 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         // worker analysis tests produce detections. The disabled/model-not-
         // configured path is covered by a service-level unit test.
         builder.UseSetting("Plates:Alpr:Enabled", "true");
+        // Personal party invitations have no built-in signing key and refuse to
+        // work without one. The test's own; a test may override it below.
+        builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
 
         if (_poolable)
         {

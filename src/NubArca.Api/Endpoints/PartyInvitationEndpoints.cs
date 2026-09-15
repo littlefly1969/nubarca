@@ -326,7 +326,7 @@ public static class PartyInvitationEndpoints
             CancellationToken cancellationToken) =>
         {
             var access = await rsvp.ResolveAsync(token, cancellationToken);
-            if (access is null || access.Experience.Access != PartyGuestAccessMode.Full)
+            if (access is null)
             {
                 return Results.NotFound();
             }

@@ -37,6 +37,9 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=nubarca;Username=nubarca;Password=nubarca"
+      # Throwaway, like the password above: a host with a database refuses to
+      # start without a personal-invitation signing secret. Never reuse it.
+      Party__InvitationTokenSecret: "development-only-invitation-secret"
       Storage__RootPath: "/var/lib/nubarca/storage"
       TvUpdates__RootPath: "/var/lib/nubarca/tv-updates"
     volumes:

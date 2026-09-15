@@ -125,8 +125,12 @@ public sealed class PartyRsvpQuestionConfiguration : IEntityTypeConfiguration<Pa
 
         builder.Property(q => q.Prompt).IsRequired().HasMaxLength(PartyInvitationLimits.MaxQuestionPromptLength);
         builder.Property(q => q.Kind).IsRequired().HasMaxLength(16);
-        // Twenty options of 120 code points, serialized, fits comfortably.
-        builder.Property(q => q.OptionsJson).HasMaxLength(8192);
+        // TEXT, deliberately without a length. The DOMAIN bounds the options —
+        // twenty of 120 code points — and JSON escaping may spend twelve
+        // characters on one code point, so a column limit here would be a
+        // second, stricter rule that nothing validates against and that only
+        // the database would enforce, on SaveChanges.
+        builder.Property(q => q.OptionsJson).HasColumnType("text");
         builder.Property(q => q.IsActive).HasDefaultValue(true);
         builder.Property(q => q.Version).HasDefaultValue(1);
         builder.Property(q => q.CreatedAt).HasColumnType("timestamp with time zone");
@@ -150,7 +154,9 @@ public sealed class PartyRsvpAnswerConfiguration : IEntityTypeConfiguration<Part
         // One answer per group per question, and no second way to write it.
         builder.HasKey(a => new { a.PartyInvitationGroupId, a.PartyRsvpQuestionId });
 
-        builder.Property(a => a.ValueJson).IsRequired().HasMaxLength(2048);
+        // TEXT for the reason OptionsJson is: the answer is bounded by the domain
+        // (500 code points), never by the length of its escaped JSON.
+        builder.Property(a => a.ValueJson).IsRequired().HasColumnType("text");
         builder.Property(a => a.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(a => a.UpdatedAt).HasColumnType("timestamp with time zone");
 

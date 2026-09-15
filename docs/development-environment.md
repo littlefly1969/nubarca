@@ -97,6 +97,15 @@ Do **not** install a .NET SDK newer than the 10.0.1xx feature band expecting it
 to be used: `global.json` uses `rollForward: latestFeature`, which stays inside
 the declared band.
 
+An API or worker host with a database refuses to start without a signing secret
+for personal party invitations, which have no built-in key. The development
+compose file carries a throwaway one; for `dotnet run` against a local database,
+set one in the shell (never in a tracked file):
+
+```bash
+export Party__InvitationTokenSecret="$(openssl rand -base64 32)"
+```
+
 ## 5. Frontend setup
 
 ```bash

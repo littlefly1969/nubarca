@@ -34,7 +34,15 @@ originating repository and is deliberately not reproduced here.
   nothing else: no uploads, no game, no printing, no greetings, and nobody
   else's names. Changing the address, or "Genera un nuovo link", makes the old
   link stop working at once. Once the party is on, the invitation shows the reply
-  and takes no new one.
+  and takes no new one; once guest access has closed and only the photos remain,
+  the party's QR still opens them and the invitation link opens nothing.
+- **For operators.** Personal invitations are signed with
+  `Party__InvitationTokenSecret`, or with `Party__TokenSecret` when that is set;
+  with neither, the server does not start. Setting only the new one leaves
+  existing party QR codes unchanged. This release's database migration needs
+  the manual review path rather than the guided update: after it, rolling back
+  to the previous server version is not guaranteed to be able to delete
+  parties.
 - **The party's QR is unchanged.** Guests who scan it at the party are the same
   anonymous browsers as before; answering an invitation does not sign anybody in
   or link the two. Duplicating a party copies its questions and none of its

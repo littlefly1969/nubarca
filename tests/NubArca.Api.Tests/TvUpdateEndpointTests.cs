@@ -129,12 +129,19 @@ public sealed class TvUpdateEndpointTests : IDisposable
     }
 
     private WebApplicationFactory<Program> CreateFactory(string? certificatePath = null) => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+    {
+        // UseSetting, not ConfigureAppConfiguration: Program reads the
+        // connection string while its top-level statements run, before an
+        // app-configuration callback is applied, so an empty value given there
+        // arrives too late and the Development connection string wins. This host
+        // is meant to have no database at all.
+        builder.UseSetting("ConnectionStrings:Postgres", "");
         builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["ConnectionStrings:Postgres"] = "",
             ["TvUpdates:RootPath"] = _root,
             ["TvUpdates:CodeSigningCertificatePath"] = certificatePath ?? _certificatePath,
-        })));
+        }));
+    });
 
     private static HttpRequestMessage ManifestRequest(string runtime, string platform = "android")
     {

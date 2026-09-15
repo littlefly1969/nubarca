@@ -137,11 +137,9 @@ public sealed class PartyInvitationDomainTests
 
     // --- The personal link ------------------------------------------------------
 
-    private static PartyInvitationTokens Tokens(string? secret = null) =>
+    private static PartyInvitationTokens Tokens(string secret = "test-secret") =>
         new(new ConfigurationBuilder()
-            .AddInMemoryCollection(secret is null
-                ? []
-                : new Dictionary<string, string?> { ["Party:TokenSecret"] = secret })
+            .AddInMemoryCollection(new Dictionary<string, string?> { [PartyInvitationTokens.InvitationSecretKey] = secret })
             .Build());
 
     [Fact]

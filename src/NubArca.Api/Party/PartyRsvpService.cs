@@ -20,9 +20,11 @@ namespace NubArca.Api.Party;
 /// <para><b>What it is checked against, on every request.</b> The hash of the
 /// CURRENT generation (so a rotated or removed link is nothing), the party's
 /// phase and windows through the same <see cref="PartyGuestExperience"/> the QR
-/// uses (so a Draft is nothing), and the host's <c>party.access</c> through the
-/// same capability policy (so a host who may no longer run parties has closed
-/// their invitations too). All of it collapses to one generic not-found.</para>
+/// uses (so a Draft is nothing) — narrowed to the FULL experience, so a party
+/// reduced to its memories is nothing too — and the host's <c>party.access</c>
+/// through the same capability policy (so a host who may no longer run parties
+/// has closed their invitations too). All of it collapses to one generic
+/// not-found.</para>
 /// </summary>
 public sealed class PartyRsvpService : IPartyRsvpService
 {
@@ -78,13 +80,17 @@ public sealed class PartyRsvpService : IPartyRsvpService
             return null;
         }
 
-        // The SAME policy the party's QR is resolved by: Draft is nothing, and
-        // the party's own windows close the invitation exactly when they close
-        // the party.
+        // The SAME policy the party's QR is resolved by — Draft is nothing, a
+        // closed window is nothing — with one narrowing of its own: the
+        // invitation lives only while the guest experience is FULL. Once all that
+        // remains is the memories, the QR still opens the album, but an RSVP link
+        // is not a way into the library, and a group's names, notes and answers
+        // are not memories. It is the same generic nothing as an unknown token:
+        // no "expired" answer tells anybody the link was once real.
         var experience = PartyGuestExperience.Resolve(
             party.Status, party.GuestAccessExpiresAt, party.LibraryAccessExpiresAt,
             _clock.GetUtcNow().UtcDateTime);
-        if (experience is null)
+        if (experience is not { Access: PartyGuestAccessMode.Full })
         {
             return null;
         }
@@ -108,18 +114,14 @@ public sealed class PartyRsvpService : IPartyRsvpService
         var enc = Uri.EscapeDataString(token);
 
         // What the party says in THIS phase, by the rule the QR's page uses, with
-        // each photograph re-addressed on the invitation's own token. Once only
-        // the memories are left there is nothing of the party to show here: the
-        // memories are the album, and the album was never this link's.
-        var content = access.Experience.Access == PartyGuestAccessMode.Full
-            ? (await _content.ForGuestAsync(
-                    access.PartyId, access.OwnerUserId, access.Experience.Phase, token, cancellationToken))
-                .Select(slot => slot with
-                {
-                    MediaUrl = slot.MediaUrl is null ? null : ContentMediaUrl(enc, slot.Kind, slot.Version),
-                })
-                .ToList()
-            : [];
+        // each photograph re-addressed on the invitation's own token.
+        var content = (await _content.ForGuestAsync(
+                access.PartyId, access.OwnerUserId, access.Experience.Phase, token, cancellationToken))
+            .Select(slot => slot with
+            {
+                MediaUrl = slot.MediaUrl is null ? null : ContentMediaUrl(enc, slot.Kind, slot.Version),
+            })
+            .ToList();
 
         var cover = await CoverAsync(access, cancellationToken);
         var coverUrl = cover is { } pick

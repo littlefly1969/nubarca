@@ -182,10 +182,9 @@ public sealed record PartyInvitationAccess(
     /// <summary>
     /// Replies are open exactly while the party is announced and not yet
     /// happening. Live and Ended still SHOW the invitation; they do not take
-    /// answers.
+    /// answers. (The experience is always Full here: nothing else resolves.)
     /// </summary>
-    public bool CanRespond =>
-        PartyStatus == PartyStatuses.Published && Experience.Access == PartyGuestAccessMode.Full;
+    public bool CanRespond => PartyStatus == PartyStatuses.Published;
 }
 
 public sealed record PartyInvitationViewDto(PartyInvitationPartyDto Party, PartyInvitationRsvpDto Invitation);
