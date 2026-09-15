@@ -39,6 +39,7 @@ import { TrashPage } from './pages/TrashPage';
 import { TvPage } from './pages/TvPage';
 import { TvPairApprovalPage } from './pages/TvPairApprovalPage';
 import { PartyPage } from './pages/PartyPage';
+import { PartyInvitationPage } from './pages/PartyInvitationPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
@@ -67,6 +68,11 @@ export function App() {
           <Route path="/tv" element={<TvPage />} />
           {/* PUBLIC, unauthenticated party album landing (QR target). */}
           <Route path="/party/:token" element={<PartyPage />} />
+          {/* PUBLIC, unauthenticated PERSONAL INVITATION. Its :token is one
+              invitation group's RSVP capability — never the party's QR — so it
+              opens that group's invitation and reply and nothing live. The
+              static `invite` segment outranks `:token` above it. */}
+          <Route path="/party/invite/:token" element={<PartyInvitationPage />} />
           {/* PUBLIC, unauthenticated party UPLOAD landing (separate upload QR). */}
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
           <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />

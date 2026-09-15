@@ -13,13 +13,13 @@ import {
   type PartyItem,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
-import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyFaceSearch, type PartyFaceFilter } from '../components/PartyFaceSearch';
 import { PartyGuestDock } from '../components/PartyGuestDock';
 import {
   PartyGuestContentSections, hasPresentableContent, isOpenablePoster,
 } from '../party/PartyGuestContent';
 import { PartyGameAffordance } from '../party/PartyGameAffordance';
+import { PartyHubTopBar } from '../party/PartyHubTopBar';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import {
   PartyAfterHome,
@@ -62,17 +62,6 @@ function hasAlbumMedia(context: PartyGuestContext): boolean {
 // without a manual reload. Same 10-20s band as the TV surfaces; each poll
 // re-checks the token server-side (revoked/disabled/expired → 404).
 const PARTY_POLL_MS = 15_000;
-
-// The guest hub is a FIXED dark surface — a party cover, not a themed app page —
-// so the approved ON-DARK wordmark is pinned here instead of resolved from the
-// visitor's theme (which is what <BrandMark> does, and would put the Midnight
-// Navy artwork on a Midnight Navy hero). Byte-exact approved asset, rendered at
-// its own proportions, unfiltered and unrecoloured; CSS only sets its width.
-const PARTY_WORDMARK = {
-  src: '/brand/nubarca-wordmark-on-dark-480w.png',
-  width: 480,
-  height: 135,
-} as const;
 
 // Brand names are not translated: the eyebrow is the product name, and the
 // stylesheet is what renders it in caps.
@@ -306,23 +295,6 @@ function CapabilityDeck({ capabilities }: { capabilities: Capability[] }) {
         })}
       </ul>
     </nav>
-  );
-}
-
-// Wordmark + language switcher: the same top row on the hero and on the
-// unavailable/error states, so a guest always knows where they are.
-function PartyHubTopBar() {
-  return (
-    <div className="party-guest-hub-topbar">
-      <img
-        className="party-guest-hub-logo"
-        src={PARTY_WORDMARK.src}
-        alt={PRODUCT_NAME}
-        width={PARTY_WORDMARK.width}
-        height={PARTY_WORDMARK.height}
-      />
-      <LanguageSwitcher className="language-switcher language-switcher-public" compact />
-    </div>
   );
 }
 

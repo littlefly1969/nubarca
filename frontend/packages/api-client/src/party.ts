@@ -1,9 +1,26 @@
 import { api, ApiError } from './client';
 import type {
   AlbumPartyStatus,
+  PartyGuestList,
+  PartyInvitationDelivery,
+  PartyInvitationGroupWrite,
+  PartyInvitationView,
   PartyMessageAction,
   PartyMessageList,
+  PartyRsvpQuestionWrite,
+  PartyRsvpWrite,
   PartyUploadList,
+} from '@nubarca/contracts';
+import {
+  partyGuestListPath,
+  partyInvitationGroupActionPath,
+  partyInvitationGroupPath,
+  partyInvitationGroupsPath,
+  partyInvitationPath,
+  partyInvitationRsvpPath,
+  partyRsvpQuestionOrderPath,
+  partyRsvpQuestionPath,
+  partyRsvpQuestionsPath,
 } from '@nubarca/contracts';
 
 // Web TRANSPORT for Party. The DTOs, the validation RANGES and the message
@@ -36,6 +53,43 @@ export {
   isPartyMessageActionAllowed,
   partyGuestUrl,
   partyMessageActions,
+} from '@nubarca/contracts';
+
+// The guest list and the personal invitation: canonical in @nubarca/contracts,
+// re-exported here so a web call site imports one package.
+export type {
+  PartyGuest,
+  PartyGuestList,
+  PartyInvitationDelivery,
+  PartyInvitationDeliveryKind,
+  PartyInvitationDeliveryState,
+  PartyInvitationDeliveryStatus,
+  PartyInvitationDeliveryView,
+  PartyInvitationGroup,
+  PartyInvitationGroupWrite,
+  PartyInvitationGuest,
+  PartyInvitationQuestion,
+  PartyInvitationRsvp,
+  PartyNamedGuestWrite,
+  PartyRsvpAnswer,
+  PartyRsvpFormProblem,
+  PartyRsvpQuestion,
+  PartyRsvpQuestionKind,
+  PartyRsvpQuestionWrite,
+  PartyRsvpStatus,
+  PartyRsvpSummary,
+  PartyRsvpWrite,
+} from '@nubarca/contracts';
+export {
+  PARTY_INVITATION_LIMITS,
+  PARTY_RSVP_QUESTION_KINDS,
+  PARTY_RSVP_STATUSES,
+  codePoints,
+  isPlausibleEmail,
+  matchesGuestSearch,
+  normalizeQuestionOptions,
+  normalizeText,
+  rsvpFormProblems,
 } from '@nubarca/contracts';
 
 
@@ -1041,6 +1095,124 @@ export interface PartyMessageSubmission {
   // 'pending' when the host reads greetings before they go up, else 'visible'.
   status: 'visible' | 'pending';
   createdAt: string;
+}
+
+// --- The GUEST LIST (owner, party.access) ---
+//
+// Every owner write answers the whole list back, so the counts the host reads
+// always describe the rows the list shows. A refusal that describes a state —
+// a stale version, a party already under way, a mailer that is not configured —
+// is a 409 whose body carries that state (`guestList`, and `party` for a send),
+// so the page adopts it instead of overwriting it.
+
+export function getPartyGuestList(partyId: string, signal?: AbortSignal): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyGuestListPath(partyId), { signal });
+}
+
+export function createPartyInvitationGroup(
+  partyId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyInvitationGroupsPath(partyId), { method: 'POST', json: body, signal });
+}
+
+/** PUT states the NAMED guests whole; the group's own +1s are kept. */
+export function updatePartyInvitationGroup(
+  partyId: string, groupId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyInvitationGroupPath(partyId, groupId), { method: 'PUT', json: body, signal });
+}
+
+/** Removing a group revokes its personal link and erases its answers. */
+export function deletePartyInvitationGroup(
+  partyId: string, groupId: string, version: number, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(
+    `${partyInvitationGroupPath(partyId, groupId)}?version=${version}`, { method: 'DELETE', signal });
+}
+
+/** Every link sent before stops opening anything; the invitation must be sent again. */
+export function rotatePartyInvitationLink(
+  partyId: string, groupId: string, version: number, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(
+    partyInvitationGroupActionPath(partyId, groupId, 'rotate-link'),
+    { method: 'POST', json: { version }, signal });
+}
+
+export interface PartyInvitationSendResult {
+  delivery: PartyInvitationDelivery;
+  guestList: PartyGuestList;
+  /** The party as it is now — a first send publishes a Draft. */
+  party: Party;
+}
+
+/**
+ * One click. `clientRequestId` is minted per click and reused for that click's
+ * retries: the same id never sends a second email. `partyVersion` is what lets
+ * a first send publish a Draft party without overwriting somebody else's edit.
+ */
+export function sendPartyInvitation(
+  partyId: string,
+  groupId: string,
+  body: { clientRequestId: string; partyVersion?: number },
+  signal?: AbortSignal,
+): Promise<PartyInvitationSendResult> {
+  return api<PartyInvitationSendResult>(
+    partyInvitationGroupActionPath(partyId, groupId, 'send'), { method: 'POST', json: body, signal });
+}
+
+/** Only for a group invited on the link it holds now that has not answered. */
+export function remindPartyInvitation(
+  partyId: string, groupId: string, clientRequestId: string, signal?: AbortSignal,
+): Promise<PartyInvitationSendResult> {
+  return api<PartyInvitationSendResult>(
+    partyInvitationGroupActionPath(partyId, groupId, 'remind'),
+    { method: 'POST', json: { clientRequestId }, signal });
+}
+
+export function createPartyRsvpQuestion(
+  partyId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyRsvpQuestionsPath(partyId), { method: 'POST', json: body, signal });
+}
+
+/** A question that has been answered may only change its activation. */
+export function updatePartyRsvpQuestion(
+  partyId: string, questionId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyRsvpQuestionPath(partyId, questionId), { method: 'PUT', json: body, signal });
+}
+
+/** The whole order, every time: exactly this party's questions, once each. */
+export function reorderPartyRsvpQuestions(
+  partyId: string, questionIds: string[], signal?: AbortSignal,
+): Promise<PartyGuestList> {
+  return api<PartyGuestList>(partyRsvpQuestionOrderPath(partyId), {
+    method: 'PUT', json: { questionIds }, signal,
+  });
+}
+
+// --- The PERSONAL INVITATION (anonymous, invitation-token scoped) ---
+//
+// Not the party's QR token and never built from one. It opens one group's
+// invitation and reply, and no upload, game, print or greeting.
+
+/** What a personal link opens, with this client's own guest-content slot shape. */
+export type PartyInvitationViewModel = PartyInvitationView<PartyGuestContentView>;
+
+export function getPartyInvitation(token: string, signal?: AbortSignal): Promise<PartyInvitationViewModel> {
+  return api<PartyInvitationViewModel>(partyInvitationPath(token), { signal });
+}
+
+/**
+ * The WHOLE reply. A 409 carries `{ error, invitation }`: `version_conflict`
+ * when the group's reply changed meanwhile, `rsvp_closed` once the party has
+ * started — either way the page shows the invitation as it now is.
+ */
+export function submitPartyRsvp(
+  token: string, reply: PartyRsvpWrite, signal?: AbortSignal,
+): Promise<PartyInvitationViewModel> {
+  return api<PartyInvitationViewModel>(partyInvitationRsvpPath(token), { method: 'PUT', json: reply, signal });
 }
 
 // The UPLOAD token, not the view token: writing is contributing, and the same

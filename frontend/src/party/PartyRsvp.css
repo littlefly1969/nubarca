@@ -1,0 +1,127 @@
+/* A personal invitation's reply — built from the guest hub's own tokens, so it
+   reads as part of the invitation it sits in rather than a form dropped onto it.
+   Left-aligned inside the invitation's centred column: a form is read line by
+   line. */
+
+.party-rsvp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.25rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 1rem;
+  background: var(--party-hub-surface);
+  text-align: left;
+}
+
+.party-rsvp-title { margin: 0; font-size: 1.35rem; font-weight: 600; }
+.party-rsvp-for { margin: 0; color: var(--party-hub-muted); }
+.party-rsvp-closed { margin: 0; font-weight: 600; }
+
+.party-rsvp-form { display: flex; flex-direction: column; gap: 1.1rem; }
+
+.party-rsvp fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.party-rsvp legend { padding: 0; margin-bottom: 0.4rem; font-weight: 600; font-size: 1.05rem; }
+
+.party-rsvp-choice { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.party-rsvp-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.45rem 0.95rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.party-rsvp-option[data-selected='true'] {
+  border-color: currentColor;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.party-rsvp-option:focus-within { outline: 3px solid var(--party-hub-focus); outline-offset: 2px; }
+
+.party-rsvp-field { display: grid; gap: 0.3rem; }
+.party-rsvp-field > span { font-size: 0.9rem; color: var(--party-hub-muted); }
+
+.party-rsvp-field input {
+  font: inherit;
+  color: inherit;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--party-hub-border);
+  background: rgba(255, 255, 255, 0.06);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.party-rsvp-field input:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 1px; }
+
+.party-rsvp-extra {
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--party-hub-border);
+}
+
+.party-rsvp-help,
+.party-rsvp-question-prompt { margin: 0; }
+.party-rsvp-help { color: var(--party-hub-muted); font-size: 0.9rem; }
+.party-rsvp-required { color: var(--party-hub-muted); font-size: 0.85rem; }
+
+.party-rsvp-link {
+  align-self: flex-start;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0.35rem 0;
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.party-rsvp-problems { margin: 0; padding-left: 1.1rem; color: var(--party-hub-muted); }
+
+.party-rsvp-submit {
+  font: inherit;
+  font-weight: 600;
+  min-height: 48px;
+  padding: 0.8rem 1.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  cursor: pointer;
+}
+
+.party-rsvp-submit:disabled { opacity: 0.55; cursor: default; }
+.party-rsvp-submit:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 3px; }
+
+.party-rsvp-notice { margin: 0; }
+.party-rsvp-notice--error { font-weight: 600; }
+
+.party-rsvp-summary { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; }
+
+.party-rsvp-chip {
+  margin-left: 0.4rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.party-rsvp-answers { margin: 0; display: grid; gap: 0.5rem; }
+.party-rsvp-answers dt { color: var(--party-hub-muted); font-size: 0.9rem; }
+.party-rsvp-answers dd { margin: 0; }
