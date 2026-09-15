@@ -205,6 +205,176 @@ public sealed class PartyGuestListLifecycleTests : IDisposable
         }
     }
 
+    // --- Attendance against the party's life ---------------------------------------
+
+    /// <summary>A live party with a QR, one group checked in by its own link and by the host, and somebody else.</summary>
+    private async Task<(string Token, Guid AlbumId, string ViewToken)> SeedArrivalsAsync(
+        HttpClient owner, Guid partyId, string label, string otherName)
+    {
+        var (albumId, viewToken, _) = await OpenPublicQrAsync(owner, partyId, $"Album di {label}");
+        var groupId = (await AddGroupAsync(owner, partyId, label, $"{Guid.NewGuid():N}@example.com", 0, label, $"{label} Due"))
+            .GetProperty("id").GetGuid();
+        var token = await InviteAsync(_factory, owner, partyId, groupId);
+        await AdvanceAsync(owner, partyId, "start-live");
+        var guest = _factory.CreateClient();
+        var view = await ViewAsync(guest, token);
+        (await guest.PutAsync($"/api/party-invitations/{token}/attendance/guests/{GuestId(view, label)}", null))
+            .EnsureSuccessStatusCode();
+        (await owner.PutAsync($"/api/parties/{partyId}/attendance/guests/{GuestId(view, $"{label} Due")}", null))
+            .EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/api/parties/{partyId}/attendance/other-guests",
+            new { name = otherName, clientRequestId = Guid.NewGuid() })).EnsureSuccessStatusCode();
+        return (token, albumId, viewToken);
+    }
+
+    [Fact]
+    public async Task Tearing_a_party_down_erases_its_arrivals_and_nothing_of_another_party()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var doomed = await CreatePartyAsync(owner, "Da smontare");
+        var kept = await CreatePartyAsync(owner, "Da tenere");
+        await SeedArrivalsAsync(owner, doomed, "Mario", "Walter");
+        await SeedArrivalsAsync(owner, kept, "Sara", "Gino");
+        await AdvanceAsync(owner, doomed, "end-live");
+
+        var version = (await GetPartyAsync(owner, doomed)).GetProperty("version").GetInt32();
+        (await owner.DeleteAsync($"/api/parties/{doomed}?version={version}")).EnsureSuccessStatusCode();
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Assert.Equal(kept, (await db.PartyAttendanceGuests.SingleAsync()).PartyId);
+        Assert.Equal(2, await db.PartyGuestAttendances.CountAsync());
+        Assert.Equal(kept, (await db.PartyInvitationGroups.SingleAsync()).PartyId);
+    }
+
+    [Fact]
+    public async Task Taking_a_person_or_a_group_off_the_list_takes_their_arrival_with_them()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        await SeedArrivalsAsync(owner, partyId, "Mario", "Walter");
+        var group = Group(await GuestListAsync(owner, partyId), "Mario");
+        var mario = OwnerGuest(group, "Mario");
+
+        // The host edits "Mario Due" off the group: his arrival goes with him.
+        (await owner.PutAsJsonAsync($"/api/parties/{partyId}/invitation-groups/{group.GetProperty("id").GetGuid()}",
+            GroupBody("Mario", group.GetProperty("recipientEmail").GetString()!, 0,
+                [new { id = mario.GetProperty("id").GetGuid(), name = "Mario" }],
+                version: group.GetProperty("version").GetInt32()))).EnsureSuccessStatusCode();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(mario.GetProperty("id").GetGuid(), (await db.PartyGuestAttendances.SingleAsync()).PartyGuestId);
+        }
+
+        // And removing the whole group removes the last one. Nobody else's arrival moves.
+        var current = Group(await GuestListAsync(owner, partyId), "Mario");
+        (await owner.DeleteAsync(
+            $"/api/parties/{partyId}/invitation-groups/{current.GetProperty("id").GetGuid()}?version={current.GetProperty("version").GetInt32()}"))
+            .EnsureSuccessStatusCode();
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Equal(0, await db.PartyGuestAttendances.CountAsync());
+            Assert.Equal("Walter", (await db.PartyAttendanceGuests.SingleAsync()).Name);
+        }
+    }
+
+    [Fact]
+    public async Task A_duplicate_carries_no_arrival()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner, "Festa di Anna");
+        await SeedArrivalsAsync(owner, partyId, "Anna", "Walter");
+        var before = await owner.GetStringAsync($"/api/parties/{partyId}/attendance");
+
+        var copy = await owner.PostAsJsonAsync($"/api/parties/{partyId}/duplicate", new { title = "Di nuovo" });
+        Assert.Equal(HttpStatusCode.Created, copy.StatusCode);
+        var cloneId = (await copy.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        var clone = await owner.GetFromJsonAsync<JsonElement>($"/api/parties/{cloneId}/attendance");
+        Assert.Equal(0, clone.GetProperty("summary").GetProperty("totalArrivals").GetInt32());
+        Assert.Empty(clone.GetProperty("otherGuests").EnumerateArray());
+        Assert.Empty(clone.GetProperty("groups").EnumerateArray());
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.False(await db.PartyAttendanceGuests.AnyAsync(g => g.PartyId == cloneId));
+            Assert.Equal(2, await db.PartyGuestAttendances.CountAsync());
+            Assert.Single(await db.PartyAttendanceGuests.ToListAsync());
+        }
+        Assert.Equal(before, await owner.GetStringAsync($"/api/parties/{partyId}/attendance"));
+    }
+
+    [Fact]
+    public async Task No_public_party_surface_carries_attendance()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync($"host-{Guid.NewGuid():N}@example.com");
+        var partyId = await CreatePartyAsync(owner, "Matrimonio di Marta");
+        var (albumId, viewToken, _) = await OpenPublicQrAsync(owner, partyId);
+        await AddPhotoAsync(owner, albumId);
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/tv-settings", new { showOnTv = true })).EnsureSuccessStatusCode();
+        (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-game-settings", new
+        {
+            gameEnabled = true, minChallengeIntervalSeconds = 300, maxChallengeIntervalSeconds = 540,
+            votesPerGuest = 3, maxChallengesPerSession = (int?)null,
+        })).EnsureSuccessStatusCode();
+
+        var arrived = (await AddGroupAsync(owner, partyId, "Zenobia", "zenobia@example.org", 0, "Zenobia Quartararo"))
+            .GetProperty("id").GetGuid();
+        var neighbour = (await AddGroupAsync(owner, partyId, "Vicini", "vicini@example.org", 0, "Ottone Pellegrini"))
+            .GetProperty("id").GetGuid();
+        var arrivedToken = await InviteAsync(_factory, owner, partyId, arrived);
+        var neighbourToken = await InviteAsync(_factory, owner, partyId, neighbour);
+        await AdvanceAsync(owner, partyId, "start-live");
+        var guest = _factory.CreateClient();
+        (await guest.PutAsync(
+            $"/api/party-invitations/{arrivedToken}/attendance/guests/{GuestId(await ViewAsync(guest, arrivedToken), "Zenobia Quartararo")}",
+            null)).EnsureSuccessStatusCode();
+        (await owner.PostAsJsonAsync($"/api/parties/{partyId}/attendance/other-guests",
+            new { name = "Ippolita Sforzesca", clientRequestId = Guid.NewGuid() })).EnsureSuccessStatusCode();
+        var tv = await PairTvAsync(owner);
+
+        var surfaces = new List<string>
+        {
+            await guest.GetStringAsync($"/api/party/{viewToken}"),
+            await guest.GetStringAsync($"/api/party/{viewToken}/items"),
+            await guest.GetStringAsync($"/api/party/{viewToken}/game"),
+            await guest.GetStringAsync($"/api/party/{viewToken}/game?display=1"),
+            await guest.GetStringAsync($"/api/party/{viewToken}/link-preview"),
+            await TvGetAsync(tv, "/api/tv/session"),
+            await TvGetAsync(tv, "/api/tv/albums"),
+            await TvGetAsync(tv, $"/api/tv/albums/{albumId}/items"),
+        };
+        // ANOTHER group's personal invitation sees none of it either.
+        var neighbourView = await guest.GetStringAsync($"/api/party-invitations/{neighbourToken}");
+        List<string> auditLines;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            auditLines = await scope.ServiceProvider.GetRequiredService<AppDbContext>().AuditLogs
+                .Select(a => a.MetadataJson ?? string.Empty).ToListAsync();
+        }
+
+        var secrets = new[] { "Zenobia", "Quartararo", "Ippolita", "Sforzesca" };
+        foreach (var text in surfaces.Append(neighbourView).Concat(auditLines))
+        {
+            foreach (var secret in secrets)
+            {
+                Assert.DoesNotContain(secret, text);
+            }
+        }
+        foreach (var surface in surfaces)
+        {
+            foreach (var field in new[] { "attendance", "checkedIn", "otherGuests", "arrival" })
+            {
+                Assert.DoesNotContain(field, surface, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        // The neighbour's own person has not arrived, and it is all its link says.
+        Assert.Contains("\"checkedInAt\":null", neighbourView);
+        Assert.DoesNotContain("otherGuests", neighbourView);
+    }
+
     // --- helpers ------------------------------------------------------------------
 
     private static async Task AddPhotoAsync(HttpClient owner, Guid albumId)

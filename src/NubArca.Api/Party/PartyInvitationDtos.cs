@@ -185,6 +185,12 @@ public sealed record PartyInvitationAccess(
     /// answers. (The experience is always Full here: nothing else resolves.)
     /// </summary>
     public bool CanRespond => PartyStatus == PartyStatuses.Published;
+
+    /// <summary>
+    /// "Sono qui" is open exactly while the party is happening. Before it
+    /// nobody has arrived; after it only the host corrects the record.
+    /// </summary>
+    public bool CanCheckIn => PartyStatus == PartyStatuses.Live;
 }
 
 public sealed record PartyInvitationViewDto(PartyInvitationPartyDto Party, PartyInvitationRsvpDto Invitation);
@@ -196,7 +202,13 @@ public sealed record PartyInvitationPartyDto(
     string Phase,
     // An address on the INVITATION token, never the party's public one.
     string? CoverUrl,
-    IReadOnlyList<PartyGuestContentViewDto> Content);
+    IReadOnlyList<PartyGuestContentViewDto> Content,
+    // The party's own PUBLIC address ("Entra nel Party"), present only while
+    // the party is live AND that address actually opens it right now — the
+    // same capability a guest gets by scanning the room's QR, no more. It is
+    // navigation, not identity: following it mints a participant the way any
+    // browser does, and binds nothing to this group.
+    string? PartyUrl);
 
 public sealed record PartyInvitationRsvpDto(
     string Label,
@@ -205,14 +217,21 @@ public sealed record PartyInvitationRsvpDto(
     int MaxAdditionalGuests,
     int AdditionalGuestsUsed,
     IReadOnlyList<PartyInvitationGuestDto> Guests,
-    IReadOnlyList<PartyInvitationQuestionDto> Questions);
+    IReadOnlyList<PartyInvitationQuestionDto> Questions,
+    // The group may record its own people's arrival ("Sono qui"): the party is live.
+    bool CanCheckIn);
 
 public sealed record PartyInvitationGuestDto(
     Guid Id,
     string Name,
     bool IsAdditionalGuest,
     string Status,
-    string? DietaryNotes);
+    string? DietaryNotes,
+    // THIS person's own arrival, and only ever a person of this group. Null:
+    // not recorded as arrived. The source says whether the group may take it
+    // back ("invitation") or it is the host's record ("owner").
+    DateTime? CheckedInAt,
+    string? CheckInSource);
 
 public sealed record PartyInvitationQuestionDto(
     Guid Id,

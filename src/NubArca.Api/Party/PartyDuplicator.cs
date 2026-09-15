@@ -248,7 +248,9 @@ public sealed class PartyDuplicator : IPartyDuplicator
             // The guest list itself is what an evening produced and none of it
             // travels: no group, no name, address or phone, no +1, no RSVP, no
             // dietary note, no answer, no personal link and no email. Last
-            // year's guests were not invited to this party.
+            // year's guests were not invited to this party — and nobody has
+            // arrived at it, so no attendance travels either, neither a guest's
+            // arrival nor any other person recorded at the door.
             var questions = await _db.PartyRsvpQuestions.AsNoTracking()
                 .Where(q => q.PartyId == partyId && q.IsActive)
                 .OrderBy(q => q.SortOrder).ThenBy(q => q.CreatedAt)

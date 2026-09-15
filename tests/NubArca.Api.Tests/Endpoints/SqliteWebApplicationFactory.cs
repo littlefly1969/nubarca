@@ -317,6 +317,8 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 NubArca.Api.Party.IPartyInvitationDeliveryService,
                 NubArca.Api.Party.PartyInvitationDeliveryService>();
             services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
+            // Attendance: who the host, or a guest's own group, saw arrive. Mirrors Program.cs.
+            services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
             services.AddScoped<StorageReconciliationService>();
             // Slice 97: refcount audit/repair.
             services.AddScoped<BlobReferenceAuditService>();

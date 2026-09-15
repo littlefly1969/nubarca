@@ -941,6 +941,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyInvitationDeliveryService, NubArca.Api.Party.PartyInvitationDeliveryService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
+    // Attendance: who the host saw arrive. Owner routes only.
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are
@@ -1551,6 +1553,7 @@ app.MapShareLinkEndpoints();
 app.MapPartyEndpoints();
 app.MapPartyOwnerEndpoints();
 app.MapPartyInvitationEndpoints();
+app.MapPartyAttendanceEndpoints();
 app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();
