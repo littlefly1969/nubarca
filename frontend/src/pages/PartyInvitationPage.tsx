@@ -3,17 +3,20 @@ import { useParams } from 'react-router';
 import {
   ApiError,
   getPartyInvitation,
+  selfCheckInPartyGuest,
   submitPartyRsvp,
+  undoSelfCheckInPartyGuest,
   type PartyGuestContentKind,
   type PartyInvitationViewModel,
   type PartyRsvpWrite,
 } from '@nubarca/api-client';
-import { useI18n } from '../i18n';
+import { useI18n, type MessageKey } from '../i18n';
 import { isOpenablePoster } from '../party/PartyGuestContent';
 import { PartyBeforeHome } from '../party/PartyGuestSurfaces';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
 import { PartyImageViewer } from '../party/PartyImageViewer';
 import { PartyRsvpCard, type PartyRsvpNotice } from '../party/PartyRsvpCard';
+import { PartySelfCheckInCard } from '../party/PartySelfCheckInCard';
 import './PartyGuestHub.css';
 
 // A PERSONAL INVITATION — the same party, reached by one group's own link.
@@ -24,8 +27,11 @@ import './PartyGuestHub.css';
 // is the party itself: the link it was opened with grants no upload, game,
 // print, greeting or face search, so none of those are drawn in any phase —
 // they are not part of what this capability opens, and the server would refuse
-// them. It sets no participant cookie either; scanning the room's QR later is a
-// separate arrival.
+// them. It sets no participant cookie either.
+//
+// While the party is live the group can say "Sono qui" for its own people, and
+// "Entra nel Party" leads to the party's ordinary public page — navigation to
+// the same capability the room's QR opens, never an identity carried across.
 //
 // No login, no polling: an invitation is read, answered, and put away.
 
@@ -42,6 +48,8 @@ export function PartyInvitationPage() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<PartyRsvpNotice | null>(null);
   const [poster, setPoster] = useState<PartyGuestContentKind | null>(null);
+  const [checkingIn, setCheckingIn] = useState<string | null>(null);
+  const [checkInNotice, setCheckInNotice] = useState<MessageKey | null>(null);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) { setState({ kind: 'unavailable' }); return; }
@@ -89,6 +97,35 @@ export function PartyInvitationPage() {
     }
   }, [token]);
 
+  // "Sono qui" and its undo. The answer is the invitation as it now is, in
+  // success and refusal alike — the version does not move, so the reply card
+  // keeps whatever it was showing.
+  const checkIn = useCallback(async (guestId: string, undo: boolean) => {
+    if (!token) return;
+    setCheckingIn(guestId);
+    setCheckInNotice(null);
+    try {
+      const view = undo
+        ? await undoSelfCheckInPartyGuest(token, guestId)
+        : await selfCheckInPartyGuest(token, guestId);
+      setState({ kind: 'ready', view });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const body = err.body as { error?: string; invitation?: PartyInvitationViewModel } | null;
+        if (body?.invitation) setState({ kind: 'ready', view: body.invitation });
+        setCheckInNotice(body?.error === 'attendance_recorded_by_host'
+          ? 'partyRsvp.checkIn.error.byHost'
+          : 'partyRsvp.checkIn.error.closed');
+      } else if (err instanceof ApiError && err.status === 404) {
+        setState({ kind: 'unavailable' });
+      } else {
+        setCheckInNotice('partyRsvp.checkIn.error.generic');
+      }
+    } finally {
+      setCheckingIn(null);
+    }
+  }, [token]);
+
   if (state.kind === 'loading') {
     return (
       <main className="party-guest-hub" aria-busy="true">
@@ -131,6 +168,18 @@ export function PartyInvitationPage() {
           footnote={t('partyRsvp.footnote')}
           onOpenPoster={setPoster}
         >
+          {/* While the party is on, arriving comes before the reply that is
+              now read-only. */}
+          {invitation.canCheckIn && (
+            <PartySelfCheckInCard
+              invitation={invitation}
+              partyUrl={party.partyUrl}
+              busyGuestId={checkingIn}
+              notice={checkInNotice}
+              onCheckIn={(guestId) => void checkIn(guestId, false)}
+              onUndo={(guestId) => void checkIn(guestId, true)}
+            />
+          )}
           {/* Keyed by the SERVER's reply: a save or an adopted conflict is a
               fresh draft, and a failed send — same version — keeps what the
               guest typed. */}

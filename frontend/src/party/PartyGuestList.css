@@ -98,3 +98,34 @@
   .party-guests-person { grid-template-columns: minmax(0, 1fr) auto; }
   .party-guests-person input:not(:first-child) { grid-column: 1 / 2; }
 }
+
+/* Arrivals: a list worked through at a door, one tap per person. */
+
+.party-attendance-people { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+
+.party-attendance-person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+}
+
+.party-attendance-person:last-child { border-bottom: 0; }
+.party-attendance-who { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.party-attendance-name { display: inline-flex; align-items: center; gap: 0.35rem; overflow-wrap: anywhere; }
+.party-attendance-state { font-size: 0.85rem; }
+.party-attendance-actions { display: inline-flex; flex-wrap: wrap; gap: 0.35rem; }
+.party-attendance-subheading { margin: 0.75rem 0 0.25rem; }
+
+.party-attendance-filters { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.party-attendance-filters [aria-pressed='true'] { font-weight: 600; border-color: currentColor; }
+
+.party-attendance-add,
+.party-attendance-edit { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.party-attendance-add input,
+.party-attendance-edit input { flex: 1 1 12rem; min-width: 0; }
+
+.party-guests-manage > summary { font-weight: 600; }

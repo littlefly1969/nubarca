@@ -17,6 +17,8 @@
 // /api/party-invitations/{token}. The latter is not the party's QR token and is
 // never built from one.
 
+import type { PartyAttendanceSource } from './partyAttendance.ts';
+
 // ── Vocabularies ────────────────────────────────────────────────────────────
 
 export const PARTY_RSVP_STATUSES = ['pending', 'attending', 'declined'] as const;
@@ -184,6 +186,10 @@ export interface PartyInvitationGuest {
   isAdditionalGuest: boolean;
   status: PartyRsvpStatus;
   dietaryNotes: string | null;
+  /** THIS person's own arrival; null when not recorded. Never anybody else's. */
+  checkedInAt: string | null;
+  /** `invitation`: the group's own "Sono qui", which it may take back. `owner`: the host's record. */
+  checkInSource: PartyAttendanceSource | null;
 }
 
 export interface PartyInvitationQuestion {
@@ -204,6 +210,8 @@ export interface PartyInvitationRsvp {
   additionalGuestsUsed: number;
   guests: PartyInvitationGuest[];
   questions: PartyInvitationQuestion[];
+  /** "Sono qui" is open: the party is live. */
+  canCheckIn: boolean;
 }
 
 /**
@@ -218,6 +226,12 @@ export interface PartyInvitationView<TContent = unknown> {
     phase: 'before' | 'live' | 'after';
     coverUrl: string | null;
     content: TContent[];
+    /**
+     * "Entra nel Party": the party's own public page, present only while it is
+     * live and that page really opens. The same capability as the room's QR —
+     * navigation, never an identity carried across.
+     */
+    partyUrl: string | null;
   };
   invitation: PartyInvitationRsvp;
 }
@@ -329,7 +343,7 @@ export function rsvpFormProblems(
  * typing "nicolo" is looking for Nicolò.
  */
 export function matchesGuestSearch(group: PartyInvitationGroup, query: string): boolean {
-  const needle = fold(query.trim());
+  const needle = foldSearchText(query.trim());
   if (needle === '') return true;
   const haystack = [
     group.label,
@@ -337,10 +351,11 @@ export function matchesGuestSearch(group: PartyInvitationGroup, query: string): 
     group.phone ?? '',
     ...group.guests.flatMap((g) => [g.name, g.email ?? '', g.phone ?? '']),
   ];
-  return haystack.some((value) => fold(value).includes(needle));
+  return haystack.some((value) => foldSearchText(value).includes(needle));
 }
 
-function fold(value: string): string {
+/** How every host-side search compares text: accents and case folded away. */
+export function foldSearchText(value: string): string {
   return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('en');
 }
 

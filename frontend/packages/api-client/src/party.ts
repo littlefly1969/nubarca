@@ -11,6 +11,18 @@ import type {
   PartyRsvpWrite,
   PartyUploadList,
 } from '@nubarca/contracts';
+import type {
+  PartyAttendance,
+  PartyAttendanceOtherGuestCreate,
+  PartyAttendanceOtherGuestUpdate,
+} from '@nubarca/contracts';
+import {
+  partyAttendanceGuestPath,
+  partyAttendanceOtherGuestPath,
+  partyAttendanceOtherGuestsPath,
+  partyAttendancePath,
+  partyInvitationAttendanceGuestPath,
+} from '@nubarca/contracts';
 import {
   partyGuestListPath,
   partyInvitationGroupActionPath,
@@ -90,6 +102,31 @@ export {
   normalizeQuestionOptions,
   normalizeText,
   rsvpFormProblems,
+} from '@nubarca/contracts';
+
+// Attendance: canonical in @nubarca/contracts as well — the counts' definitions,
+// the door's filters and search, and the source vocabulary.
+export type {
+  PartyAttendance,
+  PartyAttendanceFilter,
+  PartyAttendanceGroup,
+  PartyAttendanceGuest,
+  PartyAttendanceOtherGuest,
+  PartyAttendanceOtherGuestCreate,
+  PartyAttendanceOtherGuestUpdate,
+  PartyAttendanceSource,
+  PartyAttendanceSummary,
+} from '@nubarca/contracts';
+export {
+  PARTY_ATTENDANCE_FILTERS,
+  PARTY_ATTENDANCE_LIMITS,
+  PARTY_ATTENDANCE_SOURCES,
+  attendanceFiltersFor,
+  guestMatchesAttendanceFilter,
+  hasGuestList,
+  otherGuestMatchesAttendanceFilter,
+  unexpectedArrivals,
+  visibleAttendance,
 } from '@nubarca/contracts';
 
 
@@ -1192,10 +1229,52 @@ export function reorderPartyRsvpQuestions(
   });
 }
 
+// --- ATTENDANCE (owner, party.access) ---
+//
+// Who arrived. Every write answers the whole attendance back, so the counts
+// describe the rows. A refusal that describes a state — the party has not
+// started, a name changed meanwhile — is a 409 whose body carries
+// `{ error, attendance }`, which the page adopts.
+
+export function getPartyAttendance(partyId: string, signal?: AbortSignal): Promise<PartyAttendance> {
+  return api<PartyAttendance>(partyAttendancePath(partyId), { signal });
+}
+
+/** "This person arrived." Idempotent: the first moment recorded is kept. */
+export function checkInPartyGuest(partyId: string, guestId: string, signal?: AbortSignal): Promise<PartyAttendance> {
+  return api<PartyAttendance>(partyAttendanceGuestPath(partyId, guestId), { method: 'PUT', signal });
+}
+
+/** "That arrival was recorded by mistake" — a correction, never a check-out. */
+export function undoPartyGuestCheckIn(partyId: string, guestId: string, signal?: AbortSignal): Promise<PartyAttendance> {
+  return api<PartyAttendance>(partyAttendanceGuestPath(partyId, guestId), { method: 'DELETE', signal });
+}
+
+/** Somebody not on the guest list. The request id makes a retry of one add name them once. */
+export function createPartyAttendanceGuest(
+  partyId: string, body: PartyAttendanceOtherGuestCreate, signal?: AbortSignal,
+): Promise<PartyAttendance> {
+  return api<PartyAttendance>(partyAttendanceOtherGuestsPath(partyId), { method: 'POST', json: body, signal });
+}
+
+export function updatePartyAttendanceGuest(
+  partyId: string, attendanceGuestId: string, body: PartyAttendanceOtherGuestUpdate, signal?: AbortSignal,
+): Promise<PartyAttendance> {
+  return api<PartyAttendance>(
+    partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'PUT', json: body, signal });
+}
+
+export function deletePartyAttendanceGuest(
+  partyId: string, attendanceGuestId: string, signal?: AbortSignal,
+): Promise<PartyAttendance> {
+  return api<PartyAttendance>(partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'DELETE', signal });
+}
+
 // --- The PERSONAL INVITATION (anonymous, invitation-token scoped) ---
 //
 // Not the party's QR token and never built from one. It opens one group's
-// invitation and reply, and no upload, game, print or greeting.
+// invitation and reply, and — while the party is live — its own people's
+// "Sono qui". No upload, game, print or greeting.
 
 /** What a personal link opens, with this client's own guest-content slot shape. */
 export type PartyInvitationViewModel = PartyInvitationView<PartyGuestContentView>;
@@ -1213,6 +1292,28 @@ export function submitPartyRsvp(
   token: string, reply: PartyRsvpWrite, signal?: AbortSignal,
 ): Promise<PartyInvitationViewModel> {
   return api<PartyInvitationViewModel>(partyInvitationRsvpPath(token), { method: 'PUT', json: reply, signal });
+}
+
+/**
+ * "Sono qui" for one of the group's own people, while the party is live. It
+ * answers with the invitation as it now is; a 409 carries `{ error, invitation }`
+ * (`attendance_not_open`). It mints no participant: entering the party is a
+ * separate step through the party's own public page.
+ */
+export function selfCheckInPartyGuest(
+  token: string, guestId: string, signal?: AbortSignal,
+): Promise<PartyInvitationViewModel> {
+  return api<PartyInvitationViewModel>(partyInvitationAttendanceGuestPath(token, guestId), { method: 'PUT', signal });
+}
+
+/**
+ * Takes back the group's OWN "Sono qui". An arrival the host recorded is
+ * refused with `attendance_recorded_by_host`: only the host corrects it.
+ */
+export function undoSelfCheckInPartyGuest(
+  token: string, guestId: string, signal?: AbortSignal,
+): Promise<PartyInvitationViewModel> {
+  return api<PartyInvitationViewModel>(partyInvitationAttendanceGuestPath(token, guestId), { method: 'DELETE', signal });
 }
 
 // The UPLOAD token, not the view token: writing is contributing, and the same

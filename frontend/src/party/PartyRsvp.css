@@ -125,3 +125,40 @@
 .party-rsvp-answers { margin: 0; display: grid; gap: 0.5rem; }
 .party-rsvp-answers dt { color: var(--party-hub-muted); font-size: 0.9rem; }
 .party-rsvp-answers dd { margin: 0; }
+
+/* "Sono qui": one row per person of the group, a big target for a thumb at a
+   door, and the way into the party's own page underneath. */
+
+.party-checkin-people { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.6rem; }
+
+.party-checkin-person {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 0.75rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--party-hub-border);
+}
+
+.party-checkin-person:last-child { border-bottom: 0; }
+.party-checkin-name { display: inline-flex; align-items: center; gap: 0.35rem; overflow-wrap: anywhere; }
+.party-checkin-state { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; color: var(--party-hub-muted); }
+
+.party-checkin-here {
+  font: inherit;
+  font-weight: 600;
+  min-height: 44px;
+  padding: 0.5rem 1.1rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  cursor: pointer;
+}
+
+.party-checkin-here:disabled { opacity: 0.55; cursor: default; }
+.party-checkin-here:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 3px; }
+
+.party-checkin-enter-block { display: grid; gap: 0.4rem; }
+.party-checkin-enter { display: inline-block; text-align: center; text-decoration: none; }
