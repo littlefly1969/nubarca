@@ -113,6 +113,13 @@ public class AppDbContext : DbContext
     public DbSet<PartyRsvpAnswer> PartyRsvpAnswers => Set<PartyRsvpAnswer>();
     public DbSet<PartyInvitationDelivery> PartyInvitationDeliveries => Set<PartyInvitationDelivery>();
 
+    // Attendance: who the host saw ARRIVE — a guest on the list, or anybody
+    // else. A third fact beside the RSVP (what was declared) and the
+    // PartyParticipant (the anonymous browser), bound to neither — see
+    // PartyAttendance.cs. The guest list itself stays optional.
+    public DbSet<PartyGuestAttendance> PartyGuestAttendances => Set<PartyGuestAttendance>();
+    public DbSet<PartyAttendanceGuest> PartyAttendanceGuests => Set<PartyAttendanceGuest>();
+
     // PUBLIC read-only party access links (token hash only). A CAPABILITY over
     // a party: PartyId is its identity, while OwnerUserId/AlbumId remain as a
     // compatibility projection of the party and its main media source.
