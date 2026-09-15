@@ -335,6 +335,16 @@ var beautyLabUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLim
 // one NAT shares a bucket; the limit is set high enough for that.
 var partyMessagePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyMessage:PermitLimit") ?? 20;
 var partyMessageWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyMessage:WindowSeconds") ?? 60;
+// A personal invitation's RSVP is a WRITE, from somebody holding a link from
+// their own mailbox. A family replying, changing its mind and fixing a typo is a
+// handful of saves; tighter than reading the party, looser than a greeting.
+var partyRsvpPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyRsvp:PermitLimit") ?? 30;
+var partyRsvpWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyRsvp:WindowSeconds") ?? 60;
+// Invitation EMAILS leave through the operator's SMTP relay, one per click, so
+// this bounds what a single host account can send. Not a campaign throttle:
+// there is no queue behind it, and a refusal is a refusal.
+var partyInvitationSendPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationSend:PermitLimit") ?? 60;
+var partyInvitationSendWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationSend:WindowSeconds") ?? 600;
 // Anonymous party FACE SEARCH runs face detection + embedding per request, the
 // most expensive public party operation, so it gets the tightest per-IP window.
 // The live game is CONTINUOUS traffic on one Wi-Fi network, so it is limited
@@ -603,6 +613,33 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = partyMessagePermitLimit,
                 Window = TimeSpan.FromSeconds(partyMessageWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // Per address, like every other public Party surface.
+    options.AddPolicy(NubArca.Api.Endpoints.PartyInvitationEndpoints.RsvpRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyRsvpPermitLimit,
+                Window = TimeSpan.FromSeconds(partyRsvpWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // Per HOST account (the routes are authenticated), so two hosts behind one
+    // address do not share a mail budget. The address fallback only keeps the
+    // partition key from being empty.
+    options.AddPolicy(NubArca.Api.Endpoints.PartyInvitationEndpoints.SendRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.GetCurrentUserId()?.ToString()
+                ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyInvitationSendPermitLimit,
+                Window = TimeSpan.FromSeconds(partyInvitationSendWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
@@ -885,6 +922,15 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
+    // The guest list: invitation groups, their personal RSVP capability, the
+    // host's questions and the invitation ledger. The token helper is a
+    // singleton for the same reason PartyGuestIdentity is: key material, no
+    // state.
+    builder.Services.AddSingleton<NubArca.Api.Party.PartyInvitationTokens>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyInvitationService, NubArca.Api.Party.PartyInvitationService>();
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyInvitationDeliveryService, NubArca.Api.Party.PartyInvitationDeliveryService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are
@@ -1494,6 +1540,7 @@ app.MapShareLinkEndpoints();
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
 app.MapPartyOwnerEndpoints();
+app.MapPartyInvitationEndpoints();
 app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();

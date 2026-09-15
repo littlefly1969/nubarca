@@ -28,7 +28,7 @@ public sealed class PartyLinkService : IPartyLinkService
     // issued party QR/link signed WITHOUT a configured secret. Production
     // configures Party__TokenSecret, so this fallback is a dev/test convenience
     // there rather than live key material.
-    private const string DefaultSecret = "nubarca-party-token-secret-v1";
+    internal const string DefaultSecret = "nubarca-party-token-secret-v1";
 
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;

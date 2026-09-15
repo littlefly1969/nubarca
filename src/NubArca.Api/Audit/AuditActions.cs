@@ -220,6 +220,17 @@ public static class AuditActions
     public const string PartyStartLive = "party.start_live";
     public const string PartyEndLive = "party.end_live";
 
+    // The guest list. Every line names the party and, where there is one, the
+    // invitation group by id — never a name, an address, a phone number, an
+    // answer, a token or a link. A delivery line records its kind and outcome,
+    // which is the whole of what an operator needs to see that mail is failing.
+    public const string PartyInvitationGroupCreate = "party.invitation_group.create";
+    public const string PartyInvitationGroupDelete = "party.invitation_group.delete";
+    public const string PartyInvitationRotate = "party.invitation.rotate";
+    public const string PartyInvitationSend = "party.invitation.send";
+    public const string PartyRsvpQuestionCreate = "party.rsvp_question.create";
+    public const string PartyRsvpQuestionUpdate = "party.rsvp_question.update";
+
     // Public read-only party album links. Enable/revoke are owner actions;
     // public_view is logged on an anonymous album open (no token/hash recorded).
     public const string PartyEnable = "party.enable";

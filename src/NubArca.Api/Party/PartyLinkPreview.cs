@@ -71,7 +71,7 @@ public static class PartyLinkPreview
     /// Month names are spelled out here rather than taken from a culture, so the
     /// card reads the same on a container built without ICU.
     /// </summary>
-    private static string FormatDay(DateTime at, bool english)
+    internal static string FormatDay(DateTime at, bool english)
     {
         var local = TimeZoneInfo.ConvertTimeFromUtc(
             DateTime.SpecifyKind(at, DateTimeKind.Utc), TimeZoneInfo.Local);
