@@ -19,6 +19,7 @@ import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
 import { PartyAlbumSection } from '../party/PartyAlbumSection';
 import { PartyGuestAccessSection } from '../party/PartyGuestAccessSection';
+import { PartyGuestListTab } from '../party/PartyGuestListTab';
 import { PartyLiveTab } from '../party/PartyLiveTab';
 import { PartyContentCard } from '../party/PartyContentEditors';
 import { PartyCoverCard } from '../party/PartyCoverCard';
@@ -43,10 +44,12 @@ import '../party/Party.css';
 // id down; nothing here mints a token, moderates a photograph or configures a
 // printer of its own.
 
-// Five tabs, and every one of them has content. There were three until the
-// party had something to say beforehand and afterwards; a tab that promises
-// what the product cannot do is worse than no tab.
-type Tab = 'overview' | 'before' | 'live' | 'after' | 'photos';
+// Six tabs, and every one of them has content. There were three until the
+// party had something to say beforehand and afterwards, and five until it had a
+// guest list; a tab that promises what the product cannot do is worse than no
+// tab. The guest list sits between Before and Live because that is when it is
+// worked on: after the invitation is written, before the evening.
+type Tab = 'overview' | 'before' | 'guests' | 'live' | 'after' | 'photos';
 
 type Status =
   | { kind: 'loading' }
@@ -203,7 +206,7 @@ export function PartyWorkspacePage() {
       {/* A tablist, not a row of links: arrow keys and roving focus are what
           make this usable without a mouse. */}
       <div className="party-tabs" role="tablist" aria-label={t('party.title')}>
-        {(['overview', 'before', 'live', 'after', 'photos'] as const).map((id) => (
+        {(['overview', 'before', 'guests', 'live', 'after', 'photos'] as const).map((id) => (
           <button
             key={id} type="button" role="tab" id={`party-tab-${id}`}
             aria-selected={tab === id} aria-controls={`party-panel-${id}`}
@@ -246,6 +249,12 @@ export function PartyWorkspacePage() {
               phases={['before', 'live']}
             />
           </div>
+        )}
+        {tab === 'guests' && (
+          <PartyGuestListTab
+            party={party}
+            onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
+          />
         )}
         {tab === 'after' && (
           <div className="party-overview">

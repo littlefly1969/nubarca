@@ -14,14 +14,25 @@ import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './P
 // for as long as they last.
 
 export function PartyBeforeHome({
-  context, onOpenPoster, topBar,
+  context, onOpenPoster, topBar, eyebrow, children, footnote,
 }: {
-  context: PartyGuestContext;
+  /** Only what the invitation draws — so a personal invitation, which is not a
+   * party context, is drawn by the same composition rather than a copy of it. */
+  context: Pick<PartyGuestContext, 'title' | 'eventStartsAt' | 'coverUrl' | 'content'>;
   onOpenPoster?(kind: PartyGuestContentKind): void;
   /** The brand row, drawn INSIDE the cover exactly as it is at the party. */
   topBar?: ReactNode;
+  /** The line above the title. "You're invited" unless the caller knows better. */
+  eyebrow?: string;
+  /** Composed between the cover and what the host wrote — a personal
+   * invitation's reply. The party's own page passes nothing. */
+  children?: ReactNode;
+  /** The closing line. The QR's page promises it becomes the party; a personal
+   * invitation cannot promise that, so it says its own. Null draws none. */
+  footnote?: ReactNode;
 }) {
   const { t, formatDate } = useI18n();
+  const closing = footnote === undefined ? t('partyGuest.savePage') : footnote;
   return (
     <div className="party-invitation" data-testid="party-before">
       {/* THE SAME COVER AS THE PARTY, drawn the way the party draws its own —
@@ -43,7 +54,7 @@ export function PartyBeforeHome({
         {/* "You're invited", the name and the date come FIRST, on the picture,
             and what the host wrote follows below. */}
         <div className="party-guest-hub-headline">
-          <p className="party-guest-hub-eyebrow">{t('partyGuest.invited')}</p>
+          <p className="party-guest-hub-eyebrow">{eyebrow ?? t('partyGuest.invited')}</p>
           <h1 className="party-guest-hub-title">{context.title}</h1>
           {context.eventStartsAt && (
             <p className="party-guest-hub-meta party-invitation-date">
@@ -58,12 +69,14 @@ export function PartyBeforeHome({
       </header>
 
       <div className="party-invitation-body">
+        {children}
+
         {/* The invitation's own photograph is part of what it SAYS: it sits in
             its section above the words, or opens whole from its row, by the
             same rules as every other slot — never up in the cover. */}
         <PartyGuestContentSections slots={context.content} onOpenPoster={onOpenPoster} />
 
-        <p className="party-invitation-footnote">{t('partyGuest.savePage')}</p>
+        {closing !== null && <p className="party-invitation-footnote">{closing}</p>}
       </div>
     </div>
   );

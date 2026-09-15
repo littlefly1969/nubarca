@@ -13,3 +13,4 @@ export * from './mediaWorkspace.ts';
 export * from './mediaSelection.ts';
 export * from './sharing.ts';
 export * from './party.ts';
+export * from './partyRsvp.ts';
