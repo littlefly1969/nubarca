@@ -861,6 +861,8 @@ const it = {
   'party.console.loadingMore': 'Carico altri ospiti…',
   'party.console.loadMoreError': 'Non è stato possibile caricare altri ospiti.',
   'party.console.noResults': 'Nessun ospite corrisponde.',
+  'party.console.noResultsTitle': 'Nessun risultato',
+  'party.console.empty.arrivalsTitle': 'Ancora nessun arrivo',
   'party.console.noResultsFor': 'Nessun ospite corrisponde a «{query}».',
   'party.console.clearFilters': 'Azzera ricerca e filtri',
   'party.console.open.heading': 'La festa è aperta',
