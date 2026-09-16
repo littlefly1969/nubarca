@@ -19,6 +19,9 @@ public sealed record PartyGuestListDto(
     // configured AND a public origin to build the link on. False is a state the
     // host is told about, never a send that silently fails.
     bool MailAvailable,
+    // Whether the personal link can be handed to the host at all (WhatsApp,
+    // copy): a public origin to build it on. SMTP is not needed for it.
+    bool ShareAvailable,
     PartyRsvpSummaryDto Summary,
     IReadOnlyList<PartyInvitationGroupDto> Groups,
     IReadOnlyList<PartyRsvpQuestionDto> Questions);
@@ -57,7 +60,10 @@ public sealed record PartyInvitationGroupDto(
     IReadOnlyList<PartyRsvpAnswerDto> Answers,
     PartyInvitationDeliveryStateDto Delivery,
     bool CanSend,
-    bool CanRemind);
+    bool CanRemind,
+    // The link may be handed to the host to share (WhatsApp, copy): the party
+    // still takes invitations and the installation has a public origin.
+    bool CanShare);
 
 public sealed record PartyGuestDto(
     Guid Id,
@@ -73,16 +79,22 @@ public sealed record PartyRsvpAnswerDto(Guid QuestionId, JsonElement Value);
 
 /// <summary>
 /// Where the CURRENT link generation stands. A rotation starts it again at
-/// <c>not_sent</c>: an email that carried a dead link did not invite anybody.
-/// <c>pending</c> is "not confirmed" — the attempt was recorded and its outcome
-/// never was — and is shown as exactly that.
+/// <c>not_sent</c>: a delivery that carried a dead link invited nobody.
+/// <c>sent</c>: an email SMTP accepted. <c>shared</c>: no such email, but the
+/// link was handed to the host (WhatsApp, copy) — which is not proof of a
+/// message. <c>pending</c> is "not confirmed" — an email attempt was recorded and
+/// its outcome never was — and is shown as exactly that.
+///
+/// <para>The <c>LastAttempt*</c> fields describe the most recent delivery of
+/// the current link on ANY channel: the one line a list card shows.</para>
 /// </summary>
 public sealed record PartyInvitationDeliveryStateDto(
     string State,
     DateTime? LastAttemptAt,
     string? LastAttemptKind,
     string? LastAttemptStatus,
-    DateTime? LastSentAt);
+    DateTime? LastSentAt,
+    string? LastAttemptChannel);
 
 public static class PartyInvitationDeliveryStates
 {
@@ -90,6 +102,7 @@ public static class PartyInvitationDeliveryStates
     public const string Pending = "pending";
     public const string Sent = "sent";
     public const string Failed = "failed";
+    public const string Shared = "shared";
 }
 
 public sealed record PartyRsvpQuestionDto(
@@ -114,6 +127,27 @@ public sealed record PartyInvitationDeliveryDto(
     DateTime? CompletedAt,
     // True when this request's id had already been used: the answer is the
     // earlier attempt, and nothing was sent again.
+    bool Replayed,
+    string Channel);
+
+/// <summary>
+/// The personal link handed to the HOST, to share themselves. Returned only on
+/// the owner's share route, <c>no-store</c>, and never persisted, logged or
+/// audited: the ledger keeps that it was shared, not what.
+/// </summary>
+public sealed record PartyInvitationShareDto(
+    string Channel,
+    string Kind,
+    // Always "shared": NubArca handed the link over. Not sent, delivered or read.
+    string Status,
+    // The group's current personal invitation, on the operator's public origin.
+    string Url,
+    // The message, composed in the host's language.
+    string Text,
+    // WhatsApp click-to-chat for the whatsapp channel (a direct chat only for a
+    // certain international number), null for copy.
+    string? WhatsappUrl,
+    DateTime CreatedAt,
     bool Replayed);
 
 public sealed record PartyInvitationGroupWrite(
@@ -145,6 +179,8 @@ public enum PartyInvitationOutcome
     ReminderNotAllowed,
     MailUnavailable,
     PartyVersionConflict,
+    // No public origin to build a personal link on, so there is nothing to share.
+    LinkUnavailable,
 }
 
 public sealed record PartyInvitationResult(
@@ -152,13 +188,25 @@ public sealed record PartyInvitationResult(
     PartyGuestListDto? GuestList = null,
     string? Error = null,
     // An update that changed the recipient address also replaced the link.
-    bool LinkRotated = false);
+    bool LinkRotated = false,
+    // The group this call created or changed, so a caller that asked for no
+    // list still learns which row it is.
+    Guid? GroupId = null);
 
 public sealed record PartyInvitationSendResult(
     PartyInvitationOutcome Outcome,
     PartyInvitationDeliveryDto? Delivery = null,
     PartyGuestListDto? GuestList = null,
     PartyDto? Party = null,
+    string? Error = null);
+
+public sealed record PartyInvitationShareResult(
+    PartyInvitationOutcome Outcome,
+    PartyInvitationShareDto? Share = null,
+    PartyDto? Party = null,
+    // The group as the directory now lists it, so the page updates one card.
+    // Typed as the union so it serializes with its "kind", like a page's items.
+    PartyGuestDirectoryItemDto? Item = null,
     string? Error = null);
 
 // --- PUBLIC (the personal invitation capability) ----------------------------
@@ -320,6 +368,16 @@ public interface IPartyInvitationDeliveryService
 
     Task<PartyInvitationSendResult> RemindAsync(
         Guid ownerUserId, Guid partyId, Guid groupId, Guid clientRequestId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hands the group's CURRENT personal link to the host to share themselves
+    /// (<c>whatsapp</c> or <c>copy</c>), and records that it did. Idempotent by
+    /// request id, and — like the first email — publishes a Draft through the
+    /// lifecycle, quoting the party version the page read.
+    /// </summary>
+    Task<PartyInvitationShareResult> ShareAsync(
+        Guid ownerUserId, Guid partyId, Guid groupId, string? channel, Guid clientRequestId, int? partyVersion,
         CancellationToken cancellationToken = default);
 }
 

@@ -49,11 +49,22 @@ public class PartyInvitationGroup
     /// </summary>
     public string RecipientEmail { get; set; } = string.Empty;
 
-    /// <summary>For the host's own records. Nothing sends to it.</summary>
+    /// <summary>
+    /// The group's number. NubArca never sends to it: when it is written in an
+    /// unambiguous international form, the host's own WhatsApp share opens a chat
+    /// with it directly; otherwise WhatsApp asks the host whom to send to.
+    /// </summary>
     public string? Phone { get; set; }
 
     /// <summary>How many guests the group may bring beyond the named ones.</summary>
     public int MaxAdditionalGuests { get; set; }
+
+    /// <summary>
+    /// The owner's search cache for this row: label, address and phone folded by
+    /// <see cref="PartySearchText"/>. Derived, never shown, rewritten by every
+    /// write that changes what it folds.
+    /// </summary>
+    public string SearchText { get; set; } = string.Empty;
 
     /// <summary>The current link generation's derivation input. Never exposed.</summary>
     public Guid CapabilityId { get; set; }
@@ -90,6 +101,9 @@ public class PartyGuest
 
     public bool IsAdditionalGuest { get; set; }
     public int SortOrder { get; set; }
+
+    /// <summary>Name, address and phone folded by <see cref="PartySearchText"/>. Derived.</summary>
+    public string SearchText { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -157,19 +171,27 @@ public class PartyRsvpAnswer
 }
 
 /// <summary>
-/// One outbound invitation email, and the idempotency ledger that keeps a
-/// double click from sending two.
+/// One time the personal link left NubArca, and the idempotency ledger that
+/// keeps a double click from doing it twice.
 ///
-/// <para>The row is committed <c>pending</c> BEFORE the message is handed to
-/// SMTP and completed afterwards. A retry with the same
+/// <para>THREE CHANNELS, ONE LINK. An <c>email</c> is sent by NubArca; a
+/// <c>whatsapp</c> or <c>copy</c> share is the link handed to the HOST, who
+/// sends it themselves. So the statuses differ, and they mean different things:
+/// an email is <c>pending</c>, then <c>sent</c> (SMTP accepted it) or
+/// <c>failed</c>; a share is <c>shared</c> the moment the host has the link —
+/// which says nothing about whether a message was sent, delivered or read.
+/// NubArca never learns that, and never pretends to.</para>
+///
+/// <para>An email row is committed <c>pending</c> BEFORE the message is handed
+/// to SMTP and completed afterwards. A retry with the same
 /// <see cref="ClientRequestId"/> finds the row and sends nothing, whatever state
 /// it is in; a process that died after SMTP accepted the message leaves it
 /// <c>pending</c>, which the host sees as "not confirmed" — never as a failure
 /// that invites a duplicate, and never as a success nobody observed.</para>
 ///
-/// <para>It holds no address, no body, no SMTP reply and no token. The
+/// <para>It holds no address, no phone, no body, no SMTP reply and no token. The
 /// capability generation it carried is recorded so a rotation can tell which
-/// sends still describe the current link.</para>
+/// deliveries still describe the current link.</para>
 /// </summary>
 public class PartyInvitationDelivery
 {
@@ -179,8 +201,11 @@ public class PartyInvitationDelivery
     /// <summary>Minted by the caller, once per click.</summary>
     public Guid ClientRequestId { get; set; }
 
-    /// <summary>The capability generation embedded in this email.</summary>
+    /// <summary>The capability generation this delivery carried.</summary>
     public Guid CapabilityId { get; set; }
+
+    /// <summary>How the link left — see <see cref="PartyInvitationDeliveryChannels"/>.</summary>
+    public string Channel { get; set; } = PartyInvitationDeliveryChannels.Email;
 
     public string Kind { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
@@ -212,6 +237,18 @@ public static class PartyRsvpQuestionKinds
     public static bool IsKnown(string? kind) => kind is ShortText or SingleChoice or YesNo;
 }
 
+/// <summary>When the personal link may leave NubArca.</summary>
+public static class PartyInvitationPolicy
+{
+    /// <summary>
+    /// While the party is being prepared or announced. A Draft is published by
+    /// its first invitation; once the party is live or over, nobody is invited
+    /// any more — on any channel.
+    /// </summary>
+    public static bool TakesInvitations(string? partyStatus) =>
+        partyStatus is PartyStatuses.Draft or PartyStatuses.Published;
+}
+
 public static class PartyInvitationDeliveryKinds
 {
     public const string Initial = "initial";
@@ -219,11 +256,48 @@ public static class PartyInvitationDeliveryKinds
     public const string Reminder = "reminder";
 }
 
+/// <summary>
+/// Closed, and held by the database: a fourth channel is a slice that decides
+/// what it may do and what its statuses mean.
+/// </summary>
+public static class PartyInvitationDeliveryChannels
+{
+    /// <summary>NubArca emails the link, through the operator's SMTP relay.</summary>
+    public const string Email = "email";
+
+    /// <summary>The host is handed a WhatsApp click-to-chat link and sends it themselves.</summary>
+    public const string WhatsApp = "whatsapp";
+
+    /// <summary>The host copies the link and sends it however they like.</summary>
+    public const string Copy = "copy";
+
+    public static bool IsKnown(string? channel) => channel is Email or WhatsApp or Copy;
+
+    /// <summary>A channel whose delivery is the host's own act, recorded as <c>shared</c>.</summary>
+    public static bool IsShare(string? channel) => channel is WhatsApp or Copy;
+}
+
 public static class PartyInvitationDeliveryStatuses
 {
     public const string Pending = "pending";
     public const string Sent = "sent";
     public const string Failed = "failed";
+
+    /// <summary>
+    /// A share: NubArca handed the link to the host. NOT "sent", "delivered" or
+    /// "read" — nothing here can know any of those.
+    /// </summary>
+    public const string Shared = "shared";
+
+    /// <summary>
+    /// Whether a delivery INVITED the group on the link it carried: an email
+    /// SMTP accepted, or a link handed to the host to share — never a reminder,
+    /// never an attempt that failed or was not confirmed. One definition for the
+    /// initial/resend distinction, the reminder rule and the "not yet invited"
+    /// filter.
+    /// </summary>
+    public static bool IsInvitation(string kind, string status) =>
+        kind != PartyInvitationDeliveryKinds.Reminder && status is Sent or Shared;
 }
 
 /// <summary>

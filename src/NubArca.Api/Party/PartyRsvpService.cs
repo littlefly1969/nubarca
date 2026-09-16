@@ -392,6 +392,7 @@ public sealed class PartyRsvpService : IPartyRsvpService
             {
                 var guest = extraGuests[id];
                 guest.Name = extra.Name;
+                guest.SearchText = PartySearchText.ForGuest(extra.Name, guest.Email, guest.Phone);
                 guest.SortOrder = i;
                 guest.UpdatedAt = now;
                 if (extraRsvps.TryGetValue(id, out var rsvp))
@@ -413,6 +414,7 @@ public sealed class PartyRsvpService : IPartyRsvpService
                     Id = newId,
                     PartyInvitationGroupId = access.GroupId,
                     Name = extra.Name,
+                    SearchText = PartySearchText.ForGuest(extra.Name, null, null),
                     IsAdditionalGuest = true,
                     SortOrder = i,
                     CreatedAt = now,

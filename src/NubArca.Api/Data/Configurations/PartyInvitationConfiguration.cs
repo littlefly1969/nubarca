@@ -30,6 +30,10 @@ public sealed class PartyInvitationGroupConfiguration : IEntityTypeConfiguration
         builder.Property(g => g.Label).IsRequired().HasMaxLength(PartyInvitationLimits.MaxLabelLength);
         builder.Property(g => g.RecipientEmail).IsRequired().HasMaxLength(PartyInvitationLimits.MaxEmailLength);
         builder.Property(g => g.Phone).HasMaxLength(PartyInvitationLimits.MaxPhoneLength);
+        // TEXT with an empty default: a derived cache, bounded by the fields it
+        // folds, and empty only for a row nothing has folded yet — which the
+        // startup reconciler repairs.
+        builder.Property(g => g.SearchText).IsRequired().HasColumnType("text").HasDefaultValue(string.Empty);
         builder.Property(g => g.TokenHash).IsRequired().HasMaxLength(64);
         builder.Property(g => g.Version).HasDefaultValue(1);
         builder.Property(g => g.CapabilityIssuedAt).HasColumnType("timestamp with time zone");
@@ -62,6 +66,7 @@ public sealed class PartyGuestConfiguration : IEntityTypeConfiguration<PartyGues
         builder.Property(g => g.Name).IsRequired().HasMaxLength(PartyInvitationLimits.MaxGuestNameLength);
         builder.Property(g => g.Email).HasMaxLength(PartyInvitationLimits.MaxEmailLength);
         builder.Property(g => g.Phone).HasMaxLength(PartyInvitationLimits.MaxPhoneLength);
+        builder.Property(g => g.SearchText).IsRequired().HasColumnType("text").HasDefaultValue(string.Empty);
         builder.Property(g => g.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(g => g.UpdatedAt).HasColumnType("timestamp with time zone");
 
@@ -185,8 +190,22 @@ public sealed class PartyInvitationDeliveryConfiguration : IEntityTypeConfigurat
                 "ck_party_invitation_deliveries_kind",
                 "\"Kind\" IN ('initial', 'resend', 'reminder')");
             t.HasCheckConstraint(
+                "ck_party_invitation_deliveries_channel",
+                "\"Channel\" IN ('email', 'whatsapp', 'copy')");
+            t.HasCheckConstraint(
                 "ck_party_invitation_deliveries_status",
-                "\"Status\" IN ('pending', 'sent', 'failed')");
+                "\"Status\" IN ('pending', 'sent', 'failed', 'shared')");
+            // Each channel speaks only its own statuses: an email is attempted
+            // and then sent or failed; a share is the link handed to the host,
+            // and can be nothing but shared. So a "sent" WhatsApp — a claim
+            // NubArca could never make — cannot be stored.
+            t.HasCheckConstraint(
+                "ck_party_invitation_deliveries_channel_status",
+                "(\"Channel\" = 'email') = (\"Status\" IN ('pending', 'sent', 'failed'))");
+            // A reminder is an email NubArca sends, never a share.
+            t.HasCheckConstraint(
+                "ck_party_invitation_deliveries_channel_kind",
+                "\"Channel\" = 'email' OR \"Kind\" <> 'reminder'");
             // A completed delivery says when; a pending one cannot.
             t.HasCheckConstraint(
                 "ck_party_invitation_deliveries_completion",
@@ -195,6 +214,13 @@ public sealed class PartyInvitationDeliveryConfiguration : IEntityTypeConfigurat
         builder.HasKey(d => d.Id);
         builder.Property(d => d.Id).ValueGeneratedNever();
 
+        // Every row written before the channel existed was an email, and the
+        // default keeps an application that does not know the column writing
+        // exactly that.
+        builder.Property(d => d.Channel)
+            .IsRequired()
+            .HasMaxLength(16)
+            .HasDefaultValue(PartyInvitationDeliveryChannels.Email);
         builder.Property(d => d.Kind).IsRequired().HasMaxLength(16);
         builder.Property(d => d.Status).IsRequired().HasMaxLength(16);
         builder.Property(d => d.CreatedAt).HasColumnType("timestamp with time zone");

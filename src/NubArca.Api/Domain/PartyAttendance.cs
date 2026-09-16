@@ -88,6 +88,9 @@ public class PartyAttendanceGuest
 
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>The name folded by <see cref="PartySearchText"/>. Derived.</summary>
+    public string SearchText { get; set; } = string.Empty;
+
     public Guid ClientRequestId { get; set; }
 
     public DateTime CheckedInAt { get; set; }

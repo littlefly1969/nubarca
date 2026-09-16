@@ -145,7 +145,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "Login", "Share", "ExportCreate", "VaultUnlock",
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
-                "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend",
+                "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend", "PartyInvitationShare",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
@@ -317,6 +317,10 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 NubArca.Api.Party.IPartyInvitationDeliveryService,
                 NubArca.Api.Party.PartyInvitationDeliveryService>();
             services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
+            // The host's guest console: the directory in pages, one group on demand.
+            services.AddScoped<
+                NubArca.Api.Party.IPartyGuestDirectoryService,
+                NubArca.Api.Party.PartyGuestDirectoryService>();
             // Attendance: who the host, or a guest's own group, saw arrive. Mirrors Program.cs.
             services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
             services.AddScoped<StorageReconciliationService>();

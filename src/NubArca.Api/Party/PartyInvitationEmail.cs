@@ -112,6 +112,7 @@ public static class PartyInvitationEmail
                   """);
     }
 
-    private static string OneLine(string value) =>
+    /// <summary>The host's text on one line — for a header, or the first line of a shared message.</summary>
+    internal static string OneLine(string value) =>
         string.Join(' ', value.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
 }

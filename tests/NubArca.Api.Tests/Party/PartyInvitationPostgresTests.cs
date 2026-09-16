@@ -120,7 +120,10 @@ public sealed class PartyInvitationPostgresTests : IAsyncLifetime
         new(db, TimeProvider.System,
             // Teardown is not exercised here, so the file lifecycle it would use is absent.
             new PartyService(db, TimeProvider.System, new PartyStateEraser(db), null!),
-            Invitations(db), _tokens, _email, Mail(), NullLogger<PartyInvitationDeliveryService>.Instance);
+            Invitations(db),
+            new PartyGuestDirectoryService(
+                db, _email, Mail(), new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()),
+            _tokens, _email, Mail(), NullLogger<PartyInvitationDeliveryService>.Instance);
 
     private static StaticOptionsMonitor<MailOptions> Mail() =>
         new(new MailOptions { Enabled = true, FromAddress = "party@example.com", PublicOrigin = Origin });

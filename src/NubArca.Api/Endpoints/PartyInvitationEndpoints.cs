@@ -26,6 +26,7 @@ public static class PartyInvitationEndpoints
 {
     internal const string RsvpRateLimitPolicy = "party-rsvp";
     internal const string SendRateLimitPolicy = "party-invitation-send";
+    internal const string ShareRateLimitPolicy = "party-invitation-share";
     private const string PartyPublicRateLimitPolicy = "party-public";
     private const string PartyPublicMediaRateLimitPolicy = "party-public-media";
 
@@ -44,7 +45,28 @@ public static class PartyInvitationEndpoints
     /// </summary>
     public sealed record SendRequest(Guid ClientRequestId, int? PartyVersion = null);
 
+    /// <summary>
+    /// One click of WhatsApp or Copia link: the channel, the click's id (reused
+    /// for its retries) and, for a Draft, the party version the page read.
+    /// </summary>
+    public sealed record ShareRequest(string? Channel, Guid ClientRequestId, int? PartyVersion = null);
+
     public sealed record VersionRequest(int Version);
+
+    /// <summary>
+    /// A guest-list mutation's answer under <c>Prefer: return=minimal</c>: the
+    /// list's header — status, availability, counts, questions — without its
+    /// groups, and which group the call touched.
+    /// </summary>
+    public sealed record GuestListMinimal(
+        Guid PartyId,
+        string PartyStatus,
+        bool MailAvailable,
+        bool ShareAvailable,
+        PartyRsvpSummaryDto Summary,
+        IReadOnlyList<PartyRsvpQuestionDto> Questions,
+        Guid? GroupId,
+        bool LinkRotated);
 
     public sealed record QuestionRequest(
         string? Prompt,
@@ -94,7 +116,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { namedGuests = body.Guests?.Count ?? 0 }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("CreatePartyInvitationGroup").RequirePermission(Permissions.PartyAccess);
 
         // PUT because it states the group whole — its named guests included. The
@@ -120,7 +142,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { invitationGroupId = groupId, reason = "recipient_changed" }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("UpdatePartyInvitationGroup").RequirePermission(Permissions.PartyAccess);
 
         app.MapDelete("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}", async (
@@ -142,7 +164,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { invitationGroupId = groupId }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("DeletePartyInvitationGroup").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}/rotate-link", async (
@@ -165,7 +187,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { invitationGroupId = groupId, reason = "owner" }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("RotatePartyInvitationLink").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}/send", async (
@@ -183,10 +205,51 @@ public static class PartyInvitationEndpoints
             var result = await deliveries.SendAsync(
                 ownerUserId, partyId, groupId, body.ClientRequestId, body.PartyVersion, cancellationToken);
             await AuditDeliveryAsync(httpContext, audit, ownerUserId, partyId, groupId, result, cancellationToken);
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("SendPartyInvitation")
             .RequirePermission(Permissions.PartyAccess)
             .RequireRateLimiting(SendRateLimitPolicy);
+
+        // WhatsApp and Copia link: the group's CURRENT personal link, handed to
+        // the host to share themselves, and the ledger row that records that it
+        // was. The answer carries the link, the message and the click-to-chat
+        // URL — owner-only, no-store, and never logged or audited. The same
+        // personal capability as the email; there is no second kind of link.
+        app.MapPost("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}/share", async (
+            Guid partyId,
+            Guid groupId,
+            HttpContext httpContext,
+            [FromServices] IPartyInvitationDeliveryService deliveries,
+            [FromServices] IAuditLogger audit,
+            [FromBody] ShareRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            if (body is null) return Results.BadRequest(new { error = "invalid_request" });
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var result = await deliveries.ShareAsync(
+                ownerUserId, partyId, groupId, body.Channel, body.ClientRequestId, body.PartyVersion, cancellationToken);
+            // Only a NEW share is an event; a replayed click handed over nothing new.
+            if (result is { Outcome: PartyInvitationOutcome.Ok, Share: { Replayed: false } share })
+            {
+                await audit.LogAsync(
+                    ownerUserId, AuditActions.PartyInvitationShare, AuditEntityTypes.Party, partyId,
+                    httpContext.Connection.RemoteIpAddress?.ToString(),
+                    new { partyId, invitationGroupId = groupId, channel = share.Channel, kind = share.Kind },
+                    cancellationToken);
+            }
+            return result.Outcome switch
+            {
+                PartyInvitationOutcome.Ok => Results.Ok(new { share = result.Share, party = result.Party, item = result.Item }),
+                PartyInvitationOutcome.NotFound => Results.NotFound(),
+                PartyInvitationOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
+                _ => Results.Json(
+                    new { error = result.Error ?? "conflict", party = result.Party },
+                    statusCode: StatusCodes.Status409Conflict),
+            };
+        }).WithName("SharePartyInvitation")
+            .RequirePermission(Permissions.PartyAccess)
+            .RequireRateLimiting(ShareRateLimitPolicy);
 
         app.MapPost("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}/remind", async (
             Guid partyId,
@@ -203,7 +266,7 @@ public static class PartyInvitationEndpoints
             var result = await deliveries.RemindAsync(
                 ownerUserId, partyId, groupId, body.ClientRequestId, cancellationToken);
             await AuditDeliveryAsync(httpContext, audit, ownerUserId, partyId, groupId, result, cancellationToken);
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("RemindPartyInvitation")
             .RequirePermission(Permissions.PartyAccess)
             .RequireRateLimiting(SendRateLimitPolicy);
@@ -228,7 +291,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { kind = body.Kind }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("CreatePartyRsvpQuestion").RequirePermission(Permissions.PartyAccess);
 
         // Registered before the {questionId} route so "order" is never read as one.
@@ -243,7 +306,7 @@ public static class PartyInvitationEndpoints
             if (body?.QuestionIds is null) return Results.BadRequest(new { error = "invalid_order" });
             var result = await invitations.ReorderQuestionsAsync(
                 httpContext.GetCurrentUserId()!.Value, partyId, body.QuestionIds, cancellationToken);
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("ReorderPartyRsvpQuestions").RequirePermission(Permissions.PartyAccess);
 
         app.MapPut("/api/parties/{partyId:guid}/rsvp-questions/{questionId:guid}", async (
@@ -267,7 +330,7 @@ public static class PartyInvitationEndpoints
                     httpContext.Connection.RemoteIpAddress?.ToString(),
                     new { questionId, isActive = body.IsActive }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("UpdatePartyRsvpQuestion").RequirePermission(Permissions.PartyAccess);
 
         // --- GUEST (the personal invitation token) ------------------------------
@@ -397,31 +460,40 @@ public static class PartyInvitationEndpoints
             cancellationToken);
     }
 
-    private static IResult ToResult(PartyInvitationResult result) => result.Outcome switch
+    private static IResult ToResult(PartyInvitationResult result, bool minimal)
     {
-        PartyInvitationOutcome.Ok => Results.Ok(result.GuestList),
-        PartyInvitationOutcome.NotFound => Results.NotFound(),
-        PartyInvitationOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
-        // Every other refusal describes a state, and carries the list as it is
-        // now so the page adopts it instead of overwriting it.
-        _ => Results.Json(
-            new { error = result.Error ?? "conflict", guestList = result.GuestList },
-            statusCode: StatusCodes.Status409Conflict),
-    };
-
-    private static IResult ToResult(PartyInvitationSendResult result) => result.Outcome switch
-    {
-        PartyInvitationOutcome.Ok => Results.Ok(new
+        object? list = minimal && result.GuestList is { } full
+            ? new GuestListMinimal(
+                full.PartyId, full.PartyStatus, full.MailAvailable, full.ShareAvailable, full.Summary, full.Questions,
+                result.GroupId, result.LinkRotated)
+            : result.GuestList;
+        return result.Outcome switch
         {
-            delivery = result.Delivery,
-            guestList = result.GuestList,
-            party = result.Party,
-        }),
+            PartyInvitationOutcome.Ok => Results.Ok(list),
+            PartyInvitationOutcome.NotFound => Results.NotFound(),
+            PartyInvitationOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
+            // Every other refusal describes a state, and carries the list as it
+            // is now so the page adopts it instead of overwriting it.
+            _ => Results.Json(
+                new { error = result.Error ?? "conflict", guestList = list },
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    // Minimal: the delivery and the party (which a Draft's first invitation
+    // publishes), never the list.
+    private static IResult ToResult(PartyInvitationSendResult result, bool minimal) => result.Outcome switch
+    {
+        PartyInvitationOutcome.Ok => minimal
+            ? Results.Ok(new { delivery = result.Delivery, party = result.Party })
+            : Results.Ok(new { delivery = result.Delivery, guestList = result.GuestList, party = result.Party }),
         PartyInvitationOutcome.NotFound => Results.NotFound(),
         PartyInvitationOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
-        _ => Results.Json(
-            new { error = result.Error ?? "conflict", guestList = result.GuestList, party = result.Party },
-            statusCode: StatusCodes.Status409Conflict),
+        _ => minimal
+            ? Results.Json(new { error = result.Error ?? "conflict", party = result.Party }, statusCode: StatusCodes.Status409Conflict)
+            : Results.Json(
+                new { error = result.Error ?? "conflict", guestList = result.GuestList, party = result.Party },
+                statusCode: StatusCodes.Status409Conflict),
     };
 
     private static void SetNoStore(HttpContext context)

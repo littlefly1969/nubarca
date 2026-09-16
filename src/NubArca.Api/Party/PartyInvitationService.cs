@@ -90,6 +90,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
             Label = group.Label,
             RecipientEmail = group.Email,
             Phone = group.Phone,
+            SearchText = PartySearchText.ForGroup(group.Label, group.Email, group.Phone),
             MaxAdditionalGuests = group.MaxAdditionalGuests,
             CapabilityId = capabilityId,
             TokenHash = tokenHash,
@@ -106,7 +107,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
         await _db.SaveChangesAsync(cancellationToken);
         _db.ChangeTracker.Clear();
 
-        return new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken));
+        return new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken), GroupId: row.Id);
     }
 
     public async Task<PartyInvitationResult> UpdateGroupAsync(
@@ -157,6 +158,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
                 .SetProperty(g => g.Label, group.Label)
                 .SetProperty(g => g.RecipientEmail, group.Email)
                 .SetProperty(g => g.Phone, group.Phone)
+                .SetProperty(g => g.SearchText, PartySearchText.ForGroup(group.Label, group.Email, group.Phone))
                 .SetProperty(g => g.MaxAdditionalGuests, group.MaxAdditionalGuests)
                 .SetProperty(g => g.CapabilityId, capabilityId)
                 .SetProperty(g => g.TokenHash, tokenHash)
@@ -191,6 +193,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
                 row.Name = guest.Name;
                 row.Email = guest.Email;
                 row.Phone = guest.Phone;
+                row.SearchText = PartySearchText.ForGuest(guest.Name, guest.Email, guest.Phone);
                 row.SortOrder = i;
                 row.UpdatedAt = now;
             }
@@ -204,7 +207,8 @@ public sealed class PartyInvitationService : IPartyInvitationService
         _db.ChangeTracker.Clear();
 
         return new(
-            PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken), LinkRotated: rotate);
+            PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken),
+            LinkRotated: rotate, GroupId: groupId);
     }
 
     public async Task<PartyInvitationResult> DeleteGroupAsync(
@@ -236,7 +240,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
             _db, _db.PartyInvitationGroups.Where(g => g.Id == groupId), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken));
+        return new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken), GroupId: groupId);
     }
 
     public async Task<PartyInvitationResult> RotateLinkAsync(
@@ -264,7 +268,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
                 .SetProperty(g => g.UpdatedAt, now), cancellationToken);
         return bumped == 0
             ? await ConflictAsync(partyId, status, cancellationToken)
-            : new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken));
+            : new(PartyInvitationOutcome.Ok, await ProjectAsync(partyId, status, cancellationToken), GroupId: groupId);
     }
 
     // --- Questions --------------------------------------------------------------
@@ -400,15 +404,52 @@ public sealed class PartyInvitationService : IPartyInvitationService
     private async Task<PartyGuestListDto> ProjectAsync(
         Guid partyId, string partyStatus, CancellationToken cancellationToken)
     {
-        var groupsOfParty = _db.PartyInvitationGroups.AsNoTracking().Where(g => g.PartyId == partyId);
-        var groups = await groupsOfParty
+        var mailAvailable = IsMailAvailable(_email, _mail.CurrentValue);
+        var shareAvailable = IsShareAvailable(_mail.CurrentValue);
+        var groupDtos = await ProjectGroupsAsync(
+            _db, _db.PartyInvitationGroups.AsNoTracking().Where(g => g.PartyId == partyId),
+            partyStatus, mailAvailable, shareAvailable, cancellationToken);
+        var questions = await ProjectQuestionsAsync(
+            _db, _db.PartyRsvpQuestions.AsNoTracking().Where(q => q.PartyId == partyId), cancellationToken);
+
+        return new PartyGuestListDto(
+            partyId,
+            partyStatus,
+            mailAvailable,
+            shareAvailable,
+            Summarize(
+                groupDtos.Count,
+                groupDtos.SelectMany(g => g.Guests).Select(x => (x.IsAdditionalGuest, x.Status, 1)),
+                groupDtos.Count(g => g.PendingCount > 0)),
+            groupDtos,
+            questions);
+    }
+
+    /// <summary>
+    /// Whether the personal link can be handed to the host at all: there is a
+    /// public origin to build it on. Sharing needs no mailer.
+    /// </summary>
+    public static bool IsShareAvailable(MailOptions options) =>
+        PartyLinkPreview.Origin(options.PublicOrigin) is not null;
+
+    /// <summary>
+    /// The guest list's row for each of the SELECTED groups — every group of a
+    /// party for the whole list, one for a group's detail. Four statements
+    /// whatever the number of groups: the groups, their people with their
+    /// answers, their deliveries, their answers to the host's questions.
+    /// </summary>
+    internal static async Task<List<PartyInvitationGroupDto>> ProjectGroupsAsync(
+        AppDbContext db, IQueryable<PartyInvitationGroup> selected, string partyStatus,
+        bool mailAvailable, bool shareAvailable, CancellationToken cancellationToken)
+    {
+        var groups = await selected
             .OrderBy(g => g.CreatedAt).ThenBy(g => g.Id)
             .ToListAsync(cancellationToken);
 
         var guests = await (
-            from guest in _db.PartyGuests.AsNoTracking()
-            join g in groupsOfParty on guest.PartyInvitationGroupId equals g.Id
-            join r in _db.PartyRsvps.AsNoTracking() on guest.Id equals r.PartyGuestId into rsvps
+            from guest in db.PartyGuests.AsNoTracking()
+            join g in selected on guest.PartyInvitationGroupId equals g.Id
+            join r in db.PartyRsvps.AsNoTracking() on guest.Id equals r.PartyGuestId into rsvps
             from r in rsvps.DefaultIfEmpty()
             select new
             {
@@ -419,30 +460,19 @@ public sealed class PartyInvitationService : IPartyInvitationService
             }).ToListAsync(cancellationToken);
         var guestsByGroup = guests.ToLookup(x => x.Guest.PartyInvitationGroupId);
 
-        var deliveries = await _db.PartyInvitationDeliveries.AsNoTracking()
-            .Join(groupsOfParty, d => d.PartyInvitationGroupId, g => g.Id, (d, g) => d)
+        var deliveries = await db.PartyInvitationDeliveries.AsNoTracking()
+            .Join(selected, d => d.PartyInvitationGroupId, g => g.Id, (d, g) => d)
             .ToListAsync(cancellationToken);
         var deliveriesByGroup = deliveries.ToLookup(d => d.PartyInvitationGroupId);
 
-        var answers = await _db.PartyRsvpAnswers.AsNoTracking()
-            .Join(groupsOfParty, a => a.PartyInvitationGroupId, g => g.Id, (a, g) => a)
+        var answers = await db.PartyRsvpAnswers.AsNoTracking()
+            .Join(selected, a => a.PartyInvitationGroupId, g => g.Id, (a, g) => a)
             .ToListAsync(cancellationToken);
         var answersByGroup = answers.ToLookup(a => a.PartyInvitationGroupId);
 
-        var questions = await _db.PartyRsvpQuestions.AsNoTracking()
-            .Where(q => q.PartyId == partyId)
-            .OrderBy(q => q.SortOrder).ThenBy(q => q.CreatedAt)
-            .Select(q => new
-            {
-                Question = q,
-                Answers = _db.PartyRsvpAnswers.Count(a => a.PartyRsvpQuestionId == q.Id),
-            })
-            .ToListAsync(cancellationToken);
+        var sendable = PartyInvitationPolicy.TakesInvitations(partyStatus);
 
-        var mailAvailable = IsMailAvailable(_email, _mail.CurrentValue);
-        var sendable = partyStatus is PartyStatuses.Draft or PartyStatuses.Published;
-
-        var groupDtos = groups.Select(group =>
+        return groups.Select(group =>
         {
             var members = guestsByGroup[group.Id]
                 .OrderBy(x => x.Guest.IsAdditionalGuest)
@@ -472,69 +502,107 @@ public sealed class PartyInvitationService : IPartyInvitationService
                     .ToList(),
                 delivery,
                 CanSend: mailAvailable && sendable,
-                // Only a group that has been invited on the link it holds now,
-                // and that still has somebody who has not answered.
-                CanRemind: mailAvailable && partyStatus == PartyStatuses.Published && invited && pending > 0);
+                CanRemind: CanRemind(mailAvailable, partyStatus, invited, pending),
+                CanShare: shareAvailable && sendable);
         }).ToList();
+    }
 
-        var namedGuests = guests.Where(x => !x.Guest.IsAdditionalGuest).ToList();
-        var attending = guests.Count(x => x.Status == PartyRsvpStatuses.Attending);
-        var summary = new PartyRsvpSummaryDto(
-            Groups: groups.Count,
-            Invited: namedGuests.Count,
-            MissingResponses: namedGuests.Count(x => x.Status == PartyRsvpStatuses.Pending),
-            Attending: attending,
-            Declined: namedGuests.Count(x => x.Status == PartyRsvpStatuses.Declined),
-            ExpectedPeople: attending,
-            UnansweredGroups: groupDtos.Count(g => g.PendingCount > 0));
-
-        return new PartyGuestListDto(
-            partyId,
-            partyStatus,
-            mailAvailable,
-            summary,
-            groupDtos,
-            questions.Select(x => new PartyRsvpQuestionDto(
-                x.Question.Id,
-                x.Question.Prompt,
-                x.Question.Kind,
-                x.Question.Required,
-                PartyRsvpQuestionRules.ParseOptions(x.Question.OptionsJson),
-                x.Question.IsActive,
-                x.Question.SortOrder,
-                x.Question.Version,
-                x.Answers,
-                Locked: x.Answers > 0)).ToList());
+    internal static async Task<List<PartyRsvpQuestionDto>> ProjectQuestionsAsync(
+        AppDbContext db, IQueryable<PartyRsvpQuestion> selected, CancellationToken cancellationToken)
+    {
+        var questions = await selected
+            .OrderBy(q => q.SortOrder).ThenBy(q => q.CreatedAt)
+            .Select(q => new
+            {
+                Question = q,
+                Answers = db.PartyRsvpAnswers.Count(a => a.PartyRsvpQuestionId == q.Id),
+            })
+            .ToListAsync(cancellationToken);
+        return questions.Select(x => new PartyRsvpQuestionDto(
+            x.Question.Id,
+            x.Question.Prompt,
+            x.Question.Kind,
+            x.Question.Required,
+            PartyRsvpQuestionRules.ParseOptions(x.Question.OptionsJson),
+            x.Question.IsActive,
+            x.Question.SortOrder,
+            x.Question.Version,
+            x.Answers,
+            Locked: x.Answers > 0)).ToList();
     }
 
     /// <summary>
-    /// Where the CURRENT link generation's invitation stands. Only deliveries
-    /// that carried this generation count: an email with a rotated link in it
-    /// invited nobody.
+    /// A reminder is for a group invited on the link it holds now that still has
+    /// somebody who has not answered — and only while replies are open, and
+    /// only where mail can be sent at all.
+    /// </summary>
+    internal static bool CanRemind(bool mailAvailable, string partyStatus, bool invited, int pendingNamedGuests) =>
+        mailAvailable && partyStatus == PartyStatuses.Published && invited && pendingNamedGuests > 0;
+
+    /// <summary>
+    /// THE COUNTS, as one pure function over (is a +1, RSVP status, how many)
+    /// — the whole list folds its rows into it, the directory its aggregate —
+    /// so the definitions exist exactly once. Invited = named guests.
+    /// MissingResponses = named guests pending. Attending = everybody coming,
+    /// named or +1. Declined = named guests who said no. ExpectedPeople =
+    /// Attending.
+    /// </summary>
+    public static PartyRsvpSummaryDto Summarize(
+        int groups, IEnumerable<(bool IsAdditionalGuest, string Status, int Count)> guests, int unansweredGroups)
+    {
+        int invited = 0, missing = 0, attending = 0, declined = 0;
+        foreach (var (isAdditional, status, count) in guests)
+        {
+            if (status == PartyRsvpStatuses.Attending) attending += count;
+            if (isAdditional) continue;
+            invited += count;
+            if (status == PartyRsvpStatuses.Pending) missing += count;
+            if (status == PartyRsvpStatuses.Declined) declined += count;
+        }
+        return new PartyRsvpSummaryDto(
+            Groups: groups,
+            Invited: invited,
+            MissingResponses: missing,
+            Attending: attending,
+            Declined: declined,
+            ExpectedPeople: attending,
+            UnansweredGroups: unansweredGroups);
+    }
+
+    /// <summary>
+    /// Where the CURRENT link generation stands. Only deliveries that carried
+    /// this generation count: an email or a share with a rotated link in it
+    /// invited nobody. <paramref name="invited"/> is
+    /// <see cref="PartyInvitationDeliveryStatuses.IsInvitation"/> on any channel.
     /// </summary>
     internal static PartyInvitationDeliveryStateDto DeliveryState(
         IEnumerable<PartyInvitationDelivery> deliveries, Guid capabilityId, out bool invited)
     {
         var current = deliveries.Where(d => d.CapabilityId == capabilityId)
-            .OrderByDescending(d => d.CreatedAt)
+            .OrderByDescending(d => d.CreatedAt).ThenByDescending(d => d.Id)
             .ToList();
-        invited = current.Any(d =>
-            d.Status == PartyInvitationDeliveryStatuses.Sent
-            && d.Kind != PartyInvitationDeliveryKinds.Reminder);
+        invited = current.Any(d => PartyInvitationDeliveryStatuses.IsInvitation(d.Kind, d.Status));
+        var emailed = current.Any(d =>
+            d.Channel == PartyInvitationDeliveryChannels.Email
+            && PartyInvitationDeliveryStatuses.IsInvitation(d.Kind, d.Status));
+        var shared = current.Any(d => d.Status == PartyInvitationDeliveryStatuses.Shared);
         var last = current.FirstOrDefault();
         var lastSent = current
             .Where(d => d.Status == PartyInvitationDeliveryStatuses.Sent)
             .Select(d => d.CompletedAt)
             .Max();
-        var state = invited
+        var state = emailed
             ? PartyInvitationDeliveryStates.Sent
-            : last?.Status switch
-            {
-                PartyInvitationDeliveryStatuses.Pending => PartyInvitationDeliveryStates.Pending,
-                PartyInvitationDeliveryStatuses.Failed => PartyInvitationDeliveryStates.Failed,
-                _ => PartyInvitationDeliveryStates.NotSent,
-            };
-        return new PartyInvitationDeliveryStateDto(state, last?.CreatedAt, last?.Kind, last?.Status, lastSent);
+            : shared
+                ? PartyInvitationDeliveryStates.Shared
+                : last?.Status switch
+                {
+                    PartyInvitationDeliveryStatuses.Pending => PartyInvitationDeliveryStates.Pending,
+                    PartyInvitationDeliveryStatuses.Failed => PartyInvitationDeliveryStates.Failed,
+                    _ => PartyInvitationDeliveryStates.NotSent,
+                };
+        return new PartyInvitationDeliveryStateDto(
+            state, last?.CreatedAt, last?.Kind, last?.Status, lastSent, last?.Channel);
     }
 
     // --- Helpers ----------------------------------------------------------------
@@ -562,6 +630,7 @@ public sealed class PartyInvitationService : IPartyInvitationService
             Name = guest.Name,
             Email = guest.Email,
             Phone = guest.Phone,
+            SearchText = PartySearchText.ForGuest(guest.Name, guest.Email, guest.Phone),
             IsAdditionalGuest = false,
             SortOrder = sortOrder,
             CreatedAt = now,

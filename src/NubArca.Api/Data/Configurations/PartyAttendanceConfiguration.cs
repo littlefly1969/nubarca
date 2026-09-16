@@ -54,6 +54,7 @@ public sealed class PartyAttendanceGuestConfiguration : IEntityTypeConfiguration
         // varchar(n) counts characters, which PostgreSQL counts as code points —
         // exactly the validator's unit.
         builder.Property(g => g.Name).IsRequired().HasMaxLength(PartyAttendanceLimits.MaxNameLength);
+        builder.Property(g => g.SearchText).IsRequired().HasColumnType("text").HasDefaultValue(string.Empty);
         builder.Property(g => g.Version).HasDefaultValue(1);
         builder.Property(g => g.CheckedInAt).HasColumnType("timestamp with time zone");
         builder.Property(g => g.CreatedAt).HasColumnType("timestamp with time zone");
@@ -65,6 +66,10 @@ public sealed class PartyAttendanceGuestConfiguration : IEntityTypeConfiguration
         builder.HasIndex(g => new { g.PartyId, g.ClientRequestId })
             .IsUnique()
             .HasDatabaseName("ux_party_attendance_guests_request");
+        // The guest directory reads a party's other arrivals latest first, one
+        // page at a time, by (CheckedInAt, Id).
+        builder.HasIndex(g => new { g.PartyId, g.CheckedInAt, g.Id })
+            .HasDatabaseName("ix_party_attendance_guests_party_checked_in");
 
         builder.HasOne<Domain.Party>()
             .WithMany()
