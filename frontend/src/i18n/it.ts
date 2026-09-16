@@ -159,7 +159,7 @@ const it = {
   'partyActivity.votingOpen': 'Votazione aperta',
   'partyActivity.votingClosed': 'Votazione chiusa',
   // The activity composer (three steps) and the deck it writes into.
-  'partyComposer.createTitle': 'Nuova attività',
+  'partyComposer.createTitle': 'Nuova prova',
   'partyComposer.editTitle': 'Modifica attività',
   'partyComposer.stepsLabel': 'Passaggi',
   'partyComposer.stepActivity': 'Attività',
@@ -193,7 +193,7 @@ const it = {
   'partyComposer.unsaved': 'Ci sono modifiche non salvate.',
   'partyComposer.discard': 'Scarta le modifiche',
   'partyComposer.keepEditing': 'Continua a modificare',
-  'partyDeck.deleteTitle': 'Elimina l’attività',
+  'partyDeck.deleteTitle': 'Elimina la prova',
   'partyDeck.deleteBody': '«{title}» verrà eliminata dal gioco. Non si può annullare.',
   // The guest's live game (PartyGamePage).
   'partyGuestGame.unavailable': 'Il gioco non è disponibile.',
@@ -318,7 +318,7 @@ const it = {
   'partyPlan.include': 'Rimettila',
   'partyGame.priorityVoting': 'Chiedi agli ospiti quali prove vorrebbero',
   'partyGame.priorityVotingHelp':
-    'Prima che il game inizi gli ospiti indicano le loro preferite. Sono indicazioni: le vedi in regia e decidi tu cosa si gioca.',
+    'Prima che il gioco inizi gli ospiti indicano le prove che preferiscono. Sono indicazioni: le vedi in regia e decidi tu cosa si gioca.',
   'party.duplicate.heading': 'Duplica festa',
   'party.duplicate.help':
     'Prepara di nuovo la stessa serata: titolo, date, pagine per gli ospiti, prove, slideshow, limiti e budget di stampa. La nuova festa è pronta, con un album e un QR tutti suoi, e le foto sono condivise, non copiate.',
@@ -335,9 +335,9 @@ const it = {
   'partyGame.invalid': 'Controlla quante preferenze può esprimere ogni ospite.',
   'partyGame.save': 'Salva impostazioni gioco',
   'partyGame.saved': 'Impostazioni gioco salvate.',
-  'partyGame.error': 'Impossibile salvare le sfide. Riprova.',
-  'partyGame.deckTitle': 'Sfide',
-  'partyGame.deckHelp': 'Prepara e ordina le attività. Gli invitati non vedono i conteggi.',
+  'partyGame.error': 'Non è stato possibile salvare le prove. Riprova.',
+  'partyGame.deckTitle': 'Le prove',
+  'partyGame.deckHelp': 'Prepara e ordina le prove. Gli invitati non vedono i conteggi.',
   'partyGame.challengeTitle': 'Titolo',
   'partyGame.challengeBody': 'Cosa deve fare',
   'partyGame.photo': 'Foto dell’album (facoltativa)',
@@ -345,7 +345,7 @@ const it = {
   'partyGame.enabled': 'Disponibile al voto',
   'partyGame.add': 'Aggiungi sfida',
   'partyGame.update': 'Aggiorna sfida',
-  'partyGame.empty': 'Nessuna sfida preparata.',
+  'partyGame.empty': 'Non hai ancora preparato nessuna prova.',
   'partyGame.votes': 'voti',
   'partyGame.preview': 'Anteprima TV',
   'partyGame.on': 'attiva',
