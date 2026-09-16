@@ -108,6 +108,13 @@ namespace NubArca.Api.Data.Migrations
                 name: "SearchText",
                 table: "party_attendance_guests");
 
+            // A share cannot be said in the old vocabulary: the column that
+            // distinguishes it has just been dropped, and the narrow status
+            // check below would refuse the row. Going back therefore forgets
+            // that those links were handed over — the links themselves keep
+            // working, and every email delivery is untouched.
+            migrationBuilder.Sql("DELETE FROM party_invitation_deliveries WHERE \"Status\" = 'shared'");
+
             migrationBuilder.AddCheckConstraint(
                 name: "ck_party_invitation_deliveries_status",
                 table: "party_invitation_deliveries",
