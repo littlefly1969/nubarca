@@ -162,3 +162,171 @@
 
 .party-checkin-enter-block { display: grid; gap: 0.4rem; }
 .party-checkin-enter { display: inline-block; text-align: center; text-decoration: none; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The reply, once there is one
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* At the END of the invitation, after the host's words. It is a record, not a
+   form: quieter than the sections above it, and it carries the one button that
+   opens the sheet again. */
+.party-rsvp--summary { gap: 0.75rem; }
+
+.party-rsvp-change {
+  align-self: flex-start;
+  min-height: 2.75rem;
+  padding: 0 1.1rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.party-rsvp-change:hover { border-color: currentcolor; }
+.party-rsvp-change:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 2px; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The invitation's one call to action
+   ───────────────────────────────────────────────────────────────────────────
+
+   Pinned to the bottom edge, where a thumb is, over a scrim so the words
+   scrolling under it stay readable. It is `fixed` rather than `sticky` because
+   it must be reachable from the FIRST screen of a long invitation, not only
+   once the guest has scrolled to wherever it would otherwise sit. */
+
+.party-invitation-cta {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding:
+    2.5rem
+    max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  /* The scrim belongs to the bar, not to the page: a solid strip would cut the
+     cover in half on a short invitation. */
+  background: linear-gradient(
+    to top,
+    var(--brand-midnight-navy) 38%,
+    rgb(10 15 26 / 72%) 68%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.party-invitation-cta-button {
+  pointer-events: auto;
+  width: min(30rem, 100%);
+  min-height: 3.25rem;
+  padding: 0 1.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-strong, #1565ff);
+  color: #fff;
+  font: inherit;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgb(2 6 16 / 45%);
+}
+
+.party-invitation-cta-button:hover { background: var(--brand-electric-blue, #1565ff); }
+.party-invitation-cta-button:focus-visible {
+  outline: 3px solid var(--party-hub-focus, #00d4ff);
+  outline-offset: 3px;
+}
+
+/* Room for it: the closing line must be readable with the bar in front of it. */
+.party-guest-hub:has(~ .party-invitation-cta) .party-invitation-footnote {
+  padding-block-end: 5rem;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The sheet the form lives in
+   ───────────────────────────────────────────────────────────────────────────
+
+   Built on the shared Overlay primitive — portal, scroll lock, focus trap and
+   return, Escape, backdrop — and restyled here into a party surface, exactly as
+   the face-search sheet is. The overlay is portalled to document.body, OUTSIDE
+   the page element that carries the guest palette, so the brand tokens are
+   pinned again here; that is the only thing this duplicates. */
+
+.overlay-backdrop.party-rsvp-sheet {
+  --party-hub-text: var(--brand-cloud-white);
+  --party-hub-muted: rgb(245 247 251 / 72%);
+  --party-hub-border: rgb(245 247 251 / 14%);
+  --party-hub-focus: var(--brand-cyan-glow);
+
+  align-items: flex-end;
+  padding: 0;
+  background: rgb(4 8 16 / 72%);
+}
+
+/* Phone: a sheet from the bottom edge, tall because the host's questions can
+   make this form long — but never the whole screen, so the invitation stays
+   visible behind it and the guest knows what they are answering. */
+.party-rsvp-sheet .overlay-panel {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: 92vh;
+  max-height: min(92svh, 100%);
+  border: 1px solid var(--party-hub-border);
+  border-bottom: 0;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--brand-deep-blue);
+  color: var(--party-hub-text);
+}
+
+.party-rsvp-sheet .overlay-head {
+  border-bottom: 1px solid var(--party-hub-border);
+  background: transparent;
+}
+
+.party-rsvp-sheet .overlay-foot {
+  border-top: 1px solid var(--party-hub-border);
+  background: transparent;
+}
+
+/* Inside the sheet the reply is the page: it drops the card's own frame and
+   uses the panel's. */
+.party-rsvp-sheet .party-rsvp-form { padding-block-end: 0.25rem; }
+
+.party-rsvp-foot { display: flex; width: 100%; }
+.party-rsvp-sheet .party-rsvp-submit { flex: 1 1 auto; }
+
+@media (min-width: 40rem) {
+  .overlay-backdrop.party-rsvp-sheet {
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+
+  .party-rsvp-sheet .overlay-panel {
+    width: min(34rem, 100%);
+    max-height: 88vh;
+    max-height: min(88svh, 100%);
+    border-bottom: 1px solid var(--party-hub-border);
+    border-radius: var(--radius-card);
+  }
+
+  .party-invitation-cta { padding-block-start: 3rem; }
+}
+
+/* The footer carries the submit AND the reason it is refused: the form scrolls
+   and the button does not, so a problem list left at the end of the form would
+   be below the fold — a grey button with no explanation anywhere near it. */
+.party-rsvp-foot { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
+.party-rsvp-foot .party-rsvp-problems { margin: 0; }
+
+/* Radios and checkboxes on a fixed dark surface: the browser's default accent
+   is picked from the VISITOR's theme and lands somewhere unrelated to this
+   palette. */
+.party-rsvp input[type='radio'],
+.party-rsvp input[type='checkbox'] { accent-color: var(--brand-electric-blue, #1565ff); }

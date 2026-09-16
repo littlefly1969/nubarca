@@ -92,11 +92,19 @@ if (!chrome) {
 }
 
 const styles = [
-  readFileSync(join(frontend, 'src', 'styles.css'), 'utf8'),
-  readFileSync(join(frontend, 'src', 'party', 'Party.css'), 'utf8'),
-  readFileSync(join(frontend, 'src', 'party', 'PartyGuestConsole.css'), 'utf8'),
-  readFileSync(join(frontend, 'src', 'party', 'workspace', 'PartyWorkspace.css'), 'utf8'),
-].join('\n');
+  ['src', 'styles.css'],
+  ['src', 'party', 'Party.css'],
+  ['src', 'party', 'PartyGuestConsole.css'],
+  ['src', 'party', 'workspace', 'PartyWorkspace.css'],
+  // The public surfaces, which have their own stylesheets and their own
+  // deliberate look: a fixed dark brand page a guest meets by scanning a code.
+  ['src', 'pages', 'PartyGuestHub.css'],
+  ['src', 'pages', 'PartyContribution.css'],
+  ['src', 'pages', 'PartyGamePage.css'],
+  ['src', 'party', 'PartyRsvp.css'],
+  ['src', 'party', 'PartyRsvpQuestions.css'],
+  ['src', 'party', 'PartyChallengeCard.css'],
+].map((parts) => readFileSync(join(frontend, ...parts), 'utf8')).join('\n');
 
 const fixtures = readdirSync(fixtureDir).filter((f) => f.endsWith('.html')).sort();
 
@@ -108,7 +116,13 @@ mkdirSync(work, { recursive: true });
  * `.app-main` owns the scrolling and the horizontal gutter — wrapped round one
  * fixture's markup, with the real stylesheets inline.
  */
-function documentFor(html) {
+function documentFor(html, standalone) {
+  // A guest page IS the page: it sets its own full-height background and owns
+  // its own gutters, including the safe-area insets a notch imposes. Wrapping
+  // it in the authenticated shell would measure a layout no guest ever sees.
+  const body = standalone
+    ? `<div class="app-standalone">${html}</div>`
+    : `<div class="app-main">${html}</div>`;
   return `<!doctype html>
 <html lang="it"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -120,9 +134,10 @@ function documentFor(html) {
   html, body { margin: 0; height: 100%; }
   body { background: var(--surface-canvas); color: var(--text-primary); }
   .app-main { height: 100vh; }
+  .app-standalone { min-height: 100vh; }
 </style>
 </head>
-<body class="theme-dark"><div class="app-main">${html}</div></body></html>`;
+<body class="theme-dark">${body}</body></html>`;
 }
 
 function measure(pagePath, vp, screenshot) {
@@ -199,7 +214,9 @@ const expression = \`(() => {
   const MIN_TAP = \${minTap};
   const MIN_GUTTER = \${minGutter};
   const problems = [];
-  const main = document.querySelector('.app-main');
+  // The authenticated shell's scroll region, or — for a public page — the page
+  // itself, which owns its own background and its own gutters.
+  const main = document.querySelector('.app-main') || document.querySelector('.app-standalone');
   const doc = document.documentElement;
 
   // 1. Nothing scrolls sideways. A page that does on a phone is broken.
@@ -234,8 +251,9 @@ const expression = \`(() => {
       // thumb hits, and the box inside it is decoration. Measured on the
       // label, so a 13px input in a 44px label is correct and a bare one is
       // still caught.
-      if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')) {
-        const label = el.closest('label');
+      if (el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio' || el.type === 'file')) {
+        const label = el.closest('label')
+          || (el.id ? document.querySelector('label[for="' + el.id + '"]') : null);
         if (label && label.getBoundingClientRect().height >= MIN_TAP - 0.5) return false;
       }
       return r.height < MIN_TAP - 0.5 || r.width < 24;
@@ -245,15 +263,41 @@ const expression = \`(() => {
       + ' ' + Math.round(r.width) + 'x' + Math.round(r.height)));
   for (const s of small) problems.push('target too small: ' + s);
 
-  // 3. The side gutter survives: nothing touches the edge of the screen.
-  const contentful = [...main.querySelectorAll('.pw-panel, .pw-empty, .pw-card, .pw-title, .pw-section-title, .pw-notice')]
-    .map((el) => el.getBoundingClientRect())
-    .filter((r) => r.width > 0);
-  const leftMost = Math.min(...contentful.map((r) => r.left));
-  const rightMost = Math.max(...contentful.map((r) => r.right));
-  if (contentful.length > 0) {
-    if (leftMost < MIN_GUTTER - 0.5) problems.push('left gutter ' + Math.round(leftMost) + 'px');
-    if (doc.clientWidth - rightMost < MIN_GUTTER - 0.5) {
+  // 3. The side gutter survives, measured on what CARRIES WORDS. A cover or a
+  // photograph may be full-bleed on purpose — that is a composition — but a
+  // sentence, a label or a button that touches the edge of the screen is a
+  // mistake at every width.
+  const words = [...main.querySelectorAll('h1, h2, h3, h4, p, li, button, a, label, legend, dt, dd')]
+    .filter((el) => {
+      const s2 = getComputedStyle(el);
+      if (s2.display === 'none' || s2.visibility === 'hidden') return false;
+      // Absolutely positioned decoration is not the page's text column.
+      if (s2.position === 'absolute' || s2.position === 'fixed') return false;
+      if (el.closest('.visually-hidden')) return false;
+      // Inside something that scrolls sideways ON PURPOSE — the section rail,
+      // a chip row — being off the right edge is the feature, not a mistake.
+      for (let p2 = el.parentElement; p2 && p2 !== main; p2 = p2.parentElement) {
+        const ox = getComputedStyle(p2).overflowX;
+        if (ox === 'auto' || ox === 'scroll') return false;
+      }
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && (el.textContent || '').trim() !== '';
+    })
+    .map((el) => ({ el, r: el.getBoundingClientRect() }));
+  let leftMost = null;
+  if (words.length > 0) {
+    leftMost = Math.round(Math.min(...words.map(({ r }) => r.left)));
+    const rightMost = Math.max(...words.map(({ r }) => r.right));
+    const tight = words
+      .filter(({ r }) => r.left < MIN_GUTTER - 0.5 || doc.clientWidth - r.right < MIN_GUTTER - 0.5)
+      .slice(0, 4)
+      .map(({ el, r }) => (el.tagName.toLowerCase() + '.' + (el.className || '').toString().split(' ')[0]
+        + ' [' + Math.round(r.left) + '..' + Math.round(r.right) + ']'));
+    for (const one of tight) problems.push('touches the edge: ' + one);
+    if (tight.length === 0 && leftMost < MIN_GUTTER - 0.5) {
+      problems.push('left gutter ' + leftMost + 'px');
+    }
+    if (tight.length === 0 && doc.clientWidth - rightMost < MIN_GUTTER - 0.5) {
       problems.push('right gutter ' + Math.round(doc.clientWidth - rightMost) + 'px');
     }
   }
@@ -280,7 +324,7 @@ const expression = \`(() => {
       scrollWidth: main.scrollWidth,
       clientWidth: main.clientWidth,
       controls: interactive.length,
-      gutter: contentful.length ? Math.round(leftMost) : null,
+      gutter: leftMost,
     },
   });
 })()\`;
@@ -289,8 +333,19 @@ const res = await send('Runtime.evaluate', { expression, returnByValue: true }, 
 const value = JSON.parse(res.result.value);
 
 if (screenshot) {
+  // The page's real height, not the layout metric: a guest surface sets its own
+  // min-height of one viewport, and cssContentSize then reports the viewport
+  // while the content below the fold — the reply at the end of an invitation —
+  // is cut off the picture.
+  const tall = await send('Runtime.evaluate', {
+    expression: 'Math.max(document.documentElement.scrollHeight, document.body.scrollHeight)',
+    returnByValue: true,
+  }, sessionId);
   const metrics = await send('Page.getLayoutMetrics', {}, sessionId);
-  const full = Math.min(metrics.cssContentSize?.height ?? Number(height), 4000);
+  const full = Math.min(
+    Math.max(tall.result?.value ?? 0, metrics.cssContentSize?.height ?? 0, Number(height)),
+    6000,
+  );
   await send('Emulation.setDeviceMetricsOverride', {
     width: Number(width), height: full, deviceScaleFactor: 1, mobile: Number(width) < 700,
   }, sessionId);
@@ -312,7 +367,8 @@ const report = [];
 for (const file of fixtures) {
   const name = file.replace(/\.html$/, '');
   const page = join(work, file);
-  writeFileSync(page, documentFor(readFileSync(join(fixtureDir, file), 'utf8')), 'utf8');
+  const standalone = file.startsWith('public-');
+  writeFileSync(page, documentFor(readFileSync(join(fixtureDir, file), 'utf8'), standalone), 'utf8');
 
   for (const vp of VIEWPORTS) {
     const measured = measure(page, vp, shotDir ? join(shotDir, `${name}-${vp.name}.png`) : null);

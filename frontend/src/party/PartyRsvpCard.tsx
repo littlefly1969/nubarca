@@ -8,20 +8,29 @@ import {
   type PartyRsvpWrite,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
+import { Modal } from '../components/Overlay';
 import './PartyRsvp.css';
 
-// ONE group's reply, on its personal invitation.
+// ONE group's reply, on its personal invitation — in two pieces.
 //
-// It is composed INTO the invitation — between the cover and what the host
-// wrote — rather than being a second page with a design of its own: the guest
-// is reading an invitation, and answering it is part of reading it.
+// It used to be a single card sitting between the cover and what the host
+// wrote, which meant every guest met a form before they had read the
+// invitation: a radio group, a diet field and the host's questions, above the
+// words somebody had chosen carefully. An invitation that opens on a form is a
+// worse invitation.
+//
+// So the FORM lives in a sheet (`PartyRsvpSheet`), opened from one button, and
+// what stays on the page is the SUMMARY (`PartyRsvpSummary`) — who is coming
+// and what was answered — at the end, where a reply belongs once it exists.
+// Before there is a reply there is nothing on the page at all except the
+// invitation and the one thing it asks for.
 //
 // The form holds a draft and hands the page a WHOLE reply to send. The page
 // owns the round-trip; this owns what the guest has typed, which is why a
-// failed send never loses it. The page KEYS this card by the server's version,
-// so a new server reply — a save, or a conflict it adopted — is a fresh card
-// with a fresh draft, and there is no reseeding effect that could land after
-// the guest's first tap and quietly undo it.
+// failed send never loses it. The page KEYS the sheet by the server's version,
+// so a new server reply — a save, or a conflict it adopted — is a fresh draft,
+// and there is no reseeding effect that could land after the guest's first tap
+// and quietly undo it.
 
 interface ExtraDraft {
   key: string;
@@ -99,31 +108,44 @@ export interface PartyRsvpNotice {
   messageKey: MessageKey;
 }
 
-export function PartyRsvpCard({
-  invitation, phase, saving, notice, onSubmit,
+/** Has this group said anything yet? A pending row is nobody's answer. */
+export function partyRsvpAnswered(invitation: PartyInvitationRsvp): boolean {
+  return invitation.guests.some((g) => !g.isAdditionalGuest && g.status !== 'pending');
+}
+
+/**
+ * WHAT WAS ANSWERED, at the end of the invitation.
+ *
+ * Drawn only when there is something to draw: a reply the group sent, or a
+ * window that has closed. `onChange` is what turns it from a record into a
+ * door back to the form — present while the reply can still be changed, absent
+ * once it cannot.
+ */
+export function PartyRsvpSummary({
+  invitation, phase, notice, onChange,
 }: {
   invitation: PartyInvitationRsvp;
   phase: 'before' | 'live' | 'after';
-  saving: boolean;
-  /** What the page's last send came to. */
-  notice: PartyRsvpNotice | null;
-  onSubmit(reply: PartyRsvpWrite): void;
+  /** What the page's last send came to, shown beside the reply it changed. */
+  notice?: PartyRsvpNotice | null;
+  onChange?(): void;
 }) {
   const { t } = useI18n();
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(invitation));
-
-  const named = invitation.guests.filter((g) => !g.isAdditionalGuest);
-  const answeredBefore = named.some((g) => g.status !== 'pending');
-
-  if (!invitation.canRespond) {
-    return (
-      <section className="party-rsvp" data-testid="party-rsvp" data-mode="read-only" aria-labelledby="party-rsvp-title">
-        <h2 className="party-rsvp-title" id="party-rsvp-title">{t('partyRsvp.heading')}</h2>
-        <p className="party-rsvp-for">{t('partyRsvp.for', { label: invitation.label })}</p>
-        <p className="party-rsvp-closed" role="status">
-          {phase === 'after' ? t('partyRsvp.closed.after') : t('partyRsvp.closed.live')}
-        </p>
-        <ul className="party-rsvp-summary">
+  return (
+    <section
+      className="party-rsvp party-rsvp--summary" data-testid="party-rsvp"
+      data-mode={invitation.canRespond ? 'answered' : 'read-only'}
+      aria-labelledby="party-rsvp-title"
+    >
+      <h2 className="party-rsvp-title" id="party-rsvp-title">{t('partyRsvp.heading')}</h2>
+      <p className="party-rsvp-for">{t('partyRsvp.for', { label: invitation.label })}</p>
+      {/* Why it cannot be changed, when it cannot — and that it still can,
+          when it can. Either way the guest is told, never left guessing. */}
+      <p className="party-rsvp-closed" role="status">
+        {invitation.canRespond
+          ? t('partyRsvp.answeredNote')
+          : phase === 'after' ? t('partyRsvp.closed.after') : t('partyRsvp.closed.live')}
+      </p>        <ul className="party-rsvp-summary">
           {invitation.guests.map((g) => (
             <li key={g.id} data-status={g.status}>
               <strong>{g.name}</strong>
@@ -148,9 +170,53 @@ export function PartyRsvpCard({
             ))}
           </dl>
         )}
-      </section>
-    );
-  }
+      {notice && (
+        <p
+          className={`party-rsvp-notice party-rsvp-notice--${notice.tone}`}
+          role={notice.tone === 'error' ? 'alert' : 'status'}
+          data-testid="party-rsvp-summary-notice"
+        >
+          {t(notice.messageKey)}
+        </p>
+      )}
+      {onChange && (
+        <button
+          type="button" className="party-rsvp-change" data-testid="party-rsvp-change"
+          onClick={onChange}
+        >
+          {t('partyRsvp.change')}
+        </button>
+      )}
+    </section>
+  );
+}
+
+/**
+ * THE FORM, in a sheet.
+ *
+ * A sheet rather than a section of the page, for one reason: the invitation is
+ * something to read, and a form in the middle of it is an interruption. It
+ * rises from the bottom edge on a phone — where a thumb is — and becomes a
+ * centred dialog on a wide screen, on the shared Overlay so the focus trap,
+ * the scroll lock, Escape and the return of focus are not reinvented here.
+ *
+ * It stays open on a refusal, because the answer the guest typed is in it.
+ */
+export function PartyRsvpSheet({
+  invitation, saving, notice, onSubmit, onClose,
+}: {
+  invitation: PartyInvitationRsvp;
+  saving: boolean;
+  /** What the page's last send came to. */
+  notice: PartyRsvpNotice | null;
+  onSubmit(reply: PartyRsvpWrite): void;
+  onClose(): void;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(invitation));
+
+  const named = invitation.guests.filter((g) => !g.isAdditionalGuest);
+  const answeredBefore = named.some((g) => g.status !== 'pending');
 
   const reply = replyFrom(invitation, draft);
   const problems = rsvpFormProblems(invitation, reply);
@@ -163,11 +229,37 @@ export function PartyRsvpCard({
     setDraft((d) => ({ ...d, answers: { ...d.answers, [id]: value } }));
 
   return (
-    <section className="party-rsvp" data-testid="party-rsvp" data-mode="form" aria-labelledby="party-rsvp-title">
-      <h2 className="party-rsvp-title" id="party-rsvp-title">{t('partyRsvp.heading')}</h2>
-      <p className="party-rsvp-for">{t('partyRsvp.for', { label: invitation.label })}</p>
-
+    <Modal
+      className="party-rsvp-sheet"
+      title={t('partyRsvp.heading')}
+      subtitle={t('partyRsvp.for', { label: invitation.label })}
+      onClose={onClose}
+      // A form with something typed in it does not close by tapping the
+      // backdrop or by a stray Escape; the explicit way out stays.
+      dismissable={!saving}
+      testId="party-rsvp-sheet"
+      footer={(
+        <div className="party-rsvp-foot">
+          {problems.length > 0 && (
+            <ul className="party-rsvp-problems" data-testid="party-rsvp-problems">
+              {problems.map((p) => <li key={p}>{t(PROBLEM_KEYS[p])}</li>)}
+            </ul>
+          )}
+          {/* The submit is in the FOOTER, pinned: the host's questions can make
+              this form taller than a phone, and the way to send it must not be
+              somewhere below the fold. It drives the form by id. */}
+          <button
+            type="submit" form="party-rsvp-form"
+            className="party-rsvp-submit" data-testid="party-rsvp-submit"
+            disabled={saving || problems.length > 0}
+          >
+            {saving ? t('partyRsvp.saving') : answeredBefore ? t('partyRsvp.update') : t('partyRsvp.submit')}
+          </button>
+        </div>
+      )}
+    >
       <form
+        id="party-rsvp-form"
         className="party-rsvp-form"
         onSubmit={(e) => { e.preventDefault(); if (problems.length === 0 && !saving) onSubmit(reply); }}
       >
@@ -292,18 +384,9 @@ export function PartyRsvpCard({
           </fieldset>
         )}
 
-        {problems.length > 0 && (
-          <ul className="party-rsvp-problems" data-testid="party-rsvp-problems">
-            {problems.map((p) => <li key={p}>{t(PROBLEM_KEYS[p])}</li>)}
-          </ul>
-        )}
-
-        <button
-          type="submit" className="party-rsvp-submit" data-testid="party-rsvp-submit"
-          disabled={saving || problems.length > 0}
-        >
-          {saving ? t('partyRsvp.saving') : answeredBefore ? t('partyRsvp.update') : t('partyRsvp.submit')}
-        </button>
+        {/* A refusal is stated INSIDE the sheet, beside the answer it refused:
+            the sheet stays open on a failure precisely so the guest can see
+            why, with everything they typed still in front of them. */}
         {notice && (
           <p
             className={`party-rsvp-notice party-rsvp-notice--${notice.tone}`}
@@ -314,6 +397,6 @@ export function PartyRsvpCard({
           </p>
         )}
       </form>
-    </section>
+    </Modal>
   );
 }
