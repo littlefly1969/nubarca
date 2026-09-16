@@ -391,12 +391,22 @@ export function PartyGuestListTab({
     (item): item is GuestDirectoryGroupItem => item.kind === 'group' && item.groupId === openGroupId);
   const detailBusy = openGroupId !== undefined && openGroupId !== null && Boolean(busy[openGroupId]);
 
+  const personBusy = useCallback((guestId: string) => Boolean(busy[`guest:${guestId}`]), [busy]);
+
   const detail = openGroupId && (
     <GuestGroupDetail
       partyId={party.id} groupId={openGroupId} refreshKey={detailRefresh} busy={detailBusy}
-      share={share} actions={detailActions} onLoaded={adoptDetail} onUnauthorized={invalidateAuth}
+      personBusy={personBusy} share={share} actions={detailActions} onLoaded={adoptDetail}
+      onUnauthorized={invalidateAuth}
     />
   );
+
+  // The banner outside a detail belongs to the group that was SHARED, which is
+  // not necessarily the one open beside it.
+  const sharedItem = share
+    ? directory.items.find(
+      (item): item is GuestDirectoryGroupItem => item.kind === 'group' && item.groupId === share.groupId)
+    : undefined;
 
   return (
     <div className="guest-console" data-testid="party-guests" data-layout={wide ? 'wide' : 'narrow'}>
@@ -498,7 +508,7 @@ export function PartyGuestListTab({
           </p>
         )}
         {share && (!openGroupId || openGroupId !== share.groupId) && (
-          <GuestSharedLink share={share} label={openItem?.label ?? ''} />
+          <GuestSharedLink share={share} label={sharedItem?.label ?? ''} />
         )}
       </div>
 
@@ -532,7 +542,8 @@ export function PartyGuestListTab({
               {directory.items.map((item) => (item.kind === 'group' ? (
                 <GuestGroupCard
                   key={`g:${item.groupId}`} item={item} live={live} selected={item.groupId === openGroupId}
-                  busy={Boolean(busy[item.groupId])} detailHref={hrefFor(item.groupId)}
+                  busy={Boolean(busy[item.groupId])} personBusy={personBusy}
+                  detailHref={hrefFor(item.groupId)}
                   onPrimary={(action) => onPrimary(item, action)}
                   onMenu={() => setMenu({ kind: 'group', item })}
                   onCheckIn={(person) => void runArrival(

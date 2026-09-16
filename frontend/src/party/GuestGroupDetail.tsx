@@ -41,13 +41,15 @@ export interface DetailTarget {
 }
 
 export function GuestGroupDetail({
-  partyId, groupId, refreshKey, busy, share, actions, onLoaded, onUnauthorized,
+  partyId, groupId, refreshKey, busy, personBusy, share, actions, onLoaded, onUnauthorized,
 }: {
   partyId: string;
   groupId: string;
   /** Changes whenever something this group owns was written. */
   refreshKey: number;
   busy: boolean;
+  /** An arrival is recorded per person, so its button disables per person. */
+  personBusy(guestId: string): boolean;
   /** The link this group's last share handed over, for passing on again. */
   share: ShareOutcome | null;
   actions: GuestDetailActions;
@@ -213,7 +215,8 @@ export function GuestGroupDetail({
                     type="button" className="row-action guest-person-action"
                     aria-label={t('party.console.undoFor', { name: person.name })}
                     data-testid={`guest-detail-undo-${person.guestId}`}
-                    disabled={busy} onClick={() => actions.undo(target, person)}
+                    disabled={busy || personBusy(person.guestId)}
+                    onClick={() => actions.undo(target, person)}
                   >
                     {t('party.console.undo')}
                   </button>
@@ -222,7 +225,8 @@ export function GuestGroupDetail({
                     type="button" className="row-action-primary guest-person-action"
                     aria-label={t('party.console.checkInFor', { name: person.name })}
                     data-testid={`guest-detail-checkin-${person.guestId}`}
-                    disabled={busy} onClick={() => actions.checkIn(target, person)}
+                    disabled={busy || personBusy(person.guestId)}
+                    onClick={() => actions.checkIn(target, person)}
                   >
                     {t('party.console.checkIn')}
                   </button>

@@ -207,6 +207,72 @@ describe('the guest console', () => {
     expect(search(mock.calls, DIRECTORY).every((p) => p.get('take') === '40')).toBe(true);
   });
 
+  it('never lets a page of an old search land in a new one', async () => {
+    let releaseStalePage: ((response: Response) => void) | null = null;
+    installFetchMock({
+      [`GET ${DIRECTORY}`]: (req) => {
+        const params = new URL(req.url, 'http://x').searchParams;
+        if (params.get('cursor')) {
+          // The second page of the FIRST search, still in flight.
+          return new Promise<Response>((resolve) => { releaseStalePage = resolve; });
+        }
+        return params.get('q') === 'rossi'
+          ? jsonResponse(page({ items: [groupItem({ groupId: 'g9', label: 'Rossi' })], nextCursor: null }))
+          : jsonResponse(page({ items: [groupItem()], nextCursor: 'CURSOR-OLD' }));
+      },
+    });
+    renderConsole();
+
+    await screen.findByTestId('guest-group-g1');
+    await userEvent.click(screen.getByTestId('guest-load-more'));
+    // The host types a new search before that page comes back.
+    await userEvent.type(screen.getByTestId('guest-search'), 'rossi');
+    expect(await screen.findByTestId('guest-group-g9')).toBeInTheDocument();
+
+    releaseStalePage!(jsonResponse(page({
+      items: [groupItem({ groupId: 'stale', label: 'Pagina vecchia' })],
+      nextCursor: 'CURSOR-STALE', summary: null,
+    })));
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+    // Its rows belong to a list that is gone — and so does its cursor, which
+    // the server would refuse for this search.
+    expect(screen.queryByTestId('guest-group-stale')).not.toBeInTheDocument();
+    expect(screen.getByTestId('guest-group-g9')).toBeInTheDocument();
+    expect(screen.queryByTestId('guest-load-more')).not.toBeInTheDocument();
+  });
+
+  it('disables the arrival it is recording, and only that one', async () => {
+    let releaseCheckIn: ((response: Response) => void) | null = null;
+    installFetchMock({
+      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+        partyStatus: 'live',
+        items: [groupItem({
+          people: [
+            person('m', 'Mario Rossi', { rsvpStatus: 'attending' }),
+            person('l', 'Laura Rossi', { rsvpStatus: 'attending' }),
+          ],
+          counts: { attending: 2, pending: 0, declined: 0, arrived: 0 },
+        })],
+      })),
+      [`PUT ${ATTENDANCE}/guests/m`]: () => new Promise<Response>((resolve) => { releaseCheckIn = resolve; }),
+    });
+    renderConsole({ party: party({ status: 'live', version: 3 }) });
+
+    await userEvent.click(await screen.findByTestId('guest-checkin-m'));
+
+    expect(screen.getByTestId('guest-checkin-m')).toBeDisabled();
+    // The person beside them is not waiting for anything.
+    expect(screen.getByTestId('guest-checkin-l')).toBeEnabled();
+
+    releaseCheckIn!(jsonResponse({
+      changed: true, summary: attendanceSummary({ expectedPeople: 2, expectedArrived: 1, expectedMissing: 1, totalArrivals: 1 }),
+      guest: { guestId: 'm', name: 'Mario Rossi', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: '2027-06-12T21:04:00Z', checkInSource: 'owner' },
+      otherGuest: null,
+    }));
+    await waitFor(() => expect(screen.getByTestId('guest-undo-m')).toBeEnabled());
+  });
+
   it('searches on the server, and keeps the search and the filter in the URL', async () => {
     const mock = installFetchMock({
       [`GET ${DIRECTORY}`]: (req) => {

@@ -26,7 +26,7 @@ import { countsPhrase, formatWhen, invitationStatusLine, peopleInReadingOrder } 
 const PEOPLE_ON_A_CARD = 4;
 
 export function GuestGroupCard({
-  item, live, selected, busy, detailHref, onPrimary, onMenu, onCheckIn, onUndo,
+  item, live, selected, busy, personBusy, detailHref, onPrimary, onMenu, onCheckIn, onUndo,
 }: {
   item: GuestDirectoryGroupItem;
   /** The party is live or over: the card records arrivals. */
@@ -34,6 +34,8 @@ export function GuestGroupCard({
   selected: boolean;
   /** A request is in flight for this group, whatever it was. */
   busy: boolean;
+  /** …and for one of its people: an arrival is recorded per person, not per group. */
+  personBusy(guestId: string): boolean;
   detailHref: string;
   onPrimary(action: InvitationPrimaryAction): void;
   onMenu(): void;
@@ -82,7 +84,7 @@ export function GuestGroupCard({
         <ul className="guest-card-people-list">
           {shown.map((person) => (
             <GuestPersonRow
-              key={person.guestId} person={person} busy={busy}
+              key={person.guestId} person={person} busy={busy || personBusy(person.guestId)}
               onCheckIn={() => onCheckIn(person)} onUndo={() => onUndo(person)}
             />
           ))}

@@ -74,6 +74,11 @@ export function useGuestDirectory(
   // sentinel firing twice cannot ask for the same page twice.
   const cursorRef = useRef<string | null>(null);
   const inFlight = useRef(false);
+  // Which list the pages belong to. A search answered after the host has typed
+  // another one would otherwise append ITS rows and leave ITS cursor behind —
+  // and the next page would be asked for with a cursor the server issued for a
+  // list that is no longer on the screen.
+  const generation = useRef(0);
 
   const failed = useCallback((err: unknown): boolean => {
     if (err instanceof ApiError && err.status === 401) {
@@ -85,6 +90,7 @@ export function useGuestDirectory(
 
   useEffect(() => {
     const ctrl = new AbortController();
+    generation.current += 1;
     cursorRef.current = null;
     inFlight.current = false;
     setStatus('loading');
@@ -115,20 +121,27 @@ export function useGuestDirectory(
   const loadMore = useCallback(() => {
     const cursor = cursorRef.current;
     if (!cursor || inFlight.current) return;
+    const mine = generation.current;
     inFlight.current = true;
     setLoadingMore(true);
     setLoadMoreFailed(false);
     getPartyGuestDirectory(partyId, { q, state, cursor, take: GUEST_DIRECTORY_LIMITS.defaultTake })
       .then((page) => {
+        // The list this page continues is gone; its rows and its cursor belong
+        // to it, not to what the host is looking at now.
+        if (mine !== generation.current) return;
         cursorRef.current = page.nextCursor;
         setLoaded((current) => (current
           ? { ...current, items: merge(current.items, page.items), cursor: page.nextCursor }
           : current));
       })
       .catch((err: unknown) => {
+        if (mine !== generation.current) return;
         if (!failed(err)) setLoadMoreFailed(true);
       })
       .finally(() => {
+        // A new search has already reset both; leave its state alone.
+        if (mine !== generation.current) return;
         inFlight.current = false;
         setLoadingMore(false);
       });
