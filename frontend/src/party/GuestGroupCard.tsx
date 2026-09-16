@@ -208,24 +208,26 @@ export function GuestOtherCard({
   const { t, formatDate } = useI18n();
 
   return (
+    // Two lines and a menu: somebody at the door is a name and a time, and a
+    // card that reserved a row for one button was mostly empty space.
     <li className="guest-card guest-card--other" data-testid={`guest-other-${item.id}`} data-kind="other">
       <div className="guest-card-head">
         <h3 className="guest-card-title">{item.name}</h3>
-        <span className="guest-chip">{t('party.console.other.chip')}</span>
+        <span className="guest-card-aside">
+          <span className="guest-chip">{t('party.console.other.chip')}</span>
+          <button
+            type="button" className="icon-button guest-card-menu"
+            aria-label={t('party.console.other.more', { name: item.name })}
+            data-testid={`guest-other-menu-${item.id}`} disabled={busy} onClick={onMenu}
+          >
+            ⋮
+          </button>
+        </span>
       </div>
       <p className="guest-card-counts muted">
         {/* The day and the hour once: "oggi 09:22", not "alle 09:22 · oggi 09:22". */}
         {t('party.console.arrival.when', { when: formatWhen(item.checkedInAt, t, formatDate) })}
       </p>
-      <div className="guest-card-actions">
-        <button
-          type="button" className="icon-button guest-card-menu"
-          aria-label={t('party.console.other.more', { name: item.name })}
-          data-testid={`guest-other-menu-${item.id}`} disabled={busy} onClick={onMenu}
-        >
-          ⋮
-        </button>
-      </div>
     </li>
   );
 }

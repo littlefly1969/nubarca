@@ -81,6 +81,7 @@
   gap: 0.35rem 0.75rem;
 }
 .guest-card-title { margin: 0; font-size: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.guest-card-aside { display: inline-flex; align-items: center; gap: 0.35rem; }
 .guest-card-open { color: inherit; text-decoration: none; }
 .guest-card-open:hover, .guest-card-open:focus-visible { text-decoration: underline; }
 .guest-card-line, .guest-card-arrived { font-size: 0.85rem; opacity: 0.85; }
