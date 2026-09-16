@@ -52,14 +52,13 @@ export interface PartyFactsExtras {
   /** Read everything again — the live console's refresh, and a retry. */
   refresh(): void;
   /**
-   * Read the COUNTS again, and nothing else.
+   * Adopt counts the SERVER just answered a mutation with.
    *
-   * What a guest mutation changes is the guest summary; re-reading the album's
-   * settings and the content slots beside it would be three requests to learn
-   * one number.
+   * This is the targeted invalidation a guest mutation needs, taken to its
+   * end: the console already holds the party's new summary, so the workspace
+   * adopts it instead of asking for a number it has already been given. No
+   * request at all, and the two surfaces cannot disagree about it.
    */
-  refreshGuests(): void;
-  /** Adopt counts the SERVER just answered a mutation with — no request at all. */
   adoptGuests(next: GuestDirectorySummary): void;
   setAlbumParty(next: AlbumPartyStatus): void;
   setSlot(next: PartyGuestContentSlot): void;
@@ -81,7 +80,6 @@ export function usePartyFacts(
   const [uploads, setUploads] = useState<Loaded<number>>(LOADING);
   const [messages, setMessages] = useState<Loaded<number>>(LOADING);
   const [nonce, setNonce] = useState(0);
-  const [guestNonce, setGuestNonce] = useState(0);
 
   const partyId = party?.id ?? null;
   const partyLoaded = party !== null;
@@ -93,9 +91,7 @@ export function usePartyFacts(
   const refresh = useCallback(() => {
     askedModeration.current = null;
     setNonce((n) => n + 1);
-    setGuestNonce((n) => n + 1);
   }, []);
-  const refreshGuests = useCallback(() => setGuestNonce((n) => n + 1), []);
   const adoptGuests = useCallback(
     (next: GuestDirectorySummary) => setGuests(ready(next)), []);
 
@@ -153,7 +149,7 @@ export function usePartyFacts(
         setGuests(FAILED);
       });
     return () => ctrl.abort();
-  }, [partyId, guestNonce, unauthorized]);
+  }, [partyId, nonce, unauthorized]);
 
   useEffect(() => {
     if (!albumId || !wantsModeration || party?.status === 'draft') return;
@@ -206,7 +202,6 @@ export function usePartyFacts(
     guests,
     moderation: { uploads, messages },
     refresh,
-    refreshGuests,
     adoptGuests,
     setAlbumParty,
     setSlot,
