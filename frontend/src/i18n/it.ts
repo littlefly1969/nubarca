@@ -707,6 +707,7 @@ const it = {
   'party.console.rsvp.declined': 'Non viene',
   'party.console.plusOne': '+1',
   'party.console.arrival.at': 'Arrivato alle {time}',
+  'party.console.arrival.when': 'Arrivato · {when}',
   'party.console.arrival.bySelf': 'dal proprio invito',
   'party.console.arrival.none': 'Non ancora arrivato',
   'party.console.checkIn': 'Segna arrivato',

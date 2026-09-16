@@ -700,6 +700,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.console.rsvp.declined': 'Not coming',
   'party.console.plusOne': '+1',
   'party.console.arrival.at': 'Arrived at {time}',
+  'party.console.arrival.when': 'Arrived · {when}',
   'party.console.arrival.bySelf': 'from their invitation',
   'party.console.arrival.none': 'Not arrived yet',
   'party.console.checkIn': 'Mark arrived',
