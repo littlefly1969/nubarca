@@ -14,6 +14,8 @@ import {
   attentionBodyKey,
   attentionBodyPluralKey,
   attentionTitleKey,
+  factsFailed,
+  loadedValue,
   primaryIntent,
   statusStoryKey,
   stepActionKey,
@@ -43,15 +45,19 @@ import { Button, EmptyState, Notice, Panel, SectionHead, Step } from './ui';
 // the summary's whole job is to point at it.
 
 export function PartySummarySection({
-  facts, onNavigate, onPartyUpdated, onAlbumPartyUpdated,
+  facts, onNavigate, onPartyUpdated, onAlbumPartyUpdated, onPartyReload, onRetry,
 }: {
   facts: WorkspaceFacts;
   onNavigate(section: WorkspaceSection): void;
   onPartyUpdated(next: Party): void;
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
+  /** Read the party again: opening it to guests publishes it server-side. */
+  onPartyReload(): Promise<void>;
+  onRetry(): void;
 }) {
   const { t, tn, formatDate } = useI18n();
-  const { party, albumParty } = facts;
+  const { party } = facts;
+  const albumParty = loadedValue(facts.albumParty);
   const steps = workspaceSteps(facts);
   const attention = workspaceAttention(facts);
   const album = mainMediaSource(party);
@@ -66,7 +72,24 @@ export function PartySummarySection({
         onNavigate={onNavigate}
         onPartyUpdated={onPartyUpdated}
         onAlbumPartyUpdated={onAlbumPartyUpdated}
+        onPartyReload={onPartyReload}
+        onRetry={onRetry}
       />
+
+      {/* Something was asked for and did not come. Said once, here, rather than
+          letting each panel below quietly report an absence as a fact: a
+          checklist missing its steps is confusing, a checklist LYING about them
+          is worse. */}
+      {factsFailed(facts) && (
+        <Notice
+          tone="warn"
+          testId="party-facts-error"
+          title={t('party.summary.partialTitle')}
+          actions={<Button onClick={onRetry} data-testid="party-facts-retry">{t('common.retry')}</Button>}
+        >
+          <p>{t('party.summary.partialBody')}</p>
+        </Notice>
+      )}
 
       {attention.length > 0 && (
         <Panel
@@ -179,19 +202,22 @@ function GuestRow({
   onNavigate(section: WorkspaceSection): void;
 }) {
   const { t } = useI18n();
-  const { guests, party } = facts;
+  const { party } = facts;
+  const guests = loadedValue(facts.guests);
   const listed = (guests?.groups ?? 0) > 0;
   const running = party.status === 'live' || party.status === 'ended';
 
-  const note = guests === null
-    ? t('common.loading')
-    : running
-      ? t('party.summary.guestsArrived', { count: guests.attendance.totalArrivals })
-      : listed
-        ? t('party.summary.guestsReplies', {
-          attending: guests.rsvp.attending, pending: guests.rsvp.missingResponses,
-        })
-        : t('party.summary.guestsOptional');
+  const note = facts.guests.status === 'error'
+    ? t('party.summary.guestsUnknown')
+    : guests === null
+      ? t('common.loading')
+      : running
+        ? t('party.summary.guestsArrived', { count: guests.attendance.totalArrivals })
+        : listed
+          ? t('party.summary.guestsReplies', {
+            attending: guests.rsvp.attending, pending: guests.rsvp.missingResponses,
+          })
+          : t('party.summary.guestsOptional');
 
   return (
     <div className="pw-row" data-testid="party-essentials-guests">
@@ -216,12 +242,14 @@ function GuestRow({
  * a button to find out where their evening is.
  */
 function NextMove({
-  facts, onNavigate, onPartyUpdated, onAlbumPartyUpdated,
+  facts, onNavigate, onPartyUpdated, onAlbumPartyUpdated, onPartyReload, onRetry,
 }: {
   facts: WorkspaceFacts;
   onNavigate(section: WorkspaceSection): void;
   onPartyUpdated(next: Party): void;
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
+  onPartyReload(): Promise<void>;
+  onRetry(): void;
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -252,7 +280,15 @@ function NextMove({
   const openToGuests = () => guarded(async () => {
     // Opening the party to its guests is what publishes it: the capability's
     // own transition, not a second "publish" button that would race it.
+    //
+    // AND THE PARTY MOVED WITH IT. The capability's answer describes the
+    // album's settings and says nothing about the party's lifecycle, so
+    // adopting it alone left the badge reading "Bozza" and this very panel
+    // still offering to publish something the server had already published —
+    // until the host reloaded the page by hand. The party is read again, in
+    // the same action, so there is one source of truth for what happened.
     onAlbumPartyUpdated(await setAlbumPartyMode(album!.albumId, true));
+    await onPartyReload();
   });
 
   const transition = (action: 'start-live' | 'end-live') => guarded(async () => {
@@ -263,6 +299,14 @@ function NextMove({
 
   let action = null;
   switch (intent.kind) {
+    case 'unavailable':
+      // Asked for and not answered. A placeholder here would wait for ever.
+      action = (
+        <Button tone="primary" size="lg" data-testid="party-next-retry" onClick={onRetry}>
+          {t('common.retry')}
+        </Button>
+      );
+      break;
     case 'unknown':
       // A placeholder the size of the button that is coming, so the panel does
       // not jump under a thumb already reaching for it.
@@ -319,7 +363,11 @@ function NextMove({
       note={story}
       headingLevel={3}
     >
-      {intent.kind !== 'unknown' && (
+      {intent.kind === 'unavailable' ? (
+        <p className="pw-panel-note" role="alert" data-testid="party-next-unavailable">
+          {t('party.next.unavailable.why')}
+        </p>
+      ) : intent.kind !== 'unknown' && (
         <p className="pw-panel-note">{t(`party.next.${intent.kind}.why` as MessageKey)}</p>
       )}
       <div className="pw-panel-actions">

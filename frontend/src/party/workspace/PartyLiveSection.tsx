@@ -18,7 +18,9 @@ import {
   attentionBodyKey,
   attentionBodyPluralKey,
   attentionTitleKey,
+  loadedValue,
   workspaceAttention,
+  type Loaded,
   type WorkspaceFacts,
   type WorkspaceSection,
 } from './partyWorkspaceModel';
@@ -56,7 +58,8 @@ export function PartyLiveSection({
   onRefresh(): void;
 }) {
   const { t, tn } = useI18n();
-  const { party, albumParty, guests, moderation } = facts;
+  const { party, moderation } = facts;
+  const albumParty = loadedValue(facts.albumParty);
   const attention = workspaceAttention(facts);
 
   return (
@@ -97,7 +100,7 @@ export function PartyLiveSection({
 
       <EndTheParty party={party} onPartyUpdated={onPartyUpdated} />
 
-      {guests === null && (
+      {facts.guests.status === 'loading' && (
         <p className="visually-hidden" role="status">{t('common.loading')}</p>
       )}
     </>
@@ -119,13 +122,20 @@ function Arrivals({
   onOpenGuests(filter: GuestDirectoryState | null): void;
 }) {
   const { t } = useI18n();
-  const { guests } = facts;
+  const guests = loadedValue(facts.guests);
   const listed = (guests?.groups ?? 0) > 0;
   const attendance = guests?.attendance;
 
   return (
     <Panel tone="feature" testId="party-live-arrivals" title={t('party.live.arrivals')}>
-      {guests === null ? (
+      {/* Three states, and the third is not a skeleton: a count that failed to
+          arrive is said, not waited for. Zero arrivals and an unread door are
+          not the same evening. */}
+      {facts.guests.status === 'error' ? (
+        <Notice tone="warn" testId="party-live-counts-error">
+          <p>{t('party.summary.guestsUnknown')}</p>
+        </Notice>
+      ) : facts.guests.status === 'loading' ? (
         <div className="pw-skeleton pw-skeleton--panel" aria-hidden />
       ) : listed && attendance ? (
         <Stats
@@ -195,7 +205,7 @@ function RightNow({
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
-  moderation: { uploads: number; messages: number } | null;
+  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
 }) {
   const { t } = useI18n();
   const perms = usePermissions();
@@ -211,9 +221,7 @@ function RightNow({
         testId="party-live-uploads"
         title={t('partyUploads.title')}
         note={albumParty?.uploadEnabled ? t('party.live.uploadsOpen') : t('party.live.uploadsClosed')}
-        after={moderation && moderation.uploads > 0
-          ? <Badge kind="warn">{t('party.photos.pending', { count: moderation.uploads })}</Badge>
-          : undefined}
+        after={<QueueBadge queue={moderation.uploads} />}
       />
       <LinkRow
         to={`/albums/${albumId}/party-messages?party=${party.id}`}
@@ -222,9 +230,7 @@ function RightNow({
         note={albumParty?.requireMessageApproval
           ? t('party.activities.approvalOn')
           : t('party.activities.approvalOff')}
-        after={moderation && moderation.messages > 0
-          ? <Badge kind="warn">{t('party.photos.pending', { count: moderation.messages })}</Badge>
-          : undefined}
+        after={<QueueBadge queue={moderation.messages} />}
       />
       {albumParty?.gameEnabled && perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]) && (
         <LinkRow
@@ -320,4 +326,18 @@ export function guestConsoleSearch(
   else next.set(GUEST_CONSOLE_PARAMS.state, filter);
   next.delete(GUEST_CONSOLE_PARAMS.group);
   return next;
+}
+
+/**
+ * What is waiting in one queue — and nothing at all when the answer did not
+ * come. A badge reading "0 in attesa" on a list nobody managed to read is a
+ * statement the product cannot make.
+ */
+export function QueueBadge({ queue }: { queue: Loaded<number> }) {
+  const { t } = useI18n();
+  if (queue.status === 'error') {
+    return <Badge kind="plain">{t('party.photos.pendingUnknown')}</Badge>;
+  }
+  if (queue.status !== 'ready' || queue.value <= 0) return null;
+  return <Badge kind="warn">{t('party.photos.pending', { count: queue.value })}</Badge>;
 }

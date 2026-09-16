@@ -12,6 +12,7 @@ import {
   type PartyGuestContentSlot,
 } from '@nubarca/api-client';
 import { mainMediaSource } from '../partyModel';
+import type { Loaded } from './partyWorkspaceModel';
 
 // Everything the workspace knows about one party, gathered once.
 //
@@ -19,7 +20,8 @@ import { mainMediaSource } from '../partyModel';
 //
 //   The album's party settings, only once there is an album to ask about. A
 //   party with no album must never send an album-scoped request with an
-//   invented id.
+//   invented id — and its settings are then `ready` with `null`, because
+//   having no album is a FACT, not a missing answer.
 //
 //   The guest content slots, always: they are small, and the experience section
 //   and the summary's checklist both need them.
@@ -30,75 +32,128 @@ import { mainMediaSource } from '../partyModel';
 //   is why no personal data reaches a URL from here.
 //
 //   The moderation queues, only when the host is somewhere that shows what is
-//   waiting in them. They are the same lists the queue pages load, so the cost
-//   is one the host was going to pay anyway — but only if they look.
+//   waiting in them, and SEPARATELY: one list failing must not report the
+//   other's count as the whole truth, and must never report its own as zero.
 //
-// Each read fails QUIETLY into "unknown" rather than into zero. A summary that
-// says "0 arrivals" because a request failed is worse than one that says
-// nothing, because the host would believe it.
+// EVERY READ HAS THREE STATES, not two. `null` used to mean both "has not
+// arrived" and "the request failed", and the surfaces above could not tell
+// them apart: a failed settings read left the summary showing a placeholder for
+// ever, and a failed content read made the checklist say the invitation had not
+// been written. Unknown is not zero, and it is not "not configured" either.
+//
+// A 401 is never swallowed. It is the one failure that is not about this party
+// at all, and the application has to hear about it wherever it happens.
 
 export interface PartyFactsExtras {
-  albumParty: AlbumPartyStatus | null;
-  slots: PartyGuestContentSlot[];
-  guests: GuestDirectorySummary | null;
-  moderation: { uploads: number; messages: number } | null;
-  /** Re-read the counts — the live console's refresh, and every mutation's. */
+  albumParty: Loaded<AlbumPartyStatus | null>;
+  slots: Loaded<readonly PartyGuestContentSlot[]>;
+  guests: Loaded<GuestDirectorySummary | null>;
+  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
+  /** Read everything again — the live console's refresh, and a retry. */
   refresh(): void;
+  /**
+   * Read the COUNTS again, and nothing else.
+   *
+   * What a guest mutation changes is the guest summary; re-reading the album's
+   * settings and the content slots beside it would be three requests to learn
+   * one number.
+   */
+  refreshGuests(): void;
+  /** Adopt counts the SERVER just answered a mutation with — no request at all. */
+  adoptGuests(next: GuestDirectorySummary): void;
   setAlbumParty(next: AlbumPartyStatus): void;
   setSlot(next: PartyGuestContentSlot): void;
 }
+
+const LOADING = { status: 'loading' } as const;
+const FAILED = { status: 'error' } as const;
+const ready = <T>(value: T): Loaded<T> => ({ status: 'ready', value });
 
 export function usePartyFacts(
   party: Party | null,
   { wantsModeration }: { wantsModeration: boolean },
   onUnauthorized: () => void,
 ): PartyFactsExtras {
-  const [albumParty, setAlbumParty] = useState<AlbumPartyStatus | null>(null);
-  const [slots, setSlots] = useState<PartyGuestContentSlot[]>([]);
-  const [guests, setGuests] = useState<GuestDirectorySummary | null>(null);
-  const [moderation, setModeration] = useState<{ uploads: number; messages: number } | null>(null);
+  const [albumParty, setAlbumPartyState] =
+    useState<Loaded<AlbumPartyStatus | null>>(LOADING);
+  const [slots, setSlots] = useState<Loaded<readonly PartyGuestContentSlot[]>>(LOADING);
+  const [guests, setGuests] = useState<Loaded<GuestDirectorySummary | null>>(LOADING);
+  const [uploads, setUploads] = useState<Loaded<number>>(LOADING);
+  const [messages, setMessages] = useState<Loaded<number>>(LOADING);
   const [nonce, setNonce] = useState(0);
+  const [guestNonce, setGuestNonce] = useState(0);
 
   const partyId = party?.id ?? null;
+  const partyLoaded = party !== null;
   const albumId = party ? mainMediaSource(party)?.albumId ?? null : null;
   // The moderation read is expensive enough to be worth doing once per visit
   // rather than once per render of a section that mentions it.
   const askedModeration = useRef<string | null>(null);
 
-  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+  const refresh = useCallback(() => {
+    askedModeration.current = null;
+    setNonce((n) => n + 1);
+    setGuestNonce((n) => n + 1);
+  }, []);
+  const refreshGuests = useCallback(() => setGuestNonce((n) => n + 1), []);
+  const adoptGuests = useCallback(
+    (next: GuestDirectorySummary) => setGuests(ready(next)), []);
 
+  /** True when the failure was a 401 — handed to the application, not to a panel. */
   const unauthorized = useCallback((err: unknown) => {
     if (err instanceof ApiError && err.status === 401) { onUnauthorized(); return true; }
     return false;
   }, [onUnauthorized]);
 
   useEffect(() => {
-    if (!albumId) { setAlbumParty(null); return; }
+    // THE PARTY ITSELF IS STILL COMING. Nothing is known yet — not even whether
+    // there is an album — so this stays `loading`. Reporting `ready` with no
+    // value here would be the same mistake in a new place: the live console
+    // would draw "presenze registrate 0" for a frame before the real counts
+    // arrived, which is a number the product had not been told.
+    if (!partyLoaded) { setAlbumPartyState(LOADING); return; }
+    // The party is loaded and has no album: a known absence, not a pending
+    // answer, and nothing album-scoped may be asked for with an invented id.
+    if (!albumId) { setAlbumPartyState(ready(null)); return; }
     const ctrl = new AbortController();
+    setAlbumPartyState(LOADING);
     getAlbumPartySettings(albumId, ctrl.signal)
-      .then(setAlbumParty)
-      .catch((err) => { if (!ctrl.signal.aborted && !unauthorized(err)) setAlbumParty(null); });
+      .then((value) => { if (!ctrl.signal.aborted) setAlbumPartyState(ready(value)); })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        unauthorized(err);
+        setAlbumPartyState(FAILED);
+      });
     return () => ctrl.abort();
-  }, [albumId, nonce, unauthorized]);
+  }, [partyLoaded, albumId, nonce, unauthorized]);
 
   useEffect(() => {
-    if (!partyId) { setSlots([]); return; }
+    if (!partyId) { setSlots(LOADING); return; }
     const ctrl = new AbortController();
+    setSlots(LOADING);
     listPartyGuestContent(partyId, ctrl.signal)
-      .then(setSlots)
-      .catch((err) => { if (!ctrl.signal.aborted && !unauthorized(err)) setSlots([]); });
+      .then((value) => { if (!ctrl.signal.aborted) setSlots(ready(value)); })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        unauthorized(err);
+        setSlots(FAILED);
+      });
     return () => ctrl.abort();
-  }, [partyId, unauthorized]);
+  }, [partyId, nonce, unauthorized]);
 
   useEffect(() => {
-    if (!partyId) { setGuests(null); return; }
+    if (!partyId) { setGuests(LOADING); return; }
     const ctrl = new AbortController();
     // `take: 0` is the counts alone — no card, no person, no name.
     queryPartyGuestDirectory(partyId, { take: 0 }, ctrl.signal)
-      .then((page) => setGuests(page.summary))
-      .catch((err) => { if (!ctrl.signal.aborted && !unauthorized(err)) setGuests(null); });
+      .then((page) => { if (!ctrl.signal.aborted) setGuests(ready(page.summary)); })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        unauthorized(err);
+        setGuests(FAILED);
+      });
     return () => ctrl.abort();
-  }, [partyId, nonce, unauthorized]);
+  }, [partyId, guestNonce, unauthorized]);
 
   useEffect(() => {
     if (!albumId || !wantsModeration || party?.status === 'draft') return;
@@ -106,23 +161,54 @@ export function usePartyFacts(
     if (askedModeration.current === key) return;
     askedModeration.current = key;
     const ctrl = new AbortController();
-    void Promise.all([
-      listPartyUploads(albumId, ctrl.signal).catch(() => null),
-      listPartyMessages(albumId, ctrl.signal).catch(() => null),
-    ]).then(([uploads, messages]) => {
-      if (ctrl.signal.aborted) return;
-      if (uploads === null && messages === null) { setModeration(null); return; }
-      setModeration({
-        uploads: uploads?.items.filter((item) => item.status === 'pending').length ?? 0,
-        messages: messages?.items.filter((item) => item.status === 'pending').length ?? 0,
+    setUploads(LOADING);
+    setMessages(LOADING);
+
+    // Two reads, two answers. `Promise.all` with a shared catch would have let
+    // one failure decide for both; each settles on its own.
+    void listPartyUploads(albumId, ctrl.signal)
+      .then((list) => {
+        if (!ctrl.signal.aborted) {
+          setUploads(ready(list.items.filter((i) => i.status === 'pending').length));
+        }
+      })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        unauthorized(err);
+        setUploads(FAILED);
       });
-    });
+    void listPartyMessages(albumId, ctrl.signal)
+      .then((list) => {
+        if (!ctrl.signal.aborted) {
+          setMessages(ready(list.items.filter((i) => i.status === 'pending').length));
+        }
+      })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        unauthorized(err);
+        setMessages(FAILED);
+      });
     return () => ctrl.abort();
-  }, [albumId, wantsModeration, party?.status, nonce]);
+  }, [albumId, wantsModeration, party?.status, nonce, unauthorized]);
 
   const setSlot = useCallback((next: PartyGuestContentSlot) => {
-    setSlots((current) => current.map((slot) => (slot.kind === next.kind ? next : slot)));
+    setSlots((current) => (current.status === 'ready'
+      ? ready(current.value.map((slot) => (slot.kind === next.kind ? next : slot)))
+      : current));
   }, []);
 
-  return { albumParty, slots, guests, moderation, refresh, setAlbumParty, setSlot };
+  const setAlbumParty = useCallback(
+    (next: AlbumPartyStatus) => setAlbumPartyState(ready(next)), []);
+
+  return {
+    albumParty,
+    slots,
+    guests,
+    moderation: { uploads, messages },
+    refresh,
+    refreshGuests,
+    adoptGuests,
+    setAlbumParty,
+    setSlot,
+  };
 }

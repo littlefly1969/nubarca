@@ -22,6 +22,7 @@ import { PartySummarySection } from '../party/workspace/PartySummarySection';
 import {
   defaultWorkspaceSection,
   isWorkspaceSection,
+  loadedValue,
   sectionLabelKey,
   workspaceSections,
   type WorkspaceFacts,
@@ -174,6 +175,25 @@ export function PartyWorkspacePage() {
     setStatus({ kind: 'ready', party: next });
   }, []);
 
+  /**
+   * Read the party again from the server.
+   *
+   * Opening a party to its guests is a capability mutation that ALSO publishes
+   * the party, and the capability's answer does not carry the party. Without
+   * this the badge stayed "Bozza" and the summary kept offering to publish
+   * something already published, until the host reloaded the page.
+   */
+  const reloadParty = useCallback(async () => {
+    if (!partyId) return;
+    try {
+      setStatus({ kind: 'ready', party: await getParty(partyId) });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) invalidateAuth();
+      // Anything else leaves the party as it was: the mutation succeeded, and
+      // a failed re-read is not a reason to throw away what is on the screen.
+    }
+  }, [partyId, invalidateAuth]);
+
   // On a phone the section rail scrolls, and the eighth section is off the
   // right-hand edge. Without this, opening Impostazioni from a step's button
   // shows a rail where NOTHING is selected — which reads as a broken page
@@ -248,6 +268,7 @@ export function PartyWorkspacePage() {
     guests: facts.guests,
     moderation: facts.moderation,
   };
+  const albumParty = loadedValue(facts.albumParty);
 
   return (
     <main className="pw" data-testid="party-workspace">
@@ -315,6 +336,8 @@ export function PartyWorkspacePage() {
               onNavigate={setSection}
               onPartyUpdated={onPartyUpdated}
               onAlbumPartyUpdated={facts.setAlbumParty}
+              onPartyReload={reloadParty}
+              onRetry={facts.refresh}
             />
           )}
 
@@ -331,49 +354,64 @@ export function PartyWorkspacePage() {
           {section === 'experience' && (
             <PartyExperienceSection
               party={current}
-              albumParty={facts.albumParty}
+              albumParty={albumParty}
               slots={facts.slots}
               onPartyUpdated={onPartyUpdated}
               onSlotSaved={facts.setSlot}
+              onRetry={facts.refresh}
             />
           )}
 
           {section === 'guests' && (
-            <PartyGuestListTab party={current} onPartyUpdated={onPartyUpdated} />
+            // The console hands its counts UP as the server answers each
+            // mutation with them, so Live shows a check-in the moment the host
+            // walks back to it — without a second request, and without the
+            // refresh button they should not have needed.
+            <PartyGuestListTab
+              party={current}
+              onPartyUpdated={onPartyUpdated}
+              onGuestCountsChanged={facts.adoptGuests}
+            />
           )}
 
           {section === 'photos' && (
             <PartyPhotosSection
               party={current}
-              albumParty={facts.albumParty}
+              albumParty={albumParty}
+              albumPartyFailed={facts.albumParty.status === 'error'}
               moderation={facts.moderation}
               onPartyUpdated={onPartyUpdated}
               onAlbumPartyUpdated={facts.setAlbumParty}
               onNavigate={setSection}
+              onRetry={facts.refresh}
             />
           )}
 
           {section === 'activities' && (
             <PartyActivitiesSection
               party={current}
-              albumParty={facts.albumParty}
+              albumParty={albumParty}
+              albumPartyFailed={facts.albumParty.status === 'error'}
               moderation={facts.moderation}
               onAlbumPartyUpdated={facts.setAlbumParty}
+              onRetry={facts.refresh}
             />
           )}
 
           {section === 'screens' && (
             <PartyScreensSection
               party={current}
-              albumParty={facts.albumParty}
+              albumParty={albumParty}
+              albumPartyFailed={facts.albumParty.status === 'error'}
               onAlbumPartyUpdated={facts.setAlbumParty}
+              onRetry={facts.refresh}
             />
           )}
 
           {section === 'settings' && (
             <PartySettingsSection
               party={current}
-              albumParty={facts.albumParty}
+              albumParty={albumParty}
               onPartyUpdated={onPartyUpdated}
               onAlbumPartyUpdated={facts.setAlbumParty}
             />
@@ -398,12 +436,12 @@ function SectionCount({
   facts: WorkspaceFacts;
 }) {
   const { t } = useI18n();
-  const waiting = section === 'photos'
-    ? facts.moderation?.uploads ?? 0
-    : section === 'activities'
-      ? facts.moderation?.messages ?? 0
-      : 0;
-  if (waiting <= 0) return null;
+  const queue = section === 'photos'
+    ? facts.moderation.uploads
+    : section === 'activities' ? facts.moderation.messages : null;
+  // A queue that failed to load has no number, and must not be drawn as none.
+  if (queue === null || queue.status !== 'ready' || queue.value <= 0) return null;
+  const waiting = queue.value;
   return (
     <>
       <span className="pw-nav-count" aria-hidden>{waiting}</span>

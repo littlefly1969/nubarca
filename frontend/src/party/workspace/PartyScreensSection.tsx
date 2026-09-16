@@ -13,7 +13,7 @@ import { useI18n } from '../../i18n';
 import { PartyPrintSettings } from '../../albums/PartyPrintSettings';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
-import { EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
+import { Button, EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
 
 // "SCHERMI E STAMPA" — the party as it appears on something other than a phone.
 //
@@ -26,11 +26,13 @@ import { EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui
 // screen and no printer is a complete party.
 
 export function PartyScreensSection({
-  party, albumParty, onAlbumPartyUpdated,
+  party, albumParty, albumPartyFailed, onAlbumPartyUpdated, onRetry,
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
+  albumPartyFailed: boolean;
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
+  onRetry(): void;
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -67,6 +69,22 @@ export function PartyScreensSection({
           title={t('party.screens.needsAlbumTitle')}
           body={t('party.screens.needsAlbumBody')}
         />
+      </>
+    );
+  }
+
+  if (albumPartyFailed) {
+    return (
+      <>
+        <SectionHead title={t('party.section.screens')} lede={t('party.screens.lede')} />
+        <Notice
+          tone="error"
+          testId="party-screens-settings-error"
+          title={t('party.settingsUnreadable')}
+          actions={<Button onClick={onRetry}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.settingsUnreadableBody')}</p>
+        </Notice>
       </>
     );
   }

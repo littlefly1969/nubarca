@@ -13,8 +13,9 @@ import { useI18n } from '../../i18n';
 import { PartyAlbumSection } from '../PartyAlbumSection';
 import { PartySlideshowSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
-import { Badge, Button, Disclosure, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
-import type { WorkspaceSection } from './partyWorkspaceModel';
+import { Button, Disclosure, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
+import { QueueBadge } from './PartyLiveSection';
+import type { Loaded, WorkspaceSection } from './partyWorkspaceModel';
 
 // "FOTO" — the photographs, and who may see or add them.
 //
@@ -30,14 +31,18 @@ import type { WorkspaceSection } from './partyWorkspaceModel';
 // are where photographs are looked at, and this points at them.
 
 export function PartyPhotosSection({
-  party, albumParty, moderation, onPartyUpdated, onAlbumPartyUpdated, onNavigate,
+  party, albumParty, albumPartyFailed, moderation,
+  onPartyUpdated, onAlbumPartyUpdated, onNavigate, onRetry,
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
-  moderation: { uploads: number; messages: number } | null;
+  /** The settings were asked for and did not come — not the same as absent. */
+  albumPartyFailed: boolean;
+  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
   onPartyUpdated(next: Party): void;
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
   onNavigate(section: WorkspaceSection): void;
+  onRetry(): void;
 }) {
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -67,7 +72,18 @@ export function PartyPhotosSection({
 
       <PartyAlbumSection party={party} onPartyUpdated={onPartyUpdated} />
 
-      {albumId === null ? null : (
+      {albumId !== null && albumPartyFailed && (
+        <Notice
+          tone="error"
+          testId="party-photos-settings-error"
+          title={t('party.settingsUnreadable')}
+          actions={<Button onClick={onRetry}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.settingsUnreadableBody')}</p>
+        </Notice>
+      )}
+
+      {albumId === null || albumPartyFailed ? null : (
         <>
           <Panel
             title={t('party.photos.contributions')}
@@ -115,9 +131,7 @@ export function PartyPhotosSection({
               note={albumParty?.requireUploadApproval
                 ? t('party.photos.approvalOn')
                 : t('party.photos.approvalOff')}
-              after={moderation && moderation.uploads > 0
-                ? <Badge kind="warn">{t('party.photos.pending', { count: moderation.uploads })}</Badge>
-                : undefined}
+              after={<QueueBadge queue={moderation.uploads} />}
             />
           </Panel>
 

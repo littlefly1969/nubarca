@@ -292,6 +292,25 @@ it('guests — an open party with no list at all', async () => {
   await capture('guests-open', 'party-guests');
 });
 
+// The two error surfaces the correctness pass added. They exist as fixtures so
+// the browser measurements cover them too: an error state that overflows or
+// carries an unreachable button is still an error state nobody can use.
+it('summary — the party settings could not be read', async () => {
+  mountWorkspace('?section=summary', {
+    [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party({ status: 'published' })),
+    [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => new Response(null, { status: 500 }),
+  });
+  await capture('error-settings', 'party-next-unavailable');
+});
+
+it('experience — the sections could not be read', async () => {
+  mountWorkspace('?section=experience', {
+    [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party({ status: 'published' })),
+    [`GET /api/parties/${PARTY_ID}/guest-content`]: () => new Response(null, { status: 500 }),
+  });
+  await capture('error-content', 'party-experience-error');
+});
+
 it('parties list', async () => {
   installFetchMock({
     'GET /api/parties': () => jsonResponse([

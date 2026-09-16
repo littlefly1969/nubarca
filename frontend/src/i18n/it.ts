@@ -472,6 +472,13 @@ const it = {
 
   'party.notFoundBody': 'Forse è stata eliminata, oppure il link non è più valido.',
   'party.loadErrorBody': 'Controlla la connessione e riprova.',
+  'party.settingsUnreadable': 'Non siamo riusciti a leggere le impostazioni della festa',
+  'party.settingsUnreadableBody':
+    'Quello che c’è configurato non è perso: semplicemente non lo vediamo da qui. Riprova.',
+  'party.experience.unreadable': 'Non siamo riusciti a leggere le sezioni',
+  'party.experience.unreadableBody':
+    'Non sappiamo cosa hai scritto, quindi non ti mostriamo sezioni vuote che ti farebbero credere di non aver scritto niente. Riprova.',
+  'party.photos.pendingUnknown': 'non leggibile',
 
   // Dove si trova la festa, in una frase. È lo STATO: l'azione accanto è
   // un'altra cosa, e le due possono dire cose diverse.
@@ -485,6 +492,12 @@ const it = {
   'party.next.openToGuests': 'Apri la festa agli ospiti',
   'party.next.openConsole': 'Apri il Live',
   'party.next.openPhotos': 'Vai alle foto',
+  'party.next.unavailable.why':
+    'Non siamo riusciti a leggere come sta questa festa. Riprova: finché non lo sappiamo non ti proponiamo una mossa che potrebbe essere sbagliata.',
+  'party.summary.partialTitle': 'Alcune informazioni non sono arrivate',
+  'party.summary.partialBody':
+    'Quello che manca non è mostrato come mancante: potrebbe esserci ed essere solo illeggibile da qui. Riprova.',
+  'party.summary.guestsUnknown': 'Non siamo riusciti a leggere gli ospiti.',
   'party.next.link-album.why':
     'Serve un album: è lì che finiscono le fotografie, e da lì passano il QR, i contributi e tutto il resto.',
   'party.next.open-to-guests.why':
@@ -534,10 +547,10 @@ const it = {
   'party.step.guest-access.title': 'Festa aperta agli ospiti',
   'party.step.guest-access.note': 'Attiva il link e il QR. È anche il momento in cui la festa viene pubblicata.',
   'party.step.guest-access.action': 'Apri',
-  'party.step.invitations-sent.title': 'Inviti mandati',
-  'party.step.invitations-sent.note':
-    'Ogni gruppo ha il suo link personale, da mandare su WhatsApp, via email o copiato.',
-  'party.step.invitations-sent.action': 'Manda',
+  'party.step.invitations.title': 'Inviti',
+  'party.step.invitations.note':
+    'Ogni gruppo ha il suo link personale: mandalo su WhatsApp, via email o copiato.',
+  'party.step.invitations.action': 'Gestisci',
   'party.step.contributions.title': 'Foto dagli ospiti',
   'party.step.contributions.note': 'Lascia che aggiungano le loro. Decidi tu cosa diventa pubblico.',
   'party.step.contributions.action': 'Attiva',
