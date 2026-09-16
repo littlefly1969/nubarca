@@ -14,35 +14,48 @@ namespace NubArca.Api.Endpoints;
 /// Nothing here is reachable from the party's QR, a personal invitation, the TV,
 /// the game, print or a link preview.</para>
 ///
-/// <para>The search travels in the query string, like every other search in
-/// NubArca; the cursor that continues it is sealed and holds only a hash of it.
-/// Neither is logged or audited here.</para>
+/// <para>THE SEARCH TRAVELS IN A POST BODY, which is why reading the directory
+/// is the one read here that is not a GET. A host searching their own guest
+/// list types a name, a surname, an address or a phone number — so the needle
+/// IS personal data about a third party, and a query string is the one part of
+/// a request that leaks by default: it is written to the browser's address bar
+/// and history, to a Referer sent to whatever the host opens next, and to the
+/// access log of every proxy in between. A body is none of those places. The
+/// cursor that continues the search is sealed and carries only a hash of it.</para>
+///
+/// <para>Nothing here logs or audits the needle, the body, or any name, address
+/// or number read back — a search is not an event in the party's history, and a
+/// log line would put back exactly what the POST took out.</para>
+///
+/// <para>Being an unsafe method on <c>/api</c>, the query passes through the
+/// same-origin Origin/Referer check in <see cref="Security.CsrfOriginValidation"/>
+/// like every other write. It is deliberately NOT exempted: the cookie is
+/// ambient, so a cross-site page must not be able to read a host's guest list.</para>
 /// </summary>
 public static class PartyGuestDirectoryEndpoints
 {
     public static IEndpointRouteBuilder MapPartyGuestDirectoryEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapGet("/api/parties/{partyId:guid}/guest-directory", async (
+        app.MapPost("/api/parties/{partyId:guid}/guest-directory/query", async (
             Guid partyId,
-            [FromQuery] string? q,
-            [FromQuery] string? state,
-            [FromQuery] string? cursor,
-            [FromQuery] int? take,
+            PartyGuestDirectoryQuery? query,
             HttpContext httpContext,
             [FromServices] IPartyGuestDirectoryService directory,
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
+            // An absent body is the first page of everything, which is what a
+            // console asks for before the host has typed or filtered anything.
             var result = await directory.PageAsync(
                 httpContext.GetCurrentUserId()!.Value, partyId,
-                new PartyGuestDirectoryQuery(q, state, cursor, take), cancellationToken);
+                query ?? new PartyGuestDirectoryQuery(null, null, null, null), cancellationToken);
             return result.Outcome switch
             {
                 PartyGuestDirectoryOutcome.Ok => Results.Ok(result.Page),
                 PartyGuestDirectoryOutcome.NotFound => Results.NotFound(),
                 _ => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
             };
-        }).WithName("GetPartyGuestDirectory").RequirePermission(Permissions.PartyAccess);
+        }).WithName("QueryPartyGuestDirectory").RequirePermission(Permissions.PartyAccess);
 
         app.MapGet("/api/parties/{partyId:guid}/invitation-groups/{groupId:guid}", async (
             Guid partyId,

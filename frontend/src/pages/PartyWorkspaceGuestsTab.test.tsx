@@ -50,7 +50,7 @@ function renderWorkspace() {
       maxVideoUploadsPerParticipant: 0, maxMessagesPerParticipant: 0, gameEnabled: false,
     }),
     [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse([]),
-    [`GET /api/parties/${PARTY_ID}/guest-directory`]: () => jsonResponse(emptyDirectory),
+    [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(emptyDirectory),
   });
 }
 

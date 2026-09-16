@@ -210,11 +210,26 @@ thousand groups. Beside it sits a scalable projection, and the host's console
 ("Ospiti") uses only that:
 
 ```text
-GET /api/parties/{partyId}/guest-directory?q=&state=&cursor=&take=
-GET /api/parties/{partyId}/invitation-groups/{groupId}
-GET /api/parties/{partyId}/rsvp-questions
+POST /api/parties/{partyId}/guest-directory/query   { q, state, cursor, take }
+GET  /api/parties/{partyId}/invitation-groups/{groupId}
+GET  /api/parties/{partyId}/rsvp-questions
 ```
 
+- **The page is asked for with a POST, and that is a privacy decision, not a
+  REST one.** A host searching their own guest list types a guest's name,
+  surname, address or phone number: the needle is personal data about a third
+  party. A query string is the leakiest place in a request — it is written to
+  the address bar, the browser history of what may be a shared computer, the
+  `Referer` sent to whatever the host opens next, and the access log of every
+  proxy in between — and none of that is true of a body. So `q` travels in the
+  body, the address carries nothing, and there is no GET that accepts a search:
+  a second way in would be a second way to leak. The endpoint is owner-only,
+  `party.access`, owner-scoped, `no-store`, answers a foreign party with 404,
+  and goes through the ordinary same-origin check like any other unsafe method
+  — never exempted, because the session cookie is ambient. The search is
+  **not audited and not logged**: an audit row would put the needle straight
+  back into storage, which is the thing the POST exists to avoid. The web
+  console keeps it in memory only, so a reload loses it (see below).
 - **The database decides which rows.** The search is a substring test on the
   folded `SearchText` of a group, of any of its people, or of a recorded
   arrival — so "nicolo" finds Nicolò and "333 444" finds +39 333 444 5555. Every
@@ -245,6 +260,42 @@ GET /api/parties/{partyId}/rsvp-questions
   what changed — the list's header and the group it touched, a delivery and the
   party, an arrival and the counts. Without the header every route answers
   exactly as it always did.
+
+### The console ("Ospiti")
+
+The web console is the only consumer of the directory, and three of its rules
+are part of this contract rather than of its styling.
+
+- **The DOM is bounded, not the list.** The host may load page after page — a
+  thousand groups is twenty-five pages — but the browser mounts only the cards
+  on the screen plus a small lead in each direction, through
+  `@tanstack/react-virtual` (the same primitive the media wall and the album
+  content list use; there is no private virtualizer). The list reserves the full
+  height it would occupy and **the page keeps scrolling**: no inner scrollbar,
+  no fixed height, master/detail unchanged. Server paging is untouched —
+  `take=40` and a cursor, with the database still deciding what matches — and
+  the next page is asked for when the visible range nears the end, with
+  "Carica altri" kept for anyone who does not scroll. A page that fails leaves
+  the list alone and offers a retry; a page belonging to a search the host has
+  moved on from is discarded, and its request aborted.
+- **The search is in memory, never in a URL.** `guestState` and `guestGroup`
+  are URL state, so Back and a reload restore the filter and the open group. The
+  search is not, for the reason the endpoint is a POST: it can be a guest's name
+  or number. It survives opening and closing a group — the list is not re-read,
+  the position is kept — and it is **intentionally lost on a refresh**. A legacy
+  `?guestSearch=` from before this release is stripped by a replacing navigation
+  the moment it arrives: not honoured, not shown, not copied into the next URL.
+- **A card offers three levels, in one order**: `[ primary ] [ Dettagli ] [ ⋮ ]`.
+  The primary is a RECOMMENDATION, not a status — the status line remains the
+  authority — chosen by `primaryInvitationAction`: WhatsApp when it opens the
+  group's own chat, else email when there is an address, else WhatsApp with the
+  host choosing, else nothing. Its label says which email it would send
+  (`primaryInvitationLabel`): "Invia invito" for a link that has never gone out,
+  "Invia di nuovo via email" once it has, on any channel. **Dettagli is always on
+  the card** and never only in the menu; the menu holds secondary actions and
+  drops whichever action the card is already offering. In Live the card is the
+  door — a button per person — so it has no primary at all, and keeps Dettagli
+  and its menu.
 
 ### Questions
 

@@ -1,4 +1,6 @@
-import { createContext, useContext, type ReactNode, type RefObject } from 'react';
+import {
+  createContext, useContext, useLayoutEffect, useState, type ReactNode, type RefObject,
+} from 'react';
 
 // The authenticated shell's scroll viewport.
 //
@@ -39,6 +41,50 @@ export function AppScrollProvider({
  */
 export function useAppScrollViewport(): RefObject<HTMLElement | null> | null {
   return useContext(AppScrollContext);
+}
+
+/**
+ * Where a virtualized list begins inside whatever is scrolling.
+ *
+ * A virtualizer counts offsets from its scroll element's origin, while a list
+ * starts below a heading, a toolbar or a row of filters. Measured rather than
+ * written down as a constant, so no layout number exists in two places, and
+ * re-measured when the things that actually move it change: the viewport
+ * resizing, and the content above the list growing or shrinking — a notice
+ * appearing above a guest list, a filter row above a media wall.
+ *
+ * Pass the viewport ref when the shell scrolls; pass null and the list's own
+ * `offsetTop` is the margin, which is what a document-scrolled page needs.
+ */
+export function useAppScrollMargin(
+  containerRef: RefObject<HTMLElement | null>,
+  viewportRef: RefObject<HTMLElement | null> | null,
+): number {
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const viewport = viewportRef?.current ?? null;
+    const measure = () => {
+      const next = viewport
+        ? Math.round(
+          node.getBoundingClientRect().top
+          - viewport.getBoundingClientRect().top
+          + viewport.scrollTop,
+        )
+        : node.offsetTop;
+      setScrollMargin((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    if (viewport) ro.observe(viewport);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, [containerRef, viewportRef]);
+
+  return scrollMargin;
 }
 
 /**

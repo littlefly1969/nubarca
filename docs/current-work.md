@@ -1727,9 +1727,9 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
 - **The host reads the guest list in PAGES, and `shared` is not `sent`.** "Ospiti"
   is a console over the guest DIRECTORY
-  (`GET /api/parties/{id}/guest-directory`), a projection beside the full guest
-  list: the database searches, filters and orders, a page carries only what a card
-  shows, and one group's detail is a second read. The full
+  (`POST /api/parties/{id}/guest-directory/query`), a projection beside the full
+  guest list: the database searches, filters and orders, a page carries only what
+  a card shows, and one group's detail is a second read. The full
   `guest-list` projection remains for editing and configuration. Five things are
   easy to undo by accident. **The search is the server's**, over each row's folded
   `SearchText` (accents and case dropped, a phone also as digits) — a derived
@@ -1754,6 +1754,27 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   console can page a thousand groups without an edit returning all of them. Its
   migration IS automated and previous-application compatible: additive columns
   with defaults, a widened status constraint, and one index.
+
+- **The guest SEARCH is personal data, so it lives in a body and in memory.**
+  Reading a page of the directory is the one read in NubArca that is a POST: a
+  host looking for a guest types a name, an address or a number, and a query
+  string is copied by default into the address bar, the browser history, the
+  `Referer` of the next request and every proxy's access log. So there is no GET
+  that accepts a search — a second way in would be a second way to leak — the
+  endpoint is owner-only/`party.access`/`no-store`/404-on-foreign and passes the
+  ordinary same-origin check like any unsafe method, and **the search is never
+  audited or logged**. The console keeps `guestState` and `guestGroup` in the
+  URL and the needle only in React state: it survives opening and closing a
+  group and is deliberately lost on a reload, and a legacy `?guestSearch=` is
+  stripped by a replacing navigation rather than honoured. Paired with it, the
+  card list is VIRTUALIZED with `@tanstack/react-virtual` against the shell's
+  scroll viewport (`useAppScrollMargin`, shared with the media wall): a thousand
+  loaded groups mount a couple of dozen cards, the page keeps its own single
+  scrollbar, and the next page is asked for when the visible range nears the
+  end. A card offers `[ primary ] [ Dettagli ] [ ⋮ ]` — the primary is a
+  recommendation from `primaryInvitationAction`/`primaryInvitationLabel` and
+  never a status, Dettagli is never only in the menu, and the menu drops
+  whichever action the card already shows.
 
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 

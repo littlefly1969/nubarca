@@ -1,8 +1,10 @@
+import { act } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
-import { AuthedWrapper, installFetchMock, jsonResponse, triggerIntersection, type FetchSpyEntry } from '../test-utils';
+import type { GuestDirectoryQuery } from '@nubarca/api-client';
+import { AuthedWrapper, installFetchMock, jsonResponse, type FetchSpyEntry } from '../test-utils';
 import { PartyGuestListTab } from './PartyGuestListTab';
 
 // The host's guest console, as the host meets it: a few numbers, one search, a
@@ -11,7 +13,7 @@ import { PartyGuestListTab } from './PartyGuestListTab';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const PARTY_ID = 'p1';
-const DIRECTORY = `/api/parties/${PARTY_ID}/guest-directory`;
+const DIRECTORY = `/api/parties/${PARTY_ID}/guest-directory/query`;
 const GROUPS = `/api/parties/${PARTY_ID}/invitation-groups`;
 const ATTENDANCE = `/api/parties/${PARTY_ID}/attendance`;
 
@@ -116,15 +118,48 @@ function stubClipboard(writeText?: ReturnType<typeof vi.fn>) {
   });
 }
 
-const search = (calls: FetchSpyEntry[], path: string) =>
-  calls.filter((call) => call.url.split('?')[0] === path).map((call) => new URL(call.url, 'http://x').searchParams);
+/**
+ * What the console ASKED FOR, read from the bodies it posted.
+ *
+ * The directory is queried with a POST precisely so the search never appears in
+ * a URL, so these assertions read `call.body` — and `urls()` below exists to
+ * assert the other half: that the address really does carry nothing.
+ */
+const queries = (calls: FetchSpyEntry[], path: string): GuestDirectoryQuery[] =>
+  calls.filter((call) => call.url === path).map((call) => JSON.parse(call.body ?? '{}') as GuestDirectoryQuery);
+
+/** Every address the console requested, whatever the method. */
+const urls = (calls: FetchSpyEntry[]) => calls.map((call) => call.url);
+
+/** What one handler was asked for. */
+const asked = (req: { body: string | null }): GuestDirectoryQuery =>
+  JSON.parse(req.body ?? '{}') as GuestDirectoryQuery;
 
 const where = () => screen.getByTestId('where').textContent ?? '';
+
+/** Cards actually mounted in the DOM — not items loaded. */
+const mountedCards = () => screen.queryAllByTestId(/^guest-(group|other)-/).length;
+
+/**
+ * Scroll the page, which is what the list is virtualized against.
+ *
+ * jsdom lays nothing out and never scrolls by itself, so the offset the
+ * virtualizer reads (`window.scrollY`) is set directly and the scroll event it
+ * listens for is fired. That is enough to move the visible range, which is the
+ * thing under test.
+ */
+function scrollTo(y: number): void {
+  Object.defineProperty(window, 'scrollY', { value: y, configurable: true, writable: true });
+  act(() => { window.dispatchEvent(new Event('scroll')); });
+}
+
+/** The height the list reserves for everything it could show. */
+const reservedHeight = () => Number.parseInt(screen.getByTestId('guest-list').style.height, 10);
 
 describe('the guest console', () => {
   it('says an open party is open, and offers the list as something optional', async () => {
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         items: [], summary: summary({ groups: 0, rsvp: rsvpSummary({ groups: 0, invited: 0, missingResponses: 0, unansweredGroups: 0 }) }),
       })),
     });
@@ -141,7 +176,7 @@ describe('the guest console', () => {
 
   it('shows a group as a card with its people, its counts and where its invitation stands', async () => {
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         items: [groupItem({
           people: [person('m', 'Mario Rossi', { rsvpStatus: 'attending' }), person('l', 'Laura Rossi'), person('x', 'Giulia', { isAdditionalGuest: true, rsvpStatus: 'attending' })],
           counts: { attending: 2, pending: 1, declined: 0, arrived: 0 },
@@ -168,7 +203,50 @@ describe('the guest console', () => {
     expect(metrics.querySelector('[data-metric="pending"] dd')).toHaveTextContent('1');
   });
 
-  it('reads the list one page at a time, by button and by scrolling', async () => {
+  it('holds a thousand groups without mounting a thousand cards', async () => {
+    // What a real party of this size does to the console: page after page
+    // accumulates in memory, and the DOM must not grow with it.
+    const pageOf = (start: number, cursor: string | null) => page({
+      items: Array.from({ length: 40 }, (_, i) => groupItem({
+        groupId: `g${start + i}`, label: `Gruppo ${String(start + i).padStart(4, '0')}`,
+      })),
+      nextCursor: cursor, summary: start === 0 ? summary({ groups: 1000 }) : null,
+    });
+    let loaded = 0;
+    const mock = installFetchMock({
+      [`POST ${DIRECTORY}`]: (req) => {
+        const take = asked(req).take ?? 40;
+        if (take === 0) return jsonResponse(page({ items: [] }));
+        const start = loaded;
+        loaded += 40;
+        return jsonResponse(pageOf(start, loaded >= 1000 ? null : `CURSOR-${loaded}`));
+      },
+    });
+    renderConsole();
+
+    await screen.findByTestId('guest-group-g0');
+    // Twenty-five pages, asked for one at a time and merged into one list.
+    for (let i = 0; i < 24; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      await userEvent.click(await screen.findByTestId('guest-load-more'));
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(queries(mock.calls, DIRECTORY).length).toBe(i + 2));
+    }
+    await waitFor(() => expect(screen.queryByTestId('guest-load-more')).not.toBeInTheDocument());
+    expect(loaded).toBe(1000);
+
+    // THE POINT: a thousand groups are loaded and the DOM holds a couple of
+    // dozen cards. The hard ceiling this slice promises is 80.
+    expect(mountedCards()).toBeLessThanOrEqual(80);
+    expect(mountedCards()).toBeGreaterThan(0);
+    // The list still reserves the height of everything it could show, so the
+    // scrollbar describes a thousand groups rather than the mounted few.
+    expect(Number.parseInt(screen.getByTestId('guest-list').style.height, 10)).toBeGreaterThan(10000);
+    // Every page was a page: nothing asked for the whole list.
+    expect(queries(mock.calls, DIRECTORY).every((q) => q.take === 40)).toBe(true);
+  });
+
+  it('reads the list one page at a time, by button and when the range nears the end', async () => {
     const first = page({
       items: Array.from({ length: 40 }, (_, i) => groupItem({ groupId: `g${i}`, label: `Gruppo ${String(i).padStart(2, '0')}` })),
       nextCursor: 'CURSOR-1',
@@ -180,8 +258,8 @@ describe('the guest console', () => {
     });
     const third = page({ items: [groupItem({ groupId: 'z', label: 'Zeta' })], nextCursor: null, summary: null });
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: (req) => {
-        const cursor = new URL(req.url, 'http://x').searchParams.get('cursor');
+      [`POST ${DIRECTORY}`]: (req) => {
+        const cursor = asked(req).cursor;
         if (cursor === 'CURSOR-1') return jsonResponse(second);
         if (cursor === 'CURSOR-2') return jsonResponse(third);
         return jsonResponse(first);
@@ -190,33 +268,37 @@ describe('the guest console', () => {
     renderConsole();
 
     await screen.findByTestId('guest-group-g0');
-    expect(screen.getAllByTestId(/^guest-group-/)).toHaveLength(40);
     // The counts come with the first page only.
     expect(screen.getByTestId('guest-metrics')).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('guest-load-more'));
-    await waitFor(() => expect(screen.getAllByTestId(/^guest-group-/)).toHaveLength(62));
+    await waitFor(() => expect(queries(mock.calls, DIRECTORY)).toHaveLength(2));
+    // Sitting at the top with 62 groups loaded, there is nothing to preload:
+    // the range is nowhere near the end.
+    expect(queries(mock.calls, DIRECTORY)).toHaveLength(2);
 
-    // …and the sentinel asks for the next one on its own, rooted where the
-    // application scrolls.
-    triggerIntersection();
-    await waitFor(() => expect(screen.getAllByTestId(/^guest-group-/)).toHaveLength(63));
-    expect(screen.queryByTestId('guest-load-more')).not.toBeInTheDocument();
-    expect(search(mock.calls, DIRECTORY).map((p) => p.get('cursor'))).toEqual([null, 'CURSOR-1', 'CURSOR-2']);
-    // Every page asked for is a page shown: nothing loads the whole list.
-    expect(search(mock.calls, DIRECTORY).every((p) => p.get('take') === '40')).toBe(true);
+    // …and scrolling towards the end asks for the next page without being told
+    // to, before the host reaches the bottom.
+    scrollTo(reservedHeight() - 800);
+    await waitFor(() => expect(screen.queryByTestId('guest-load-more')).not.toBeInTheDocument());
+    expect(queries(mock.calls, DIRECTORY).map((q) => q.cursor ?? null)).toEqual([null, 'CURSOR-1', 'CURSOR-2']);
+    // Sixty-three groups are loaded; the DOM holds the few that are on screen.
+    expect(mountedCards()).toBeLessThanOrEqual(80);
+    expect(mountedCards()).toBeGreaterThan(0);
+    // Every page asked for is a page: nothing loads the whole list.
+    expect(queries(mock.calls, DIRECTORY).every((q) => q.take === 40)).toBe(true);
   });
 
   it('never lets a page of an old search land in a new one', async () => {
     let releaseStalePage: ((response: Response) => void) | null = null;
     installFetchMock({
-      [`GET ${DIRECTORY}`]: (req) => {
-        const params = new URL(req.url, 'http://x').searchParams;
-        if (params.get('cursor')) {
+      [`POST ${DIRECTORY}`]: (req) => {
+        const query = asked(req);
+        if (query.cursor) {
           // The second page of the FIRST search, still in flight.
           return new Promise<Response>((resolve) => { releaseStalePage = resolve; });
         }
-        return params.get('q') === 'rossi'
+        return query.q === 'rossi'
           ? jsonResponse(page({ items: [groupItem({ groupId: 'g9', label: 'Rossi' })], nextCursor: null }))
           : jsonResponse(page({ items: [groupItem()], nextCursor: 'CURSOR-OLD' }));
       },
@@ -245,7 +327,7 @@ describe('the guest console', () => {
   it('disables the arrival it is recording, and only that one', async () => {
     let releaseCheckIn: ((response: Response) => void) | null = null;
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         partyStatus: 'live',
         items: [groupItem({
           people: [
@@ -273,40 +355,69 @@ describe('the guest console', () => {
     await waitFor(() => expect(screen.getByTestId('guest-undo-m')).toBeEnabled());
   });
 
-  it('searches on the server, and keeps the search and the filter in the URL', async () => {
+  it('searches on the server and leaves the search out of every URL', async () => {
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: (req) => {
-        const params = new URL(req.url, 'http://x').searchParams;
-        if (params.get('q') === 'rossi') {
+      [`POST ${DIRECTORY}`]: (req) => {
+        const query = asked(req);
+        if (query.q === 'Mario Rossi') {
           return jsonResponse(page({ items: [groupItem({ people: [person('m', 'Mario Rossi', { matched: true })] })] }));
         }
-        if (params.get('state') === 'pending') return jsonResponse(page({ items: [groupItem({ groupId: 'g2', label: 'Sara' })] }));
+        if (query.state === 'pending') return jsonResponse(page({ items: [groupItem({ groupId: 'g2', label: 'Sara' })] }));
         return jsonResponse(page({ items: [groupItem(), groupItem({ groupId: 'g2', label: 'Sara' })] }));
       },
     });
     renderConsole();
 
     await screen.findByTestId('guest-group-g2');
-    await userEvent.type(screen.getByTestId('guest-search'), 'rossi');
+    // A guest's actual name — the kind of thing a host types, and exactly what
+    // must not end up anywhere it can be read back.
+    await userEvent.type(screen.getByTestId('guest-search'), 'Mario Rossi');
 
-    await waitFor(() => expect(where()).toContain('guestSearch=rossi'));
     await waitFor(() => expect(screen.queryByTestId('guest-group-g2')).not.toBeInTheDocument());
-    expect(search(mock.calls, DIRECTORY).some((p) => p.get('q') === 'rossi')).toBe(true);
+    expect(queries(mock.calls, DIRECTORY).some((q) => q.q === 'Mario Rossi')).toBe(true);
+    // IT TRAVELS IN THE BODY AND NOWHERE ELSE: not in the address the browser
+    // shows, not in any URL that was requested (so not in a Referer either),
+    // and not under the old parameter name.
+    expect(where()).not.toContain('Mario');
+    expect(where()).not.toContain('guestSearch');
+    expect(urls(mock.calls).some((url) => url.includes('Mario') || url.includes('q='))).toBe(false);
+    expect(urls(mock.calls).every((url) => !url.includes('?'))).toBe(true);
     // What came back is what is shown: the server decided who matched.
-    expect(screen.getAllByTestId(/^guest-group-/)).toHaveLength(1);
     expect(within(screen.getByTestId('guest-group-g1')).getByText('Mario Rossi')).toBeInTheDocument();
 
+    // The filter is not personal data, and stays in the URL where a reload and
+    // Back can restore it.
     await userEvent.clear(screen.getByTestId('guest-search'));
-    await waitFor(() => expect(where()).not.toContain('guestSearch'));
     await userEvent.click(await screen.findByTestId('guest-filter-pending'));
     await waitFor(() => expect(where()).toContain('guestState=pending'));
     await waitFor(() => expect(screen.getByTestId('guest-filter-pending')).toHaveAttribute('aria-pressed', 'true'));
-    expect(search(mock.calls, DIRECTORY).some((p) => p.get('state') === 'pending')).toBe(true);
+    expect(queries(mock.calls, DIRECTORY).some((q) => q.state === 'pending')).toBe(true);
+  });
+
+  it('strips a legacy ?guestSearch= instead of honouring it', async () => {
+    const mock = installFetchMock({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
+    });
+    // A link shared, bookmarked or in a history from before the search moved
+    // out of the URL.
+    renderConsole({ entry: `/parties/${PARTY_ID}?tab=guests&guestSearch=rossi&guestState=pending` });
+
+    await screen.findByTestId('guest-group-g1');
+    // Gone from the address at once, and never searched for: the list was asked
+    // for the filter alone, and the field is empty.
+    await waitFor(() => expect(where()).not.toContain('guestSearch'));
+    expect(where()).toContain('guestState=pending');
+    expect(screen.getByTestId('guest-search')).toHaveValue('');
+    expect(queries(mock.calls, DIRECTORY).every((q) => !q.q)).toBe(true);
+
+    // …and it is not carried into the next URL either: opening a group writes
+    // an address that no longer has it.
+    expect(screen.getByTestId('guest-details-g1').getAttribute('href')).not.toContain('guestSearch');
   });
 
   it('opens a group beside the list on a wide screen, reading it once', async () => {
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`GET ${GROUPS}/g1`]: () => jsonResponse(groupDetail()),
     });
     renderConsole({ wide: true });
@@ -326,26 +437,35 @@ describe('the guest console', () => {
 
   it('opens a group as a sheet on a phone, and Back returns to the same search', async () => {
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: (req) => (asked(req).q === 'rossi'
+        ? jsonResponse(page({ items: [groupItem()] }))
+        : jsonResponse(page({ items: [groupItem(), groupItem({ groupId: 'g2', label: 'Sara' })] }))),
       [`GET ${GROUPS}/g1`]: () => jsonResponse(groupDetail()),
     });
-    renderConsole({ entry: `/parties/${PARTY_ID}?tab=guests&guestSearch=rossi&guestState=pending` });
+    renderConsole({ entry: `/parties/${PARTY_ID}?tab=guests&guestState=pending` });
 
-    await userEvent.click(await screen.findByTestId('guest-open-g1'));
+    // The search is in memory, so this is what has to survive the round trip.
+    await userEvent.type(await screen.findByTestId('guest-search'), 'rossi');
+    await waitFor(() => expect(screen.queryByTestId('guest-group-g2')).not.toBeInTheDocument());
+
+    await userEvent.click(screen.getByTestId('guest-open-g1'));
     const sheet = await screen.findByTestId('guest-detail-sheet');
     expect(sheet).toHaveAttribute('aria-modal', 'true');
     expect(where()).toContain('guestGroup=g1');
+    // Opening a group does not put the search in the URL either.
+    expect(where()).not.toContain('rossi');
 
-    const listRequests = search(mock.calls, DIRECTORY).length;
+    const listRequests = queries(mock.calls, DIRECTORY).length;
     await userEvent.click(screen.getByTestId('guest-detail-sheet-close'));
 
     await waitFor(() => expect(screen.queryByTestId('guest-detail-sheet')).not.toBeInTheDocument());
-    // Exactly where the host was: same search, same filter, and the list was
-    // never asked for again.
-    expect(where()).toContain('guestSearch=rossi');
+    // Exactly where the host was: the same search still in the field and still
+    // applied to the list, the same filter, and the list never asked for again.
+    expect(screen.getByTestId('guest-search')).toHaveValue('rossi');
+    expect(screen.queryByTestId('guest-group-g2')).not.toBeInTheDocument();
     expect(where()).toContain('guestState=pending');
     expect(where()).not.toContain('guestGroup');
-    expect(search(mock.calls, DIRECTORY)).toHaveLength(listRequests);
+    expect(queries(mock.calls, DIRECTORY)).toHaveLength(listRequests);
   });
 
   it('WhatsApp: records the share, opens WhatsApp, and says what a share is not', async () => {
@@ -358,7 +478,7 @@ describe('the guest console', () => {
       }),
     });
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`POST ${GROUPS}/g1/share`]: () => jsonResponse({
         share: {
           channel: 'whatsapp', kind: 'initial', status: 'shared',
@@ -392,7 +512,7 @@ describe('the guest console', () => {
   it('offers the link when the browser refuses to open WhatsApp', async () => {
     vi.stubGlobal('open', vi.fn(() => null));
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`POST ${GROUPS}/g1/share`]: () => jsonResponse({
         share: {
           channel: 'whatsapp', kind: 'initial', status: 'shared',
@@ -416,7 +536,7 @@ describe('the guest console', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText);
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`POST ${GROUPS}/g1/share`]: () => jsonResponse({
         share: {
           channel: 'copy', kind: 'initial', status: 'shared',
@@ -439,7 +559,7 @@ describe('the guest console', () => {
     cleanup();
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`POST ${GROUPS}/g1/share`]: () => jsonResponse({
         share: {
           channel: 'copy', kind: 'initial', status: 'shared',
@@ -464,7 +584,7 @@ describe('the guest console', () => {
       }),
     });
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({ items: [groupItem({ whatsappDirect: false })] })),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({ items: [groupItem({ whatsappDirect: false })] })),
       [`POST ${GROUPS}/g1/send`]: () => jsonResponse({
         delivery: {
           channel: 'email', kind: 'initial', status: 'sent',
@@ -489,9 +609,9 @@ describe('the guest console', () => {
     expect((send?.init?.headers as Record<string, string>).Prefer).toBe('return=minimal');
   });
 
-  it('puts every other action in a sheet a thumb can reach', async () => {
+  it('puts every OTHER action in a sheet a thumb can reach', async () => {
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({ items: [groupItem({ canRemind: true })] })),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({ items: [groupItem({ canRemind: true })] })),
     });
     renderConsole();
 
@@ -499,17 +619,76 @@ describe('the guest console', () => {
 
     const sheet = await screen.findByTestId('guest-menu-sheet');
     expect(sheet).toHaveAttribute('aria-modal', 'true');
-    for (const action of ['details', 'whatsapp', 'email', 'remind', 'copy', 'edit', 'rotate', 'remove']) {
+    for (const action of ['email', 'remind', 'copy', 'edit', 'rotate', 'remove']) {
       expect(within(sheet).getByTestId(`guest-action-${action}`)).toBeInTheDocument();
     }
+    // Not here: Details, which is on the card itself, and WhatsApp, which this
+    // card is already offering as its primary. The menu never shows the host
+    // the same action twice under two names.
+    expect(within(sheet).queryByTestId('guest-action-details')).not.toBeInTheDocument();
+    expect(within(sheet).queryByTestId('guest-action-whatsapp')).not.toBeInTheDocument();
     // Deleting a group is asked about first.
     await userEvent.click(within(sheet).getByTestId('guest-action-remove'));
     expect(await screen.findByTestId('guest-confirm')).toHaveTextContent('Eliminare «Famiglia Rossi»?');
   });
 
+  it('gives every card three levels: the recommended action, Dettagli and the menu', async () => {
+    installFetchMock({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
+        items: [
+          // WhatsApp opens this group's own chat: that is the recommendation.
+          groupItem(),
+          // No number to open, but an address to send to — and this link has
+          // already gone out, so the button says WHICH email it would send.
+          groupItem({
+            groupId: 'g2', label: 'Sara', whatsappDirect: false,
+            invitation: delivery({
+              state: 'sent', lastAttemptAt: '2027-06-01T10:00:00Z', lastAttemptKind: 'initial',
+              lastAttemptStatus: 'sent', lastAttemptChannel: 'email', lastSentAt: '2027-06-01T10:00:00Z',
+            }),
+          }),
+          // Nothing can be sent or shared: no primary at all.
+          groupItem({ groupId: 'g3', label: 'Nino', canSend: false, canShare: false, whatsappDirect: false }),
+        ],
+      })),
+    });
+    renderConsole();
+
+    expect(await screen.findByTestId('guest-primary-g1')).toHaveTextContent('WhatsApp');
+    expect(screen.getByTestId('guest-primary-g2')).toHaveTextContent('Invia di nuovo via email');
+    // A card with nothing to recommend is not a broken card.
+    expect(screen.queryByTestId('guest-primary-g3')).not.toBeInTheDocument();
+
+    // Details is on EVERY card, whatever its primary — never only in the menu.
+    for (const id of ['g1', 'g2', 'g3']) {
+      expect(screen.getByTestId(`guest-details-${id}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`guest-menu-${id}`)).toBeInTheDocument();
+    }
+  });
+
+  it('Live: the card is the door, and still offers Dettagli and its menu', async () => {
+    installFetchMock({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
+        partyStatus: 'live',
+        items: [groupItem({
+          people: [person('m', 'Mario Rossi', { rsvpStatus: 'attending' })],
+          counts: { attending: 1, pending: 0, declined: 0, arrived: 0 },
+        })],
+      })),
+    });
+    renderConsole({ party: party({ status: 'live', version: 3 }) });
+
+    // The per-person button is the work; there is no second generic primary
+    // competing with it.
+    expect(await screen.findByTestId('guest-checkin-m')).toBeInTheDocument();
+    expect(screen.queryByTestId('guest-primary-g1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('guest-details-g1')).toBeInTheDocument();
+    expect(screen.getByTestId('guest-menu-g1')).toBeInTheDocument();
+  });
+
   it('asks for a group, its people and its plus-ones in one column', async () => {
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({ items: [], summary: summary({ groups: 0 }) })),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({ items: [], summary: summary({ groups: 0 }) })),
       [`POST ${GROUPS}`]: () => jsonResponse({
         partyId: PARTY_ID, partyStatus: 'draft', mailAvailable: true, shareAvailable: true,
         summary: rsvpSummary(), questions: [], groupId: 'g9', linkRotated: false,
@@ -556,7 +735,7 @@ describe('the guest console', () => {
     const live = party({ status: 'live', version: 3 });
     const arrived = { guestId: 'm', name: 'Mario Rossi', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: '2027-06-12T21:04:00Z', checkInSource: 'owner' };
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         partyStatus: 'live',
         items: [groupItem({
           people: [person('m', 'Mario Rossi', { rsvpStatus: 'attending', matched: true }), person('l', 'Laura Rossi', { rsvpStatus: 'attending' })],
@@ -587,7 +766,7 @@ describe('the guest console', () => {
 
   it('Live: records somebody who is not on the list, and shows them at once', async () => {
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({ partyStatus: 'live' })),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({ partyStatus: 'live' })),
       [`POST ${ATTENDANCE}/other-guests`]: () => jsonResponse({
         changed: true, summary: attendanceSummary({ otherArrivals: 1, totalArrivals: 1 }),
         guest: null, otherGuest: otherItem({ name: 'Zoë' }),
@@ -610,7 +789,7 @@ describe('the guest console', () => {
 
   it('Live without a guest list counts what was recorded, and says what it is not', async () => {
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         partyStatus: 'live',
         items: [otherItem(), otherItem({ id: 'o2', name: 'Bruno' })],
         summary: summary({
@@ -632,7 +811,7 @@ describe('the guest console', () => {
 
   it('says plainly when this installation cannot email, and still offers WhatsApp', async () => {
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
         mailAvailable: false, items: [groupItem({ canSend: false })],
       })),
     });
@@ -650,7 +829,7 @@ describe('the guest console', () => {
       options: ['Carne', 'Pesce'], isActive: true, sortOrder: 0, version: 1, answerCount: 0, locked: false,
     };
     const mock = installFetchMock({
-      [`GET ${DIRECTORY}`]: () => jsonResponse(page()),
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page()),
       [`GET /api/parties/${PARTY_ID}/rsvp-questions`]: () => jsonResponse({ questions: [question] }),
       [`PUT /api/parties/${PARTY_ID}/rsvp-questions/q1`]: () => jsonResponse({
         partyId: PARTY_ID, partyStatus: 'draft', mailAvailable: true, shareAvailable: true,
@@ -682,7 +861,7 @@ describe('the guest console', () => {
 
   it('hands an expired session back to sign-in', async () => {
     const invalidateAuth = vi.fn();
-    installFetchMock({ [`GET ${DIRECTORY}`]: () => jsonResponse({}, 401) });
+    installFetchMock({ [`POST ${DIRECTORY}`]: () => jsonResponse({}, 401) });
     render(
       <AuthedWrapper value={{ invalidateAuth }}>
         <MemoryRouter initialEntries={[`/parties/${PARTY_ID}?tab=guests`]}>
@@ -696,7 +875,7 @@ describe('the guest console', () => {
   it('offers a way back when the list will not load', async () => {
     let attempts = 0;
     installFetchMock({
-      [`GET ${DIRECTORY}`]: () => {
+      [`POST ${DIRECTORY}`]: () => {
         attempts += 1;
         return attempts === 1 ? jsonResponse({}, 500) : jsonResponse(page());
       },

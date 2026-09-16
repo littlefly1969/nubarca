@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
   GUEST_DIRECTORY_LIMITS,
-  getPartyGuestDirectory,
+  queryPartyGuestDirectory,
   guestDirectoryItemKey,
   type GuestDirectoryGroupItem,
   type GuestDirectoryItem,
@@ -21,6 +21,11 @@ import {
 // Every mutation the console makes patches the item it changed IN PLACE rather
 // than reloading: the host keeps their search, their filter and their position
 // in the list, which is the whole point of paging it.
+//
+// The search itself never leaves this process except in the body of a POST: it
+// is an argument to the hook, not a URL parameter, so nothing writes a guest's
+// name to the address bar, the history or a log. See the console for why that
+// costs a refresh.
 
 export interface GuestDirectoryMeta {
   partyStatus: 'draft' | 'published' | 'live' | 'ended';
@@ -79,6 +84,9 @@ export function useGuestDirectory(
   // and the next page would be asked for with a cursor the server issued for a
   // list that is no longer on the screen.
   const generation = useRef(0);
+  // The next page in flight, so a new search can CANCEL it rather than pay for
+  // a response it is going to throw away.
+  const moreCtrl = useRef<AbortController | null>(null);
 
   const failed = useCallback((err: unknown): boolean => {
     if (err instanceof ApiError && err.status === 401) {
@@ -93,10 +101,12 @@ export function useGuestDirectory(
     generation.current += 1;
     cursorRef.current = null;
     inFlight.current = false;
+    moreCtrl.current?.abort();
+    moreCtrl.current = null;
     setStatus('loading');
     setLoadMoreFailed(false);
     setLoadingMore(false);
-    getPartyGuestDirectory(partyId, { q, state, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
+    queryPartyGuestDirectory(partyId, { q, state, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
       .then((page) => {
         cursorRef.current = page.nextCursor;
         setLoaded({
@@ -122,10 +132,13 @@ export function useGuestDirectory(
     const cursor = cursorRef.current;
     if (!cursor || inFlight.current) return;
     const mine = generation.current;
+    const ctrl = new AbortController();
+    moreCtrl.current = ctrl;
     inFlight.current = true;
     setLoadingMore(true);
     setLoadMoreFailed(false);
-    getPartyGuestDirectory(partyId, { q, state, cursor, take: GUEST_DIRECTORY_LIMITS.defaultTake })
+    queryPartyGuestDirectory(
+      partyId, { q, state, cursor, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
       .then((page) => {
         // The list this page continues is gone; its rows and its cursor belong
         // to it, not to what the host is looking at now.
@@ -136,12 +149,17 @@ export function useGuestDirectory(
           : current));
       })
       .catch((err: unknown) => {
+        // An abort is a new search, which bumps the generation: the same guard
+        // covers both. A page that genuinely failed leaves the list ALONE and
+        // offers the retry — losing what the host was reading because the next
+        // page timed out would be a worse answer than not having it yet.
         if (mine !== generation.current) return;
         if (!failed(err)) setLoadMoreFailed(true);
       })
       .finally(() => {
         // A new search has already reset both; leave its state alone.
         if (mine !== generation.current) return;
+        if (moreCtrl.current === ctrl) moreCtrl.current = null;
         inFlight.current = false;
         setLoadingMore(false);
       });

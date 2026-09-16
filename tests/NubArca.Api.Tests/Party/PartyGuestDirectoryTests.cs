@@ -32,15 +32,27 @@ public sealed class PartyGuestDirectoryTests : IDisposable
 
     // --- Helpers ----------------------------------------------------------------------
 
-    private static async Task<JsonElement> PageAsync(HttpClient owner, Guid partyId, string query = "")
+    /// <summary>
+    /// What one page is asked for. A BODY, not a query string: the needle can be
+    /// a guest's name, address or number, and a URL is copied into history,
+    /// Referer headers and access logs by default.
+    /// </summary>
+    private sealed record Query(string? Q = null, string? State = null, string? Cursor = null, int? Take = null);
+
+    private static string QueryUrl(Guid partyId) => $"/api/parties/{partyId}/guest-directory/query";
+
+    private static Task<HttpResponseMessage> AskAsync(HttpClient owner, Guid partyId, Query? query = null) =>
+        owner.PostAsJsonAsync(QueryUrl(partyId), query ?? new Query());
+
+    private static async Task<JsonElement> PageAsync(HttpClient owner, Guid partyId, Query? query = null)
     {
-        var response = await owner.GetAsync($"/api/parties/{partyId}/guest-directory{query}");
+        var response = await AskAsync(owner, partyId, query);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("no-store", response.Headers.CacheControl?.ToString());
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    private static string Search(string q) => "?q=" + Uri.EscapeDataString(q);
+    private static Query Search(string q) => new(Q: q);
 
     private static string Name(JsonElement item) => item.GetProperty("kind").GetString() == "group"
         ? item.GetProperty("label").GetString()!
@@ -53,7 +65,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         page.GetProperty("nextCursor").ValueKind == JsonValueKind.Null ? null : page.GetProperty("nextCursor").GetString();
 
     /// <summary>Every page of one list, asserting the counts come on the first page only.</summary>
-    private static async Task<List<string>> WalkAsync(HttpClient owner, Guid partyId, int take, string parameters = "")
+    private static async Task<List<string>> WalkAsync(HttpClient owner, Guid partyId, int take, Query? filter = null)
     {
         var names = new List<string>();
         string? cursor = null;
@@ -61,7 +73,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         do
         {
             var page = await PageAsync(owner, partyId,
-                $"?take={take}{parameters}" + (cursor is null ? string.Empty : "&cursor=" + Uri.EscapeDataString(cursor)));
+                (filter ?? new Query()) with { Take = take, Cursor = cursor });
             Assert.Equal(pages == 0 ? JsonValueKind.Object : JsonValueKind.Null, page.GetProperty("summary").ValueKind);
             Assert.True(page.GetProperty("items").GetArrayLength() <= take);
             names.AddRange(Names(page));
@@ -133,7 +145,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         var walked = await WalkAsync(owner, partyId, take: 3);
 
         Assert.Equal(new[] { "Alfa", "Bravo", "charlie", "delta", "echo", "Foxtrot", "golf" }, walked);
-        var first = await PageAsync(owner, partyId, "?take=3");
+        var first = await PageAsync(owner, partyId, new Query(Take: 3));
         Assert.Equal(7, first.GetProperty("summary").GetProperty("groups").GetInt32());
         Assert.Equal(3, first.GetProperty("items").GetArrayLength());
         // The default page is forty.
@@ -150,7 +162,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
             await CreateGroupAsync(owner, partyId, $"Ospite {i}", "x@example.com", null, 0, new { name = $"Persona {i}" });
         }
 
-        var first = await PageAsync(owner, partyId, "?take=2");
+        var first = await PageAsync(owner, partyId, new Query(Take: 2));
         Assert.Equal(new[] { "Ospite 1", "Ospite 2" }, Names(first));
 
         // Meanwhile: one added before the page, one after it, one removed, one renamed to the end.
@@ -172,7 +184,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         var cursor = Cursor(first);
         while (cursor is not null)
         {
-            var page = await PageAsync(owner, partyId, "?take=2&cursor=" + Uri.EscapeDataString(cursor));
+            var page = await PageAsync(owner, partyId, new Query(Take: 2, Cursor: cursor));
             rest.AddRange(Names(page));
             cursor = Cursor(page);
         }
@@ -291,7 +303,7 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         await Answer("Carla", new() { ["Carla"] = "declined" });
         await InviteAsync(_factory, owner, partyId, ids["Dario"]);
 
-        async Task<string[]> Filtered(string state) => Names(await PageAsync(owner, partyId, $"?state={state}"));
+        async Task<string[]> Filtered(string state) => Names(await PageAsync(owner, partyId, new Query(State: state)));
 
         Assert.Equal(new[] { "Anna", "Bianchi", "Carla", "Dario", "Elena" }, await Filtered("all"));
         Assert.Equal(new[] { "Dario", "Elena" }, await Filtered("pending"));
@@ -363,13 +375,16 @@ public sealed class PartyGuestDirectoryTests : IDisposable
 
         foreach (var url in new[]
         {
-            $"/api/parties/{partyId}/guest-directory",
             $"/api/parties/{partyId}/invitation-groups/{groupId}",
             $"/api/parties/{partyId}/rsvp-questions",
         })
         {
             Assert.Equal(HttpStatusCode.NotFound, (await stranger.GetAsync(url)).StatusCode);
         }
+        // A stranger asking for the directory of a party that is not theirs is
+        // told the same thing a missing party is: nothing.
+        Assert.Equal(HttpStatusCode.NotFound, (await AskAsync(stranger, partyId)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await AskAsync(owner, Guid.NewGuid())).StatusCode);
         // Another party of the same host does not own the group.
         Assert.Equal(HttpStatusCode.NotFound,
             (await owner.GetAsync($"/api/parties/{otherPartyId}/invitation-groups/{groupId}")).StatusCode);
@@ -378,7 +393,88 @@ public sealed class PartyGuestDirectoryTests : IDisposable
         Assert.Empty((await PageAsync(owner, otherPartyId)).GetProperty("items").EnumerateArray());
         // Signed out is signed out.
         Assert.Equal(HttpStatusCode.Unauthorized,
-            (await _factory.CreateClient().GetAsync($"/api/parties/{partyId}/guest-directory")).StatusCode);
+            (await AskAsync(_factory.CreateClient(), partyId)).StatusCode);
+    }
+
+    /// <summary>
+    /// The one read in NubArca that is a POST, and why: a host searching their
+    /// own guest list types names, addresses and numbers, and a query string is
+    /// written to the address bar, the browser history, the Referer of whatever
+    /// the host opens next and the access log of every proxy in between. None of
+    /// that is true of a body.
+    /// </summary>
+    [Fact]
+    public async Task The_search_is_asked_for_in_a_body_and_there_is_no_way_to_ask_for_it_in_a_url()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        await CreateGroupAsync(
+            owner, partyId, "Famiglia Rossi", "mario@example.com", "+39 333 1234567", 0, new { name = "Mario Rossi" });
+
+        // The needle is personal data, and it reaches the server in the body.
+        Assert.Equal(new[] { "Famiglia Rossi" }, Names(await PageAsync(owner, partyId, Search("mario@example.com"))));
+
+        // The address it was posted to carries nothing at all.
+        Assert.DoesNotContain("?", QueryUrl(partyId));
+
+        // The route that used to take `?q=` is GONE. Not deprecated beside the
+        // new one — a second way in would be a second way to leak.
+        var legacy = await owner.GetAsync($"/api/parties/{partyId}/guest-directory?q=mario");
+        Assert.True(
+            legacy.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed,
+            $"the old GET still answers with {legacy.StatusCode}");
+
+        // An absent body is the first page of everything, so the console's first
+        // read needs no parameters either.
+        var empty = await owner.PostAsync(QueryUrl(partyId), content: null);
+        Assert.Equal(HttpStatusCode.OK, empty.StatusCode);
+        Assert.Equal("no-store", empty.Headers.CacheControl?.ToString());
+        Assert.Equal("no-cache", empty.Headers.Pragma.ToString());
+    }
+
+    /// <summary>
+    /// Being an unsafe method on /api, the query goes through the same
+    /// same-origin check as every write. It is deliberately not exempted: the
+    /// session cookie is ambient, so without it any site the host visits could
+    /// POST this endpoint and read their whole guest list.
+    /// </summary>
+    [Fact]
+    public async Task A_cross_origin_page_cannot_read_the_guest_list_with_the_hosts_cookie()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        await CreateGroupAsync(owner, partyId, "Famiglia Rossi", "rossi@example.com", null, 0, new { name = "Mario" });
+
+        var request = new HttpRequestMessage(HttpMethod.Post, QueryUrl(partyId))
+        {
+            Content = JsonContent.Create(new Query(Q: "mario")),
+        };
+        request.Headers.Add("Origin", "https://evil.example");
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await owner.SendAsync(request)).StatusCode);
+    }
+
+    /// <summary>
+    /// A search is not an event in the party's history. Nothing about it is
+    /// recorded — which is the other half of keeping it out of the URL, since an
+    /// audit row would put the needle straight back into storage.
+    /// </summary>
+    [Fact]
+    public async Task Searching_the_guest_list_is_not_audited()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        await CreateGroupAsync(owner, partyId, "Famiglia Rossi", "rossi@example.com", null, 0, new { name = "Mario" });
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var before = await db.AuditLogs.CountAsync();
+
+        await PageAsync(owner, partyId, Search("mario"));
+        await PageAsync(owner, partyId, Search("rossi@example.com"));
+        await PageAsync(owner, partyId, new Query(State: "pending"));
+
+        Assert.Equal(before, await db.AuditLogs.CountAsync());
     }
 
     [Fact]
@@ -393,31 +489,34 @@ public sealed class PartyGuestDirectoryTests : IDisposable
             await CreateGroupAsync(owner, otherPartyId, $"Anna {i}", "x@example.com", null, 0, new { name = $"Anna {i}" });
         }
 
-        async Task<string> Refused(Guid party, string query)
+        async Task<string> Refused(Guid party, Query query)
         {
-            var response = await owner.GetAsync($"/api/parties/{party}/guest-directory{query}");
+            var response = await AskAsync(owner, party, query);
             Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
             return await ErrorOf(response);
         }
 
-        Assert.Equal("invalid_state", await Refused(partyId, "?state=maybe"));
-        Assert.Equal("invalid_take", await Refused(partyId, "?take=101"));
-        Assert.Equal("invalid_take", await Refused(partyId, "?take=-1"));
+        Assert.Equal("invalid_state", await Refused(partyId, new Query(State: "maybe")));
+        Assert.Equal("invalid_take", await Refused(partyId, new Query(Take: 101)));
+        Assert.Equal("invalid_take", await Refused(partyId, new Query(Take: -1)));
         Assert.Equal("invalid_query", await Refused(partyId, Search(new string('a', 121))));
-        Assert.Equal("invalid_cursor", await Refused(partyId, "?cursor=garbage"));
+        Assert.Equal("invalid_cursor", await Refused(partyId, new Query(Cursor: "garbage")));
 
-        var cursor = Cursor(await PageAsync(owner, partyId, "?take=1&q=anna"))!;
-        var escaped = Uri.EscapeDataString(cursor);
+        // A cursor in a body needs no escaping, which is one class of bug the
+        // move away from the query string simply removes.
+        var anna = new Query(Take: 1, Q: "anna");
+        var cursor = Cursor(await PageAsync(owner, partyId, anna))!;
         // Honoured for exactly the list it continues…
-        Assert.Equal(new[] { "Anna 2" }, Names(await PageAsync(owner, partyId, $"?take=1&q=anna&cursor={escaped}")));
+        Assert.Equal(new[] { "Anna 2" }, Names(await PageAsync(owner, partyId, anna with { Cursor = cursor })));
         // …and for nothing else.
-        Assert.Equal("invalid_cursor", await Refused(partyId, $"?take=1&q=anna+1&cursor={escaped}"));
-        Assert.Equal("invalid_cursor", await Refused(partyId, $"?take=1&q=anna&state=pending&cursor={escaped}"));
-        Assert.Equal("invalid_cursor", await Refused(otherPartyId, $"?take=1&q=anna&cursor={escaped}"));
-        Assert.Equal("invalid_cursor", await Refused(partyId, $"?take=1&q=anna&cursor={escaped[..^2]}"));
+        Assert.Equal("invalid_cursor", await Refused(partyId, new Query(Take: 1, Q: "anna 1", Cursor: cursor)));
+        Assert.Equal("invalid_cursor",
+            await Refused(partyId, anna with { State = "pending", Cursor = cursor }));
+        Assert.Equal("invalid_cursor", await Refused(otherPartyId, anna with { Cursor = cursor }));
+        Assert.Equal("invalid_cursor", await Refused(partyId, anna with { Cursor = cursor[..^2] }));
 
         // take=0 is the counts alone.
-        var counts = await PageAsync(owner, partyId, "?take=0");
+        var counts = await PageAsync(owner, partyId, new Query(Take: 0));
         Assert.Empty(counts.GetProperty("items").EnumerateArray());
         Assert.Null(Cursor(counts));
         Assert.Equal(3, counts.GetProperty("summary").GetProperty("groups").GetInt32());

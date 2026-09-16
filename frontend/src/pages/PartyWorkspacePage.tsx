@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   GUEST_CONSOLE_PARAMS,
+  LEGACY_GUEST_SEARCH_PARAM,
   getAlbumPartySettings,
   getParty,
   listPartyGuestContent,
@@ -94,8 +95,11 @@ export function PartyWorkspacePage() {
       const params = new URLSearchParams(current);
       params.set('tab', next);
       if (next !== 'guests') {
-        // The guest console's own state belongs to the guest console.
-        params.delete(GUEST_CONSOLE_PARAMS.search);
+        // The guest console's own state belongs to the guest console. Its
+        // search is not here at all — it never enters a URL — but a link from
+        // before that release can still carry the old key, and leaving the tab
+        // is another chance to drop it.
+        params.delete(LEGACY_GUEST_SEARCH_PARAM);
         params.delete(GUEST_CONSOLE_PARAMS.state);
         params.delete(GUEST_CONSOLE_PARAMS.group);
       }

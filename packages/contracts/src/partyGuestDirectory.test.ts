@@ -4,6 +4,7 @@ import {
   GUEST_CONSOLE_PARAMS,
   GUEST_DIRECTORY_LIMITS,
   GUEST_DIRECTORY_STATES,
+  LEGACY_GUEST_SEARCH_PARAM,
   PARTY_INVITATION_DELIVERY_CHANNELS,
   PARTY_INVITATION_DELIVERY_STATUSES,
   PARTY_INVITATION_SHARE_CHANNELS,
@@ -12,11 +13,13 @@ import {
   invitationLine,
   isAttendancePhase,
   isGuestDirectoryState,
-  partyGuestDirectoryPath,
+  partyGuestDirectoryQueryPath,
   partyInvitationGroupDetailPath,
   partyInvitationSharePath,
   peoplePreview,
   primaryInvitationAction,
+  primaryInvitationLabel,
+  type GuestDirectoryGroupItem,
   type PartyInvitationDeliveryView,
 } from './index.ts';
 
@@ -93,13 +96,42 @@ test('items keep distinct keys across kinds', () => {
   }), 'o:x');
 });
 
-test('the routes, with the search encoded and the defaults left out', () => {
-  assert.equal(partyGuestDirectoryPath('p1'), '/api/parties/p1/guest-directory');
-  assert.equal(
-    partyGuestDirectoryPath('p1', { q: '  Nicolò Rossi ', state: 'pending', cursor: 'a+b/c', take: 40 }),
-    '/api/parties/p1/guest-directory?q=Nicol%C3%B2%20Rossi&state=pending&cursor=a%2Bb%2Fc&take=40');
-  assert.equal(partyGuestDirectoryPath('p1', { q: '   ', state: 'all', take: 0 }), '/api/parties/p1/guest-directory?take=0');
+test('the directory is read at ONE address, which carries no query at all', () => {
+  // The search travels in the body. There is no helper that puts it in a URL,
+  // and this route takes no parameters to put it in.
+  assert.equal(partyGuestDirectoryQueryPath('p1'), '/api/parties/p1/guest-directory/query');
+  assert.equal(partyGuestDirectoryQueryPath('p1').includes('?'), false);
   assert.equal(partyInvitationGroupDetailPath('p1', 'g1'), '/api/parties/p1/invitation-groups/g1');
   assert.equal(partyInvitationSharePath('p1', 'g1'), '/api/parties/p1/invitation-groups/g1/share');
-  assert.deepEqual(GUEST_CONSOLE_PARAMS, { search: 'guestSearch', state: 'guestState', group: 'guestGroup' });
+});
+
+test('the console keeps its filter and its open group in the URL, and never its search', () => {
+  // Exhaustive on purpose: adding a key here would fail this line, which is
+  // where somebody would otherwise put the search back. The type says the same
+  // thing at compile time — the union of these values no longer admits
+  // 'guestSearch', so even comparing them is an error.
+  assert.deepEqual(GUEST_CONSOLE_PARAMS, { state: 'guestState', group: 'guestGroup' });
+  // The old key is still named — so it can be recognised and removed.
+  assert.equal(LEGACY_GUEST_SEARCH_PARAM, 'guestSearch');
+});
+
+test('the primary button says which email it is about to send', () => {
+  const group = { canShare: true, canSend: true, whatsappDirect: false };
+  const invitation = (state: string) => ({
+    state, lastAttemptAt: null, lastAttemptKind: null, lastAttemptStatus: null,
+    lastSentAt: null, lastAttemptChannel: null,
+  } as GuestDirectoryGroupItem['invitation']);
+
+  assert.equal(primaryInvitationLabel({ ...group, invitation: invitation('not_sent') }), 'email_first');
+  assert.equal(primaryInvitationLabel({ ...group, invitation: invitation('sent') }), 'email_again');
+  // A link shared on WhatsApp or copied has also gone out: the next email is
+  // another copy of an invitation the group already holds.
+  assert.equal(primaryInvitationLabel({ ...group, invitation: invitation('shared') }), 'email_again');
+  // The other actions say what they do; there is nothing ambiguous to resolve.
+  assert.equal(primaryInvitationLabel({
+    canShare: true, canSend: true, whatsappDirect: true, invitation: invitation('not_sent'),
+  }), 'whatsapp');
+  assert.equal(primaryInvitationLabel({
+    canShare: false, canSend: false, whatsappDirect: true, invitation: invitation('sent'),
+  }), null);
 });
