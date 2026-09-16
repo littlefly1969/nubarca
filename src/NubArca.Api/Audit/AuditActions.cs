@@ -228,6 +228,10 @@ public static class AuditActions
     public const string PartyInvitationGroupDelete = "party.invitation_group.delete";
     public const string PartyInvitationRotate = "party.invitation.rotate";
     public const string PartyInvitationSend = "party.invitation.send";
+    // The link handed to the host to share (WhatsApp, copy): the party, the
+    // group by id, the channel and the kind — never the link, the message, a
+    // phone number or a name.
+    public const string PartyInvitationShare = "party.invitation.share";
     public const string PartyRsvpQuestionCreate = "party.rsvp_question.create";
     public const string PartyRsvpQuestionUpdate = "party.rsvp_question.update";
 

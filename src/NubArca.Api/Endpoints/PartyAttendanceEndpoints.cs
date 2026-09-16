@@ -67,7 +67,7 @@ public static class PartyAttendanceEndpoints
                 await AuditAsync(httpContext, audit, ownerUserId, AuditActions.PartyAttendanceCheckIn, partyId,
                     new { guestId, source = PartyAttendanceSources.Owner }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext), guestId: guestId);
         }).WithName("CheckInPartyGuest").RequirePermission(Permissions.PartyAccess);
 
         // DELETE: "that arrival was recorded by mistake" — never "they left".
@@ -87,7 +87,7 @@ public static class PartyAttendanceEndpoints
                 await AuditAsync(httpContext, audit, ownerUserId, AuditActions.PartyAttendanceUndo, partyId,
                     new { guestId, source = PartyAttendanceSources.Owner }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext), guestId: guestId);
         }).WithName("UndoPartyGuestCheckIn").RequirePermission(Permissions.PartyAccess);
 
         app.MapPost("/api/parties/{partyId:guid}/attendance/other-guests", async (
@@ -108,7 +108,7 @@ public static class PartyAttendanceEndpoints
                 await AuditAsync(httpContext, audit, ownerUserId, AuditActions.PartyAttendanceOtherCreate, partyId,
                     new { attendanceGuestId = result.AttendanceGuestId }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext), otherGuestId: result.AttendanceGuestId);
         }).WithName("CreatePartyAttendanceGuest").RequirePermission(Permissions.PartyAccess);
 
         app.MapPut("/api/parties/{partyId:guid}/attendance/other-guests/{attendanceGuestId:guid}", async (
@@ -130,7 +130,7 @@ public static class PartyAttendanceEndpoints
                 await AuditAsync(httpContext, audit, ownerUserId, AuditActions.PartyAttendanceOtherUpdate, partyId,
                     new { attendanceGuestId }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext), otherGuestId: attendanceGuestId);
         }).WithName("UpdatePartyAttendanceGuest").RequirePermission(Permissions.PartyAccess);
 
         app.MapDelete("/api/parties/{partyId:guid}/attendance/other-guests/{attendanceGuestId:guid}", async (
@@ -149,7 +149,7 @@ public static class PartyAttendanceEndpoints
                 await AuditAsync(httpContext, audit, ownerUserId, AuditActions.PartyAttendanceOtherDelete, partyId,
                     new { attendanceGuestId }, cancellationToken);
             }
-            return ToResult(result);
+            return ToResult(result, PreferHeader.WantsMinimal(httpContext));
         }).WithName("DeletePartyAttendanceGuest").RequirePermission(Permissions.PartyAccess);
 
         // --- GUEST (the personal invitation token) ------------------------------
@@ -211,6 +211,38 @@ public static class PartyAttendanceEndpoints
         audit.LogAsync(
             userId, action, AuditEntityTypes.Party, partyId,
             httpContext.Connection.RemoteIpAddress?.ToString(), metadata, cancellationToken);
+
+    /// <summary>
+    /// Under <c>Prefer: return=minimal</c> — the guest console at the door —
+    /// only what changed: whether it did, the counts, and the one person the
+    /// call was about as the attendance now reads them. A tap on "Segna
+    /// arrivato" must not download every guest of a thousand-group party.
+    /// </summary>
+    private static IResult ToResult(
+        PartyAttendanceResult result, bool minimal, Guid? guestId = null, Guid? otherGuestId = null)
+    {
+        if (!minimal) return ToResult(result);
+        var attendance = result.Attendance;
+        return result.Outcome switch
+        {
+            PartyAttendanceOutcome.Ok => Results.Ok(new
+            {
+                changed = result.Changed,
+                summary = attendance?.Summary,
+                guest = guestId is Guid id
+                    ? attendance?.Groups.SelectMany(g => g.Guests).FirstOrDefault(g => g.GuestId == id)
+                    : null,
+                otherGuest = otherGuestId is Guid other
+                    ? attendance?.OtherGuests.FirstOrDefault(o => o.Id == other)
+                    : null,
+            }),
+            PartyAttendanceOutcome.NotFound => Results.NotFound(),
+            PartyAttendanceOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
+            _ => Results.Json(
+                new { error = result.Error ?? "conflict", summary = attendance?.Summary },
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
 
     private static IResult ToResult(PartyAttendanceResult result) => result.Outcome switch
     {

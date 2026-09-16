@@ -345,6 +345,12 @@ var partyRsvpWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:Pa
 // there is no queue behind it, and a refusal is a refusal.
 var partyInvitationSendPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationSend:PermitLimit") ?? 60;
 var partyInvitationSendWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationSend:WindowSeconds") ?? 600;
+// Invitation SHARES (WhatsApp, copy) send nothing — the host sends them — so
+// they are not bounded by what a mail relay tolerates, only by what a host
+// working through a long guest list does: one share per group, each a trip to
+// WhatsApp and back. The ceiling keeps a runaway client from filling the ledger.
+var partyInvitationSharePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationShare:PermitLimit") ?? 300;
+var partyInvitationShareWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationShare:WindowSeconds") ?? 600;
 // Anonymous party FACE SEARCH runs face detection + embedding per request, the
 // most expensive public party operation, so it gets the tightest per-IP window.
 // The live game is CONTINUOUS traffic on one Wi-Fi network, so it is limited
@@ -640,6 +646,19 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = partyInvitationSendPermitLimit,
                 Window = TimeSpan.FromSeconds(partyInvitationSendWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // Per HOST account, like sending.
+    options.AddPolicy(NubArca.Api.Endpoints.PartyInvitationEndpoints.ShareRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.GetCurrentUserId()?.ToString()
+                ?? httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyInvitationSharePermitLimit,
+                Window = TimeSpan.FromSeconds(partyInvitationShareWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));
@@ -941,6 +960,9 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Party.IPartyInvitationDeliveryService, NubArca.Api.Party.PartyInvitationDeliveryService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyRsvpService, NubArca.Api.Party.PartyRsvpService>();
+    // The host's guest console: the directory in pages, one group on demand.
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyGuestDirectoryService, NubArca.Api.Party.PartyGuestDirectoryService>();
     // Attendance: who the host saw arrive. Owner routes only.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
 
@@ -1326,6 +1348,11 @@ if (builder.Configuration.GetValue<bool>("Database:MigrateOnStartup"))
 // yet must still boot far enough to serve /health and be diagnosed.
 await EnsureAccessRolesAsync(app);
 
+// The guest search's folded text is a cache of the guest list's own fields;
+// re-derive whatever is missing or stale before serving. Fail-soft for the same
+// reason the roles are.
+await ReconcilePartySearchTextAsync(app);
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -1553,6 +1580,7 @@ app.MapShareLinkEndpoints();
 app.MapPartyEndpoints();
 app.MapPartyOwnerEndpoints();
 app.MapPartyInvitationEndpoints();
+app.MapPartyGuestDirectoryEndpoints();
 app.MapPartyAttendanceEndpoints();
 app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
@@ -1681,6 +1709,28 @@ static async Task EnsureAccessRolesAsync(WebApplication app)
     {
         app.Logger.LogWarning(
             ex, "Could not ensure the built-in access roles; the schema may not be migrated yet.");
+    }
+}
+
+static async Task ReconcilePartySearchTextAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetService<AppDbContext>();
+    if (db is null) return;
+
+    try
+    {
+        var repaired = await NubArca.Api.Party.PartySearchTextReconciler.RunAsync(db);
+        if (repaired > 0)
+        {
+            // A count, never a row: the text it folds is owner-private.
+            app.Logger.LogInformation("Party guest search text re-derived for {Count} row(s).", repaired);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(
+            ex, "Could not re-derive the party guest search text; the schema may not be migrated yet.");
     }
 }
 

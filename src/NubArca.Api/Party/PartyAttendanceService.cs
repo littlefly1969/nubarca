@@ -110,6 +110,7 @@ public sealed class PartyAttendanceService : IPartyAttendanceService
             Id = Guid.NewGuid(),
             PartyId = partyId,
             Name = normalized,
+            SearchText = PartySearchText.ForName(normalized),
             ClientRequestId = clientRequestId,
             CheckedInAt = now,
             Version = 1,
@@ -161,6 +162,7 @@ public sealed class PartyAttendanceService : IPartyAttendanceService
             .Where(g => g.Id == attendanceGuestId && g.PartyId == partyId && g.Version == expectedVersion)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(g => g.Name, normalized)
+                .SetProperty(g => g.SearchText, PartySearchText.ForName(normalized))
                 .SetProperty(g => g.Version, g => g.Version + 1)
                 .SetProperty(g => g.UpdatedAt, now), cancellationToken);
         if (updated == 0)
