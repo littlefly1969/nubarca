@@ -214,9 +214,8 @@ export function GuestOtherCard({
         <span className="guest-chip">{t('party.console.other.chip')}</span>
       </div>
       <p className="guest-card-counts muted">
-        {t('party.console.arrival.at', { time: formatDate(item.checkedInAt, { timeStyle: 'short' }) })}
-        {' · '}
-        {formatWhen(item.checkedInAt, t, formatDate)}
+        {/* The day and the hour once: "oggi 09:22", not "alle 09:22 · oggi 09:22". */}
+        {t('party.console.arrival.when', { when: formatWhen(item.checkedInAt, t, formatDate) })}
       </p>
       <div className="guest-card-actions">
         <button
