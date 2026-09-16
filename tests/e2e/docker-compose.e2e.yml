@@ -107,6 +107,13 @@ services:
       Mail__PublicOrigin: "http://127.0.0.1:${E2E_WEB_PORT:-5273}"
       Mail__TokenLifetimeMinutes: "30"
       Mail__PerEmailPermitLimit: "1000"
+      # Personal party invitations are signed with an operator secret and have
+      # no built-in fallback — the API REFUSES TO START without one, because a
+      # key readable in the source plus the stored capability ids would turn a
+      # database dump into every group's working link. A throwaway value for a
+      # throwaway stack, like every other credential here; an installation
+      # generates its own (see docs/party-rsvp.md).
+      Party__InvitationTokenSecret: "e2e-invitation-token-secret"
     volumes:
       - storage:/var/lib/nubarca/storage
       - derived:/var/lib/nubarca/derived
