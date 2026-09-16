@@ -6,6 +6,46 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### "Ospiti" becomes a console, and invitations go out on WhatsApp
+
+- **A guest console instead of a long list.** "Ospiti" now opens on the few
+  numbers that matter, one search and the filters of the moment — *Da rispondere,
+  Confermati, Declinati, Da invitare* before the party, *Da arrivare, Arrivati,
+  Inattesi* during it. Each invitation is a card: who is in it, how they
+  answered, where their invitation stands, one primary action and a menu. Tap a
+  card to see everything about that group — beside the list on a big screen, as a
+  full screen on a phone — and Back returns to exactly the search, filter and
+  place you left.
+- **It stays quick with a thousand invitations.** The search, the filters and the
+  order are the server's, and the page reads the list as you scroll rather than
+  all at once, so opening "Ospiti" costs the same for ten groups and for a
+  thousand. Searching finds people by name, invitation name, email or phone —
+  "nicolo" finds Nicolò, and "333 444" finds +39 333 444 5555.
+- **Invitations on WhatsApp, and by copied link.** The same personal invitation
+  can now go out three ways: email as before, WhatsApp, or a link you copy and
+  send however you like. With the group's number written internationally
+  (+39 333 123 4567) WhatsApp opens that chat directly with the message ready;
+  otherwise WhatsApp asks you whom to send it to. The first invitation you share
+  publishes the party, exactly as the first email did, and replacing a group's
+  link stops every copy of it — however it was sent.
+- **NubArca hands you the link; you send it.** A share is recorded as *WhatsApp
+  condiviso* or *Link copiato* — never as "sent", "delivered" or "read", because
+  that is not something NubArca can know. Emails keep saying what they really
+  are: inviata, non partita, or esito non confermato. Each card says the latest
+  of those in one line.
+- **At the door.** While the party is on, the same cards become the check-in:
+  find a person in a couple of letters and record their arrival in one tap, or
+  register somebody who is not on the list — they appear at the top of the list
+  straight away. Nothing changes about what an arrival means: it never alters
+  anybody's reply, and scanning the QR still never counts as arriving.
+- **Built for a phone.** One column, targets big enough for a thumb, menus and
+  forms that slide up from the bottom edge, nothing that needs hovering, and no
+  sideways scrolling — at 320 px as at full width.
+- **For operators.** This release's database migration is additive and classified
+  as safe to apply through the guided update: it adds the invitation ledger's
+  channel (existing rows are emails), widens its statuses to include *shared*,
+  and adds the search index the console reads by.
+
 ### Who arrived: attendance for open and invited parties
 
 - **"Ospiti", not "Invitati".** The tab is now called "Ospiti", because a party

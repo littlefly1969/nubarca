@@ -1725,6 +1725,36 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   `PartyStateEraser` erases all six tables explicitly. See
   [party-rsvp.md](party-rsvp.md).
 
+- **The host reads the guest list in PAGES, and `shared` is not `sent`.** "Ospiti"
+  is a console over the guest DIRECTORY
+  (`GET /api/parties/{id}/guest-directory`), a projection beside the full guest
+  list: the database searches, filters and orders, a page carries only what a card
+  shows, and one group's detail is a second read. The full
+  `guest-list` projection remains for editing and configuration. Five things are
+  easy to undo by accident. **The search is the server's**, over each row's folded
+  `SearchText` (accents and case dropped, a phone also as digits) — a derived
+  cache every write maintains and `PartySearchTextReconciler` re-derives at API
+  start, so a row written by an application that did not know the column is
+  searchable again; a client-side search would disagree with it, which is why
+  none exists. **The cursor carries the last item's own sort key**, not an
+  offset, so a group added or renamed between two pages neither repeats nor skips
+  the rows around it; it is ENCRYPTED with the data-protection keys (it holds a
+  label, and URLs reach access logs) and bound to a hash of party+search+filter,
+  so a replayed cursor is refused rather than reinterpreted. **A delivery now has
+  a CHANNEL** (`email`, `whatsapp`, `copy`) and the database holds channel and
+  status together: an email is `pending`/`sent`/`failed`, a share is `shared` and
+  can be nothing else — NubArca hands the host a click-to-chat link and never
+  learns whether a message was sent, delivered or read, and there is no provider,
+  API or webhook. A national phone number is never guessed into a country code.
+  **Invited means invited on the CURRENT link by any channel** (`sent` or
+  `shared`, never a reminder) — one definition behind initial/resend, the reminder
+  rule and the *Da invitare* filter — and a rotation still resets all of it.
+  **Owner mutations answer minimally when asked** (`Prefer: return=minimal`,
+  RFC 7240): without the header every route answers exactly as before, so the
+  console can page a thousand groups without an edit returning all of them. Its
+  migration IS automated and previous-application compatible: additive columns
+  with defaults, a widened status constraint, and one index.
+
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
 Known, scoped, deliberately NOT fixed by the portrait/rotation slice.

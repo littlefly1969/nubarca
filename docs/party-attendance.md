@@ -112,7 +112,11 @@ DELETE /api/parties/{partyId}/attendance/other-guests/{id}
   `409 version_conflict` carrying the attendance as it is now. `DELETE` removes a
   mistaken one.
 - Every answer is the whole attendance; every refusal that describes a state is a
-  `409` carrying it as `attendance`.
+  `409` carrying it as `attendance`. A client that pages the guest list adds
+  `Prefer: return=minimal` and receives `{ changed, summary, guest | otherGuest }`
+  instead — what changed, the counts, and the one person as the record now reads
+  them — so a tap at the door never downloads a thousand groups. The route, its
+  authorization, its audit and its refusals are the same either way.
 
 ### The projection
 
@@ -208,17 +212,23 @@ no-store`.
 ## Where it lives in the UI
 
 Inside the owner's **Ospiti** tab (renamed from "Invitati": a party may invite
-nobody). There is no separate Attendance tab.
+nobody). There is no separate Attendance tab: the same console shows the guest
+list before the party and becomes the door once it is live, reading both from
+the guest directory a page at a time (see
+[party-rsvp.md](party-rsvp.md#the-guest-directory-the-list-one-page-at-a-time)).
 
-- **Before the party, open** — "La festa è aperta": the QR admits anybody; the guest
-  list is offered folded as *Lista invitati (facoltativa)*, never as a prerequisite.
-- **Before the party, invited** — the guest list and RSVP view, unchanged.
+- **Before the party, open** — "La festa è aperta": the QR admits anybody, and the
+  guest list is offered as an option, never as a prerequisite.
+- **Before the party, invited** — the cards carry the invitation: who is in the
+  group, how they answered, and where their invitation stands.
 - **Live or Ended, open** — *Presenze registrate: N*, *Aggiungi persona*, and a note
-  that this is not a head count of everyone at the party.
+  that this is who was recorded, not a head count of everyone at the party.
 - **Live or Ended, invited or mixed** — *Attesi · Arrivati · Mancano · Altri arrivi*,
-  one local search (guest name, group label, other arrival's name), the filters
-  *Tutti · Da arrivare · Arrivati · Inattesi*, each person with their RSVP and
-  arrival, *Altri arrivi* beneath, and the guest list folded underneath.
+  one search (guest name, group label, either address or number, an other
+  arrival's name) answered by the server, the filters *Tutti · Da arrivare ·
+  Arrivati · Inattesi*, and every person one tap from being recorded as arrived —
+  from the card itself, without opening the group. Other arrivals are listed
+  first, latest first, so somebody just recorded is at the top.
 
 `Altri arrivi` = `unexpectedKnownGuests + otherArrivals` — exactly what the
 *Inattesi* filter shows — so *Arrivati* = (*Attesi* − *Mancano*) + *Altri arrivi*.

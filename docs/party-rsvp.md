@@ -54,14 +54,27 @@ Six tables, one additive migration (`AddPartyGuestListRsvp`), every foreign key
   `attending`, `declined`, dietary notes, `RespondedAt` (first answer only).
 - `party_rsvp_questions` — the host's questions, closed kinds, frozen once answered.
 - `party_rsvp_answers` — one per group per question, canonical JSON.
-- `party_invitation_deliveries` — the outbound ledger: kind, status, the capability
-  generation the email carried, the caller's request id. No address, no body, no
-  SMTP reply, no token.
+- `party_invitation_deliveries` — the ledger of every time the link left: channel
+  (`email`, `whatsapp`, `copy`), kind, status, the capability generation it
+  carried, the caller's request id. No address, no phone, no body, no SMTP reply,
+  no token and no message.
 
 Check constraints hold every closed vocabulary, the +1 ceiling, the 64-character
 token hash, "options exist exactly for a single choice", and "a completed delivery
-has a completion time". A unique index on the token hash is the public lookup; a
+has a completion time". A delivery's channel and status are held together, so an
+email is `pending`/`sent`/`failed` and a share is `shared` and nothing else — the
+database refuses a "sent" WhatsApp, a claim NubArca could never make — and a
+reminder is an email. A unique index on the token hash is the public lookup; a
 unique index on `(group, request id)` is the idempotency rule.
+
+Groups, guests and recorded arrivals each carry a `SearchText`: the fields the
+host may search that row by (label, address, phone; name, address, phone; name),
+accent- and case-folded by `PartySearchText`, with a phone also as its digits
+alone. It is a derived cache, never returned and never shown. Every write that
+changes what it folds writes it too, and `PartySearchTextReconciler` re-derives
+any row that disagrees with its own fields when the API starts — which is what
+makes a row written before the column existed, or by an application that did not
+know it, searchable again.
 
 The two columns that hold serialized JSON — `party_rsvp_questions.OptionsJson`
 and `party_rsvp_answers.ValueJson` — are `text`. The DOMAIN bounds what they
@@ -176,7 +189,9 @@ that party's, so a foreign object is the same 404 as a missing one.
 - Every group mutation — edit, rotate, remove — spends the group's version through
   the same conditional statement a guest's reply uses, so the two can never
   silently overwrite each other.
-- Search is client-side, over the list the page already holds.
+- The host reads the list through the **guest directory** below, one page at a
+  time; `GET /api/parties/{partyId}/guest-list` still answers with all of it for
+  a caller that really needs every group.
 
 **The counts, with one definition each** (`PartyRsvpSummaryDto`, contracts'
 `PartyRsvpSummary`): *Invitati* = named guests; *Risposte mancanti* = named guests
@@ -186,6 +201,50 @@ when a named guest is pending. None of it is attendance: who actually arrived is
 a separate projection with its own counts (`PartyAttendanceSummaryDto`, see
 [party-attendance.md](party-attendance.md)), and an arrival never changes any of
 the numbers above.
+
+### The guest directory: the list, one page at a time
+
+The whole guest list is one read of everything — right for a screen that edits a
+handful, wrong for one that must stay usable at the domain's own ceiling of a
+thousand groups. Beside it sits a scalable projection, and the host's console
+("Ospiti") uses only that:
+
+```text
+GET /api/parties/{partyId}/guest-directory?q=&state=&cursor=&take=
+GET /api/parties/{partyId}/invitation-groups/{groupId}
+GET /api/parties/{partyId}/rsvp-questions
+```
+
+- **The database decides which rows.** The search is a substring test on the
+  folded `SearchText` of a group, of any of its people, or of a recorded
+  arrival — so "nicolo" finds Nicolò and "333 444" finds +39 333 444 5555. Every
+  filter is an `EXISTS` over the group's own people or its deliveries:
+  `pending`, `attending`, `declined`, `not_invited` before the party;
+  `to_arrive`, `arrived`, `unexpected` once it is live. Nothing is filtered in
+  the application, and no client holds a second opinion about what matches.
+- **Order and paging.** Other arrivals first, latest first by
+  (`CheckedInAt`, `Id`); then groups by (`lower(Label)`, `Id`). The cursor
+  carries the last item's own sort key rather than a position, so a group added,
+  renamed or removed between two pages never makes a page repeat or skip the
+  rows around it. It is **encrypted** with the installation's data-protection
+  keys — it holds a label, and a URL reaches an access log — and bound to a hash
+  of the party, the search and the filter it was issued for: replayed against
+  anything else it is refused (`400 invalid_cursor`), never reinterpreted.
+- **A page costs the same at any size**: the other arrivals, the groups, then
+  that page's people and deliveries by id — four or five statements, whatever
+  the party. The counts come with the FIRST page only (`take=0` asks for them
+  alone) and are aggregates, folded into the same `PartyRsvpSummaryDto` and
+  `PartyAttendanceSummaryDto` definitions the full projections use.
+- **An item is as wide as a card**: label, its people with their RSVP and
+  arrival, the counts, where its invitation stands, and whether WhatsApp can
+  open its chat — never an address, a phone number, a token or a hash. A
+  group's detail is a second read, on demand, and carries what the guest list
+  already showed the host for that one group, plus its delivery history.
+- **Writes answer minimally.** A client that pages the list sends
+  `Prefer: return=minimal` (RFC 7240) on every owner mutation and receives only
+  what changed — the list's header and the group it touched, a delivery and the
+  party, an arrival and the counts. Without the header every route answers
+  exactly as it always did.
 
 ### Questions
 
@@ -230,17 +289,68 @@ row exists, SMTP and the outcome finish whatever the browser does.
 - Sends and reminders stop once the party is Live or Ended (`invitations_closed`).
 - **A delivery never touches an RSVP**, whether it succeeds, fails or is uncertain.
 
+## Sharing: WhatsApp and a copied link
+
+The same personal link, handed to the HOST instead of posted by NubArca:
+
+```text
+POST /api/parties/{partyId}/invitation-groups/{groupId}/share
+     { "channel": "whatsapp" | "copy", "clientRequestId": "…", "partyVersion": 12 }
+  →  { "share": { channel, kind, status: "shared", url, text, whatsappUrl, createdAt, replayed },
+       "party": …, "item": … }
+```
+
+- **`shared` is not `sent`.** It means NubArca handed the host the link. Whether
+  a message was written, sent, delivered or read is not something it can know,
+  and the vocabulary refuses to pretend otherwise:
+
+  ```text
+  email:    pending → sent | failed        (SMTP accepted it, or did not)
+  whatsapp: shared                          (the host has the link)
+  copy:     shared
+  ```
+
+- **Click-to-chat, and no provider.** `https://wa.me/<number>?text=…` when the
+  group's phone is certainly international (`+39 …`, `0039 …`, a country code
+  that does not start with 0, at most E.164's fifteen digits), else
+  `https://wa.me/?text=…`, which asks the host whom to send to. A national
+  number is never guessed at: assuming a country would open a chat with a
+  stranger. No WhatsApp Business API, no provider, no webhook, no callback —
+  NubArca never talks to Meta.
+- **The message is composed on the server** in the host's persisted UI language
+  (`PartyInvitationShareText`), short on purpose: who is invited to what, the
+  personal link, and that the reply happens there. The link is built on
+  `Mail:PublicOrigin` + `PartyInvitationTokens.InvitationPath`, never on a
+  request's Host header, and no client ever builds one.
+- **The protocol is the email's**, without anything to wait for: ownership, then
+  the request id (a retry of the same click hands back the same link and records
+  no second share), then a public origin (`409 link_unavailable`; SMTP is NOT
+  needed to share), then `invitations_closed` once the party is under way, then
+  the Draft's publication through `PartyLifecycle` with the version the page read
+  (`409 party_version_conflict`), then ONE `shared` row. A click is one act on
+  one channel: an id already spent on another is `400 request_id_reused`.
+- **Invited is invited, whatever the channel.** A non-reminder delivery that is
+  `sent` or `shared` on the current generation is what makes the next one a
+  `resend`, what a reminder requires, and what the *Da invitare* filter excludes.
+  A rotation makes all of it not-invited again, as it always did.
+- The response's link, message and `whatsappUrl` are `no-store`, live in the
+  page's memory for as long as the host needs them, and are never stored, logged
+  or audited.
+
 ## Rate limits
 
 | Policy | Partition | Default | Configuration |
 |---|---|---|---|
 | `party-rsvp` (guest reply) | remote IP | 30 / 60 s | `RateLimits:PartyRsvp:*` |
 | `party-invitation-send` (send, remind) | host account | 60 / 600 s | `RateLimits:PartyInvitationSend:*` |
+| `party-invitation-share` (WhatsApp, copy) | host account | 300 / 600 s | `RateLimits:PartyInvitationShare:*` |
 | `party-public` (guest read) | remote IP | existing | existing |
 | `party-public-media` (invitation media) | remote IP | existing | existing |
 
 One call sends one email, so the send limiter bounds SMTP output. There is no
-queue behind it.
+queue behind it. A share sends nothing — the host does — so its limit is set by
+what a host working through a long guest list does, not by what a mail relay
+tolerates; it bounds how fast the ledger can grow.
 
 ## Privacy
 
@@ -249,7 +359,12 @@ except a group's own data on its own personal link. They never reach
 `/api/party/{token}`, the TV, the game, the print studio, face search, public
 media DTOs, a link preview, a log line or an audit record. Audit lines name the
 party and, where relevant, a group by id, a delivery's kind and status, or a
-question's kind — never its prompt. `PartyGuestListLifecycleTests` serializes the
+question's kind — never its prompt. A share records
+`party.invitation.share` with the party, the group by id, the channel and the
+kind: never the link, the message, a number or a name, and never at all for a
+replayed click, which handed over nothing new. The directory's items carry names
+and states only — no address, no number — and its folded `SearchText` is
+returned to nobody. `PartyGuestListLifecycleTests` serializes the
 public party context, its items, the game snapshot, the link preview, the TV
 session and TV album surfaces and every audit line, and asserts none of the seeded
 PII appears. `/party/invite/{token}` is a two-segment path, so the frontend's
@@ -274,7 +389,9 @@ Personal invitation and RSVP JSON are `Cache-Control: no-store`.
 
 ## Deliberately absent
 
-No scheduled or automatic reminders, no SMS or WhatsApp provider, no campaign or
+No scheduled or automatic reminders, no SMS; no WhatsApp **provider** — no
+Business API, no webhook, no delivery or read receipt, and no message NubArca
+sends itself, only a click-to-chat link the host sends; no campaign or
 newsletter system, no mail queue, no CSV import, no "maybe", no seating, no
 generic form builder, no sub-events, no automatic guest ↔ participant binding,
 and no second invitation app: the personal invitation is the party's own
