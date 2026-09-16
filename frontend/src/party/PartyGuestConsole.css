@@ -153,7 +153,6 @@
 
 .guest-more { display: flex; justify-content: center; padding-block: 0.6rem; }
 .guest-more .row-action { min-height: 44px; }
-.guest-sentinel { height: 1px; }
 
 /* ---- One group ---------------------------------------------------------- */
 
