@@ -90,6 +90,21 @@ export function PartyWorkspacePage() {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = toTab(searchParams.get('tab'));
+
+  // The guest search is never in a URL any more, but a link made before it
+  // moved out can still carry one — and the guest console can only strip what
+  // arrives while IT is open. Dropping it here covers every other way in
+  // (a bookmark to another tab, a pasted link), by replacing the entry so it
+  // is not one Back away either. It is removed, never read.
+  useEffect(() => {
+    if (!searchParams.has(LEGACY_GUEST_SEARCH_PARAM)) return;
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete(LEGACY_GUEST_SEARCH_PARAM);
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const setTab = useCallback((next: Tab) => {
     setSearchParams((current) => {
       const params = new URLSearchParams(current);
