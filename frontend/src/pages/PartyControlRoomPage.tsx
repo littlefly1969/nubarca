@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import QRCode from 'qrcode';
 import { useEffect } from 'react';
 import {
@@ -425,9 +425,20 @@ function PartyPlanPanel({
   );
 }
 
+// The control room is reached FROM a party, and its way out returns there
+// rather than to an album the host may never have opened. An old bookmark with
+// no party in it still lands on the album.
 function BackLink({ albumId }: { albumId: string | undefined }) {
   const { t } = useI18n();
-  return <Link className="back-link" to={`/albums/${albumId ?? ''}`}>{t('partyControl.back')}</Link>;
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
+  return partyId
+    ? (
+      <Link className="back-link" to={`/parties/${partyId}?section=activities`}>
+        {t('partyUploads.backToParty')}
+      </Link>
+    )
+    : <Link className="back-link" to={`/albums/${albumId ?? ''}`}>{t('partyControl.back')}</Link>;
 }
 
 function useQr(url: string | null): string | null {

@@ -222,12 +222,25 @@ describe('PartyPrintSettings (owner panel)', () => {
     expect(alert).not.toHaveTextContent(/Npgsql|boom/);
   });
 
-  it('stays closed rather than showing a broken form', async () => {
-    installFetchMock({
-      [`GET /api/albums/${ALBUM}/party-print-settings`]: () => errorResponse(500),
+  it('says a failed read failed, and offers the way back', async () => {
+    // It used to render NOTHING here, which is indistinguishable from a slow
+    // read for as long as the host is willing to wait — and, once the panel
+    // grew a loading skeleton, indistinguishable from one that never ends.
+    let fail = true;
+    const mock = installFetchMock({
+      [`GET /api/albums/${ALBUM}/party-print-settings`]: () =>
+        (fail ? errorResponse(500) : jsonResponse(settings())),
       'GET /api/print/stations': () => jsonResponse([]),
     });
-    const { container } = view();
-    await waitFor(() => expect(container).toBeEmptyDOMElement());
+    view();
+
+    expect(await screen.findByTestId('party-print-failed')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/impostazioni di stampa/i);
+
+    fail = false;
+    await userEvent.click(screen.getByRole('button', { name: 'Riprova' }));
+
+    expect(await screen.findByTestId('party-print-settings')).toBeInTheDocument();
+    expect(mock.calls.filter((c) => c.url.includes('party-print-settings'))).toHaveLength(2);
   });
 });

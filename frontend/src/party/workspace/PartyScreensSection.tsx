@@ -84,7 +84,7 @@ export function PartyScreensSection({
           <SwitchRow
             testId="party-screens-show-on-tv"
             label={t('albumDetail.showOnTv')}
-            note={t('albumDetail.showOnTvHelp')}
+            note={t('party.screens.tvSwitchNote')}
             checked={albumParty?.showOnTv ?? false}
             disabled={busy || albumParty === null}
             onChange={(next) => void toggleTv(next)}
