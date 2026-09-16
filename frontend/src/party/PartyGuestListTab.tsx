@@ -48,6 +48,7 @@ import { PartyRsvpQuestionsCard } from './PartyRsvpQuestionsCard';
 import { newClientRequestId } from './clientRequestId';
 import { shareInvitation, type ShareOutcome } from './guestConsoleActions';
 import { useGuestDirectory } from './useGuestDirectory';
+import { Button, EmptyState } from './workspace/ui';
 import { useWideLayout } from './useWideLayout';
 import './PartyGuestConsole.css';
 
@@ -874,38 +875,51 @@ function EmptyList({
 }) {
   const { t } = useI18n();
 
+  // The three ways a list can be empty, each a different sentence. They use the
+  // workspace's own empty state, so "nothing here" looks the same in the guest
+  // console as it does in every other section of the party.
   if (searching) {
     return (
-      <div className="party-card" data-testid="guest-no-results">
-        <p>{query ? t('party.console.noResultsFor', { query }) : t('party.console.noResults')}</p>
-        <button type="button" className="row-action" data-testid="guest-clear-filters" onClick={onClear}>
-          {t('party.console.clearFilters')}
-        </button>
-      </div>
+      <EmptyState
+        testId="guest-no-results"
+        title={t('party.console.noResultsTitle')}
+        body={query ? t('party.console.noResultsFor', { query }) : t('party.console.noResults')}
+        action={(
+          <Button data-testid="guest-clear-filters" onClick={onClear}>
+            {t('party.console.clearFilters')}
+          </Button>
+        )}
+      />
     );
   }
   if (live) {
     return (
-      <div className="party-card" data-testid="guest-empty-arrivals">
-        <p>{t('party.console.empty.arrivals')}</p>
-        <button type="button" className="row-action-primary" data-testid="guest-empty-add" onClick={onAddPerson}>
-          {t('party.console.addPerson')}
-        </button>
-      </div>
+      <EmptyState
+        testId="guest-empty-arrivals"
+        title={t('party.console.empty.arrivalsTitle')}
+        body={t('party.console.empty.arrivals')}
+        action={(
+          <Button tone="primary" data-testid="guest-empty-add" onClick={onAddPerson}>
+            {t('party.console.addPerson')}
+          </Button>
+        )}
+      />
     );
   }
+  // A party with no guest list is not an unfinished party: it is open, and the
+  // copy says so before it offers the list as something optional.
   return (
-    <section className="party-card" data-testid="guest-open" aria-labelledby="guest-open-heading">
-      <h3 id="guest-open-heading">{t('party.console.open.heading')}</h3>
-      <p>{t('party.console.open.body')}</p>
-      <p className="muted">{t('party.console.open.attendanceLater')}</p>
-      <p className="muted">{t('party.console.open.offer')}</p>
-      <p className="party-card-actions">
-        <button type="button" className="row-action-primary" data-testid="guest-empty-add" onClick={onAddGroup}>
+    <EmptyState
+      testId="guest-open"
+      title={t('party.console.open.heading')}
+      body={t('party.console.open.body')}
+      optional={`${t('party.console.open.attendanceLater')} ${t('party.console.open.offer')}`}
+      action={(
+        <Button tone="primary" data-testid="guest-empty-add" onClick={onAddGroup}>
           {t('party.console.addGroup')}
-        </button>
-      </p>
-    </section>
+        </Button>
+      )}
+    />
   );
 }
 

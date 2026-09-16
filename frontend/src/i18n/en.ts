@@ -844,6 +844,8 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.console.loadingMore': 'Loading more guests…',
   'party.console.loadMoreError': 'More guests could not be loaded.',
   'party.console.noResults': 'No guest matches.',
+  'party.console.noResultsTitle': 'Nothing found',
+  'party.console.empty.arrivalsTitle': 'Nobody has arrived yet',
   'party.console.noResultsFor': 'No guest matches “{query}”.',
   'party.console.clearFilters': 'Clear search and filters',
   'party.console.open.heading': 'The party is open',
