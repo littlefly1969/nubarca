@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PartySummary } from '@nubarca/api-client';
-import {
-  PARTY_TIMELINE,
-  partyPrimaryAction,
-  partyStatusLabelKey,
-  sortParties,
-  timelineStepState,
-} from './partyModel';
+import { partyStatusLabelKey, sortParties } from './partyModel';
+import { PARTY_STATUSES } from './workspace/partyWorkspaceModel';
 
 // The party's information architecture, testable without rendering anything.
 
@@ -19,34 +14,12 @@ const summary = (over: Partial<PartySummary>): PartySummary => ({
 
 describe('party status', () => {
   it('every status has a product label, and an unknown one never leaks raw', () => {
-    for (const status of PARTY_TIMELINE) {
+    for (const status of PARTY_STATUSES) {
       expect(partyStatusLabelKey(status)).toBe(`party.status.${status}`);
     }
     // A wire value the client does not know must still produce a message key,
     // never the raw string on a screen.
     expect(partyStatusLabelKey('something-new')).toMatch(/^party\.status\./);
-  });
-});
-
-describe('the lifecycle timeline', () => {
-  it('describes where the evening is, in order', () => {
-    expect(PARTY_TIMELINE).toEqual(['draft', 'published', 'live', 'ended']);
-
-    expect(timelineStepState('draft', 'live')).toBe('done');
-    expect(timelineStepState('published', 'live')).toBe('done');
-    expect(timelineStepState('live', 'live')).toBe('current');
-    expect(timelineStepState('ended', 'live')).toBe('upcoming');
-  });
-
-  it('offers exactly one action per state, and none where there is no move', () => {
-    // Draft has none: a party is published by opening it to guests, and a
-    // second button reaching the same state would be two ways to do one thing.
-    expect(partyPrimaryAction('draft')).toBeNull();
-    expect(partyPrimaryAction('published')?.action).toBe('start-live');
-    expect(partyPrimaryAction('live')?.action).toBe('end-live');
-    // Ended has none: there is no re-open transition, and a button that
-    // answered 400 would be worse than no button.
-    expect(partyPrimaryAction('ended')).toBeNull();
   });
 });
 

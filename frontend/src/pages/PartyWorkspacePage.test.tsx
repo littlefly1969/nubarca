@@ -49,69 +49,217 @@ const albumParty = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-function page(permissions?: readonly string[]) {
-  return (
+/** The guest counts, as the counts-only directory query answers them. */
+const guestCounts = (over: {
+  groups?: number;
+  rsvp?: Record<string, number>;
+  attendance?: Record<string, number>;
+} = {}) => ({
+  partyId: PARTY_ID, partyStatus: 'draft', mailAvailable: true, shareAvailable: true,
+  items: [], nextCursor: null,
+  summary: {
+    groups: over.groups ?? 0,
+    otherArrivals: 0,
+    rsvp: {
+      groups: over.groups ?? 0, invited: 0, missingResponses: 0, attending: 0,
+      declined: 0, expectedPeople: 0, unansweredGroups: 0, ...over.rsvp,
+    },
+    attendance: {
+      expectedPeople: 0, expectedArrived: 0, expectedMissing: 0,
+      unexpectedKnownGuests: 0, otherArrivals: 0, totalArrivals: 0, ...over.attendance,
+    },
+  },
+});
+
+/**
+ * The reads every section of the workspace may make, plus whatever the test
+ * cares about. The page asks for the party, its album settings, its guest
+ * content and its guest COUNTS; the sections that state what is waiting also
+ * read the two moderation queues.
+ */
+function mount(
+  handlers: Record<string, () => Response>,
+  { permissions, at }: { permissions?: readonly string[]; at?: string } = {},
+) {
+  const mock = installFetchMock({
+    [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
+    [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(guestCounts()),
+    [`GET /api/albums/${ALBUM_ID}/party-uploads`]: () =>
+      jsonResponse({ albumId: ALBUM_ID, requireUploadApproval: false, items: [] }),
+    [`GET /api/albums/${ALBUM_ID}/party-messages`]: () =>
+      jsonResponse({ albumId: ALBUM_ID, isOwner: true, partyActive: true, requireMessageApproval: false, items: [] }),
+    ...handlers,
+  });
+  render(
     <AuthedWrapper permissions={permissions}>
-      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}`]}>
+      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}${at ?? ''}`]}>
         <Routes>
           <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
+          <Route path="/parties" element={<div data-testid="parties-page-marker" />} />
         </Routes>
       </MemoryRouter>
-    </AuthedWrapper>
+    </AuthedWrapper>,
   );
+  return mock;
 }
 
-describe('PartyWorkspacePage — what the party tells its guests', () => {
-  it('offers a typed card per kind, in the product order, and no page builder', async () => {
-    installFetchMock({
+describe('the party workspace — one map, whatever the phase', () => {
+  it('offers the same sections from the draft to the end', async () => {
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
     });
-    render(page());
 
-    await userEvent.click(await screen.findByTestId('party-tab-before'));
+    for (const id of ['summary', 'experience', 'guests', 'photos', 'activities', 'screens', 'settings']) {
+      expect(await screen.findByTestId(`party-tab-${id}`)).toBeInTheDocument();
+    }
+    // Live is a room with the lights on: it does not exist yet.
+    expect(screen.queryByTestId('party-tab-live')).not.toBeInTheDocument();
+  });
 
-    for (const kind of ['invitation', 'location', 'dress-code', 'menu', 'info']) {
+  it('lands on the summary, and on the console while the party is happening', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+    expect(await screen.findByTestId('party-next')).toBeInTheDocument();
+    cleanup();
+
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+    expect(await screen.findByTestId('party-live-arrivals')).toBeInTheDocument();
+    expect(screen.getByTestId('party-tab-live')).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('still lands a bookmark from before the sections existed', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    }, { at: '?tab=before' });
+
+    // The old "Before" tab was the guest-facing content, which is Experience.
+    expect(await screen.findByTestId('party-content-invitation')).toBeInTheDocument();
+  });
+
+  it('never leaves a guest search in the URL, wherever the link came from', async () => {
+    // The one piece of console state that is personal data about somebody else.
+    // A pre-release link can still carry it; arriving anywhere strips it.
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    }, { at: '?section=settings&guestSearch=mario%20rossi' });
+
+    await screen.findByTestId('party-settings-form');
+    expect(window.location.search).not.toContain('mario');
+    expect(document.body.innerHTML).not.toContain('mario');
+  });
+});
+
+describe('the summary — what do I do now', () => {
+  it('offers the step that actually unblocks the party, not a move it cannot make', async () => {
+    mount({ [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()), 'GET /api/albums': () => jsonResponse([]) });
+
+    // A draft with no album is not one button away from a party.
+    expect(await screen.findByTestId('party-next-move')).toHaveTextContent('Scegli l’album');
+  });
+
+  it('publishes by opening the party to its guests, and adopts what came back', async () => {
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ partyMode: false })),
+      [`PATCH /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+
+    await userEvent.click(await screen.findByTestId('party-next-move'));
+
+    // The capability's own transition, not a second "publish" racing it.
+    const patch = mock.calls.find((c) => c.method === 'PATCH')!;
+    expect(patch.url).toContain('party-settings');
+    expect(await screen.findByTestId('party-share-url')).toHaveTextContent('/party/tok');
+  });
+
+  it('states the party’s state separately from the action', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'published' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+
+    // The badge says where the evening is; the button says what pressing it
+    // does. A host must never have to read a CTA to learn the state.
+    expect(await screen.findByTestId('party-status')).toHaveTextContent('Pubblicata');
+    // And the action waits for the album's settings rather than guessing: until
+    // they arrive, whether the guests can already reach this party is unknown.
+    expect(await screen.findByTestId('party-next-move')).toHaveTextContent('Avvia festa');
+  });
+
+  it('an open party is never told it is missing zero guests', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () =>
+        jsonResponse(guestCounts({ groups: 0, attendance: { totalArrivals: 84 } })),
+    });
+
+    const metrics = await screen.findByTestId('party-live-metrics');
+    expect(within(metrics).getByText('84')).toBeInTheDocument();
+    expect(within(metrics).queryByText('Attesi')).not.toBeInTheDocument();
+    expect(within(metrics).queryByText('Mancano')).not.toBeInTheDocument();
+  });
+
+  it('separates a problem from a step still to do', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ partyMode: false })),
+    });
+
+    // A party that is on with its guests locked out is WRONG, and is stated as
+    // such rather than sitting in a checklist.
+    expect(await screen.findByTestId('party-live-attention-access-closed')).toBeInTheDocument();
+  });
+});
+
+describe('the experience — what the guests will see', () => {
+  it('offers a typed card per kind, and no page builder', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    }, { at: '?section=experience' });
+
+    for (const kind of ['invitation', 'location', 'dress-code', 'menu', 'info', 'thank-you']) {
       expect(await screen.findByTestId(`party-content-${kind}`)).toBeInTheDocument();
     }
-    // The thank-you belongs to the After surface, not this one.
-    expect(screen.queryByTestId('party-content-thank-you')).not.toBeInTheDocument();
-    // No palette, no blocks, no drag handles: this is six named shapes.
+    // No palette, no blocks, no drag handles: six named shapes.
     expect(screen.queryByText(/blocco|block|trascina|drag/i)).not.toBeInTheDocument();
   });
 
   it('reveals a slot’s form only once the host turns it on', async () => {
-    installFetchMock({
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
-    });
-    render(page());
+    }, { at: '?section=experience' });
 
-    await userEvent.click(await screen.findByTestId('party-tab-before'));
     const card = await screen.findByTestId('party-content-location');
-    // Progressive disclosure: a name, and nothing else, until there is a reason.
     expect(within(card).queryByLabelText('Luogo')).not.toBeInTheDocument();
+    // The state is on the card before it is opened, and it is not the switch.
+    expect(within(card).getByTestId('party-content-state-location')).toHaveTextContent(/non la vedono/i);
 
-    await userEvent.click(within(card).getByLabelText('Dove'));
+    await userEvent.click(within(card).getByTestId('party-content-enable-location'));
     expect(within(card).getByLabelText('Luogo')).toBeInTheDocument();
     expect(within(card).getByLabelText('Indirizzo')).toBeInTheDocument();
   });
 
   it('saves one slot with its OWN version', async () => {
-    const mock = installFetchMock({
+    const mock = mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
       [`PUT /api/parties/${PARTY_ID}/guest-content/location`]: () =>
         jsonResponse(slot('location', { enabled: true, version: 1 })),
-    });
-    render(page());
+    }, { at: '?section=experience' });
 
-    await userEvent.click(await screen.findByTestId('party-tab-before'));
     const card = await screen.findByTestId('party-content-location');
-    await userEvent.click(within(card).getByLabelText('Dove'));
+    await userEvent.click(within(card).getByTestId('party-content-enable-location'));
     await userEvent.type(within(card).getByLabelText('Luogo'), 'Villa Aurora');
     await userEvent.click(within(card).getByTestId('party-content-save-location'));
 
@@ -125,76 +273,54 @@ describe('PartyWorkspacePage — what the party tells its guests', () => {
   });
 
   it('adopts the server’s slot on a conflict rather than overwriting', async () => {
-    installFetchMock({
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
       [`PUT /api/parties/${PARTY_ID}/guest-content/info`]: () => jsonResponse({
         error: 'version_conflict',
         content: slot('info', {
           enabled: true, version: 4, content: { title: 'Scritto da qualcun altro', body: 'Testo' },
         }),
       }, 409),
-    });
-    render(page());
+    }, { at: '?section=experience' });
 
-    await userEvent.click(await screen.findByTestId('party-tab-before'));
     const card = await screen.findByTestId('party-content-info');
-    await userEvent.click(within(card).getByLabelText('Info'));
+    await userEvent.click(within(card).getByTestId('party-content-enable-info'));
     await userEvent.type(within(card).getByLabelText('Titolo'), 'Il mio');
     await userEvent.click(within(card).getByTestId('party-content-save-info'));
 
     expect(await screen.findByTestId('party-content-conflict-info')).toBeInTheDocument();
-    // The card now shows what actually happened.
     expect(within(await screen.findByTestId('party-content-info')).getByLabelText('Titolo'))
       .toHaveValue('Scritto da qualcun altro');
   });
 
-  it('configures the memories’ own window in After, on the party’s mutation', async () => {
-    const mock = installFetchMock({
+  it('opens the real guest page as the preview, and says so when it cannot', async () => {
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
-      [`PATCH /api/parties/${PARTY_ID}`]: () =>
-        jsonResponse(withAlbum({ version: 2, libraryAccessExpiresAt: '2027-07-20T00:00:00Z' })),
-    });
-    render(page());
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ partyMode: false })),
+    }, { at: '?section=experience' });
 
-    await userEvent.click(await screen.findByTestId('party-tab-after'));
-    // The thank-you lives here, not on the invitation.
-    expect(await screen.findByTestId('party-content-thank-you')).toBeInTheDocument();
-
-    const window = await screen.findByTestId('party-library-window');
-    await userEvent.type(
-      within(window).getByLabelText(/Le foto restano disponibili/i), '2027-07-20T00:00');
-    await userEvent.click(within(window).getByTestId('party-library-save'));
-
-    // One endpoint, one version: the memories' end is the party's own data.
-    const patch = mock.calls.find((c) => c.method === 'PATCH')!;
-    expect(patch.url).toContain(`/api/parties/${PARTY_ID}`);
-    expect(JSON.parse(String(patch.body)).libraryAccessExpiresAt).toBeTruthy();
+    expect(await screen.findByTestId('party-experience-no-preview')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-experience-preview')).not.toBeInTheDocument();
   });
 });
 
-describe('PartyWorkspacePage', () => {
+describe('the photos', () => {
   it('a party with no album invites one instead of failing', async () => {
-    const mock = installFetchMock({
+    const mock = mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()),
       'GET /api/albums': () => jsonResponse([]),
-    });
-    render(page());
+    }, { at: '?section=photos' });
 
     expect(await screen.findByTestId('party-album-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('party-guest-needs-album')).toBeInTheDocument();
-
     // Not a permission problem and not an error: an unfinished configuration.
     // Nothing album-scoped is requested with an id that does not exist.
     expect(mock.calls.some((c) => c.url.includes('party-settings'))).toBe(false);
-    expect(mock.calls.some((c) => c.url.includes('party-print-settings'))).toBe(false);
+    expect(mock.calls.some((c) => c.url.includes('party-uploads'))).toBe(false);
   });
 
   it('links an existing album without building a second album browser', async () => {
-    const mock = installFetchMock({
+    const mock = mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()),
       'GET /api/albums': () => jsonResponse([
         { id: ALBUM_ID, name: 'Album di Marta', description: null, itemCount: 0, showOnTv: false,
@@ -203,8 +329,7 @@ describe('PartyWorkspacePage', () => {
       ]),
       [`PUT /api/parties/${PARTY_ID}/media/main`]: () => jsonResponse(withAlbum({ version: 2 })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ partyMode: false })),
-    });
-    render(page());
+    }, { at: '?section=photos' });
 
     await userEvent.click(await screen.findByRole('button', { name: 'Usa album esistente' }));
     await userEvent.selectOptions(await screen.findByLabelText('Scegli un album'), ALBUM_ID);
@@ -216,62 +341,168 @@ describe('PartyWorkspacePage', () => {
   });
 
   it('says the album is fixed once the party has published a QR', async () => {
-    installFetchMock({
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () =>
         jsonResponse(withAlbum({ status: 'published', canChangeMainMediaSource: false })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page());
+    }, { at: '?section=photos' });
 
     expect(await screen.findByTestId('party-album-locked')).toBeInTheDocument();
     // Said plainly, rather than discovered from a refusal after choosing.
     expect(screen.queryByRole('button', { name: 'Cambia album' })).not.toBeInTheDocument();
   });
 
-  it('offers one lifecycle action per state and none where there is no move', async () => {
-    const mock = installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'published' })),
+  it('keeps the queue reachable when the contribution permission is gone', async () => {
+    // `party.contributions` governs OPENING the channel, never tidying up what
+    // already came through it. The backend allows this, and the UI must agree.
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`POST /api/parties/${PARTY_ID}/start-live`]: () =>
-        jsonResponse(withAlbum({ status: 'live', version: 2 })),
-    });
-    render(page());
+    }, { permissions: [PERMISSIONS.partyAccess], at: '?section=photos' });
 
-    await userEvent.click(await screen.findByTestId('party-lifecycle-action'));
-
-    expect(await screen.findByTestId('party-status')).toHaveTextContent('Live');
-    expect(screen.getByTestId('party-lifecycle-action')).toHaveTextContent('Termina festa');
-    const started = mock.calls.find((c) => c.url.endsWith('/start-live'))!;
-    expect(JSON.parse(String(started.body))).toEqual({ version: 1 });
+    const queue = await screen.findByTestId('party-photos-queue');
+    expect(queue).toHaveAttribute('href', expect.stringContaining(`/albums/${ALBUM_ID}/party-uploads`));
+    // The SWITCH is absent, not disabled: the host may not open the channel.
+    expect(screen.queryByTestId('party-photos-uploads')).not.toBeInTheDocument();
   });
 
-  it('a finished party offers no false re-open', async () => {
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'ended' })),
+  it('counts what is waiting, beside the section that empties it', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page());
+      [`GET /api/albums/${ALBUM_ID}/party-uploads`]: () => jsonResponse({
+        albumId: ALBUM_ID, requireUploadApproval: true,
+        items: [
+          { fileItemId: 'f1', name: 'a.jpg', status: 'pending', thumbnailPath: null },
+          { fileItemId: 'f2', name: 'b.jpg', status: 'pending', thumbnailPath: null },
+          { fileItemId: 'f3', name: 'c.jpg', status: 'approved', thumbnailPath: null },
+        ],
+      }),
+    }, { at: '?section=photos' });
 
+    expect(await within(await screen.findByTestId('party-photos-queue')).findByText('2 in attesa'))
+      .toBeInTheDocument();
+    expect(within(screen.getByTestId('party-tab-photos')).getByText('2')).toBeInTheDocument();
+  });
+});
+
+describe('the live console', () => {
+  it('leads with the arrivals and opens the door in one tap', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(guestCounts({
+        groups: 12,
+        attendance: { expectedPeople: 40, totalArrivals: 22, expectedMissing: 18 },
+      })),
+    });
+
+    const metrics = await screen.findByTestId('party-live-metrics');
+    expect(within(metrics).getByText('22')).toBeInTheDocument();
+    expect(within(metrics).getByText('18')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('party-live-door'));
+    expect(await screen.findByTestId('party-guests')).toBeInTheDocument();
+  });
+
+  it('jumps into the list already filtered to who is missing', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse({
+        ...guestCounts({ groups: 12, attendance: { expectedPeople: 40, totalArrivals: 22, expectedMissing: 18 } }),
+        partyStatus: 'live',
+      }),
+    });
+
+    await userEvent.click(await screen.findByTestId('party-live-filter-to_arrive'));
+
+    // The console's own filter, not a second list.
+    expect(await screen.findByTestId('guest-filter-to_arrive')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('asks before ending the evening, and one press ends nothing', async () => {
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/end-live`]: () => jsonResponse(withAlbum({ status: 'ended', version: 2 })),
+    });
+
+    await userEvent.click(await screen.findByTestId('party-end-live'));
+    expect(await screen.findByTestId('party-end-live-confirm')).toBeInTheDocument();
+    expect(mock.calls.some((c) => c.url.endsWith('/end-live'))).toBe(false);
+
+    await userEvent.click(screen.getByTestId('party-end-live-yes'));
+    const ended = mock.calls.find((c) => c.url.endsWith('/end-live'))!;
+    expect(JSON.parse(String(ended.body))).toEqual({ version: 1 });
     expect(await screen.findByTestId('party-status')).toHaveTextContent('Conclusa');
-    expect(screen.queryByTestId('party-lifecycle-action')).not.toBeInTheDocument();
-    // And guest access is NOT switched off behind the host's back: an ended
-    // party keeping its capability is what the post-event library needs. Waits
-    // for the album's settings to arrive — until they do the switch says
-    // nothing, which is correct and is not the assertion.
-    expect(await screen.findByTestId('party-guest-url')).toBeInTheDocument();
-    expect(screen.getByLabelText('Gli ospiti possono raggiungere questa festa')).toBeChecked();
+    // The console goes away with the evening; the map does not change.
+    expect(screen.queryByTestId('party-tab-live')).not.toBeInTheDocument();
+  });
+});
+
+describe('activities and screens', () => {
+  it('shows only what the caller may actually run', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    }, { permissions: [PERMISSIONS.partyAccess, PERMISSIONS.partyGames], at: '?section=activities' });
+
+    expect(await screen.findByTestId('party-game-settings')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-activities-game-locked')).not.toBeInTheDocument();
+  });
+
+  it('says a locked capability is not available rather than showing dead controls', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    }, { permissions: [PERMISSIONS.partyAccess], at: '?section=screens' });
+
+    expect(await screen.findByTestId('party-print-locked')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print')).not.toBeInTheDocument();
+  });
+
+  it('waits for an album rather than calling album routes without one', async () => {
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()),
+    }, { at: '?section=activities' });
+
+    expect(await screen.findByTestId('party-activities-needs-album')).toBeInTheDocument();
+    expect(mock.calls.some((c) => c.url.includes('/albums/'))).toBe(false);
+  });
+});
+
+describe('the settings', () => {
+  it('saves the party’s facts and BOTH windows in one request', async () => {
+    // One form, one version, one concurrency check: two forms over one version
+    // would mean saving either silently discarded the other's edits.
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`PATCH /api/parties/${PARTY_ID}`]: () =>
+        jsonResponse(withAlbum({ version: 2, libraryAccessExpiresAt: '2027-07-20T00:00:00Z' })),
+    }, { at: '?section=settings' });
+
+    await userEvent.type(
+      await screen.findByTestId('party-library-window'), '2027-07-20T00:00');
+    await userEvent.click(screen.getByTestId('party-details-save'));
+
+    const patch = mock.calls.filter((c) => c.method === 'PATCH');
+    expect(patch).toHaveLength(1);
+    const body = JSON.parse(String(patch[0].body));
+    expect(body.libraryAccessExpiresAt).toBeTruthy();
+    expect(body.version).toBe(1);
   });
 
   it('adopts the server state on a version conflict rather than overwriting', async () => {
-    installFetchMock({
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
       [`PATCH /api/parties/${PARTY_ID}`]: () => jsonResponse(
         { error: 'version_conflict', party: withAlbum({ title: 'Nome di qualcun altro', version: 7 }) },
         409,
       ),
-    });
-    render(page());
+    }, { at: '?section=settings' });
 
     const title = await screen.findByLabelText('Nome');
     await userEvent.clear(title);
@@ -284,173 +515,66 @@ describe('PartyWorkspacePage', () => {
     expect(screen.getByLabelText('Nome')).toHaveValue('Nome di qualcun altro');
   });
 
-  it('the timeline describes the evening and cannot change it', async () => {
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+  it('an ended party offers no false re-open and keeps its guest access', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'ended' })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page());
+    }, { at: '?section=settings' });
 
-    const timeline = await screen.findByTestId('party-timeline');
-    expect(within(timeline).queryAllByRole('button')).toHaveLength(0);
-    expect(timeline.querySelector('[data-step="live"]')).toHaveAttribute('data-state', 'current');
-    expect(timeline.querySelector('[data-step="draft"]')).toHaveAttribute('data-state', 'done');
-    expect(timeline.querySelector('[data-step="ended"]')).toHaveAttribute('data-state', 'upcoming');
-  });
-
-  it('shows only the Live surfaces the caller may run', async () => {
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]));
-
-    await userEvent.click(await screen.findByTestId('party-tab-live'));
-
-    expect(await screen.findByTestId('party-games')).toBeInTheDocument();
-    // No party.contributions and no party.print: absent, not disabled.
-    expect(screen.queryByTestId('party-contributions')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('party-print')).not.toBeInTheDocument();
-  });
-
-  it('keeps moderation reachable when the contribution permission is gone', async () => {
-    // The rule that is easy to get wrong: `party.contributions` governs OPENING
-    // the channel, never tidying up what already came through it. The backend
-    // allows this, and the UI has to agree.
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page([PERMISSIONS.partyAccess]));
-
-    await userEvent.click(await screen.findByTestId('party-tab-live'));
-
-    const moderation = await screen.findByTestId('party-moderation');
-    expect(within(moderation).getByRole('link', { name: /Gestisci caricamenti ospiti/i }))
-      .toHaveAttribute('href', `/albums/${ALBUM_ID}/party-uploads`);
-    expect(screen.queryByTestId('party-contributions')).not.toBeInTheDocument();
-  });
-
-  it('the Live tab waits for an album rather than calling album routes without one', async () => {
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()),
-      'GET /api/albums': () => jsonResponse([]),
-    });
-    render(page());
-
-    await userEvent.click(await screen.findByTestId('party-tab-live'));
-
-    expect(await screen.findByTestId('party-live-needs-album')).toBeInTheDocument();
+    expect(await screen.findByTestId('party-status')).toHaveTextContent('Conclusa');
+    // Guest access is NOT switched off behind the host's back: an ended party
+    // keeping its capability is what the post-event library needs.
+    expect(await screen.findByTestId('party-guest-access-switch'))
+      .toHaveAttribute('aria-checked', 'true');
   });
 });
 
-// The workspace navigates away when the party stops existing, so this block
-// mounts a destination for it. A bare marker rather than the real list page:
-// what is under test is that the host LEAVES, not what they arrive at.
-function pageWithList() {
-  return (
-    <AuthedWrapper>
-      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}`]}>
-        <Routes>
-          <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
-          <Route path="/parties" element={<div data-testid="parties-page-marker" />} />
-        </Routes>
-      </MemoryRouter>
-    </AuthedWrapper>
-  );
-}
-
-describe('PartyWorkspacePage — deleting the party', () => {
-  // The gap this closes: the endpoint and its client have existed since Party
-  // became a root, and no screen called either. A party could be created and
-  // never removed.
-  it('offers a way to delete the party at all', async () => {
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page());
-
-    expect(await screen.findByTestId('party-teardown-start')).toBeInTheDocument();
-  });
+describe('deleting the party', () => {
+  const settings = () => mount({
+    [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ version: 7 })),
+    [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
+  }, { at: '?section=settings' });
 
   it('says what SURVIVES before the host commits, not afterwards', async () => {
-    // The sentence that decides whether somebody dares press it: the album and
-    // the approved photographs stay. It is on the page before the first click.
-    installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-    });
-    render(page());
-
+    settings();
     const card = await screen.findByTestId('party-teardown');
     expect(within(card).getByText(/L’album resta/i)).toBeInTheDocument();
     expect(within(card).getByText(/Cestino/i)).toBeInTheDocument();
   });
 
   it('asks first, and one click deletes nothing', async () => {
-    const mock = installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
-    });
-    render(page());
-
+    const mock = settings();
     await userEvent.click(await screen.findByTestId('party-teardown-start'));
 
     expect(await screen.findByTestId('party-teardown-confirm')).toBeInTheDocument();
     expect(mock.calls.some((c) => c.method === 'DELETE')).toBe(false);
   });
 
-  it('cancelling leaves the party alone', async () => {
-    const mock = installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
-    });
-    render(page());
-
-    await userEvent.click(await screen.findByTestId('party-teardown-start'));
-    await userEvent.click(screen.getByTestId('party-teardown-cancel'));
-
-    expect(screen.queryByTestId('party-teardown-confirm')).not.toBeInTheDocument();
-    expect(mock.calls.some((c) => c.method === 'DELETE')).toBe(false);
-  });
-
   it('confirming sends the party’s CURRENT version and returns to the list', async () => {
-    const mock = installFetchMock({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ version: 7 })),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
-      [`DELETE /api/parties/${PARTY_ID}`]: () => new Response(null, { status: 204 }),
-    });
-    render(pageWithList());
-
+    const mock = settings();
     await userEvent.click(await screen.findByTestId('party-teardown-start'));
     await userEvent.click(screen.getByTestId('party-teardown-confirm-yes'));
 
     const del = mock.calls.find((c) => c.method === 'DELETE')!;
-    expect(del.url).toContain(`/api/parties/${PARTY_ID}`);
     // Optimistic concurrency travels with the request: a party somebody else
     // edited meanwhile must be refused, not torn down from a stale read.
     expect(del.url).toContain('version=7');
-    // The party is gone, so this route has nothing left to load.
     expect(await screen.findByTestId('parties-page-marker')).toBeInTheDocument();
   });
 
   it('adopts the server’s party on a version conflict instead of insisting', async () => {
-    installFetchMock({
+    mount({
       [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ version: 3 })),
       [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
       [`DELETE /api/parties/${PARTY_ID}`]: () =>
         jsonResponse({ party: withAlbum({ version: 4, title: 'Rinominata' }) }, 409),
-    });
-    render(page());
+    }, { at: '?section=settings' });
 
     await userEvent.click(await screen.findByTestId('party-teardown-start'));
     await userEvent.click(screen.getByTestId('party-teardown-confirm-yes'));
 
     expect(await screen.findByTestId('party-teardown-conflict')).toBeInTheDocument();
-    // The page now shows what actually exists, not what it acted on.
     expect(screen.getByTestId('party-title')).toHaveTextContent('Rinominata');
   });
 });

@@ -5,9 +5,10 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../test-utils';
 import { PartyWorkspacePage } from './PartyWorkspacePage';
 
-// The guest console lives IN the party's workspace — its own tab, between
-// writing the invitation and running the evening — not in an application of its
-// own. The tab travels in the URL, because what is inside it does too.
+// The guest console lives IN the party's workspace — its own section, between
+// what the guests will see and the photographs they will take — not in an
+// application of its own. The section travels in the URL, because what is
+// inside it does too.
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -40,8 +41,8 @@ const emptyDirectory = {
   nextCursor: null,
 };
 
-function renderWorkspace() {
-  return installFetchMock({
+function renderWorkspace(at = '') {
+  const mock = installFetchMock({
     [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party),
     [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse({
       albumId: ALBUM_ID, partyId: PARTY_ID, showOnTv: false, partyMode: false, partyUrl: null,
@@ -52,52 +53,61 @@ function renderWorkspace() {
     [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse([]),
     [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(emptyDirectory),
   });
-}
-
-it('offers the guest console as a tab between Before and Live, and opens it', async () => {
-  const mock = renderWorkspace();
   render(
     <AuthedWrapper>
-      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}`]}>
+      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}${at}`]}>
         <Routes>
           <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
         </Routes>
       </MemoryRouter>
     </AuthedWrapper>,
   );
+  return mock;
+}
 
-  const tabs = await screen.findAllByRole('tab');
-  expect(tabs.map((tab) => tab.id)).toEqual([
-    'party-tab-overview', 'party-tab-before', 'party-tab-guests', 'party-tab-live', 'party-tab-after', 'party-tab-photos',
-  ]);
+/** Every directory read this page made, as the bodies it actually sent. */
+function directoryQueries(mock: { calls: { url: string; body: string | null | FormData }[] }) {
+  return mock.calls
+    .filter((c) => c.url.includes('/guest-directory'))
+    .map((c) => JSON.parse(String(c.body)) as { take?: number | null });
+}
+
+it('asks the guest list for NUMBERS, and for names only when the host opens it', async () => {
+  const mock = renderWorkspace();
+
+  await screen.findByTestId('party-tab-guests');
   // "Ospiti", not "Invitati": a party may be open and invite nobody at all.
   expect(screen.getByTestId('party-tab-guests')).toHaveTextContent('Ospiti');
-  // Nothing is asked of the guest list until the host opens it.
-  expect(mock.calls.some((c) => c.url.includes('/guest-directory'))).toBe(false);
+
+  // The summary needs the counts, and asks for exactly those: `take: 0` is the
+  // totals alone. No card, no person, no name reaches a page that is not the
+  // console — which is what keeps the guest list out of every other surface.
+  const beforeOpening = directoryQueries(mock);
+  expect(beforeOpening.length).toBeGreaterThan(0);
+  expect(beforeOpening.every((q) => q.take === 0)).toBe(true);
 
   await userEvent.click(screen.getByTestId('party-tab-guests'));
 
-  // With no invitation this is an OPEN party, and the tab says so rather than
-  // asking for a guest list it does not need.
+  // With no invitation this is an OPEN party, and the console says so rather
+  // than asking for a guest list it does not need.
   expect(await screen.findByTestId('guest-open')).toBeInTheDocument();
   expect(screen.getByTestId('party-tab-guests')).toHaveAttribute('aria-selected', 'true');
   expect(screen.queryByTestId('guest-metrics')).not.toBeInTheDocument();
-  // The console reads the directory in pages, never the whole guest list.
+
+  // Now it reads a PAGE — still in pages, never the whole guest list.
+  expect(directoryQueries(mock).some((q) => q.take !== 0)).toBe(true);
   expect(mock.calls.some((c) => c.url.includes('/guest-list'))).toBe(false);
-  expect(mock.calls.some((c) => c.url.includes('/guest-directory'))).toBe(true);
 });
 
-it('keeps the open tab in the URL, so a reload comes back to it', async () => {
-  renderWorkspace();
-  render(
-    <AuthedWrapper>
-      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}?tab=guests`]}>
-        <Routes>
-          <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
-        </Routes>
-      </MemoryRouter>
-    </AuthedWrapper>,
-  );
+it('keeps the open section in the URL, so a reload comes back to it', async () => {
+  renderWorkspace('?section=guests');
+
+  expect(await screen.findByTestId('guest-open')).toBeInTheDocument();
+  expect(screen.getByTestId('party-tab-guests')).toHaveAttribute('aria-selected', 'true');
+});
+
+it('still honours a link made when the sections were tabs', async () => {
+  renderWorkspace('?tab=guests');
 
   expect(await screen.findByTestId('guest-open')).toBeInTheDocument();
   expect(screen.getByTestId('party-tab-guests')).toHaveAttribute('aria-selected', 'true');

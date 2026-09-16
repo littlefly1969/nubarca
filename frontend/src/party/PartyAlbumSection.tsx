@@ -88,19 +88,25 @@ export function PartyAlbumSection({
 
   if (main) {
     return (
-      <section className="party-card" data-testid="party-album">
-        <h3>{t('party.album.heading')}</h3>
-        <p className="party-album-name" data-testid="party-album-name">{main.albumName}</p>
-        <p className="party-card-actions">
-          <Link to={`/albums/${main.albumId}`}>{t('party.album.open')}</Link>
-        </p>
+      <section className="pw-panel" data-testid="party-album">
+        <div className="pw-panel-head">
+          <div>
+            <h3 className="pw-panel-title">{t('party.album.heading')}</h3>
+            <p className="pw-panel-note" data-testid="party-album-name">{main.albumName}</p>
+          </div>
+        </div>
+        <div className="pw-panel-actions">
+          <Link to={`/albums/${main.albumId}`} className="pw-btn">{t('party.album.open')}</Link>
+          {party.canChangeMainMediaSource && mode === 'idle' && (
+            <button type="button" className="pw-btn pw-btn--quiet" onClick={() => setMode('pick')}>
+              {t('party.album.change')}
+            </button>
+          )}
+        </div>
+        {/* Once a QR exists the album is fixed — every guest capability names
+            it. Said as a fact rather than as a disabled control. */}
         {!party.canChangeMainMediaSource && (
-          <p className="muted" data-testid="party-album-locked">{t('party.album.locked')}</p>
-        )}
-        {party.canChangeMainMediaSource && mode === 'idle' && (
-          <button type="button" className="row-action" onClick={() => setMode('pick')}>
-            {t('party.album.change')}
-          </button>
+          <p className="pw-small pw-muted" data-testid="party-album-locked">{t('party.album.locked')}</p>
         )}
         {party.canChangeMainMediaSource && mode !== 'idle' && (
           <AlbumPicker
@@ -109,22 +115,22 @@ export function PartyAlbumSection({
             excludeAlbumId={main.albumId}
           />
         )}
-        {error && <p className="inline-error" role="alert">{error}</p>}
+        {error && <p className="pw-field-error" role="alert">{error}</p>}
       </section>
     );
   }
 
   return (
-    <section className="party-card party-card--empty" data-testid="party-album-empty">
-      <h3>{t('party.album.heading')}</h3>
-      <p className="muted">{t('party.album.help')}</p>
+    <section className="pw-empty" data-testid="party-album-empty">
+      <h3 className="pw-empty-title">{t('party.album.heading')}</h3>
+      <p className="pw-empty-body">{t('party.album.help')}</p>
 
       {mode === 'idle' && (
-        <div className="party-card-actions">
-          <button type="button" className="row-action-primary" onClick={() => setMode('pick')}>
+        <div className="pw-panel-actions">
+          <button type="button" className="pw-btn pw-btn--primary" onClick={() => setMode('pick')}>
             {t('party.album.useExisting')}
           </button>
-          <button type="button" className="row-action" onClick={() => setMode('create')}>
+          <button type="button" className="pw-btn" onClick={() => setMode('create')}>
             {t('party.album.createNew')}
           </button>
         </div>
@@ -138,8 +144,8 @@ export function PartyAlbumSection({
       )}
 
       {mode === 'create' && (
-        <div className="party-inline-form">
-          <label>
+        <div className="pw-inline-form">
+          <label className="pw-field">
             <span className="visually-hidden">{t('party.album.newNamePlaceholder')}</span>
             <input
               value={newName} disabled={busy}
@@ -149,18 +155,18 @@ export function PartyAlbumSection({
             />
           </label>
           <button
-            type="button" className="row-action-primary"
+            type="button" className="pw-btn pw-btn--primary"
             disabled={busy || newName.trim() === ''} onClick={() => void createAndLink()}
           >
             {t('party.album.createNew')}
           </button>
-          <button type="button" className="row-action" onClick={() => setMode('idle')}>
+          <button type="button" className="pw-btn" onClick={() => setMode('idle')}>
             {t('party.album.cancel')}
           </button>
         </div>
       )}
 
-      {error && <p className="inline-error" role="alert">{error}</p>}
+      {error && <p className="pw-field-error" role="alert">{error}</p>}
     </section>
   );
 }
@@ -181,9 +187,9 @@ function AlbumPicker({
 
   if (albums !== null && options.length === 0) {
     return (
-      <div className="party-inline-form">
-        <p className="muted">{t('party.album.none')}</p>
-        <button type="button" className="row-action" onClick={onCancel}>
+      <div className="pw-inline-form">
+        <p className="pw-small pw-muted">{t('party.album.none')}</p>
+        <button type="button" className="pw-btn" onClick={onCancel}>
           {t('party.album.cancel')}
         </button>
       </div>
@@ -191,8 +197,8 @@ function AlbumPicker({
   }
 
   return (
-    <div className="party-inline-form" data-testid="party-album-picker">
-      <label>
+    <div className="pw-inline-form" data-testid="party-album-picker">
+      <label className="pw-field">
         <span className="visually-hidden">{t('party.album.pick')}</span>
         <select
           value={chosen} disabled={busy || albums === null}
@@ -206,12 +212,12 @@ function AlbumPicker({
         </select>
       </label>
       <button
-        type="button" className="row-action-primary"
+        type="button" className="pw-btn pw-btn--primary"
         disabled={busy || chosen === ''} onClick={onLink}
       >
         {t('party.album.link')}
       </button>
-      <button type="button" className="row-action" onClick={onCancel}>
+      <button type="button" className="pw-btn" onClick={onCancel}>
         {t('party.album.cancel')}
       </button>
     </div>
