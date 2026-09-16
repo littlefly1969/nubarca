@@ -15,3 +15,4 @@ export * from './sharing.ts';
 export * from './party.ts';
 export * from './partyRsvp.ts';
 export * from './partyAttendance.ts';
+export * from './partyGuestDirectory.ts';

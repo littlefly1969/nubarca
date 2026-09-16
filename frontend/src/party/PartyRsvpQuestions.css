@@ -1,0 +1,47 @@
+/* The questions every invitation asks — a short list the host edits while
+   preparing the party, folded away inside the guest console. */
+
+.party-questions-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+
+.party-questions-row {
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.party-questions-row[data-active='false'] { opacity: 0.7; }
+.party-questions-row p { margin: 0; }
+
+.party-questions-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.party-questions-chip {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.45rem;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.35));
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.party-questions-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px dashed var(--border, rgba(128, 128, 128, 0.4));
+  border-radius: 0.5rem;
+}
+.party-questions-form p { margin: 0; }
+.party-questions-form input,
+.party-questions-form select,
+.party-questions-form textarea { min-height: 44px; }
+.party-questions-list .row-action,
+.party-questions-form .row-action,
+.party-questions-form .row-action-primary { min-height: 44px; }

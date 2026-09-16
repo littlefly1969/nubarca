@@ -8,11 +8,12 @@ import {
   normalizeText,
   reorderPartyRsvpQuestions,
   updatePartyRsvpQuestion,
-  type PartyGuestList,
+  type PartyGuestListMinimal,
   type PartyRsvpQuestion,
   type PartyRsvpQuestionKind,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
+import './PartyRsvpQuestions.css';
 
 // The questions every invitation asks — three closed kinds, and nothing that
 // grows into a form builder: no sections, no conditions, no field registry.
@@ -41,17 +42,18 @@ export function PartyRsvpQuestionsCard({
 }: {
   partyId: string;
   questions: readonly PartyRsvpQuestion[];
-  onChanged(next: PartyGuestList): void;
+  /** The questions as they now are: the console pages the guest list and never reads it whole. */
+  onChanged(next: PartyRsvpQuestion[]): void;
   onRefused(err: unknown, fallback: MessageKey): void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState<PartyRsvpQuestion | 'new' | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function act(action: () => Promise<PartyGuestList>) {
+  async function act(action: () => Promise<PartyGuestListMinimal>) {
     setBusy(true);
     try {
-      onChanged(await action());
+      onChanged((await action()).questions);
       setEditing(null);
     } catch (err) {
       const code = (err as { body?: { error?: string } }).body?.error;
@@ -82,9 +84,9 @@ export function PartyRsvpQuestionsCard({
         <ol className="party-questions-list">
           {questions.map((q, index) => (
             <li key={q.id} className="party-questions-row" data-testid={`party-question-${q.id}`} data-active={q.isActive}>
-              <div className="party-guests-row-head">
+              <div className="party-questions-head">
                 <strong>{q.prompt}</strong>
-                <span className="party-guests-chip">{t(`party.questions.kind.${q.kind}` as MessageKey)}</span>
+                <span className="party-questions-chip">{t(`party.questions.kind.${q.kind}` as MessageKey)}</span>
               </div>
               <p className="muted">
                 {q.required && <>{t('party.questions.required')} · </>}
@@ -171,7 +173,7 @@ function QuestionForm({
 
   return (
     <form
-      className="party-guests-editor" data-testid="party-question-form"
+      className="party-questions-form" data-testid="party-question-form"
       onSubmit={(e) => { e.preventDefault(); if (valid) onSave(draft, draft.kind === 'single_choice' ? options : null); }}
     >
       {locked && <p className="muted" role="note" data-testid="party-question-locked">{t('party.questions.locked')}</p>}

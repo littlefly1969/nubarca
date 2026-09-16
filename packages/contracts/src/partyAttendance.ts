@@ -12,8 +12,12 @@
 //
 // Every route is the HOST's, under /api/parties/{partyId}. Neither the party's
 // QR token nor a personal invitation token can reach any of it.
+//
+// Who is shown for a search or a filter is the SERVER's to say: the host reads
+// arrivals through the guest directory (partyGuestDirectory.ts), which pages,
+// searches and filters in the database.
 
-import { foldSearchText, type PartyRsvpStatus } from './partyRsvp.ts';
+import type { PartyRsvpStatus } from './partyRsvp.ts';
 
 export const PARTY_ATTENDANCE_LIMITS = {
   /** Unicode code points, like every Party text limit. */
@@ -98,70 +102,13 @@ export interface PartyAttendanceOtherGuestUpdate {
 
 // ── Rules ───────────────────────────────────────────────────────────────────
 
-/** Whether the party has a guest list at all — read from the rows, never stored. */
-export function hasGuestList(attendance: Pick<PartyAttendance, 'groups'>): boolean {
-  return attendance.groups.length > 0;
-}
-
 /**
  * "Altri arrivi": everybody who arrived without an attending RSVP — guests on
  * the list who had not confirmed, and people not on it. It is exactly what the
- * `unexpected` filter shows, so Arrivati = (Attesi − Mancano) + Altri arrivi.
+ * directory's `unexpected` filter shows, so Arrivati = (Attesi − Mancano) + Altri arrivi.
  */
 export function unexpectedArrivals(summary: PartyAttendanceSummary): number {
   return summary.unexpectedKnownGuests + summary.otherArrivals;
-}
-
-export const PARTY_ATTENDANCE_FILTERS = ['all', 'to_arrive', 'arrived', 'unexpected'] as const;
-export type PartyAttendanceFilter = (typeof PARTY_ATTENDANCE_FILTERS)[number];
-
-/**
- * The filters worth offering. With no guest list nobody is expected and
- * everybody listed has arrived, so there is nothing to filter by.
- */
-export function attendanceFiltersFor(attendance: Pick<PartyAttendance, 'groups'>): PartyAttendanceFilter[] {
-  return hasGuestList(attendance) ? [...PARTY_ATTENDANCE_FILTERS] : [];
-}
-
-export function guestMatchesAttendanceFilter(guest: PartyAttendanceGuest, filter: PartyAttendanceFilter): boolean {
-  const arrived = guest.checkedInAt !== null;
-  switch (filter) {
-    case 'all': return true;
-    case 'to_arrive': return guest.rsvpStatus === 'attending' && !arrived;
-    case 'arrived': return arrived;
-    case 'unexpected': return arrived && guest.rsvpStatus !== 'attending';
-  }
-}
-
-/** An other arrival has arrived and was not expected, by definition. */
-export function otherGuestMatchesAttendanceFilter(filter: PartyAttendanceFilter): boolean {
-  return filter !== 'to_arrive';
-}
-
-/**
- * What the door sees for one search and one filter, over the list the page
- * already holds. The search reads a guest's name, the label of their group and
- * an other arrival's name — case- and accent-insensitive. A group appears when
- * at least one of its people does.
- */
-export function visibleAttendance(
-  attendance: Pick<PartyAttendance, 'groups' | 'otherGuests'>,
-  query: string,
-  filter: PartyAttendanceFilter,
-): { groups: PartyAttendanceGroup[]; otherGuests: PartyAttendanceOtherGuest[] } {
-  const needle = foldSearchText(query.trim());
-  const matches = (value: string) => needle === '' || foldSearchText(value).includes(needle);
-  const groups = attendance.groups
-    .map((group) => ({
-      ...group,
-      guests: group.guests.filter((guest) =>
-        guestMatchesAttendanceFilter(guest, filter) && (matches(guest.name) || matches(group.label))),
-    }))
-    .filter((group) => group.guests.length > 0);
-  const otherGuests = otherGuestMatchesAttendanceFilter(filter)
-    ? attendance.otherGuests.filter((other) => matches(other.name))
-    : [];
-  return { groups, otherGuests };
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
