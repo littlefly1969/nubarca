@@ -88,6 +88,15 @@ services:
       RateLimits__PasswordRecovery__WindowSeconds: "60"
       RateLimits__CastGrantCreate__PermitLimit: "1000"
       RateLimits__CastGrantCreate__WindowSeconds: "60"
+      # A suite that builds a guest list answers dozens of invitations from one
+      # address in seconds, which the real per-IP budgets are deliberately too
+      # small for. The limiters themselves are exercised by their own tests.
+      RateLimits__PartyRsvp__PermitLimit: "1000"
+      RateLimits__PartyRsvp__WindowSeconds: "60"
+      RateLimits__PartyInvitationSend__PermitLimit: "1000"
+      RateLimits__PartyInvitationSend__WindowSeconds: "60"
+      RateLimits__PartyInvitationShare__PermitLimit: "1000"
+      RateLimits__PartyInvitationShare__WindowSeconds: "60"
       # Google Cast: a DETERMINISTIC test receiver origin, never a guess at what
       # Google's Default Media Receiver presents in production. The real value is
       # captured once from a physical device and configured per installation.
