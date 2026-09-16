@@ -12,15 +12,25 @@ originating repository and is deliberately not reproduced here.
   numbers that matter, one search and the filters of the moment — *Da rispondere,
   Confermati, Declinati, Da invitare* before the party, *Da arrivare, Arrivati,
   Inattesi* during it. Each invitation is a card: who is in it, how they
-  answered, where their invitation stands, one primary action and a menu. Tap a
-  card to see everything about that group — beside the list on a big screen, as a
-  full screen on a phone — and Back returns to exactly the search, filter and
-  place you left.
+  answered, where their invitation stands, and three things to do with it: the
+  action we suggest next, *Dettagli*, and a menu for everything else. *Dettagli*
+  is always there on the card — never hidden behind the ⋮ — and opens everything
+  about that group, beside the list on a big screen and as a full screen on a
+  phone. Back returns to exactly the search, filter and place you left. When the
+  suggestion is an email it says which email it is: *Invia invito* the first
+  time, *Invia di nuovo via email* once that invitation has already gone out.
 - **It stays quick with a thousand invitations.** The search, the filters and the
-  order are the server's, and the page reads the list as you scroll rather than
-  all at once, so opening "Ospiti" costs the same for ten groups and for a
-  thousand. Searching finds people by name, invitation name, email or phone —
-  "nicolo" finds Nicolò, and "333 444" finds +39 333 444 5555.
+  order are the server's; the page reads the list as you scroll rather than all
+  at once, and keeps only the cards you can actually see, so opening "Ospiti"
+  and scrolling it cost the same for ten groups and for a thousand. Searching
+  finds people by name, invitation name, email or phone — "nicolo" finds Nicolò,
+  and "333 444" finds +39 333 444 5555.
+- **What you search for stays between you and your party.** Searching a guest
+  list means typing somebody's name, address or number, so NubArca keeps it out
+  of the web address entirely: nothing to read over your shoulder, nothing left
+  in the history of a shared computer, nothing carried into a link you paste.
+  The trade is deliberate and small — your search survives opening and closing a
+  group, and is forgotten when you reload the page.
 - **Invitations on WhatsApp, and by copied link.** The same personal invitation
   can now go out three ways: email as before, WhatsApp, or a link you copy and
   send however you like. With the group's number written internationally

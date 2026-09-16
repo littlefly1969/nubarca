@@ -26,7 +26,7 @@ import type {
 } from '@nubarca/contracts';
 import {
   PREFER_RETURN_MINIMAL,
-  partyGuestDirectoryPath,
+  partyGuestDirectoryQueryPath,
   partyInvitationGroupDetailPath,
   partyInvitationSharePath,
 } from '@nubarca/contracts';
@@ -155,6 +155,7 @@ export type {
   InvitationLine,
   InvitationLineKind,
   InvitationPrimaryAction,
+  InvitationPrimaryLabel,
   InvitationShare,
   InvitationShareRequest,
   InvitationShareResult,
@@ -165,6 +166,7 @@ export type {
 } from '@nubarca/contracts';
 export {
   GUEST_CONSOLE_PARAMS,
+  LEGACY_GUEST_SEARCH_PARAM,
   GUEST_DIRECTORY_LIMITS,
   GUEST_DIRECTORY_STATES,
   guestDirectoryItemKey,
@@ -174,6 +176,7 @@ export {
   isGuestDirectoryState,
   peoplePreview,
   primaryInvitationAction,
+  primaryInvitationLabel,
 } from '@nubarca/contracts';
 
 
@@ -1199,11 +1202,20 @@ export function getPartyGuestList(partyId: string, signal?: AbortSignal): Promis
   return api<PartyGuestList>(partyGuestListPath(partyId), { signal });
 }
 
-/** One page of the directory: searched, filtered and ordered by the server. */
-export function getPartyGuestDirectory(
+/**
+ * One page of the directory: searched, filtered and ordered by the server.
+ *
+ * THE ONLY WAY TO READ IT, and a POST although it reads nothing: the search may
+ * be a guest's name, address or phone number, and a query string would put it
+ * in the address bar, the history, the Referer of the next request and the
+ * access log of every proxy on the way. Routing every page through this one
+ * function is what keeps a `?q=` from coming back by hand somewhere.
+ */
+export function queryPartyGuestDirectory(
   partyId: string, query: GuestDirectoryQuery, signal?: AbortSignal,
 ): Promise<GuestDirectoryPage> {
-  return api<GuestDirectoryPage>(partyGuestDirectoryPath(partyId, query), { signal });
+  return api<GuestDirectoryPage>(
+    partyGuestDirectoryQueryPath(partyId), { method: 'POST', json: query, signal });
 }
 
 /** One group in detail, with its card and the party's counts. */

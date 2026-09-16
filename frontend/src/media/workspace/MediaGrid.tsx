@@ -1,6 +1,5 @@
 import {
   useEffect,
-  useLayoutEffect,
   useMemo,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -10,7 +9,7 @@ import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual';
 import type { MediaItem, SemanticBestMatch } from '@nubarca/api-client';
 import { formatSize } from '../../components/format';
 import { useI18n } from '../../i18n';
-import { useAppScrollViewport } from '../../components/appScroll';
+import { useAppScrollMargin, useAppScrollViewport } from '../../components/appScroll';
 import { SemanticMarkerStrip, toMarkers } from './SemanticMarkerStrip';
 import { VideoPreview } from '../../video/VideoPreview';
 import { getMediaAspectRatio } from './mediaAspectRatio';
@@ -117,45 +116,6 @@ function useWallLayout(items: MediaItem[]): {
   return { ref, containerRef, measured, rows };
 }
 
-/**
- * Where the wall begins inside the application scroll viewport's content.
- *
- * A virtualizer counts scrolling from its scroll element's origin, while the wall
- * starts below the page heading and the sticky workspace chrome. Measured rather
- * than expressed as a constant, so no layout number is written down twice. The
- * observers cover the cases that actually move it: the viewport resizing, and the
- * wall's own height changing — which is what happens when a filter chip row or a
- * query notice appears above it, because that only ever accompanies a refetch.
- */
-function useWallScrollMargin(
-  containerRef: RefObject<HTMLDivElement | null>,
-  viewportRef: RefObject<HTMLElement | null>,
-): number {
-  const [scrollMargin, setScrollMargin] = useState(0);
-
-  useLayoutEffect(() => {
-    const node = containerRef.current;
-    const viewport = viewportRef.current;
-    if (!node || !viewport) return;
-    const measure = () => {
-      const next = Math.round(
-        node.getBoundingClientRect().top
-        - viewport.getBoundingClientRect().top
-        + viewport.scrollTop,
-      );
-      setScrollMargin((prev) => (Math.abs(prev - next) < 1 ? prev : next));
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(viewport);
-    ro.observe(node);
-    return () => ro.disconnect();
-  }, [containerRef, viewportRef]);
-
-  return scrollMargin;
-}
-
 /** One virtual element per justified row, sized exactly — no measurement pass. */
 function rowSizer(rows: WallRows) {
   return (index: number) => {
@@ -177,7 +137,7 @@ function ViewportScrolledWall({
   viewportRef, ...props
 }: GridProps & { viewportRef: RefObject<HTMLElement | null> }) {
   const { ref, containerRef, measured, rows } = useWallLayout(props.items);
-  const scrollMargin = useWallScrollMargin(containerRef, viewportRef);
+  const scrollMargin = useAppScrollMargin(containerRef, viewportRef);
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => viewportRef.current,

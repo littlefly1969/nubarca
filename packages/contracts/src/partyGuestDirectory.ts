@@ -19,7 +19,6 @@
 // composes on its own public origin and a client passes on untouched: no client
 // ever builds, stores or logs a personal link.
 
-import { withQuery } from './query.ts';
 import type {
   PartyAttendanceGuest,
   PartyAttendanceOtherGuest,
@@ -85,6 +84,11 @@ export function guestDirectoryStatesFor(partyStatus: PartyStatus, hasGuestList: 
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
 
+/**
+ * What one page of the directory is asked for — the BODY of the query, never a
+ * query string: `q` can hold a guest's name, address or phone number, and a URL
+ * is copied into history, Referer headers and proxy logs by default.
+ */
 export interface GuestDirectoryQuery {
   q?: string | null;
   state?: GuestDirectoryState | null;
@@ -312,10 +316,20 @@ export function peoplePreview(people: readonly { name: string }[], room = 2): { 
 export type InvitationPrimaryAction = 'whatsapp' | 'email' | 'copy';
 
 /**
- * A card's ONE primary invitation action; everything else is in its menu.
- * WhatsApp when it opens the group's own chat, else email when it can be sent,
- * else WhatsApp with the host choosing the recipient. Null once invitations
- * are closed or no link can be built.
+ * A card's ONE primary invitation action — the RECOMMENDED next step, never a
+ * statement of where the invitation stands. That is the status line's job, and
+ * the two are allowed to disagree: a group whose email failed still gets
+ * "Invia di nuovo via email" offered while its line says the send failed.
+ *
+ * THE MATRIX, in order — the card renders it, the menu drops whichever entry it
+ * chose, and both are tested against this function rather than against JSX:
+ *
+ *   canShare && whatsappDirect  → 'whatsapp'  (the group's own chat opens)
+ *   canSend                     → 'email'     (there is an address to send to)
+ *   canShare                    → 'whatsapp'  (the host picks the recipient)
+ *   otherwise                   → null        (invitations closed, or no link)
+ *
+ * A null primary is not a broken card: it still offers Details and its menu.
  */
 export function primaryInvitationAction(
   item: Pick<GuestDirectoryGroupItem, 'canShare' | 'canSend' | 'whatsappDirect'>,
@@ -326,16 +340,36 @@ export function primaryInvitationAction(
   return null;
 }
 
+/** What the primary button SAYS — the action, plus which email it would be. */
+export type InvitationPrimaryLabel = 'whatsapp' | 'copy' | 'email_first' | 'email_again';
+
+/**
+ * An email button must never be ambiguous about which email it is about to
+ * send. "Invia invito" is the first one this link has ever carried; once the
+ * link has gone out on ANY channel — email, WhatsApp or a copied link — the
+ * same button becomes "Invia di nuovo via email", because that is what pressing
+ * it does. `state === 'not_sent'` is the honest test: rotating the link resets
+ * it, and a link nobody has received is being sent for the first time.
+ */
+export function primaryInvitationLabel(
+  item: Pick<GuestDirectoryGroupItem, 'canShare' | 'canSend' | 'whatsappDirect' | 'invitation'>,
+): InvitationPrimaryLabel | null {
+  const action = primaryInvitationAction(item);
+  if (action === null) return null;
+  if (action !== 'email') return action;
+  return item.invitation.state === 'not_sent' ? 'email_first' : 'email_again';
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
-export function partyGuestDirectoryPath(partyId: string, query: GuestDirectoryQuery = {}): string {
-  const params: [string, string][] = [];
-  const q = query.q?.trim();
-  if (q) params.push(['q', q]);
-  if (query.state && query.state !== 'all') params.push(['state', query.state]);
-  if (query.cursor) params.push(['cursor', query.cursor]);
-  if (query.take !== undefined && query.take !== null) params.push(['take', String(query.take)]);
-  return withQuery(`/api/parties/${partyId}/guest-directory`, params);
+/**
+ * Reading the directory is a POST because the search is personal data: the
+ * needle travels in the body, so it never reaches the address bar, the browser
+ * history, a Referer or an access log. There is deliberately no helper that
+ * builds a `?q=` — the only address is this one, and it carries no query.
+ */
+export function partyGuestDirectoryQueryPath(partyId: string): string {
+  return `/api/parties/${partyId}/guest-directory/query`;
 }
 
 export function partyInvitationGroupDetailPath(partyId: string, groupId: string): string {
@@ -351,7 +385,19 @@ export function partyInvitationSharePath(partyId: string, groupId: string): stri
  * a reload or Back returns the host to exactly what they were looking at.
  */
 export const GUEST_CONSOLE_PARAMS = {
-  search: 'guestSearch',
   state: 'guestState',
   group: 'guestGroup',
 } as const;
+
+/**
+ * The search is NOT one of them, and there is no key here for it. It lives in
+ * memory for as long as the console is mounted and is lost on a reload —
+ * deliberately: a URL that holds "mario rossi" is copied into the history of a
+ * shared computer, into the Referer of the next site opened, and into a link
+ * pasted to somebody who was never meant to see the guest list. A search that
+ * survives a refresh is worth less than that.
+ *
+ * `guestSearch` was that key until this release. Anything still carrying one is
+ * stripped on arrival rather than honoured; see LEGACY_GUEST_SEARCH_PARAM.
+ */
+export const LEGACY_GUEST_SEARCH_PARAM = 'guestSearch';

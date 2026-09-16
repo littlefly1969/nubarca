@@ -1,21 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import {
   ApiError,
   GUEST_CONSOLE_PARAMS,
+  LEGACY_GUEST_SEARCH_PARAM,
   PARTY_ATTENDANCE_LIMITS,
   checkInPartyGuest,
   codePoints,
   createPartyAttendanceGuest,
   deletePartyAttendanceGuest,
   deletePartyInvitationGroup,
-  getPartyGuestDirectory,
   getPartyInvitationGroup,
   getPartyRsvpQuestions,
   guestDirectoryStatesFor,
   isAttendancePhase,
   isGuestDirectoryState,
   normalizeText,
+  primaryInvitationAction,
+  queryPartyGuestDirectory,
   remindPartyInvitation,
   rotatePartyInvitationLink,
   sendPartyInvitation,
@@ -34,11 +36,11 @@ import {
   type PartyRsvpQuestion,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
-import { useAppScrollViewport } from '../components/appScroll';
 import { Modal } from '../components/Overlay';
 import { useI18n, type MessageKey } from '../i18n';
 import { GuestActionSheet, type GuestAction } from './GuestActionSheet';
 import { GuestGroupCard, GuestOtherCard } from './GuestGroupCard';
+import { GuestVirtualList } from './GuestVirtualList';
 import { GuestGroupDetail, type DetailTarget, type GuestDetailActions } from './GuestGroupDetail';
 import { GuestGroupEditor } from './GuestGroupEditor';
 import { GuestSharedLink } from './GuestSharedLink';
@@ -63,8 +65,17 @@ import './PartyGuestConsole.css';
 // live the same cards become the door: every person one tap from being
 // recorded as arrived, with the search finding them in a couple of letters.
 //
-// The search, the filter and the open group live in the URL, so Back closes a
-// group exactly where the host left the list, and a reload returns to it.
+// The filter and the open group live in the URL, so Back closes a group exactly
+// where the host left the list, and a reload returns to it.
+//
+// THE SEARCH DOES NOT. It is the one piece of this console's state that is
+// personal data about someone else: a host looking for a guest types a name, a
+// surname, an address or a phone number, and a URL is the leakiest place in a
+// browser to put one — the address bar over a shoulder, the history of a shared
+// computer, the Referer sent to the next site, a link pasted into a chat. So it
+// lives in this component's state and travels only in the body of a POST, and a
+// refresh loses it. That trade is deliberate: re-typing three letters costs the
+// host a second, and the alternative costs a guest their privacy.
 
 type Busy = Record<string, true>;
 
@@ -107,14 +118,16 @@ export function PartyGuestListTab({
   const location = useLocation();
   const navigate = useNavigate();
   const wide = useWideLayout();
-  const viewport = useAppScrollViewport();
 
-  const urlSearch = searchParams.get(GUEST_CONSOLE_PARAMS.search) ?? '';
   const stateParam = searchParams.get(GUEST_CONSOLE_PARAMS.state);
   const state: GuestDirectoryState = isGuestDirectoryState(stateParam) ? stateParam : 'all';
   const openGroupId = searchParams.get(GUEST_CONSOLE_PARAMS.group);
+  const legacySearch = searchParams.get(LEGACY_GUEST_SEARCH_PARAM);
 
-  const [typed, setTyped] = useState(urlSearch);
+  // What the host has typed, and what the list has been asked for: the same
+  // text a moment apart, both in memory and neither in the URL.
+  const [typed, setTyped] = useState('');
+  const [q, setQ] = useState('');
   const [busy, setBusy] = useState<Busy>({});
   const [notice, setNotice] = useState<Notice>(null);
   const [menu, setMenu] = useState<Menu>(null);
@@ -125,36 +138,40 @@ export function PartyGuestListTab({
   const [renaming, setRenaming] = useState<GuestDirectoryOtherItem | null>(null);
   const [detailRefresh, setDetailRefresh] = useState(0);
   const [questions, setQuestions] = useState<PartyRsvpQuestion[] | null>(null);
-  const sentinel = useRef<HTMLDivElement>(null);
 
-  const directory = useGuestDirectory(party.id, { q: urlSearch, state }, invalidateAuth);
+  const directory = useGuestDirectory(party.id, { q, state }, invalidateAuth);
   const live = isAttendancePhase(party.status);
 
-  // --- The URL is the console's state ------------------------------------------
+  // --- The URL is the console's state, minus the search --------------------------
 
   const setParam = useCallback((key: string, value: string | null, options?: { push?: boolean }) => {
     setSearchParams((current) => {
-      const next = new URLSearchParams(current);
+      const next = withoutLegacySearch(current);
       if (value === null || value === '') next.delete(key);
       else next.set(key, value);
       return next;
     }, options?.push ? { state: { guestDetail: true } } : { replace: true });
   }, [setSearchParams]);
 
-  // Typing moves the field at once and the list a moment later; a search that
-  // arrives from elsewhere (Back, "azzera") is adopted.
+  // A link from before this release can still carry `?guestSearch=mario`. It is
+  // removed the moment it arrives — by REPLACING the entry, so it does not stay
+  // one Back away — and it is never read: the list is not searched for it, the
+  // field is not filled with it, and nothing below copies it into another URL.
   useEffect(() => {
-    setTyped((current) => (current.trim() === urlSearch ? current : urlSearch));
-  }, [urlSearch]);
+    if (legacySearch === null) return;
+    setSearchParams((current) => withoutLegacySearch(current), { replace: true });
+  }, [legacySearch, setSearchParams]);
+
+  // Typing moves the field at once and the list a moment later.
   useEffect(() => {
     const trimmed = typed.trim();
-    if (trimmed === urlSearch) return;
-    const timer = setTimeout(() => setParam(GUEST_CONSOLE_PARAMS.search, trimmed), SEARCH_DEBOUNCE_MS);
+    if (trimmed === q) return;
+    const timer = setTimeout(() => setQ(trimmed), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [typed, urlSearch, setParam]);
+  }, [typed, q]);
 
   const hrefFor = useCallback((groupId: string) => {
-    const next = new URLSearchParams(searchParams);
+    const next = withoutLegacySearch(searchParams);
     next.set(GUEST_CONSOLE_PARAMS.group, groupId);
     return `?${next.toString()}`;
   }, [searchParams]);
@@ -187,7 +204,7 @@ export function PartyGuestListTab({
   // Bound to the directory's own stable writers, not to the view object it
   // returns: this is the open group's `onLoaded`, and an identity that changed
   // every render would re-run its effect — a group that fetched itself forever.
-  const { patchGroup, setSummary, reload, loadMore, hasMore } = directory;
+  const { patchGroup, setSummary, reload, loadMore } = directory;
   const adoptDetail = useCallback((detail: PartyInvitationGroupDetail) => {
     patchGroup(detail.item);
     setSummary(detail.summary);
@@ -203,7 +220,7 @@ export function PartyGuestListTab({
   }, [openGroupId, adoptDetail, party.id]);
 
   const refreshSummary = useCallback(async () => {
-    const page = await getPartyGuestDirectory(party.id, { take: 0 });
+    const page = await queryPartyGuestDirectory(party.id, { take: 0 });
     setSummary(page.summary);
   }, [party.id, setSummary]);
 
@@ -359,17 +376,14 @@ export function PartyGuestListTab({
 
   // --- Paging as the host scrolls ------------------------------------------------
 
-  useEffect(() => {
-    const element = sentinel.current;
-    if (!element || !hasMore || directory.status !== 'ready') return;
-    // Rooted in the shell's scroll viewport: a document-rooted observer inside
-    // `.app-main` would lose its preload margin to that container's clip.
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) loadMore();
-    }, { root: viewport?.current ?? null, rootMargin: '600px 0px' });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [hasMore, directory.status, loadMore, viewport]);
+  // The list asks for the next page when its VISIBLE RANGE nears the end. That
+  // replaced a sentinel element: with a virtualized list the range already is
+  // the scroll position, and an observer would be a second answer to the same
+  // question — free to disagree with the first.
+  const nearEnd = useCallback(() => {
+    if (directory.status !== 'ready') return;
+    loadMore();
+  }, [directory.status, loadMore]);
 
   // The questions are read only when the host opens them.
   const openQuestions = useCallback(() => {
@@ -385,7 +399,7 @@ export function PartyGuestListTab({
   const groups = summary?.groups ?? 0;
   const hasGuestList = groups > 0;
   const filters = guestDirectoryStatesFor(party.status, hasGuestList);
-  const searching = urlSearch !== '' || state !== 'all';
+  const searching = q !== '' || state !== 'all';
   const anything = directory.items.length > 0 || searching;
   const openItem = directory.items.find(
     (item): item is GuestDirectoryGroupItem => item.kind === 'group' && item.groupId === openGroupId);
@@ -528,20 +542,21 @@ export function PartyGuestListTab({
             </ul>
           ) : directory.items.length === 0 ? (
             <EmptyList
-              live={live} searching={searching} query={urlSearch}
+              live={live} searching={searching} query={q}
               onAddGroup={() => setEditing('new')} onAddPerson={() => setAdding(true)}
-              onClear={() => setSearchParams((current) => {
-                const next = new URLSearchParams(current);
-                next.delete(GUEST_CONSOLE_PARAMS.search);
-                next.delete(GUEST_CONSOLE_PARAMS.state);
-                return next;
-              }, { replace: true })}
+              onClear={() => {
+                setTyped('');
+                setQ('');
+                setParam(GUEST_CONSOLE_PARAMS.state, null);
+              }}
             />
           ) : (
-            <ul className="guest-list" data-testid="guest-list">
-              {directory.items.map((item) => (item.kind === 'group' ? (
+            <GuestVirtualList
+              items={directory.items} resetKey={`${state} ${q}`}
+              hasMore={directory.hasMore} loadingMore={directory.loadingMore} onNearEnd={nearEnd}
+              renderItem={(item) => (item.kind === 'group' ? (
                 <GuestGroupCard
-                  key={`g:${item.groupId}`} item={item} live={live} selected={item.groupId === openGroupId}
+                  item={item} live={live} selected={item.groupId === openGroupId}
                   busy={Boolean(busy[item.groupId])} personBusy={personBusy}
                   detailHref={hrefFor(item.groupId)}
                   onPrimary={(action) => onPrimary(item, action)}
@@ -553,11 +568,11 @@ export function PartyGuestListTab({
                 />
               ) : (
                 <GuestOtherCard
-                  key={`o:${item.id}`} item={item} busy={Boolean(busy[`other:${item.id}`])}
+                  item={item} busy={Boolean(busy[`other:${item.id}`])}
                   onMenu={() => setMenu({ kind: 'other', item })}
                 />
-              )))}
-            </ul>
+              ))}
+            />
           )}
 
           {directory.loadMoreFailed && (
@@ -575,7 +590,6 @@ export function PartyGuestListTab({
               </button>
             </div>
           )}
-          <div ref={sentinel} aria-hidden className="guest-sentinel" />
         </section>
 
         {wide && openGroupId && (
@@ -619,9 +633,8 @@ export function PartyGuestListTab({
         <GuestActionSheet
           title={t('party.console.action.sheetTitle', { label: menu.item.label })}
           testId="guest-menu-sheet" onClose={() => setMenu(null)}
-          actions={groupActions(menu.item, {
+          actions={groupActions(menu.item, live, {
             t,
-            open: () => openDetail(menu.item.groupId),
             share: (channel) => void runShare(targetOf(menu.item), channel),
             email: () => void runEmail(targetOf(menu.item), false),
             remind: () => void runEmail(targetOf(menu.item), true),
@@ -741,6 +754,20 @@ function targetOf(item: GuestDirectoryGroupItem): DetailTarget {
   return { groupId: item.groupId, label: item.label, version: item.version };
 }
 
+/**
+ * A copy of the current parameters with any legacy search dropped.
+ *
+ * EVERY URL this console writes goes through here — a filter, an opened group,
+ * a cleared search — so a `?guestSearch=` that arrived on the link cannot be
+ * carried forward into the next entry by something that merely copied what it
+ * found. It is removed, not preserved and not renamed.
+ */
+function withoutLegacySearch(current: URLSearchParams): URLSearchParams {
+  const next = new URLSearchParams(current);
+  next.delete(LEGACY_GUEST_SEARCH_PARAM);
+  return next;
+}
+
 /** The editor needs the group whole — its people's addresses included — so it is read first. */
 async function openForEdit(
   partyId: string,
@@ -755,9 +782,19 @@ async function openForEdit(
   }
 }
 
-function groupActions(item: GuestDirectoryGroupItem, handlers: {
+/**
+ * THE MENU IS SECONDARY ACTIONS ONLY.
+ *
+ * Two things are deliberately not in it. Details, because it is on every card:
+ * reading a group is the most ordinary thing a host does with one, and burying
+ * it behind an icon made the card's own title the only way in. And whatever the
+ * card is already offering as its primary — the menu drops that entry rather
+ * than showing the same button twice under two names, which is why it is told
+ * which action the card took. In Live the card has no primary, so nothing is
+ * dropped and every channel is here.
+ */
+function groupActions(item: GuestDirectoryGroupItem, live: boolean, handlers: {
   t: (key: MessageKey, params?: Record<string, string | number>) => string;
-  open(): void;
   share(channel: InvitationShareChannel): void;
   email(): void;
   remind(): void;
@@ -768,10 +805,9 @@ function groupActions(item: GuestDirectoryGroupItem, handlers: {
 }): GuestAction[] {
   const { t } = handlers;
   const then = (action: () => void) => () => { handlers.close(); action(); };
-  const actions: GuestAction[] = [
-    { key: 'open', label: t('party.console.action.details'), testId: 'guest-action-details', onSelect: then(handlers.open) },
-  ];
-  if (item.canShare) {
+  const onTheCard = live ? null : primaryInvitationAction(item);
+  const actions: GuestAction[] = [];
+  if (item.canShare && onTheCard !== 'whatsapp') {
     actions.push({
       key: 'whatsapp',
       label: t('party.console.action.whatsapp'),
@@ -779,7 +815,7 @@ function groupActions(item: GuestDirectoryGroupItem, handlers: {
       onSelect: then(() => handlers.share('whatsapp')),
     });
   }
-  if (item.canSend) {
+  if (item.canSend && onTheCard !== 'email') {
     actions.push({
       key: 'email',
       label: t('party.console.action.emailMenu'),

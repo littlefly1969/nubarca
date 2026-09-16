@@ -63,6 +63,14 @@
 .guest-list-pane { min-width: 0; }
 .guest-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.6rem; }
 
+/* The virtualized list reserves the height of everything it could show and
+   places the few cards that are on the screen inside it. It is the PAGE that
+   scrolls — no inner scrollbar, no fixed height — so the rows are positioned
+   rather than flowed, and the 0.6rem gap above is carried by each card's
+   measurement instead (CARD_GAP_PX in GuestVirtualList.tsx). */
+.guest-list--virtual { display: block; position: relative; }
+.guest-row { position: absolute; top: 0; left: 0; width: 100%; box-sizing: border-box; }
+
 .guest-card {
   border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
   border-radius: 0.7rem;
@@ -96,10 +104,15 @@
   justify-content: flex-end;
   gap: 0.4rem;
 }
+/* Three levels, one row, 44px each: primary, Dettagli, menu. They WRAP on a
+   narrow phone rather than overflowing — the primary takes the width that is
+   left and gives it back when there is not enough for all three. */
 .guest-card-actions .row-action,
-.guest-card-actions .row-action-primary { min-height: 44px; }
+.guest-card-actions .row-action-primary,
+.guest-card-actions a { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 .guest-card-menu { min-width: 44px; min-height: 44px; font-size: 1.1rem; line-height: 1; }
-.guest-card-primary { flex: 1 1 auto; }
+.guest-card-primary { flex: 1 1 auto; min-width: 0; }
+.guest-card-details { white-space: nowrap; text-decoration: none; }
 
 .guest-card-people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
 .guest-person {
