@@ -66,6 +66,25 @@ const putBodies = (calls: FetchSpyEntry[]) =>
 
 const person$ = (id: string) => screen.getByTestId(`party-rsvp-person-${id}`);
 
+/**
+ * Open the reply.
+ *
+ * The form is in a sheet: an invitation is something to READ, and a radio group
+ * between the cover and the host's words was the first thing every guest met.
+ * These tests are about what the form does, so they all come through the one
+ * button that opens it.
+ */
+async function openReply() {
+  // Two doors to the same sheet, and which one exists says something true: a
+  // group that has not replied is asked to, from the bar pinned to the bottom
+  // of the invitation; one that has already replied changes it from the reply
+  // itself, at the end.
+  await screen.findByTestId('party-before');
+  const bar = screen.queryByTestId('party-rsvp-open');
+  await userEvent.click(bar ?? screen.getByTestId('party-rsvp-change'));
+  return screen.findByTestId('party-rsvp-sheet');
+}
+
 describe('PartyInvitationPage (a personal invitation)', () => {
   it('opens with no account as the party’s own invitation, with this group’s reply in it', async () => {
     const mock = installFetchMock({ [`GET ${VIEW_URL}`]: () => jsonResponse(view()) });
@@ -76,7 +95,13 @@ describe('PartyInvitationPage (a personal invitation)', () => {
     expect(screen.getByTestId('party-before')).toBeInTheDocument();
     expect(screen.getByTestId('party-invitation-hero')).toHaveAttribute('data-cover', 'photo');
     expect(screen.getByText('Villa dei Fiori')).toBeInTheDocument();
-    const rsvp = screen.getByTestId('party-rsvp');
+
+    // NOTHING of the form until it is asked for: a group that has not replied
+    // meets the invitation, and one button pinned to the bottom of it.
+    expect(screen.queryByTestId('party-rsvp')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+
+    const rsvp = await openReply();
     expect(within(rsvp).getByText('Invito per Famiglia Rossi')).toBeInTheDocument();
     expect(within(rsvp).getByText('Mario')).toBeInTheDocument();
     expect(within(rsvp).getByText('Laura')).toBeInTheDocument();
@@ -114,7 +139,7 @@ describe('PartyInvitationPage (a personal invitation)', () => {
       })),
     });
     render(page());
-    await screen.findByTestId('party-rsvp');
+    await openReply();
 
     // Mario is coming; Laura has not decided — a family may answer in parts.
     await userEvent.click(within(person$('m')).getByLabelText('Ci sarò'));
@@ -128,8 +153,11 @@ describe('PartyInvitationPage (a personal invitation)', () => {
     await userEvent.click(within(screen.getByTestId('party-rsvp-question-q-parking')).getByLabelText('No'));
     await userEvent.click(screen.getByTestId('party-rsvp-submit'));
 
-    expect(await screen.findByTestId('party-rsvp-notice'))
+    // Sent: the sheet has done its job and closes, and the confirmation is on
+    // the reply it changed — at the end of the invitation, where the reply is.
+    expect(await screen.findByTestId('party-rsvp-summary-notice'))
       .toHaveTextContent('Risposta salvata. Puoi cambiarla fino all’inizio della festa.');
+    expect(screen.queryByTestId('party-rsvp-submit')).not.toBeInTheDocument();
     expect(putBodies(mock.calls)).toEqual([{
       version: 3,
       guests: [
@@ -143,7 +171,10 @@ describe('PartyInvitationPage (a personal invitation)', () => {
         { questionId: 'q-parking', value: false },
       ],
     }]);
-    // An answered reply is updated, not sent anew.
+    // An answered reply is updated, not sent anew — said by the button that
+    // reopens it, and by the sheet's own submit once it is open again.
+    expect(screen.getByTestId('party-rsvp-change')).toBeInTheDocument();
+    await openReply();
     expect(screen.getByTestId('party-rsvp-submit')).toHaveTextContent('Aggiorna la risposta');
   });
 
@@ -152,7 +183,7 @@ describe('PartyInvitationPage (a personal invitation)', () => {
       [`GET ${VIEW_URL}`]: () => jsonResponse(view({ invitation: { questions: [QUESTIONS[1]] } })),
     });
     render(page());
-    await screen.findByTestId('party-rsvp');
+    await openReply();
 
     await userEvent.click(within(person$('m')).getByLabelText('Ci sarò'));
     expect(screen.getByTestId('party-rsvp-problems')).toHaveTextContent('Rispondi alle domande obbligatorie.');
@@ -178,13 +209,14 @@ describe('PartyInvitationPage (a personal invitation)', () => {
       })),
     });
     render(page());
+    await openReply();
 
-    const extras = await screen.findByTestId('party-rsvp-extras');
+    const extras = screen.getByTestId('party-rsvp-extras');
     expect(within(extras).getByDisplayValue('Giulia')).toBeInTheDocument();
     await userEvent.click(within(extras).getByRole('button', { name: 'Togli' }));
     await userEvent.click(screen.getByTestId('party-rsvp-submit'));
 
-    await screen.findByTestId('party-rsvp-notice');
+    await screen.findByTestId('party-rsvp-summary-notice');
     expect(putBodies(mock.calls)[0].additionalGuests).toEqual([]);
   });
 
@@ -194,7 +226,7 @@ describe('PartyInvitationPage (a personal invitation)', () => {
       [`PUT ${RSVP_URL}`]: () => jsonResponse({ error: 'boom' }, 500),
     });
     render(page());
-    await screen.findByTestId('party-rsvp');
+    await openReply();
 
     await userEvent.click(within(person$('m')).getByLabelText('Ci sarò'));
     await userEvent.type(within(person$('m')).getByLabelText('Allergie o esigenze alimentari'), 'Niente noci');
@@ -215,7 +247,7 @@ describe('PartyInvitationPage (a personal invitation)', () => {
       }, 409),
     });
     render(page());
-    await screen.findByTestId('party-rsvp');
+    await openReply();
 
     await userEvent.click(within(person$('m')).getByLabelText('Ci sarò'));
     await userEvent.click(screen.getByTestId('party-rsvp-submit'));

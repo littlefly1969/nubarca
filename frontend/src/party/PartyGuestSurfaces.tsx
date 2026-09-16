@@ -14,7 +14,7 @@ import { PartyContentImage, PartyGuestContentSections, partyThankYou } from './P
 // for as long as they last.
 
 export function PartyBeforeHome({
-  context, onOpenPoster, topBar, eyebrow, children, footnote,
+  context, onOpenPoster, topBar, eyebrow, children, after, footnote,
 }: {
   /** Only what the invitation draws — so a personal invitation, which is not a
    * party context, is drawn by the same composition rather than a copy of it. */
@@ -24,9 +24,13 @@ export function PartyBeforeHome({
   topBar?: ReactNode;
   /** The line above the title. "You're invited" unless the caller knows better. */
   eyebrow?: string;
-  /** Composed between the cover and what the host wrote — a personal
-   * invitation's reply. The party's own page passes nothing. */
+  /** Composed between the cover and what the host wrote. Only for something
+   * that must be met BEFORE the invitation is read — "Sono qui", while the
+   * party is on. The party's own page passes nothing. */
   children?: ReactNode;
+  /** Composed AFTER what the host wrote, before the closing line: a personal
+   * invitation's reply, which belongs at the end of what it is replying to. */
+  after?: ReactNode;
   /** The closing line. The QR's page promises it becomes the party; a personal
    * invitation cannot promise that, so it says its own. Null draws none. */
   footnote?: ReactNode;
@@ -75,6 +79,8 @@ export function PartyBeforeHome({
             its section above the words, or opens whole from its row, by the
             same rules as every other slot — never up in the cover. */}
         <PartyGuestContentSections slots={context.content} onOpenPoster={onOpenPoster} />
+
+        {after}
 
         {closing !== null && <p className="party-invitation-footnote">{closing}</p>}
       </div>

@@ -15,7 +15,9 @@ import { isOpenablePoster } from '../party/PartyGuestContent';
 import { PartyBeforeHome } from '../party/PartyGuestSurfaces';
 import { PartyHubTopBar } from '../party/PartyHubTopBar';
 import { PartyImageViewer } from '../party/PartyImageViewer';
-import { PartyRsvpCard, type PartyRsvpNotice } from '../party/PartyRsvpCard';
+import {
+  PartyRsvpSheet, PartyRsvpSummary, partyRsvpAnswered, type PartyRsvpNotice,
+} from '../party/PartyRsvpCard';
 import { PartySelfCheckInCard } from '../party/PartySelfCheckInCard';
 import './PartyGuestHub.css';
 
@@ -28,6 +30,12 @@ import './PartyGuestHub.css';
 // print, greeting or face search, so none of those are drawn in any phase —
 // they are not part of what this capability opens, and the server would refuse
 // them. It sets no participant cookie either.
+//
+// THE REPLY IS NOT THE FIRST THING ON IT. The form used to sit between the
+// cover and the host's words, so every guest met a radio group before they had
+// read what they were invited to. It lives in a sheet now, opened from one
+// button pinned to the bottom edge, and what stays on the page is the answer
+// once there is one — at the END, where a reply belongs.
 //
 // While the party is live the group can say "Sono qui" for its own people, and
 // "Entra nel Party" leads to the party's ordinary public page — navigation to
@@ -50,6 +58,7 @@ export function PartyInvitationPage() {
   const [poster, setPoster] = useState<PartyGuestContentKind | null>(null);
   const [checkingIn, setCheckingIn] = useState<string | null>(null);
   const [checkInNotice, setCheckInNotice] = useState<MessageKey | null>(null);
+  const [replying, setReplying] = useState(false);
 
   const load = useCallback((signal?: AbortSignal) => {
     if (!token) { setState({ kind: 'unavailable' }); return; }
@@ -76,6 +85,9 @@ export function PartyInvitationPage() {
       const view = await submitPartyRsvp(token, reply);
       setState({ kind: 'ready', view });
       setNotice({ tone: 'ok', messageKey: 'partyRsvp.saved' });
+      // Sent: the sheet has done its job and gets out of the way. A REFUSAL
+      // leaves it open, because what the guest typed is still in it.
+      setReplying(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // A refusal that describes a state carries it: the invitation as it is
@@ -158,6 +170,12 @@ export function PartyInvitationPage() {
     ? t('partyRsvp.eyebrow.live')
     : party.phase === 'after' ? t('partyRsvp.eyebrow.after') : undefined;
 
+  // Nothing on the page until there is something to say: before a reply exists
+  // the invitation is only an invitation, and the one thing it asks for is the
+  // button pinned to the bottom of it.
+  const answered = partyRsvpAnswered(invitation);
+  const showSummary = answered || !invitation.canRespond;
+
   return (
     <>
       <main className="party-guest-hub" data-testid="party-invitation" data-phase={party.phase}>
@@ -167,9 +185,17 @@ export function PartyInvitationPage() {
           eyebrow={eyebrow}
           footnote={t('partyRsvp.footnote')}
           onOpenPoster={setPoster}
+          after={showSummary && (
+            <PartyRsvpSummary
+              invitation={invitation}
+              phase={party.phase}
+              notice={replying ? null : notice}
+              onChange={invitation.canRespond ? () => setReplying(true) : undefined}
+            />
+          )}
         >
-          {/* While the party is on, arriving comes before the reply that is
-              now read-only. */}
+          {/* While the party is on, arriving comes before everything: it is the
+              one thing a guest standing at a door needs. */}
           {invitation.canCheckIn && (
             <PartySelfCheckInCard
               invitation={invitation}
@@ -180,19 +206,39 @@ export function PartyInvitationPage() {
               onUndo={(guestId) => void checkIn(guestId, true)}
             />
           )}
-          {/* Keyed by the SERVER's reply: a save or an adopted conflict is a
-              fresh draft, and a failed send — same version — keeps what the
-              guest typed. */}
-          <PartyRsvpCard
-            key={`${invitation.version}:${invitation.canRespond}`}
-            invitation={invitation}
-            phase={party.phase}
-            saving={saving}
-            notice={notice}
-            onSubmit={(reply) => void submit(reply)}
-          />
         </PartyBeforeHome>
       </main>
+
+      {/* The invitation's one call to action, pinned where a thumb is. It is
+          drawn only while there is nothing to show at the end — once the group
+          has replied, changing that reply is the summary's own button and a
+          second one here would be the same door twice. */}
+      {invitation.canRespond && !answered && (
+        <div className="party-invitation-cta" data-testid="party-rsvp-open-bar">
+          <button
+            type="button"
+            className="party-invitation-cta-button"
+            data-testid="party-rsvp-open"
+            onClick={() => setReplying(true)}
+          >
+            {t('partyRsvp.openSheet')}
+          </button>
+        </div>
+      )}
+
+      {/* Keyed by the SERVER's reply: a save or an adopted conflict is a fresh
+          draft, and a failed send — same version — keeps what the guest typed. */}
+      {replying && invitation.canRespond && (
+        <PartyRsvpSheet
+          key={`${invitation.version}`}
+          invitation={invitation}
+          saving={saving}
+          notice={notice}
+          onSubmit={(reply) => void submit(reply)}
+          onClose={() => setReplying(false)}
+        />
+      )}
+
       {posterSlot?.mediaUrl && (
         <PartyImageViewer src={posterSlot.mediaUrl} label={t('party.photoViewer')} onClose={() => setPoster(null)} />
       )}

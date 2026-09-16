@@ -152,7 +152,12 @@ describe('PartyInvitationPage outside the party', () => {
     });
     render(page());
 
-    expect(await screen.findByTestId('party-rsvp')).toHaveAttribute('data-mode', 'form');
+    // Before the party there is nothing to arrive at, and nothing to read but
+    // the invitation. This group has already replied, so what it gets is its
+    // reply at the end and the way to change it — never a form in the way.
+    await screen.findByTestId('party-before');
     expect(screen.queryByTestId('party-checkin')).not.toBeInTheDocument();
+    expect(screen.getByTestId('party-rsvp-change')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-rsvp-sheet')).not.toBeInTheDocument();
   });
 });

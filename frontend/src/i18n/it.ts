@@ -16,7 +16,6 @@ const it = {
   'partyHub.contributeHelp': 'Aggiungi foto, video o un messaggio',
   'partyHub.face': 'Trova le tue foto',
   'partyHub.faceHelp': 'Scatta un selfie',
-  'partyHub.vote': 'Sfide e votazioni',
   'partyHub.voteHelp': 'Partecipa ora',
   'partyHub.dedication': 'Lascia una dedica',
   'partyHub.dedicationHelp': 'Un pensiero speciale per la festa',
@@ -146,8 +145,6 @@ const it = {
   'partyChallenges.vote': 'Vota',
   'partyChallenges.unvote': 'Rimuovi voto',
   'partyChallenges.voteError': 'Il voto non è stato salvato. Riprova.',
-  'partyChallenges.empty': 'L’organizzatore non ha ancora pubblicato sfide.',
-  'partyChallenges.unavailable': 'Le sfide non sono disponibili.',
   // The canonical activity card (PartyChallengeCard). One set of strings for
   // the composer preview, the television and the owner's control room, because
   // there is one renderer.
@@ -218,7 +215,7 @@ const it = {
   'partyGuestGame.finishedBody': 'Grazie per aver giocato.',
   'partyGuestGame.backToParty': 'Torna alla festa',
   'partyHub.game': 'Il gioco dal vivo',
-  'partyHub.gameHelp': 'Segui le sfide e vota',
+  'partyHub.gameHelp': 'Segui le prove e vota',
   // The television stage (PartyTvStagePage). Read from three metres.
   'partyStage.unavailable': 'Nessun gioco per questa festa',
   'partyStage.offline': 'Connessione persa',
@@ -343,8 +340,6 @@ const it = {
   'partyGame.photo': 'Foto dell’album (facoltativa)',
   'partyGame.noPhoto': 'Nessuna foto',
   'partyGame.enabled': 'Disponibile al voto',
-  'partyGame.add': 'Aggiungi sfida',
-  'partyGame.update': 'Aggiorna sfida',
   'partyGame.empty': 'Non hai ancora preparato nessuna prova.',
   'partyGame.votes': 'voti',
   'partyGame.preview': 'Anteprima TV',
@@ -353,7 +348,6 @@ const it = {
   'partyGame.moveUp': 'Sposta su',
   'partyGame.moveDown': 'Sposta giù',
   'partyGame.edit': 'Modifica',
-  'partyGame.deleteConfirm': 'Eliminare questa sfida?',
   // --- Common / shared UI states ---
   'help.ai.menu': 'Chiedi a NubArca',
   'help.ai.title': 'Chiedi a NubArca',
@@ -1037,6 +1031,9 @@ const it = {
   'party.questions.error.generic': 'Non è stato possibile salvare la domanda.',
 
   'partyRsvp.heading': 'La tua risposta',
+  'partyRsvp.openSheet': 'Rispondi all’invito',
+  'partyRsvp.change': 'Cambia la risposta',
+  'partyRsvp.answeredNote': 'Hai già risposto. Puoi cambiare quando vuoi.',
   'partyRsvp.for': 'Invito per {label}',
   'partyRsvp.attending': 'Ci sarò',
   'partyRsvp.declined': 'Non ci sarò',

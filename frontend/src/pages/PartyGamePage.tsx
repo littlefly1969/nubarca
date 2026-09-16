@@ -166,7 +166,9 @@ export function PartyGamePage() {
     <main className="party-guest-hub party-game" data-scene={scene} data-testid="party-game-page">
       <header className="party-game-top">
         <Link className="party-game-back" to={`/party/${token}`}>{t('partyChallenges.back')}</Link>
-        <LanguageSwitcher className="language-switcher language-switcher-public" />
+        {/* The same pill as every other public surface: the game is the party,
+            not a second product with its own chrome. */}
+        <LanguageSwitcher className="language-switcher language-switcher-public" compact />
       </header>
 
       {/* A poll that failed is not a broken party: the scene stays, and this

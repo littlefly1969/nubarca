@@ -15,6 +15,13 @@
   --contribution-border: rgb(245 247 251 / 14%);
   --contribution-surface: rgb(15 30 58 / 62%);
   --contribution-focus: var(--brand-cyan-glow);
+  /* The three colours the shared public chrome in styles.css paints itself
+     with. Declared rather than duplicated: this surface and the guest hub
+     carry the same control, and two copies of it is how one of them came to
+     have a 42px target while the other had 44. */
+  --public-border: var(--contribution-border);
+  --public-text: var(--contribution-text);
+  --public-focus: var(--contribution-focus);
   --contribution-danger: #ff7a85;
 
   box-sizing: border-box;
@@ -55,75 +62,6 @@
   width: clamp(8.5rem, 34vw, 10.5rem);
   height: auto;
   max-width: 100%;
-}
-
-/* The switcher follows the visitor's theme everywhere else; this surface is a
-   fixed dark one, so it is pinned here exactly as on the guest hub. */
-.party-contribution .language-switcher--compact .language-switcher-label {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-}
-
-.party-contribution .language-switcher-face {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 2.75rem;
-  padding: 0 0.7rem;
-  border: 1px solid var(--contribution-border);
-  border-radius: 999px;
-  background: rgb(10 15 26 / 55%);
-  color: var(--contribution-text);
-}
-
-.party-contribution .language-switcher-face svg {
-  width: 1.05rem;
-  height: 1.05rem;
-  fill: none;
-  stroke: currentcolor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.party-contribution .language-switcher-face svg:last-of-type {
-  width: 0.85rem;
-  height: 0.85rem;
-  opacity: 0.7;
-}
-
-.party-contribution .language-switcher-code {
-  font-size: 0.85rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-}
-
-.party-contribution .language-switcher--compact select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.party-contribution .language-switcher select {
-  color-scheme: dark;
-}
-
-.party-contribution .language-switcher-face:has(select:focus-visible) {
-  outline: 3px solid var(--contribution-focus);
-  outline-offset: 3px;
 }
 
 .party-contribution-head {
