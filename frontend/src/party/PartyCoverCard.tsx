@@ -64,9 +64,17 @@ export function PartyCoverCard({
   }
 
   return (
-    <section className="party-card" data-testid={`party-cover-${which}`}>
-      <h3>{t(`partyCover.${which}.heading` as 'partyCover.invitation.heading')}</h3>
-      <p className="muted">{t(`partyCover.${which}.help` as 'partyCover.invitation.help')}</p>
+    <section className="pw-panel" data-testid={`party-cover-${which}`}>
+      <div className="pw-panel-head">
+        <div>
+          <h3 className="pw-panel-title">
+            {t(`partyCover.${which}.heading` as 'partyCover.invitation.heading')}
+          </h3>
+          <p className="pw-panel-note">
+            {t(`partyCover.${which}.help` as 'partyCover.invitation.help')}
+          </p>
+        </div>
+      </div>
       <PartySlotImageField
         kind={`cover-${which}`}
         albumId={albumId}
@@ -78,24 +86,30 @@ export function PartyCoverCard({
           previewUrl: next?.previewUrl ?? null,
         })}
       />
-      <button
-        type="button" className="row-action-primary" disabled={busy}
-        data-testid={`party-cover-save-${which}`}
-        onClick={() => void save()}
-      >
-        {t('party.overview.save')}
-      </button>
-      {status === 'saved' && <p className="muted" role="status">{t('party.overview.saved')}</p>}
+      <div className="pw-form-foot">
+        <button
+          type="button" className="pw-btn pw-btn--primary" disabled={busy} aria-busy={busy || undefined}
+          data-testid={`party-cover-save-${which}`}
+          onClick={() => void save()}
+        >
+          {t('party.overview.save')}
+        </button>
+        <span aria-live="polite">
+          {status === 'saved' && (
+            <span className="pw-small pw-muted" role="status">{t('party.overview.saved')}</span>
+          )}
+        </span>
+      </div>
       {status === 'conflict' && (
-        <p className="inline-error" role="alert">{t('party.overview.conflict')}</p>
+        <p className="pw-field-error" role="alert">{t('party.overview.conflict')}</p>
       )}
       {status === 'invalidMedia' && (
-        <p className="inline-error" role="alert" data-testid={`party-cover-invalid-${which}`}>
+        <p className="pw-field-error" role="alert" data-testid={`party-cover-invalid-${which}`}>
           {t('partyContent.imageInvalid')}
         </p>
       )}
       {status === 'failed' && (
-        <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
+        <p className="pw-field-error" role="alert">{t('party.overview.saveFailed')}</p>
       )}
     </section>
   );

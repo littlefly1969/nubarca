@@ -188,38 +188,54 @@
   .party-teardown-confirm button { width: 100%; }
 }
 
-/* The presentation choice. Two options, each worth a sentence — a toggle would
-   say "on/off" about two things that are both something. */
+/* The presentation choice, the alignment, the frame and the text placement —
+   every one of them a SET OF OPTIONS the host reads rather than a switch. They
+   borrow the workspace's option pattern (.pw-option) so a radio list inside a
+   content card looks like every other radio list in the party. */
 .party-presentation {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: var(--pw-2, 0.5rem);
+  border: 0;
   margin: 0;
-  padding: 0.75rem;
-  border: 1px solid var(--border, rgb(255 255 255 / 14%));
-  border-radius: 0.7rem;
+  padding: 0;
+  min-width: 0;
 }
 
 .party-presentation > legend {
-  padding: 0 0.35rem;
-  font-weight: 600;
+  padding: 0;
+  margin-block-end: var(--pw-2, 0.5rem);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .party-presentation-option {
   display: flex;
   align-items: flex-start;
-  gap: 0.6rem;
+  gap: var(--pw-3, 0.75rem);
+  padding: var(--pw-3, 0.75rem);
+  border: 1px solid var(--pw-line, var(--border-default));
+  border-radius: var(--pw-radius-control, 12px);
   cursor: pointer;
 }
 
-.party-presentation-option input { margin-top: 0.25rem; }
+.party-presentation-option:hover {
+  border-color: var(--pw-line-strong, var(--border-strong));
+  background: var(--pw-quiet, var(--surface-subtle));
+}
 
-.party-presentation-title { display: block; font-weight: 600; }
+.party-presentation-option:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.party-presentation-option input { margin-block-start: 0.1875rem; accent-color: var(--accent); }
+
+.party-presentation-title { display: block; font-size: 0.9375rem; font-weight: 500; }
 
 .party-presentation-help {
   display: block;
-  opacity: 0.75;
-  font-size: 0.9em;
+  margin-block-start: 0.125rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.45;
 }
 
 .party-presentation-note { margin: 0; }
@@ -230,10 +246,12 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid var(--warning-border, rgb(255 180 80 / 45%));
-  border-radius: 0.7rem;
+  gap: var(--pw-2, 0.5rem);
+  padding: var(--pw-3, 0.75rem);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-radius: var(--pw-radius-control, 12px);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  font-size: 0.875rem;
 }
 
 .party-presentation-lost p { margin: 0; }

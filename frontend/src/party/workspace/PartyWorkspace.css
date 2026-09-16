@@ -1,0 +1,1132 @@
+/* The Party workspace — ONE design system for the host's whole product.
+ *
+ * Every Party surface the host sees is built from the primitives in this file,
+ * so a section written six months apart from another still looks like the same
+ * page. Nothing here invents a colour or a font: the tokens come from
+ * styles.css, and what this adds is the party's own spacing, hierarchy and
+ * responsive behaviour.
+ *
+ * MOBILE FIRST, and literally: every rule below is written for a 320px phone,
+ * and the wider layouts are additions at 48rem and 64rem. There is no desktop
+ * grid being squeezed — there is a column that earns a second one.
+ *
+ * The scroll container is `.app-main`, not the document. It already supplies
+ * the page's horizontal gutter and its top margin, so this file adds neither:
+ * a `position: sticky` offset of 0 therefore means the top of the screen.
+ */
+
+.pw {
+  /* The party's own spacing scale. Four steps, used everywhere, so that two
+     sections written months apart breathe the same way. */
+  --pw-1: 0.25rem;
+  --pw-2: 0.5rem;
+  --pw-3: 0.75rem;
+  --pw-4: 1rem;
+  --pw-5: 1.5rem;
+  --pw-6: 2rem;
+  --pw-7: 3rem;
+
+  --pw-radius-panel: var(--radius-card, 16px);
+  --pw-radius-control: var(--radius-button, 12px);
+  --pw-radius-pill: 999px;
+
+  /* One hairline, one raised surface, one quiet surface — named by role so a
+     section never reaches for a raw colour. */
+  --pw-line: var(--border-default);
+  --pw-line-strong: var(--border-strong);
+  --pw-panel: var(--surface-raised);
+  --pw-quiet: var(--surface-subtle);
+
+  /* The tallest thing a thumb has to hit. 44px is the floor, and controls that
+     carry a decision get 48. */
+  --pw-tap: 2.75rem;
+  --pw-tap-lg: 3rem;
+
+  display: block;
+  max-width: 78rem;
+  margin-inline: auto;
+  padding-block-end: var(--pw-7);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Page header — who this party is, where it is, and the one thing to do next
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+  padding-block-end: var(--pw-4);
+}
+
+.pw-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pw-1);
+  align-self: flex-start;
+  min-height: var(--pw-tap);
+  padding-inline-end: var(--pw-2);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.pw-back:hover,
+.pw-back:focus-visible { color: var(--text-primary); text-decoration: underline; }
+
+.pw-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+}
+
+.pw-identity { min-width: 0; }
+
+.pw-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.5rem, 1.15rem + 1.6vw, 1.875rem);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  overflow-wrap: anywhere;
+}
+
+.pw-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pw-2);
+  margin: var(--pw-2) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.pw-head-meta > .pw-dot { color: var(--text-muted); }
+
+/* The header's action rail. One primary, and whatever quiet company it keeps.
+   Full width on a phone, because that is where a thumb expects it. */
+.pw-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pw-2);
+}
+
+.pw-head-actions > * { flex: 1 1 auto; }
+
+@media (min-width: 48rem) {
+  .pw-head-main {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--pw-4);
+  }
+  .pw-head-actions { flex: 0 0 auto; justify-content: flex-end; }
+  .pw-head-actions > * { flex: 0 0 auto; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Buttons — one scale, three weights, and a real touch target
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pw-2);
+  min-height: var(--pw-tap);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pw-btn:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--pw-line-strong);
+  background: var(--pw-quiet);
+}
+
+.pw-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* The dominant action of a local decision. There is at most one per panel. */
+.pw-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+.pw-btn--primary:hover:not(:disabled):not([aria-disabled='true']) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  color: var(--accent-contrast);
+}
+
+/* No container until it is wanted: toolbar and in-card affordances. */
+.pw-btn--quiet {
+  border-color: transparent;
+  color: var(--text-secondary);
+  padding-inline: 0.625rem;
+}
+
+.pw-btn--quiet:hover:not(:disabled) { color: var(--text-primary); }
+
+.pw-btn--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.pw-btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.pw-btn--lg { min-height: var(--pw-tap-lg); font-size: 1rem; padding-inline: 1.25rem; }
+.pw-btn--block { width: 100%; }
+
+/* Disabled stays legible: the label does not fade below reading contrast, and
+   the surface says "not now" instead. */
+.pw-btn:disabled,
+.pw-btn[aria-disabled='true'] {
+  cursor: not-allowed;
+  border-color: var(--pw-line);
+  background: var(--pw-quiet);
+  color: var(--text-muted);
+}
+
+.pw-btn--primary:disabled,
+.pw-btn--primary[aria-disabled='true'] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 35%, var(--pw-quiet));
+  color: color-mix(in srgb, var(--accent-contrast) 70%, transparent);
+}
+
+.pw-btn[data-busy='true'] { cursor: progress; }
+
+.pw-icon-btn {
+  min-width: var(--pw-tap);
+  padding-inline: 0;
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Section navigation — a scroll rail on a phone, a stable list on a desktop
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-layout { display: block; }
+
+.pw-nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  gap: var(--pw-1);
+  margin-inline: calc(-1 * clamp(1rem, 2.5vw, 2.5rem));
+  padding: var(--pw-2) clamp(1rem, 2.5vw, 2.5rem);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  background: var(--surface-canvas);
+  border-block-end: 1px solid var(--pw-line);
+}
+
+.pw-nav::-webkit-scrollbar { display: none; }
+
+.pw-nav-item {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pw-2);
+  min-height: var(--pw-tap);
+  padding: 0 0.875rem;
+  border: 1px solid transparent;
+  border-radius: var(--pw-radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.9375rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pw-nav-item:hover { color: var(--text-primary); background: var(--pw-quiet); }
+
+.pw-nav-item[aria-selected='true'] {
+  background: var(--accent-subtle);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.pw-nav-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* A count beside a section's name — what is waiting there, never decoration. */
+.pw-nav-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding-inline: 0.3rem;
+  border-radius: var(--pw-radius-pill);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.pw-nav-item[data-live='true'] .pw-nav-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* From a tablet the navigation leaves the flow and becomes a rail: the host
+   stops losing their place every time a section scrolls. */
+@media (min-width: 64rem) {
+  .pw-layout {
+    display: grid;
+    grid-template-columns: 14rem minmax(0, 1fr);
+    gap: var(--pw-6);
+    align-items: start;
+  }
+  .pw-nav {
+    position: sticky;
+    top: var(--pw-4);
+    flex-direction: column;
+    gap: 0.125rem;
+    margin-inline: 0;
+    padding: 0;
+    overflow: visible;
+    background: transparent;
+    border-block-end: 0;
+  }
+  .pw-nav-item {
+    justify-content: flex-start;
+    width: 100%;
+    border-radius: var(--pw-radius-control);
+    padding-inline: 0.75rem;
+  }
+  .pw-nav-count { margin-inline-start: auto; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Sections and panels
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-4);
+  padding-block-start: var(--pw-4);
+}
+
+.pw-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--pw-2) var(--pw-4);
+}
+
+.pw-section-head > div { min-width: 0; flex: 1 1 16rem; }
+
+.pw-section-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.pw-section-lede {
+  margin: var(--pw-1) 0 0;
+  max-width: 56ch;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.pw-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+  padding: var(--pw-4);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-panel);
+  background: var(--pw-panel);
+}
+
+.pw-panel--quiet { background: transparent; }
+.pw-panel--flush { padding: 0; overflow: hidden; }
+
+.pw-panel--danger { border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.pw-panel--danger .pw-panel-title { color: var(--danger); }
+
+/* The one panel that has to be noticed on arrival. Its accent is a rule down
+   the leading edge, not a fill — the page keeps one focal point. */
+.pw-panel--feature {
+  position: relative;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--pw-line));
+  background:
+    linear-gradient(to bottom right,
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 60%),
+    var(--pw-panel);
+}
+
+.pw-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pw-2) var(--pw-3);
+}
+
+.pw-panel-head > div { min-width: 0; flex: 1 1 14rem; }
+
+.pw-panel-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.pw-panel-note {
+  margin: var(--pw-1) 0 0;
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.pw-panel-body { display: flex; flex-direction: column; gap: var(--pw-3); }
+
+.pw-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pw-2);
+  margin: 0;
+}
+
+/* On a phone the panel's decision takes the full width; from 30rem the buttons
+   sit side by side again. */
+@media (max-width: 29.999rem) {
+  .pw-panel-actions > .pw-btn { flex: 1 1 100%; }
+  .pw-panel-actions > .pw-btn.pw-icon-btn { flex: 0 0 auto; }
+}
+
+/* Two panels that belong together side by side once there is room. */
+.pw-grid {
+  display: grid;
+  gap: var(--pw-4);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 48rem) {
+  .pw-grid--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Rows — a label, what it means, and one control
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-rows {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.pw-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pw-2) var(--pw-4);
+  padding-block: var(--pw-3);
+  border-block-start: 1px solid var(--pw-line);
+}
+
+.pw-rows > .pw-row:first-child,
+.pw-row:first-child { border-block-start: 0; }
+
+.pw-row-text { flex: 1 1 14rem; min-width: 0; }
+.pw-row-label { display: block; font-size: 0.9375rem; font-weight: 500; }
+.pw-row-note { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
+.pw-row-control { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--pw-2); }
+
+/* A whole row that opens something else. The chevron is the affordance; the
+   row itself is the target, and it is tall enough for a thumb. */
+.pw-link-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pw-3);
+  width: 100%;
+  min-height: var(--pw-tap-lg);
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pw-link-row:hover { border-color: var(--pw-line-strong); background: var(--pw-quiet); }
+.pw-link-row:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-link-row-text { flex: 1 1 auto; min-width: 0; }
+.pw-link-row-title { display: block; font-size: 0.9375rem; font-weight: 500; }
+.pw-link-row-note { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; }
+.pw-link-row-after { flex: 0 0 auto; display: inline-flex; align-items: center; gap: var(--pw-2); color: var(--text-muted); }
+.pw-chevron { font-size: 1rem; line-height: 1; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Switch — a real control, never a bare checkbox in a sentence
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 1.75rem;
+  border: 1px solid var(--pw-line-strong);
+  border-radius: var(--pw-radius-pill);
+  background: var(--pw-quiet);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.pw-switch::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0.1875rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+
+.pw-switch[aria-checked='true'] { background: var(--accent); border-color: var(--accent); }
+.pw-switch[aria-checked='true']::after { transform: translateX(1.1875rem); background: var(--accent-contrast); }
+.pw-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-switch:disabled { cursor: not-allowed; opacity: 0.55; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-switch, .pw-switch::after { transition: none; }
+}
+
+/* The switch's own tap area covers the whole row on a phone. */
+.pw-row--switch { cursor: pointer; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Fields
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-field { display: flex; flex-direction: column; gap: var(--pw-1); min-width: 0; }
+
+.pw-field-label { font-size: 0.8125rem; font-weight: 500; color: var(--text-secondary); }
+
+.pw-field input,
+.pw-field textarea,
+.pw-field select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--pw-tap);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9375rem;
+}
+
+.pw-field textarea { min-height: 5rem; resize: vertical; line-height: 1.5; }
+
+.pw-field input:focus-visible,
+.pw-field textarea:focus-visible,
+.pw-field select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.pw-field input:disabled,
+.pw-field textarea:disabled,
+.pw-field select:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pw-field-help { margin: 0; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
+.pw-field-error { margin: 0; color: var(--danger); font-size: 0.8125rem; }
+
+.pw-fields { display: grid; gap: var(--pw-3); grid-template-columns: 1fr; }
+
+@media (min-width: 40rem) {
+  .pw-fields--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pw-fields > .pw-field--wide { grid-column: 1 / -1; }
+}
+
+/* A form's own footer: what saves it, and what it says afterwards. */
+.pw-form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pw-2) var(--pw-3);
+}
+
+.pw-form-foot > .pw-btn { min-width: 8rem; }
+
+@media (max-width: 29.999rem) {
+  .pw-form-foot > .pw-btn { flex: 1 1 100%; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Badges — a state, always with its word
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.5rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-pill);
+  background: var(--pw-quiet);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.pw-badge::before {
+  content: '';
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pw-badge--draft { color: var(--text-secondary); }
+.pw-badge--published { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); background: var(--accent-subtle); }
+.pw-badge--live {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.pw-badge--live::before { animation: pw-pulse 2s ease-in-out infinite; }
+.pw-badge--ended { color: var(--text-muted); }
+.pw-badge--ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.pw-badge--warn { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.pw-badge--plain::before { display: none; }
+
+@keyframes pw-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .pw-badge--live::before { animation: none; } }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Notices — information, warning, error, success. Never colour alone.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pw-3);
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.pw-notice-icon { flex: 0 0 auto; font-size: 1rem; line-height: 1.4; }
+.pw-notice-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--pw-2); }
+.pw-notice-title { font-weight: 600; }
+.pw-notice p { margin: 0; }
+.pw-notice-actions { display: flex; flex-wrap: wrap; gap: var(--pw-2); }
+
+.pw-notice--warn {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.pw-notice--error {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text-primary);
+}
+.pw-notice--error .pw-notice-title { color: var(--danger); }
+.pw-notice--ok {
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Empty states — "ready to set up", never "broken"
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pw-3);
+  padding: var(--pw-5) var(--pw-4);
+  border: 1px dashed var(--pw-line-strong);
+  border-radius: var(--pw-radius-panel);
+  background: transparent;
+}
+
+.pw-empty-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.pw-empty-body { margin: 0; max-width: 52ch; color: var(--text-secondary); font-size: 0.9375rem; line-height: 1.55; }
+.pw-empty-optional { margin: 0; color: var(--text-muted); font-size: 0.8125rem; }
+
+@media (min-width: 48rem) {
+  .pw-empty { align-items: center; text-align: center; padding-block: var(--pw-6); }
+  .pw-empty-body { text-align: center; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Statistics — used where a number IS the information, never as decoration
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
+  gap: var(--pw-2);
+  margin: 0;
+}
+
+.pw-stat {
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+}
+
+.pw-stat dt { color: var(--text-secondary); font-size: 0.75rem; line-height: 1.3; }
+.pw-stat dd {
+  margin: 0.125rem 0 0;
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-stat[data-tone='warn'] dd { color: var(--danger); }
+.pw-stat[data-tone='accent'] dd { color: var(--accent); }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Checklist — the next steps, as things to do rather than metrics
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+
+.pw-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pw-3);
+  padding-block: var(--pw-3);
+  border-block-start: 1px solid var(--pw-line);
+}
+
+.pw-step:first-child { border-block-start: 0; padding-block-start: 0; }
+
+.pw-step-mark {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  margin-block-start: 0.0625rem;
+  border: 1px solid var(--pw-line-strong);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.pw-step[data-done='true'] .pw-step-mark {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+
+.pw-step-text { flex: 1 1 auto; min-width: 0; }
+.pw-step-title { display: block; font-size: 0.9375rem; font-weight: 500; }
+.pw-step[data-done='true'] .pw-step-title { color: var(--text-secondary); }
+.pw-step-note { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
+.pw-step-action { flex: 0 0 auto; align-self: center; }
+
+@media (max-width: 29.999rem) {
+  .pw-step { flex-wrap: wrap; }
+  .pw-step-action { flex: 1 1 100%; align-self: stretch; }
+  .pw-step-action .pw-btn { width: 100%; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Share — the guest link, its QR and what to do with it
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-share { display: flex; flex-direction: column; gap: var(--pw-3); }
+
+.pw-share-url {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--surface-canvas);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Loading
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-skeleton {
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+  animation: pw-shimmer 1.4s ease-in-out infinite;
+}
+
+.pw-skeleton--panel { height: 7rem; border-radius: var(--pw-radius-panel); }
+.pw-skeleton--line { height: 0.875rem; }
+.pw-skeleton--title { height: 1.25rem; width: 40%; }
+
+@keyframes pw-shimmer { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .pw-skeleton { animation: none; } }
+
+.pw-loading { display: flex; flex-direction: column; gap: var(--pw-4); }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Disclosure — advanced controls, folded away until they are wanted
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-disclosure {
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-panel);
+  background: var(--pw-panel);
+}
+
+.pw-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pw-3);
+  min-height: var(--pw-tap-lg);
+  padding: var(--pw-3) var(--pw-4);
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.pw-disclosure > summary::-webkit-details-marker { display: none; }
+.pw-disclosure > summary::after { content: '⌄'; color: var(--text-muted); font-size: 1.125rem; line-height: 1; }
+.pw-disclosure[open] > summary::after { content: '⌃'; }
+.pw-disclosure > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: var(--pw-radius-panel); }
+.pw-disclosure-summary-note { display: block; font-weight: 400; font-size: 0.8125rem; color: var(--text-secondary); }
+.pw-disclosure-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+  padding: 0 var(--pw-4) var(--pw-4);
+  border-block-start: 1px solid var(--pw-line);
+  padding-block-start: var(--pw-4);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Small print
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-muted { color: var(--text-secondary); }
+.pw-small { font-size: 0.8125rem; }
+.pw-inline-list { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pw-2); margin: 0; }
+.pw-nowrap { white-space: nowrap; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   QR — the party on a table
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pw-2);
+  margin: 0;
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+}
+
+/* The code itself always sits on white, whatever the application's theme is:
+   a scanner needs the contrast the symbol was designed with, and a dark QR on
+   a dark panel is a decoration rather than a link. */
+.pw-qr-code {
+  display: flex;
+  padding: var(--pw-2);
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.pw-qr-code svg { display: block; width: 11rem; height: 11rem; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Choices — a set of options, each worth reading
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-choice-set { border: 0; margin: 0; padding: 0; min-width: 0; }
+.pw-choice-set > legend { padding: 0; margin-block-end: var(--pw-2); }
+.pw-choice-row { display: flex; flex-wrap: wrap; gap: var(--pw-2); }
+
+/* A checkbox or radio that is a real target: the label IS the control's box,
+   tall enough for a thumb, and its selected state is a wash plus a border —
+   never colour alone, because the input inside it stays visible. */
+.pw-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pw-2);
+  min-height: var(--pw-tap);
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-pill);
+  background: transparent;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.pw-choice:hover { border-color: var(--pw-line-strong); }
+.pw-choice[data-checked='true'] {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--accent-subtle);
+  font-weight: 600;
+}
+.pw-choice:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-choice input { accent-color: var(--accent); }
+
+/* The stacked variant: options that each need a sentence. */
+.pw-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-2);
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.pw-options > legend { padding: 0; margin-block-end: var(--pw-2); font-size: 0.8125rem; font-weight: 500; color: var(--text-secondary); }
+
+.pw-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pw-3);
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  cursor: pointer;
+}
+
+.pw-option:hover { border-color: var(--pw-line-strong); background: var(--pw-quiet); }
+.pw-option:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-option input { margin-block-start: 0.1875rem; accent-color: var(--accent); }
+.pw-option-title { display: block; font-size: 0.9375rem; font-weight: 500; }
+.pw-option-help { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Groups — several panels that belong to one moment of the evening
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-group { display: flex; flex-direction: column; gap: var(--pw-3); }
+
+.pw-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pw-2) var(--pw-3);
+  padding-block-start: var(--pw-2);
+}
+
+.pw-group-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.pw-group-lede {
+  margin: calc(-1 * var(--pw-1)) 0 0;
+  max-width: 62ch;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* An inline form: a field and the two buttons that resolve it, on one line
+   once there is room and stacked on a phone. */
+.pw-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--pw-2);
+}
+
+.pw-inline-form > .pw-field { flex: 1 1 12rem; min-width: 0; }
+
+@media (max-width: 29.999rem) {
+  .pw-inline-form > * { flex: 1 1 100%; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Facts — a short list of "this is how it is", with no control attached
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+
+.pw-facts > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pw-1) var(--pw-4);
+  padding-block: var(--pw-2);
+  border-block-start: 1px solid var(--pw-line);
+  font-size: 0.875rem;
+}
+
+.pw-facts > li:first-child { border-block-start: 0; padding-block-start: 0; }
+.pw-fact-label { color: var(--text-secondary); }
+.pw-fact-value { text-align: end; font-weight: 500; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Numbers — the dials, when the host has asked for them
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-settings-block { display: flex; flex-direction: column; gap: var(--pw-3); }
+
+.pw-numbers {
+  display: grid;
+  gap: var(--pw-3);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 34rem) {
+  .pw-numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.pw-number {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.125rem var(--pw-2);
+  font-size: 0.875rem;
+}
+
+.pw-number > span:first-child { grid-column: 1 / -1; color: var(--text-secondary); }
+
+.pw-number input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--pw-tap);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-number input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; border-color: var(--accent); }
+.pw-number-suffix { color: var(--text-muted); font-size: 0.8125rem; white-space: nowrap; }
+.pw-number--tight { grid-template-columns: auto; }
+.pw-number--tight input { width: 5rem; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   A form that spans several panels, and the bar that saves it
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-panels-form { display: flex; flex-direction: column; gap: var(--pw-4); }
+
+.pw-save-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pw-2) var(--pw-3);
+}
+
+.pw-save-bar > .pw-btn { min-width: 9rem; }
+.pw-save-bar-status { min-height: 1.25rem; }
+
+/* On a phone the save is a bar that stays with the thumb: a long settings form
+   must never require scrolling back to the top to commit it. */
+@media (max-width: 47.999rem) {
+  .pw-save-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    margin-inline: calc(-1 * clamp(1rem, 2.5vw, 2.5rem));
+    padding: var(--pw-3) clamp(1rem, 2.5vw, 2.5rem);
+    background: var(--surface-canvas);
+    border-block-start: 1px solid var(--pw-line);
+  }
+  .pw-save-bar > .pw-btn { flex: 1 1 auto; }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Chips — shortcuts into a list that already exists
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-chips { display: flex; flex-wrap: wrap; gap: var(--pw-2); }
+
+.pw-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--pw-tap);
+  padding-inline: 0.875rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-pill);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.pw-chip:hover { border-color: var(--pw-line-strong); background: var(--pw-quiet); }
+.pw-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* While the party is on, the arrivals read from across a room. */
+.pw-panel--feature[data-testid='party-live-arrivals'] .pw-stat dd { font-size: 2rem; }

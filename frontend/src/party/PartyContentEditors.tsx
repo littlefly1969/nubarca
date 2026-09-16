@@ -139,21 +139,40 @@ export function PartyContentCard({
     } finally { setBusy(false); }
   }
 
+  // What the card says about itself before it is opened: whether the guests
+  // see this at all, and when. It is the STATE — never the switch's label,
+  // which says what pressing it would do.
+  const shownIn = phases.filter((phase) => draft[
+    phase === 'before' ? 'visibleBefore' : phase === 'live' ? 'visibleLive' : 'visibleAfter'
+  ]);
+  const stateLine = !draft.enabled
+    ? t('partyContent.stateOff')
+    : shownIn.length === 0
+      ? t('partyContent.stateNowhere')
+      : t('partyContent.stateOn', {
+        phases: shownIn.map((phase) => t(phaseLabelKey(phase))).join(' · '),
+      });
+
   return (
-    <section className="party-card" data-testid={`party-content-${slot.kind}`}>
-      <label className="party-toggle">
-        <input
-          type="checkbox" checked={draft.enabled} disabled={busy}
+    <section className="pw-panel" data-testid={`party-content-${slot.kind}`}>
+      <div className="pw-panel-head">
+        <div>
+          <h3 className="pw-panel-title">{t(contentLabelKey(slot.kind))}</h3>
+          <p className="pw-panel-note" data-testid={`party-content-state-${slot.kind}`}>{stateLine}</p>
+        </div>
+        <button
+          type="button" role="switch" className="pw-switch"
+          aria-checked={draft.enabled} disabled={busy}
           aria-label={t(contentLabelKey(slot.kind))}
-          onChange={(e) => setDraft((d) => ({ ...d, enabled: e.target.checked }))}
+          data-testid={`party-content-enable-${slot.kind}`}
+          onClick={() => setDraft((d) => ({ ...d, enabled: !d.enabled }))}
         />
-        <span>{t(contentLabelKey(slot.kind))}</span>
-      </label>
+      </div>
 
       {/* Progressive disclosure: a slot the host has not turned on shows its
           name and nothing else. The form appears when there is a reason for it. */}
       {draft.enabled && (
-        <>
+        <div className="pw-panel-body">
           <ContentFields kind={slot.kind} content={draft.content} busy={busy} set={set} />
 
           <TextAlignChoice
@@ -232,7 +251,7 @@ export function PartyContentCard({
               <p role="status">{t('partyContent.posterMediaLost')}</p>
               <button
                 type="button"
-                className="row-action"
+                className="pw-btn"
                 disabled={busy}
                 data-testid={`party-poster-lost-inline-${slot.kind}`}
                 onClick={() => setDraft((d) => ({ ...d, mediaPresentation: 'inline' }))}
@@ -242,52 +261,63 @@ export function PartyContentCard({
             </div>
           )}
 
-          <div className="party-content-visibility">
-            {phases.map((phase) => {
-              const key = phase === 'before'
-                ? 'visibleBefore' : phase === 'live' ? 'visibleLive' : 'visibleAfter';
-              return (
-                <label className="party-toggle" key={phase}>
-                  <input
-                    type="checkbox" checked={draft[key]} disabled={busy}
-                    aria-label={`${t(contentLabelKey(slot.kind))} — ${t(phaseLabelKey(phase))}`}
-                    onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))}
-                  />
-                  <span>{t(phaseLabelKey(phase))}</span>
-                </label>
-              );
-            })}
-          </div>
+          {/* WHEN the guests see it. A set of choices, not a row of anonymous
+              boxes: each says which moment of the evening it is about. */}
+          <fieldset className="pw-choice-set" data-testid={`party-content-phases-${slot.kind}`}>
+            <legend className="pw-field-label">{t('partyContent.visibleWhen')}</legend>
+            <div className="pw-choice-row">
+              {phases.map((phase) => {
+                const key = phase === 'before'
+                  ? 'visibleBefore' : phase === 'live' ? 'visibleLive' : 'visibleAfter';
+                return (
+                  <label className="pw-choice" key={phase} data-checked={draft[key]}>
+                    <input
+                      type="checkbox" checked={draft[key]} disabled={busy}
+                      aria-label={`${t(contentLabelKey(slot.kind))} — ${t(phaseLabelKey(phase))}`}
+                      onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))}
+                    />
+                    <span>{t(phaseLabelKey(phase))}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
 
-          <button
-            type="button" className="row-action-primary" disabled={busy}
-            data-testid={`party-content-save-${slot.kind}`}
-            onClick={() => void save()}
-          >
-            {t('party.overview.save')}
-          </button>
-        </>
+          <div className="pw-form-foot">
+            <button
+              type="button" className="pw-btn pw-btn--primary" disabled={busy} aria-busy={busy || undefined}
+              data-testid={`party-content-save-${slot.kind}`}
+              onClick={() => void save()}
+            >
+              {t('party.overview.save')}
+            </button>
+            <span aria-live="polite">
+              {status === 'saved' && (
+                <span className="pw-small pw-muted" role="status">{t('party.overview.saved')}</span>
+              )}
+            </span>
+          </div>
+        </div>
       )}
 
-      {status === 'saved' && <p className="muted" role="status">{t('party.overview.saved')}</p>}
       {status === 'conflict' && (
-        <p className="inline-error" role="alert" data-testid={`party-content-conflict-${slot.kind}`}>
+        <p className="pw-field-error" role="alert" data-testid={`party-content-conflict-${slot.kind}`}>
           {t('party.overview.conflict')}
         </p>
       )}
       {status === 'invalidMedia' && (
-        <p className="inline-error" role="alert">{t('partyContent.imageInvalid')}</p>
+        <p className="pw-field-error" role="alert">{t('partyContent.imageInvalid')}</p>
       )}
       {status === 'invalidPresentation' && (
-        <p className="inline-error" role="alert">{t('partyContent.presentationInvalid')}</p>
+        <p className="pw-field-error" role="alert">{t('partyContent.presentationInvalid')}</p>
       )}
       {status === 'invalidContent' && (
-        <p className="inline-error" role="alert" data-testid={`party-content-invalid-${slot.kind}`}>
+        <p className="pw-field-error" role="alert" data-testid={`party-content-invalid-${slot.kind}`}>
           {t('partyContent.invalidContent')}
         </p>
       )}
       {status === 'failed' && (
-        <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
+        <p className="pw-field-error" role="alert">{t('party.overview.saveFailed')}</p>
       )}
     </section>
   );
@@ -343,7 +373,7 @@ function PresentationChoice({
       {/* The words are not deleted, and saying so is the difference between a
           presentation choice and losing an evening's typing. */}
       {value === 'poster' && (
-        <p className="muted party-presentation-note">{t('partyContent.presentationTextKept')}</p>
+        <p className="pw-small pw-muted party-presentation-note">{t('partyContent.presentationTextKept')}</p>
       )}
     </fieldset>
   );
@@ -440,8 +470,8 @@ function PhotoFrameChoice({
             onChange={(next) => onChange(orientation, next)}
             testId={`party-frame-crop-${kind}`}
           />
-          <p className="muted">{t('partyContent.frameHelp')}</p>
-          <label className="party-field">
+          <p className="pw-small pw-muted">{t('partyContent.frameHelp')}</p>
+          <label className="pw-field">
             <span>{t('partyContent.frameZoom')}</span>
             <input
               type="range" min={1} max={MAX_ZOOM} step={0.05} value={view.zoom}
@@ -450,7 +480,7 @@ function PhotoFrameChoice({
             />
           </label>
           <button
-            type="button" className="row-action" disabled={disabled}
+            type="button" className="pw-btn" disabled={disabled}
             onClick={() => onChange(orientation, null)}
           >
             {t('partyContent.frameReset')}
@@ -512,8 +542,8 @@ function ContentFields({
     labelKey: Parameters<typeof t>[0],
     { long = false, required = false }: { long?: boolean; required?: boolean } = {},
   ) => (
-    <label className="party-field" key={key}>
-      <span>{t(labelKey)}{required && <span aria-hidden="true"> *</span>}</span>
+    <label className="pw-field" key={key}>
+      <span className="pw-field-label">{t(labelKey)}{required && <span aria-hidden="true"> *</span>}</span>
       {long ? (
         <textarea
           rows={3} value={text(content, key)} disabled={busy} required={required}

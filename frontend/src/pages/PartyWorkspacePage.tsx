@@ -1,66 +1,75 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   GUEST_CONSOLE_PARAMS,
   LEGACY_GUEST_SEARCH_PARAM,
-  getAlbumPartySettings,
   getParty,
-  listPartyGuestContent,
-  duplicateParty,
-  tearDownParty,
-  transitionParty,
-  updateParty,
-  type AlbumPartyStatus,
+  type GuestDirectoryState,
   type Party,
-  type PartyGuestContentKind,
-  type PartyGuestContentSlot,
-  type PartyLifecycleAction,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
-import { PartyAlbumSection } from '../party/PartyAlbumSection';
-import { PartyGuestAccessSection } from '../party/PartyGuestAccessSection';
 import { PartyGuestListTab } from '../party/PartyGuestListTab';
-import { PartyLiveTab } from '../party/PartyLiveTab';
-import { PartyContentCard } from '../party/PartyContentEditors';
-import { PartyCoverCard } from '../party/PartyCoverCard';
+import { partyStatusLabelKey } from '../party/partyModel';
+import { PartyActivitiesSection } from '../party/workspace/PartyActivitiesSection';
+import { PartyExperienceSection } from '../party/workspace/PartyExperienceSection';
+import { PartyLiveSection } from '../party/workspace/PartyLiveSection';
+import { PartyPhotosSection } from '../party/workspace/PartyPhotosSection';
+import { PartyScreensSection } from '../party/workspace/PartyScreensSection';
+import { PartySettingsSection } from '../party/workspace/PartySettingsSection';
+import { PartySummarySection } from '../party/workspace/PartySummarySection';
 import {
-  PARTY_TIMELINE,
-  mainMediaSource,
-  partyPrimaryAction,
-  partyStatusLabelKey,
-  timelineStepState,
-} from '../party/partyModel';
+  defaultWorkspaceSection,
+  isWorkspaceSection,
+  sectionLabelKey,
+  workspaceSections,
+  type WorkspaceFacts,
+  type WorkspaceSection,
+} from '../party/workspace/partyWorkspaceModel';
+import { usePartyFacts } from '../party/workspace/usePartyFacts';
+import { Notice, PanelSkeleton } from '../party/workspace/ui';
 import '../party/Party.css';
+import '../party/workspace/PartyWorkspace.css';
 
-// The host's own surface for ONE party.
+// THE host's surface for one party.
 //
-// Three tabs, and deliberately only three: Overview, Live and Photos. There are
-// no empty "Before" and "After" tabs waiting to be filled — a tab that promises
-// something the product cannot yet do is worse than no tab, and the slice that
-// gives them content will add them.
+// Seven sections, and the same seven from the first draft to the last
+// photograph — plus Live, which exists only while the party is. A host learns
+// one map and keeps it: what changes with the lifecycle is which section they
+// land on, what each one leads with, and which steps are still open, never the
+// shape of the product.
 //
-// Everything below the party root is reached through its MAIN ALBUM, using the
-// functions that already work. This page resolves that album once and hands the
-// id down; nothing here mints a token, moderates a photograph or configures a
-// printer of its own.
+//   Riepilogo          what to do now
+//   Live               the evening, while it is happening
+//   Esperienza         what the guests will see
+//   Ospiti             the guest list, the invitations, the door
+//   Foto               where the photographs live and who may add to them
+//   Attività           the game and the greetings
+//   Schermi e stampa   the television, the paired display, the printer
+//   Impostazioni       the party's own facts, its windows, and removing it
+//
+// Everything below the party's root is reached through its MAIN ALBUM, using
+// the functions that already work. This page resolves that album once and hands
+// the id down; nothing here mints a token, moderates a photograph or configures
+// a printer of its own.
 
-// Six tabs, and every one of them has content. There were three until the
-// party had something to say beforehand and afterwards, and five until it had a
-// guest list; a tab that promises what the product cannot do is worse than no
-// tab. The guest list sits between Before and Live because that is when it is
-// worked on: after the invitation is written, before the evening.
-const TABS = ['overview', 'before', 'guests', 'live', 'after', 'photos'] as const;
-type Tab = (typeof TABS)[number];
+/** The old `?tab=` values, so a bookmark from before this release still lands. */
+const LEGACY_TABS: Record<string, WorkspaceSection> = {
+  overview: 'summary',
+  before: 'experience',
+  after: 'experience',
+  guests: 'guests',
+  photos: 'photos',
+  // The old "Live" tab was the evening's CONFIGURATION — contributions, the
+  // game, printing — which now lives in the sections that own each decision.
+  // It lands on Activities; a party that really is live opens its console by
+  // default anyway.
+  live: 'activities',
+};
 
-// The open tab lives in the URL, because what is inside one does too: the guest
-// console keeps its search, its filter and the group it has open there, so a
-// reload — or a browser coming back from WhatsApp — returns to what the host
-// was actually looking at. Anything unknown is the overview.
-function toTab(value: string | null): Tab {
-  return TABS.includes(value as Tab) ? (value as Tab) : 'overview';
-}
+/** Sections whose content states what is waiting in the moderation queues. */
+const SHOWS_MODERATION: readonly WorkspaceSection[] = ['summary', 'live', 'photos', 'activities'];
 
 type Status =
   | { kind: 'loading' }
@@ -68,33 +77,22 @@ type Status =
   | { kind: 'missing' }
   | { kind: 'error' };
 
-// A datetime-local input speaks local wall time with no zone; the wire speaks
-// UTC. Converting in one place at each boundary is what keeps "ends at 23:00"
-// from drifting an hour every time the form is opened.
-function toLocalInput(iso: string | null): string {
-  if (!iso) return '';
-  const at = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
-    + `T${pad(at.getHours())}:${pad(at.getMinutes())}`;
-}
-
-function fromLocalInput(value: string): string | null {
-  return value === '' ? null : new Date(value).toISOString();
-}
-
 export function PartyWorkspacePage() {
   const { partyId } = useParams<{ partyId: string }>();
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = toTab(searchParams.get('tab'));
+  const abortRef = useRef<AbortController | null>(null);
+
+  const party = status.kind === 'ready' ? status.party : null;
+  const partyStatus = party?.status ?? 'draft';
+  const available = workspaceSections(partyStatus);
 
   // The guest search is never in a URL any more, but a link made before it
   // moved out can still carry one — and the guest console can only strip what
-  // arrives while IT is open. Dropping it here covers every other way in
-  // (a bookmark to another tab, a pasted link), by replacing the entry so it
+  // arrives while IT is open. Dropping it here covers every other way in (a
+  // bookmark to another section, a pasted link), by REPLACING the entry so it
   // is not one Back away either. It is removed, never read.
   useEffect(() => {
     if (!searchParams.has(LEGACY_GUEST_SEARCH_PARAM)) return;
@@ -105,15 +103,30 @@ export function PartyWorkspacePage() {
     }, { replace: true });
   }, [searchParams, setSearchParams]);
 
-  const setTab = useCallback((next: Tab) => {
+  // What the URL asks for, what a pre-release bookmark asks for, and what the
+  // party's own phase would open. Anything the party does not offer right now
+  // falls back rather than rendering an empty panel.
+  const asked = searchParams.get('section') ?? LEGACY_TABS[searchParams.get('tab') ?? ''] ?? null;
+  const wanted = isWorkspaceSection(asked) ? asked : null;
+  const section: WorkspaceSection = wanted && available.includes(wanted)
+    ? wanted
+    : defaultWorkspaceSection(partyStatus);
+
+  const facts = usePartyFacts(
+    party,
+    { wantsModeration: SHOWS_MODERATION.includes(section) },
+    invalidateAuth,
+  );
+
+  const setSection = useCallback((next: WorkspaceSection) => {
     setSearchParams((current) => {
       const params = new URLSearchParams(current);
-      params.set('tab', next);
+      params.set('section', next);
+      params.delete('tab');
       if (next !== 'guests') {
         // The guest console's own state belongs to the guest console. Its
-        // search is not here at all — it never enters a URL — but a link from
-        // before that release can still carry the old key, and leaving the tab
-        // is another chance to drop it.
+        // search is not here at all — it never enters a URL — but leaving the
+        // section is another chance to drop what a stale link carried.
         params.delete(LEGACY_GUEST_SEARCH_PARAM);
         params.delete(GUEST_CONSOLE_PARAMS.state);
         params.delete(GUEST_CONSOLE_PARAMS.group);
@@ -121,44 +134,24 @@ export function PartyWorkspacePage() {
       return params;
     }, { replace: true });
   }, [setSearchParams]);
-  const [albumParty, setAlbumParty] = useState<AlbumPartyStatus | null>(null);
-  // Every kind, always — the server returns the ones the host has written and
-  // the ones they have not, so the editor renders what the server says rather
-  // than holding a second opinion about the defaults.
-  const [contentSlots, setContentSlots] = useState<PartyGuestContentSlot[]>([]);
-  const [libraryDraft, setLibraryDraft] = useState('');
-  const [librarySaving, setLibrarySaving] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
 
-  const onSlotSaved = useCallback((next: PartyGuestContentSlot) => {
-    setContentSlots((cur) => cur.map((slot) => (slot.kind === next.kind ? next : slot)));
-  }, []);
-
-  // The memories' window rides on the party's OWN metadata mutation — it is the
-  // party's data and shares the party's version, so there is no second endpoint
-  // and no second concurrency check for one date.
-  const saveLibraryWindow = useCallback(async () => {
-    if (status.kind !== 'ready') return;
-    setLibrarySaving(true);
-    try {
-      const next = await updateParty(status.party.id, {
-        title: status.party.title,
-        description: status.party.description,
-        eventStartsAt: status.party.eventStartsAt,
-        guestAccessExpiresAt: status.party.guestAccessExpiresAt,
-        libraryAccessExpiresAt: fromLocalInput(libraryDraft),
-        version: status.party.version,
-      });
-      setStatus({ kind: 'ready', party: next });
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) invalidateAuth();
-    } finally { setLibrarySaving(false); }
-  }, [status, libraryDraft, invalidateAuth]);
+  /** The door, already filtered: the live console's shortcuts into the list. */
+  const openGuests = useCallback((filter: GuestDirectoryState | null) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.set('section', 'guests');
+      params.delete('tab');
+      params.delete(GUEST_CONSOLE_PARAMS.group);
+      if (filter === null || filter === 'all') params.delete(GUEST_CONSOLE_PARAMS.state);
+      else params.set(GUEST_CONSOLE_PARAMS.state, filter);
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   const load = useCallback((signal: AbortSignal) => {
     if (!partyId) return;
     getParty(partyId, signal)
-      .then((party) => setStatus({ kind: 'ready', party }))
+      .then((next) => setStatus({ kind: 'ready', party: next }))
       .catch((err) => {
         if ((err as Error).name === 'AbortError') return;
         if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -176,600 +169,206 @@ export function PartyWorkspacePage() {
     return () => ctrl.abort();
   }, [load]);
 
-  useEffect(() => {
-    if (!partyId) return;
-    const ctrl = new AbortController();
-    listPartyGuestContent(partyId, ctrl.signal)
-      .then(setContentSlots)
-      .catch(() => { if (!ctrl.signal.aborted) setContentSlots([]); });
-    return () => ctrl.abort();
-  }, [partyId]);
-
-  useEffect(() => {
-    if (status.kind !== 'ready') return;
-    setLibraryDraft(toLocalInput(status.party.libraryAccessExpiresAt));
-  }, [status.kind, status.kind === 'ready' ? status.party.version : 0]);
-
-  const main = status.kind === 'ready' ? mainMediaSource(status.party) : null;
-  const mainAlbumId = main?.albumId ?? null;
-
-  // The album's party settings are asked for ONLY when there is an album to ask
-  // about. A party with no album yet must never send an album-scoped request
-  // with an invented id.
-  useEffect(() => {
-    if (!mainAlbumId) { setAlbumParty(null); return; }
-    const ctrl = new AbortController();
-    getAlbumPartySettings(mainAlbumId, ctrl.signal)
-      .then(setAlbumParty)
-      .catch(() => { if (!ctrl.signal.aborted) setAlbumParty(null); });
-    return () => ctrl.abort();
-  }, [mainAlbumId]);
+  const onPartyUpdated = useCallback((next: Party) => {
+    setStatus({ kind: 'ready', party: next });
+  }, []);
 
   if (status.kind === 'loading') {
-    return <main className="party-page"><p role="status">{t('common.loading')}</p></main>;
-  }
-  if (status.kind === 'missing' || status.kind === 'error') {
     return (
-      <main className="party-page">
-        <p className="inline-error" role="alert">
-          {status.kind === 'missing' ? t('party.notFound') : t('party.loadError')}
-        </p>
-        <Link to="/parties">{t('party.back')}</Link>
+      <main className="pw" data-testid="party-workspace">
+        {/* Content-shaped, so what arrives does not move the page under a
+            thumb that is already reaching for it. */}
+        <div className="pw-head">
+          <div className="pw-skeleton pw-skeleton--title" aria-hidden />
+        </div>
+        <PanelSkeleton rows={3} />
+        <p role="status" className="visually-hidden">{t('common.loading')}</p>
       </main>
     );
   }
 
-  const party = status.party;
+  if (status.kind === 'missing' || status.kind === 'error') {
+    return (
+      <main className="pw" data-testid="party-workspace">
+        <div className="pw-head">
+          <Link to="/parties" className="pw-back">← {t('party.back')}</Link>
+        </div>
+        <Notice
+          tone="error"
+          testId="party-load-error"
+          title={t(status.kind === 'missing' ? 'party.notFound' : 'party.loadError')}
+        >
+          <p>{t(status.kind === 'missing' ? 'party.notFoundBody' : 'party.loadErrorBody')}</p>
+        </Notice>
+      </main>
+    );
+  }
+
+  const current = status.party;
+  const workspaceFacts: WorkspaceFacts = {
+    party: current,
+    albumParty: facts.albumParty,
+    slots: facts.slots,
+    guests: facts.guests,
+    moderation: facts.moderation,
+  };
 
   return (
-    <main className="party-page" data-testid="party-workspace">
-      <nav className="party-breadcrumb">
-        <Link to="/parties">{t('party.back')}</Link>
-      </nav>
-
-      <header className="party-page-header">
-        <div>
-          <h1 data-testid="party-title">{party.title}</h1>
-          <p className="party-header-meta">
-            <span
-              className={`party-badge party-badge--${party.status}`}
-              data-testid="party-status" data-status={party.status}
-            >
-              {t(partyStatusLabelKey(party.status))}
-            </span>
-            {party.eventStartsAt && <> · {formatDate(party.eventStartsAt)}</>}
-          </p>
+    <main className="pw" data-testid="party-workspace">
+      <header className="pw-head">
+        <Link to="/parties" className="pw-back">← {t('party.back')}</Link>
+        <div className="pw-head-main">
+          <div className="pw-identity">
+            <h1 className="pw-title" data-testid="party-title">{current.title}</h1>
+            <p className="pw-head-meta">
+              {/* State is never carried by colour alone: the badge says the
+                  word, and it is a product label rather than a raw `draft`. */}
+              <span
+                className={`pw-badge pw-badge--${current.status}`}
+                data-testid="party-status" data-status={current.status}
+              >
+                {t(partyStatusLabelKey(current.status))}
+              </span>
+              {current.eventStartsAt && (
+                <>
+                  <span className="pw-dot" aria-hidden>·</span>
+                  <span>{formatDate(current.eventStartsAt)}</span>
+                </>
+              )}
+            </p>
+          </div>
         </div>
-        <PartyLifecycleButton
-          party={party}
-          onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
-        />
       </header>
 
-      {/* A tablist, not a row of links: arrow keys and roving focus are what
-          make this usable without a mouse. */}
-      <div className="party-tabs" role="tablist" aria-label={t('party.title')}>
-        {(['overview', 'before', 'guests', 'live', 'after', 'photos'] as const).map((id) => (
-          <button
-            key={id} type="button" role="tab" id={`party-tab-${id}`}
-            aria-selected={tab === id} aria-controls={`party-panel-${id}`}
-            tabIndex={tab === id ? 0 : -1}
-            className={`party-tab${tab === id ? ' is-active' : ''}`}
-            data-testid={`party-tab-${id}`}
-            onClick={() => setTab(id)}
-          >
-            {t(`party.tab.${id}` as 'party.tab.overview')}
-          </button>
-        ))}
-      </div>
+      <div className="pw-layout">
+        {/* A tablist, not a row of links: arrow keys and roving focus are what
+            make this usable without a mouse, and the same markup becomes a
+            rail on a wide screen rather than a second component. */}
+        <nav className="pw-nav" role="tablist" aria-label={t('party.section.nav')}>
+          {available.map((id) => (
+            <button
+              key={id} type="button" role="tab"
+              id={`party-tab-${id}`}
+              aria-selected={section === id}
+              aria-controls={`party-panel-${id}`}
+              tabIndex={section === id ? 0 : -1}
+              className="pw-nav-item"
+              data-live={id === 'live' ? 'true' : undefined}
+              data-testid={`party-tab-${id}`}
+              onClick={() => setSection(id)}
+            >
+              {id === 'live' && <span className="pw-nav-dot" aria-hidden />}
+              <span>{t(sectionLabelKey(id))}</span>
+              <SectionCount section={id} facts={workspaceFacts} />
+            </button>
+          ))}
+        </nav>
 
-      <div
-        role="tabpanel" id={`party-panel-${tab}`} aria-labelledby={`party-tab-${tab}`}
-        className="party-panel"
-      >
-        {tab === 'overview' && (
-          <PartyOverview
-            party={party}
-            albumParty={albumParty}
-            onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
-            onAlbumPartyUpdated={setAlbumParty}
-          />
-        )}
-        {tab === 'before' && (
-          <div className="party-overview">
-            {/* The photograph at the top of the invitation, decided once for the
-                whole page — separate from the invitation slot's own. */}
-            <PartyCoverCard
-              party={party} which="invitation" albumId={mainAlbumId}
-              onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
+        <div
+          role="tabpanel"
+          id={`party-panel-${section}`}
+          aria-labelledby={`party-tab-${section}`}
+          className="pw-panels"
+        >
+          {section === 'summary' && (
+            <PartySummarySection
+              facts={workspaceFacts}
+              onNavigate={setSection}
+              onPartyUpdated={onPartyUpdated}
+              onAlbumPartyUpdated={facts.setAlbumParty}
             />
-            <PartyContentTab
-              partyId={party.id}
-              albumId={mainAlbumId}
-              slots={contentSlots}
-              onSlotSaved={onSlotSaved}
-              kinds={['invitation', 'location', 'dress-code', 'menu', 'info']}
-              phases={['before', 'live']}
+          )}
+
+          {section === 'live' && (
+            <PartyLiveSection
+              facts={workspaceFacts}
+              onNavigate={setSection}
+              onOpenGuests={openGuests}
+              onPartyUpdated={onPartyUpdated}
+              onRefresh={facts.refresh}
             />
-          </div>
-        )}
-        {tab === 'guests' && (
-          <PartyGuestListTab
-            party={party}
-            onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
-          />
-        )}
-        {tab === 'after' && (
-          <div className="party-overview">
-            <PartyContentTab
-              partyId={party.id}
-              albumId={mainAlbumId}
-              slots={contentSlots}
-              onSlotSaved={onSlotSaved}
-              kinds={['thank-you']}
-              phases={['after']}
+          )}
+
+          {section === 'experience' && (
+            <PartyExperienceSection
+              party={current}
+              albumParty={facts.albumParty}
+              slots={facts.slots}
+              onPartyUpdated={onPartyUpdated}
+              onSlotSaved={facts.setSlot}
             />
-            {/* The memories' own window, which may OUTLIVE guest access — that
-                is the whole point of it, and why it is configured here where it
-                means something rather than beside the guest switch. */}
-            <section className="party-card" data-testid="party-library-window">
-              <h3>{t('party.tab.after')}</h3>
-              <label className="party-field">
-                <span>{t('party.after.libraryLabel')}</span>
-                <input
-                  type="datetime-local" value={libraryDraft} disabled={librarySaving}
-                  aria-label={t('party.after.libraryLabel')}
-                  onChange={(e) => setLibraryDraft(e.target.value)}
-                />
-              </label>
-              <p className="muted">{t('party.after.libraryHelp')}</p>
-              <button
-                type="button" className="row-action-primary" data-testid="party-library-save"
-                disabled={librarySaving} onClick={() => void saveLibraryWindow()}
-              >
-                {t('party.overview.save')}
-              </button>
-            </section>
-            {/* The informational slots the host may also want to keep visible
-                afterwards — the same cards, scoped to the After surface. */}
-            <PartyContentTab
-              partyId={party.id}
-              albumId={mainAlbumId}
-              slots={contentSlots}
-              onSlotSaved={onSlotSaved}
-              kinds={['location', 'info']}
-              phases={['after']}
+          )}
+
+          {section === 'guests' && (
+            <PartyGuestListTab party={current} onPartyUpdated={onPartyUpdated} />
+          )}
+
+          {section === 'photos' && (
+            <PartyPhotosSection
+              party={current}
+              albumParty={facts.albumParty}
+              moderation={facts.moderation}
+              onPartyUpdated={onPartyUpdated}
+              onAlbumPartyUpdated={facts.setAlbumParty}
+              onNavigate={setSection}
             />
-          </div>
-        )}
-        {tab === 'live' && (
-          <div className="party-overview">
-            {/* The first choice for the party's own cover while it is on; the
-                invitation's carries on without it. */}
-            <PartyCoverCard
-              party={party} which="live" albumId={mainAlbumId}
-              onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
+          )}
+
+          {section === 'activities' && (
+            <PartyActivitiesSection
+              party={current}
+              albumParty={facts.albumParty}
+              moderation={facts.moderation}
+              onAlbumPartyUpdated={facts.setAlbumParty}
             />
-            <PartyLiveTab
-              albumId={mainAlbumId}
-              albumParty={albumParty}
-              onAlbumPartyUpdated={setAlbumParty}
+          )}
+
+          {section === 'screens' && (
+            <PartyScreensSection
+              party={current}
+              albumParty={facts.albumParty}
+              onAlbumPartyUpdated={facts.setAlbumParty}
             />
-          </div>
-        )}
-        {tab === 'photos' && (
-          <section className="party-card" data-testid="party-photos">
-            <h3>{t('party.photos.heading')}</h3>
-            {main ? (
-              <>
-                {/* No second album browser: the Media Library and the album
-                    page are where photographs are looked at, and this points
-                    at them rather than reproducing them. */}
-                <p className="muted">{t('party.photos.help')}</p>
-                <p className="party-album-name">{main.albumName}</p>
-                <p className="party-card-actions">
-                  <Link to={`/albums/${main.albumId}`}>{t('party.album.open')}</Link>
-                </p>
-              </>
-            ) : (
-              <PartyAlbumSection
-                party={party}
-                onPartyUpdated={(next) => setStatus({ kind: 'ready', party: next })}
-              />
-            )}
-          </section>
-        )}
+          )}
+
+          {section === 'settings' && (
+            <PartySettingsSection
+              party={current}
+              albumParty={facts.albumParty}
+              onPartyUpdated={onPartyUpdated}
+              onAlbumPartyUpdated={facts.setAlbumParty}
+            />
+          )}
+        </div>
       </div>
     </main>
   );
 }
 
-// One card per kind, in the server's order, filtered to the kinds this surface
-// is about. It renders the slots it is given rather than inventing any: an
-// untouched slot arrives at version 0 with the product's default visibility.
-function PartyContentTab({
-  partyId, albumId, slots, kinds, phases, onSlotSaved,
+/**
+ * What is waiting in a section, beside its name — and nothing when nothing is.
+ *
+ * A badge that always shows a number teaches a host to stop reading it. These
+ * appear only when there is something to act on, which is what makes them worth
+ * a glance during an evening.
+ */
+function SectionCount({
+  section, facts,
 }: {
-  partyId: string;
-  /** The party's album, offered as a place to choose a photograph from — or null. */
-  albumId: string | null;
-  slots: readonly PartyGuestContentSlot[];
-  kinds: readonly PartyGuestContentKind[];
-  phases: readonly ('before' | 'live' | 'after')[];
-  onSlotSaved(next: PartyGuestContentSlot): void;
-}) {
-  return (
-    <div className="party-overview">
-      {slots
-        .filter((slot) => kinds.includes(slot.kind))
-        .map((slot) => (
-          <PartyContentCard
-            key={slot.kind}
-            slot={slot}
-            partyId={partyId}
-            albumId={albumId}
-            phases={phases}
-            onSaved={onSlotSaved}
-          />
-        ))}
-    </div>
-  );
-}
-
-// The ONE lifecycle control, and only when there is a real move to make.
-// `draft` has none — a party is published by opening it to guests — and `ended`
-// has none, because there is no re-open transition and a button that answered
-// 400 would be worse than no button.
-function PartyLifecycleButton({
-  party, onPartyUpdated,
-}: {
-  party: Party;
-  onPartyUpdated(next: Party): void;
+  section: WorkspaceSection;
+  facts: WorkspaceFacts;
 }) {
   const { t } = useI18n();
-  const { invalidateAuth } = useAuth();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const primary = partyPrimaryAction(party.status);
-  if (!primary) return null;
-
-  async function run(action: PartyLifecycleAction) {
-    if (action === 'end-live' && !window.confirm(t('party.action.confirmEnd'))) return;
-    setBusy(true); setError(null);
-    try {
-      onPartyUpdated(await transitionParty(party.id, action, party.version));
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-      // A refusal carries the CURRENT party, so the page adopts the server's
-      // state rather than keeping the one it acted on. That is what makes a
-      // version conflict a refresh instead of an overwrite.
-      const body = (err as ApiError).body as { party?: Party } | undefined;
-      if (body?.party) onPartyUpdated(body.party);
-      setError(t('party.action.failed'));
-    } finally { setBusy(false); }
-  }
-
+  const waiting = section === 'photos'
+    ? facts.moderation?.uploads ?? 0
+    : section === 'activities'
+      ? facts.moderation?.messages ?? 0
+      : 0;
+  if (waiting <= 0) return null;
   return (
-    <div className="party-primary-action">
-      <button
-        type="button" className="row-action-primary" data-testid="party-lifecycle-action"
-        disabled={busy} onClick={() => void run(primary.action)}
-      >
-        {t(primary.labelKey)}
-      </button>
-      {error && <p className="inline-error" role="alert">{error}</p>}
-    </div>
-  );
-}
-
-function PartyOverview({
-  party, albumParty, onPartyUpdated, onAlbumPartyUpdated,
-}: {
-  party: Party;
-  albumParty: AlbumPartyStatus | null;
-  onPartyUpdated(next: Party): void;
-  onAlbumPartyUpdated(next: AlbumPartyStatus): void;
-}) {
-  const { t } = useI18n();
-  const { invalidateAuth } = useAuth();
-  const main = mainMediaSource(party);
-  const [draft, setDraft] = useState({
-    title: party.title,
-    description: party.description ?? '',
-    eventStartsAt: toLocalInput(party.eventStartsAt),
-    guestAccessExpiresAt: toLocalInput(party.guestAccessExpiresAt),
-  });
-  const [busy, setBusy] = useState(false);
-  const [state, setState] = useState<'idle' | 'saved' | 'conflict' | 'failed'>('idle');
-
-  // Re-seeded whenever the SERVER's version moves — including after a conflict,
-  // which is how the form adopts what actually happened instead of insisting on
-  // what the host typed against a stale read.
-  useEffect(() => {
-    setDraft({
-      title: party.title,
-      description: party.description ?? '',
-      eventStartsAt: toLocalInput(party.eventStartsAt),
-      guestAccessExpiresAt: toLocalInput(party.guestAccessExpiresAt),
-    });
-  }, [party.version, party.title, party.description, party.eventStartsAt, party.guestAccessExpiresAt]);
-
-  const dirty =
-    draft.title.trim() !== party.title
-    || draft.description.trim() !== (party.description ?? '')
-    || draft.eventStartsAt !== toLocalInput(party.eventStartsAt)
-    || draft.guestAccessExpiresAt !== toLocalInput(party.guestAccessExpiresAt);
-
-  async function save() {
-    if (draft.title.trim() === '') return;
-    setBusy(true); setState('idle');
-    try {
-      onPartyUpdated(await updateParty(party.id, {
-        title: draft.title.trim(),
-        description: draft.description.trim() || null,
-        eventStartsAt: fromLocalInput(draft.eventStartsAt),
-        guestAccessExpiresAt: fromLocalInput(draft.guestAccessExpiresAt),
-        version: party.version,
-      }));
-      setState('saved');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-      const body = (err as ApiError).body as { party?: Party } | undefined;
-      if (err instanceof ApiError && err.status === 409 && body?.party) {
-        onPartyUpdated(body.party);
-        setState('conflict');
-      } else {
-        setState('failed');
-      }
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <div className="party-overview">
-      <section className="party-card" data-testid="party-details">
-        <h3>{t('party.overview.details')}</h3>
-        <label className="party-field">
-          <span>{t('party.overview.titleLabel')}</span>
-          {/* Renaming a party renames the PARTY. The album keeps its own name:
-              they were only ever the same string because one was made from the
-              other, and there is deliberately no sync in either direction. */}
-          <input
-            value={draft.title} disabled={busy}
-            aria-label={t('party.overview.titleLabel')}
-            onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))}
-          />
-        </label>
-        <label className="party-field">
-          <span>{t('party.overview.dateLabel')}</span>
-          <input
-            type="datetime-local" value={draft.eventStartsAt} disabled={busy}
-            aria-label={t('party.overview.dateLabel')}
-            onChange={(e) => setDraft((d) => ({ ...d, eventStartsAt: e.target.value }))}
-          />
-        </label>
-        <label className="party-field">
-          <span>{t('party.overview.descriptionLabel')}</span>
-          <textarea
-            value={draft.description} rows={2} disabled={busy}
-            aria-label={t('party.overview.descriptionLabel')}
-            onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-          />
-        </label>
-        {/* The party's OWN guest window, independent of any one QR's expiry: it
-            closes every capability at once, and it is the public seam that
-            enforces it rather than anything on this page. It is edited here
-            because it is the party's data and shares its version — one form,
-            one save, one concurrency check. */}
-        <label className="party-field">
-          <span>{t('party.guest.expiresLabel')}</span>
-          <input
-            type="datetime-local" value={draft.guestAccessExpiresAt} disabled={busy}
-            aria-label={t('party.guest.expiresLabel')}
-            onChange={(e) => setDraft((d) => ({ ...d, guestAccessExpiresAt: e.target.value }))}
-          />
-        </label>
-        <p className="muted">{t('party.guest.expiresHelp')}</p>
-        <button
-          type="button" className="row-action-primary" data-testid="party-details-save"
-          disabled={busy || !dirty || draft.title.trim() === ''} onClick={() => void save()}
-        >
-          {t('party.overview.save')}
-        </button>
-        {state === 'saved' && <p className="muted" role="status">{t('party.overview.saved')}</p>}
-        {state === 'conflict' && (
-          <p className="inline-error" role="alert" data-testid="party-conflict">
-            {t('party.overview.conflict')}
-          </p>
-        )}
-        {state === 'failed' && (
-          <p className="inline-error" role="alert">{t('party.overview.saveFailed')}</p>
-        )}
-      </section>
-
-      <PartyAlbumSection party={party} onPartyUpdated={onPartyUpdated} />
-
-      {main ? (
-        <PartyGuestAccessSection
-          party={party}
-          albumId={main.albumId}
-          albumParty={albumParty}
-          onAlbumPartyUpdated={onAlbumPartyUpdated}
-        />
-      ) : (
-        <section className="party-card party-card--empty" data-testid="party-guest-needs-album">
-          <h3>{t('party.guest.heading')}</h3>
-          <p className="muted">{t('party.guest.needsAlbum')}</p>
-        </section>
-      )}
-
-      {/* A DESCRIPTION of where the evening is, never a state editor: no step
-          here can be clicked to move the party. */}
-      <section className="party-card" data-testid="party-timeline">
-        <h3>{t('party.overview.timeline')}</h3>
-        <ol className="party-timeline">
-          {PARTY_TIMELINE.map((step) => {
-            const stepState = timelineStepState(step, party.status);
-            return (
-              <li
-                key={step}
-                className={`party-timeline-step is-${stepState}`}
-                data-step={step} data-state={stepState}
-                aria-current={stepState === 'current' ? 'step' : undefined}
-              >
-                <span className="party-timeline-label">{t(partyStatusLabelKey(step))}</span>
-                {stepState !== 'upcoming' && (
-                  <span className="visually-hidden">
-                    {stepState === 'current'
-                      ? t('party.overview.stepCurrent') : t('party.overview.stepDone')}
-                  </span>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-      </section>
-
-      <PartyDuplicateSection party={party} />
-
-      <PartyTeardownSection party={party} onPartyUpdated={onPartyUpdated} />
-    </div>
-  );
-}
-
-// Setting the same evening up again.
-//
-// A host who runs a monthly party rebuilds the same thing every time: the
-// slots, the deck, the timings, the quotas, the print budgets. This copies the
-// DECISIONS and none of the history — the clone is a Draft with its own album,
-// its own deck and brand-new tokens, and nobody who came to the party being
-// copied is in it.
-//
-// The copy is stated plainly before the host presses, because "duplicate" is a
-// word that could mean anything from an alias to a second copy of every
-// photograph, and it is neither: the photographs are SHARED through ordinary
-// album membership, so the clone can be edited freely and no byte is written
-// twice.
-function PartyDuplicateSection({ party }: { party: Party }) {
-  const { t } = useI18n();
-  const { invalidateAuth } = useAuth();
-  const navigate = useNavigate();
-  const [busy, setBusy] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  async function run() {
-    setBusy(true); setFailed(false);
-    try {
-      const copy = await duplicateParty(party.id);
-      // Straight into the copy: the host duplicated it in order to edit it.
-      navigate(`/parties/${copy.id}`);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-      setFailed(true);
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <section className="party-card" data-testid="party-duplicate">
-      <h3>{t('party.duplicate.heading')}</h3>
-      <p className="muted">{t('party.duplicate.help')}</p>
-      <p className="muted">{t('party.duplicate.excludes')}</p>
-      <button
-        type="button" className="row-action" data-testid="party-duplicate-start"
-        disabled={busy} onClick={() => void run()}
-      >
-        {busy ? t('party.duplicate.busy') : t('party.duplicate.start')}
-      </button>
-      {failed && <p className="inline-error" role="alert">{t('party.duplicate.failed')}</p>}
-    </section>
-  );
-}
-
-// Deleting the party, and the ONE place in the product that can.
-//
-// The endpoint and its client have existed since the party became a root; what
-// was missing was a way to reach them, so a party could be created and never
-// removed. That gap is why this is a plain section rather than a menu item
-// hidden behind an overflow: the host must be able to find it.
-//
-// Two things are deliberate. The confirmation is INLINE rather than a
-// window.confirm, because the sentence that matters — the album and the
-// approved photographs survive — does not fit in a browser dialog and is
-// exactly what the host is afraid of when they hesitate here. And the version
-// travels with the request, so a party somebody else has edited meanwhile is
-// refused with its current state rather than torn down from a stale read.
-function PartyTeardownSection({
-  party, onPartyUpdated,
-}: {
-  party: Party;
-  onPartyUpdated(next: Party): void;
-}) {
-  const { t } = useI18n();
-  const { invalidateAuth } = useAuth();
-  const navigate = useNavigate();
-  const [asking, setAsking] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [state, setState] = useState<'idle' | 'conflict' | 'failed'>('idle');
-
-  async function run() {
-    setBusy(true); setState('idle');
-    try {
-      await tearDownParty(party.id, party.version);
-      // The party no longer exists, so there is nothing left for this route to
-      // load: go back to the list rather than re-fetching a 404.
-      navigate('/parties');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-      const body = (err as ApiError).body as { party?: Party } | undefined;
-      if (err instanceof ApiError && err.status === 409 && body?.party) {
-        onPartyUpdated(body.party);
-        setState('conflict');
-      } else {
-        setState('failed');
-      }
-      setAsking(false);
-    } finally { setBusy(false); }
-  }
-
-  return (
-    <section className="party-card party-card--danger" data-testid="party-teardown">
-      <h3>{t('party.teardown.heading')}</h3>
-      <p className="muted">{t('party.teardown.help')}</p>
-      {/* Stated BEFORE the host commits, not in a receipt afterwards. */}
-      <p className="muted">{t('party.teardown.keeps')}</p>
-
-      {!asking ? (
-        <button
-          type="button" className="row-action row-action-danger" data-testid="party-teardown-start"
-          onClick={() => { setState('idle'); setAsking(true); }}
-        >
-          {t('party.teardown.start')}
-        </button>
-      ) : (
-        <div className="party-teardown-confirm" data-testid="party-teardown-confirm">
-          <p role="alert">{t('party.teardown.confirmQuestion', { title: party.title })}</p>
-          <button
-            type="button" className="row-action row-action-danger" data-testid="party-teardown-confirm-yes"
-            disabled={busy} onClick={() => void run()}
-          >
-            {busy ? t('party.teardown.busy') : t('party.teardown.confirm')}
-          </button>
-          <button
-            type="button" className="row-action" data-testid="party-teardown-cancel"
-            disabled={busy} onClick={() => setAsking(false)}
-          >
-            {t('party.teardown.cancel')}
-          </button>
-        </div>
-      )}
-
-      {state === 'conflict' && (
-        <p className="inline-error" role="alert" data-testid="party-teardown-conflict">
-          {t('party.teardown.conflict')}
-        </p>
-      )}
-      {state === 'failed' && (
-        <p className="inline-error" role="alert">{t('party.teardown.failed')}</p>
-      )}
-    </section>
+    <>
+      <span className="pw-nav-count" aria-hidden>{waiting}</span>
+      <span className="visually-hidden">{t('party.photos.pending', { count: waiting })}</span>
+    </>
   );
 }
