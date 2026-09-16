@@ -1130,3 +1130,407 @@
 
 /* While the party is on, the arrivals read from across a room. */
 .pw-panel--feature[data-testid='party-live-arrivals'] .pw-stat dd { font-size: 2rem; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Cards — a list of parties, each one a whole tap target
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--pw-2);
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 52rem) {
+  .pw-cards { grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); }
+}
+
+.pw-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-1);
+  min-height: var(--pw-tap-lg);
+  padding: var(--pw-3) var(--pw-4);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-panel);
+  background: var(--pw-panel);
+  color: inherit;
+  text-decoration: none;
+}
+
+.pw-card:hover { border-color: var(--pw-line-strong); background: var(--pw-quiet); }
+.pw-card:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.pw-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pw-2) var(--pw-3);
+}
+
+.pw-card-title {
+  font-family: var(--font-heading);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pw-card-meta { color: var(--text-secondary); font-size: 0.875rem; }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Moderation rows — a thumbnail, what it is, and what may be done to it
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.pw-mod-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+
+.pw-mod-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--pw-2) var(--pw-3);
+  padding-block: var(--pw-3);
+  border-block-start: 1px solid var(--pw-line);
+}
+
+.pw-mod-row:first-child { border-block-start: 0; padding-block-start: 0; }
+
+.pw-mod-thumb {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+}
+
+.pw-mod-text { min-width: 0; }
+.pw-mod-name { display: block; font-size: 0.9375rem; font-weight: 500; overflow-wrap: anywhere; }
+.pw-mod-meta { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; }
+
+/* On a phone the actions take their own row under the picture, at full width:
+   approving and rejecting are decisions, and a decision is not a 24px target. */
+.pw-mod-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pw-2);
+}
+
+.pw-mod-actions > .pw-btn { flex: 1 1 8rem; }
+
+@media (min-width: 40rem) {
+  .pw-mod-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .pw-mod-actions { grid-column: auto; }
+  .pw-mod-actions > .pw-btn { flex: 0 0 auto; }
+}
+
+.pw-mod-state { font-weight: 500; color: var(--text-primary); }
+.pw-mod-state[data-status='pending'] { color: var(--danger); }
+.pw-mod-state[data-status='approved'] { color: var(--success); }
+
+/* A greeting has no thumbnail: its own words are the content. */
+.pw-mod-row--message { grid-template-columns: minmax(0, 1fr); }
+
+@media (min-width: 40rem) {
+  .pw-mod-row--message { grid-template-columns: minmax(0, 1fr) auto; }
+}
+
+.pw-message-body {
+  display: block;
+  margin-block-start: 0.25rem;
+  max-width: 62ch;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.pw-mod-name .pw-badge { margin-inline-start: var(--pw-2); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONE LOOK FOR EVERY CONTROL IN THE PARTY
+   ═══════════════════════════════════════════════════════════════════════════
+
+   The workspace mounts panels that were written before it — the guest console,
+   the RSVP questions, the print settings, the game deck — each built from the
+   application's older primitives (`row-action`, `party-card`, `field`,
+   `muted`). Their markup is correct and well tested, and rewriting it to change
+   a border radius would be churn with a real risk attached.
+
+   So the primitives are re-dressed HERE, scoped to `.pw`, and each one renders
+   as its `pw-` equivalent. Two things follow: a panel written in either
+   vocabulary looks the same, and a control that was already the right size
+   (the console's 44px targets) keeps its own rule, because these set the
+   appearance and leave the geometry to whoever owns it.
+
+   Nothing outside the party is touched: the same classes elsewhere in NubArca
+   are unaffected. */
+
+.pw .row-action,
+.pw .row-action-primary,
+.pw button:not([class]),
+.pw .btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--pw-2);
+  min-height: var(--pw-tap);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.pw .row-action:hover:not(:disabled),
+.pw button:not([class]):hover:not(:disabled) {
+  border-color: var(--pw-line-strong);
+  background: var(--pw-quiet);
+  color: var(--text-primary);
+}
+
+.pw .row-action-primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-weight: 600;
+}
+
+.pw .row-action-primary:hover:not(:disabled) {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+}
+
+.pw .btn-danger,
+.pw .row-action-danger,
+.pw .row-action-destructive {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: transparent;
+}
+
+.pw .btn-danger:hover:not(:disabled),
+.pw .row-action-danger:hover:not(:disabled),
+.pw .row-action-destructive:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.pw .row-action:focus-visible,
+.pw .row-action-primary:focus-visible,
+.pw .btn-danger:focus-visible,
+.pw button:not([class]):focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw .row-action:disabled,
+.pw .row-action-primary:disabled,
+.pw .btn-danger:disabled,
+.pw button:not([class]):disabled {
+  cursor: not-allowed;
+  opacity: 1;
+  border-color: var(--pw-line);
+  background: var(--pw-quiet);
+  color: var(--text-muted);
+}
+
+.pw .row-action-primary:disabled {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 35%, var(--pw-quiet));
+  color: color-mix(in srgb, var(--accent-contrast) 70%, transparent);
+}
+
+/* Panels written in the older vocabulary. */
+.pw .party-card {
+  gap: var(--pw-3);
+  padding: var(--pw-4);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-panel);
+  background: var(--pw-panel);
+}
+
+.pw .party-card > h2,
+.pw .party-card > h3 {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.pw .party-card--empty { border-style: dashed; background: transparent; }
+.pw .party-card-actions { gap: var(--pw-2); }
+
+/* Fields written in the older vocabulary. */
+.pw .party-field,
+.pw .field {
+  display: grid;
+  gap: var(--pw-1);
+  min-width: 0;
+}
+
+.pw .party-field > span:first-child,
+.pw .field > span:first-child {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+.pw .party-field input,
+.pw .party-field textarea,
+.pw .party-field select,
+.pw .field input,
+.pw .field textarea,
+.pw .field select,
+.pw .album-party-number input,
+.pw .form-grid input,
+.pw .form-grid select {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: var(--pw-tap);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.9375rem;
+}
+
+.pw .party-field input:focus-visible,
+.pw .party-field textarea:focus-visible,
+.pw .field input:focus-visible,
+.pw .field textarea:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+/* A checkbox in a sentence still gets a target a thumb can hit. */
+.pw .party-toggle,
+.pw .album-tv-label {
+  display: flex;
+  align-items: center;
+  gap: var(--pw-2);
+  min-height: var(--pw-tap);
+  cursor: pointer;
+}
+
+.pw .party-toggle input,
+.pw .album-tv-label input {
+  width: 1.125rem;
+  height: 1.125rem;
+  accent-color: var(--accent);
+}
+
+/* Secondary text and inline problems, in the party's own voice. */
+.pw .muted { color: var(--text-secondary); font-size: 0.875rem; line-height: 1.5; }
+.pw .inline-error { color: var(--danger); font-size: 0.875rem; margin: 0; }
+.pw .empty-state { color: var(--text-secondary); font-size: 0.9375rem; }
+
+.pw fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.pw legend { padding: 0; font-size: 0.8125rem; font-weight: 500; color: var(--text-secondary); }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Where "the top of the screen" is, for anything that sticks to it
+   ───────────────────────────────────────────────────────────────────────────
+
+   On a phone the section rail is itself stuck at the top of the scrollport, so
+   a panel that sticks at `top: 0` slides UNDER it and disappears — which is
+   exactly what would happen to the guest console's search at the door. The rail
+   publishes its own height instead, and everything that sticks inside the
+   workspace offsets by it. From 64rem the rail leaves the flow and becomes a
+   column, so the offset goes back to nothing. */
+
+.pw {
+  /* item (2.75rem) + block padding (2 x 0.5rem) + hairline */
+  --pw-sticky-top: calc(3.75rem + 1px);
+}
+
+@media (min-width: 64rem) {
+  .pw { --pw-sticky-top: 0px; }
+}
+
+.pw .guest-toolbar {
+  top: var(--pw-sticky-top);
+  background: var(--surface-canvas);
+}
+
+@media (min-width: 64rem) {
+  .pw .guest-detail-pane { top: var(--pw-4); }
+}
+
+/* The guest console's own heading is a SECTION heading: it is the one panel
+   that came with its own, and it reads like every other section's. */
+.pw .guest-console-head {
+  align-items: flex-start;
+  gap: var(--pw-2) var(--pw-4);
+}
+
+.pw .guest-console-head h2 {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The console's own numbers, in the workspace's shape. */
+.pw .guest-metrics { gap: var(--pw-2); }
+
+.pw .guest-metric {
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-quiet);
+}
+
+.pw .guest-metric dt { color: var(--text-secondary); font-size: 0.75rem; opacity: 1; }
+.pw .guest-metric dd {
+  margin: 0.125rem 0 0;
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw .guest-card,
+.pw .guest-detail-section {
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-panel);
+  background: var(--pw-panel);
+  padding: var(--pw-3) var(--pw-4);
+}
+
+.pw .guest-card-title,
+.pw .guest-detail-head h3 { font-family: var(--font-heading); font-weight: 600; }
+
+.pw .guest-filter[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--accent-subtle);
+}
+
+.pw .guest-skeleton {
+  border-radius: var(--pw-radius-panel);
+  border-color: var(--pw-line);
+  background: var(--pw-quiet);
+}
+
+.pw .guest-chip {
+  border-color: var(--pw-line);
+  border-radius: var(--pw-radius-pill);
+  color: var(--text-secondary);
+}
+
+.pw .guest-chip[data-status='attending'] { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }

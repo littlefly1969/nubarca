@@ -454,6 +454,12 @@ const it = {
   'party.create.cancel': 'Annulla',
   'party.create.failed': 'Non \u00e8 stato possibile creare la festa.',
   'party.create.invalid': 'Una festa ha bisogno di un nome.',
+  'party.create.note': 'Il resto — album, invito, schermi — si decide dopo, nella festa.',
+
+  // I tre gruppi in cui l'elenco si legge a colpo d'occhio.
+  'party.group.now': 'Adesso',
+  'party.group.coming': 'In arrivo',
+  'party.group.over': 'Concluse',
 
   // --- Festa: la console dell'organizzatore ---
   //
@@ -1250,6 +1256,12 @@ const it = {
   // --- Owner-side party upload moderation ---
   'partyUploads.backToAlbum': '← Torna all’album',
   'partyUploads.title': 'Caricamenti party',
+  'partyUploads.backToParty': 'Torna alla festa',
+  'partyUploads.rule': 'Come entrano le foto',
+  'partyUploads.emptyTitle': 'Nessun contributo, per ora',
+  'partyUploads.sectionPendingNote': 'Non sono pubbliche finché non le approvi tu.',
+  'partyUploads.sectionVisibleNote': 'Gli ospiti le vedono nella festa.',
+  'partyUploads.sectionRemovedNote': 'Fuori dalla festa. Puoi rimetterle quando vuoi.',
   'partyUploads.intro':
     'Foto aggiunte dagli ospiti tramite il link di caricamento party. I caricamenti nascosti, rifiutati o rimossi dall’album non compaiono nella vista party né nello slideshow TV, ma il file salvato resta nella tua libreria finché non lo elimini separatamente.',
   'partyUploads.requireApproval': 'Richiedi approvazione per i caricamenti party',
@@ -1311,6 +1323,11 @@ const it = {
 
   // --- Owner/delegate party message moderation ---
   'partyMessages.title': 'Messaggi',
+  'partyMessages.rule': 'Come entrano i messaggi',
+  'partyMessages.queue': 'I messaggi',
+  'partyMessages.filters': 'Filtra i messaggi',
+  'partyMessages.emptyTitle': 'Nessun messaggio, per ora',
+  'partyMessages.noPartyTitle': 'La festa non è aperta',
   'partyMessages.intro':
     'Messaggi lasciati dagli ospiti. Quelli live scorrono nella fascia in basso sulla TV; un messaggio promosso a Hero compare ogni tanto a tutto schermo.',
   'partyMessages.requireApproval': 'I messaggi degli ospiti richiedono approvazione',

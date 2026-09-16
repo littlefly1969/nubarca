@@ -70,6 +70,33 @@ describe('PartiesPage', () => {
     expect(screen.queryByText('ended')).not.toBeInTheDocument();
   });
 
+  it('groups the list into what is happening, coming and over', async () => {
+    installFetchMock({
+      'GET /api/parties': () => jsonResponse([
+        party({ id: 'ended', title: 'Conclusa', status: 'ended' }),
+        party({ id: 'live', title: 'Stasera', status: 'live' }),
+        party({ id: 'draft', title: 'Bozza', status: 'draft' }),
+      ]),
+    });
+    render(page());
+
+    // A reading aid, not a filter: every party is still on the page.
+    expect(await screen.findByTestId('party-group-now')).toHaveTextContent('Stasera');
+    expect(screen.getByTestId('party-group-coming')).toHaveTextContent('Bozza');
+    expect(screen.getByTestId('party-group-over')).toHaveTextContent('Conclusa');
+  });
+
+  it('does not put a heading over a list of one kind', async () => {
+    // A group heading above the only group there is says nothing.
+    installFetchMock({
+      'GET /api/parties': () => jsonResponse([party({ id: 'a' }), party({ id: 'b', title: 'Altra' })]),
+    });
+    render(page());
+
+    await screen.findByTestId('party-group-coming');
+    expect(screen.queryByText('In arrivo')).not.toBeInTheDocument();
+  });
+
   it('creates a party from a name alone and opens it', async () => {
     const mock = installFetchMock({
       'GET /api/parties': () => jsonResponse([]),

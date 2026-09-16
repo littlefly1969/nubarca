@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   getAlbumPartySettings,
   listPartyUploads,
@@ -11,6 +11,8 @@ import {
 import { ApiError } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
+import { Badge, Button, EmptyState, Notice, Panel, PanelSkeleton, SwitchRow } from '../party/workspace/ui';
+import '../party/workspace/PartyWorkspace.css';
 
 type Status =
   | { kind: 'loading' }
@@ -32,6 +34,10 @@ const STATUS_LABEL_KEY: Record<PartyUploadItem['status'], MessageKey> = {
 export function PartyUploadsPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const navigate = useNavigate();
+  // The queue is reached FROM a party, and its own back link returns there.
+  // Falling back to the album keeps an old bookmark working.
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -95,15 +101,36 @@ export function PartyUploadsPage() {
     }
   };
 
+  const back = partyId
+    ? { to: `/parties/${partyId}?section=photos`, label: t('partyUploads.backToParty') }
+    : { to: `/albums/${albumId}`, label: t('partyUploads.backToAlbum') };
+
   if (status.kind === 'loading') {
-    return <div className="page"><p>{t('common.loading')}</p></div>;
+    return (
+      <main className="pw" data-testid="party-uploads-page">
+        <header className="pw-head">
+          <div className="pw-skeleton pw-skeleton--title" aria-hidden />
+        </header>
+        <PanelSkeleton rows={2} />
+        <p role="status" className="visually-hidden">{t('common.loading')}</p>
+      </main>
+    );
   }
   if (status.kind === 'error') {
     return (
-      <div className="page">
-        <p className="error-message" data-testid="party-uploads-error">{status.message}</p>
-        <button type="button" onClick={load}>{t('common.retry')}</button>
-      </div>
+      <main className="pw" data-testid="party-uploads-page">
+        <header className="pw-head">
+          <Link to={back.to} className="pw-back">← {back.label}</Link>
+        </header>
+        <Notice
+          tone="error"
+          testId="party-uploads-error"
+          title={status.message}
+          actions={<Button onClick={load}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.loadErrorBody')}</p>
+        </Notice>
+      </main>
     );
   }
 
@@ -114,103 +141,127 @@ export function PartyUploadsPage() {
     i.status === 'hidden' || i.status === 'rejected' || i.status === 'removed_from_album');
 
   return (
-    <div className="page party-uploads-page">
-      <p>
-        <Link to={`/albums/${albumId}`}>{t('partyUploads.backToAlbum')}</Link>
-      </p>
-      <h1>{t('partyUploads.title')}</h1>
-      <p className="muted">{t('partyUploads.intro')}</p>
+    <main className="pw" data-testid="party-uploads-page">
+      <header className="pw-head">
+        <Link to={back.to} className="pw-back">← {back.label}</Link>
+        <div className="pw-head-main">
+          <div className="pw-identity">
+            <h1 className="pw-title">{t('partyUploads.title')}</h1>
+            <p className="pw-section-lede">{t('partyUploads.intro')}</p>
+          </div>
+        </div>
+      </header>
 
-      <div className="album-party-approval" data-testid="approval-toggle">
-        <label className="album-tv-label">
-          <input
-            type="checkbox"
-            checked={list.requireUploadApproval}
-            disabled={busy}
-            onChange={(e) => void handleToggleApproval(e.target.checked)}
-            aria-label={t('partyUploads.requireApproval')}
+      <div className="pw-panels">
+        {/* The rule lives WITH the queue it explains: this is the answer to
+            "why are these waiting", so it is not a second copy of a switch
+            kept somewhere else. */}
+        <Panel
+          title={t('partyUploads.rule')}
+          testId="approval-toggle"
+          headingLevel={2}
+        >
+          <div className="pw-rows">
+            <SwitchRow
+              testId="party-uploads-approval"
+              label={t('partyUploads.requireApproval')}
+              note={t('partyUploads.requireApprovalHelp')}
+              checked={list.requireUploadApproval}
+              disabled={busy}
+              onChange={(next) => void handleToggleApproval(next)}
+            />
+          </div>
+        </Panel>
+
+        {list.items.length === 0 && (
+          <EmptyState
+            testId="party-uploads-empty"
+            title={t('partyUploads.emptyTitle')}
+            body={t('partyUploads.empty')}
           />
-          <span>{t('partyUploads.requireApproval')}</span>
-        </label>
-        <p className="muted">{t('partyUploads.requireApprovalHelp')}</p>
+        )}
+
+        {pending.length > 0 && (
+          <Panel
+            title={t('partyUploads.sectionPending')}
+            note={t('partyUploads.sectionPendingNote')}
+            testId="party-uploads-pending"
+            headingLevel={2}
+            aside={<Badge kind="warn">{t('party.photos.pending', { count: pending.length })}</Badge>}
+          >
+            <ul className="pw-mod-list">
+              {pending.map((item) => (
+                <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
+                  <Button
+                    tone="primary"
+                    disabled={busy}
+                    aria-label={t('partyUploads.approveLabel', { name: item.name })}
+                    onClick={() => void handleModerate(item, 'approve')}
+                  >
+                    {t('partyUploads.approve')}
+                  </Button>
+                  <Button
+                    tone="danger"
+                    disabled={busy}
+                    aria-label={t('partyUploads.rejectLabel', { name: item.name })}
+                    onClick={() => void handleModerate(item, 'reject')}
+                  >
+                    {t('partyUploads.reject')}
+                  </Button>
+                </PartyUploadRow>
+              ))}
+            </ul>
+          </Panel>
+        )}
+
+        {visible.length > 0 && (
+          <Panel
+            title={t('partyUploads.sectionVisible')}
+            note={t('partyUploads.sectionVisibleNote')}
+            testId="party-uploads-visible"
+            headingLevel={2}
+          >
+            <ul className="pw-mod-list">
+              {visible.map((item) => (
+                <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
+                  <Button
+                    tone="danger"
+                    disabled={busy}
+                    aria-label={t('partyUploads.hideLabel', { name: item.name })}
+                    onClick={() => void handleModerate(item, 'hide')}
+                  >
+                    {t('partyUploads.hide')}
+                  </Button>
+                </PartyUploadRow>
+              ))}
+            </ul>
+          </Panel>
+        )}
+
+        {removed.length > 0 && (
+          <Panel
+            title={t('partyUploads.sectionRemoved')}
+            note={t('partyUploads.sectionRemovedNote')}
+            testId="party-uploads-removed"
+            headingLevel={2}
+          >
+            <ul className="pw-mod-list">
+              {removed.map((item) => (
+                <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
+                  <Button
+                    disabled={busy}
+                    aria-label={t('partyUploads.restoreLabel', { name: item.name })}
+                    onClick={() => void handleModerate(item, 'restore')}
+                  >
+                    {t('partyUploads.restore')}
+                  </Button>
+                </PartyUploadRow>
+              ))}
+            </ul>
+          </Panel>
+        )}
       </div>
-
-      {list.items.length === 0 && (
-        <p className="empty-state" data-testid="party-uploads-empty">
-          {t('partyUploads.empty')}
-        </p>
-      )}
-
-      {pending.length > 0 && (
-        <section data-testid="party-uploads-pending">
-          <h2>{t('partyUploads.sectionPending')}</h2>
-          <ul className="party-uploads-list">
-            {pending.map((item) => (
-              <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
-                <button
-                  type="button"
-                  onClick={() => void handleModerate(item, 'approve')}
-                  disabled={busy}
-                  aria-label={t('partyUploads.approveLabel', { name: item.name })}
-                >
-                  {t('partyUploads.approve')}
-                </button>
-                <button
-                  type="button"
-                  className="btn-danger"
-                  onClick={() => void handleModerate(item, 'reject')}
-                  disabled={busy}
-                  aria-label={t('partyUploads.rejectLabel', { name: item.name })}
-                >
-                  {t('partyUploads.reject')}
-                </button>
-              </PartyUploadRow>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {visible.length > 0 && (
-        <section data-testid="party-uploads-visible">
-          <h2>{t('partyUploads.sectionVisible')}</h2>
-          <ul className="party-uploads-list">
-            {visible.map((item) => (
-              <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
-                <button
-                  type="button"
-                  className="btn-danger"
-                  onClick={() => void handleModerate(item, 'hide')}
-                  disabled={busy}
-                  aria-label={t('partyUploads.hideLabel', { name: item.name })}
-                >
-                  {t('partyUploads.hide')}
-                </button>
-              </PartyUploadRow>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {removed.length > 0 && (
-        <section data-testid="party-uploads-removed">
-          <h2>{t('partyUploads.sectionRemoved')}</h2>
-          <ul className="party-uploads-list">
-            {removed.map((item) => (
-              <PartyUploadRow key={item.fileItemId} item={item} busy={busy}>
-                <button
-                  type="button"
-                  onClick={() => void handleModerate(item, 'restore')}
-                  disabled={busy}
-                  aria-label={t('partyUploads.restoreLabel', { name: item.name })}
-                >
-                  {t('partyUploads.restore')}
-                </button>
-              </PartyUploadRow>
-            ))}
-          </ul>
-        </section>
-      )}
-    </div>
+    </main>
   );
 }
 
@@ -224,20 +275,27 @@ function PartyUploadRow({
 }) {
   const { t, formatDate } = useI18n();
   return (
-    <li className="party-mod-row" data-testid="party-upload-row">
+    <li className="pw-mod-row" data-testid="party-upload-row">
       <img
         src={item.thumbnailUrl}
         alt=""
-        className="party-mod-thumb"
+        className="pw-mod-thumb"
         loading="lazy"
         onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
       />
-      <span className="party-mod-name">{item.name}</span>
-      <span className={`party-mod-status status-${item.status}`}>
-        {t(STATUS_LABEL_KEY[item.status])}
+      <span className="pw-mod-text">
+        <span className="pw-mod-name">{item.name}</span>
+        {/* The state in words beside the picture, never by colour alone —
+            and in its own element, so it can be read as one thing. */}
+        <span className="pw-mod-meta">
+          <span className="pw-mod-state" data-status={item.status}>
+            {t(STATUS_LABEL_KEY[item.status])}
+          </span>
+          <span aria-hidden> · </span>
+          <span>{formatDate(item.uploadedAt)}</span>
+        </span>
       </span>
-      <span className="party-mod-meta">{formatDate(item.uploadedAt)}</span>
-      <span className="party-mod-actions">{children}</span>
+      <span className="pw-mod-actions">{children}</span>
     </li>
   );
 }

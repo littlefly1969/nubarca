@@ -443,6 +443,11 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.create.cancel': 'Cancel',
   'party.create.failed': 'The party could not be created.',
   'party.create.invalid': 'A party needs a name.',
+  'party.create.note': 'The rest \u2014 album, invitation, screens \u2014 comes later, inside the party.',
+
+  'party.group.now': 'Right now',
+  'party.group.coming': 'Coming up',
+  'party.group.over': 'Over',
 
   // --- Party: the host's console ---
   'party.section.nav': 'Party sections',
@@ -1232,6 +1237,12 @@ const en: Partial<Record<MessageKey, string>> = {
   // --- Owner-side party upload moderation ---
   'partyUploads.backToAlbum': '← Back to album',
   'partyUploads.title': 'Party uploads',
+  'partyUploads.backToParty': 'Back to the party',
+  'partyUploads.rule': 'How photos get in',
+  'partyUploads.emptyTitle': 'Nothing sent in yet',
+  'partyUploads.sectionPendingNote': 'Not public until you approve them.',
+  'partyUploads.sectionVisibleNote': 'Guests see these in the party.',
+  'partyUploads.sectionRemovedNote': 'Out of the party. You can put them back at any time.',
   'partyUploads.intro':
     'Photos guests added through the party upload link. Hidden, rejected, or album-removed uploads do not appear in the party view or TV slideshow, but the stored file stays in your library until you delete it separately.',
   'partyUploads.requireApproval': 'Require approval for party uploads',
@@ -1293,6 +1304,11 @@ const en: Partial<Record<MessageKey, string>> = {
 
   // --- Owner/delegate party message moderation ---
   'partyMessages.title': 'Messages',
+  'partyMessages.rule': 'How messages get in',
+  'partyMessages.queue': 'The messages',
+  'partyMessages.filters': 'Filter the messages',
+  'partyMessages.emptyTitle': 'No messages yet',
+  'partyMessages.noPartyTitle': 'The party is not open',
   'partyMessages.intro':
     'Messages left by guests. Live ones rotate through the ribbon at the bottom of the TV; a message promoted to Hero appears full-screen from time to time.',
   'partyMessages.requireApproval': 'Guest messages require approval',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   listPartyMessages,
@@ -13,6 +13,8 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
+import { Badge, Button, EmptyState, Notice, Panel, PanelSkeleton, SwitchRow } from '../party/workspace/ui';
+import '../party/workspace/PartyWorkspace.css';
 
 type Status =
   | { kind: 'loading' }
@@ -48,6 +50,10 @@ const FILTER_LABEL_KEY: Record<Filter, MessageKey> = {
 export function PartyMessagesPage() {
   const { albumId } = useParams<{ albumId: string }>();
   const navigate = useNavigate();
+  // The queue is reached FROM a party, and its own back link returns there.
+  // Falling back to the album keeps an old bookmark working.
+  const [searchParams] = useSearchParams();
+  const partyId = searchParams.get('party');
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
@@ -114,96 +120,138 @@ export function PartyMessagesPage() {
     }
   };
 
+  const back = partyId
+    ? { to: `/parties/${partyId}?section=activities`, label: t('partyUploads.backToParty') }
+    : { to: `/albums/${albumId}`, label: t('partyUploads.backToAlbum') };
+
   if (status.kind === 'loading') {
-    return <div className="page"><p>{t('common.loading')}</p></div>;
+    return (
+      <main className="pw" data-testid="party-messages-page">
+        <header className="pw-head">
+          <div className="pw-skeleton pw-skeleton--title" aria-hidden />
+        </header>
+        <PanelSkeleton rows={2} />
+        <p role="status" className="visually-hidden">{t('common.loading')}</p>
+      </main>
+    );
   }
   if (status.kind === 'error') {
     return (
-      <div className="page">
-        <p className="error-message" data-testid="party-messages-error">{status.message}</p>
-        <button type="button" onClick={load}>{t('common.retry')}</button>
-      </div>
+      <main className="pw" data-testid="party-messages-page">
+        <header className="pw-head">
+          <Link to={back.to} className="pw-back">← {back.label}</Link>
+        </header>
+        <Notice
+          tone="error"
+          testId="party-messages-error"
+          title={status.message}
+          actions={<Button onClick={load}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.loadErrorBody')}</p>
+        </Notice>
+      </main>
     );
   }
 
+  const pending = status.list.items.filter((m) => m.status === 'pending').length;
+
   return (
-    <div className="page party-messages-page">
-      <p>
-        <Link to={`/albums/${albumId}`}>{t('partyUploads.backToAlbum')}</Link>
-      </p>
-      <h1>{t('partyMessages.title')}</h1>
-      <p className="muted">{t('partyMessages.intro')}</p>
-
-      {!status.list.isOwner && (
-        <p className="muted" data-testid="party-messages-delegate-notice">
-          {t('partyMessages.delegateNotice')}
-        </p>
-      )}
-
-      {status.list.isOwner && status.list.partyActive && (
-        <div className="album-party-approval" data-testid="message-approval-toggle">
-          <label className="album-tv-label">
-            <input
-              type="checkbox"
-              checked={status.list.requireMessageApproval}
-              disabled={busy}
-              onChange={(e) => void toggleApproval(e.target.checked)}
-              aria-label={t('partyMessages.requireApproval')}
-            />
-            <span>{t('partyMessages.requireApproval')}</span>
-          </label>
-          <p className="muted">{t('partyMessages.requireApprovalHelp')}</p>
-        </div>
-      )}
-
-      {!status.list.partyActive && (
-        <p className="empty-state" data-testid="party-messages-no-party">
-          {t('partyMessages.noParty')}
-        </p>
-      )}
-
-      {status.list.partyActive && status.list.items.length === 0 && (
-        <p className="empty-state" data-testid="party-messages-empty">
-          {t('partyMessages.empty')}
-        </p>
-      )}
-
-      {status.list.items.length > 0 && (
-        <>
-          <div className="party-messages-filters" role="tablist">
-            {(['all', 'pending', 'visible', 'hidden', 'hero'] as const).map((key) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={filter === key}
-                className={filter === key ? 'active' : undefined}
-                onClick={() => setFilter(key)}
-              >
-                {t(FILTER_LABEL_KEY[key])}
-              </button>
-            ))}
+    <main className="pw" data-testid="party-messages-page">
+      <header className="pw-head">
+        <Link to={back.to} className="pw-back">← {back.label}</Link>
+        <div className="pw-head-main">
+          <div className="pw-identity">
+            <h1 className="pw-title">{t('partyMessages.title')}</h1>
+            <p className="pw-section-lede">{t('partyMessages.intro')}</p>
           </div>
+        </div>
+      </header>
 
-          {shown.length === 0 ? (
-            <p className="empty-state" data-testid="party-messages-empty-filtered">
-              {t('partyMessages.emptyFiltered')}
-            </p>
-          ) : (
-            <ul className="party-messages-list">
-              {shown.map((message) => (
-                <PartyMessageRow
-                  key={message.id}
-                  message={message}
-                  busy={busy}
-                  onAct={(action) => void act(message, action)}
-                />
+      <div className="pw-panels">
+        {!status.list.isOwner && (
+          <Notice tone="info" testId="party-messages-delegate-notice">
+            <p>{t('partyMessages.delegateNotice')}</p>
+          </Notice>
+        )}
+
+        {/* The approval switch is a party SETTING: a delegate moderates the
+            messages without ever changing what the party requires. */}
+        {status.list.isOwner && status.list.partyActive && (
+          <Panel title={t('partyMessages.rule')} testId="message-approval-toggle" headingLevel={2}>
+            <div className="pw-rows">
+              <SwitchRow
+                testId="party-messages-approval"
+                label={t('partyMessages.requireApproval')}
+                note={t('partyMessages.requireApprovalHelp')}
+                checked={status.list.requireMessageApproval}
+                disabled={busy}
+                onChange={(next) => void toggleApproval(next)}
+              />
+            </div>
+          </Panel>
+        )}
+
+        {!status.list.partyActive && (
+          <EmptyState
+            testId="party-messages-no-party"
+            title={t('partyMessages.noPartyTitle')}
+            body={t('partyMessages.noParty')}
+          />
+        )}
+
+        {status.list.partyActive && status.list.items.length === 0 && (
+          <EmptyState
+            testId="party-messages-empty"
+            title={t('partyMessages.emptyTitle')}
+            body={t('partyMessages.empty')}
+          />
+        )}
+
+        {status.list.items.length > 0 && (
+          <Panel
+            title={t('partyMessages.queue')}
+            testId="party-messages-queue"
+            headingLevel={2}
+            aside={pending > 0
+              ? <Badge kind="warn">{t('party.photos.pending', { count: pending })}</Badge>
+              : undefined}
+          >
+            <div className="pw-chips" role="tablist" aria-label={t('partyMessages.filters')}>
+              {(['all', 'pending', 'visible', 'hidden', 'hero'] as const).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={filter === key}
+                  className="pw-chip"
+                  data-testid={`party-messages-filter-${key}`}
+                  onClick={() => setFilter(key)}
+                >
+                  {t(FILTER_LABEL_KEY[key])}
+                </button>
               ))}
-            </ul>
-          )}
-        </>
-      )}
-    </div>
+            </div>
+
+            {shown.length === 0 ? (
+              <p className="pw-small pw-muted" data-testid="party-messages-empty-filtered">
+                {t('partyMessages.emptyFiltered')}
+              </p>
+            ) : (
+              <ul className="pw-mod-list">
+                {shown.map((message) => (
+                  <PartyMessageRow
+                    key={message.id}
+                    message={message}
+                    busy={busy}
+                    onAct={(action) => void act(message, action)}
+                  />
+                ))}
+              </ul>
+            )}
+          </Panel>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -229,37 +277,41 @@ function PartyMessageRow({
 }) {
   const { t, formatDate } = useI18n();
   return (
-    <li className="party-mod-row party-message-row" data-testid="party-message-row">
-      <span className="party-message-author">
-        {message.displayName ?? t('partyMessages.anonymous')}
+    <li className="pw-mod-row pw-mod-row--message" data-testid="party-message-row">
+      <span className="pw-mod-text">
+        <span className="pw-mod-name">
+          {message.displayName ?? t('partyMessages.anonymous')}
+          {message.isHero && (
+            <span className="pw-badge pw-badge--published pw-badge--plain">
+              {t('partyMessages.heroBadge')}
+            </span>
+          )}
+        </span>
+        {/* Rendered as TEXT. Never dangerouslySetInnerHTML, never a Markdown
+            renderer: the body is whatever a stranger typed. */}
+        <span className="pw-message-body">{message.text}</span>
+        <span className="pw-mod-meta">
+          <span className="pw-mod-state" data-status={message.status}>
+            {t(STATUS_LABEL_KEY[message.status])}
+          </span>
+          <span aria-hidden> · </span>
+          <span>{formatDate(message.createdAt)}</span>
+        </span>
       </span>
-      {/* Rendered as TEXT. Never dangerouslySetInnerHTML, never a Markdown
-          renderer: the body is whatever a stranger typed. */}
-      <span className="party-message-body">{message.text}</span>
-      <span className={`party-mod-status status-${message.status}`}>
-        {t(STATUS_LABEL_KEY[message.status])}
-      </span>
-      {message.isHero && (
-        <span className="party-message-hero-badge">{t('partyMessages.heroBadge')}</span>
-      )}
-      <span className="party-mod-meta">{formatDate(message.createdAt)}</span>
-      <span className="party-mod-actions">
+      <span className="pw-mod-actions">
         {/* WHICH actions this message admits comes from the shared transition
             matrix (@nubarca/contracts), not from conditions written here. The
             rules used to live in this markup, where a second client could not
             read them — and the phone now offers exactly the same set. */}
         {partyMessageActions(message).map((action) => (
-          <button
+          <Button
             key={action}
-            type="button"
-            className={
-              DESTRUCTIVE_PARTY_MESSAGE_ACTIONS.includes(action) ? 'btn-danger' : undefined
-            }
+            tone={DESTRUCTIVE_PARTY_MESSAGE_ACTIONS.includes(action) ? 'danger' : 'secondary'}
             disabled={busy}
             onClick={() => onAct(action)}
           >
             {t(PARTY_MESSAGE_ACTION_LABELS[action])}
-          </button>
+          </Button>
         ))}
       </span>
     </li>
