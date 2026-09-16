@@ -27,10 +27,32 @@ export type PartyRsvpStatus = (typeof PARTY_RSVP_STATUSES)[number];
 export const PARTY_RSVP_QUESTION_KINDS = ['short_text', 'single_choice', 'yes_no'] as const;
 export type PartyRsvpQuestionKind = (typeof PARTY_RSVP_QUESTION_KINDS)[number];
 
-/** Where the CURRENT personal link's invitation stands. A rotation starts it again. */
-export type PartyInvitationDeliveryState = 'not_sent' | 'pending' | 'sent' | 'failed';
+/**
+ * Where the CURRENT personal link's invitation stands. A rotation starts it again.
+ * `sent`: an email SMTP accepted. `shared`: no such email, but the link was
+ * handed to the host (WhatsApp, copy) — which proves no message.
+ */
+export type PartyInvitationDeliveryState = 'not_sent' | 'pending' | 'sent' | 'failed' | 'shared';
 export type PartyInvitationDeliveryKind = 'initial' | 'resend' | 'reminder';
-export type PartyInvitationDeliveryStatus = 'pending' | 'sent' | 'failed';
+
+/**
+ * How the personal link left NubArca: emailed BY it, or handed TO the host to
+ * share themselves. One capability, one link, three channels.
+ */
+export const PARTY_INVITATION_DELIVERY_CHANNELS = ['email', 'whatsapp', 'copy'] as const;
+export type InvitationDeliveryChannel = (typeof PARTY_INVITATION_DELIVERY_CHANNELS)[number];
+
+/** The channels whose delivery is the host's own act, recorded as `shared`. */
+export const PARTY_INVITATION_SHARE_CHANNELS = ['whatsapp', 'copy'] as const;
+export type InvitationShareChannel = (typeof PARTY_INVITATION_SHARE_CHANNELS)[number];
+
+/**
+ * An email is `pending`, then `sent` or `failed`. A share is `shared` — NubArca
+ * handed the link over — and never `sent`, `delivered` or `read`: nothing here
+ * can know any of those.
+ */
+export const PARTY_INVITATION_DELIVERY_STATUSES = ['pending', 'sent', 'failed', 'shared'] as const;
+export type InvitationDeliveryStatus = (typeof PARTY_INVITATION_DELIVERY_STATUSES)[number];
 
 export const PARTY_INVITATION_LIMITS = {
   label: 120,
@@ -73,10 +95,13 @@ export interface PartyRsvpAnswer {
 
 export interface PartyInvitationDeliveryView {
   state: PartyInvitationDeliveryState;
+  /** The most recent delivery of the CURRENT link, on any channel. */
   lastAttemptAt: string | null;
   lastAttemptKind: PartyInvitationDeliveryKind | null;
-  lastAttemptStatus: PartyInvitationDeliveryStatus | null;
+  lastAttemptStatus: InvitationDeliveryStatus | null;
+  /** The last EMAIL SMTP accepted. A share is never a send. */
   lastSentAt: string | null;
+  lastAttemptChannel: InvitationDeliveryChannel | null;
 }
 
 export interface PartyInvitationGroup {
@@ -97,8 +122,10 @@ export interface PartyInvitationGroup {
   answers: PartyRsvpAnswer[];
   delivery: PartyInvitationDeliveryView;
   canSend: boolean;
-  /** Invited on the link it holds now, and somebody has not answered. */
+  /** Invited on the link it holds now (any channel), and somebody has not answered. */
   canRemind: boolean;
+  /** The link can be handed to the host (WhatsApp, copy): invitations are open and there is a public origin. */
+  canShare: boolean;
 }
 
 /**
@@ -136,14 +163,17 @@ export interface PartyGuestList {
   partyStatus: 'draft' | 'published' | 'live' | 'ended';
   /** Whether this installation can email an invitation at all. */
   mailAvailable: boolean;
+  /** Whether a personal link can be handed to the host at all (a public origin; no mailer needed). */
+  shareAvailable: boolean;
   summary: PartyRsvpSummary;
   groups: PartyInvitationGroup[];
   questions: PartyRsvpQuestion[];
 }
 
 export interface PartyInvitationDelivery {
+  channel: InvitationDeliveryChannel;
   kind: PartyInvitationDeliveryKind;
-  status: PartyInvitationDeliveryStatus;
+  status: InvitationDeliveryStatus;
   createdAt: string;
   completedAt: string | null;
   /** This click's id had already been used: nothing was sent again. */
@@ -337,27 +367,9 @@ export function rsvpFormProblems(
   return problems;
 }
 
-/**
- * The host's search, over what the list already holds: the group's label, its
- * people, its address and phone. Case- and accent-insensitive, because a host
- * typing "nicolo" is looking for Nicolò.
- */
-export function matchesGuestSearch(group: PartyInvitationGroup, query: string): boolean {
-  const needle = foldSearchText(query.trim());
-  if (needle === '') return true;
-  const haystack = [
-    group.label,
-    group.recipientEmail,
-    group.phone ?? '',
-    ...group.guests.flatMap((g) => [g.name, g.email ?? '', g.phone ?? '']),
-  ];
-  return haystack.some((value) => foldSearchText(value).includes(needle));
-}
-
-/** How every host-side search compares text: accents and case folded away. */
-export function foldSearchText(value: string): string {
-  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLocaleLowerCase('en');
-}
+// The host's SEARCH is the server's: the guest directory folds accents and case
+// in the database (see partyGuestDirectory.ts), so no client holds a second
+// opinion about what "nicolo" matches.
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
@@ -373,7 +385,7 @@ export function partyInvitationGroupPath(partyId: string, groupId: string): stri
 export function partyInvitationGroupActionPath(
   partyId: string,
   groupId: string,
-  action: 'send' | 'remind' | 'rotate-link',
+  action: 'send' | 'remind' | 'rotate-link' | 'share',
 ): string {
   return `${partyInvitationGroupPath(partyId, groupId)}/${action}`;
 }

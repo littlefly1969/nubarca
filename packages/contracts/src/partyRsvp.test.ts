@@ -5,7 +5,6 @@ import {
   PARTY_RSVP_QUESTION_KINDS,
   PARTY_RSVP_STATUSES,
   isPlausibleEmail,
-  matchesGuestSearch,
   normalizeQuestionOptions,
   partyGuestListPath,
   partyInvitationGroupActionPath,
@@ -13,7 +12,6 @@ import {
   partyInvitationRsvpPath,
   partyRsvpQuestionOrderPath,
   rsvpFormProblems,
-  type PartyInvitationGroup,
   type PartyInvitationQuestion,
 } from './index.ts';
 
@@ -86,28 +84,10 @@ test('over-long text is caught in code points, as the server counts', () => {
   assert.deepEqual(rsvpFormProblems(invitation, reply(`${fits}!`)), ['text_too_long']);
 });
 
-const group: PartyInvitationGroup = {
-  id: 'g', label: 'Famiglia Rossi', recipientEmail: 'rossi@example.com', phone: '+39 333 1234567',
-  maxAdditionalGuests: 0, version: 1,
-  guests: [{
-    id: 'p', name: 'Nicolò Rossi', email: null, phone: null, isAdditionalGuest: false,
-    status: 'pending', dietaryNotes: null, respondedAt: null,
-  }],
-  additionalGuestsUsed: 0, pendingCount: 1, attendingCount: 0, declinedCount: 0, answers: [],
-  delivery: { state: 'not_sent', lastAttemptAt: null, lastAttemptKind: null, lastAttemptStatus: null, lastSentAt: null },
-  canSend: true, canRemind: false,
-};
-
-test('the host searches label, people, address and phone, without minding accents', () => {
-  for (const query of ['', 'rossi', 'FAMIGLIA', 'nicolo', 'rossi@example', '1234567']) {
-    assert.equal(matchesGuestSearch(group, query), true, query);
-  }
-  assert.equal(matchesGuestSearch(group, 'bianchi'), false);
-});
-
 test('two capabilities, two route families', () => {
   assert.equal(partyGuestListPath('p1'), '/api/parties/p1/guest-list');
   assert.equal(partyInvitationGroupActionPath('p1', 'g1', 'remind'), '/api/parties/p1/invitation-groups/g1/remind');
+  assert.equal(partyInvitationGroupActionPath('p1', 'g1', 'share'), '/api/parties/p1/invitation-groups/g1/share');
   assert.equal(partyRsvpQuestionOrderPath('p1'), '/api/parties/p1/rsvp-questions/order');
   assert.equal(partyInvitationPath('a/b'), '/api/party-invitations/a%2Fb');
   assert.equal(partyInvitationRsvpPath('tok'), '/api/party-invitations/tok/rsvp');

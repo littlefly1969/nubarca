@@ -1,20 +1,34 @@
 import { api, ApiError } from './client';
 import type {
   AlbumPartyStatus,
+  GuestDirectoryPage,
+  GuestDirectoryQuery,
+  InvitationShareRequest,
+  InvitationShareResult,
   PartyGuestList,
-  PartyInvitationDelivery,
+  PartyGuestListMinimal,
+  PartyInvitationGroupDetail,
   PartyInvitationGroupWrite,
+  PartyInvitationSendMinimal,
   PartyInvitationView,
   PartyMessageAction,
   PartyMessageList,
+  PartyRsvpQuestion,
   PartyRsvpQuestionWrite,
   PartyRsvpWrite,
   PartyUploadList,
 } from '@nubarca/contracts';
 import type {
   PartyAttendance,
+  PartyAttendanceChange,
   PartyAttendanceOtherGuestCreate,
   PartyAttendanceOtherGuestUpdate,
+} from '@nubarca/contracts';
+import {
+  PREFER_RETURN_MINIMAL,
+  partyGuestDirectoryPath,
+  partyInvitationGroupDetailPath,
+  partyInvitationSharePath,
 } from '@nubarca/contracts';
 import {
   partyAttendanceGuestPath,
@@ -70,12 +84,14 @@ export {
 // The guest list and the personal invitation: canonical in @nubarca/contracts,
 // re-exported here so a web call site imports one package.
 export type {
+  InvitationDeliveryChannel,
+  InvitationDeliveryStatus,
+  InvitationShareChannel,
   PartyGuest,
   PartyGuestList,
   PartyInvitationDelivery,
   PartyInvitationDeliveryKind,
   PartyInvitationDeliveryState,
-  PartyInvitationDeliveryStatus,
   PartyInvitationDeliveryView,
   PartyInvitationGroup,
   PartyInvitationGroupWrite,
@@ -93,22 +109,24 @@ export type {
   PartyRsvpWrite,
 } from '@nubarca/contracts';
 export {
+  PARTY_INVITATION_DELIVERY_CHANNELS,
+  PARTY_INVITATION_DELIVERY_STATUSES,
   PARTY_INVITATION_LIMITS,
+  PARTY_INVITATION_SHARE_CHANNELS,
   PARTY_RSVP_QUESTION_KINDS,
   PARTY_RSVP_STATUSES,
   codePoints,
   isPlausibleEmail,
-  matchesGuestSearch,
   normalizeQuestionOptions,
   normalizeText,
   rsvpFormProblems,
 } from '@nubarca/contracts';
 
-// Attendance: canonical in @nubarca/contracts as well — the counts' definitions,
-// the door's filters and search, and the source vocabulary.
+// Attendance: canonical in @nubarca/contracts as well — the counts' definitions
+// and the source vocabulary.
 export type {
   PartyAttendance,
-  PartyAttendanceFilter,
+  PartyAttendanceChange,
   PartyAttendanceGroup,
   PartyAttendanceGuest,
   PartyAttendanceOtherGuest,
@@ -118,15 +136,44 @@ export type {
   PartyAttendanceSummary,
 } from '@nubarca/contracts';
 export {
-  PARTY_ATTENDANCE_FILTERS,
   PARTY_ATTENDANCE_LIMITS,
   PARTY_ATTENDANCE_SOURCES,
-  attendanceFiltersFor,
-  guestMatchesAttendanceFilter,
-  hasGuestList,
-  otherGuestMatchesAttendanceFilter,
   unexpectedArrivals,
-  visibleAttendance,
+} from '@nubarca/contracts';
+
+// The guest directory and sharing: the host's console, read in pages.
+export type {
+  GuestDirectoryCounts,
+  GuestDirectoryGroupItem,
+  GuestDirectoryItem,
+  GuestDirectoryOtherItem,
+  GuestDirectoryPage,
+  GuestDirectoryPerson,
+  GuestDirectoryQuery,
+  GuestDirectoryState,
+  GuestDirectorySummary,
+  InvitationLine,
+  InvitationLineKind,
+  InvitationPrimaryAction,
+  InvitationShare,
+  InvitationShareRequest,
+  InvitationShareResult,
+  PartyGuestArrival,
+  PartyGuestListMinimal,
+  PartyInvitationGroupDetail,
+  PartyInvitationHistoryEntry,
+} from '@nubarca/contracts';
+export {
+  GUEST_CONSOLE_PARAMS,
+  GUEST_DIRECTORY_LIMITS,
+  GUEST_DIRECTORY_STATES,
+  guestDirectoryItemKey,
+  guestDirectoryStatesFor,
+  invitationLine,
+  isAttendancePhase,
+  isGuestDirectoryState,
+  peoplePreview,
+  primaryInvitationAction,
 } from '@nubarca/contracts';
 
 
@@ -1134,54 +1181,77 @@ export interface PartyMessageSubmission {
   createdAt: string;
 }
 
-// --- The GUEST LIST (owner, party.access) ---
+// --- The GUEST CONSOLE (owner, party.access) ---
 //
-// Every owner write answers the whole list back, so the counts the host reads
-// always describe the rows the list shows. A refusal that describes a state —
-// a stale version, a party already under way, a mailer that is not configured —
-// is a 409 whose body carries that state (`guestList`, and `party` for a send),
-// so the page adopts it instead of overwriting it.
+// The host's "Ospiti" reads the guest list in PAGES (the directory) and one
+// group on demand (its detail); it never downloads the whole list. So every
+// owner write here asks for `Prefer: return=minimal` and receives only what
+// changed — the list's header and the group it touched, a delivery and the
+// party, an arrival and the counts — and the page updates the card it holds.
+// A refusal that describes a state — a stale version, a party already under
+// way, a mailer that is not configured — is a 409 whose body says which
+// (`error`, and `party` where a send or share would have published it).
 
+const MINIMAL = { Prefer: PREFER_RETURN_MINIMAL } as const;
+
+/** The whole list at once — for a caller that really needs every group. The console does not. */
 export function getPartyGuestList(partyId: string, signal?: AbortSignal): Promise<PartyGuestList> {
   return api<PartyGuestList>(partyGuestListPath(partyId), { signal });
 }
 
+/** One page of the directory: searched, filtered and ordered by the server. */
+export function getPartyGuestDirectory(
+  partyId: string, query: GuestDirectoryQuery, signal?: AbortSignal,
+): Promise<GuestDirectoryPage> {
+  return api<GuestDirectoryPage>(partyGuestDirectoryPath(partyId, query), { signal });
+}
+
+/** One group in detail, with its card and the party's counts. */
+export function getPartyInvitationGroup(
+  partyId: string, groupId: string, signal?: AbortSignal,
+): Promise<PartyInvitationGroupDetail> {
+  return api<PartyInvitationGroupDetail>(partyInvitationGroupDetailPath(partyId, groupId), { signal });
+}
+
+export function getPartyRsvpQuestions(
+  partyId: string, signal?: AbortSignal,
+): Promise<{ questions: PartyRsvpQuestion[] }> {
+  return api<{ questions: PartyRsvpQuestion[] }>(partyRsvpQuestionsPath(partyId), { signal });
+}
+
 export function createPartyInvitationGroup(
   partyId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(partyInvitationGroupsPath(partyId), { method: 'POST', json: body, signal });
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
+    partyInvitationGroupsPath(partyId), { method: 'POST', json: body, headers: MINIMAL, signal });
 }
 
 /** PUT states the NAMED guests whole; the group's own +1s are kept. */
 export function updatePartyInvitationGroup(
   partyId: string, groupId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(partyInvitationGroupPath(partyId, groupId), { method: 'PUT', json: body, signal });
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
+    partyInvitationGroupPath(partyId, groupId), { method: 'PUT', json: body, headers: MINIMAL, signal });
 }
 
 /** Removing a group revokes its personal link and erases its answers. */
 export function deletePartyInvitationGroup(
   partyId: string, groupId: string, version: number, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(
-    `${partyInvitationGroupPath(partyId, groupId)}?version=${version}`, { method: 'DELETE', signal });
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
+    `${partyInvitationGroupPath(partyId, groupId)}?version=${version}`, { method: 'DELETE', headers: MINIMAL, signal });
 }
 
-/** Every link sent before stops opening anything; the invitation must be sent again. */
+/** Every link sent or shared before stops opening anything; it must be shared again. */
 export function rotatePartyInvitationLink(
   partyId: string, groupId: string, version: number, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
     partyInvitationGroupActionPath(partyId, groupId, 'rotate-link'),
-    { method: 'POST', json: { version }, signal });
+    { method: 'POST', json: { version }, headers: MINIMAL, signal });
 }
 
-export interface PartyInvitationSendResult {
-  delivery: PartyInvitationDelivery;
-  guestList: PartyGuestList;
-  /** The party as it is now — a first send publishes a Draft. */
-  party: Party;
-}
+export type PartyInvitationSendResult = PartyInvitationSendMinimal<Party>;
 
 /**
  * One click. `clientRequestId` is minted per click and reused for that click's
@@ -1195,7 +1265,7 @@ export function sendPartyInvitation(
   signal?: AbortSignal,
 ): Promise<PartyInvitationSendResult> {
   return api<PartyInvitationSendResult>(
-    partyInvitationGroupActionPath(partyId, groupId, 'send'), { method: 'POST', json: body, signal });
+    partyInvitationGroupActionPath(partyId, groupId, 'send'), { method: 'POST', json: body, headers: MINIMAL, signal });
 }
 
 /** Only for a group invited on the link it holds now that has not answered. */
@@ -1204,70 +1274,94 @@ export function remindPartyInvitation(
 ): Promise<PartyInvitationSendResult> {
   return api<PartyInvitationSendResult>(
     partyInvitationGroupActionPath(partyId, groupId, 'remind'),
-    { method: 'POST', json: { clientRequestId }, signal });
+    { method: 'POST', json: { clientRequestId }, headers: MINIMAL, signal });
+}
+
+/**
+ * WhatsApp or Copia link: the group's CURRENT personal link, composed by the
+ * server on its public origin, handed to the host to share. One click, one id;
+ * a retry of the click hands back the same link and records nothing new. The
+ * answer's link and message are for passing on, never for keeping.
+ */
+export function sharePartyInvitation(
+  partyId: string, groupId: string, body: InvitationShareRequest, signal?: AbortSignal,
+): Promise<InvitationShareResult<Party>> {
+  return api<InvitationShareResult<Party>>(
+    partyInvitationSharePath(partyId, groupId), { method: 'POST', json: body, signal });
 }
 
 export function createPartyRsvpQuestion(
   partyId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(partyRsvpQuestionsPath(partyId), { method: 'POST', json: body, signal });
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
+    partyRsvpQuestionsPath(partyId), { method: 'POST', json: body, headers: MINIMAL, signal });
 }
 
 /** A question that has been answered may only change its activation. */
 export function updatePartyRsvpQuestion(
   partyId: string, questionId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(partyRsvpQuestionPath(partyId, questionId), { method: 'PUT', json: body, signal });
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(
+    partyRsvpQuestionPath(partyId, questionId), { method: 'PUT', json: body, headers: MINIMAL, signal });
 }
 
 /** The whole order, every time: exactly this party's questions, once each. */
 export function reorderPartyRsvpQuestions(
   partyId: string, questionIds: string[], signal?: AbortSignal,
-): Promise<PartyGuestList> {
-  return api<PartyGuestList>(partyRsvpQuestionOrderPath(partyId), {
-    method: 'PUT', json: { questionIds }, signal,
+): Promise<PartyGuestListMinimal> {
+  return api<PartyGuestListMinimal>(partyRsvpQuestionOrderPath(partyId), {
+    method: 'PUT', json: { questionIds }, headers: MINIMAL, signal,
   });
 }
 
 // --- ATTENDANCE (owner, party.access) ---
 //
-// Who arrived. Every write answers the whole attendance back, so the counts
-// describe the rows. A refusal that describes a state — the party has not
-// started, a name changed meanwhile — is a 409 whose body carries
-// `{ error, attendance }`, which the page adopts.
+// Who arrived. Every write answers `{ changed, summary, guest | otherGuest }` —
+// whether it changed anything, the counts, and the one person as the record
+// now reads them. A refusal that describes a state — the party has not
+// started, a name changed meanwhile — is a 409 carrying `{ error, summary }`.
 
+/** The whole attendance at once. The console reads arrivals through the directory instead. */
 export function getPartyAttendance(partyId: string, signal?: AbortSignal): Promise<PartyAttendance> {
   return api<PartyAttendance>(partyAttendancePath(partyId), { signal });
 }
 
 /** "This person arrived." Idempotent: the first moment recorded is kept. */
-export function checkInPartyGuest(partyId: string, guestId: string, signal?: AbortSignal): Promise<PartyAttendance> {
-  return api<PartyAttendance>(partyAttendanceGuestPath(partyId, guestId), { method: 'PUT', signal });
+export function checkInPartyGuest(
+  partyId: string, guestId: string, signal?: AbortSignal,
+): Promise<PartyAttendanceChange> {
+  return api<PartyAttendanceChange>(
+    partyAttendanceGuestPath(partyId, guestId), { method: 'PUT', headers: MINIMAL, signal });
 }
 
 /** "That arrival was recorded by mistake" — a correction, never a check-out. */
-export function undoPartyGuestCheckIn(partyId: string, guestId: string, signal?: AbortSignal): Promise<PartyAttendance> {
-  return api<PartyAttendance>(partyAttendanceGuestPath(partyId, guestId), { method: 'DELETE', signal });
+export function undoPartyGuestCheckIn(
+  partyId: string, guestId: string, signal?: AbortSignal,
+): Promise<PartyAttendanceChange> {
+  return api<PartyAttendanceChange>(
+    partyAttendanceGuestPath(partyId, guestId), { method: 'DELETE', headers: MINIMAL, signal });
 }
 
 /** Somebody not on the guest list. The request id makes a retry of one add name them once. */
 export function createPartyAttendanceGuest(
   partyId: string, body: PartyAttendanceOtherGuestCreate, signal?: AbortSignal,
-): Promise<PartyAttendance> {
-  return api<PartyAttendance>(partyAttendanceOtherGuestsPath(partyId), { method: 'POST', json: body, signal });
+): Promise<PartyAttendanceChange> {
+  return api<PartyAttendanceChange>(
+    partyAttendanceOtherGuestsPath(partyId), { method: 'POST', json: body, headers: MINIMAL, signal });
 }
 
 export function updatePartyAttendanceGuest(
   partyId: string, attendanceGuestId: string, body: PartyAttendanceOtherGuestUpdate, signal?: AbortSignal,
-): Promise<PartyAttendance> {
-  return api<PartyAttendance>(
-    partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'PUT', json: body, signal });
+): Promise<PartyAttendanceChange> {
+  return api<PartyAttendanceChange>(
+    partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'PUT', json: body, headers: MINIMAL, signal });
 }
 
 export function deletePartyAttendanceGuest(
   partyId: string, attendanceGuestId: string, signal?: AbortSignal,
-): Promise<PartyAttendance> {
-  return api<PartyAttendance>(partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'DELETE', signal });
+): Promise<PartyAttendanceChange> {
+  return api<PartyAttendanceChange>(
+    partyAttendanceOtherGuestPath(partyId, attendanceGuestId), { method: 'DELETE', headers: MINIMAL, signal });
 }
 
 // --- The PERSONAL INVITATION (anonymous, invitation-token scoped) ---

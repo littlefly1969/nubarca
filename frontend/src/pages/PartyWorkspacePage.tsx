@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
+  GUEST_CONSOLE_PARAMS,
   getAlbumPartySettings,
   getParty,
   listPartyGuestContent,
@@ -49,7 +50,16 @@ import '../party/Party.css';
 // guest list; a tab that promises what the product cannot do is worse than no
 // tab. The guest list sits between Before and Live because that is when it is
 // worked on: after the invitation is written, before the evening.
-type Tab = 'overview' | 'before' | 'guests' | 'live' | 'after' | 'photos';
+const TABS = ['overview', 'before', 'guests', 'live', 'after', 'photos'] as const;
+type Tab = (typeof TABS)[number];
+
+// The open tab lives in the URL, because what is inside one does too: the guest
+// console keeps its search, its filter and the group it has open there, so a
+// reload — or a browser coming back from WhatsApp — returns to what the host
+// was actually looking at. Anything unknown is the overview.
+function toTab(value: string | null): Tab {
+  return TABS.includes(value as Tab) ? (value as Tab) : 'overview';
+}
 
 type Status =
   | { kind: 'loading' }
@@ -77,7 +87,21 @@ export function PartyWorkspacePage() {
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
-  const [tab, setTab] = useState<Tab>('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = toTab(searchParams.get('tab'));
+  const setTab = useCallback((next: Tab) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.set('tab', next);
+      if (next !== 'guests') {
+        // The guest console's own state belongs to the guest console.
+        params.delete(GUEST_CONSOLE_PARAMS.search);
+        params.delete(GUEST_CONSOLE_PARAMS.state);
+        params.delete(GUEST_CONSOLE_PARAMS.group);
+      }
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
   const [albumParty, setAlbumParty] = useState<AlbumPartyStatus | null>(null);
   // Every kind, always — the server returns the ones the host has written and
   // the ones they have not, so the editor renders what the server says rather
