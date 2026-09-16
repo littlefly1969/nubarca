@@ -110,6 +110,37 @@ const MESSAGES = {
   ],
 };
 
+
+/** One page of the guest directory, so the console has cards to draw. */
+const GROUPS = [
+  {
+    kind: 'group', groupId: 'g1', label: 'Famiglia Rossi', version: 2,
+    maxAdditionalGuests: 1, additionalGuestsUsed: 1,
+    people: [
+      { guestId: 'p1', name: 'Mario', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: '2027-06-12T20:10:00Z', checkInSource: 'host', matched: false },
+      { guestId: 'p2', name: 'Laura', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: null, checkInSource: null, matched: false },
+      { guestId: 'p3', name: '+1', isAdditionalGuest: true, rsvpStatus: 'pending', checkedInAt: null, checkInSource: null, matched: false },
+    ],
+    counts: { attending: 2, pending: 1, declined: 0, arrived: 1 },
+    invitation: { state: 'sent', lastAttemptChannel: 'whatsapp', lastAttemptKind: 'invitation', lastAttemptStatus: 'shared', lastAttemptAt: '2027-06-01T10:12:00Z' },
+    whatsappDirect: true, canSend: true, canRemind: true, canShare: true,
+  },
+  {
+    kind: 'group', groupId: 'g2', label: 'Chiara e Paolo', version: 1,
+    maxAdditionalGuests: 0, additionalGuestsUsed: 0,
+    people: [
+      { guestId: 'p4', name: 'Chiara', isAdditionalGuest: false, rsvpStatus: 'pending', checkedInAt: null, checkInSource: null, matched: false },
+      { guestId: 'p5', name: 'Paolo', isAdditionalGuest: false, rsvpStatus: 'declined', checkedInAt: null, checkInSource: null, matched: false },
+    ],
+    counts: { attending: 0, pending: 1, declined: 1, arrived: 0 },
+    invitation: { state: 'not_sent', lastAttemptChannel: null, lastAttemptKind: null, lastAttemptStatus: null, lastAttemptAt: null },
+    whatsappDirect: false, canSend: true, canRemind: false, canShare: true,
+  },
+  {
+    kind: 'other', id: 'o1', name: 'Il collega di Marta', checkedInAt: '2027-06-12T21:02:00Z', version: 1,
+  },
+];
+
 function base(extra: Record<string, () => Response> = {}) {
   return installFetchMock({
     [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party()),
@@ -234,6 +265,31 @@ it('empty draft — nothing set up yet', async () => {
     [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(counts({ groups: 0 })),
   });
   await capture('empty-draft', 'party-next');
+});
+
+// ONE CAVEAT, and it belongs to these two only. The guest list is VIRTUALIZED:
+// its rows are absolutely positioned at offsets the virtualizer computes from
+// measured card heights, and jsdom measures every card as zero — so the
+// snapshot freezes the estimated offsets and the cards overlap in the picture.
+// Per-element measurements (overflow, target sizes, gutters) are unaffected and
+// are what the script asserts; the vertical stacking in these two screenshots
+// is an artifact of the capture, not of the product.
+it('guests — a populated console', async () => {
+  mountWorkspace('?section=guests', {
+    [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party({ status: 'published' })),
+    [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () =>
+      jsonResponse({ ...counts(), partyStatus: 'published', items: GROUPS }),
+  });
+  await capture('guests', 'party-guests');
+});
+
+it('guests — an open party with no list at all', async () => {
+  mountWorkspace('?section=guests', {
+    [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party({ status: 'published' })),
+    [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () =>
+      jsonResponse({ ...counts({ groups: 0 }), partyStatus: 'published' }),
+  });
+  await capture('guests-open', 'party-guests');
 });
 
 it('parties list', async () => {

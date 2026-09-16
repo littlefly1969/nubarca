@@ -1603,3 +1603,18 @@
 .pw .party-image-field-help { font-size: 0.8125rem; opacity: 1; color: var(--text-secondary); }
 .pw .party-image-field > .muted { font-size: 0.875rem; }
 .pw .party-image-grid button { min-height: 0; }
+
+/* The card title opens the group, and a 22px link is not a target.
+   An invisible overlay would have given a thumb its 44px while leaving the
+   element measurably 22 — which is a rule kept by cleverness rather than by
+   construction, and unverifiable from outside. The link is simply 44px, and
+   the card is that much taller: the list virtualizes and measures each card,
+   so the only cost is density, which is the right thing to spend on a target
+   every host has to hit at the door. */
+.pw .guest-card-head { align-items: center; min-height: var(--pw-tap); }
+
+.pw .guest-card-open {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--pw-tap);
+}
