@@ -158,7 +158,8 @@ describe('the guest console', () => {
     const card = await screen.findByTestId('guest-group-g1');
     expect(within(card).getByText('Famiglia Rossi')).toBeInTheDocument();
     expect(within(card).getByText('Mario Rossi · Laura Rossi · +1')).toBeInTheDocument();
-    expect(within(card).getByText('2 confermati · 1 da rispondere')).toBeInTheDocument();
+    // Labelled counts rather than a plural phrase: "1 declinati" is not Italian.
+    expect(within(card).getByText('Confermati: 2 · Da rispondere: 1')).toBeInTheDocument();
     // One line about the invitation, and it never claims the message arrived.
     expect(within(card).getByTestId('guest-invite-g1')).toHaveTextContent(/^WhatsApp condiviso · oggi/);
     const metrics = screen.getByTestId('guest-metrics');
@@ -513,7 +514,7 @@ describe('the guest console', () => {
     expect(screen.getByTestId('guest-undo-m')).toBeInTheDocument();
     expect(screen.getByTestId('guest-notice')).toHaveTextContent('Arrivo di Mario Rossi registrato');
     expect(screen.getByTestId('guest-metrics').querySelector('[data-metric="arrived"] dd')).toHaveTextContent('1');
-    expect(screen.getByTestId('guest-arrived-g1')).toHaveTextContent('1 / 2 arrivati');
+    expect(screen.getByTestId('guest-arrived-g1')).toHaveTextContent('Arrivati: 1 di 2');
     const checkIn = mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/attendance/guests/m'));
     expect((checkIn?.init?.headers as Record<string, string>).Prefer).toBe('return=minimal');
   });
