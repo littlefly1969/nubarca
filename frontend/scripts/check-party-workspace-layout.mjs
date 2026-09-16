@@ -263,9 +263,15 @@ const expression = \`(() => {
   const toolbar = main.querySelector('.guest-toolbar');
   if (rail && toolbar && getComputedStyle(rail).position === 'sticky'
       && getComputedStyle(toolbar).position === 'sticky') {
-    const railBottom = rail.getBoundingClientRect().bottom;
-    const toolbarTop = toolbar.getBoundingClientRect().top;
-    if (toolbarTop < railBottom - 1) problems.push('the search hides under the section rail');
+    const a = rail.getBoundingClientRect();
+    const b = toolbar.getBoundingClientRect();
+    // Only when they share horizontal space at all: from 64rem the rail is a
+    // COLUMN beside the content, and one sitting higher than the other then
+    // covers nothing.
+    const sideBySide = a.right <= b.left + 1 || b.right <= a.left + 1;
+    if (!sideBySide && b.top < a.bottom - 1) {
+      problems.push('the search hides under the section rail');
+    }
   }
 
   return JSON.stringify({
