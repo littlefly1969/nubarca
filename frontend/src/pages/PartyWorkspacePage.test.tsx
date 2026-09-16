@@ -143,6 +143,28 @@ describe('the party workspace — one map, whatever the phase', () => {
     expect(await screen.findByTestId('party-content-invitation')).toBeInTheDocument();
   });
 
+  it('moves through its sections with the arrow keys', async () => {
+    // The rail carries a roving tabIndex, which is only half of a tablist's
+    // contract: without arrow keys it is one stop in the tab order that cannot
+    // be moved through at all.
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+    });
+
+    const summary = await screen.findByTestId('party-tab-summary');
+    summary.focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByTestId('party-tab-experience')).toHaveAttribute('aria-selected', 'true');
+
+    await userEvent.keyboard('{End}');
+    expect(screen.getByTestId('party-tab-settings')).toHaveAttribute('aria-selected', 'true');
+
+    // And it wraps, so the last section's right arrow is the first one.
+    await userEvent.keyboard('{ArrowRight}');
+    expect(screen.getByTestId('party-tab-summary')).toHaveAttribute('aria-selected', 'true');
+  });
+
   it('never leaves a guest search in the URL, wherever the link came from', async () => {
     // The one piece of console state that is personal data about somebody else.
     // A pre-release link can still carry it; arriving anywhere strips it.
