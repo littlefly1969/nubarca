@@ -1236,7 +1236,7 @@ const en: Partial<Record<MessageKey, string>> = {
 
   // --- Owner-side party upload moderation ---
   'partyUploads.backToAlbum': '← Back to album',
-  'partyUploads.title': 'Party uploads',
+  'partyUploads.title': 'Guest photos',
   'partyUploads.backToParty': 'Back to the party',
   'partyUploads.rule': 'How photos get in',
   'partyUploads.emptyTitle': 'Nothing sent in yet',

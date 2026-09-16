@@ -244,6 +244,15 @@
 
 .pw-nav::-webkit-scrollbar { display: none; }
 
+/* A rail that scrolls says so: the last item fades at the edge instead of being
+   cut off mid-word. Removed the moment the rail becomes a column. */
+@media (max-width: 63.999rem) {
+  .pw-nav {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+  }
+}
+
 .pw-nav-item {
   flex: 0 0 auto;
   display: inline-flex;
@@ -424,12 +433,17 @@
   margin: 0;
 }
 
-/* On a phone the panel's decision takes the full width; from 30rem the buttons
-   sit side by side again. */
+/* On a phone the PANEL's decision takes the full width; from 30rem the buttons
+   sit side by side again. A section heading's action is not a decision — it is
+   a refresh, a preview — so it keeps its own width and its own edge. */
 @media (max-width: 29.999rem) {
-  .pw-panel-actions > .pw-btn { flex: 1 1 100%; }
+  .pw-panel > .pw-panel-actions > .pw-btn,
+  .pw-panel .pw-panel-body > .pw-panel-actions > .pw-btn { flex: 1 1 100%; }
   .pw-panel-actions > .pw-btn.pw-icon-btn { flex: 0 0 auto; }
 }
+
+.pw-section-head > .pw-panel-actions { flex: 0 0 auto; justify-content: flex-start; }
+.pw-section-head > .pw-panel-actions > .pw-btn { flex: 0 0 auto; }
 
 /* Two panels that belong together side by side once there is room. */
 .pw-grid {
@@ -501,26 +515,44 @@
 
 /* ───────────────────────────────────────────────────────────────────────────
    Switch — a real control, never a bare checkbox in a sentence
-   ─────────────────────────────────────────────────────────────────────────── */
+   ───────────────────────────────────────────────────────────────────────────
+
+   THE BUTTON IS THE TARGET AND THE TRACK IS DRAWN INSIDE IT. A switch that
+   looks 28px tall is 28px tall to a thumb, however carefully the rest of the
+   page keeps its 44px — so the element is a full 44px box, transparent, with
+   the track and the knob as its two pseudo-elements. The control looks exactly
+   the same and is half as easy to miss. */
 
 .pw-switch {
   position: relative;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
+  width: var(--pw-tap);
+  min-width: var(--pw-tap);
+  height: var(--pw-tap);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pw-switch::before {
+  content: '';
   width: 3rem;
   height: 1.75rem;
   border: 1px solid var(--pw-line-strong);
   border-radius: var(--pw-radius-pill);
   background: var(--pw-quiet);
-  cursor: pointer;
   transition: background-color 140ms ease, border-color 140ms ease;
 }
 
 .pw-switch::after {
   content: '';
   position: absolute;
-  inset-inline-start: 0.1875rem;
+  inset-inline-start: 50%;
+  margin-inline-start: -1.3125rem;
   width: 1.25rem;
   height: 1.25rem;
   border-radius: 50%;
@@ -528,17 +560,18 @@
   transition: transform 140ms ease, background-color 140ms ease;
 }
 
-.pw-switch[aria-checked='true'] { background: var(--accent); border-color: var(--accent); }
+.pw-switch[aria-checked='true']::before { background: var(--accent); border-color: var(--accent); }
 .pw-switch[aria-checked='true']::after { transform: translateX(1.1875rem); background: var(--accent-contrast); }
-.pw-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-switch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--pw-radius-control); }
 .pw-switch:disabled { cursor: not-allowed; opacity: 0.55; }
 
-@media (prefers-reduced-motion: reduce) {
-  .pw-switch, .pw-switch::after { transition: none; }
-}
+/* The track is wider than the 44px box it sits in, so the row has to leave
+   room for it rather than clipping it. */
+.pw-row-control:has(.pw-switch) { min-width: 3rem; }
 
-/* The switch's own tap area covers the whole row on a phone. */
-.pw-row--switch { cursor: pointer; }
+@media (prefers-reduced-motion: reduce) {
+  .pw-switch::before, .pw-switch::after { transition: none; }
+}
 
 /* ───────────────────────────────────────────────────────────────────────────
    Fields
@@ -779,7 +812,7 @@
   color: var(--success);
 }
 
-.pw-step-text { flex: 1 1 auto; min-width: 0; }
+.pw-step-text { flex: 1 1 0; min-width: 0; }
 .pw-step-title { display: block; font-size: 0.9375rem; font-weight: 500; }
 .pw-step[data-done='true'] .pw-step-title { color: var(--text-secondary); }
 .pw-step-note { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
@@ -1534,3 +1567,39 @@
 }
 
 .pw .guest-chip[data-status='attending'] { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+
+/* Panels that arrived with their own button geometry.
+   `min-height` does nothing to a non-replaced INLINE element, so a button that
+   declares 2.75rem and never declares a display renders at its line box — which
+   is how the game composer's primary action came to be 28px tall while its
+   stylesheet said 44. Stating the display is the whole fix. */
+.pw .party-composer-primary,
+.pw .party-composer-discard button,
+.pw .party-deck-row-actions button,
+.pw .party-composer-steps button,
+.pw .party-composer-actions button,
+.pw .party-composer-presets button,
+.pw .party-photo-picker button,
+.pw .party-photo-upload button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--pw-tap);
+}
+
+/* A photograph in a picker grid is a tile, not a row of text: its height comes
+   from the picture, and it is already far larger than a target needs to be. */
+.pw .party-photo-picker .party-photo-option { min-height: 0; }
+
+/* The slot photograph's field, in the workspace's own type scale. Its label is
+   a field label, not a heading: it was competing with the panel title it sits
+   under. */
+.pw .party-image-field-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.pw .party-image-field-help { font-size: 0.8125rem; opacity: 1; color: var(--text-secondary); }
+.pw .party-image-field > .muted { font-size: 0.875rem; }
+.pw .party-image-grid button { min-height: 0; }

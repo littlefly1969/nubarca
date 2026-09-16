@@ -119,12 +119,6 @@ export function PartyPhotosSection({
                 ? <Badge kind="warn">{t('party.photos.pending', { count: moderation.uploads })}</Badge>
                 : undefined}
             />
-            <LinkRow
-              to={`/albums/${albumId}`}
-              testId="party-photos-album"
-              title={t('party.album.open')}
-              note={album?.albumName}
-            />
           </Panel>
 
           <Panel

@@ -84,6 +84,7 @@ export function PartyWorkspacePage() {
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [searchParams, setSearchParams] = useSearchParams();
   const abortRef = useRef<AbortController | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
 
   const party = status.kind === 'ready' ? status.party : null;
   const partyStatus = party?.status ?? 'draft';
@@ -173,6 +174,41 @@ export function PartyWorkspacePage() {
     setStatus({ kind: 'ready', party: next });
   }, []);
 
+  // On a phone the section rail scrolls, and the eighth section is off the
+  // right-hand edge. Without this, opening Impostazioni from a step's button
+  // shows a rail where NOTHING is selected — which reads as a broken page
+  // rather than as a list that has more in it. `block: 'nearest'` keeps the
+  // page itself still: only the rail moves.
+  useEffect(() => {
+    const selected = navRef.current?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (selected && typeof selected.scrollIntoView === 'function') {
+      selected.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+  }, [section]);
+
+  // A tablist is navigated with the arrow keys, and Home/End jump to the ends.
+  // The roving `tabIndex` below is only half of that contract: without this the
+  // rail is one stop in the tab order that cannot be moved through at all.
+  const onNavKeyDown = useCallback((event: React.KeyboardEvent) => {
+    const keys: Record<string, number> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+    const at = available.indexOf(section);
+    let next: WorkspaceSection | null = null;
+    if (event.key in keys) {
+      next = available[(at + keys[event.key] + available.length) % available.length];
+    } else if (event.key === 'Home') {
+      next = available[0];
+    } else if (event.key === 'End') {
+      next = available[available.length - 1];
+    }
+    if (!next) return;
+    event.preventDefault();
+    setSection(next);
+    // Focus follows selection in a tablist that shows its panel immediately.
+    requestAnimationFrame(() => {
+      navRef.current?.querySelector<HTMLElement>(`#party-tab-${next}`)?.focus();
+    });
+  }, [available, section, setSection]);
+
   if (status.kind === 'loading') {
     return (
       <main className="pw" data-testid="party-workspace">
@@ -244,7 +280,10 @@ export function PartyWorkspacePage() {
         {/* A tablist, not a row of links: arrow keys and roving focus are what
             make this usable without a mouse, and the same markup becomes a
             rail on a wide screen rather than a second component. */}
-        <nav className="pw-nav" role="tablist" aria-label={t('party.section.nav')}>
+        <nav
+          className="pw-nav" role="tablist" aria-label={t('party.section.nav')}
+          ref={navRef} onKeyDown={onNavKeyDown}
+        >
           {available.map((id) => (
             <button
               key={id} type="button" role="tab"

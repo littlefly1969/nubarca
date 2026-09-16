@@ -1255,7 +1255,7 @@ const it = {
 
   // --- Owner-side party upload moderation ---
   'partyUploads.backToAlbum': '← Torna all’album',
-  'partyUploads.title': 'Caricamenti party',
+  'partyUploads.title': 'Foto degli ospiti',
   'partyUploads.backToParty': 'Torna alla festa',
   'partyUploads.rule': 'Come entrano le foto',
   'partyUploads.emptyTitle': 'Nessun contributo, per ora',
