@@ -15,8 +15,10 @@ import {
   slotHasContent,
   slotsWithLostMedia,
   workspaceAttention,
+  factsFailed,
   workspaceSections,
   workspaceSteps,
+  type Loaded,
   type WorkspaceFacts,
 } from './partyWorkspaceModel';
 
@@ -55,26 +57,36 @@ const slot = (
   ...over,
 });
 
-const counts = (over: Partial<GuestDirectorySummary> = {}): GuestDirectorySummary => ({
+const counts = (
+  over: Partial<Omit<GuestDirectorySummary, 'rsvp' | 'attendance'>> & {
+    rsvp?: Partial<GuestDirectorySummary['rsvp']>;
+    attendance?: Partial<GuestDirectorySummary['attendance']>;
+  } = {},
+): GuestDirectorySummary => ({
   groups: 0,
   otherArrivals: 0,
+  ...over,
   rsvp: {
     groups: 0, invited: 0, missingResponses: 0, attending: 0, declined: 0,
-    expectedPeople: 0, unansweredGroups: 0,
+    expectedPeople: 0, unansweredGroups: 0, ...over.rsvp,
   },
   attendance: {
     expectedPeople: 0, expectedArrived: 0, expectedMissing: 0,
-    unexpectedKnownGuests: 0, otherArrivals: 0, totalArrivals: 0,
+    unexpectedKnownGuests: 0, otherArrivals: 0, totalArrivals: 0, ...over.attendance,
   },
-  ...over,
 });
+
+/** A read that answered. The tests say `loading` or `error` when they mean it. */
+const got = <T>(value: T): Loaded<T> => ({ status: 'ready', value });
+const LOADING = { status: 'loading' } as const;
+const FAILED = { status: 'error' } as const;
 
 const facts = (over: Partial<WorkspaceFacts> = {}): WorkspaceFacts => ({
   party: withAlbum(),
-  albumParty: albumParty(),
-  slots: [],
-  guests: counts(),
-  moderation: null,
+  albumParty: got(albumParty()),
+  slots: got([]),
+  guests: got(counts()),
+  moderation: { uploads: LOADING, messages: LOADING },
   ...over,
 });
 
@@ -101,18 +113,18 @@ describe('the one thing to do now', () => {
   it('never offers a move the party cannot make', () => {
     // A draft with no album is not one button away from a party: the summary
     // offers the step that actually unblocks it.
-    expect(primaryIntent(facts({ party: party(), albumParty: null })).kind).toBe('link-album');
-    expect(primaryIntent(facts({ party: party({ status: 'published' }), albumParty: null })).kind)
+    expect(primaryIntent(facts({ party: party(), albumParty: got(null) })).kind).toBe('link-album');
+    expect(primaryIntent(facts({ party: party({ status: 'published' }), albumParty: got(null) })).kind)
       .toBe('link-album');
   });
 
   it('publishes by opening the party to its guests, never by a second button', () => {
-    expect(primaryIntent(facts({ party: withAlbum(), albumParty: albumParty({ partyMode: false }) })).kind)
+    expect(primaryIntent(facts({ party: withAlbum(), albumParty: got(albumParty({ partyMode: false })) })).kind)
       .toBe('open-to-guests');
     // Published but the capability was turned off again: re-opening is the move.
     expect(primaryIntent(facts({
       party: withAlbum({ status: 'published' }),
-      albumParty: albumParty({ partyMode: false }),
+      albumParty: got(albumParty({ partyMode: false })),
     })).kind).toBe('open-to-guests');
   });
 
@@ -126,7 +138,7 @@ describe('the one thing to do now', () => {
 describe('what is left to do', () => {
   it('asks a draft for the things a party cannot open without', () => {
     const steps = workspaceSteps(facts({
-      party: party(), albumParty: null, guests: counts(),
+      party: party(), albumParty: got(null), guests: got(counts()),
     }));
     const byId = Object.fromEntries(steps.map((s) => [s.id, s]));
 
@@ -142,7 +154,7 @@ describe('what is left to do', () => {
   it('ticks off what the party already has', () => {
     const steps = workspaceSteps(facts({
       party: withAlbum({ eventStartsAt: '2027-06-12T18:00:00Z' }),
-      slots: [slot('invitation', { enabled: true, content: { headline: 'Vieni' } })],
+      slots: got([slot('invitation', { enabled: true, content: { headline: 'Vieni' } })]),
     }));
     const byId = Object.fromEntries(steps.map((s) => [s.id, s]));
 
@@ -177,19 +189,19 @@ describe('what needs attention', () => {
   it('says nothing about a party that is simply not finished yet', () => {
     // A draft missing its album is a STEP, not a problem: the difference is
     // what stops the summary crying wolf on every new party.
-    expect(workspaceAttention(facts({ party: party(), albumParty: null }))).toEqual([]);
+    expect(workspaceAttention(facts({ party: party(), albumParty: got(null) }))).toEqual([]);
   });
 
   it('flags a published party with no album', () => {
     const ids = workspaceAttention(facts({
-      party: party({ status: 'published' }), albumParty: null,
+      party: party({ status: 'published' }), albumParty: got(null),
     })).map((a) => a.id);
     expect(ids).toContain('no-album');
   });
 
   it('flags a party that is on while its guests are locked out', () => {
     const ids = workspaceAttention(facts({
-      party: withAlbum({ status: 'live' }), albumParty: albumParty({ partyMode: false }),
+      party: withAlbum({ status: 'live' }), albumParty: got(albumParty({ partyMode: false })),
     })).map((a) => a.id);
     expect(ids).toContain('access-closed');
   });
@@ -209,7 +221,7 @@ describe('what needs attention', () => {
       slot('menu', { enabled: true, mediaFileItemId: 'here', mediaUrl: '/media/here' }),
     ];
     expect(slotsWithLostMedia(slots)).toHaveLength(1);
-    const lost = workspaceAttention(facts({ slots })).find((a) => a.id === 'lost-media');
+    const lost = workspaceAttention(facts({ slots: got(slots) })).find((a) => a.id === 'lost-media');
     expect(lost?.count).toBe(1);
     expect(lost?.section).toBe('experience');
   });
@@ -217,16 +229,21 @@ describe('what needs attention', () => {
   it('points a waiting queue at the section that empties it', () => {
     const items = workspaceAttention(facts({
       party: withAlbum({ status: 'live' }),
-      moderation: { uploads: 3, messages: 1 },
+      moderation: { uploads: got(3), messages: got(1) },
     }));
     expect(items.find((a) => a.id === 'pending-uploads')).toMatchObject({ count: 3, section: 'photos' });
     expect(items.find((a) => a.id === 'pending-messages')).toMatchObject({ count: 1, section: 'activities' });
   });
 
   it('never invents a queue it was not told about', () => {
-    // `null` is "not asked for", and it must not read as zero or as a problem.
-    const ids = workspaceAttention(facts({ moderation: null })).map((a) => a.id);
-    expect(ids).not.toContain('pending-uploads');
+    // Loading is "not asked for yet", and it must not read as zero or as a
+    // problem. Neither must a failure.
+    expect(workspaceAttention(facts({
+      moderation: { uploads: LOADING, messages: LOADING },
+    })).map((a) => a.id)).not.toContain('pending-uploads');
+    expect(workspaceAttention(facts({
+      moderation: { uploads: FAILED, messages: FAILED },
+    })).map((a) => a.id)).not.toContain('pending-uploads');
   });
 });
 
@@ -240,14 +257,88 @@ describe('an open party', () => {
 
   it('is never told it is missing invitations it never sent', () => {
     const steps = workspaceSteps(facts({
-      party: withAlbum({ status: 'published' }), guests: counts(),
+      party: withAlbum({ status: 'published' }), guests: got(counts()),
     }));
-    const sent = steps.find((s) => s.id === 'invitations-sent')!;
-    expect(sent.optional).toBe(true);
+    expect(steps.find((s) => s.id === 'invitations')!.optional).toBe(true);
   });
 });
 
 /** The statuses are the four the product knows, in order. */
 it('names the four states of an evening', () => {
   expect(PARTY_STATUSES).toEqual<PartyStatus[]>(['draft', 'published', 'live', 'ended']);
+});
+
+describe('unknown is not zero, and it is not "not configured" either', () => {
+  it('says it cannot decide the next move rather than guessing one', () => {
+    // Loading and failed are DIFFERENT answers: one is worth waiting for, the
+    // other is worth retrying, and neither is "publish it".
+    expect(primaryIntent(facts({ albumParty: LOADING })).kind).toBe('unknown');
+    expect(primaryIntent(facts({ albumParty: FAILED })).kind).toBe('unavailable');
+  });
+
+  it('never claims a section is unwritten because the read failed', () => {
+    // The whole point: "you have not written the invitation" and "we could not
+    // read the invitation" are different sentences, and only one is true.
+    const failed = workspaceSteps(facts({ party: party(), slots: FAILED }));
+    expect(failed.some((s) => s.id === 'invitation')).toBe(false);
+    expect(failed.some((s) => s.id === 'details')).toBe(false);
+    // The steps that do not depend on it are still offered.
+    expect(failed.some((s) => s.id === 'date')).toBe(true);
+
+    const read = workspaceSteps(facts({ party: party(), slots: got([]) }));
+    expect(read.find((s) => s.id === 'invitation')!.done).toBe(false);
+  });
+
+  it('never claims the guest access is closed because the read failed', () => {
+    expect(workspaceSteps(facts({ albumParty: FAILED })).some((s) => s.id === 'guest-access'))
+      .toBe(false);
+    expect(workspaceAttention(facts({
+      party: withAlbum({ status: 'live' }), albumParty: FAILED,
+    })).map((a) => a.id)).not.toContain('access-closed');
+  });
+
+  it('lets one queue fail without the other losing its number', () => {
+    const items = workspaceAttention(facts({
+      party: withAlbum({ status: 'live' }),
+      moderation: { uploads: FAILED, messages: got(2) },
+    }));
+    expect(items.find((a) => a.id === 'pending-uploads')).toBeUndefined();
+    expect(items.find((a) => a.id === 'pending-messages')).toMatchObject({ count: 2 });
+  });
+
+  it('reports what did not arrive, so a surface can say so once', () => {
+    expect(factsFailed(facts())).toBe(false);
+    expect(factsFailed(facts({ albumParty: LOADING }))).toBe(false);
+    expect(factsFailed(facts({ slots: FAILED }))).toBe(true);
+    expect(factsFailed(facts({ guests: FAILED }))).toBe(true);
+  });
+});
+
+describe('delivery is never inferred from the guest list', () => {
+  it('does not tick the invitations off because the list has names in it', () => {
+    // `rsvp.invited` counts NAMED GUESTS — the size of the list, not a delivery
+    // receipt. A list created a minute ago used to read "Inviti mandati ✓"
+    // while no personal link had left the building.
+    const steps = workspaceSteps(facts({
+      party: withAlbum({ status: 'published' }),
+      guests: got(counts({ groups: 4, rsvp: { invited: 11 } })),
+    }));
+    const invitations = steps.find((s) => s.id === 'invitations')!;
+    expect(invitations.done).toBe(false);
+    expect(invitations.section).toBe('guests');
+  });
+
+  it('says the same thing whether the list is empty or full', () => {
+    // Nothing about this entry may move with the size of the guest list,
+    // because nothing about the list is evidence of a delivery either way.
+    const empty = workspaceSteps(facts({
+      party: withAlbum({ status: 'published' }), guests: got(counts({ groups: 0 })),
+    })).find((s) => s.id === 'invitations')!;
+    const full = workspaceSteps(facts({
+      party: withAlbum({ status: 'published' }),
+      guests: got(counts({ groups: 9, rsvp: { invited: 30, attending: 21 } })),
+    })).find((s) => s.id === 'invitations')!;
+    expect(empty.done).toBe(full.done);
+    expect(empty.done).toBe(false);
+  });
 });

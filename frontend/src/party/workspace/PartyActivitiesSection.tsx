@@ -4,7 +4,9 @@ import { PERMISSIONS } from '../../auth/permissions';
 import { useI18n } from '../../i18n';
 import { PartyGameSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
-import { Badge, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
+import { Badge, Button, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
+import { QueueBadge } from './PartyLiveSection';
+import type { Loaded } from './partyWorkspaceModel';
 
 // "ATTIVITÀ" — what there is to DO at the party, as opposed to what there is
 // to look at.
@@ -20,12 +22,14 @@ import { Badge, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
 // up in front of people.
 
 export function PartyActivitiesSection({
-  party, albumParty, moderation, onAlbumPartyUpdated,
+  party, albumParty, albumPartyFailed, moderation, onAlbumPartyUpdated, onRetry,
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
-  moderation: { uploads: number; messages: number } | null;
+  albumPartyFailed: boolean;
+  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
+  onRetry(): void;
 }) {
   const { t } = useI18n();
   const perms = usePermissions();
@@ -42,6 +46,22 @@ export function PartyActivitiesSection({
           title={t('party.activities.needsAlbumTitle')}
           body={t('party.activities.needsAlbumBody')}
         />
+      </>
+    );
+  }
+
+  if (albumPartyFailed) {
+    return (
+      <>
+        <SectionHead title={t('party.section.activities')} lede={t('party.activities.lede')} />
+        <Notice
+          tone="error"
+          testId="party-activities-settings-error"
+          title={t('party.settingsUnreadable')}
+          actions={<Button onClick={onRetry}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.settingsUnreadableBody')}</p>
+        </Notice>
       </>
     );
   }
@@ -68,9 +88,7 @@ export function PartyActivitiesSection({
           note={albumParty?.requireMessageApproval
             ? t('party.activities.approvalOn')
             : t('party.activities.approvalOff')}
-          after={moderation && moderation.messages > 0
-            ? <Badge kind="warn">{t('party.photos.pending', { count: moderation.messages })}</Badge>
-            : undefined}
+          after={<QueueBadge queue={moderation.messages} />}
         />
       </Panel>
 

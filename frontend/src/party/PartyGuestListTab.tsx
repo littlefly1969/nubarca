@@ -27,6 +27,7 @@ import {
   type GuestDirectoryGroupItem,
   type GuestDirectoryOtherItem,
   type GuestDirectoryPerson,
+  type GuestDirectorySummary,
   type GuestDirectoryState,
   type InvitationPrimaryAction,
   type InvitationShareChannel,
@@ -108,10 +109,24 @@ const ERROR_KEYS: Record<string, MessageKey> = {
 const SEARCH_DEBOUNCE_MS = 250;
 
 export function PartyGuestListTab({
-  party, onPartyUpdated,
+  party, onPartyUpdated, onGuestCountsChanged,
 }: {
   party: Party;
   onPartyUpdated(next: Party): void;
+  /**
+   * The party's own counts, as the SERVER answers each mutation with them.
+   *
+   * The workspace keeps its own counts-only read for the summary and the live
+   * console, and until this existed they drifted the moment the host did
+   * anything here: check somebody in, walk back to Live, and "Arrivati" was
+   * still the number from before — correct only after the refresh button the
+   * host should never have needed to find.
+   *
+   * It hands UP what the console already holds rather than asking the server
+   * again: this summary IS the server's answer to the mutation, so the two
+   * surfaces cannot disagree and nothing is re-fetched to learn it.
+   */
+  onGuestCountsChanged?(next: GuestDirectorySummary): void;
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
@@ -142,6 +157,21 @@ export function PartyGuestListTab({
 
   const directory = useGuestDirectory(party.id, { q, state }, invalidateAuth);
   const live = isAttendancePhase(party.status);
+
+  // Hand the counts UP whenever the server moves them.
+  //
+  // Every mutation here answers with the party's own summary and the console
+  // patches its copy from it; the workspace keeps a second copy for the summary
+  // and the live console. Without this the two drifted the moment the host
+  // checked somebody in: walk back to Live and "Arrivati" was the number from
+  // before, correct only after pressing a refresh nobody should have to find.
+  //
+  // It publishes the object the console is ALREADY showing, so the two surfaces
+  // cannot disagree, and it costs no request. The effect fires on identity:
+  // `useGuestDirectory` builds a new summary only when one actually changed.
+  useEffect(() => {
+    if (directory.summary) onGuestCountsChanged?.(directory.summary);
+  }, [directory.summary, onGuestCountsChanged]);
 
   // --- The URL is the console's state, minus the search --------------------------
 

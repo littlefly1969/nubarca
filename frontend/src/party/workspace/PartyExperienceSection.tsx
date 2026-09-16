@@ -9,8 +9,8 @@ import { PartyContentCard } from '../PartyContentEditors';
 import { PartyCoverCard } from '../PartyCoverCard';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
-import { Badge, ButtonLink, EmptyState, Notice, Panel, SectionHead } from './ui';
-import { slotsWithLostMedia } from './partyWorkspaceModel';
+import { Badge, Button, ButtonLink, EmptyState, Notice, Panel, SectionHead } from './ui';
+import { loadedValue, slotsWithLostMedia, type Loaded } from './partyWorkspaceModel';
 
 // "ESPERIENZA" — everything the guest will see, in the order they will see it.
 //
@@ -32,20 +32,40 @@ const PRACTICAL: readonly PartyGuestContentKind[] = ['location', 'dress-code', '
 const AFTERWARDS: readonly PartyGuestContentKind[] = ['thank-you'];
 
 export function PartyExperienceSection({
-  party, albumParty, slots, onPartyUpdated, onSlotSaved,
+  party, albumParty, slots: loadedSlots, onPartyUpdated, onSlotSaved, onRetry,
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
-  slots: readonly PartyGuestContentSlot[];
+  slots: Loaded<readonly PartyGuestContentSlot[]>;
   onPartyUpdated(next: Party): void;
   onSlotSaved(next: PartyGuestContentSlot): void;
+  onRetry(): void;
 }) {
   const { t, tn } = useI18n();
   const albumId = mainMediaSource(party)?.albumId ?? null;
   const guestUrl = albumParty?.partyMode && albumParty.partyUrl
     ? absoluteGuestUrl(albumParty.partyUrl)
     : null;
+  const slots = loadedValue(loadedSlots) ?? [];
   const lost = slotsWithLostMedia(slots);
+
+  // An unread section list is NOT an empty one: drawing six "off" cards here
+  // would tell the host they had written nothing.
+  if (loadedSlots.status === 'error') {
+    return (
+      <>
+        <SectionHead title={t('party.section.experience')} lede={t('party.experience.lede')} />
+        <Notice
+          tone="error"
+          testId="party-experience-error"
+          title={t('party.experience.unreadable')}
+          actions={<Button onClick={onRetry}>{t('common.retry')}</Button>}
+        >
+          <p>{t('party.experience.unreadableBody')}</p>
+        </Notice>
+      </>
+    );
+  }
 
   return (
     <>

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PERMISSIONS } from '@nubarca/api-client';
@@ -79,7 +79,11 @@ const guestCounts = (over: {
  */
 function mount(
   handlers: Record<string, () => Response>,
-  { permissions, at }: { permissions?: readonly string[]; at?: string } = {},
+  { permissions, at, onUnauthorized }: {
+    permissions?: readonly string[];
+    at?: string;
+    onUnauthorized?: () => void;
+  } = {},
 ) {
   const mock = installFetchMock({
     [`GET /api/parties/${PARTY_ID}/guest-content`]: () => jsonResponse(EVERY_SLOT),
@@ -91,7 +95,10 @@ function mount(
     ...handlers,
   });
   render(
-    <AuthedWrapper permissions={permissions}>
+    <AuthedWrapper
+      permissions={permissions}
+      value={onUnauthorized ? { invalidateAuth: onUnauthorized } : undefined}
+    >
       <MemoryRouter initialEntries={[`/parties/${PARTY_ID}${at ?? ''}`]}>
         <Routes>
           <Route path="/parties/:partyId" element={<PartyWorkspacePage />} />
@@ -187,19 +194,34 @@ describe('the summary — what do I do now', () => {
     expect(await screen.findByTestId('party-next-move')).toHaveTextContent('Scegli l’album');
   });
 
-  it('publishes by opening the party to its guests, and adopts what came back', async () => {
+  it('publishes by opening the party to its guests, and the whole page moves with it', async () => {
+    // Enabling guest access publishes the party SERVER-SIDE, and the
+    // capability's answer says nothing about the lifecycle. The page used to
+    // adopt the settings alone and leave the badge reading "Bozza" over a
+    // button still offering to publish, until the host reloaded by hand.
+    let published = false;
     const mock = mount({
-      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
-      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty({ partyMode: false })),
-      [`PATCH /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}`]: () =>
+        jsonResponse(withAlbum(published ? { status: 'published', version: 2 } : {})),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () =>
+        jsonResponse(albumParty({ partyMode: published })),
+      [`PATCH /api/albums/${ALBUM_ID}/party-settings`]: () => {
+        published = true;
+        return jsonResponse(albumParty());
+      },
     });
 
+    expect(await screen.findByTestId('party-status')).toHaveTextContent('In preparazione');
     await userEvent.click(await screen.findByTestId('party-next-move'));
 
     // The capability's own transition, not a second "publish" racing it.
-    const patch = mock.calls.find((c) => c.method === 'PATCH')!;
-    expect(patch.url).toContain('party-settings');
-    expect(await screen.findByTestId('party-share-url')).toHaveTextContent('/party/tok');
+    expect(mock.calls.find((c) => c.method === 'PATCH')!.url).toContain('party-settings');
+    // And every one of these without a reload: the badge, the next action, and
+    // the link the host is now meant to hand out.
+    expect(await screen.findByTestId('party-status')).toHaveTextContent('Pubblicata');
+    await waitFor(() =>
+      expect(screen.getByTestId('party-next-move')).toHaveTextContent('Avvia festa'));
+    expect(screen.getByTestId('party-share-url')).toHaveTextContent('/party/tok');
   });
 
   it('states the party’s state separately from the action', async () => {
@@ -460,6 +482,173 @@ describe('the live console', () => {
     expect(await screen.findByTestId('party-status')).toHaveTextContent('Conclusa');
     // The console goes away with the evening; the map does not change.
     expect(screen.queryByTestId('party-tab-live')).not.toBeInTheDocument();
+  });
+});
+
+describe('the counts follow what the host just did', () => {
+    /** The number one named metric is showing, so "0" elsewhere cannot answer. */
+  const arrived = (root: HTMLElement) =>
+    root.querySelector('[data-metric="arrived"] dd')?.textContent;
+
+  /** A directory page with one group of two, and a door that can be worked. */
+  const directory = (over: { arrived?: number; others?: number } = {}) => ({
+    ...guestCounts({
+      groups: 1,
+      attendance: {
+        expectedPeople: 2,
+        totalArrivals: over.arrived ?? 0,
+        expectedArrived: over.arrived ?? 0,
+        expectedMissing: 2 - (over.arrived ?? 0),
+        otherArrivals: over.others ?? 0,
+      },
+    }),
+    partyStatus: 'live',
+    items: [{
+      kind: 'group', groupId: 'g1', label: 'Famiglia Rossi', version: 1,
+      maxAdditionalGuests: 0, additionalGuestsUsed: 0,
+      people: [
+        { guestId: 'p1', name: 'Mario', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: null, checkInSource: null, matched: false },
+        { guestId: 'p2', name: 'Laura', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: null, checkInSource: null, matched: false },
+      ],
+      counts: { attending: 2, pending: 0, declined: 0, arrived: over.arrived ?? 0 },
+      invitation: { state: 'sent', lastAttemptChannel: 'whatsapp', lastAttemptKind: 'invitation', lastAttemptStatus: 'shared', lastAttemptAt: '2027-06-01T10:00:00Z' },
+      whatsappDirect: true, canSend: true, canRemind: true, canShare: true,
+    }],
+  });
+
+  it('shows a check-in on Live without a refresh, and without asking again', async () => {
+    // The console and the workspace each keep counts. Before they were joined,
+    // checking somebody in and walking back to Live showed the number from
+    // before — right only after pressing a refresh nobody should have to find.
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(directory()),
+      [`PUT /api/parties/${PARTY_ID}/attendance/guests/p1`]: () => jsonResponse({
+        changed: true,
+        summary: {
+          expectedPeople: 2, expectedArrived: 1, expectedMissing: 1,
+          unexpectedKnownGuests: 0, otherArrivals: 0, totalArrivals: 1,
+        },
+        guest: { guestId: 'p1', name: 'Mario', isAdditionalGuest: false, rsvpStatus: 'attending', checkedInAt: '2027-06-12T20:10:00Z', checkInSource: 'owner' },
+        otherGuest: null,
+      }),
+    });
+
+    expect(arrived(await screen.findByTestId('party-live-metrics'))).toBe('0');
+
+    await userEvent.click(screen.getByTestId('party-live-door'));
+    await userEvent.click(await screen.findByTestId('guest-checkin-p1'));
+    await screen.findByTestId('guest-notice');
+
+    const reads = mock.calls.filter((c) => c.url.includes('/guest-directory')).length;
+    await userEvent.click(screen.getByTestId('party-tab-live'));
+
+    // The arrival is there, and the workspace did not go and ask for it: the
+    // console handed up the counts the server answered the mutation with.
+    const after = await screen.findByTestId('party-live-metrics');
+    await waitFor(() => expect(arrived(after)).toBe('1'));
+    expect(mock.calls.filter((c) => c.url.includes('/guest-directory'))).toHaveLength(reads);
+  });
+
+  it('shows another arrival, and its removal, the same way', async () => {
+    const mock = mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`POST /api/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse(directory()),
+      [`POST /api/parties/${PARTY_ID}/attendance/other-guests`]: () => jsonResponse({
+        changed: true,
+        summary: {
+          expectedPeople: 2, expectedArrived: 0, expectedMissing: 2,
+          unexpectedKnownGuests: 0, otherArrivals: 1, totalArrivals: 1,
+        },
+        guest: null,
+        otherGuest: { id: 'o1', name: 'Il collega', checkedInAt: '2027-06-12T21:02:00Z', version: 1 },
+      }),
+    });
+
+    await screen.findByTestId('party-live-metrics');
+    await userEvent.click(screen.getByTestId('party-live-door'));
+    await userEvent.click(await screen.findByTestId('guest-add'));
+    await userEvent.type(screen.getByTestId('guest-add-name'), 'Il collega');
+    await userEvent.click(screen.getByTestId('guest-add-submit'));
+    await screen.findByTestId('guest-notice');
+
+    await userEvent.click(screen.getByTestId('party-tab-live'));
+    const metrics = await screen.findByTestId('party-live-metrics');
+    // The walk-in counts as an arrival and as an "altro arrivo": both move.
+    await waitFor(() => expect(arrived(metrics)).toBe('1'));
+    expect(metrics.querySelector('[data-metric="others"] dd')?.textContent).toBe('1');
+    expect(mock.calls.some((c) => c.method === 'POST' && c.url.includes('other-guests'))).toBe(true);
+  });
+});
+
+describe('unknown is never drawn as zero, or as "not configured"', () => {
+  it('offers a retry instead of a placeholder that waits for ever', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => new Response(null, { status: 500 }),
+    });
+
+    // Not a skeleton: the read failed, and a placeholder here would spin for
+    // the rest of the evening.
+    expect(await screen.findByTestId('party-next-unavailable')).toBeInTheDocument();
+    expect(screen.getByTestId('party-next-retry')).toBeInTheDocument();
+    expect(screen.getByTestId('party-facts-error')).toBeInTheDocument();
+  });
+
+  it('never says the invitation is unwritten because the read failed', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum()),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/parties/${PARTY_ID}/guest-content`]: () => new Response(null, { status: 500 }),
+    });
+
+    expect(await screen.findByTestId('party-facts-error')).toBeInTheDocument();
+    // The step is ABSENT rather than shown open: "you have not written it" and
+    // "we could not read it" are different sentences, and only one is true.
+    expect(screen.queryByTestId('party-step-invitation')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-step-details')).not.toBeInTheDocument();
+    // And the section itself says so rather than drawing six empty cards.
+    await userEvent.click(screen.getByTestId('party-tab-experience'));
+    expect(await screen.findByTestId('party-experience-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-content-invitation')).not.toBeInTheDocument();
+  });
+
+  it('lets one queue fail without reporting the other, or itself, as zero', async () => {
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/albums/${ALBUM_ID}/party-uploads`]: () => new Response(null, { status: 500 }),
+      [`GET /api/albums/${ALBUM_ID}/party-messages`]: () => jsonResponse({
+        albumId: ALBUM_ID, isOwner: true, partyActive: true, requireMessageApproval: false,
+        items: [{ id: 'm1', displayName: null, text: 'Auguri', status: 'pending', isHero: false, createdAt: '2027-06-12T21:00:00Z' }],
+      }),
+    });
+
+    // The one that answered keeps its number; the one that did not says so
+    // rather than claiming none, and neither is drawn in the rail as zero.
+    const uploads = await screen.findByTestId('party-live-uploads');
+    expect(await within(uploads).findByText('non leggibile')).toBeInTheDocument();
+    expect(await within(screen.getByTestId('party-live-messages')).findByText('1 in attesa'))
+      .toBeInTheDocument();
+    // And the rail carries no number for the queue that could not be read.
+    expect(within(screen.getByTestId('party-tab-photos')).queryByText('0')).not.toBeInTheDocument();
+    expect(screen.getByTestId('party-tab-photos').querySelector('.pw-nav-count')).toBeNull();
+  });
+
+  it('hands a 401 from a moderation read to the application', async () => {
+    // The one failure that is not about this party. It used to be swallowed by
+    // the queues' own catch, leaving a signed-out host looking at a workspace.
+    const onUnauthorized = vi.fn();
+    mount({
+      [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(withAlbum({ status: 'live' })),
+      [`GET /api/albums/${ALBUM_ID}/party-settings`]: () => jsonResponse(albumParty()),
+      [`GET /api/albums/${ALBUM_ID}/party-uploads`]: () => new Response(null, { status: 401 }),
+    }, { onUnauthorized });
+
+    await screen.findByTestId('party-live-arrivals');
+    await waitFor(() => expect(onUnauthorized).toHaveBeenCalled());
   });
 });
 

@@ -62,15 +62,45 @@ export function sectionLabelKey(section: WorkspaceSection): MessageKey {
 
 /* ── What the party knows about itself ────────────────────────────────────── */
 
+/**
+ * ONE READ, IN ONE OF THREE STATES — and they are three, not two.
+ *
+ * `null` used to mean both "has not arrived" and "the request failed", and the
+ * surfaces above could not tell them apart: a failed album-settings read left
+ * the summary showing a placeholder for ever, and a failed guest-content read
+ * made the checklist say the invitation had not been written. Both are the same
+ * mistake — UNKNOWN IS NOT ZERO, and it is not "not configured" either.
+ *
+ * `ready` may legitimately carry `null`: a party with no album has no album
+ * settings, and that is a fact rather than a missing answer.
+ */
+export type Loaded<T> =
+  | { status: 'loading' }
+  | { status: 'ready'; value: T }
+  | { status: 'error' };
+
+export const loadedValue = <T>(loaded: Loaded<T>): T | null =>
+  (loaded.status === 'ready' ? loaded.value : null);
+
 /** Everything the summary reasons over, gathered once. */
 export interface WorkspaceFacts {
   party: Party;
-  albumParty: AlbumPartyStatus | null;
-  slots: readonly PartyGuestContentSlot[];
-  /** Null while the guest counts have not arrived — never zero standing in for unknown. */
-  guests: GuestDirectorySummary | null;
-  /** Contributions waiting for the host, or null when they were not asked for. */
-  moderation: { uploads: number; messages: number } | null;
+  /** `ready` with `null` when the party has no album to have settings for. */
+  albumParty: Loaded<AlbumPartyStatus | null>;
+  slots: Loaded<readonly PartyGuestContentSlot[]>;
+  guests: Loaded<GuestDirectorySummary | null>;
+  /**
+   * The two queues, SEPARATELY. One list failing must not report the other's
+   * count as the whole truth, and must never report its own as zero.
+   */
+  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
+}
+
+/** Anything the workspace asked for and did not get. */
+export function factsFailed(facts: WorkspaceFacts): boolean {
+  return facts.albumParty.status === 'error'
+    || facts.slots.status === 'error'
+    || facts.guests.status === 'error';
 }
 
 /** A slot SAYS something: it is on, and it has words or a photograph in it. */
@@ -121,11 +151,17 @@ export type PrimaryIntent =
   /** Something must be configured before any of the above means anything. */
   | { kind: 'link-album' }
   /**
-   * The album's settings have not arrived, so whether the guests can already
-   * reach this party is genuinely not known yet. Saying "publish it" here would
-   * be a guess, and a host who pressed it would be acting on one.
+   * The album's settings have not arrived YET, so whether the guests can
+   * already reach this party is genuinely not known. Saying "publish it" here
+   * would be a guess, and a host who pressed it would be acting on one.
    */
-  | { kind: 'unknown' };
+  | { kind: 'unknown' }
+  /**
+   * They were asked for and did not come. Distinct from `unknown`, because a
+   * placeholder that waits for ever is how a failed read used to look: this
+   * one says so and offers the read again.
+   */
+  | { kind: 'unavailable' };
 
 /**
  * THE action of the moment — one, contextual, and never a lie.
@@ -135,18 +171,18 @@ export type PrimaryIntent =
  * step that actually unblocks it instead of a "publish" that would fail.
  */
 export function primaryIntent(facts: WorkspaceFacts): PrimaryIntent {
-  const { party, albumParty } = facts;
+  const { party } = facts;
   const album = mainMediaSource(party);
+  const settings = facts.albumParty;
   switch (party.status) {
     case 'draft':
+    case 'published': {
       if (!album) return { kind: 'link-album' };
-      if (albumParty === null) return { kind: 'unknown' };
-      return { kind: 'open-to-guests' };
-    case 'published':
-      if (!album) return { kind: 'link-album' };
-      if (albumParty === null) return { kind: 'unknown' };
-      if (!albumParty.partyMode) return { kind: 'open-to-guests' };
-      return { kind: 'start-live' };
+      if (settings.status === 'loading') return { kind: 'unknown' };
+      if (settings.status === 'error') return { kind: 'unavailable' };
+      if (!settings.value?.partyMode) return { kind: 'open-to-guests' };
+      return party.status === 'published' ? { kind: 'start-live' } : { kind: 'open-to-guests' };
+    }
     case 'live':
       return { kind: 'go-live-console' };
     case 'ended':
@@ -163,7 +199,7 @@ export type StepId =
   | 'details'
   | 'guest-access'
   | 'guest-list'
-  | 'invitations-sent'
+  | 'invitations'
   | 'contributions'
   | 'screens'
   | 'start'
@@ -188,46 +224,67 @@ export interface WorkspaceStep {
  * on: the same steps, re-prioritised, never a different product.
  */
 export function workspaceSteps(facts: WorkspaceFacts): WorkspaceStep[] {
-  const { party, albumParty, slots, guests } = facts;
+  const { party } = facts;
   const album = mainMediaSource(party) !== null;
-  const invitation = findSlot(slots, 'invitation');
-  const thankYou = findSlot(slots, 'thank-you');
-  const accessOpen = albumParty?.partyMode === true;
+  // A step is only offered when the evidence for it ARRIVED. A read that failed
+  // must never produce "not done": "you have not written the invitation" and
+  // "we could not read the invitation" are different sentences, and only one of
+  // them is true. The summary says which, above the list.
+  const slots = loadedValue(facts.slots);
+  const settings = loadedValue(facts.albumParty);
+  const guests = loadedValue(facts.guests);
+  const invitation = slots ? findSlot(slots, 'invitation') : undefined;
+  const thankYou = slots ? findSlot(slots, 'thank-you') : undefined;
+  const accessOpen = settings?.partyMode === true;
   const listed = hasGuestList(guests);
 
   const step = (
     id: StepId, done: boolean, section: WorkspaceSection, optional = false,
   ): WorkspaceStep => ({ id, done, section, optional });
+  const known = (source: Loaded<unknown>, made: WorkspaceStep): WorkspaceStep | null =>
+    (source.status === 'ready' ? made : null);
+  const kept = (steps: (WorkspaceStep | null)[]): WorkspaceStep[] =>
+    steps.filter((one): one is WorkspaceStep => one !== null);
 
   switch (party.status) {
     case 'draft':
-      return [
+      return kept([
         step('date', party.eventStartsAt !== null, 'settings'),
         step('album', album, 'photos'),
-        step('invitation', invitation ? slotHasContent(invitation) : false, 'experience'),
-        step('details', slots.some((s) => s.kind !== 'invitation' && s.kind !== 'thank-you' && slotHasContent(s)), 'experience', true),
-        step('guest-list', listed, 'guests', true),
-        step('guest-access', accessOpen, 'summary'),
-      ];
+        known(facts.slots, step('invitation', invitation ? slotHasContent(invitation) : false, 'experience')),
+        known(facts.slots, step('details', (slots ?? []).some(
+          (one) => one.kind !== 'invitation' && one.kind !== 'thank-you' && slotHasContent(one),
+        ), 'experience', true)),
+        known(facts.guests, step('guest-list', listed, 'guests', true)),
+        known(facts.albumParty, step('guest-access', accessOpen, 'summary')),
+      ]);
     case 'published':
-      return [
-        step('guest-access', accessOpen, 'summary'),
-        step('invitations-sent', listed && (guests?.rsvp.invited ?? 0) > 0, 'guests', !listed),
-        step('invitation', invitation ? slotHasContent(invitation) : false, 'experience'),
-        step('contributions', albumParty?.uploadEnabled === true, 'photos', true),
-        step('screens', albumParty?.showOnTv === true, 'screens', true),
+      return kept([
+        known(facts.albumParty, step('guest-access', accessOpen, 'summary')),
+        // NEVER MARKED DONE, because nothing here knows whether an invitation
+        // was actually handed to anybody. `rsvp.invited` counts NAMED GUESTS —
+        // it is the size of the list, not a delivery receipt — so a list
+        // created a minute ago used to tick this box while no personal link had
+        // left the building. There is no delivery aggregate on the counts-only
+        // query, and inventing one is not this change's job; so the entry is an
+        // open door rather than a claim, and its copy says what to do rather
+        // than what has happened.
+        known(facts.guests, step('invitations', false, 'guests', true)),
+        known(facts.slots, step('invitation', invitation ? slotHasContent(invitation) : false, 'experience')),
+        known(facts.albumParty, step('contributions', settings?.uploadEnabled === true, 'photos', true)),
+        known(facts.albumParty, step('screens', settings?.showOnTv === true, 'screens', true)),
         step('start', false, 'summary'),
-      ];
+      ]);
     case 'live':
       // Nothing is a "step" during the party. The console is the work, and the
       // summary points at it rather than handing the host a checklist while a
       // room full of people waits.
       return [];
     case 'ended':
-      return [
-        step('thank-you', thankYou ? slotHasContent(thankYou) : false, 'experience', true),
+      return kept([
+        known(facts.slots, step('thank-you', thankYou ? slotHasContent(thankYou) : false, 'experience', true)),
         step('memories', party.libraryAccessExpiresAt !== null, 'settings', true),
-      ];
+      ]);
   }
 }
 
@@ -257,28 +314,35 @@ export interface WorkspaceAttention {
  * of them is inferred from the absence of an optional feature.
  */
 export function workspaceAttention(facts: WorkspaceFacts, now: Date = new Date()): WorkspaceAttention[] {
-  const { party, albumParty, slots, moderation } = facts;
+  const { party, moderation } = facts;
   const out: WorkspaceAttention[] = [];
   const running = party.status === 'live';
+  // Every problem below is claimed only from evidence that ARRIVED. A read that
+  // failed raises nothing: a warning invented from a missing answer is worse
+  // than no warning, because the host would act on it.
+  const settings = loadedValue(facts.albumParty);
+  const slots = loadedValue(facts.slots);
 
   if (party.status !== 'draft' && mainMediaSource(party) === null) {
     out.push({ id: 'no-album', tone: 'warn', section: 'photos' });
   }
-  if (running && albumParty && !albumParty.partyMode) {
+  if (running && settings && !settings.partyMode) {
     out.push({ id: 'access-closed', tone: 'warn', section: 'summary' });
   }
   if ((running || party.status === 'published') && guestAccessExpired(party, now)) {
     out.push({ id: 'access-expired', tone: 'warn', section: 'settings' });
   }
-  const lost = slotsWithLostMedia(slots);
+  const lost = slots ? slotsWithLostMedia(slots) : [];
   if (lost.length > 0) {
     out.push({ id: 'lost-media', tone: 'warn', section: 'experience', count: lost.length });
   }
-  if (moderation && moderation.uploads > 0) {
-    out.push({ id: 'pending-uploads', tone: 'info', section: 'photos', count: moderation.uploads });
+  // Each queue answers for itself: one failing must not be reported as zero,
+  // and must not suppress the other's real count either.
+  if (moderation.uploads.status === 'ready' && moderation.uploads.value > 0) {
+    out.push({ id: 'pending-uploads', tone: 'info', section: 'photos', count: moderation.uploads.value });
   }
-  if (moderation && moderation.messages > 0) {
-    out.push({ id: 'pending-messages', tone: 'info', section: 'activities', count: moderation.messages });
+  if (moderation.messages.status === 'ready' && moderation.messages.value > 0) {
+    out.push({ id: 'pending-messages', tone: 'info', section: 'activities', count: moderation.messages.value });
   }
   return out;
 }

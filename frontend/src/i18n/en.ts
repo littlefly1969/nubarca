@@ -457,6 +457,13 @@ const en: Partial<Record<MessageKey, string>> = {
 
   'party.notFoundBody': 'It may have been deleted, or the link is no longer valid.',
   'party.loadErrorBody': 'Check your connection and try again.',
+  'party.settingsUnreadable': 'We could not read the party settings',
+  'party.settingsUnreadableBody':
+    'Nothing you configured is lost: we simply cannot see it from here. Try again.',
+  'party.experience.unreadable': 'We could not read the sections',
+  'party.experience.unreadableBody':
+    'We do not know what you wrote, so we are not showing you empty sections that would suggest you wrote nothing. Try again.',
+  'party.photos.pendingUnknown': 'unreadable',
 
   'party.story.draft': 'Being prepared: your guests cannot see anything yet.',
   'party.story.published': 'Published: guests can open the link and reply to the invitation.',
@@ -468,6 +475,12 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.next.openToGuests': 'Open the party to guests',
   'party.next.openConsole': 'Open Live',
   'party.next.openPhotos': 'Go to the photos',
+  'party.next.unavailable.why':
+    'We could not read where this party stands. Try again: until we know, we will not offer you a move that might be the wrong one.',
+  'party.summary.partialTitle': 'Some of this did not load',
+  'party.summary.partialBody':
+    'What is missing is not shown as missing: it may be there and simply unreadable from here. Try again.',
+  'party.summary.guestsUnknown': 'We could not read the guests.',
   'party.next.link-album.why':
     'An album is where the photographs go, and the QR, the contributions and everything else hang off it.',
   'party.next.open-to-guests.why':
@@ -517,10 +530,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.step.guest-access.title': 'Party open to guests',
   'party.step.guest-access.note': 'Turns on the link and the QR. It is also what publishes the party.',
   'party.step.guest-access.action': 'Open it',
-  'party.step.invitations-sent.title': 'Invitations sent',
-  'party.step.invitations-sent.note':
-    'Every group has its own personal link, to send on WhatsApp, by email or copied.',
-  'party.step.invitations-sent.action': 'Send',
+  'party.step.invitations.title': 'Invitations',
+  'party.step.invitations.note':
+    'Every group has its own personal link: send it on WhatsApp, by email or copied.',
+  'party.step.invitations.action': 'Manage',
   'party.step.contributions.title': 'Photos from guests',
   'party.step.contributions.note': 'Let them add theirs. You still decide what becomes public.',
   'party.step.contributions.action': 'Turn on',
