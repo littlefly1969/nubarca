@@ -52,7 +52,7 @@ describe('PartyUploadsPage', () => {
     expect(await screen.findByText('guest.jpg')).toBeInTheDocument();
     // The per-row status badge (scoped to the row, not the section heading).
     expect(within(screen.getByTestId('party-upload-row')).getByText('Visibile')).toBeInTheDocument();
-    const toggle = screen.getByRole('checkbox', { name: /Richiedi approvazione per i caricamenti party/i });
+    const toggle = screen.getByRole('switch', { name: /Richiedi approvazione per i caricamenti party/i });
     expect(toggle).not.toBeChecked();
     // No face/person/original-download UI.
     expect(screen.queryByText(/person|face|original/i)).not.toBeInTheDocument();
@@ -111,7 +111,7 @@ describe('PartyUploadsPage', () => {
 
     render(wrapper());
     expect(await screen.findByTestId('party-uploads-pending')).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: /Richiedi approvazione per i caricamenti party/i })).toBeChecked();
+    expect(screen.getByRole('switch', { name: /Richiedi approvazione per i caricamenti party/i })).toBeChecked();
 
     await user.click(screen.getByRole('button', { name: /Approva wait.jpg/i }));
     await waitFor(() => {
@@ -139,7 +139,7 @@ describe('PartyUploadsPage', () => {
     });
 
     render(wrapper());
-    await user.click(await screen.findByRole('checkbox', { name: /Richiedi approvazione per i caricamenti party/i }));
+    await user.click(await screen.findByRole('switch', { name: /Richiedi approvazione per i caricamenti party/i }));
 
     await waitFor(() => {
       expect(mock.calls.some((c) => c.url.includes('/party-settings') && c.method === 'PATCH')).toBe(true);
