@@ -60,6 +60,35 @@ is built is described by `ARCHITECTURE.md`.
 
 These describe current behaviour, not history. Each is easy to "fix" wrongly.
 
+- **The Party workspace is SEVEN sections, and the same seven in every phase.**
+  Riepilogo, Esperienza, Ospiti, Foto, Attività, Schermi e stampa,
+  Impostazioni — plus Live, the one section that appears while the party is
+  happening and goes away when it ends. What changes with the lifecycle is
+  which section a host lands on, what each leads with and which steps are still
+  open, never the shape of the product; there is deliberately no `PartyType`
+  and no mode switch. `frontend/src/party/workspace/partyWorkspaceModel.ts`
+  decides the sections, the landing section, the one contextual action, the
+  steps and the problems as PURE FUNCTIONS, so two surfaces cannot disagree and
+  none of it needs a browser to test. Three things are easy to undo by
+  accident. The summary's action is not the lifecycle transition: a draft with
+  no album is not one button away from a party, and while the album's settings
+  have not arrived the intent is `unknown` and the panel renders a placeholder
+  rather than guessing. Every section but the guest console reads the guest
+  directory with `take: 0` — the COUNTS alone — so no name reaches a surface
+  that is not the console. And an open party (no guest list) is a complete
+  party: it is offered "presenze registrate" and never "Attesi 0 · Mancano 0".
+  See [party-workspace.md](party-workspace.md).
+
+- **The party's layout is measured in a real browser, not asserted in jsdom.**
+  `frontend/src/party/workspace/partyWorkspace.fixtures.tsx` renders the real
+  components against mocked responses and `frontend/scripts/check-party-workspace-layout.mjs`
+  opens each state in headless Chromium at 320/375/430/820/1440 to assert that
+  nothing overflows, no target is under 44px, the side gutter holds and two
+  sticky regions never cover each other. It is a dev/QA tool (it needs a
+  Chromium binary), and it is what caught a 28px switch, a button whose
+  `min-height` did nothing because it never declared a display, and a section
+  rail that never scrolled its own selection into view.
+
 - **A production migration is automated only by an explicit compatibility
   contract.** `deploy/migration-policy.json` does not guess from generated SQL:
   each migration must be newly added, explicitly approved, and state that the

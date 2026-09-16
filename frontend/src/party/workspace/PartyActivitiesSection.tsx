@@ -90,7 +90,7 @@ export function PartyActivitiesSection({
               />
               {albumParty.gameEnabled && (
                 <LinkRow
-                  to={`/albums/${albumId}/party-game`}
+                  to={`/albums/${albumId}/party-game?party=${party.id}`}
                   testId="party-activities-control-room"
                   title={t('partyGame.controlRoom')}
                   note={t('party.activities.controlRoomNote')}

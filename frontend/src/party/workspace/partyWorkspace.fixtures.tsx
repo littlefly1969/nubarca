@@ -124,7 +124,7 @@ function base(extra: Record<string, () => Response> = {}) {
       strip: { enabled: false, maxPrints: 0, perGuest: 0, used: 0 },
       footerText: '',
     }),
-    'GET /api/print-stations': () => jsonResponse([]),
+    'GET /api/print/stations': () => jsonResponse([]),
     [`GET /api/albums/${ALBUM_ID}/party-challenges`]: () => jsonResponse({ albumId: ALBUM_ID, challenges: [] }),
     'GET /api/albums': () => jsonResponse([]),
     ...extra,
@@ -134,7 +134,7 @@ function base(extra: Record<string, () => Response> = {}) {
 async function capture(name: string, waitFor: string) {
   await screen.findByTestId(waitFor);
   // Let the workspace's later reads (counts, queues) settle before the snapshot.
-  await new Promise((r) => setTimeout(r, 60));
+  await new Promise((r) => setTimeout(r, 200));
   mkdirSync(OUT, { recursive: true });
   writeFileSync(`${OUT}/${name}.html`, document.body.innerHTML, 'utf8');
 }

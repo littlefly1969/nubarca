@@ -228,7 +228,7 @@ function RightNow({
       />
       {albumParty?.gameEnabled && perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]) && (
         <LinkRow
-          to={`/albums/${albumId}/party-game`}
+          to={`/albums/${albumId}/party-game?party=${party.id}`}
           testId="party-live-control-room"
           title={t('partyGame.controlRoom')}
           note={t('party.live.controlRoomNote')}

@@ -73,22 +73,50 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<MessageKey | null>(null);
+  // Three states, not two: this panel used to swallow a failed read, and a
+  // silent failure is indistinguishable from a slow one for as long as the
+  // host is willing to wait.
+  const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    setLoad('loading');
     void Promise.all([
       getPartyPrintSettings(albumId, controller.signal),
       listPrintStations(controller.signal),
     ]).then(([loaded, allStations]) => {
+      if (controller.signal.aborted) return;
       setSettings(loaded);
       setDraft(toDraft(loaded));
       // Only stations that could actually print: a revoked one is not a choice.
       setStations(allStations.filter((s) => s.enabled && s.revokedAt === null));
-    }).catch(() => { /* The section stays closed rather than showing a broken form. */ });
+      setLoad('ready');
+    }).catch(() => { if (!controller.signal.aborted) setLoad('failed'); });
     return () => controller.abort();
-  }, [albumId]);
+  }, [albumId, attempt]);
 
-  if (!settings || !draft) return null;
+  if (load === 'failed') {
+    return (
+      <div className="album-party-print" data-testid="party-print-failed">
+        <p className="inline-error" role="alert">{t('partyPrintOwner.loadFailed')}</p>
+        <button type="button" onClick={() => setAttempt((n) => n + 1)}>{t('common.retry')}</button>
+      </div>
+    );
+  }
+
+  // A panel that renders NOTHING while it loads reads as a broken section —
+  // its heading sits above empty space. Content-shaped loading instead, so
+  // what arrives does not move the page either.
+  if (!settings || !draft) {
+    return (
+      <div className="album-party-print" data-testid="party-print-loading" aria-busy>
+        <div className="pw-skeleton pw-skeleton--line" style={{ width: '60%' }} />
+        <div className="pw-skeleton pw-skeleton--panel" style={{ height: '4rem' }} />
+        <span className="visually-hidden" role="status">{t('common.loading')}</span>
+      </div>
+    );
+  }
 
   const station = stations.find((s) => s.id === draft.stationId) ?? null;
   // Both products compose a 10x15 sheet, so a printer that cannot do that size
