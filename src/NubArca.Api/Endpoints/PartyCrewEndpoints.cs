@@ -18,12 +18,18 @@ namespace NubArca.Api.Endpoints;
 /// host toggling the party on run the same code with the same ranges and write
 /// the same audit lines — differing only in who the line names.</para>
 ///
-/// <para><b>Nothing is named by the client.</b> There is no party id, no album
-/// id and no owner id anywhere in these routes. The device cookie resolves to
-/// exactly one collaborator on exactly one party, and every identifier the
-/// services need comes from that resolution. A collaborator cannot reach
-/// another party by changing a URL, because there is no id in the URL to
-/// change.</para>
+/// <para><b>The client names the party, and nothing else.</b> No owner id, no
+/// album id, no collaborator id and no capability is ever accepted from a
+/// request: every one of those comes from resolving the device cookie. The
+/// PARTY is named, because it has to be — one browser may legitimately hold
+/// several assignments, and picking whichever grant came back first would make
+/// "which evening am I running" a property of the query plan.</para>
+///
+/// <para>That id is a RESOURCE SELECTOR and never an authority. The resolver
+/// requires it to match a live grant this device actually holds, in the same
+/// clause that finds the grant, so naming another party is the same generic
+/// nothing as holding no device at all — never a fallback to the one party this
+/// device does have.</para>
 ///
 /// <para><b>Deny by default, per capability, on every request.</b> Each route
 /// declares the one capability it needs. The resolver re-reads the grants and
@@ -39,23 +45,62 @@ namespace NubArca.Api.Endpoints;
 /// itself is not bounded by anything, and a collaborator who could re-point the
 /// album could hand the host's library to a party. The print STATION and the TV
 /// DEVICE are likewise absent — they are installation hardware, not this
-/// evening's.</para>
+/// evening's, and enumerating them is the host administering their own
+/// equipment rather than anyone running a party.</para>
 /// </summary>
 public static class PartyCrewEndpoints
 {
     public static IEndpointRouteBuilder MapPartyCrewEndpoints(this IEndpointRouteBuilder app)
     {
-        // ── Who am I, and leaving ───────────────────────────────────────────
+        // ── This browser, and this browser at this party ────────────────────
 
-        // The one route with no capability: it answers what this device is, and
-        // the answer is what the shell uses to decide which sections exist.
-        app.MapGet("/api/party-crew/session", async (
+        // EVERY PARTY THIS BROWSER MAY OPERATE. The one route with no party in
+        // it, because it is what a person needs BEFORE they have chosen one:
+        // the same phone can legitimately hold two assignments, and something
+        // has to be able to say so. Derived from this device's own grants —
+        // never from the owner's list of parties.
+        app.MapGet("/api/party-crew/me", async (
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             CancellationToken ct) =>
         {
             NoStore(http);
-            var ctx = await Resolve(http, resolver, ct);
+            var assignments = await resolver.AssignmentsAsync(PartyCrewSession.Device(http), ct);
+            return assignments.Count == 0
+                ? Results.NotFound()
+                : Results.Ok(new PartyCrewMeDto(assignments));
+        }).WithName("GetPartyCrewAssignments");
+
+        // DISCONNECT THIS BROWSER FROM PARTY CREW ENTIRELY. The device, not one
+        // grant: every party it helps at, at once. Its own route because it is
+        // a different decision from leaving one party, and a product that spells
+        // them the same is a product that loses somebody two jobs when they
+        // meant to leave one.
+        app.MapDelete("/api/party-crew/device", async (
+            HttpContext http,
+            [FromServices] IPartyCrewSignOutService signOut,
+            CancellationToken ct) =>
+        {
+            NoStore(http);
+            await signOut.DisconnectDeviceAsync(PartyCrewSession.Device(http), Ip(http), ct);
+            // The cookie goes regardless: a device whose grants were already
+            // revoked is still holding a credential it should not keep.
+            PartyCrewSession.ClearDevice(http);
+            return Results.NoContent();
+        }).WithName("DisconnectPartyCrewDevice");
+
+        // ── At one party ────────────────────────────────────────────────────
+
+        // What this device is AT THIS PARTY, and what the shell draws from it.
+        // No capability: being told who you are is not an operation.
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/session", async (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            CancellationToken ct) =>
+        {
+            NoStore(http);
+            var ctx = await Resolve(http, partyId, resolver, ct);
             return ctx is null
                 ? Results.NotFound()
                 : Results.Ok(new PartyCrewSessionDto(
@@ -63,39 +108,43 @@ public static class PartyCrewEndpoints
                     [.. ctx.Capabilities.Order(StringComparer.Ordinal)]));
         }).WithName("GetPartyCrewSession");
 
-        // Signing this device out. Revokes the GRANT, not the device: the same
-        // phone may be helping at another party, and leaving one is not leaving
-        // both.
-        app.MapDelete("/api/party-crew/session", async (
+        // LEAVE THIS PARTY. Revokes the GRANT and nothing else: the same phone
+        // may be helping at another party, and the cookie stays because that
+        // other assignment still needs it.
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/session", async (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyCrewSignOutService signOut,
             CancellationToken ct) =>
         {
             NoStore(http);
-            var ctx = await Resolve(http, resolver, ct);
-            if (ctx is not null) await signOut.SignOutAsync(ctx, Ip(http), ct);
-            // The cookie goes regardless. A device whose grant was already
-            // revoked is still holding a cookie it should not keep.
-            PartyCrewSession.ClearDevice(http);
-            return Results.NoContent();
-        }).WithName("EndPartyCrewSession");
+            var ctx = await Resolve(http, partyId, resolver, ct);
+            if (ctx is null) return Results.NotFound();
+            await signOut.SignOutAsync(ctx, Ip(http), ct);
 
-        // The crew's own two devices, and dropping one of them. Deliberately
-        // capability-free for the same reason the session is: recognising and
+            // The credential only goes when nothing else is using it.
+            if (!await signOut.HasOtherAssignmentsAsync(ctx, ct)) PartyCrewSession.ClearDevice(http);
+            return Results.NoContent();
+        }).WithName("LeavePartyCrewParty");
+
+        // This collaborator's own devices AT THIS PARTY, and dropping one.
+        // Capability-free for the same reason the session is: recognising and
         // removing your own devices is not an operation on the party.
-        app.MapGet("/api/party-crew/devices", async (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/devices", async (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyCrewSignOutService signOut,
             CancellationToken ct) =>
         {
             NoStore(http);
-            var ctx = await Resolve(http, resolver, ct);
+            var ctx = await Resolve(http, partyId, resolver, ct);
             return ctx is null ? Results.NotFound() : Results.Ok(await signOut.DevicesAsync(ctx, ct));
         }).WithName("ListPartyCrewDevices");
 
-        app.MapDelete("/api/party-crew/devices/{grantId:guid}", async (
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/devices/{grantId:guid}", async (
+            Guid partyId,
             Guid grantId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
@@ -103,35 +152,42 @@ public static class PartyCrewEndpoints
             CancellationToken ct) =>
         {
             NoStore(http);
-            var ctx = await Resolve(http, resolver, ct);
+            var ctx = await Resolve(http, partyId, resolver, ct);
             if (ctx is null) return Results.NotFound();
             if (!await signOut.RevokeAsync(ctx, grantId, Ip(http), ct)) return Results.NotFound();
-            // Dropping the device you are holding signs you out of it.
-            if (grantId == ctx.DeviceGrantId) PartyCrewSession.ClearDevice(http);
+
+            // Dropping the grant you are holding leaves this party — and the
+            // cookie survives if this browser still helps at another one.
+            if (grantId == ctx.DeviceGrantId && !await signOut.HasOtherAssignmentsAsync(ctx, ct))
+            {
+                PartyCrewSession.ClearDevice(http);
+            }
             return Results.NoContent();
         }).WithName("RevokePartyCrewDevice");
 
         // ── The party itself ────────────────────────────────────────────────
 
-        app.MapGet("/api/party-crew/party", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/party", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyService parties,
             CancellationToken ct) =>
-            With(http, resolver, null, ct, async ctx =>
+            With(http, partyId, resolver, null, ct, async ctx =>
             {
                 var party = await parties.GetAsync(ctx.OwnerUserId, ctx.PartyId, ct);
                 return party is null ? Results.NotFound() : Results.Ok(party);
             })).WithName("GetPartyCrewParty");
 
-        app.MapMethods("/api/party-crew/party", ["PATCH"], (
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/party", ["PATCH"], (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyService parties,
             [FromServices] IAuditLogger audit,
             [FromBody] PartyOwnerEndpoints.UpdatePartyRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
                 var result = await parties.UpdateMetadataAsync(
@@ -153,13 +209,14 @@ public static class PartyCrewEndpoints
                 return PartyOwnerEndpoints.ToResult(result);
             })).WithName("UpdatePartyCrewParty");
 
-        app.MapPut("/api/party-crew/party/covers", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/party/covers", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyService parties,
             [FromBody] PartyOwnerEndpoints.SetPartyCoversRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
                 return PartyOwnerEndpoints.ToResult(await parties.SetCoversAsync(
@@ -173,12 +230,13 @@ public static class PartyCrewEndpoints
 
         // ── The album's party settings ──────────────────────────────────────
 
-        app.MapGet("/api/party-crew/album-settings", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/album-settings", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyLinkService links,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, null, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, null, ct, async (ctx, albumId) =>
             {
                 var status = await links.GetOwnerStatusAsync(ctx.OwnerUserId, albumId, ct);
                 return status is null ? Results.NotFound() : Results.Ok(status);
@@ -188,14 +246,15 @@ public static class PartyCrewEndpoints
         // party is OPEN is the lifecycle — it is what publishes a draft — while
         // whether contributions need approving is the moderation configuration.
         // A role holding one and not the other gets exactly the half it holds.
-        app.MapMethods("/api/party-crew/album-settings", ["PATCH"], (
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/album-settings", ["PATCH"], (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyLinkService links,
             [FromServices] IAuditLogger audit,
             [FromBody] SetAlbumPartyModeRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.LifecycleManage, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.LifecycleManage, ct, (ctx, albumId) =>
             {
                 var configures = body is not null && (body.UploadEnabled is not null
                     || body.RequireUploadApproval is not null
@@ -206,35 +265,38 @@ public static class PartyCrewEndpoints
                     links, audit, ctx.OwnerUserId, Actor(ctx), albumId, body, Ip(http), ct);
             })).WithName("SetPartyCrewAlbumSettings");
 
-        app.MapMethods("/api/party-crew/slideshow-settings", ["PATCH"], (
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/slideshow-settings", ["PATCH"], (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyLinkService links,
             [FromBody] SetPartySlideshowSettingsRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsConfigure, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsConfigure, ct, (ctx, albumId) =>
                 PartyAlbumSettingsOperations.SetSlideshowSettingsAsync(
                     links, ctx.OwnerUserId, albumId, body, ct)))
             .WithName("SetPartyCrewSlideshowSettings");
 
-        app.MapMethods("/api/party-crew/game-settings", ["PATCH"], (
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/game-settings", ["PATCH"], (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyLinkService links,
             [FromBody] PartyGameSettingsRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, (ctx, albumId) =>
                 PartyAlbumSettingsOperations.SetGameSettingsAsync(
                     links, ctx.OwnerUserId, albumId, body, ct)))
             .WithName("SetPartyCrewGameSettings");
 
-        app.MapPut("/api/party-crew/tv-visibility", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/tv-visibility", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IAlbumService albums,
             [FromBody] SetAlbumTvVisibilityRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ScreensManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ScreensManage, ct, async (ctx, albumId) =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
                 var detail = await albums.SetTvVisibilityAsync(albumId, ctx.OwnerUserId, body.ShowOnTv, ct);
@@ -243,25 +305,27 @@ public static class PartyCrewEndpoints
 
         // ── What the party tells its guests ─────────────────────────────────
 
-        app.MapGet("/api/party-crew/guest-content", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/guest-content", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestContentService content,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.ExperienceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.ExperienceManage, ct, async ctx =>
             {
                 var slots = await content.ListAsync(ctx.OwnerUserId, ctx.PartyId, ct);
                 return slots is null ? Results.NotFound() : Results.Ok(slots);
             })).WithName("ListPartyCrewGuestContent");
 
-        app.MapPut("/api/party-crew/guest-content/{kind}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/guest-content/{kind}", (
+            Guid partyId,
             string kind,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestContentService content,
             [FromBody] PartyOwnerEndpoints.PartyGuestContentRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.ExperienceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.ExperienceManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
                 return PartyOwnerEndpoints.ToResult(await content.UpsertAsync(
@@ -281,13 +345,14 @@ public static class PartyCrewEndpoints
         // names and the arrival ticks and has no business rewriting the list or
         // sending anything. A DIRECTOR holds neither and never fetches a name.
 
-        app.MapPost("/api/party-crew/guest-directory/query", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/guest-directory/query", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestDirectoryService directory,
             [FromBody] PartyGuestDirectoryQuery? query,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
             {
                 var result = await directory.PageAsync(
                     ctx.OwnerUserId, ctx.PartyId,
@@ -300,36 +365,39 @@ public static class PartyCrewEndpoints
                 };
             })).WithName("QueryPartyCrewGuestDirectory");
 
-        app.MapGet("/api/party-crew/invitation-groups/{groupId:guid}", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestDirectoryService directory,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
             {
                 var detail = await directory.GroupAsync(ctx.OwnerUserId, ctx.PartyId, groupId, ct);
                 return detail is null ? Results.NotFound() : Results.Ok(detail);
             })).WithName("GetPartyCrewInvitationGroup");
 
-        app.MapGet("/api/party-crew/rsvp-questions", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/rsvp-questions", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestDirectoryService directory,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.GuestsRead, ct, async ctx =>
             {
                 var questions = await directory.QuestionsAsync(ctx.OwnerUserId, ctx.PartyId, ct);
                 return questions is null ? Results.NotFound() : Results.Ok(new { questions });
             })).WithName("GetPartyCrewRsvpQuestions");
 
-        app.MapPost("/api/party-crew/invitation-groups", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/invitation-groups", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.GroupRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -338,14 +406,15 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http));
             })).WithName("CreatePartyCrewInvitationGroup");
 
-        app.MapPut("/api/party-crew/invitation-groups/{groupId:guid}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.GroupRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -355,27 +424,29 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http));
             })).WithName("UpdatePartyCrewInvitationGroup");
 
-        app.MapDelete("/api/party-crew/invitation-groups/{groupId:guid}", (
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}", (
+            Guid partyId,
             Guid groupId,
             [FromQuery] int version,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
                 PartyInvitationEndpoints.ToResult(
                     await invitations.DeleteGroupAsync(ctx.OwnerUserId, ctx.PartyId, groupId, version, ct),
                     PreferHeader.WantsMinimal(http))))
             .WithName("DeletePartyCrewInvitationGroup");
 
-        app.MapPost("/api/party-crew/invitation-groups/{groupId:guid}/rotate-link", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}/rotate-link", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.VersionRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -384,14 +455,15 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http));
             })).WithName("RotatePartyCrewInvitationLink");
 
-        app.MapPost("/api/party-crew/invitation-groups/{groupId:guid}/send", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}/send", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationDeliveryService deliveries,
             [FromBody] PartyInvitationEndpoints.SendRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -401,14 +473,15 @@ public static class PartyCrewEndpoints
             })).WithName("SendPartyCrewInvitation")
             .RequireRateLimiting(PartyInvitationEndpoints.SendRateLimitPolicy);
 
-        app.MapPost("/api/party-crew/invitation-groups/{groupId:guid}/remind", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}/remind", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationDeliveryService deliveries,
             [FromBody] PartyInvitationEndpoints.SendRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -418,7 +491,8 @@ public static class PartyCrewEndpoints
             })).WithName("RemindPartyCrewInvitation")
             .RequireRateLimiting(PartyInvitationEndpoints.SendRateLimitPolicy);
 
-        app.MapPost("/api/party-crew/invitation-groups/{groupId:guid}/share", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/invitation-groups/{groupId:guid}/share", (
+            Guid partyId,
             Guid groupId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
@@ -426,7 +500,7 @@ public static class PartyCrewEndpoints
             [FromServices] IAuditLogger audit,
             [FromBody] PartyInvitationEndpoints.ShareRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 var result = await deliveries.ShareAsync(
@@ -437,13 +511,14 @@ public static class PartyCrewEndpoints
             })).WithName("SharePartyCrewInvitation")
             .RequireRateLimiting(PartyInvitationEndpoints.ShareRateLimitPolicy);
 
-        app.MapPost("/api/party-crew/rsvp-questions", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/rsvp-questions", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.QuestionRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -452,13 +527,14 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http));
             })).WithName("CreatePartyCrewRsvpQuestion");
 
-        app.MapPut("/api/party-crew/rsvp-questions/order", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/rsvp-questions/order", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.QuestionOrderRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body?.QuestionIds is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -467,14 +543,15 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http));
             })).WithName("ReorderPartyCrewRsvpQuestions");
 
-        app.MapPut("/api/party-crew/rsvp-questions/{questionId:guid}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/rsvp-questions/{questionId:guid}", (
+            Guid partyId,
             Guid questionId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyInvitationService invitations,
             [FromBody] PartyInvitationEndpoints.QuestionRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.InvitationsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyInvitationEndpoints.ToResult(
@@ -486,25 +563,27 @@ public static class PartyCrewEndpoints
 
         // ── Who arrived ─────────────────────────────────────────────────────
 
-        app.MapGet("/api/party-crew/attendance", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/attendance", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
             {
                 var result = await attendance.GetAsync(ctx.OwnerUserId, ctx.PartyId, ct);
                 return result is null ? Results.NotFound() : Results.Ok(result);
             })).WithName("GetPartyCrewAttendance");
 
-        app.MapPut("/api/party-crew/attendance/guests/{guestId:guid}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/attendance/guests/{guestId:guid}", (
+            Guid partyId,
             Guid guestId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             [FromServices] IAuditLogger audit,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
             {
                 var result = await attendance.CheckInGuestAsync(ctx.OwnerUserId, ctx.PartyId, guestId, ct);
                 if (result.Changed)
@@ -518,14 +597,15 @@ public static class PartyCrewEndpoints
                     result, PreferHeader.WantsMinimal(http), guestId: guestId);
             })).WithName("CheckInPartyCrewGuest");
 
-        app.MapDelete("/api/party-crew/attendance/guests/{guestId:guid}", (
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/attendance/guests/{guestId:guid}", (
+            Guid partyId,
             Guid guestId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             [FromServices] IAuditLogger audit,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
             {
                 var result = await attendance.UndoGuestCheckInAsync(ctx.OwnerUserId, ctx.PartyId, guestId, ct);
                 if (result.Changed)
@@ -539,13 +619,14 @@ public static class PartyCrewEndpoints
                     result, PreferHeader.WantsMinimal(http), guestId: guestId);
             })).WithName("UndoPartyCrewGuestCheckIn");
 
-        app.MapPost("/api/party-crew/attendance/other-guests", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/attendance/other-guests", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             [FromBody] PartyAttendanceEndpoints.OtherGuestCreateRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 var result = await attendance.CreateOtherGuestAsync(
@@ -555,14 +636,15 @@ public static class PartyCrewEndpoints
                     otherGuestId: result.AttendanceGuestId);
             })).WithName("CreatePartyCrewAttendanceGuest");
 
-        app.MapPut("/api/party-crew/attendance/other-guests/{attendanceGuestId:guid}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/attendance/other-guests/{attendanceGuestId:guid}", (
+            Guid partyId,
             Guid attendanceGuestId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             [FromBody] PartyAttendanceEndpoints.OtherGuestUpdateRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "invalid_request" });
                 return PartyAttendanceEndpoints.ToResult(
@@ -571,13 +653,14 @@ public static class PartyCrewEndpoints
                     PreferHeader.WantsMinimal(http), otherGuestId: attendanceGuestId);
             })).WithName("UpdatePartyCrewAttendanceGuest");
 
-        app.MapDelete("/api/party-crew/attendance/other-guests/{attendanceGuestId:guid}", (
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/attendance/other-guests/{attendanceGuestId:guid}", (
+            Guid partyId,
             Guid attendanceGuestId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyAttendanceService attendance,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.AttendanceManage, ct, async ctx =>
                 PartyAttendanceEndpoints.ToResult(
                     await attendance.DeleteOtherGuestAsync(
                         ctx.OwnerUserId, ctx.PartyId, attendanceGuestId, ct),
@@ -586,12 +669,13 @@ public static class PartyCrewEndpoints
 
         // ── The photographs ─────────────────────────────────────────────────
 
-        app.MapGet("/api/party-crew/uploads", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/uploads", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyModerationService moderation,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async (ctx, albumId) =>
             {
                 var list = await moderation.ListAsync(ctx.OwnerUserId, albumId, ct);
                 return list is null ? Results.NotFound() : Results.Ok(list);
@@ -604,12 +688,13 @@ public static class PartyCrewEndpoints
 
         // ── The greetings ───────────────────────────────────────────────────
 
-        app.MapGet("/api/party-crew/messages", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/messages", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyMessageService messages,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async (ctx, albumId) =>
             {
                 var list = await messages.ListForManagerAsync(albumId, ctx.OwnerUserId, ct);
                 return list is null ? Results.NotFound() : Results.Ok(list);
@@ -624,64 +709,69 @@ public static class PartyCrewEndpoints
 
         // ── The activities ──────────────────────────────────────────────────
 
-        app.MapGet("/api/party-crew/challenges", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/challenges", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 var list = await challenges.ListOwnerAsync(ctx.OwnerUserId, albumId, ct);
                 return list is null ? Results.NotFound() : Results.Ok(list);
             })).WithName("ListPartyCrewChallenges");
 
-        app.MapPost("/api/party-crew/challenges", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/challenges", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
             [FromBody] PartyChallengeWriteRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 if (body is null) return Results.BadRequest();
                 var created = await challenges.CreateAsync(ctx.OwnerUserId, albumId, body, ct);
                 return created is null ? Results.BadRequest() : Results.Ok(created);
             })).WithName("CreatePartyCrewChallenge");
 
-        app.MapPut("/api/party-crew/challenges/order", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/challenges/order", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
             [FromBody] PartyChallengeReorderRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 if (body?.ChallengeIds is null) return Results.BadRequest();
                 return await challenges.ReorderAsync(ctx.OwnerUserId, albumId, body.ChallengeIds, ct)
                     ? Results.NoContent() : Results.BadRequest();
             })).WithName("ReorderPartyCrewChallenges");
 
-        app.MapPut("/api/party-crew/challenges/{challengeId:guid}", (
+        app.MapPut("/api/party-crew/parties/{partyId:guid}/challenges/{challengeId:guid}", (
+            Guid partyId,
             Guid challengeId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
             [FromBody] PartyChallengeWriteRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 if (body is null) return Results.BadRequest();
                 var updated = await challenges.UpdateAsync(ctx.OwnerUserId, albumId, challengeId, body, ct);
                 return updated is null ? Results.BadRequest() : Results.Ok(updated);
             })).WithName("UpdatePartyCrewChallenge");
 
-        app.MapDelete("/api/party-crew/challenges/{challengeId:guid}", (
+        app.MapDelete("/api/party-crew/parties/{partyId:guid}/challenges/{challengeId:guid}", (
+            Guid partyId,
             Guid challengeId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
                 await challenges.DeleteAsync(ctx.OwnerUserId, albumId, challengeId, ct)
                     ? Results.NoContent() : Results.NotFound()))
             .WithName("DeletePartyCrewChallenge");
@@ -689,12 +779,13 @@ public static class PartyCrewEndpoints
         // The party's own photographs, so an activity can name one. Scoped to
         // the party's MAIN album and nothing else: a collaborator never reaches
         // the host's library, only the album this evening is about.
-        app.MapGet("/api/party-crew/album-items", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/album-items", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IAlbumService albums,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 var items = await albums.ListItemsAsync(albumId, ctx.OwnerUserId, ct);
                 return items is null ? Results.NotFound() : Results.Ok(items);
@@ -702,36 +793,39 @@ public static class PartyCrewEndpoints
 
         // Running it. A separate capability from writing the list: the DIRECTOR
         // presses start and next all evening and never edits a question.
-        app.MapGet("/api/party-crew/game", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/game", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGameService game,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesControl, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesControl, ct, async (ctx, albumId) =>
             {
                 var snapshot = await game.GetOwnerSnapshotAsync(ctx.OwnerUserId, albumId, ct);
                 return snapshot is null ? Results.NotFound() : Results.Ok(snapshot);
             })).WithName("GetPartyCrewGameSnapshot");
 
-        app.MapPost("/api/party-crew/game/commands", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/game/commands", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGameService game,
             [FromServices] IAuditLogger audit,
             [FromBody] PartyGameCommandRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesControl, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesControl, ct, (ctx, albumId) =>
                 PartyGameEndpoints.ExecuteAsync(
                     game, audit, ctx.OwnerUserId, Actor(ctx), albumId, body, Ip(http), ct)))
             .WithName("ExecutePartyCrewGameCommand");
 
-        app.MapPost("/api/party-crew/game/plan", (
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/game/plan", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGameService game,
             [FromBody] PartyGamePlanRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ActivitiesControl, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesControl, ct, (ctx, albumId) =>
                 PartyGameEndpoints.PlanAsync(game, ctx.OwnerUserId, albumId, body, ct)))
             .WithName("PlanPartyCrewGame");
 
@@ -742,34 +836,27 @@ public static class PartyCrewEndpoints
         // devices are not here: they are the installation's hardware, and a
         // collaborator at one party has no business re-pointing a printer.
 
-        app.MapGet("/api/party-crew/print-stations", (
-            HttpContext http,
-            [FromServices] IPartyCrewAccessResolver resolver,
-            [FromServices] PrintStationService stations,
-            CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.PrintManage, ct, async ctx =>
-                Results.Ok(await stations.ListAsync(ctx.OwnerUserId, ct))))
-            .WithName("ListPartyCrewPrintStations");
-
-        app.MapGet("/api/party-crew/print-settings", (
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/print-settings", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyPrintProfileService profiles,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.PrintManage, ct, async (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.PrintManage, ct, async (ctx, albumId) =>
             {
                 var profile = await profiles.GetAsync(ctx.OwnerUserId, albumId, ct);
                 return profile is null ? Results.NotFound() : Results.Ok(profile);
             })).WithName("GetPartyCrewPrintSettings");
 
-        app.MapMethods("/api/party-crew/print-settings", ["PATCH"], (
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/print-settings", ["PATCH"], (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyPrintProfileService profiles,
             [FromServices] IAuditLogger audit,
             [FromBody] PartyPrintProfileRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.PrintManage, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.PrintManage, ct, (ctx, albumId) =>
                 PartyPrintOwnerEndpoints.SaveAsync(
                     profiles, audit, ctx.OwnerUserId, Actor(ctx), albumId, body, Ip(http), ct)))
             .WithName("SetPartyCrewPrintSettings");
@@ -790,13 +877,14 @@ public static class PartyCrewEndpoints
     /// </summary>
     private static async Task<IResult> With(
         HttpContext http,
+        Guid partyId,
         IPartyCrewAccessResolver resolver,
         string? capability,
         CancellationToken ct,
         Func<PartyCrewAccessContext, Task<IResult>> work)
     {
         NoStore(http);
-        var ctx = await Resolve(http, resolver, ct);
+        var ctx = await Resolve(http, partyId, resolver, ct);
         if (ctx is null) return Results.NotFound();
         if (capability is not null && !ctx.Can(capability)) return Results.NotFound();
         return await work(ctx);
@@ -811,28 +899,37 @@ public static class PartyCrewEndpoints
     /// </summary>
     private static Task<IResult> WithAlbum(
         HttpContext http,
+        Guid partyId,
         IPartyCrewAccessResolver resolver,
         string? capability,
         CancellationToken ct,
         Func<PartyCrewAccessContext, Guid, Task<IResult>> work)
-        => With(http, resolver, capability, ct, ctx =>
+        => With(http, partyId, resolver, capability, ct, ctx =>
             ctx.MainAlbumId is Guid albumId ? work(ctx, albumId) : Task.FromResult(Results.NotFound()));
 
+    /// <summary>
+    /// The device token from the cookie, at the party the ROUTE named.
+    ///
+    /// <para>The id is a selector, never an authority: the resolver requires it
+    /// to match a grant this device actually holds, so naming another party is
+    /// the same nothing as holding no device at all.</para>
+    /// </summary>
     private static Task<PartyCrewAccessContext?> Resolve(
-        HttpContext http, IPartyCrewAccessResolver resolver, CancellationToken ct)
-        => resolver.ResolveAsync(PartyCrewSession.Device(http), ct);
+        HttpContext http, Guid partyId, IPartyCrewAccessResolver resolver, CancellationToken ct)
+        => resolver.ResolveAsync(PartyCrewSession.Device(http), partyId, ct);
 
     private static void MapTransition(
         IEndpointRouteBuilder app, string segment, PartyLifecycleAction action, string auditAction)
     {
-        app.MapPost($"/api/party-crew/party/{segment}", (
+        app.MapPost($"/api/party-crew/parties/{{partyId:guid}}/party/{segment}", (
+            Guid partyId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyService parties,
             [FromServices] IAuditLogger audit,
             [FromBody] PartyOwnerEndpoints.PartyVersionedRequest? body,
             CancellationToken ct) =>
-            With(http, resolver, PartyCrewCapabilities.LifecycleManage, ct, async ctx =>
+            With(http, partyId, resolver, PartyCrewCapabilities.LifecycleManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
                 var result = await parties.TransitionAsync(
@@ -850,14 +947,15 @@ public static class PartyCrewEndpoints
     private static void MapUploadModeration(
         IEndpointRouteBuilder app, string segment, string status, string auditAction)
     {
-        app.MapPost($"/api/party-crew/uploads/{{fileItemId:guid}}/{segment}", (
+        app.MapPost($"/api/party-crew/parties/{{partyId:guid}}/uploads/{{fileItemId:guid}}/{segment}", (
+            Guid partyId,
             Guid fileItemId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyModerationService moderation,
             [FromServices] IAuditLogger audit,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
                 PartyEndpoints.ModeratePartyUploadAsync(
                     moderation, audit, ctx.OwnerUserId, Actor(ctx), albumId, fileItemId,
                     status, auditAction, Ip(http), ct)))
@@ -867,14 +965,15 @@ public static class PartyCrewEndpoints
     private static void MapMessageModeration(
         IEndpointRouteBuilder app, string segment, PartyMessageModeration action, string auditAction)
     {
-        app.MapPost($"/api/party-crew/messages/{{messageId:guid}}/{segment}", (
+        app.MapPost($"/api/party-crew/parties/{{partyId:guid}}/messages/{{messageId:guid}}/{segment}", (
+            Guid partyId,
             Guid messageId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyMessageService messages,
             [FromServices] IAuditLogger audit,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
                 PartyEndpoints.ModeratePartyMessageAsync(
                     messages, audit, ctx.OwnerUserId, Actor(ctx), albumId, messageId,
                     action, auditAction, Ip(http), ct)))
@@ -884,14 +983,15 @@ public static class PartyCrewEndpoints
     private static void MapMessageHero(
         IEndpointRouteBuilder app, string segment, bool hero, string auditAction)
     {
-        app.MapPost($"/api/party-crew/messages/{{messageId:guid}}/{segment}", (
+        app.MapPost($"/api/party-crew/parties/{{partyId:guid}}/messages/{{messageId:guid}}/{segment}", (
+            Guid partyId,
             Guid messageId,
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyMessageService messages,
             [FromServices] IAuditLogger audit,
             CancellationToken ct) =>
-            WithAlbum(http, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, (ctx, albumId) =>
                 PartyEndpoints.SetPartyMessageHeroAsync(
                     messages, audit, ctx.OwnerUserId, Actor(ctx), albumId, messageId,
                     hero, auditAction, Ip(http), ct)))

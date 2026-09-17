@@ -166,9 +166,22 @@ public static class PartyCrewAuthEndpoints
         if (result.Error is { } error) return Problem(error);
 
         var pairing = result.Value!;
+
+        // A NEW browser gets a credential; a browser that already had one keeps
+        // it. Adding a second party to a device that is already paired mints
+        // nothing, and that is correct — the device token is party-agnostic.
         if (pairing.RawDeviceToken is not null)
         {
             PartyCrewSession.IssueDevice(http, pairing.RawDeviceToken);
+        }
+
+        // THE CHALLENGE GOES EITHER WAY. It is spent the moment the pairing
+        // succeeds, whether or not a token was minted — tying the clear to the
+        // token left a finished challenge cookie in every browser that paired
+        // to a second party, and a spent credential nobody removes is one
+        // somebody eventually tries to use.
+        if (pairing.Result.Outcome == PartyCrewVerifyOutcome.Paired)
+        {
             PartyCrewSession.ClearChallenge(http);
         }
         return Results.Ok(pairing.Result);
@@ -184,6 +197,11 @@ public static class PartyCrewAuthEndpoints
         PartyCrewAuthError.TooManyAttempts => Results.StatusCode(StatusCodes.Status429TooManyRequests),
         PartyCrewAuthError.ResendTooSoon => Results.StatusCode(StatusCodes.Status429TooManyRequests),
         PartyCrewAuthError.MailUnavailable => Results.BadRequest(new { error = "mail_unavailable" }),
+        // The provider refused THIS message. A different fact from "mail is not
+        // configured", and a different thing to tell somebody: nothing is
+        // broken on their side and asking again may work. Never the provider's
+        // own words — those are an operator's business, not a guest's.
+        PartyCrewAuthError.DeliveryFailed => Results.BadRequest(new { error = "delivery_failed" }),
         PartyCrewAuthError.DeviceLimitReached => Results.BadRequest(new { error = "device_limit" }),
         _ => Results.NotFound(),
     };

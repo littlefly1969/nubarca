@@ -87,11 +87,11 @@ it('crew — two devices already', async () => {
 
 it('crew — the collaborator’s party', { timeout: 20_000 }, async () => {
   installFetchMock({
-    'GET /api/party-crew/session': () => jsonResponse({
+    [`GET /api/party-crew/parties/${PARTY_ID}/session`]: () => jsonResponse({
       partyId: PARTY_ID, partyTitle: 'Il compleanno di Marta',
       displayName: 'Marco Bianchi', roleKey: 'co_organizer', capabilities: CO_ORGANIZER,
     }),
-    'GET /api/party-crew/party': () => jsonResponse({
+    [`GET /api/party-crew/parties/${PARTY_ID}/party`]: () => jsonResponse({
       id: PARTY_ID, title: 'Il compleanno di Marta',
       description: 'Cinquant’anni, e si festeggia.',
       status: 'live', eventStartsAt: '2027-06-12T19:30:00Z',
@@ -101,7 +101,7 @@ it('crew — the collaborator’s party', { timeout: 20_000 }, async () => {
       mediaSources: [{ albumId: 'a1', albumName: 'Marta 50', role: 'main', sortOrder: 0 }],
       canChangeMainMediaSource: false,
     }),
-    'GET /api/party-crew/album-settings': () => jsonResponse({
+    [`GET /api/party-crew/parties/${PARTY_ID}/album-settings`]: () => jsonResponse({
       albumId: 'a1', partyId: PARTY_ID, showOnTv: true, partyMode: true,
       partyUrl: '/party/Hq7Fn2', uploadEnabled: true, uploadUrl: '/party/Kd3Pa9/upload',
       requireUploadApproval: true, requireMessageApproval: false,
@@ -109,8 +109,8 @@ it('crew — the collaborator’s party', { timeout: 20_000 }, async () => {
       maxPhotoUploadsPerParticipant: 20, maxVideoUploadsPerParticipant: 5,
       maxMessagesPerParticipant: 3, gameEnabled: true,
     }),
-    'GET /api/party-crew/guest-content': () => jsonResponse([]),
-    'POST /api/party-crew/guest-directory/query': () => jsonResponse({
+    [`GET /api/party-crew/parties/${PARTY_ID}/guest-content`]: () => jsonResponse([]),
+    [`POST /api/party-crew/parties/${PARTY_ID}/guest-directory/query`]: () => jsonResponse({
       partyId: PARTY_ID, partyStatus: 'live', mailAvailable: true, shareAvailable: true,
       items: [], nextCursor: null,
       summary: {
@@ -125,12 +125,12 @@ it('crew — the collaborator’s party', { timeout: 20_000 }, async () => {
         },
       },
     }),
-    'GET /api/party-crew/uploads': () =>
+    [`GET /api/party-crew/parties/${PARTY_ID}/uploads`]: () =>
       jsonResponse({ albumId: 'a1', requireUploadApproval: true, items: [] }),
-    'GET /api/party-crew/messages': () => jsonResponse({
+    [`GET /api/party-crew/parties/${PARTY_ID}/messages`]: () => jsonResponse({
       albumId: 'a1', isOwner: false, partyActive: true, requireMessageApproval: false, items: [],
     }),
-    'GET /api/party-crew/devices': () => jsonResponse(devices),
+    [`GET /api/party-crew/parties/${PARTY_ID}/devices`]: () => jsonResponse(devices),
   });
   render(
     <AuthedWrapper>

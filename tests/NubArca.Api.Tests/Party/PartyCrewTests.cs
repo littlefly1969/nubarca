@@ -55,7 +55,7 @@ public sealed class PartyCrewTests : IDisposable
         Assert.DoesNotContain("marco@example.com", wire);
         Assert.DoesNotContain(partyId.ToString(), wire);
         // And nothing is authorized yet.
-        AssertRefused(await device.GetAsync("/api/party-crew/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/session"));
 
         // THE CODE ALONE is not enough either: a second browser holding the
         // same six digits has no challenge to type them into.
@@ -71,7 +71,7 @@ public sealed class PartyCrewTests : IDisposable
         Assert.Equal("Paired", (await verified.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("outcome").GetString());
 
-        var session = await SessionAsync(device);
+        var session = await SessionAsync(device, partyId);
         Assert.Equal(partyId, session.GetProperty("partyId").GetGuid());
         Assert.Equal("Marco", session.GetProperty("displayName").GetString());
         Assert.Equal(PartyCrewRoles.CoOrganizer, session.GetProperty("roleKey").GetString());
@@ -129,7 +129,7 @@ public sealed class PartyCrewTests : IDisposable
         // Spent. Even the RIGHT code no longer works on this challenge.
         var afterwards = await device.PostAsJsonAsync("/api/party-crew/auth/verify", new { code = right });
         Assert.Equal(HttpStatusCode.TooManyRequests, afterwards.StatusCode);
-        AssertRefused(await device.GetAsync("/api/party-crew/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/session"));
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public sealed class PartyCrewTests : IDisposable
         Assert.Equal(2, result.GetProperty("devices").GetArrayLength());
         Assert.Equal(2, await LiveGrantsAsync(collaboratorId));
         // Not paired yet: the session is still nothing.
-        AssertRefused(await third.GetAsync("/api/party-crew/session"));
+        AssertRefused(await third.GetAsync($"/api/party-crew/parties/{partyId}/session"));
 
         // Freeing a slot and finishing — WITHOUT typing a second code.
         var listed = await third.GetAsync("/api/party-crew/auth/devices");
@@ -231,7 +231,7 @@ public sealed class PartyCrewTests : IDisposable
         Assert.Equal("Paired", (await completed.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("outcome").GetString());
         Assert.Equal(2, await LiveGrantsAsync(collaboratorId));
-        Assert.Equal(partyId, (await SessionAsync(third)).GetProperty("partyId").GetGuid());
+        Assert.Equal(partyId, (await SessionAsync(third, partyId)).GetProperty("partyId").GetGuid());
     }
 
     [Fact]
@@ -270,30 +270,47 @@ public sealed class PartyCrewTests : IDisposable
             owner, partyId, "Regista", "regista@example.com", PartyCrewRoles.Director);
         var director = await PairAsync(_factory, invite);
 
-        var capabilities = CapabilitiesOf(await SessionAsync(director));
+        var capabilities = CapabilitiesOf(await SessionAsync(director, partyId));
         Assert.Contains(PartyCrewCapabilities.ActivitiesControl, capabilities);
         Assert.Contains(PartyCrewCapabilities.ContributionsModerate, capabilities);
-        // Deciding whether photographs need approving is the same job as
-        // approving them, so the role that does one does the other.
-        Assert.Contains(PartyCrewCapabilities.ContributionsConfigure, capabilities);
         Assert.Contains(PartyCrewCapabilities.ScreensManage, capabilities);
+        // MODERATING IS NOT CONFIGURING. A director decides what stays up
+        // tonight; whether guests may upload at all, and whether what they
+        // upload needs approving, is the host's standing decision about their
+        // own party and their own library.
+        Assert.DoesNotContain(PartyCrewCapabilities.ContributionsConfigure, capabilities);
         // The guest list is not theirs, and neither is sending anything.
         Assert.DoesNotContain(PartyCrewCapabilities.GuestsRead, capabilities);
         Assert.DoesNotContain(PartyCrewCapabilities.InvitationsManage, capabilities);
         Assert.DoesNotContain(PartyCrewCapabilities.AttendanceManage, capabilities);
 
         // The party itself, the greetings and the photographs: yes.
-        (await director.GetAsync("/api/party-crew/party")).EnsureSuccessStatusCode();
-        (await director.GetAsync("/api/party-crew/uploads")).EnsureSuccessStatusCode();
-        (await director.GetAsync("/api/party-crew/messages")).EnsureSuccessStatusCode();
+        (await director.GetAsync($"/api/party-crew/parties/{partyId}/party")).EnsureSuccessStatusCode();
+        (await director.GetAsync($"/api/party-crew/parties/{partyId}/uploads")).EnsureSuccessStatusCode();
+        (await director.GetAsync($"/api/party-crew/parties/{partyId}/messages")).EnsureSuccessStatusCode();
+
+        // The contribution CONFIGURATION is not theirs either, and the routes
+        // say so rather than the surface merely hiding the switch.
+        AssertRefused(await director.PatchAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/album-settings",
+            new { enabled = true, requireUploadApproval = true }));
+        AssertRefused(await director.PatchAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/slideshow-settings",
+            new { maxPhotoUploadsPerParticipant = 3 }));
+
+        // But the party's own lifecycle IS: opening it to guests is what they
+        // are there for, and it carries no configuration.
+        (await director.PatchAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/album-settings",
+            new { enabled = true })).EnsureSuccessStatusCode();
 
         // A guest's NAME: not a 403 that confirms the surface exists — nothing.
         AssertRefused(await director.PostAsJsonAsync(
-            "/api/party-crew/guest-directory/query", new { take = 50 }));
-        AssertRefused(await director.GetAsync("/api/party-crew/attendance"));
-        AssertRefused(await director.GetAsync("/api/party-crew/rsvp-questions"));
+            $"/api/party-crew/parties/{partyId}/guest-directory/query", new { take = 50 }));
+        AssertRefused(await director.GetAsync($"/api/party-crew/parties/{partyId}/attendance"));
+        AssertRefused(await director.GetAsync($"/api/party-crew/parties/{partyId}/rsvp-questions"));
         AssertRefused(await director.PostAsJsonAsync(
-            "/api/party-crew/invitation-groups", new { label = "Famiglia", maxAdditionalGuests = 0 }));
+            $"/api/party-crew/parties/{partyId}/invitation-groups", new { label = "Famiglia", maxAdditionalGuests = 0 }));
     }
 
     [Fact]
@@ -307,17 +324,17 @@ public sealed class PartyCrewTests : IDisposable
         var co = await PairAsync(_factory, invite);
 
         (await co.PostAsJsonAsync(
-            "/api/party-crew/guest-directory/query", new { take = 50 })).EnsureSuccessStatusCode();
-        (await co.GetAsync("/api/party-crew/attendance")).EnsureSuccessStatusCode();
+            $"/api/party-crew/parties/{partyId}/guest-directory/query", new { take = 50 })).EnsureSuccessStatusCode();
+        (await co.GetAsync($"/api/party-crew/parties/{partyId}/attendance")).EnsureSuccessStatusCode();
 
         // OWNER-ONLY, for the life of the party: adding another collaborator,
         // re-pointing the album, duplicating, tearing down. None of them exist
         // on this family of routes at all.
         AssertAbsent(await co.PostAsJsonAsync(
-            "/api/party-crew/crew", new { displayName = "X", email = "x@example.com", roleKey = "director" }));
-        AssertAbsent(await co.PutAsJsonAsync("/api/party-crew/party/media/main", new { }));
-        AssertAbsent(await co.PostAsync("/api/party-crew/party/duplicate", null));
-        AssertAbsent(await co.DeleteAsync("/api/party-crew/party"));
+            $"/api/party-crew/parties/{partyId}/crew", new { displayName = "X", email = "x@example.com", roleKey = "director" }));
+        AssertAbsent(await co.PutAsJsonAsync($"/api/party-crew/parties/{partyId}/party/media/main", new { }));
+        AssertAbsent(await co.PostAsync($"/api/party-crew/parties/{partyId}/party/duplicate", null));
+        AssertAbsent(await co.DeleteAsync($"/api/party-crew/parties/{partyId}/party"));
 
         // And the host's own routes refuse a device cookie: it is not a session.
         AssertRefusedOrUnauthorized(await co.GetAsync($"/api/parties/{partyId}"));
@@ -341,16 +358,16 @@ public sealed class PartyCrewTests : IDisposable
             owner, partyId, "Regista", "r@example.com", PartyCrewRoles.Director);
         var director = await PairAsync(_factory, invite);
 
-        var capabilities = CapabilitiesOf(await SessionAsync(director));
+        var capabilities = CapabilitiesOf(await SessionAsync(director, partyId));
         Assert.DoesNotContain(PartyCrewCapabilities.ActivitiesControl, capabilities);
         Assert.DoesNotContain(PartyCrewCapabilities.ActivitiesManage, capabilities);
         Assert.DoesNotContain(PartyCrewCapabilities.PrintManage, capabilities);
         // Moderation needs only party.access, which the host still holds.
         Assert.Contains(PartyCrewCapabilities.ContributionsModerate, capabilities);
 
-        AssertRefused(await director.GetAsync("/api/party-crew/game"));
-        AssertRefused(await director.GetAsync("/api/party-crew/challenges"));
-        (await director.GetAsync("/api/party-crew/uploads")).EnsureSuccessStatusCode();
+        AssertRefused(await director.GetAsync($"/api/party-crew/parties/{partyId}/game"));
+        AssertRefused(await director.GetAsync($"/api/party-crew/parties/{partyId}/challenges"));
+        (await director.GetAsync($"/api/party-crew/parties/{partyId}/uploads")).EnsureSuccessStatusCode();
     }
 
     // ── Revoking ────────────────────────────────────────────────────────────
@@ -363,7 +380,7 @@ public sealed class PartyCrewTests : IDisposable
         var (collaboratorId, invite) = await AddCollaboratorAsync(
             owner, partyId, "Temp", "temp@example.com", PartyCrewRoles.CoOrganizer);
         var device = await PairAsync(_factory, invite);
-        (await device.GetAsync("/api/party-crew/party")).EnsureSuccessStatusCode();
+        (await device.GetAsync($"/api/party-crew/parties/{partyId}/party")).EnsureSuccessStatusCode();
 
         // A ROLE CHANGE replaces the whole capability set, with nobody signing
         // out and no token rotated.
@@ -377,13 +394,13 @@ public sealed class PartyCrewTests : IDisposable
                 roleKey = PartyCrewRoles.Director, version,
             })).EnsureSuccessStatusCode();
         Assert.DoesNotContain(
-            PartyCrewCapabilities.GuestsRead, CapabilitiesOf(await SessionAsync(device)));
+            PartyCrewCapabilities.GuestsRead, CapabilitiesOf(await SessionAsync(device, partyId)));
 
         // A REVOKE ends it, on the very next request.
         (await owner.DeleteAsync($"/api/parties/{partyId}/crew/{collaboratorId}"))
             .EnsureSuccessStatusCode();
-        AssertRefused(await device.GetAsync("/api/party-crew/session"));
-        AssertRefused(await device.GetAsync("/api/party-crew/party"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/party"));
     }
 
     [Fact]
@@ -394,7 +411,7 @@ public sealed class PartyCrewTests : IDisposable
         var (collaboratorId, invite) = await AddCollaboratorAsync(
             owner, partyId, "Chi", "prima@example.com", PartyCrewRoles.CoOrganizer);
         var device = await PairAsync(_factory, invite);
-        (await device.GetAsync("/api/party-crew/session")).EnsureSuccessStatusCode();
+        (await device.GetAsync($"/api/party-crew/parties/{partyId}/session")).EnsureSuccessStatusCode();
 
         var version = (await CrewAsync(owner, partyId))
             .GetProperty("collaborators")[0].GetProperty("version").GetInt32();
@@ -407,7 +424,7 @@ public sealed class PartyCrewTests : IDisposable
             })).EnsureSuccessStatusCode();
 
         // The device was verified against a mailbox the host has replaced.
-        AssertRefused(await device.GetAsync("/api/party-crew/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/session"));
         Assert.Equal(0, await LiveGrantsAsync(collaboratorId));
     }
 
@@ -421,26 +438,26 @@ public sealed class PartyCrewTests : IDisposable
         var phone = await PairAsync(_factory, first);
         var tablet = await PairAsync(_factory, await NewLinkAsync(owner, partyId, collaboratorId));
 
-        var mine = await phone.GetAsync("/api/party-crew/devices");
+        var mine = await phone.GetAsync($"/api/party-crew/parties/{partyId}/devices");
         mine.EnsureSuccessStatusCode();
         var listed = await mine.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal(2, listed.GetArrayLength());
         var other = listed.EnumerateArray().Single(d => !d.GetProperty("isCurrent").GetBoolean());
 
-        (await phone.DeleteAsync($"/api/party-crew/devices/{other.GetProperty("grantId").GetGuid()}"))
+        (await phone.DeleteAsync($"/api/party-crew/parties/{partyId}/devices/{other.GetProperty("grantId").GetGuid()}"))
             .EnsureSuccessStatusCode();
-        AssertRefused(await tablet.GetAsync("/api/party-crew/session"));
-        (await phone.GetAsync("/api/party-crew/session")).EnsureSuccessStatusCode();
+        AssertRefused(await tablet.GetAsync($"/api/party-crew/parties/{partyId}/session"));
+        (await phone.GetAsync($"/api/party-crew/parties/{partyId}/session")).EnsureSuccessStatusCode();
 
-        (await phone.DeleteAsync("/api/party-crew/session")).EnsureSuccessStatusCode();
-        AssertRefused(await phone.GetAsync("/api/party-crew/session"));
+        (await phone.DeleteAsync($"/api/party-crew/parties/{partyId}/session")).EnsureSuccessStatusCode();
+        AssertRefused(await phone.GetAsync($"/api/party-crew/parties/{partyId}/session"));
         Assert.Equal(0, await LiveGrantsAsync(collaboratorId));
     }
 
     // ── Isolation ───────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task A_device_reaches_its_own_party_and_no_other()
+    public async Task A_device_reaches_the_party_it_was_asked_for_and_no_other()
     {
         var (_, owner) = await NewHostAsync(_factory);
         var mine = await CreatePartyAsync(owner, "La mia festa");
@@ -449,11 +466,85 @@ public sealed class PartyCrewTests : IDisposable
             owner, mine, "Uno", "uno@example.com", PartyCrewRoles.CoOrganizer);
         var device = await PairAsync(_factory, invite);
 
-        // There is no id in the URL to change: the route family names none.
-        var party = await device.GetFromJsonAsync<JsonElement>("/api/party-crew/party");
+        var party = await device.GetFromJsonAsync<JsonElement>(
+            $"/api/party-crew/parties/{mine}/party");
         Assert.Equal(mine, party.GetProperty("id").GetGuid());
-        Assert.Equal("La mia festa", party.GetProperty("title").GetString());
-        Assert.NotEqual(theirs, party.GetProperty("id").GetGuid());
+
+        // THE ID IN THE URL IS A SELECTOR, NOT AN AUTHORITY. Naming the other
+        // party — which this device holds no grant for — is the same nothing as
+        // holding no device at all, and it is emphatically not a fallback to
+        // the one party this device does have.
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{theirs}/party"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{theirs}/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{Guid.NewGuid()}/party"));
+    }
+
+    [Fact]
+    public async Task One_browser_at_two_parties_gets_the_right_one_each_time()
+    {
+        // The whole reason the party is named. Laura helps at two parties from
+        // one phone: one device, two grants, two roles. Nothing may decide
+        // which evening she is running by insertion order.
+        var (_, owner) = await NewHostAsync(_factory);
+        var first = await CreatePartyAsync(owner, "Il matrimonio");
+        var second = await CreatePartyAsync(owner, "Il compleanno");
+        var (_, firstInvite) = await AddCollaboratorAsync(
+            owner, first, "Laura", "laura@example.com", PartyCrewRoles.CoOrganizer);
+        var (_, secondInvite) = await AddCollaboratorAsync(
+            owner, second, "Laura", "laura@example.com", PartyCrewRoles.Director);
+
+        var phone = await PairAsync(_factory, firstInvite);
+        (await phone.PostAsJsonAsync(
+            "/api/party-crew/auth/invite",
+            new { token = TokenOf(secondInvite) })).EnsureSuccessStatusCode();
+        (await phone.PostAsJsonAsync(
+            "/api/party-crew/auth/verify",
+            new { code = CodeFromLastEmail(_factory) })).EnsureSuccessStatusCode();
+
+        var atFirst = await SessionAsync(phone, first);
+        Assert.Equal(first, atFirst.GetProperty("partyId").GetGuid());
+        Assert.Equal("Il matrimonio", atFirst.GetProperty("partyTitle").GetString());
+        Assert.Equal(PartyCrewRoles.CoOrganizer, atFirst.GetProperty("roleKey").GetString());
+        Assert.Contains(PartyCrewCapabilities.GuestsRead, CapabilitiesOf(atFirst));
+
+        var atSecond = await SessionAsync(phone, second);
+        Assert.Equal(second, atSecond.GetProperty("partyId").GetGuid());
+        Assert.Equal("Il compleanno", atSecond.GetProperty("partyTitle").GetString());
+        Assert.Equal(PartyCrewRoles.Director, atSecond.GetProperty("roleKey").GetString());
+        // The role at the OTHER party does not leak into this one.
+        Assert.DoesNotContain(PartyCrewCapabilities.GuestsRead, CapabilitiesOf(atSecond));
+
+        // And the capability check follows the party, not the device: the guest
+        // list is open at the first and absent at the second.
+        (await phone.PostAsJsonAsync(
+            $"/api/party-crew/parties/{first}/guest-directory/query",
+            new { take = 50 })).EnsureSuccessStatusCode();
+        AssertRefused(await phone.PostAsJsonAsync(
+            $"/api/party-crew/parties/{second}/guest-directory/query", new { take = 50 }));
+    }
+
+    [Fact]
+    public async Task Every_party_this_browser_may_operate_and_nothing_of_the_owner_s()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var helping = await CreatePartyAsync(owner, "Dove aiuto");
+        var elsewhere = await CreatePartyAsync(owner, "Dove non aiuto");
+        var (_, invite) = await AddCollaboratorAsync(
+            owner, helping, "Laura", "laura@example.com", PartyCrewRoles.Director);
+        var phone = await PairAsync(_factory, invite);
+
+        var me = await phone.GetFromJsonAsync<JsonElement>("/api/party-crew/me");
+        var assignments = me.GetProperty("assignments");
+        Assert.Equal(1, assignments.GetArrayLength());
+        Assert.Equal(helping, assignments[0].GetProperty("partyId").GetGuid());
+        Assert.Equal("Dove aiuto", assignments[0].GetProperty("partyTitle").GetString());
+
+        // The owner's OTHER party is not this device's business, and neither is
+        // anything else about them.
+        var wire = me.GetRawText();
+        Assert.DoesNotContain(elsewhere.ToString(), wire);
+        Assert.DoesNotContain("Dove non aiuto", wire);
+        Assert.DoesNotContain("laura@example.com", wire);
     }
 
     [Fact]
@@ -491,7 +582,7 @@ public sealed class PartyCrewTests : IDisposable
 
         // The collaborator's OWN session says who they are and nothing about
         // where the code went.
-        var session = await SessionAsync(device);
+        var session = await SessionAsync(device, partyId);
         Assert.DoesNotContain("privata@example.com", session.GetRawText());
 
         // And the audit names the collaborator by ID, never by name or address.
@@ -519,9 +610,9 @@ public sealed class PartyCrewTests : IDisposable
             owner, partyId, "Regia", "regia@example.com", PartyCrewRoles.CoOrganizer);
         var device = await PairAsync(_factory, invite);
 
-        var party = await device.GetFromJsonAsync<JsonElement>("/api/party-crew/party");
+        var party = await device.GetFromJsonAsync<JsonElement>($"/api/party-crew/parties/{partyId}/party");
         (await device.PostAsJsonAsync(
-            "/api/party-crew/party/start-live",
+            $"/api/party-crew/parties/{partyId}/party/start-live",
             new { version = party.GetProperty("version").GetInt32() })).EnsureSuccessStatusCode();
 
         using var scope = _factory.Services.CreateScope();
@@ -551,7 +642,7 @@ public sealed class PartyCrewTests : IDisposable
         var torn = await owner.DeleteAsync($"/api/parties/{partyId}?version={version}");
         torn.EnsureSuccessStatusCode();
 
-        AssertRefused(await device.GetAsync("/api/party-crew/session"));
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{partyId}/session"));
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         Assert.Empty(await db.PartyCollaborators.Where(c => c.PartyId == partyId).ToListAsync());
@@ -590,9 +681,10 @@ public sealed class PartyCrewTests : IDisposable
         var version = (await GetPartyAsync(owner, doomed)).GetProperty("version").GetInt32();
         (await owner.DeleteAsync($"/api/parties/{doomed}?version={version}")).EnsureSuccessStatusCode();
 
-        // Still signed in — at the party that still exists.
-        var session = await SessionAsync(device);
+        // Still signed in — at the party that still exists, and nowhere else.
+        var session = await SessionAsync(device, surviving);
         Assert.Equal(surviving, session.GetProperty("partyId").GetGuid());
+        AssertRefused(await device.GetAsync($"/api/party-crew/parties/{doomed}/session"));
     }
 
     // ── Validation ──────────────────────────────────────────────────────────

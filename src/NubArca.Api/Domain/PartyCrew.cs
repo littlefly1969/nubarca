@@ -166,6 +166,20 @@ public class PartyCollaboratorAuthChallenge
     /// reads it.
     public DateTime OtpSentAt { get; set; }
 
+    /// <summary>
+    /// How many codes this challenge has actually put in somebody's inbox.
+    ///
+    /// <para>The interval between resends is not a budget: sixty seconds apart,
+    /// for the ten minutes a challenge lives, is ten emails from one link. This
+    /// is the budget, and it is per CHALLENGE rather than per address, so a
+    /// person who genuinely needs a second code gets one and a script holding a
+    /// leaked link cannot turn a mailbox into a target.</para>
+    ///
+    /// <para>Counted only on sends the mail subsystem ACCEPTED: a refused
+    /// delivery costs the person nothing.</para>
+    /// </summary>
+    public int OtpSendCount { get; set; } = 1;
+
     /// Wrong codes, counted atomically. Past the limit the challenge is spent.
     public int FailedAttempts { get; set; }
 

@@ -83,6 +83,9 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     setLoad('loading');
     void Promise.all([
       api.getPartyPrintSettings(albumId, controller.signal),
+      // Resolves empty for a collaborator: there is no crew route for the
+      // installation's hardware, and asking for one would be the request this
+      // boundary exists to prevent.
       api.listPrintStations(controller.signal),
     ]).then(([loaded, allStations]) => {
       if (controller.signal.aborted) return;
@@ -222,7 +225,16 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
       <h4>{t('partyPrintOwner.title')}</h4>
       <p className="muted">{t('partyPrintOwner.help')}</p>
 
-      {stations.length === 0 ? (
+      {!api.isOwner ? (
+        // THE VENUE'S PRINTERS ARE NOT THIS PARTY'S TO ENUMERATE. Which
+        // printers the installation has, and which are enrolled, is the host
+        // administering their own hardware — `print.manage` is this evening's
+        // print profile and nothing wider. So a collaborator is told what is
+        // set up rather than shown a list they could change.
+        <p className="muted" data-testid="party-print-crew-station">
+          {t('partyPrintOwner.stationIsHosts')}
+        </p>
+      ) : stations.length === 0 ? (
         // No station, no printing. Said plainly instead of offering an empty
         // select and a switch that cannot be turned on.
         <p className="muted" data-testid="party-print-no-stations">

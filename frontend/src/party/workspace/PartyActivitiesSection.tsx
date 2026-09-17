@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../../auth/permissions';
 import { useI18n } from '../../i18n';
 import { PartyGameSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
+import { CREW_CAPABILITIES } from '../crew/crewModel';
 import { partyDeepLink, usePartyApi } from './partyApi';
 import { Badge, Button, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
 import { QueueBadge } from './PartyLiveSection';
@@ -105,9 +106,14 @@ export function PartyActivitiesSection({
         >
           {albumParty ? (
             <>
-              <PartyGameSettings
-                albumId={albumId} party={albumParty} onUpdated={onAlbumPartyUpdated}
-              />
+              {/* The RULES are `activities.manage`; running the game is
+                  `activities.control`. A role with only the latter presses
+                  start and next all evening and never rewrites the game. */}
+              {api.can(CREW_CAPABILITIES.activitiesManage) && (
+                <PartyGameSettings
+                  albumId={albumId} party={albumParty} onUpdated={onAlbumPartyUpdated}
+                />
+              )}
               {albumParty.gameEnabled && (
                 <LinkRow
                   to={partyDeepLink(api, 'game', party.id, albumId)}

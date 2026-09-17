@@ -3925,6 +3925,11 @@ const it = {
   'crew.shell.signOut': 'Disconnetti questo dispositivo',
   'crew.shell.signOutDone': 'Fatto. Questo dispositivo non gestisce più la festa.',
   'crew.shell.close': 'Chiudi',
+  'crew.shell.leaveParty': 'Esci da questa festa',
+  'crew.shell.leftParty': 'Fatto. Questo dispositivo non gestisce pi\u00f9 questa festa.',
+  'crew.shell.disconnect': 'Scollega del tutto questo dispositivo',
+  'crew.shell.disconnectHelp': 'Lo scollega da tutte le feste in cui aiuti.',
+  'partyPrintOwner.stationIsHosts': 'La stampante la sceglie chi organizza la festa.',
   'crew.deep.back': 'Torna alla festa',
 } as const;
 

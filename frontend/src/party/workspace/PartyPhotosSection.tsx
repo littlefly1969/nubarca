@@ -12,6 +12,7 @@ import { useI18n } from '../../i18n';
 import { PartyAlbumSection } from '../PartyAlbumSection';
 import { PartySlideshowSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
+import { CREW_CAPABILITIES } from '../crew/crewModel';
 import { partyDeepLink, usePartyApi } from './partyApi';
 import { Button, Disclosure, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
 import { QueueBadge } from './PartyLiveSection';
@@ -48,7 +49,13 @@ export function PartyPhotosSection({
   const { invalidateAuth } = useAuth();
   const api = usePartyApi();
   const perms = usePermissions();
-  const canContributions = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyContributions]);
+  // TWO GATES, and both must hold. The host's own permission decides whether
+  // this installation's party may take contributions at all; the crew
+  // capability decides whether THIS person configures them. A Regista moderates
+  // what guests left and does not choose whether they may leave it — so the
+  // switch is absent for them rather than present and refused.
+  const canContributions = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyContributions])
+    && api.can(CREW_CAPABILITIES.contributionsConfigure);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
 

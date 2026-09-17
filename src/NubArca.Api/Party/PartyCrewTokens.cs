@@ -145,4 +145,26 @@ public static class PartyCrewLimits
 
     /// <summary>The floor between two sends of a code to the same address.</summary>
     public static readonly TimeSpan ResendInterval = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How many codes one challenge may ever send, the first included.
+    ///
+    /// <para>The resend INTERVAL spaces them; this bounds them. Without it a
+    /// link is a way to put ten emails in somebody's inbox, one a minute, for
+    /// as long as the challenge lives.</para>
+    /// </summary>
+    public const int MaxOtpSendsPerChallenge = 3;
+
+    /// <summary>
+    /// How many challenges one collaborator may start in <see cref="SendWindow"/>.
+    ///
+    /// <para>Re-opening the link is what resets a challenge's own budget, so
+    /// without a second bound there is no bound at all. Per COLLABORATOR and
+    /// not per address of origin: an address is not who is being written to,
+    /// and a script behind a carrier NAT is indistinguishable from a guest.
+    /// </para>
+    /// </summary>
+    public const int MaxChallengesPerCollaborator = 3;
+
+    public static readonly TimeSpan SendWindow = TimeSpan.FromHours(1);
 }

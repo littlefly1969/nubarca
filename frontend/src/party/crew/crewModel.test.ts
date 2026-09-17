@@ -25,7 +25,6 @@ const CO_ORGANIZER = [
 
 const DIRECTOR = [
   CREW_CAPABILITIES.lifecycleManage,
-  CREW_CAPABILITIES.contributionsConfigure,
   CREW_CAPABILITIES.contributionsModerate,
   CREW_CAPABILITIES.activitiesManage,
   CREW_CAPABILITIES.activitiesControl,

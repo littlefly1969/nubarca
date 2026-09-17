@@ -148,6 +148,7 @@ namespace NubArca.Api.Data.Migrations
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     OtpSentAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
+                    OtpSendCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
                     FailedAttempts = table.Column<int>(type: "integer", nullable: false),
                     LastAttemptAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     VerifiedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
@@ -159,6 +160,7 @@ namespace NubArca.Api.Data.Migrations
                     table.PrimaryKey("PK_party_collaborator_auth_challenges", x => x.Id);
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_attempts", "\"FailedAttempts\" >= 0");
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_otp_proof", "length(\"OtpProof\") = 64");
+                    table.CheckConstraint("ck_party_collaborator_auth_challenges_sends", "\"OtpSendCount\" >= 0");
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_token_hash", "length(\"ChallengeTokenHash\") = 64");
                     table.ForeignKey(
                         name: "FK_party_collaborator_auth_challenges_party_collaborator_invit~",
@@ -183,7 +185,7 @@ namespace NubArca.Api.Data.Migrations
             migrationBuilder.CreateIndex(
                 name: "ix_party_collaborator_auth_challenges_collaborator",
                 table: "party_collaborator_auth_challenges",
-                column: "PartyCollaboratorId");
+                columns: new[] { "PartyCollaboratorId", "CreatedAt" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_party_collaborator_auth_challenges_PartyCollaboratorInviteId",

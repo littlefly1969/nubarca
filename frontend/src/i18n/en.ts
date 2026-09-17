@@ -3884,6 +3884,11 @@ const en: Partial<Record<MessageKey, string>> = {
   'crew.shell.signOut': 'Disconnect this device',
   'crew.shell.signOutDone': 'Done. This device no longer runs the party.',
   'crew.shell.close': 'Close',
+  'crew.shell.leaveParty': 'Leave this party',
+  'crew.shell.leftParty': 'Done. This device no longer runs this party.',
+  'crew.shell.disconnect': 'Disconnect this device completely',
+  'crew.shell.disconnectHelp': 'Disconnects it from every party you help at.',
+  'partyPrintOwner.stationIsHosts': 'The host chooses the printer.',
   'crew.deep.back': 'Back to the party',
 };
 

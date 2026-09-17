@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth.Recovery;
@@ -31,6 +32,15 @@ public enum PartyCrewAuthError
 
     /// <summary>Outbound mail is not configured, so no second factor can be sent.</summary>
     MailUnavailable,
+
+    /// <summary>
+    /// Mail IS configured and the provider refused this message.
+    ///
+    /// <para>Its own value, because it is a different fact and a different
+    /// thing to tell somebody: nothing is misconfigured on their side, the code
+    /// simply did not go, and retrying may work. Never a success.</para>
+    /// </summary>
+    DeliveryFailed,
 
     /// <summary>The slot freed up between the check and the write, or never existed.</summary>
     DeviceLimitReached,
@@ -158,15 +168,17 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         if (found is null)
             return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.Unavailable);
 
-        // Any earlier attempt by this person ends here. Following the link a
-        // second time is ordinary — the first attempt was abandoned, or the
-        // code never arrived — and the browser's cookie now points at the new
-        // challenge anyway, so leaving the old one alive for ten more minutes
-        // would only mean a second working code nobody is waiting for.
-        await _db.PartyCollaboratorAuthChallenges
-            .Where(c => c.PartyCollaboratorId == found.Collaborator.Id
-                && c.RevokedAt == null && c.CompletedAt == null)
-            .ExecuteUpdateAsync(u => u.SetProperty(c => c.RevokedAt, _ => (DateTime?)now), ct);
+        // HOW MANY CODES THIS PERSON HAS ALREADY BEEN SENT. Re-opening the link
+        // is what resets a challenge's own budget, so without this second bound
+        // there is no bound at all: a leaked link would be a way to put an
+        // email in somebody's inbox on demand. Counted per COLLABORATOR, not
+        // per address of origin — an address is not who is being written to.
+        var recent = await _db.PartyCollaboratorAuthChallenges
+            .CountAsync(
+                c => c.PartyCollaboratorId == found.Collaborator.Id
+                    && c.CreatedAt > now - PartyCrewLimits.SendWindow, ct);
+        if (recent >= PartyCrewLimits.MaxChallengesPerCollaborator)
+            return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.ResendTooSoon);
 
         var otp = PartyCrewTokens.NewOtp();
         var rawChallenge = PartyCrewTokens.NewToken();
@@ -179,12 +191,31 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
             CreatedAt = now,
             ExpiresAt = now.Add(PartyCrewLimits.ChallengeLifetime),
             OtpSentAt = now,
+            OtpSendCount = 1,
         };
         challenge.OtpProof = _tokens.OtpProof(challenge.Id, otp);
         _db.PartyCollaboratorAuthChallenges.Add(challenge);
         await _db.SaveChangesAsync(ct);
 
-        await SendCodeAsync(found.Collaborator, found.Party, otp, ct);
+        // THE MAIL DECIDES WHETHER THIS CHALLENGE EXISTS. A provider that
+        // refuses the message leaves a person staring at "check your email"
+        // for a code nobody sent, so a refusal takes the challenge with it.
+        if (!await SendCodeAsync(found.Collaborator, found.Party, otp, ct))
+        {
+            await _db.PartyCollaboratorAuthChallenges
+                .Where(c => c.Id == challenge.Id)
+                .ExecuteDeleteAsync(ct);
+            return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.DeliveryFailed);
+        }
+
+        // AND ONLY NOW do earlier attempts end. Revoking first would mean a
+        // failed send had destroyed a challenge somebody was still using: the
+        // previous browser would be logged out by an email that never arrived.
+        await _db.PartyCollaboratorAuthChallenges
+            .Where(c => c.PartyCollaboratorId == found.Collaborator.Id
+                && c.Id != challenge.Id
+                && c.RevokedAt == null && c.CompletedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.RevokedAt, _ => (DateTime?)now), ct);
 
         return PartyCrewAuthResult<PartyCrewChallengeStart>.Ok(new PartyCrewChallengeStart(
             new PartyCrewChallengeStartedDto(
@@ -225,14 +256,29 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         if (now - state.Challenge.OtpSentAt < PartyCrewLimits.ResendInterval)
             return PartyCrewAuthError.ResendTooSoon;
 
-        // A new code INVALIDATES the previous one: the proof is replaced, so the
-        // code already in somebody's inbox stops matching.
-        var otp = PartyCrewTokens.NewOtp();
-        state.Challenge.OtpProof = _tokens.OtpProof(state.Challenge.Id, otp);
-        state.Challenge.OtpSentAt = now;
-        await _db.SaveChangesAsync(ct);
+        // And the ceiling on the whole challenge. The interval only spaces
+        // them: without this, one link is ten emails, a minute apart, for as
+        // long as the challenge lives.
+        if (state.Challenge.OtpSendCount >= PartyCrewLimits.MaxOtpSendsPerChallenge)
+            return PartyCrewAuthError.TooManyAttempts;
 
-        await SendCodeAsync(state.Collaborator, state.Party, otp, ct);
+        var otp = PartyCrewTokens.NewOtp();
+        var proof = _tokens.OtpProof(state.Challenge.Id, otp);
+
+        // SENT BEFORE THE PROOF IS REPLACED, and this order is the whole fix.
+        // The other way round — replace, save, then send — means a provider
+        // that refuses has killed the code already in somebody's inbox and
+        // delivered nothing to replace it: zero working codes, and no way
+        // forward but a new link. Refused here, the old code still works and
+        // the interval has not restarted, so they can simply ask again.
+        if (!await SendCodeAsync(state.Collaborator, state.Party, otp, ct))
+            return PartyCrewAuthError.DeliveryFailed;
+
+        // Accepted. NOW the previous code stops matching.
+        state.Challenge.OtpProof = proof;
+        state.Challenge.OtpSentAt = now;
+        state.Challenge.OtpSendCount++;
+        await _db.SaveChangesAsync(ct);
         return null;
     }
 
@@ -395,7 +441,14 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
                     g => g.PartyCrewDeviceId == device.Id && g.PartyCollaboratorId == collaboratorId, ct);
                 if (already is { RevokedAt: null })
                 {
-                    await FinishAsync(state, already, now, ct);
+                    if (!await ClaimAsync(state, now, ct))
+                    {
+                        var lost = await LostAsync(tx, owned, ct);
+                        tx = null;
+                        return lost;
+                    }
+                    already.LastUsedAt = now;
+                    await _db.SaveChangesAsync(ct);
                     if (owned) { await tx!.CommitAsync(ct); tx = null; }
                     return PartyCrewAuthResult<PartyCrewPairing>.Ok(
                         new PartyCrewPairing(await PairedAsync(state, ct), null));
@@ -424,6 +477,18 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
                         PartyCrewVerifyOutcome.DeviceLimitReached,
                         null, null, null, null, devices),
                     null));
+            }
+
+            // CLAIMED HERE, and not before: a challenge that meets the device
+            // limit must stay verified so the person can free a slot and finish
+            // without a second code. Claiming above and rolling back would also
+            // work, but only because the rollback undoes it — this way the
+            // order says what the product means.
+            if (!await ClaimAsync(state, now, ct))
+            {
+                var lost = await LostAsync(tx, owned, ct);
+                tx = null;
+                return lost;
             }
 
             string? rawDeviceToken = null;
@@ -465,7 +530,8 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
                 grant.CreatedAt = now;
             }
 
-            await FinishAsync(state, grant, now, ct);
+            grant.LastUsedAt = now;
+            await _db.SaveChangesAsync(ct);
             if (owned) { await tx!.CommitAsync(ct); tx = null; }
 
             await _audit.LogAsync(
@@ -488,15 +554,43 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
     }
 
     /// <summary>Spend the invite and the challenge together: one link, one device.</summary>
-    private async Task FinishAsync(
-        ChallengeState state, PartyCollaboratorDeviceGrant grant, DateTime now, CancellationToken ct)
+    /// <summary>
+    /// Spend the challenge and the invite — once, and provably once.
+    ///
+    /// <para><b>Why this is a conditional UPDATE and not an assignment.</b> The
+    /// challenge was read at the top of the request, so two requests carrying
+    /// the same cookie both read <c>CompletedAt == null</c> and both believe
+    /// they may finish. Writing the field from a tracked entity lets both
+    /// succeed: one challenge, two devices, from a limit that was checked and
+    /// never enforced. Written as a WHERE the database evaluates, exactly one
+    /// of them changes a row — and the other is told it lost.</para>
+    ///
+    /// <para>The invite is claimed the same way and for the same reason. Its
+    /// result was previously ignored, which made "already consumed" mean
+    /// "carry on and create another grant".</para>
+    ///
+    /// <para>Returns false when either claim found nothing. The caller rolls
+    /// back: no device, no grant, no session.</para>
+    /// </summary>
+    private async Task<bool> ClaimAsync(ChallengeState state, DateTime now, CancellationToken ct)
     {
-        state.Challenge.CompletedAt = now;
-        grant.LastUsedAt = now;
-        await _db.PartyCollaboratorInvites
+        var challenge = await _db.PartyCollaboratorAuthChallenges
+            .Where(c => c.Id == state.Challenge.Id
+                && c.CompletedAt == null
+                && c.RevokedAt == null
+                && c.ExpiresAt > now)
+            .ExecuteUpdateAsync(s => s.SetProperty(c => c.CompletedAt, _ => (DateTime?)now), ct);
+        if (challenge != 1) return false;
+
+        var invite = await _db.PartyCollaboratorInvites
             .Where(i => i.Id == state.Challenge.PartyCollaboratorInviteId && i.ConsumedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(i => i.ConsumedAt, _ => (DateTime?)now), ct);
-        await _db.SaveChangesAsync(ct);
+        if (invite != 1) return false;
+
+        // The tracked copy follows the database, so anything reading it later
+        // in this request sees what actually happened.
+        state.Challenge.CompletedAt = now;
+        return true;
     }
 
     private async Task<PartyCrewVerifyResultDto> PairedAsync(ChallengeState state, CancellationToken ct)
@@ -538,6 +632,17 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
     }
 
     /// <summary>
+    /// The answer for a request that lost the claim: nothing written, and the
+    /// same generic refusal every other dead credential gets.
+    /// </summary>
+    private static async Task<PartyCrewAuthResult<PartyCrewPairing>> LostAsync(
+        IDbContextTransaction? tx, bool owned, CancellationToken ct)
+    {
+        if (owned && tx is not null) await tx.RollbackAsync(ct);
+        return PartyCrewAuthResult<PartyCrewPairing>.Fail(PartyCrewAuthError.Unavailable);
+    }
+
+    /// <summary>
     /// This collaborator's live devices, oldest first.
     ///
     /// <para>Written as a filtered select with a correlated lookup rather than
@@ -575,7 +680,18 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
             currentDeviceId is not null && r.PartyCrewDeviceId == currentDeviceId))];
     }
 
-    private async Task SendCodeAsync(
+    /// <summary>
+    /// Hand the code to the mail subsystem, and say whether it took it.
+    ///
+    /// <para>The return value is the whole point. <c>IsEnabled</c> says the
+    /// installation is CONFIGURED for mail; it says nothing about whether this
+    /// message was accepted. A provider that refuses — a bad credential, a
+    /// blocked recipient, a relay that is down — used to produce a screen that
+    /// said "check your email" about a code that does not exist, which is the
+    /// worst possible answer: the person waits, retries, and concludes the
+    /// product is broken rather than the mail.</para>
+    /// </summary>
+    private async Task<bool> SendCodeAsync(
         PartyCollaborator collaborator, Domain.Party party, string otp, CancellationToken ct)
     {
         var language = await _db.Users
@@ -592,10 +708,13 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         var accepted = await _email.SendAsync(message, ct);
         if (!accepted)
         {
+            // The collaborator by ID, and nothing else: not the code, not the
+            // address, not the provider's complaint.
             _log.LogWarning(
                 "Party Crew one-time code could not be handed to the mail server for collaborator {Collaborator}.",
                 collaborator.Id);
         }
+        return accepted;
     }
 
     /// <summary>

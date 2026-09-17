@@ -1443,20 +1443,79 @@ media source, duplicating it, tearing it down, and managing collaborators are
 the owner's for the life of the party — authority that can extend itself is not
 bounded by anything, and a collaborator who could re-point the album could hand
 the host's library to a party. The print station and the TV device are likewise
-owner-only: they are installation hardware, not this evening's. A collaborator
-also never reaches the host's media library — the Party Crew surface offers the
-party's own album and no upload into the library root.
+owner-only: they are installation hardware, not this evening's, and there is no
+crew route that enumerates them — `print.manage` is this party's print profile
+and nothing wider. Configuring contributions is likewise not moderating them: a
+director decides what stays up tonight, while whether guests may upload at all
+and whether uploads need approving is the host's standing decision, so
+`contributions.configure` is not in that preset and the surface omits the
+switches rather than drawing ones that refuse. A collaborator also never reaches
+the host's media library — the Party Crew surface offers the party's own album
+and no upload into the library root.
 
-**The façade names nothing.** Every crew route lives under `/api/party-crew` and
-carries **no party id, album id or owner id**, because the device cookie
-resolves all three server-side. A collaborator cannot reach another party by
-changing a URL, because there is no id in the URL to change. Each route declares
-the one capability it needs and answers the same generic 404 for every way it
-can be refused — no device, revoked device, revoked collaborator, missing party,
-owner without the permission, role without the capability. The handlers
-themselves are the host's: the services are owner-scoped and already correct, so
-any handler body that carried validation or audit logic was extracted and both
-surfaces call one implementation.
+**One device, several parties.** `PartyCrewDevice` is a BROWSER credential and
+is deliberately party-agnostic; `PartyCollaboratorDeviceGrant` is one
+ASSIGNMENT. The same phone helping at two parties is one device with two
+grants, which is why the two-device limit is counted on grants — a person may
+have as many parties as they are invited to, and two devices at each.
+
+**So the party is named, and the name is not an authority.** Every operative
+route lives under `/api/party-crew/parties/{partyId}/…`, and that id is a
+RESOURCE SELECTOR: it says which of this device's assignments the request is
+about. `PartyCrewAccessResolver` then requires it to match a live grant the
+device actually holds, in the same WHERE clause that finds the grant — so a
+party the device has no assignment for answers the same generic nothing as no
+device at all, and there is no fallback to whichever grant the database
+happened to return first. Resolving a multi-assignment device by insertion
+order would have made "which evening am I running" a property of the query
+plan.
+
+What still comes only from the server is everything else: no owner id, no album
+id, no collaborator id and no capability is ever accepted from a client.
+`/api/party-crew/me` lists the assignments this device holds — derived from its
+own grants, never from the owner's list of parties — for a surface that has to
+offer a choice before one has been made.
+
+Each route declares the one capability it needs and answers the same generic 404
+for every way it can be refused: no device, revoked device, revoked
+collaborator, wrong party, missing party, owner without the permission, role
+without the capability. The handlers themselves are the host's — the services
+are owner-scoped and already correct, so any handler body that carried
+validation or audit logic was extracted and both surfaces call one
+implementation.
+
+**Leaving one party is not leaving them all.** `DELETE …/parties/{id}/session`
+revokes that assignment and keeps the credential when the browser still helps
+elsewhere; `DELETE /api/party-crew/device` revokes the device and every grant on
+it. Two decisions, two routes, two sentences in the UI.
+
+**One challenge spends once, and the database is what says so.** A cookie read
+at the top of a request is stale by the time the request acts on it, so two
+calls carrying the same challenge both see `CompletedAt == null` and both
+believe they may finish. Completion is therefore a conditional UPDATE —
+`WHERE CompletedAt IS NULL AND RevokedAt IS NULL AND ExpiresAt > now` — that
+must affect exactly one row, and the invite is consumed the same way in the same
+transaction. Either claim finding nothing rolls the whole thing back: no device,
+no grant, no session. The claim happens only once a slot is known to be free, so
+a challenge that meets the two-device limit stays verified and can still be
+finished after one is freed, with no second code.
+
+**A configured mailer is not a delivered code.** `IsEnabled` says the
+installation can send mail; it says nothing about whether a provider accepted
+this message. A refused send at the start deletes the challenge it belonged to
+and answers `delivery_failed`, so nobody is shown "check your email" about a
+code that does not exist — and the invite is untouched, so trying again is all
+it takes. A refused RESEND changes nothing at all: the new proof is stored only
+after the mail subsystem accepts, so the code already in somebody's inbox keeps
+working instead of being destroyed by a delivery that never happened.
+
+**Email is budgeted by identity, not by address.** The ASP.NET rate limiters
+partition by address and bound traffic; they cannot bound a mailbox, because a
+carrier NAT, a shared office and an attacker rotating addresses all defeat that
+partition. The budgets that protect the person are per CHALLENGE
+(`MaxOtpSendsPerChallenge`) and per COLLABORATOR
+(`MaxChallengesPerCollaborator` within `SendWindow`), enforced in the service
+where the identity is known.
 
 **The audit names the actor.** `AuditLog` gained a nullable
 `PartyCollaboratorId` and `IAuditLogger` takes an `AuditActor`: a crew action
