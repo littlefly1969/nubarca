@@ -27,13 +27,14 @@ public sealed class PartyCrewSecretTests
             .Build();
 
     /// <summary>The documented construction, computed independently.</summary>
-    private static string Expected(string secret, Guid challengeId, string otp)
+    private static string Expected(string secret, Guid challengeId, int generation, string otp)
     {
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         var mac = hmac.ComputeHash(
         [
             .. challengeId.ToByteArray(),
-            .. Encoding.UTF8.GetBytes("party-crew-otp"),
+            .. Encoding.UTF8.GetBytes("party-crew-auth-v1"),
+            .. BitConverter.GetBytes(generation),
             .. Encoding.UTF8.GetBytes(otp),
         ]);
         return Convert.ToHexString(mac).ToLowerInvariant();
@@ -43,19 +44,19 @@ public sealed class PartyCrewSecretTests
     public void The_dedicated_crew_secret_wins()
     {
         var challengeId = Guid.NewGuid();
-        var proof = new PartyCrewTokens(Config("secret-A", "secret-B")).OtpProof(challengeId, "482117");
+        var proof = new PartyCrewTokens(Config("secret-A", "secret-B")).OtpProof(challengeId, 1, "482117");
 
-        Assert.Equal(Expected("secret-A", challengeId, "482117"), proof);
-        Assert.NotEqual(Expected("secret-B", challengeId, "482117"), proof);
+        Assert.Equal(Expected("secret-A", challengeId, 1, "482117"), proof);
+        Assert.NotEqual(Expected("secret-B", challengeId, 1, "482117"), proof);
     }
 
     [Fact]
     public void An_explicitly_configured_party_secret_is_reused()
     {
         var challengeId = Guid.NewGuid();
-        var proof = new PartyCrewTokens(Config(null, "secret-B")).OtpProof(challengeId, "482117");
+        var proof = new PartyCrewTokens(Config(null, "secret-B")).OtpProof(challengeId, 1, "482117");
 
-        Assert.Equal(Expected("secret-B", challengeId, "482117"), proof);
+        Assert.Equal(Expected("secret-B", challengeId, 1, "482117"), proof);
     }
 
     [Theory]
@@ -82,16 +83,30 @@ public sealed class PartyCrewSecretTests
 
         // The SAME six digits, two challenges: a proof lifted from one row is
         // worthless against the other.
-        Assert.NotEqual(tokens.OtpProof(mine, "482117"), tokens.OtpProof(yours, "482117"));
-        Assert.True(tokens.OtpMatches(mine, tokens.OtpProof(mine, "482117"), "482117"));
-        Assert.False(tokens.OtpMatches(yours, tokens.OtpProof(mine, "482117"), "482117"));
+        Assert.NotEqual(tokens.OtpProof(mine, 1, "482117"), tokens.OtpProof(yours, 1, "482117"));
+        Assert.True(tokens.OtpMatches(mine, 1, tokens.OtpProof(mine, 1, "482117"), "482117"));
+        Assert.False(tokens.OtpMatches(yours, 1, tokens.OtpProof(mine, 1, "482117"), "482117"));
+    }
+
+    [Fact]
+    public void The_proof_is_bound_to_its_own_generation()
+    {
+        var tokens = new PartyCrewTokens(Config("secret-A", null));
+        var challengeId = Guid.NewGuid();
+
+        // The SAME six digits on the same challenge, one resend apart: a code
+        // is valid for the send it was minted for and no other.
+        Assert.NotEqual(tokens.OtpProof(challengeId, 1, "482117"),
+                        tokens.OtpProof(challengeId, 2, "482117"));
+        Assert.True(tokens.OtpMatches(challengeId, 2, tokens.OtpProof(challengeId, 2, "482117"), "482117"));
+        Assert.False(tokens.OtpMatches(challengeId, 2, tokens.OtpProof(challengeId, 1, "482117"), "482117"));
     }
 
     [Fact]
     public void A_proof_is_never_the_bare_hash_of_the_code()
     {
         var challengeId = Guid.NewGuid();
-        var proof = new PartyCrewTokens(Config("secret-A", null)).OtpProof(challengeId, "482117");
+        var proof = new PartyCrewTokens(Config("secret-A", null)).OtpProof(challengeId, 1, "482117");
 
         // The lookup table a dump of bare hashes would be.
         var bare = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("482117")))

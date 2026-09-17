@@ -3930,6 +3930,10 @@ const it = {
   'crew.shell.disconnect': 'Scollega del tutto questo dispositivo',
   'crew.shell.disconnectHelp': 'Lo scollega da tutte le feste in cui aiuti.',
   'partyPrintOwner.stationIsHosts': 'La stampante la sceglie chi organizza la festa.',
+  'crew.shell.leftTitle': 'A presto',
+  'crew.shell.disconnected': 'Fatto. Questo dispositivo non gestisce pi\u00f9 nessuna festa.',
+  'party.crew.linkShare': 'Condividi',
+  'party.crew.linkChannel': 'Mandaglielo su WhatsApp o con un messaggio: il codice arriva via email, e \u00e8 meglio che le due cose non viaggino insieme.',
   'crew.deep.back': 'Torna alla festa',
 } as const;
 

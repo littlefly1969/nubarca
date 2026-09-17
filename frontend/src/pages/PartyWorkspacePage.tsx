@@ -136,13 +136,7 @@ export function PartyWorkspacePage({
 
   const facts = usePartyFacts(
     party,
-    {
-      wantsModeration: SHOWS_MODERATION.includes(section),
-      // A surface with no Ospiti section has no guest list: the host always
-      // does, a Party Crew role without `guests.read` does not, and the
-      // counts-only query is not made at all rather than made and refused.
-      wantsGuests: available.includes('guests'),
-    },
+    { wantsModeration: SHOWS_MODERATION.includes(section) },
     invalidateAuth,
   );
 

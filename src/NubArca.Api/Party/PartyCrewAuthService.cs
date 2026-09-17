@@ -44,6 +44,17 @@ public enum PartyCrewAuthError
 
     /// <summary>The slot freed up between the check and the write, or never existed.</summary>
     DeviceLimitReached,
+
+    /// <summary>
+    /// This browser already helps at this party AS SOMEBODY ELSE.
+    ///
+    /// <para>One device may hold as many party assignments as it is invited to,
+    /// but inside one party it is one person — otherwise every request would
+    /// have to pick which of two identities it was acting as. The way out is to
+    /// leave the other assignment first, which is a decision the person makes
+    /// rather than one the pairing makes for them.</para>
+    /// </summary>
+    DeviceAlreadyAssigned,
 }
 
 public sealed record PartyCrewAuthResult<T>(T? Value, PartyCrewAuthError? Error)
@@ -173,12 +184,32 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         // there is no bound at all: a leaked link would be a way to put an
         // email in somebody's inbox on demand. Counted per COLLABORATOR, not
         // per address of origin — an address is not who is being written to.
+        //
+        // SERIALISED ON THE COLLABORATOR, because counting and then inserting
+        // is a read-modify-write: three requests arriving together each count
+        // the same two and each conclude there is room, and a budget of three
+        // becomes six. The transaction opens by taking that person's row lock,
+        // so the count below sees every start that has already committed.
+        var window = now - PartyCrewLimits.SendWindow;
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var locked = await _db.PartyCollaborators
+            .Where(c => c.Id == found.Collaborator.Id && c.RevokedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.UpdatedAt, c => c.UpdatedAt), ct);
+        if (locked == 0)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.Unavailable);
+        }
+
         var recent = await _db.PartyCollaboratorAuthChallenges
             .CountAsync(
-                c => c.PartyCollaboratorId == found.Collaborator.Id
-                    && c.CreatedAt > now - PartyCrewLimits.SendWindow, ct);
+                c => c.PartyCollaboratorId == found.Collaborator.Id && c.CreatedAt > window, ct);
         if (recent >= PartyCrewLimits.MaxChallengesPerCollaborator)
+        {
+            await tx.RollbackAsync(ct);
             return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.ResendTooSoon);
+        }
 
         var otp = PartyCrewTokens.NewOtp();
         var rawChallenge = PartyCrewTokens.NewToken();
@@ -192,12 +223,18 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
             ExpiresAt = now.Add(PartyCrewLimits.ChallengeLifetime),
             OtpSentAt = now,
             OtpSendCount = 1,
+            OtpGeneration = 1,
         };
-        challenge.OtpProof = _tokens.OtpProof(challenge.Id, otp);
+        challenge.OtpProof = _tokens.OtpProof(challenge.Id, challenge.OtpGeneration, otp);
         _db.PartyCollaboratorAuthChallenges.Add(challenge);
         await _db.SaveChangesAsync(ct);
+        // The budget is spent the moment the row exists, so a concurrent start
+        // counts this one. The lock is released here rather than held across an
+        // SMTP call, which is not a thing to keep a database transaction open
+        // for; the row below is what the next request sees.
+        await tx.CommitAsync(ct);
 
-        // THE MAIL DECIDES WHETHER THIS CHALLENGE EXISTS. A provider that
+        // THE MAIL DECIDES WHETHER THIS CHALLENGE IS USABLE. A provider that
         // refuses the message leaves a person staring at "check your email"
         // for a code nobody sent, so a refusal takes the challenge with it.
         if (!await SendCodeAsync(found.Collaborator, found.Party, otp, ct))
@@ -263,7 +300,8 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
             return PartyCrewAuthError.TooManyAttempts;
 
         var otp = PartyCrewTokens.NewOtp();
-        var proof = _tokens.OtpProof(state.Challenge.Id, otp);
+        var generation = state.Challenge.OtpGeneration + 1;
+        var proof = _tokens.OtpProof(state.Challenge.Id, generation, otp);
 
         // SENT BEFORE THE PROOF IS REPLACED, and this order is the whole fix.
         // The other way round — replace, save, then send — means a provider
@@ -274,12 +312,20 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         if (!await SendCodeAsync(state.Collaborator, state.Party, otp, ct))
             return PartyCrewAuthError.DeliveryFailed;
 
-        // Accepted. NOW the previous code stops matching.
-        state.Challenge.OtpProof = proof;
-        state.Challenge.OtpSentAt = now;
-        state.Challenge.OtpSendCount++;
-        await _db.SaveChangesAsync(ct);
-        return null;
+        // ACCEPTED, AND CLAIMED ATOMICALLY. Two resends arriving together must
+        // not both "succeed": whichever lands first owns the generation, and
+        // the other is told the budget moved under it rather than leaving two
+        // codes both announced as working and only one that is.
+        var claimed = await _db.PartyCollaboratorAuthChallenges
+            .Where(c => c.Id == state.Challenge.Id
+                && c.OtpGeneration == state.Challenge.OtpGeneration
+                && c.CompletedAt == null && c.RevokedAt == null)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(c => c.OtpProof, _ => proof)
+                .SetProperty(c => c.OtpSentAt, _ => now)
+                .SetProperty(c => c.OtpGeneration, _ => generation)
+                .SetProperty(c => c.OtpSendCount, c => c.OtpSendCount + 1), ct);
+        return claimed == 1 ? null : PartyCrewAuthError.ResendTooSoon;
     }
 
     // ── 2. The code ─────────────────────────────────────────────────────────
@@ -305,18 +351,30 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         if (challenge.FailedAttempts >= PartyCrewLimits.MaxOtpAttempts)
             return PartyCrewAuthResult<PartyCrewPairing>.Fail(PartyCrewAuthError.TooManyAttempts);
 
-        if (!_tokens.OtpMatches(challenge.Id, challenge.OtpProof, code ?? string.Empty))
+        if (!_tokens.OtpMatches(
+                challenge.Id, challenge.OtpGeneration, challenge.OtpProof, code ?? string.Empty))
         {
             // Counted atomically: two wrong guesses arriving together must both
             // be charged, or the limit is advisory.
-            var attempts = await _db.PartyCollaboratorAuthChallenges
-                .Where(c => c.Id == challenge.Id)
+            // CHARGED BY THE DATABASE, and the ceiling is part of the WHERE.
+            // Five concurrent wrong guesses must cost five, and the sixth must
+            // find nothing left to charge — a read-then-increment would let a
+            // burst spend the same attempt several times over.
+            var charged = await _db.PartyCollaboratorAuthChallenges
+                .Where(c => c.Id == challenge.Id
+                    && c.FailedAttempts < PartyCrewLimits.MaxOtpAttempts)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(c => c.FailedAttempts, c => c.FailedAttempts + 1)
                     .SetProperty(c => c.LastAttemptAt, _ => (DateTime?)now), ct);
-            _ = attempts;
+            if (charged == 0)
+                return PartyCrewAuthResult<PartyCrewPairing>.Fail(PartyCrewAuthError.TooManyAttempts);
+
+            var spent = await _db.PartyCollaboratorAuthChallenges
+                .Where(c => c.Id == challenge.Id)
+                .Select(c => c.FailedAttempts)
+                .FirstAsync(ct);
             return PartyCrewAuthResult<PartyCrewPairing>.Fail(
-                challenge.FailedAttempts + 1 >= PartyCrewLimits.MaxOtpAttempts
+                spent >= PartyCrewLimits.MaxOtpAttempts
                     ? PartyCrewAuthError.TooManyAttempts
                     : PartyCrewAuthError.InvalidCode);
         }
@@ -437,6 +495,38 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
 
             if (device is not null)
             {
+                // THE DEVICE'S OWN WRITE LOCK, taken after the collaborator's.
+                // The collaborator lock orders two pairings of the SAME person;
+                // it does nothing about two DIFFERENT people racing to claim
+                // the same browser for the same party, because they contend on
+                // no shared row. This is that row. The order is always
+                // collaborator-then-device, so two requests can never hold half
+                // of each other's pair.
+                await _db.PartyCrewDevices
+                    .Where(d => d.Id == device.Id)
+                    .ExecuteUpdateAsync(u => u.SetProperty(d => d.LastSeenAt, d => d.LastSeenAt), ct);
+
+                // ONE IDENTITY PER BROWSER PER PARTY. A device may help at as
+                // many parties as it is invited to, but inside one party it is
+                // one person: otherwise the resolver would have to pick, and
+                // "who is acting" would be decided by whichever grant came
+                // back first. Asked to become somebody else here, it is refused
+                // rather than silently added.
+                var otherIdentity = await _db.PartyCollaboratorDeviceGrants
+                    .Where(g => g.PartyCrewDeviceId == device.Id
+                        && g.RevokedAt == null
+                        && g.PartyCollaboratorId != collaboratorId)
+                    .AnyAsync(g => _db.PartyCollaborators.Any(
+                        c => c.Id == g.PartyCollaboratorId
+                            && c.RevokedAt == null
+                            && c.PartyId == state.Party.Id), ct);
+                if (otherIdentity)
+                {
+                    if (owned) { await tx!.RollbackAsync(ct); tx = null; }
+                    return PartyCrewAuthResult<PartyCrewPairing>.Fail(
+                        PartyCrewAuthError.DeviceAlreadyAssigned);
+                }
+
                 var already = await _db.PartyCollaboratorDeviceGrants.FirstOrDefaultAsync(
                     g => g.PartyCrewDeviceId == device.Id && g.PartyCollaboratorId == collaboratorId, ct);
                 if (already is { RevokedAt: null })
@@ -620,6 +710,14 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
 
         var found = await _db.PartyCollaboratorAuthChallenges
             .Where(c => c.ChallengeTokenHash == hash && c.RevokedAt == null && c.ExpiresAt > now)
+            // THE INVITE IT CAME FROM MUST STILL BE LIVE. "Send them a new
+            // link" has to mean the old one stops working, and a challenge
+            // already opened off the old one is exactly the thing that would
+            // otherwise survive the rotation and finish anyway.
+            .Where(c => _db.PartyCollaboratorInvites.Any(
+                i => i.Id == c.PartyCollaboratorInviteId
+                    && i.RevokedAt == null
+                    && (i.ConsumedAt == null || c.CompletedAt != null)))
             .Join(_db.PartyCollaborators.Where(c => c.RevokedAt == null),
                 c => c.PartyCollaboratorId, col => col.Id, (c, col) => new { Challenge = c, Collaborator = col })
             .Join(_db.Parties, x => x.Collaborator.PartyId, p => p.Id,

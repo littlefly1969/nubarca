@@ -281,6 +281,197 @@ public sealed class PartyCrewHardeningTests : IDisposable
         AssertRefused(await phone.GetAsync("/api/party-crew/me"));
     }
 
+    // ── One identity per browser per party ──────────────────────────────────
+
+    [Fact]
+    public async Task A_browser_cannot_become_a_second_person_at_the_same_party()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner, "La stessa festa");
+        var (_, lauraInvite) = await AddCollaboratorAsync(
+            owner, partyId, "Laura", "laura@example.com", PartyCrewRoles.CoOrganizer);
+        var (_, marcoInvite) = await AddCollaboratorAsync(
+            owner, partyId, "Marco", "marco@example.com", PartyCrewRoles.Director);
+
+        var browser = await PairAsync(_factory, lauraInvite);
+
+        // A DEVICE MAY HELP AT MANY PARTIES, BUT IS ONE PERSON AT EACH. Two
+        // identities on one browser at one party would leave the resolver
+        // choosing which of them is acting, and "who did this" would be decided
+        // by whichever grant came back first.
+        (await browser.PostAsJsonAsync(
+            "/api/party-crew/auth/invite",
+            new { token = TokenOf(marcoInvite) })).EnsureSuccessStatusCode();
+        var refused = await browser.PostAsJsonAsync(
+            "/api/party-crew/auth/verify", new { code = CodeFromLastEmail(_factory) });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("device_already_assigned", await PartyCrewTestKit.ErrorOf(refused));
+
+        // Laura is untouched, and Marco got nothing.
+        var session = await SessionAsync(browser, partyId);
+        Assert.Equal("Laura", session.GetProperty("displayName").GetString());
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var marco = await db.PartyCollaborators
+            .SingleAsync(c => c.PartyId == partyId && c.DisplayName == "Marco");
+        Assert.Empty(await db.PartyCollaboratorDeviceGrants
+            .Where(g => g.PartyCollaboratorId == marco.Id && g.RevokedAt == null).ToListAsync());
+    }
+
+    [Fact]
+    public async Task Leaving_the_party_frees_the_browser_for_somebody_else()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        var (_, lauraInvite) = await AddCollaboratorAsync(
+            owner, partyId, "Laura", "laura@example.com", PartyCrewRoles.CoOrganizer);
+        var (_, marcoInvite) = await AddCollaboratorAsync(
+            owner, partyId, "Marco", "marco@example.com", PartyCrewRoles.Director);
+
+        var browser = await PairAsync(_factory, lauraInvite);
+
+        // The way out is a decision the person makes, not one the pairing makes
+        // for them: leave the other assignment, then pair.
+        (await browser.DeleteAsync($"/api/party-crew/parties/{partyId}/session"))
+            .EnsureSuccessStatusCode();
+
+        (await browser.PostAsJsonAsync(
+            "/api/party-crew/auth/invite",
+            new { token = TokenOf(marcoInvite) })).EnsureSuccessStatusCode();
+        var paired = await browser.PostAsJsonAsync(
+            "/api/party-crew/auth/verify", new { code = CodeFromLastEmail(_factory) });
+        paired.EnsureSuccessStatusCode();
+        Assert.Equal("Marco", (await SessionAsync(browser, partyId))
+            .GetProperty("displayName").GetString());
+    }
+
+    // ── A rotated link takes its pairings with it ───────────────────────────
+
+    [Fact]
+    public async Task A_new_link_kills_the_pairing_already_in_flight_from_the_old_one()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        var (collaboratorId, first) = await AddCollaboratorAsync(
+            owner, partyId, "Ines", "ines@example.com", PartyCrewRoles.Director);
+
+        // A pairing is underway: the link has been opened and a code sent.
+        var device = _factory.CreateClient();
+        (await device.PostAsJsonAsync(
+            "/api/party-crew/auth/invite", new { token = TokenOf(first) })).EnsureSuccessStatusCode();
+        var code = CodeFromLastEmail(_factory);
+
+        // The host sends a new link before it finishes.
+        (await owner.PostAsync($"/api/parties/{partyId}/crew/{collaboratorId}/invite", null))
+            .EnsureSuccessStatusCode();
+
+        // EVERY DOOR THE OLD LINK OPENED IS SHUT. Revoking the invite and
+        // leaving its challenge alive would mean the host revoked nothing: the
+        // pairing would simply finish a minute later.
+        AssertRefused(await device.PostAsJsonAsync("/api/party-crew/auth/verify", new { code }));
+        AssertRefused(await device.GetAsync("/api/party-crew/auth/challenge"));
+        AssertRefused(await device.GetAsync("/api/party-crew/auth/devices"));
+        AssertRefused(await device.PostAsync("/api/party-crew/auth/complete", null));
+        AssertRefused(await device.PostAsync("/api/party-crew/auth/resend", null));
+    }
+
+    // ── The party's photographs, and no others ──────────────────────────────
+
+    [Fact]
+    public async Task A_collaborator_names_the_party_s_own_photographs_and_cannot_reach_past_them()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        var (albumId, _, _) = await OpenPublicQrAsync(owner, partyId);
+
+        // One photograph in the party's album, one only in the host's library.
+        var inAlbum = await UploadPhotoAsync(owner, "in-album.png");
+        var elsewhere = await UploadPhotoAsync(owner, "elsewhere.png");
+        (await owner.PostAsJsonAsync(
+            $"/api/albums/{albumId}/items", new { fileItemId = inAlbum }))
+            .EnsureSuccessStatusCode();
+
+        var (_, invite) = await AddCollaboratorAsync(
+            owner, partyId, "Co", "co@example.com", PartyCrewRoles.CoOrganizer);
+        var co = await PairAsync(_factory, invite);
+
+        // THE ALBUM'S PHOTOGRAPH IS THEIRS to name, and to see: a picker that
+        // listed rows a browser cannot render is the visible half of having no
+        // session at all.
+        var accepted = await co.PutAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/guest-content/invitation",
+            new
+            {
+                enabled = true, visibleBefore = true, visibleLive = false, visibleAfter = false,
+                content = new { headline = "Vieni" }, mediaFileItemId = inAlbum,
+                mediaPresentation = "inline", version = 0,
+            });
+        accepted.EnsureSuccessStatusCode();
+        (await co.GetAsync($"/api/party-crew/parties/{partyId}/media/{inAlbum}/thumbnail"))
+            .EnsureSuccessStatusCode();
+
+        // THE HOST'S OTHER PHOTOGRAPH IS NOT. The picker never offers it, but
+        // the picker is not the boundary — a request naming it directly is
+        // refused, and its bytes are not served either.
+        var refused = await co.PutAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/guest-content/menu",
+            new
+            {
+                enabled = true, visibleBefore = true, visibleLive = true, visibleAfter = false,
+                content = new { headline = "Menu" }, mediaFileItemId = elsewhere,
+                mediaPresentation = "inline", version = 0,
+            });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Equal("invalid_media", await PartyCrewTestKit.ErrorOf(refused));
+        AssertRefused(await co.GetAsync(
+            $"/api/party-crew/parties/{partyId}/media/{elsewhere}/thumbnail"));
+
+        // And the host's own file routes stay shut to a device cookie.
+        var direct = await co.GetAsync($"/api/files/{inAlbum}/thumbnail");
+        Assert.NotEqual(HttpStatusCode.OK, direct.StatusCode);
+    }
+
+    // ── The venue's hardware, again — this time by request ──────────────────
+
+    [Fact]
+    public async Task A_hand_built_request_cannot_re_point_the_printer()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        var (albumId, _, _) = await OpenPublicQrAsync(owner, partyId);
+        var (_, invite) = await AddCollaboratorAsync(
+            owner, partyId, "Regista", "regista@example.com", PartyCrewRoles.Director);
+        var director = await PairAsync(_factory, invite);
+
+        var before = await owner.GetFromJsonAsync<JsonElement>(
+            $"/api/albums/{albumId}/party-print-settings");
+
+        // The crew request has no hardware field at all, so these are simply
+        // not read. What the collaborator MAY change is changed.
+        var saved = await director.PatchAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/print-settings",
+            new
+            {
+                enabled = false,
+                photoEnabled = true,
+                photoMaxPrints = 7,
+                printStationId = Guid.NewGuid(),
+                printerDeviceId = Guid.NewGuid(),
+            });
+        saved.EnsureSuccessStatusCode();
+
+        var after = await owner.GetFromJsonAsync<JsonElement>(
+            $"/api/albums/{albumId}/party-print-settings");
+        Assert.Equal(
+            before.GetProperty("printStationId").GetRawText(),
+            after.GetProperty("printStationId").GetRawText());
+        Assert.Equal(
+            before.GetProperty("printerDeviceId").GetRawText(),
+            after.GetProperty("printerDeviceId").GetRawText());
+        Assert.Equal(7, after.GetProperty("photo").GetProperty("maxPrints").GetInt32());
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>

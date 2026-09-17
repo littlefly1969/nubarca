@@ -433,6 +433,15 @@ public sealed class PartyCrewService : IPartyCrewService
                 && i.RevokedAt == null && i.ConsumedAt == null)
             .ExecuteUpdate(s => s.SetProperty(i => i.RevokedAt, _ => (DateTime?)now));
 
+        // AND THE PAIRINGS ALREADY IN FLIGHT OFF THOSE LINKS. "Send them a new
+        // link" means the old one stops working; a challenge somebody opened
+        // from it a minute ago would otherwise finish anyway, and the host
+        // would have revoked nothing.
+        _db.PartyCollaboratorAuthChallenges
+            .Where(c => c.PartyCollaboratorId == collaboratorId
+                && c.RevokedAt == null && c.CompletedAt == null)
+            .ExecuteUpdate(s => s.SetProperty(c => c.RevokedAt, _ => (DateTime?)now));
+
         var raw = PartyCrewTokens.NewToken();
         var invite = new PartyCollaboratorInvite
         {

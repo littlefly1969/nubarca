@@ -145,6 +145,7 @@ namespace NubArca.Api.Data.Migrations
                     PartyCollaboratorInviteId = table.Column<Guid>(type: "uuid", nullable: false),
                     ChallengeTokenHash = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
                     OtpProof = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    OtpGeneration = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     ExpiresAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     OtpSentAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
@@ -159,6 +160,7 @@ namespace NubArca.Api.Data.Migrations
                 {
                     table.PrimaryKey("PK_party_collaborator_auth_challenges", x => x.Id);
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_attempts", "\"FailedAttempts\" >= 0");
+                    table.CheckConstraint("ck_party_collaborator_auth_challenges_generation", "\"OtpGeneration\" >= 1");
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_otp_proof", "length(\"OtpProof\") = 64");
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_sends", "\"OtpSendCount\" >= 0");
                     table.CheckConstraint("ck_party_collaborator_auth_challenges_token_hash", "length(\"ChallengeTokenHash\") = 64");

@@ -41,6 +41,7 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
     private readonly Guid _ownerId = Guid.NewGuid();
     private readonly Guid _partyId = Guid.NewGuid();
     private readonly Guid _collaboratorId = Guid.NewGuid();
+    private readonly Guid _otherCollaboratorId = Guid.NewGuid();
 
     public PartyCrewConcurrencyPostgresTests(PostgresContainerFixture fixture) => _fixture = fixture;
 
@@ -68,6 +69,14 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
             Id = _collaboratorId, PartyId = _partyId,
             DisplayName = "Regista", Email = "regista@example.com",
             NormalizedEmail = "regista@example.com", RoleKey = PartyCrewRoles.Director,
+            Version = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        });
+        // A SECOND person at the SAME party, for the identity race below.
+        db.PartyCollaborators.Add(new PartyCollaborator
+        {
+            Id = _otherCollaboratorId, PartyId = _partyId,
+            DisplayName = "Co", Email = "co@example.com",
+            NormalizedEmail = "co@example.com", RoleKey = PartyCrewRoles.CoOrganizer,
             Version = 1, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
@@ -247,6 +256,50 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
             .CountAsync(i => i.PartyCollaboratorId == _collaboratorId && i.ConsumedAt != null));
     }
 
+    [SkippableFact]
+    public async Task One_browser_never_becomes_two_people_at_one_party()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // TWO DIFFERENT COLLABORATORS, ONE BROWSER, ONE PARTY, ONE INSTANT.
+        // The collaborator row lock cannot decide this: these two requests are
+        // about different people and contend on no shared row. What orders them
+        // is the DEVICE's own lock, and without it both would insert a grant —
+        // leaving the resolver to pick which of two identities is acting.
+        var raw = PartyCrewTokens.NewToken();
+        await SeedDeviceAsync(raw, "one-browser");
+
+        var (mine, myOtp) = await SeedChallengeAsync();
+        var (theirs, theirOtp) = await SeedChallengeAsync(_otherCollaboratorId);
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthResult<PartyCrewPairing>> Race(string challenge, string otp)
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            return await service.VerifyAsync(
+                challenge, otp, "Mozilla/5.0 (Linux; Android 14)", raw, null);
+        }
+
+        var results = await Task.WhenAll(
+            Task.Run(() => Race(mine, myOtp)),
+            Task.Run(() => Race(theirs, theirOtp)));
+
+        Assert.Equal(1, results.Count(r => r.Value?.Result.Outcome == PartyCrewVerifyOutcome.Paired));
+        Assert.Equal(1, results.Count(r => r.Error == PartyCrewAuthError.DeviceAlreadyAssigned));
+
+        // ONE identity on this browser at this party, whichever won.
+        await using var check = NewContext();
+        var identities = await check.PartyCollaboratorDeviceGrants
+            .Where(g => g.RevokedAt == null)
+            .Where(g => check.PartyCollaborators.Any(
+                c => c.Id == g.PartyCollaboratorId && c.PartyId == _partyId && c.RevokedAt == null))
+            .CountAsync();
+        Assert.Equal(1, identities);
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     private AppDbContext NewContext() => new(_dbOptions!);
@@ -317,14 +370,17 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
     }
 
     /// <summary>A live invite and a live challenge, ready for its code.</summary>
-    private async Task<(string RawChallengeToken, string Otp)> SeedChallengeAsync()
+    private Task<(string RawChallengeToken, string Otp)> SeedChallengeAsync() =>
+        SeedChallengeAsync(_collaboratorId);
+
+    private async Task<(string RawChallengeToken, string Otp)> SeedChallengeAsync(Guid collaboratorId)
     {
         await using var db = NewContext();
         var inviteId = Guid.NewGuid();
         db.PartyCollaboratorInvites.Add(new PartyCollaboratorInvite
         {
             Id = inviteId,
-            PartyCollaboratorId = _collaboratorId,
+            PartyCollaboratorId = collaboratorId,
             TokenHash = PartyCrewTokens.Hash(PartyCrewTokens.NewToken()),
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.Add(PartyCrewLimits.InviteLifetime),
@@ -336,10 +392,11 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
         db.PartyCollaboratorAuthChallenges.Add(new PartyCollaboratorAuthChallenge
         {
             Id = challengeId,
-            PartyCollaboratorId = _collaboratorId,
+            PartyCollaboratorId = collaboratorId,
             PartyCollaboratorInviteId = inviteId,
             ChallengeTokenHash = PartyCrewTokens.Hash(raw),
-            OtpProof = NewTokens().OtpProof(challengeId, otp),
+            OtpProof = NewTokens().OtpProof(challengeId, 1, otp),
+            OtpGeneration = 1,
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.Add(PartyCrewLimits.ChallengeLifetime),
             OtpSentAt = DateTime.UtcNow,

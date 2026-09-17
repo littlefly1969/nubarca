@@ -261,6 +261,7 @@ function CollaboratorRow({
         <div className="pw-crew-link" data-testid={`party-crew-link-${person.id}`}>
           <p className="pw-small">{t('party.crew.linkReady', { name: person.displayName })}</p>
           <CrewLink url={link.inviteUrl} />
+          <p className="pw-small pw-muted">{t('party.crew.linkChannel')}</p>
           <p className="pw-small pw-muted">{t('party.crew.linkOnce')}</p>
           <Button onClick={onLinkDone} data-testid={`party-crew-link-done-${person.id}`}>
             {t('party.crew.linkDone')}
@@ -460,6 +461,7 @@ function CrewLink({ url }: { url: string }) {
   const { t } = useI18n();
   const field = useRef<HTMLInputElement>(null);
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
   return (
     <div className="pw-crew-link-row">
@@ -471,6 +473,21 @@ function CrewLink({ url }: { url: string }) {
         data-testid="party-crew-link-url"
         onFocus={(event) => event.currentTarget.select()}
       />
+      {/* WEB SHARE, where the browser has it. The link and the code must not
+          normally travel the same way — the whole point of two factors — so the
+          product nudges toward WhatsApp, a message or an AirDrop rather than
+          the mailbox the code is going to. Copy stays for everywhere else. */}
+      {canShare && (
+        <Button
+          data-testid="party-crew-link-share"
+          onClick={() => {
+            void navigator.share({ url }).catch(() => { /* dismissed, or refused */ });
+          }}
+        >
+          {t('party.crew.linkShare')}
+        </Button>
+      )}
+
       <Button
         data-testid="party-crew-link-copy"
         onClick={() => {

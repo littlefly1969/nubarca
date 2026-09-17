@@ -49,9 +49,12 @@ import './PartyCrew.css';
 export function PartyCrewWorkspacePage() {
   const { partyId } = useParams<{ partyId: string }>();
   const { t } = useI18n();
-  const [state, setState] =
-    useState<{ kind: 'loading' } | { kind: 'ready'; session: PartyCrewSession } | { kind: 'gone' }>(
-      { kind: 'loading' });
+  const [state, setState] = useState<
+    | { kind: 'loading' }
+    | { kind: 'ready'; session: PartyCrewSession }
+    | { kind: 'gone' }
+    | { kind: 'left'; scope: 'party' | 'device' }
+  >({ kind: 'loading' });
 
   useEffect(() => {
     let live = true;
@@ -79,6 +82,23 @@ export function PartyCrewWorkspacePage() {
     );
   }
 
+  // LEAVING UNMOUNTS THE PARTY, and that is the point of holding this state
+  // here rather than inside the menu. Hiding a panel would leave every guest
+  // name, arrival and photograph this person had already loaded sitting in the
+  // DOM of a session they just ended.
+  if (state.kind === 'left') {
+    return (
+      <main className="crew-shell" data-testid="party-crew-workspace" data-left={state.scope}>
+        <div className="crew-pair-card">
+          <h1 className="crew-pair-title">{t('crew.shell.leftTitle')}</h1>
+          <p className="crew-pair-lede">
+            {t(state.scope === 'device' ? 'crew.shell.disconnected' : 'crew.shell.leftParty')}
+          </p>
+        </div>
+      </main>
+    );
+  }
+
   if (state.kind === 'gone') {
     return (
       <main className="crew-shell" data-testid="party-crew-workspace">
@@ -102,7 +122,12 @@ export function PartyCrewWorkspacePage() {
         <PartyWorkspacePage
           sections={sections}
           landing={landing}
-          header={<CrewIdentity session={session} />}
+          header={(
+            <CrewIdentity
+              session={session}
+              onLeft={(scope) => setState({ kind: 'left', scope })}
+            />
+          )}
         />
       </div>
     </PartyApiProvider>
@@ -116,7 +141,12 @@ export function PartyCrewWorkspacePage() {
  * Folded into a details element rather than a menu, because it is opened rarely
  * and a menu would need focus management to be worth the same 44px.
  */
-function CrewIdentity({ session }: { session: PartyCrewSession }) {
+function CrewIdentity({
+  session, onLeft,
+}: {
+  session: PartyCrewSession;
+  onLeft(scope: 'party' | 'device'): void;
+}) {
   const { t } = useI18n();
   return (
     <details className="crew-identity" data-testid="crew-identity">
@@ -129,18 +159,22 @@ function CrewIdentity({ session }: { session: PartyCrewSession }) {
         </span>
       </summary>
       <div className="crew-identity-body">
-        <CrewDevices partyId={session.partyId} />
+        <CrewDevices partyId={session.partyId} onLeft={onLeft} />
       </div>
     </details>
   );
 }
 
-function CrewDevices({ partyId }: { partyId: string }) {
+function CrewDevices({
+  partyId, onLeft,
+}: {
+  partyId: string;
+  onLeft(scope: 'party' | 'device'): void;
+}) {
   const { t } = useI18n();
   const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [devices, setDevices] = useState<PartyCrewDevice[]>([]);
   const [busy, setBusy] = useState(false);
-  const [left, setLeft] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -153,17 +187,13 @@ function CrewDevices({ partyId }: { partyId: string }) {
 
   useEffect(() => { void reload(); }, [reload]);
 
-  // Leaving is final for this browser: the cookie is gone and there is nothing
-  // to go back to, so the panel says so rather than showing a dead list.
-  if (left) {
-    return <p className="crew-identity-note" role="status">{t('crew.shell.leftParty')}</p>;
-  }
-
   async function drop(grantId: string, isCurrent: boolean) {
     setBusy(true);
     try {
       await revokeMyPartyCrewDevice(partyId, grantId);
-      if (isCurrent) { setLeft(true); return; }
+      // Dropping the grant you are HOLDING ends this session, so the workspace
+      // goes with it rather than staying on screen full of party data.
+      if (isCurrent) { onLeft('party'); return; }
       await reload();
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
@@ -215,7 +245,7 @@ function CrewDevices({ partyId }: { partyId: string }) {
         data-testid="crew-leave-party"
         onClick={() => void (async () => {
           setBusy(true);
-          try { await leavePartyCrewParty(partyId); } finally { setBusy(false); setLeft(true); }
+          try { await leavePartyCrewParty(partyId); } finally { setBusy(false); onLeft('party'); }
         })()}
       >
         {t('crew.shell.leaveParty')}
@@ -230,7 +260,7 @@ function CrewDevices({ partyId }: { partyId: string }) {
         data-testid="crew-disconnect-device"
         onClick={() => void (async () => {
           setBusy(true);
-          try { await disconnectPartyCrewDevice(); } finally { setBusy(false); setLeft(true); }
+          try { await disconnectPartyCrewDevice(); } finally { setBusy(false); onLeft('device'); }
         })()}
       >
         {t('crew.shell.disconnect')}

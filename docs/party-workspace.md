@@ -180,7 +180,13 @@ here rather than cosmetic, and must not be "simplified":
   A counts-only query is still a query for names.
 - A collaborator never gets the host's media library. The slot image field
   offers the party's own album and hides the upload button, which writes into
-  the host's library root.
+  the host's library root — and the server refuses a `FileItemId` from outside
+  the party regardless, because the picker is not the boundary. Thumbnails come
+  from the party's own media routes, since a crew browser has no session for the
+  owner's.
+- Leaving a party **unmounts the workspace**. Hiding the menu would leave every
+  name, arrival and photograph the person had loaded sitting in the DOM of a
+  session they just ended, so the shell owns that state.
 - A collaborator never enumerates the venue's printers. `print.manage` is this
   party's print profile; the installation's hardware has no crew route at all,
   and the panel says the host chose the printer instead of offering a list.

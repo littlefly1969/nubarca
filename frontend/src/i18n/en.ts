@@ -3889,6 +3889,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'crew.shell.disconnect': 'Disconnect this device completely',
   'crew.shell.disconnectHelp': 'Disconnects it from every party you help at.',
   'partyPrintOwner.stationIsHosts': 'The host chooses the printer.',
+  'crew.shell.leftTitle': 'See you soon',
+  'crew.shell.disconnected': 'Done. This device no longer runs any party.',
+  'party.crew.linkShare': 'Share',
+  'party.crew.linkChannel': 'Send it on WhatsApp or by message: the code goes to their email, and the two are better off not travelling together.',
   'crew.deep.back': 'Back to the party',
 };
 
