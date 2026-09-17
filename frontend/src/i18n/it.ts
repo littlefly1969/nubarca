@@ -3835,6 +3835,97 @@ const it = {
   'print.actionError': 'Impossibile aggiornare la stazione.',
   'print.testError': 'Impossibile accodare la stampa test.',
   'print.revokeError': 'Impossibile revocare la stazione.',
+
+  // ── PARTY CREW ────────────────────────────────────────────────────────────
+  //
+  // The host's side. Deliberately free of implementation words: no
+  // "capability", no "token", no "grant", no "device limit reached". A host
+  // adds a person, says what they are there to do, and hands them a link.
+
+  'party.crew.heading': 'Chi ti aiuta',
+  'party.crew.help': 'Persone che possono gestire questa festa con te, dal loro telefono. Non hanno un account NubArca e vedono solo questa festa.',
+  'party.crew.empty': 'Per ora gestisci tutto da solo.',
+  'party.crew.add': 'Aggiungi una persona',
+  'party.crew.addSubmit': 'Aggiungi e crea il link',
+  'party.crew.cancel': 'Annulla',
+  'party.crew.edit': 'Modifica',
+  'party.crew.link': 'Crea il link',
+  'party.crew.newLink': 'Crea un nuovo link',
+  'party.crew.remove': 'Rimuovi',
+  'party.crew.removeConfirm': 'Vuoi togliere l’accesso a {name}? I suoi dispositivi smettono di funzionare subito.',
+  'party.crew.removeYes': 'Sì, togli l’accesso',
+  'party.crew.loadFailed': 'Non è stato possibile caricare chi ti aiuta.',
+  'party.crew.noMail': 'Serve la posta in uscita: il codice di accesso arriva via email. Chiedi a chi gestisce il server di configurarla.',
+  'party.crew.devices': '{used}/{max} dispositivi',
+
+  'party.crew.linkReady': 'Ecco il link per {name}. Mandaglielo tu, come preferisci.',
+  'party.crew.linkLabel': 'Link di accesso',
+  'party.crew.linkCopy': 'Copia',
+  'party.crew.linkCopied': 'Copiato.',
+  'party.crew.linkCopyFailed': 'Copialo a mano: il browser non lo ha permesso.',
+  'party.crew.linkOnce': 'Lo vedi solo ora. Se lo perdi puoi crearne un altro, e il vecchio smette di funzionare.',
+  'party.crew.linkDone': 'Fatto, l’ho mandato',
+
+  'party.crew.device.paired': 'Collegato il {when}',
+  'party.crew.device.remove': 'Scollega',
+
+  'party.crew.field.name': 'Nome',
+  'party.crew.field.email': 'Email',
+  'party.crew.field.emailHelp': 'Qui arriva il codice per collegare il suo telefono. Scegli un indirizzo che legge davvero.',
+  'party.crew.field.role': 'Di cosa si occupa',
+
+  'party.crew.role.coOrganizer': 'Co-organizzatore',
+  'party.crew.role.coOrganizer.help': 'Gestisce la festa come te: ospiti, inviti, foto, attività, schermi e stampa.',
+  'party.crew.role.director': 'Regista',
+  'party.crew.role.director.help': 'Manda avanti la serata: foto, attività, schermi e stampa. Non vede la lista degli ospiti.',
+  'party.crew.role.dj': 'DJ',
+  'party.crew.role.reception': 'Accoglienza',
+  'party.crew.role.honoree': 'Festeggiato',
+  'party.crew.role.other': 'Collaboratore',
+
+  'party.crew.error.name': 'Serve un nome.',
+  'party.crew.error.email': 'Questo indirizzo email non sembra valido.',
+  'party.crew.error.emailInUse': 'Questo indirizzo sta già aiutando a questa festa.',
+  'party.crew.error.role': 'Scegli di cosa si occupa.',
+  'party.crew.error.conflict': 'Qualcosa è cambiato nel frattempo. Ricarica e riprova.',
+  'party.crew.error.mail': 'Serve la posta in uscita per mandare il codice.',
+
+  // The collaborator's own side: pairing, and the party once paired.
+
+  'crew.pair.eyebrow': 'NubArca',
+  'crew.pair.opening': 'Un attimo…',
+  'crew.pair.unusable.title': 'Questo link non funziona',
+  'crew.pair.unusable.body': 'Può essere scaduto, già usato o non più valido. Chiedi a chi organizza la festa di mandartene uno nuovo.',
+  'crew.pair.expired.title': 'Ricominciamo',
+  'crew.pair.expired.body': 'È passato troppo tempo. Riapri il link che ti hanno mandato.',
+  'crew.pair.role': 'Ti stai collegando come {role}.',
+  'crew.pair.code.label': 'Codice',
+  'crew.pair.code.sentTo': 'Lo abbiamo mandato a {email}. Vale 10 minuti e funziona solo qui.',
+  'crew.pair.code.submit': 'Entra',
+  'crew.pair.code.resend': 'Non mi è arrivato',
+  'crew.pair.code.resent': 'Te ne abbiamo mandato un altro.',
+  'crew.pair.wrongCode': 'Codice sbagliato. Controlla e riprova.',
+  'crew.pair.tooMany': 'Troppi tentativi. Aspetta qualche minuto.',
+  'crew.pair.noMail': 'Il server non riesce a mandare email. Avvisa chi organizza la festa.',
+  'crew.pair.failed': 'Non ha funzionato. Riprova.',
+  'crew.pair.limit.title': 'Hai già due dispositivi',
+  'crew.pair.limit.body': 'Puoi usarne due alla volta. Scollegane uno per collegare questo: non dovrai reinserire il codice.',
+  'crew.pair.limit.lastUsed': 'Usato il {when}',
+  'crew.pair.limit.drop': 'Scollega questo',
+
+  'crew.shell.loading': 'Un attimo…',
+  'crew.shell.gone.title': 'Non hai più accesso',
+  'crew.shell.gone.body': 'Questo dispositivo non può più gestire la festa. Se è un errore, chiedi un nuovo link a chi organizza.',
+  'crew.shell.as': '{name} · {role}',
+  'crew.shell.menu': 'Il tuo accesso',
+  'crew.shell.devices': 'I miei dispositivi',
+  'crew.shell.devicesHelp': 'Puoi usare due dispositivi alla volta.',
+  'crew.shell.devicesFailed': 'Non è stato possibile caricare i tuoi dispositivi.',
+  'crew.shell.deviceThis': 'Questo dispositivo',
+  'crew.shell.signOut': 'Disconnetti questo dispositivo',
+  'crew.shell.signOutDone': 'Fatto. Questo dispositivo non gestisce più la festa.',
+  'crew.shell.close': 'Chiudi',
+  'crew.deep.back': 'Torna alla festa',
 } as const;
 
 export type MessageKey = keyof typeof it;

@@ -1,10 +1,10 @@
 import {
-  sharePartyInvitation,
   type InvitationShareChannel,
   type InvitationShareResult,
   type Party,
 } from '@nubarca/api-client';
 import { newClientRequestId } from './clientRequestId';
+import type { PartyApi } from './workspace/partyApi';
 import { copyWhenReady, openExternal } from './guestShare';
 
 // ONE TAP OF "WhatsApp" OR "Copia link".
@@ -36,6 +36,10 @@ export interface SharedInvitation {
 }
 
 export async function shareInvitation(
+  // The one call, handed in rather than imported: a collaborator shares the
+  // same invitation through their own route family, and this helper does not
+  // need to know which one it was given.
+  share: PartyApi['sharePartyInvitation'],
   partyId: string,
   groupId: string,
   channel: InvitationShareChannel,
@@ -43,7 +47,7 @@ export async function shareInvitation(
 ): Promise<SharedInvitation> {
   // One id per tap, reused by that tap's retries: the same click never records
   // a second share.
-  const pending = sharePartyInvitation(partyId, groupId, {
+  const pending = share(partyId, groupId, {
     channel, clientRequestId: newClientRequestId(), partyVersion,
   });
 

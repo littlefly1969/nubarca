@@ -5,25 +5,13 @@ import {
   GUEST_CONSOLE_PARAMS,
   LEGACY_GUEST_SEARCH_PARAM,
   PARTY_ATTENDANCE_LIMITS,
-  checkInPartyGuest,
   codePoints,
-  createPartyAttendanceGuest,
-  deletePartyAttendanceGuest,
-  deletePartyInvitationGroup,
-  getPartyInvitationGroup,
-  getPartyRsvpQuestions,
   guestDirectoryStatesFor,
   isAttendancePhase,
   isGuestDirectoryState,
   normalizeText,
   primaryInvitationAction,
-  queryPartyGuestDirectory,
-  remindPartyInvitation,
-  rotatePartyInvitationLink,
-  sendPartyInvitation,
-  undoPartyGuestCheckIn,
   unexpectedArrivals,
-  updatePartyAttendanceGuest,
   type GuestDirectoryGroupItem,
   type GuestDirectoryOtherItem,
   type GuestDirectoryPerson,
@@ -36,6 +24,7 @@ import {
   type PartyInvitationGroupDetail,
   type PartyRsvpQuestion,
 } from '@nubarca/api-client';
+import { usePartyApi, type PartyApi } from './workspace/partyApi';
 import { useAuth } from '../auth/useAuth';
 import { Modal } from '../components/Overlay';
 import { useI18n, type MessageKey } from '../i18n';
@@ -130,6 +119,7 @@ export function PartyGuestListTab({
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -247,13 +237,13 @@ export function PartyGuestListTab({
       setDetailRefresh((n) => n + 1);
       return;
     }
-    adoptDetail(await getPartyInvitationGroup(party.id, groupId));
-  }, [openGroupId, adoptDetail, party.id]);
+    adoptDetail(await api.getPartyInvitationGroup(party.id, groupId));
+  }, [openGroupId, adoptDetail, party.id, api]);
 
   const refreshSummary = useCallback(async () => {
-    const page = await queryPartyGuestDirectory(party.id, { take: 0 });
+    const page = await api.queryPartyGuestDirectory(party.id, { take: 0 });
     setSummary(page.summary);
-  }, [party.id, setSummary]);
+  }, [party.id, setSummary, api]);
 
   const refused = useCallback((err: unknown, fallback: MessageKey) => {
     if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -282,7 +272,8 @@ export function PartyGuestListTab({
 
   const runShare = useCallback((target: DetailTarget, channel: InvitationShareChannel) =>
     run(target.groupId, async () => {
-      const { result, outcome } = await shareInvitation(party.id, target.groupId, channel, party.version);
+      const { result, outcome } = await shareInvitation(
+        api.sharePartyInvitation, party.id, target.groupId, channel, party.version);
       if (result.party) onPartyUpdated(result.party);
       if (result.item) directory.patchGroup(result.item);
       setShare(outcome);
@@ -299,8 +290,8 @@ export function PartyGuestListTab({
     run(target.groupId, async () => {
       const clientRequestId = newClientRequestId();
       const result = reminder
-        ? await remindPartyInvitation(party.id, target.groupId, clientRequestId)
-        : await sendPartyInvitation(party.id, target.groupId, { clientRequestId, partyVersion: party.version });
+        ? await api.remindPartyInvitation(party.id, target.groupId, clientRequestId)
+        : await api.sendPartyInvitation(party.id, target.groupId, { clientRequestId, partyVersion: party.version });
       onPartyUpdated(result.party);
       await refreshGroup(target.groupId);
       const status = result.delivery.status;
@@ -317,7 +308,7 @@ export function PartyGuestListTab({
 
   const runRotate = useCallback((target: DetailTarget) =>
     run(target.groupId, async () => {
-      await rotatePartyInvitationLink(party.id, target.groupId, target.version);
+      await api.rotatePartyInvitationLink(party.id, target.groupId, target.version);
       setShare(null);
       await refreshGroup(target.groupId);
       setNotice({ tone: 'ok', text: t('party.console.rotated') });
@@ -325,7 +316,7 @@ export function PartyGuestListTab({
 
   const runRemove = useCallback((target: DetailTarget) =>
     run(target.groupId, async () => {
-      await deletePartyInvitationGroup(party.id, target.groupId, target.version);
+      await api.deletePartyInvitationGroup(party.id, target.groupId, target.version);
       directory.removeItem(`g:${target.groupId}`);
       if (openGroupId === target.groupId) closeDetail();
       await refreshSummary();
@@ -349,8 +340,8 @@ export function PartyGuestListTab({
   const runArrival = useCallback((target: DetailTarget, person: GuestDirectoryPerson, undo: boolean) =>
     run(`guest:${person.guestId}`, async () => {
       const change = undo
-        ? await undoPartyGuestCheckIn(party.id, person.guestId)
-        : await checkInPartyGuest(party.id, person.guestId);
+        ? await api.undoPartyGuestCheckIn(party.id, person.guestId)
+        : await api.checkInPartyGuest(party.id, person.guestId);
       patchPerson(target.groupId, person.guestId, {
         checkedInAt: change.guest?.checkedInAt ?? null,
         checkInSource: change.guest?.checkInSource ?? null,
@@ -365,7 +356,7 @@ export function PartyGuestListTab({
 
   const addPerson = useCallback((name: string, clientRequestId: string) =>
     run('add', async () => {
-      const change = await createPartyAttendanceGuest(party.id, { name: name.trim(), clientRequestId });
+      const change = await api.createPartyAttendanceGuest(party.id, { name: name.trim(), clientRequestId });
       // An arrival becomes a card of the directory, which says what kind it is.
       if (change.otherGuest) directory.prependOther({ kind: 'other', ...change.otherGuest });
       directory.patchAttendance(change.summary);
@@ -375,14 +366,14 @@ export function PartyGuestListTab({
 
   const renameOther = useCallback((item: GuestDirectoryOtherItem, name: string) =>
     run(`other:${item.id}`, async () => {
-      const change = await updatePartyAttendanceGuest(party.id, item.id, { name: name.trim(), version: item.version });
+      const change = await api.updatePartyAttendanceGuest(party.id, item.id, { name: name.trim(), version: item.version });
       if (change.otherGuest) directory.patchOther({ kind: 'other', ...change.otherGuest });
       setRenaming(null);
     }), [run, party.id, directory]);
 
   const removeOther = useCallback((item: GuestDirectoryOtherItem) =>
     run(`other:${item.id}`, async () => {
-      const change = await deletePartyAttendanceGuest(party.id, item.id);
+      const change = await api.deletePartyAttendanceGuest(party.id, item.id);
       directory.removeItem(`o:${item.id}`);
       directory.patchAttendance(change.summary);
       setNotice({ tone: 'ok', text: t('party.console.other.removed', { name: item.name }) });
@@ -419,10 +410,10 @@ export function PartyGuestListTab({
   // The questions are read only when the host opens them.
   const openQuestions = useCallback(() => {
     if (questions !== null) return;
-    getPartyRsvpQuestions(party.id)
+    api.getPartyRsvpQuestions(party.id)
       .then((answer) => setQuestions(answer.questions))
       .catch((err: unknown) => refused(err, 'party.console.error.generic'));
-  }, [questions, party.id, refused]);
+  }, [questions, party.id, refused, api]);
 
   // --- What is on the screen ------------------------------------------------------
 
@@ -669,7 +660,8 @@ export function PartyGuestListTab({
             share: (channel) => void runShare(targetOf(menu.item), channel),
             email: () => void runEmail(targetOf(menu.item), false),
             remind: () => void runEmail(targetOf(menu.item), true),
-            edit: () => { void openForEdit(party.id, menu.item.groupId, setEditing, refused); },
+            edit: () => { void openForEdit(
+              api.getPartyInvitationGroup, party.id, menu.item.groupId, setEditing, refused); },
             rotate: () => setConfirm({ kind: 'rotate', target: targetOf(menu.item) }),
             remove: () => setConfirm({ kind: 'remove', target: targetOf(menu.item) }),
             close: () => setMenu(null),
@@ -801,13 +793,14 @@ function withoutLegacySearch(current: URLSearchParams): URLSearchParams {
 
 /** The editor needs the group whole — its people's addresses included — so it is read first. */
 async function openForEdit(
+  read: PartyApi['getPartyInvitationGroup'],
   partyId: string,
   groupId: string,
   setEditing: (group: PartyInvitationGroup) => void,
   onRefused: (err: unknown, fallback: MessageKey) => void,
 ): Promise<void> {
   try {
-    setEditing((await getPartyInvitationGroup(partyId, groupId)).group);
+    setEditing((await read(partyId, groupId)).group);
   } catch (err) {
     onRefused(err, 'party.console.editor.error.generic');
   }

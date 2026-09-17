@@ -2,15 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
-  listPartyMessages,
-  moderatePartyMessage,
   partyMessageActions,
   DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
-  setAlbumPartyMode,
   type PartyMessage,
   type PartyMessageAction,
   type PartyMessageList,
 } from '@nubarca/api-client';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
 import { Badge, Button, EmptyState, Notice, Panel, PanelSkeleton, SwitchRow } from '../party/workspace/ui';
@@ -47,8 +45,23 @@ const FILTER_LABEL_KEY: Record<Filter, MessageKey> = {
 // The one thing the page does branch on is `isOwner`: the approval switch is a
 // party SETTING, and a delegate moderates messages without ever changing what
 // the party requires.
-export function PartyMessagesPage() {
-  const { albumId } = useParams<{ albumId: string }>();
+/**
+ * Optional overrides, for the Party Crew surface.
+ *
+ * Both default to what the host's route supplies, so nothing changes for them.
+ * A collaborator reaches this page through `/party/crew/...`, where there is no
+ * album id in the URL and no parties list to go back to — so the id is handed
+ * in (every crew route ignores it and resolves the album server-side) and the
+ * way out points at their own party.
+ */
+export function PartyMessagesPage({
+  albumId: albumIdProp, back: backProp,
+}: {
+  albumId?: string;
+  back?: { to: string; label: string };
+} = {}) {
+  const { albumId: routeAlbumId } = useParams<{ albumId: string }>();
+  const albumId = albumIdProp ?? routeAlbumId;
   const navigate = useNavigate();
   // The queue is reached FROM a party, and its own back link returns there.
   // Falling back to the album keeps an old bookmark working.
@@ -56,19 +69,20 @@ export function PartyMessagesPage() {
   const partyId = searchParams.get('party');
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
+  const api = usePartyApi();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [filter, setFilter] = useState<Filter>('all');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     if (!albumId) return;
-    listPartyMessages(albumId)
+    api.listPartyMessages(albumId)
       .then((list) => setStatus({ kind: 'ready', list }))
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
         // 404 covers "no such album" and "not yours to manage" alike — the
         // server deliberately does not distinguish them, and neither do we.
-        if (err instanceof ApiError && err.status === 404) { void navigate('/albums'); return; }
+        if (err instanceof ApiError && err.status === 404) { void navigate(backProp?.to ?? '/albums'); return; }
         setStatus({ kind: 'error', message: t('partyMessages.loadError') });
       });
   }, [albumId, invalidateAuth, navigate, t]);
@@ -94,7 +108,7 @@ export function PartyMessagesPage() {
     if (!albumId) return;
     setBusy(true);
     try {
-      await moderatePartyMessage(albumId, message.id, action);
+      await api.moderatePartyMessage(albumId, message.id, action);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -110,7 +124,7 @@ export function PartyMessagesPage() {
     try {
       // Party stays on and the tokens are untouched: only the message-approval
       // sub-switch moves.
-      await setAlbumPartyMode(albumId, true, undefined, undefined, undefined, next);
+      await api.setAlbumPartyMode(albumId, true, undefined, undefined, undefined, next);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }

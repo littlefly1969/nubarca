@@ -120,6 +120,22 @@ public class AppDbContext : DbContext
     public DbSet<PartyGuestAttendance> PartyGuestAttendances => Set<PartyGuestAttendance>();
     public DbSet<PartyAttendanceGuest> PartyAttendanceGuests => Set<PartyAttendanceGuest>();
 
+    // PARTY CREW: collaborators who run one party and hold no NubArca account.
+    //
+    // A FOURTH authority beside the owner's session, the guest's capability and
+    // a display's grant — and deliberately not a fifth kind of user. A
+    // PartyCollaborator exists inside one party, holds party-local capabilities
+    // that are never in PermissionCatalog, and reaches nothing else the owner
+    // has. See PartyCrew.cs; the two-device limit lives on the grant.
+    public DbSet<PartyCollaborator> PartyCollaborators => Set<PartyCollaborator>();
+    public DbSet<PartyCollaboratorGrant> PartyCollaboratorGrants => Set<PartyCollaboratorGrant>();
+    public DbSet<PartyCollaboratorInvite> PartyCollaboratorInvites => Set<PartyCollaboratorInvite>();
+    public DbSet<PartyCollaboratorAuthChallenge> PartyCollaboratorAuthChallenges
+        => Set<PartyCollaboratorAuthChallenge>();
+    public DbSet<PartyCrewDevice> PartyCrewDevices => Set<PartyCrewDevice>();
+    public DbSet<PartyCollaboratorDeviceGrant> PartyCollaboratorDeviceGrants
+        => Set<PartyCollaboratorDeviceGrant>();
+
     // PUBLIC read-only party access links (token hash only). A CAPABILITY over
     // a party: PartyId is its identity, while OwnerUserId/AlbumId remain as a
     // compatibility projection of the party and its main media source.

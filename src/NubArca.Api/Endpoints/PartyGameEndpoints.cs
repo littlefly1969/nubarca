@@ -64,52 +64,10 @@ public static class PartyGameEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            if (body?.Command is null || body.ExpectedVersion is null) return Results.BadRequest();
             var ownerId = httpContext.GetCurrentUserId()!.Value;
-            // Read before the command only for the one command that erases what
-            // would have been read after it.
-            var discarded = body.Command == PartyGameCommands.RestartGame
-                ? (await game.GetOwnerSnapshotAsync(ownerId, albumId, cancellationToken))?.PlayedRounds ?? 0
-                : 0;
-            var result = await game.ExecuteAsync(
-                ownerId, albumId, body.Command, body.ExpectedVersion.Value, cancellationToken);
-
-            if (result.Error is PartyGameCommandError error)
-            {
-                return error switch
-                {
-                    PartyGameCommandError.NotFound => Results.NotFound(),
-                    PartyGameCommandError.UnknownCommand => Results.BadRequest(),
-                    _ => Results.Json(new PartyGameCommandRefusalDto(
-                        Code(error), result.Snapshot), statusCode: StatusCodes.Status409Conflict),
-                };
-            }
-
-            // Only the commands that BOUND a game are audited. A round-by-round
-            // trail would be a log of an evening, not a security record.
-            // `restart_game` is here because it bounds one from the other side
-            // and is the only owner command that DELETES: the finished match's
-            // rounds, and with them the room's votes.
-            if (AuditedCommand(body.Command) is string auditedAction)
-            {
-                await audit.LogAsync(
-                    userId: ownerId,
-                    action: auditedAction,
-                    entityType: AuditEntityTypes.PartyAlbum,
-                    entityId: albumId,
-                    ipAddress: httpContext.Connection.RemoteIpAddress?.ToString(),
-                    // A restart's own snapshot is an empty lobby, so the count it
-                    // carries is the one taken BEFORE the command: how many rounds
-                    // the restart discarded, which is the fact worth recording.
-                    metadata: new
-                    {
-                        rounds = body.Command == PartyGameCommands.RestartGame
-                            ? discarded : result.Snapshot!.PlayedRounds,
-                    },
-                    cancellationToken: cancellationToken);
-            }
-
-            return Results.Ok(result.Snapshot);
+            return await ExecuteAsync(
+                game, audit, ownerId, ownerId, albumId, body,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
         }).WithName("ExecutePartyGameCommand").RequirePartyGames();
 
         // Owner: one edit to the PLAN — move a remaining activity, or decide it
@@ -127,21 +85,8 @@ public static class PartyGameEndpoints
             CancellationToken cancellationToken) =>
         {
             SetNoStore(httpContext);
-            if (body?.Action is null || body.ChallengeId is null || body.ExpectedVersion is null)
-                return Results.BadRequest();
-            var ownerId = httpContext.GetCurrentUserId()!.Value;
-            var result = await game.PlanAsync(ownerId, albumId, body, cancellationToken);
-            if (result.Error is PartyGameCommandError error)
-            {
-                return error switch
-                {
-                    PartyGameCommandError.NotFound => Results.NotFound(),
-                    PartyGameCommandError.UnknownCommand => Results.BadRequest(),
-                    _ => Results.Json(new PartyGameCommandRefusalDto(
-                        Code(error), result.Snapshot), statusCode: StatusCodes.Status409Conflict),
-                };
-            }
-            return Results.Ok(result.Snapshot);
+            return await PlanAsync(
+                game, httpContext.GetCurrentUserId()!.Value, albumId, body, cancellationToken);
         }).WithName("PlanPartyGame").RequirePartyGames();
 
         // Public: what a guest phone or a television may know. Anonymous,
@@ -366,6 +311,78 @@ public static class PartyGameEndpoints
         PartyGamePreferenceError.UnknownChallenge => "unknown_challenge",
         PartyGamePreferenceError.LimitReached => "limit_reached",
         _ => "conflict",
+    };
+
+    /// <summary>
+    /// Running the hosted game, shared with the Party Crew façade.
+    ///
+    /// <para>The DIRECTOR is the role this exists for: someone standing by the
+    /// screen with the host's phone nowhere near them. <c>ownerUserId</c> is
+    /// still whose album it is — a collaborator owns nothing — while
+    /// <c>actor</c> is who pressed the button, which is what the audit records.
+    /// </para>
+    /// </summary>
+    internal static async Task<IResult> ExecuteAsync(
+        IPartyGameService game,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        PartyGameCommandRequest? body,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
+        if (body?.Command is null || body.ExpectedVersion is null) return Results.BadRequest();
+
+        var discarded = body.Command == PartyGameCommands.RestartGame
+            ? (await game.GetOwnerSnapshotAsync(ownerUserId, albumId, cancellationToken))?.PlayedRounds ?? 0
+            : 0;
+        var result = await game.ExecuteAsync(
+            ownerUserId, albumId, body.Command, body.ExpectedVersion.Value, cancellationToken);
+
+        if (result.Error is PartyGameCommandError error) return Refusal(error, result);
+
+        if (AuditedCommand(body.Command) is string auditedAction)
+        {
+            await audit.LogAsync(
+                actor: actor,
+                action: auditedAction,
+                entityType: AuditEntityTypes.PartyAlbum,
+                entityId: albumId,
+                ipAddress: ip,
+                metadata: new
+                {
+                    rounds = body.Command == PartyGameCommands.RestartGame
+                        ? discarded : result.Snapshot!.PlayedRounds,
+                },
+                cancellationToken: cancellationToken);
+        }
+
+        return Results.Ok(result.Snapshot);
+    }
+
+    /// <summary>Queueing what comes next. Shared with the Party Crew façade; nothing here is audited.</summary>
+    internal static async Task<IResult> PlanAsync(
+        IPartyGameService game,
+        Guid ownerUserId,
+        Guid albumId,
+        PartyGamePlanRequest? body,
+        CancellationToken cancellationToken)
+    {
+        if (body?.Action is null || body.ChallengeId is null || body.ExpectedVersion is null)
+            return Results.BadRequest();
+        var result = await game.PlanAsync(ownerUserId, albumId, body, cancellationToken);
+        return result.Error is PartyGameCommandError error
+            ? Refusal(error, result)
+            : Results.Ok(result.Snapshot);
+    }
+
+    private static IResult Refusal(PartyGameCommandError error, PartyGameCommandResult result) => error switch
+    {
+        PartyGameCommandError.NotFound => Results.NotFound(),
+        PartyGameCommandError.UnknownCommand => Results.BadRequest(),
+        _ => Results.Json(new PartyGameCommandRefusalDto(
+            Code(error), result.Snapshot), statusCode: StatusCodes.Status409Conflict),
     };
 
     private static void SetNoStore(HttpContext context)

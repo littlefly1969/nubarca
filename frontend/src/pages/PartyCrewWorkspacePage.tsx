@@ -1,0 +1,214 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import {
+  ApiError,
+  endPartyCrewSession,
+  getPartyCrewSession,
+  listMyPartyCrewDevices,
+  revokeMyPartyCrewDevice,
+  type PartyCrewDevice,
+  type PartyCrewSession,
+  type PartyStatus,
+} from '@nubarca/api-client';
+import { useI18n } from '../i18n';
+import { crewLandingSection, crewRoleLabelKey, crewSections } from '../party/crew/crewModel';
+import { PartyApiProvider, crewPartyApi } from '../party/workspace/partyApi';
+import {
+  WORKSPACE_SECTIONS, type WorkspaceSection,
+} from '../party/workspace/partyWorkspaceModel';
+import { PartyWorkspacePage } from './PartyWorkspacePage';
+import './PartyCrew.css';
+
+// THE SAME PARTY, RUN BY SOMEBODY WHO IS NOT ITS HOST.
+//
+// NOT A SECOND PRODUCT. This page resolves who the device is, hands the
+// workspace the Party Crew family of routes, and gets back the workspace — the
+// same sections, the same panels, the same words, the same loading and failure
+// states. The only three things it decides are which sections exist, where the
+// person lands, and what sits where the host's "← Le tue feste" would be.
+//
+// NO AUTHENTICATED SHELL. There is no sidebar, no library, no albums, no
+// search: a collaborator has no account and nothing else in NubArca to reach.
+// What they get instead is their own name, their role, and the two things that
+// are theirs to control — which devices they are using, and leaving.
+//
+// THE UI IS NOT THE AUTHORITY. `crewSections` hides what a role cannot use, but
+// every route behind every panel re-reads the grants on the server and answers
+// 404 regardless. A section rendered by mistake would be an empty section, not
+// an open door.
+
+export function PartyCrewWorkspacePage() {
+  const { partyId } = useParams<{ partyId: string }>();
+  const { t } = useI18n();
+  const navigate = useNavigate();
+  const [state, setState] =
+    useState<{ kind: 'loading' } | { kind: 'ready'; session: PartyCrewSession } | { kind: 'gone' }>(
+      { kind: 'loading' });
+
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      try {
+        const session = await getPartyCrewSession();
+        if (!live) return;
+        // The device resolves to ONE party. A URL naming another is not an
+        // error to explain — it is simply not where this device is.
+        if (partyId && session.partyId !== partyId) {
+          navigate(`/party/crew/${session.partyId}`, { replace: true });
+          return;
+        }
+        setState({ kind: 'ready', session });
+      } catch {
+        if (live) setState({ kind: 'gone' });
+      }
+    })();
+    return () => { live = false; };
+  }, [partyId, navigate]);
+
+  if (state.kind === 'loading') {
+    return (
+      <main className="crew-shell" data-testid="party-crew-workspace">
+        <p className="crew-pair-lede" role="status">{t('crew.shell.loading')}</p>
+      </main>
+    );
+  }
+
+  if (state.kind === 'gone') {
+    return (
+      <main className="crew-shell" data-testid="party-crew-workspace">
+        <div className="crew-pair-card">
+          <h1 className="crew-pair-title">{t('crew.shell.gone.title')}</h1>
+          <p className="crew-pair-lede">{t('crew.shell.gone.body')}</p>
+        </div>
+      </main>
+    );
+  }
+
+  const { session } = state;
+  const sections = (status: PartyStatus): readonly WorkspaceSection[] =>
+    crewSections(session.capabilities, status, WORKSPACE_SECTIONS);
+  const landing = (status: PartyStatus): WorkspaceSection =>
+    crewLandingSection(session.capabilities, status, WORKSPACE_SECTIONS);
+
+  return (
+    <PartyApiProvider api={crewPartyApi}>
+      <div className="crew-shell" data-testid="party-crew-workspace">
+        <PartyWorkspacePage
+          sections={sections}
+          landing={landing}
+          header={<CrewIdentity session={session} />}
+        />
+      </div>
+    </PartyApiProvider>
+  );
+}
+
+/**
+ * Who this device is, and the two things that belong to the person rather than
+ * to the party: their devices, and leaving.
+ *
+ * Folded into a details element rather than a menu, because it is opened rarely
+ * and a menu would need focus management to be worth the same 44px.
+ */
+function CrewIdentity({ session }: { session: PartyCrewSession }) {
+  const { t } = useI18n();
+  return (
+    <details className="crew-identity" data-testid="crew-identity">
+      <summary>
+        <span className="crew-identity-name">
+          {t('crew.shell.as', {
+            name: session.displayName,
+            role: t(crewRoleLabelKey(session.roleKey)),
+          })}
+        </span>
+      </summary>
+      <div className="crew-identity-body">
+        <CrewDevices />
+      </div>
+    </details>
+  );
+}
+
+function CrewDevices() {
+  const { t } = useI18n();
+  const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
+  const [devices, setDevices] = useState<PartyCrewDevice[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [left, setLeft] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      setDevices(await listMyPartyCrewDevices());
+      setLoad('ready');
+    } catch {
+      setLoad('failed');
+    }
+  }, []);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  // Leaving is final for this browser: the cookie is gone and there is nothing
+  // to go back to, so the panel says so rather than showing a dead list.
+  if (left) {
+    return <p className="crew-identity-note" role="status">{t('crew.shell.signOutDone')}</p>;
+  }
+
+  async function drop(grantId: string, isCurrent: boolean) {
+    setBusy(true);
+    try {
+      await revokeMyPartyCrewDevice(grantId);
+      if (isCurrent) { setLeft(true); return; }
+      await reload();
+    } catch (err) {
+      if (!(err instanceof ApiError)) throw err;
+      await reload();
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <>
+      <p className="crew-identity-note">{t('crew.shell.devicesHelp')}</p>
+
+      {load === 'failed' && (
+        <p className="crew-identity-note" role="status">{t('crew.shell.devicesFailed')}</p>
+      )}
+
+      {load === 'ready' && (
+        <ul className="crew-identity-devices" data-testid="crew-my-devices">
+          {devices.map((device) => (
+            <li key={device.grantId}>
+              <span>
+                {device.label}
+                {device.isCurrent && <> · {t('crew.shell.deviceThis')}</>}
+              </span>
+              {!device.isCurrent && (
+                <button
+                  type="button"
+                  className="crew-identity-drop"
+                  disabled={busy}
+                  data-testid={`crew-my-device-drop-${device.grantId}`}
+                  onClick={() => void drop(device.grantId, false)}
+                >
+                  {t('party.crew.device.remove')}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <button
+        type="button"
+        className="crew-identity-signout"
+        disabled={busy}
+        data-testid="crew-sign-out"
+        onClick={() => void (async () => {
+          setBusy(true);
+          try { await endPartyCrewSession(); } finally { setBusy(false); setLeft(true); }
+        })()}
+      >
+        {t('crew.shell.signOut')}
+      </button>
+    </>
+  );
+}

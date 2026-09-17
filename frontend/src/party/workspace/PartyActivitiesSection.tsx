@@ -4,6 +4,7 @@ import { PERMISSIONS } from '../../auth/permissions';
 import { useI18n } from '../../i18n';
 import { PartyGameSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
+import { partyDeepLink, usePartyApi } from './partyApi';
 import { Badge, Button, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
 import { QueueBadge } from './PartyLiveSection';
 import type { Loaded } from './partyWorkspaceModel';
@@ -32,6 +33,7 @@ export function PartyActivitiesSection({
   onRetry(): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const perms = usePermissions();
   const canGames = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]);
   const albumId = mainMediaSource(party)?.albumId ?? null;
@@ -82,7 +84,7 @@ export function PartyActivitiesSection({
         testId="party-activities-messages"
       >
         <LinkRow
-          to={`/albums/${albumId}/party-messages?party=${party.id}`}
+          to={partyDeepLink(api, 'messages', party.id, albumId)}
           testId="party-activities-messages-link"
           title={t('partyMessages.title')}
           note={albumParty?.requireMessageApproval
@@ -108,7 +110,7 @@ export function PartyActivitiesSection({
               />
               {albumParty.gameEnabled && (
                 <LinkRow
-                  to={`/albums/${albumId}/party-game?party=${party.id}`}
+                  to={partyDeepLink(api, 'game', party.id, albumId)}
                   testId="party-activities-control-room"
                   title={t('partyGame.controlRoom')}
                   note={t('party.activities.controlRoomNote')}

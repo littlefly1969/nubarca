@@ -6,6 +6,38 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Somebody can help you run the party without a NubArca account
+
+- **"Chi ti aiuta", in Impostazioni.** Add a person by name and email, say what
+  they look after — *Co-organizzatore* or *Regista* — and NubArca gives you one
+  link to send them however you already talk to them. They never get a NubArca
+  account, never see your library, your albums or your other parties, and their
+  access ends the moment you take it away.
+- **A link is not enough to get in, on purpose.** Opening the link asks for a
+  six-digit code, and the code goes to the address *you* chose. A link forwarded
+  in a chat, screenshotted, or sitting in somebody's browser history opens
+  nothing on its own — and the code is useless in any browser but the one that
+  asked for it, so reading it over a shoulder gets nobody in either. You are
+  never woken up to approve a device.
+- **Two devices each, said out loud.** Their phone and their tablet, and the
+  panel shows *1/2* or *2/2* so you know why a third will not connect. A third
+  device is not turned away with an error: it is shown the two that are
+  connected, and dropping one finishes the job without asking for the code
+  again. You can disconnect one of somebody's devices without taking their
+  access away — losing a phone and leaving the party are different things.
+- **They get the party, not the product.** The same workspace you use, with only
+  the sections their job needs: a *Regista* runs the photographs, the activities
+  and the screens and never sees your guest list at all — not a hidden page, no
+  request for a single name is ever made. A *Co-organizzatore* runs the guest
+  list and the invitations too. Nobody but you can rename the album the party
+  draws on, duplicate the party, close it down, or add another helper.
+- **Changing your mind is immediate.** Change somebody's role, change their
+  email, or remove them, and it takes effect on their very next tap — no
+  waiting, nobody signing out, no new link. Changing their email disconnects
+  every device they had, because those devices were checked against an address
+  that is no longer theirs. And the record of what happened at your party says
+  who did it: your co-organizer's name on their decisions, not yours.
+
 ### "Ospiti" becomes a console, and invitations go out on WhatsApp
 
 - **A guest console instead of a long list.** "Ospiti" now opens on the few

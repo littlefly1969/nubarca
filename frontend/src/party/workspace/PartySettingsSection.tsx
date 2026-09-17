@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../auth/useAuth';
 import { useI18n } from '../../i18n';
 import { mainMediaSource } from '../partyModel';
+import { PartyCrewPanel } from './PartyCrewPanel';
 import { fromLocalInput, toLocalInput } from './partyDateInput';
 import { guestAccessExpired } from './partyWorkspaceModel';
 import { Button, Notice, Panel, SectionHead, SwitchRow } from './ui';
@@ -196,6 +197,8 @@ export function PartySettingsSection({
       <GuestAccessPanel
         party={party} albumParty={albumParty} onAlbumPartyUpdated={onAlbumPartyUpdated}
       />
+
+      <PartyCrewPanel partyId={party.id} />
 
       <DuplicatePanel party={party} />
       <TeardownPanel party={party} onPartyUpdated={onPartyUpdated} />

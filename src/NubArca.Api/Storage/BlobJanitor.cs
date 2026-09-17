@@ -276,7 +276,7 @@ public sealed class BlobJanitor : BackgroundService
                     cancellationToken);
 
                 await audit.LogAsync(
-                    userId: null,
+                    actor: null,
                     action: AuditActions.BlobPurge,
                     entityType: AuditEntityTypes.Blob,
                     entityId: candidate.Id,

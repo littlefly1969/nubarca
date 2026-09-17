@@ -38,6 +38,7 @@ public sealed class PostgresWebApplicationFactory : WebApplicationFactory<Progra
         // A host with a database refuses to start without an invitation
         // signing secret; this one is the test's. Settings below may override.
         builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
+        builder.UseSetting("Party:CollaboratorOtpSecret", "test-party-crew-otp-secret");
         foreach (var (key, value) in _settings)
         {
             builder.UseSetting(key, value);

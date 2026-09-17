@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   GUEST_CONSOLE_PARAMS,
   LEGACY_GUEST_SEARCH_PARAM,
-  getParty,
   type GuestDirectoryState,
   type Party,
+  type PartyStatus,
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
@@ -28,6 +28,7 @@ import {
   type WorkspaceFacts,
   type WorkspaceSection,
 } from '../party/workspace/partyWorkspaceModel';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { usePartyFacts } from '../party/workspace/usePartyFacts';
 import { Notice, PanelSkeleton } from '../party/workspace/ui';
 import '../party/Party.css';
@@ -78,10 +79,29 @@ type Status =
   | { kind: 'missing' }
   | { kind: 'error' };
 
-export function PartyWorkspacePage() {
+/**
+ * The workspace, for whoever is running the party.
+ *
+ * Every prop has a default, and the defaults are the HOST's: a tree that
+ * renders `<PartyWorkspacePage />` with nothing behaves exactly as it always
+ * has. A Party Crew device supplies its own three — which sections exist, where
+ * it lands, and what sits in the header instead of a link back to the parties
+ * list — and gets the same product.
+ */
+export function PartyWorkspacePage({
+  sections = workspaceSections,
+  landing = defaultWorkspaceSection,
+  header,
+}: {
+  sections?(status: PartyStatus): readonly WorkspaceSection[];
+  landing?(status: PartyStatus): WorkspaceSection;
+  /** Replaces the host's "← Le tue feste" with whatever this surface has. */
+  header?: ReactNode;
+} = {}) {
   const { partyId } = useParams<{ partyId: string }>();
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [searchParams, setSearchParams] = useSearchParams();
   const abortRef = useRef<AbortController | null>(null);
@@ -89,7 +109,7 @@ export function PartyWorkspacePage() {
 
   const party = status.kind === 'ready' ? status.party : null;
   const partyStatus = party?.status ?? 'draft';
-  const available = workspaceSections(partyStatus);
+  const available = sections(partyStatus);
 
   // The guest search is never in a URL any more, but a link made before it
   // moved out can still carry one — and the guest console can only strip what
@@ -112,11 +132,17 @@ export function PartyWorkspacePage() {
   const wanted = isWorkspaceSection(asked) ? asked : null;
   const section: WorkspaceSection = wanted && available.includes(wanted)
     ? wanted
-    : defaultWorkspaceSection(partyStatus);
+    : landing(partyStatus);
 
   const facts = usePartyFacts(
     party,
-    { wantsModeration: SHOWS_MODERATION.includes(section) },
+    {
+      wantsModeration: SHOWS_MODERATION.includes(section),
+      // A surface with no Ospiti section has no guest list: the host always
+      // does, a Party Crew role without `guests.read` does not, and the
+      // counts-only query is not made at all rather than made and refused.
+      wantsGuests: available.includes('guests'),
+    },
     invalidateAuth,
   );
 
@@ -152,7 +178,7 @@ export function PartyWorkspacePage() {
 
   const load = useCallback((signal: AbortSignal) => {
     if (!partyId) return;
-    getParty(partyId, signal)
+    api.getParty(partyId, signal)
       .then((next) => setStatus({ kind: 'ready', party: next }))
       .catch((err) => {
         if ((err as Error).name === 'AbortError') return;
@@ -160,7 +186,7 @@ export function PartyWorkspacePage() {
         setStatus(err instanceof ApiError && err.status === 404
           ? { kind: 'missing' } : { kind: 'error' });
       });
-  }, [partyId, invalidateAuth]);
+  }, [partyId, invalidateAuth, api]);
 
   useEffect(() => {
     abortRef.current?.abort();
@@ -186,13 +212,13 @@ export function PartyWorkspacePage() {
   const reloadParty = useCallback(async () => {
     if (!partyId) return;
     try {
-      setStatus({ kind: 'ready', party: await getParty(partyId) });
+      setStatus({ kind: 'ready', party: await api.getParty(partyId) });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) invalidateAuth();
       // Anything else leaves the party as it was: the mutation succeeded, and
       // a failed re-read is not a reason to throw away what is on the screen.
     }
-  }, [partyId, invalidateAuth]);
+  }, [partyId, invalidateAuth, api]);
 
   // On a phone the section rail scrolls, and the eighth section is off the
   // right-hand edge. Without this, opening Impostazioni from a step's button
@@ -247,7 +273,7 @@ export function PartyWorkspacePage() {
     return (
       <main className="pw" data-testid="party-workspace">
         <div className="pw-head">
-          <Link to="/parties" className="pw-back">← {t('party.back')}</Link>
+          {header ?? <Link to="/parties" className="pw-back">← {t('party.back')}</Link>}
         </div>
         <Notice
           tone="error"
@@ -273,7 +299,7 @@ export function PartyWorkspacePage() {
   return (
     <main className="pw" data-testid="party-workspace">
       <header className="pw-head">
-        <Link to="/parties" className="pw-back">← {t('party.back')}</Link>
+        {header ?? <Link to="/parties" className="pw-back">← {t('party.back')}</Link>}
         <div className="pw-head-main">
           <div className="pw-identity">
             <h1 className="pw-title" data-testid="party-title">{current.title}</h1>
@@ -408,7 +434,7 @@ export function PartyWorkspacePage() {
             />
           )}
 
-          {section === 'settings' && (
+          {section === 'settings' && api.isOwner && (
             <PartySettingsSection
               party={current}
               albumParty={albumParty}

@@ -1962,7 +1962,7 @@ public static class TvEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.PartyFaceSearchDelete,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: albumId,

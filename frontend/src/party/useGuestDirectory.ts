@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
   GUEST_DIRECTORY_LIMITS,
-  queryPartyGuestDirectory,
   guestDirectoryItemKey,
   type GuestDirectoryGroupItem,
   type GuestDirectoryItem,
@@ -11,6 +10,7 @@ import {
   type GuestDirectorySummary,
   type PartyAttendanceSummary,
 } from '@nubarca/api-client';
+import { usePartyApi } from './workspace/partyApi';
 
 // THE LIST THE CONSOLE HOLDS: the pages it has actually shown, and nothing
 // else. A new search or filter is a NEW list — the server answers it from the
@@ -70,6 +70,7 @@ export function useGuestDirectory(
   onUnauthorized: () => void,
 ): GuestDirectoryView {
   const { q, state } = query;
+  const api = usePartyApi();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [reloadKey, setReloadKey] = useState(0);
@@ -106,7 +107,7 @@ export function useGuestDirectory(
     setStatus('loading');
     setLoadMoreFailed(false);
     setLoadingMore(false);
-    queryPartyGuestDirectory(partyId, { q, state, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
+    api.queryPartyGuestDirectory(partyId, { q, state, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
       .then((page) => {
         cursorRef.current = page.nextCursor;
         setLoaded({
@@ -126,7 +127,7 @@ export function useGuestDirectory(
         if (!failed(err)) setStatus('error');
       });
     return () => ctrl.abort();
-  }, [partyId, q, state, reloadKey, failed]);
+  }, [partyId, q, state, reloadKey, failed, api]);
 
   const loadMore = useCallback(() => {
     const cursor = cursorRef.current;
@@ -137,7 +138,7 @@ export function useGuestDirectory(
     inFlight.current = true;
     setLoadingMore(true);
     setLoadMoreFailed(false);
-    queryPartyGuestDirectory(
+    api.queryPartyGuestDirectory(
       partyId, { q, state, cursor, take: GUEST_DIRECTORY_LIMITS.defaultTake }, ctrl.signal)
       .then((page) => {
         // The list this page continues is gone; its rows and its cursor belong
@@ -163,7 +164,7 @@ export function useGuestDirectory(
         inFlight.current = false;
         setLoadingMore(false);
       });
-  }, [partyId, q, state, failed]);
+  }, [partyId, q, state, failed, api]);
 
   const update = useCallback((change: (current: Loaded) => Loaded) => {
     setLoaded((current) => (current ? change(current) : current));

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ApiError, listAlbumItems, uploadRootFile, type AlbumItemSummary,
+  ApiError, uploadRootFile, type AlbumItemSummary,
 } from '@nubarca/api-client';
 import { smallThumbnailUrl } from '../components/files/types';
 import { useI18n } from '../i18n';
+import { usePartyApi } from './workspace/partyApi';
 import './PartyImageField.css';
 
 // Choosing the ONE photograph a Party feature shows — a menu's, an activity's.
@@ -93,6 +94,7 @@ export function PartySlotImageField({
   onChange(next: PartyImageChoice | null): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<PartyImageUploadError | null>(null);
 
@@ -122,11 +124,16 @@ export function PartySlotImageField({
             {t('partyContent.imageChooseAlbum')}
           </button>
         )}
-        <PartyImageUploadButton
-          disabled={disabled} testId={`party-image-upload-${kind}`}
-          onUploaded={(choice) => { setError(null); setPicking(false); onChange(choice); }}
-          onError={setError}
-        />
+        {/* Uploading writes a new file into the HOST's library. A
+            collaborator picks from the party's album instead: the album is this
+            evening's, the library is not theirs to add to. */}
+        {api.isOwner && (
+          <PartyImageUploadButton
+            disabled={disabled} testId={`party-image-upload-${kind}`}
+            onUploaded={(choice) => { setError(null); setPicking(false); onChange(choice); }}
+            onError={setError}
+          />
+        )}
         {fileItemId !== null && (
           <button
             type="button" disabled={disabled} data-testid={`party-image-remove-${kind}`}
@@ -158,15 +165,16 @@ function PartyAlbumPhotoGrid({
   onPick(choice: PartyImageChoice): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [items, setItems] = useState<AlbumItemSummary[] | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
-    listAlbumItems(albumId, ctrl.signal)
+    api.listAlbumItems(albumId, ctrl.signal)
       .then((members) => setItems(members.filter((m) => m.thumbnailUrl)))
       .catch(() => { if (!ctrl.signal.aborted) setItems([]); });
     return () => ctrl.abort();
-  }, [albumId]);
+  }, [albumId, api]);
 
   if (items === null) return <p className="muted" role="status">{t('common.loading')}</p>;
   if (items.length === 0) return <p className="muted">{t('partyContent.imageAlbumEmpty')}</p>;

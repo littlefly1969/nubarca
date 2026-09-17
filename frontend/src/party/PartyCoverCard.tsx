@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ApiError, setPartyCovers, type Party } from '@nubarca/api-client';
+import {
+  ApiError,
+  type Party,
+} from '@nubarca/api-client';
+import { usePartyApi } from './workspace/partyApi';
 import { useI18n } from '../i18n';
 import { PartySlotImageField } from './PartyImageField';
 
@@ -27,6 +31,7 @@ export function PartyCoverCard({
   onPartyUpdated(next: Party): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const stored = () => (which === 'invitation'
     ? { fileItemId: party.invitationCoverFileItemId ?? null, previewUrl: party.invitationCoverUrl ?? null }
     : { fileItemId: party.liveCoverFileItemId ?? null, previewUrl: party.liveCoverUrl ?? null });
@@ -42,7 +47,7 @@ export function PartyCoverCard({
   async function save() {
     setBusy(true); setStatus('idle');
     try {
-      onPartyUpdated(await setPartyCovers(party.id, {
+      onPartyUpdated(await api.setPartyCovers(party.id, {
         invitationCoverFileItemId: which === 'invitation'
           ? draft.fileItemId : party.invitationCoverFileItemId ?? null,
         liveCoverFileItemId: which === 'live'

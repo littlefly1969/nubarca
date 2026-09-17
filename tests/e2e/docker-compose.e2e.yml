@@ -123,6 +123,7 @@ services:
       # throwaway stack, like every other credential here; an installation
       # generates its own (see docs/party-rsvp.md).
       Party__InvitationTokenSecret: "e2e-invitation-token-secret"
+      Party__CollaboratorOtpSecret: "e2e-party-crew-otp-secret"
     volumes:
       - storage:/var/lib/nubarca/storage
       - derived:/var/lib/nubarca/derived

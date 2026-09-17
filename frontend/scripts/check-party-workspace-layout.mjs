@@ -104,6 +104,10 @@ const styles = [
   ['src', 'party', 'PartyRsvp.css'],
   ['src', 'party', 'PartyRsvpQuestions.css'],
   ['src', 'party', 'PartyChallengeCard.css'],
+  // Party Crew: the pairing card and the collaborator's shell, which the host
+  // has no equivalent of. Everything else on a crew surface is the `pw-*`
+  // system above, shared with the host.
+  ['src', 'pages', 'PartyCrew.css'],
 ].map((parts) => readFileSync(join(frontend, ...parts), 'utf8')).join('\n');
 
 const fixtures = readdirSync(fixtureDir).filter((f) => f.endsWith('.html')).sort();

@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import {
   ApiError,
-  setAlbumTvVisibility,
   type AlbumPartyStatus,
   type Party,
 } from '@nubarca/api-client';
@@ -13,6 +12,7 @@ import { useI18n } from '../../i18n';
 import { PartyPrintSettings } from '../../albums/PartyPrintSettings';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
+import { usePartyApi } from './partyApi';
 import { Button, EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
 
 // "SCHERMI E STAMPA" — the party as it appears on something other than a phone.
@@ -36,6 +36,7 @@ export function PartyScreensSection({
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const perms = usePermissions();
   const canPrint = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyPrint]);
   const [busy, setBusy] = useState(false);
@@ -49,7 +50,7 @@ export function PartyScreensSection({
     if (!albumId || !albumParty) return;
     setBusy(true); setFailed(false);
     try {
-      await setAlbumTvVisibility(albumId, next);
+      await api.setAlbumTvVisibility(albumId, next);
       // The TV flag belongs to the ALBUM and the party's own settings only
       // report it, so the page adopts the value it just set rather than asking
       // a second endpoint for an answer it already knows.
@@ -121,12 +122,17 @@ export function PartyScreensSection({
             {t('party.screens.stageLocked')}
           </p>
         )}
-        <LinkRow
-          to={cloudToolUrl('tv-devices')}
-          testId="party-screens-devices"
-          title={t('cloud.tvDevices')}
-          note={t('party.screens.devicesNote')}
-        />
+        {/* Paired televisions are INSTALLATION hardware — they outlive this
+            party and belong to whoever runs the server. A collaborator points
+            a screen at this evening; they do not pair or unpair devices. */}
+        {api.isOwner && (
+          <LinkRow
+            to={cloudToolUrl('tv-devices')}
+            testId="party-screens-devices"
+            title={t('cloud.tvDevices')}
+            note={t('party.screens.devicesNote')}
+          />
+        )}
       </Panel>
 
       {canPrint ? (

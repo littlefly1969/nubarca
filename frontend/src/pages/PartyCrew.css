@@ -1,0 +1,240 @@
+/* PARTY CREW — pairing, and the shell around a collaborator's workspace.
+ *
+ * Deliberately small. The workspace itself is the `pw-*` design system, shared
+ * with the host; what lives here is only the two things the host has no
+ * equivalent of: the pairing card, and the identity strip that replaces a link
+ * back to a parties list a collaborator does not have.
+ *
+ * Mobile first, and mobile mostly: a collaborator is holding a phone at a
+ * party. Every control below is at least 44px tall. */
+
+.crew-pair {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 70vh;
+  /* The app shell supplies the horizontal gutters; only the vertical is ours. */
+  padding-block: clamp(1.5rem, 6vw, 4rem);
+}
+
+.crew-pair-card {
+  width: 100%;
+  max-width: 26rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  padding: clamp(1.25rem, 5vw, 2rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.crew-pair-eyebrow {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.crew-pair-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.375rem, 5vw, 1.75rem);
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.crew-pair-lede {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.crew-pair-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.crew-pair-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.crew-pair-label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Six digits, read aloud and typed by hand. Wide tracking and a tabular face
+   so a mistyped one is visible before it is submitted. */
+.crew-pair-code {
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-heading);
+  font-size: 1.75rem;
+  letter-spacing: 0.35em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--surface-canvas);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+}
+
+.crew-pair-code:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.crew-pair-help {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.crew-pair-primary,
+.crew-pair-quiet,
+.crew-pair-drop,
+.crew-identity-drop,
+.crew-identity-signout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-button);
+  font-family: var(--font-ui);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.crew-pair-primary {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
+.crew-pair-primary:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.crew-pair-quiet,
+.crew-identity-signout {
+  background: transparent;
+  border-color: var(--border-default);
+  color: var(--text-secondary);
+}
+
+.crew-pair-notice {
+  margin: 0;
+  min-height: 1.25rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.crew-pair-devices,
+.crew-identity-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.crew-pair-device,
+.crew-identity-devices li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.625rem 0.75rem;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+}
+
+.crew-pair-device-text {
+  display: flex;
+  flex-direction: column;
+  /* `1 1 0` and not `1 1 auto`: a long device name must wrap rather than push
+     the button onto its own line at 320px. */
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.crew-pair-device-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.crew-pair-device-when {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.crew-pair-drop,
+.crew-identity-drop {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ── The shell ─────────────────────────────────────────────────────────── */
+
+.crew-identity {
+  width: 100%;
+}
+
+.crew-identity > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  list-style: none;
+}
+
+.crew-identity > summary::-webkit-details-marker { display: none; }
+
+.crew-identity > summary::after {
+  content: '▾';
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.crew-identity[open] > summary::after { content: '▴'; }
+
+.crew-identity-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.crew-identity-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.75rem;
+  margin-top: 0.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+}
+
+.crew-identity-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}

@@ -103,7 +103,7 @@ public static class AdminUserEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: callerUserId,
+                    actor: callerUserId,
                     action: AuditActions.AdminUserCreate,
                     entityType: AuditEntityTypes.User,
                     entityId: created!.Id,
@@ -158,7 +158,7 @@ public static class AdminUserEndpoints
             }
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminUserUpdate,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,
@@ -192,7 +192,7 @@ public static class AdminUserEndpoints
             }
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminUserPasswordReset,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,
@@ -241,7 +241,7 @@ public static class AdminUserEndpoints
             await recovery.RequestAsync(user.Email, cancellationToken);
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminUserPasswordResetEmail,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,
@@ -286,7 +286,7 @@ public static class AdminUserEndpoints
             }
 
             await audit.LogAsync(
-                userId: callerUserId,
+                actor: callerUserId,
                 action: AuditActions.AdminUserRoleChange,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,
@@ -320,7 +320,7 @@ public static class AdminUserEndpoints
             }
 
             await audit.LogAsync(
-                userId: callerUserId,
+                actor: callerUserId,
                 action: body!.Disabled ? AuditActions.AdminUserDisable : AuditActions.AdminUserEnable,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,

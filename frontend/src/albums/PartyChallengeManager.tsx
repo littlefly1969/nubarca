@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
-  deletePartyChallenge, listAlbumItems, listPartyChallenges, reorderPartyChallenges,
-  type AlbumItemSummary, type PartyChallenge,
+  type AlbumItemSummary,
+  type PartyChallenge,
 } from '@nubarca/api-client';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { Modal } from '../components/Overlay';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
 import { useI18n } from '../i18n';
@@ -24,6 +25,7 @@ type Editing = { challenge: PartyChallenge | null } | null;
 
 export function PartyChallengeManager({ albumId }: { albumId: string }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [items, setItems] = useState<PartyChallenge[]>([]);
   const [media, setMedia] = useState<AlbumItemSummary[]>([]);
   const [editing, setEditing] = useState<Editing>(null);
@@ -32,7 +34,7 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
   const [error, setError] = useState(false);
 
   const refresh = async () => {
-    const [deck, members] = await Promise.all([listPartyChallenges(albumId), listAlbumItems(albumId)]);
+    const [deck, members] = await Promise.all([api.listPartyChallenges(albumId), api.listAlbumItems(albumId)]);
     setItems(deck.items);
     setMedia(members.filter((x) => x.thumbnailUrl));
   };
@@ -42,7 +44,7 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
     if (!deleting) return;
     setBusy(true);
     try {
-      await deletePartyChallenge(albumId, deleting.id);
+      await api.deletePartyChallenge(albumId, deleting.id);
       setDeleting(null);
       await refresh();
     } catch { setError(true); } finally { setBusy(false); }
@@ -54,7 +56,7 @@ export function PartyChallengeManager({ albumId }: { albumId: string }) {
     if (to < 0 || to >= next.length) return;
     [next[at], next[to]] = [next[to], next[at]];
     setItems(next);
-    try { await reorderPartyChallenges(albumId, next.map((x) => x.id)); }
+    try { await api.reorderPartyChallenges(albumId, next.map((x) => x.id)); }
     catch { setError(true); await refresh(); }
   };
 

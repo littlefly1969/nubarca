@@ -172,7 +172,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FilePermanentDelete,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -207,7 +207,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderPermanentDelete,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -339,7 +339,7 @@ public static class FolderTrashEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.TrashEmpty,
                 entityType: AuditEntityTypes.Trash,
                 entityId: null,
@@ -401,7 +401,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderRename,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -446,7 +446,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderMove,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -507,7 +507,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderDeleteRecursive,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -527,7 +527,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderDelete,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -562,7 +562,7 @@ public static class FolderTrashEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FolderRestore,
                     entityType: AuditEntityTypes.Folder,
                     entityId: id,
@@ -608,7 +608,7 @@ public static class FolderTrashEndpoints
         {
             var created = await folders.CreateAsync(ownerUserId, parentFolderId, body.Name, cancellationToken);
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.FolderCreate,
                 entityType: AuditEntityTypes.Folder,
                 entityId: created.Id,

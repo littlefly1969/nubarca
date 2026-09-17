@@ -100,7 +100,7 @@ public static class ShareLinkEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.ShareCreate,
                 entityType: AuditEntityTypes.ShareLink,
                 entityId: result.Id,
@@ -130,7 +130,7 @@ public static class ShareLinkEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.ShareRevoke,
                 entityType: AuditEntityTypes.ShareLink,
                 entityId: id,
@@ -169,7 +169,7 @@ public static class ShareLinkEndpoints
             }
 
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.SharePublicDownload,
                 entityType: AuditEntityTypes.ShareLink,
                 entityId: null,

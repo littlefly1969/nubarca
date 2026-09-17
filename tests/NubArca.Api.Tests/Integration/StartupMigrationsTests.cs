@@ -191,6 +191,7 @@ internal sealed class MigrateOnStartupFactory : WebApplicationFactory<Program>
         // A host with a database refuses to start without an invitation
         // signing secret; this one is the test's.
         builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
+        builder.UseSetting("Party:CollaboratorOtpSecret", "test-party-crew-otp-secret");
     }
 
     protected override void Dispose(bool disposing)

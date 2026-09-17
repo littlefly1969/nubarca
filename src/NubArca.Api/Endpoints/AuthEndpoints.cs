@@ -54,7 +54,7 @@ public static class AuthEndpoints
             if (user is null)
             {
                 await audit.LogAsync(
-                    userId: null,
+                    actor: null,
                     action: AuditActions.LoginFailure,
                     entityType: AuditEntityTypes.User,
                     entityId: null,
@@ -79,7 +79,7 @@ public static class AuthEndpoints
                 new ClaimsPrincipal(identity));
 
             await audit.LogAsync(
-                userId: user.Id,
+                actor: user.Id,
                 action: AuditActions.LoginSuccess,
                 entityType: AuditEntityTypes.User,
                 entityId: user.Id,
@@ -104,7 +104,7 @@ public static class AuthEndpoints
             if (userId is Guid id)
             {
                 await audit.LogAsync(
-                    userId: id,
+                    actor: id,
                     action: AuditActions.Logout,
                     entityType: AuditEntityTypes.User,
                     entityId: id,
@@ -214,7 +214,7 @@ public static class AuthEndpoints
             }
 
             await audit.LogAsync(
-                userId: userId,
+                actor: userId,
                 action: AuditActions.AuthProfileUpdate,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,
@@ -299,7 +299,7 @@ public static class AuthEndpoints
                     CookieAuthenticationDefaults.AuthenticationScheme)));
 
             await audit.LogAsync(
-                userId: userId,
+                actor: userId,
                 action: AuditActions.AuthPasswordChange,
                 entityType: AuditEntityTypes.User,
                 entityId: userId,

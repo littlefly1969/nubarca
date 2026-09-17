@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import {
   ApiError,
-  setAlbumPartyMode,
   type AlbumPartyStatus,
   type Party,
 } from '@nubarca/api-client';
@@ -13,6 +12,7 @@ import { useI18n } from '../../i18n';
 import { PartyAlbumSection } from '../PartyAlbumSection';
 import { PartySlideshowSettings } from '../PartyAdvancedSettings';
 import { mainMediaSource } from '../partyModel';
+import { partyDeepLink, usePartyApi } from './partyApi';
 import { Button, Disclosure, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
 import { QueueBadge } from './PartyLiveSection';
 import type { Loaded, WorkspaceSection } from './partyWorkspaceModel';
@@ -46,6 +46,7 @@ export function PartyPhotosSection({
 }) {
   const { t, formatDate } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const perms = usePermissions();
   const canContributions = perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyContributions]);
   const [busy, setBusy] = useState(false);
@@ -59,7 +60,7 @@ export function PartyPhotosSection({
     if (!albumId) return;
     setBusy(true); setFailed(false);
     try {
-      onAlbumPartyUpdated(await setAlbumPartyMode(albumId, true, next));
+      onAlbumPartyUpdated(await api.setAlbumPartyMode(albumId, true, next));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
       setFailed(true);
@@ -125,7 +126,7 @@ export function PartyPhotosSection({
             {/* Reachable on `party.access` alone: closing the channel must never
                 lock the host out of the queue it filled. */}
             <LinkRow
-              to={`/albums/${albumId}/party-uploads?party=${party.id}`}
+              to={partyDeepLink(api, 'photos', party.id, albumId)}
               testId="party-photos-queue"
               title={t('partyUploads.title')}
               note={albumParty?.requireUploadApproval
@@ -183,7 +184,10 @@ export function PartyPhotosSection({
         </>
       )}
 
-      {party.status === 'ended' && albumId && (
+      {/* The album itself is the host's library, not the party. A collaborator
+          moderated the evening's photographs; they do not get the shelf they
+          were filed on afterwards. */}
+      {party.status === 'ended' && albumId && api.isOwner && (
         <Panel title={t('party.photos.memories')} note={t('party.photos.memoriesNote')}>
           <div className="pw-panel-actions">
             <Link to={`/albums/${albumId}`} className="pw-btn pw-btn--primary">

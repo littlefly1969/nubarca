@@ -24,7 +24,7 @@ public sealed class AuditLogger : IAuditLogger
     }
 
     public async Task WriteAsync(
-        Guid? userId,
+        AuditActor actor,
         string action,
         string entityType,
         Guid? entityId,
@@ -35,7 +35,8 @@ public sealed class AuditLogger : IAuditLogger
         var entry = new AuditLog
         {
             Id = Guid.NewGuid(),
-            UserId = userId,
+            UserId = actor.UserId,
+            PartyCollaboratorId = actor.PartyCollaboratorId,
             Action = action,
             EntityType = entityType,
             EntityId = entityId,
@@ -52,7 +53,7 @@ public sealed class AuditLogger : IAuditLogger
     }
 
     public async Task LogAsync(
-        Guid? userId,
+        AuditActor actor,
         string action,
         string entityType,
         Guid? entityId,
@@ -63,7 +64,7 @@ public sealed class AuditLogger : IAuditLogger
         try
         {
             await WriteAsync(
-                userId, action, entityType, entityId, ipAddress, metadata, cancellationToken);
+                actor, action, entityType, entityId, ipAddress, metadata, cancellationToken);
         }
         catch (Exception ex)
         {

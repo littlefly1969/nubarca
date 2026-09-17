@@ -143,7 +143,7 @@ public static class AestheticsEndpoints
 
             // Aggregate-only audit (no token, no filename, no storage internals).
             await audit.LogAsync(
-                userId: resolution.OwnerUserId,
+                actor: resolution.OwnerUserId,
                 action: AuditActions.AestheticUploadSessionUpload,
                 entityType: AuditEntityTypes.AestheticLabItem,
                 entityId: resolution.SessionId,

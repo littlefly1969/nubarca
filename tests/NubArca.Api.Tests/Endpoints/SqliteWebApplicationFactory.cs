@@ -134,6 +134,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         // Personal party invitations have no built-in signing key and refuse to
         // work without one. The test's own; a test may override it below.
         builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
+        builder.UseSetting("Party:CollaboratorOtpSecret", "test-party-crew-otp-secret");
 
         if (_poolable)
         {
@@ -146,6 +147,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "TvPairingStart", "TvPersonalUnlock", "Party", "PartyMedia",
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
                 "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend", "PartyInvitationShare",
+                "PartyCrewInvite", "PartyCrewCode", "PartyCrewVerify",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
@@ -323,6 +325,15 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 NubArca.Api.Party.PartyGuestDirectoryService>();
             // Attendance: who the host, or a guest's own group, saw arrive. Mirrors Program.cs.
             services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
+            // Party Crew: accountless collaborators on one party. Mirrors Program.cs.
+            services.AddSingleton<NubArca.Api.Party.PartyCrewTokens>();
+            services.AddScoped<NubArca.Api.Party.IPartyCrewService, NubArca.Api.Party.PartyCrewService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyCrewAuthService, NubArca.Api.Party.PartyCrewAuthService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyCrewAccessResolver, NubArca.Api.Party.PartyCrewAccessResolver>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyCrewSignOutService, NubArca.Api.Party.PartyCrewSignOutService>();
             services.AddScoped<StorageReconciliationService>();
             // Slice 97: refcount audit/repair.
             services.AddScoped<BlobReferenceAuditService>();

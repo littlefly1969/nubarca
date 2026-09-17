@@ -2559,6 +2559,9 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<string>("MetadataJson")
                         .HasColumnType("jsonb");
 
+                    b.Property<Guid?>("PartyCollaboratorId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("UserId")
                         .HasColumnType("uuid");
 
@@ -2566,6 +2569,10 @@ namespace NubArca.Api.Data.Migrations
 
                     b.HasIndex("Action", "CreatedAt")
                         .HasDatabaseName("ix_audit_logs_action_created");
+
+                    b.HasIndex("PartyCollaboratorId", "CreatedAt")
+                        .HasDatabaseName("ix_audit_logs_collaborator_created")
+                        .HasFilter("\"PartyCollaboratorId\" IS NOT NULL");
 
                     b.HasIndex("UserId", "CreatedAt")
                         .HasDatabaseName("ix_audit_logs_user_created");
@@ -4007,6 +4014,272 @@ namespace NubArca.Api.Data.Migrations
                         .HasDatabaseName("ux_party_challenge_votes_link_guest_challenge");
 
                     b.ToTable("party_challenge_votes", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaborator", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<string>("NormalizedEmail")
+                        .IsRequired()
+                        .HasMaxLength(254)
+                        .HasColumnType("character varying(254)");
+
+                    b.Property<Guid>("PartyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RoleKey")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartyId", "CreatedAt")
+                        .HasDatabaseName("ix_party_collaborators_party_created");
+
+                    b.HasIndex("PartyId", "NormalizedEmail")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_collaborators_party_email_live")
+                        .HasFilter("\"RevokedAt\" IS NULL");
+
+                    b.ToTable("party_collaborators", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_party_collaborators_role", "\"RoleKey\" IN ('co_organizer', 'director', 'dj', 'reception', 'honoree')");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorAuthChallenge", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChallengeTokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("FailedAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("OtpProof")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("OtpSentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PartyCollaboratorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PartyCollaboratorInviteId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("VerifiedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChallengeTokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_collaborator_auth_challenges_token_hash");
+
+                    b.HasIndex("PartyCollaboratorId")
+                        .HasDatabaseName("ix_party_collaborator_auth_challenges_collaborator");
+
+                    b.HasIndex("PartyCollaboratorInviteId");
+
+                    b.ToTable("party_collaborator_auth_challenges", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_party_collaborator_auth_challenges_attempts", "\"FailedAttempts\" >= 0");
+
+                            t.HasCheckConstraint("ck_party_collaborator_auth_challenges_otp_proof", "length(\"OtpProof\") = 64");
+
+                            t.HasCheckConstraint("ck_party_collaborator_auth_challenges_token_hash", "length(\"ChallengeTokenHash\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorDeviceGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PartyCollaboratorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("PartyCrewDeviceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartyCollaboratorId", "RevokedAt")
+                        .HasDatabaseName("ix_party_collaborator_device_grants_collaborator_revoked");
+
+                    b.HasIndex("PartyCrewDeviceId", "PartyCollaboratorId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_collaborator_device_grants_device_collaborator");
+
+                    b.ToTable("party_collaborator_device_grants", (string)null);
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CapabilityKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PartyCollaboratorId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartyCollaboratorId", "CapabilityKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_collaborator_grants_collaborator_capability");
+
+                    b.ToTable("party_collaborator_grants", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_party_collaborator_grants_capability", "\"CapabilityKey\" IN ('party-crew.details.manage', 'party-crew.lifecycle.manage', 'party-crew.experience.manage', 'party-crew.guests.read', 'party-crew.invitations.manage', 'party-crew.attendance.manage', 'party-crew.contributions.configure', 'party-crew.contributions.moderate', 'party-crew.activities.manage', 'party-crew.activities.control', 'party-crew.screens.manage', 'party-crew.print.manage')");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorInvite", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PartyCollaboratorId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PartyCollaboratorId")
+                        .HasDatabaseName("ix_party_collaborator_invites_collaborator");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_collaborator_invites_token_hash");
+
+                    b.ToTable("party_collaborator_invites", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_party_collaborator_invites_token_hash", "length(\"TokenHash\") = 64");
+                        });
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCrewDevice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceLabel")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique()
+                        .HasDatabaseName("ux_party_crew_devices_token_hash");
+
+                    b.ToTable("party_crew_devices", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_party_crew_devices_token_hash", "length(\"TokenHash\") = 64");
+                        });
                 });
 
             modelBuilder.Entity("NubArca.Api.Domain.PartyDisplayGrant", b =>
@@ -7697,6 +7970,63 @@ namespace NubArca.Api.Data.Migrations
                     b.HasOne("NubArca.Api.Domain.PartyParticipant", null)
                         .WithMany()
                         .HasForeignKey("PartyParticipantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaborator", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.Party", null)
+                        .WithMany()
+                        .HasForeignKey("PartyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorAuthChallenge", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.PartyCollaborator", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCollaboratorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.PartyCollaboratorInvite", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCollaboratorInviteId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorDeviceGrant", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.PartyCollaborator", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCollaboratorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("NubArca.Api.Domain.PartyCrewDevice", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCrewDeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorGrant", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.PartyCollaborator", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCollaboratorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("NubArca.Api.Domain.PartyCollaboratorInvite", b =>
+                {
+                    b.HasOne("NubArca.Api.Domain.PartyCollaborator", null)
+                        .WithMany()
+                        .HasForeignKey("PartyCollaboratorId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

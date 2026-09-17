@@ -1,15 +1,14 @@
 import { useState } from 'react';
 import {
   PARTY_INVITATION_LIMITS,
-  createPartyInvitationGroup,
   isPlausibleEmail,
   normalizeText,
-  updatePartyInvitationGroup,
   type PartyGuestListMinimal,
   type PartyInvitationGroup,
   type PartyInvitationGroupWrite,
 } from '@nubarca/api-client';
 import { Modal } from '../components/Overlay';
+import { usePartyApi } from './workspace/partyApi';
 import { useI18n } from '../i18n';
 
 // WHO IS INVITED, AS A FORM SOMEBODY FILLS IN ON A PHONE.
@@ -48,6 +47,7 @@ export function GuestGroupEditor({
   onRefused(err: unknown): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [label, setLabel] = useState(group?.label ?? '');
   const [email, setEmail] = useState(group?.recipientEmail ?? '');
   const [phone, setPhone] = useState(group?.phone ?? '');
@@ -91,8 +91,8 @@ export function GuestGroupEditor({
     setSaving(true);
     try {
       const result = group
-        ? await updatePartyInvitationGroup(partyId, group.id, body)
-        : await createPartyInvitationGroup(partyId, body);
+        ? await api.updatePartyInvitationGroup(partyId, group.id, body)
+        : await api.createPartyInvitationGroup(partyId, body);
       onSaved(result, body.label);
     } catch (err) {
       onRefused(err);

@@ -50,7 +50,7 @@ public static class FileEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.FileDownload,
                 entityType: AuditEntityTypes.File,
                 entityId: id,
@@ -368,7 +368,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileMetadataUpdate,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -413,7 +413,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileMetadataStripEmbedded,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -468,7 +468,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileMetadataWriteDateTaken,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -521,7 +521,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileDownloadPrivacySafe,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -653,7 +653,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileRename,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -698,7 +698,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileMove,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -742,7 +742,7 @@ public static class FileEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: AuditActions.FileDelete,
                 entityType: AuditEntityTypes.File,
                 entityId: id,
@@ -772,7 +772,7 @@ public static class FileEndpoints
                 }
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.FileRestore,
                     entityType: AuditEntityTypes.File,
                     entityId: id,
@@ -908,7 +908,7 @@ public static class FileEndpoints
             uploadOperationClaimToken: claimToken);
 
         await audit.LogAsync(
-            userId: ownerUserId,
+            actor: ownerUserId,
             action: AuditActions.FileUpload,
             entityType: AuditEntityTypes.File,
             entityId: created.Id,

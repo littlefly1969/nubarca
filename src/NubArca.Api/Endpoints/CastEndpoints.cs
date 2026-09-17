@@ -76,7 +76,7 @@ public static class CastEndpoints
 
             var grant = creation.Grant!;
             await audit.LogAsync(
-                userId: userId,
+                actor: userId,
                 action: AuditActions.CastGrantCreate,
                 entityType: AuditEntityTypes.File,
                 entityId: fileId,
@@ -109,7 +109,7 @@ public static class CastEndpoints
             if (existed)
             {
                 await audit.LogAsync(
-                    userId: userId,
+                    actor: userId,
                     action: AuditActions.CastGrantRevoke,
                     entityType: AuditEntityTypes.File,
                     entityId: null,

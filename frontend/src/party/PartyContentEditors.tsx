@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   ApiError,
-  setPartyGuestContent,
   type PartyGuestContentKind,
   type PartyGuestContentSlot,
   type PartyMediaPresentation,
@@ -11,6 +10,7 @@ import {
   type PartyTextPlacement,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { usePartyApi } from './workspace/partyApi';
 import { DEFAULT_CROP_VIEW, MAX_ZOOM } from '../pages/partyPrintGeometry';
 import { defaultTextAlign, SLOT_FRAME_ASPECT } from './PartyGuestContent';
 import { PhotoCropFrame } from './PhotoCropFrame';
@@ -83,6 +83,7 @@ export function PartyContentCard({
   onSaved(next: PartyGuestContentSlot): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [draft, setDraft] = useState<Draft>(() => fromSlot(slot));
   const [busy, setBusy] = useState(false);
   const [status, setStatus] =
@@ -99,7 +100,7 @@ export function PartyContentCard({
   async function save() {
     setBusy(true); setStatus('idle');
     try {
-      onSaved(await setPartyGuestContent(partyId, slot.kind, {
+      onSaved(await api.setPartyGuestContent(partyId, slot.kind, {
         enabled: draft.enabled,
         visibleBefore: draft.visibleBefore,
         visibleLive: draft.visibleLive,

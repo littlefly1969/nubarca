@@ -6,7 +6,7 @@ public interface IAuditLogger
     // actions the user-facing operation has ALREADY succeeded and failing it
     // afterwards would be worse than a gap in the trail.
     Task LogAsync(
-        Guid? userId,
+        AuditActor actor,
         string action,
         string entityType,
         Guid? entityId,
@@ -23,7 +23,7 @@ public interface IAuditLogger
     // committed with no audit entry would be exactly the gap the audit exists
     // to close. Everything else should keep using LogAsync.
     Task WriteAsync(
-        Guid? userId,
+        AuditActor actor,
         string action,
         string entityType,
         Guid? entityId,

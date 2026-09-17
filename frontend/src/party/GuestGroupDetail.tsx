@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ApiError,
-  getPartyInvitationGroup,
   type GuestDirectoryPerson,
   type InvitationShareChannel,
   type PartyInvitationGroupDetail,
 } from '@nubarca/api-client';
+import { usePartyApi } from './workspace/partyApi';
 import { useI18n, type MessageKey } from '../i18n';
 import { historyLine, invitationStatusLine } from './guestConsoleFormat';
 import { GuestSharedLink } from './GuestSharedLink';
@@ -57,13 +57,14 @@ export function GuestGroupDetail({
   onUnauthorized(): void;
 }) {
   const { t, formatDate } = useI18n();
+  const api = usePartyApi();
   const [detail, setDetail] = useState<PartyInvitationGroupDetail | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
     setFailed(false);
-    getPartyInvitationGroup(partyId, groupId, ctrl.signal)
+    api.getPartyInvitationGroup(partyId, groupId, ctrl.signal)
       .then((next) => {
         setDetail(next);
         onLoaded(next);
@@ -74,7 +75,7 @@ export function GuestGroupDetail({
         setFailed(true);
       });
     return () => ctrl.abort();
-  }, [partyId, groupId, refreshKey, onLoaded, onUnauthorized]);
+  }, [partyId, groupId, refreshKey, onLoaded, onUnauthorized, api]);
 
   const dietaryOf = useCallback((guestId: string) =>
     detail?.group.guests.find((guest) => guest.id === guestId)?.dietaryNotes ?? null, [detail]);
