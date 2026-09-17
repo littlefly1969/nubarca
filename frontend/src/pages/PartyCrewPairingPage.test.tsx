@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router';
+import { MemoryRouter, Route, Routes, useParams } from 'react-router';
 import { I18nProvider } from '../i18n';
 import { emptyResponse, errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 import { PartyCrewPairingPage } from './PartyCrewPairingPage';
@@ -9,6 +9,12 @@ import { PartyCrewPairingPage } from './PartyCrewPairingPage';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const TOKEN = 'a'.repeat(43);
+
+/** Stands in for the workspace, and reports which party it was opened at. */
+function CrewWorkspaceMarker() {
+  const { partyId } = useParams<{ partyId: string }>();
+  return <div data-testid="crew-workspace-marker">{partyId}</div>;
+}
 
 const challenge = (over: Record<string, unknown> = {}) => ({
   partyTitle: 'Compleanno di Lia',
@@ -30,7 +36,7 @@ function mount(
           <Route path="/party/crew/invite" element={<PartyCrewPairingPage />} />
           <Route path="/party/crew/verify" element={<PartyCrewPairingPage />} />
           <Route path="/party/crew/devices" element={<PartyCrewPairingPage />} />
-          <Route path="/party/crew/:partyId" element={<div data-testid="crew-workspace-marker" />} />
+          <Route path="/party/crew/:partyId" element={<CrewWorkspaceMarker />} />
         </Routes>
       </MemoryRouter>
     </I18nProvider>,
@@ -125,6 +131,23 @@ describe('becoming a Party Crew device', () => {
     await userEvent.click(screen.getByTestId('crew-code-submit'));
 
     expect(await screen.findByTestId('crew-workspace-marker')).toBeInTheDocument();
+  });
+
+  it('goes to the party the server paired, not one the page guessed', async () => {
+    // The pairing decides which party this is; the page follows. A browser
+    // holding several assignments must land on the one this link was for.
+    mount({
+      'GET /api/party-crew/auth/challenge': () => jsonResponse(challenge()),
+      'POST /api/party-crew/auth/verify': () => jsonResponse({
+        outcome: 'Paired', partyId: 'p-from-server', partyTitle: 'La seconda',
+        roleKey: 'director', capabilities: [], devices: null,
+      }),
+    }, { at: '/party/crew/verify' });
+
+    await userEvent.type(await screen.findByTestId('crew-code'), '482117');
+    await userEvent.click(screen.getByTestId('crew-code-submit'));
+
+    expect(await screen.findByTestId('crew-workspace-marker')).toHaveTextContent('p-from-server');
   });
 
   it('clears a wrong code and says only that it was wrong', async () => {

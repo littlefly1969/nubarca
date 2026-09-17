@@ -157,8 +157,13 @@ Three properties make this safe to have done at all:
 - **The default is the host.** The context's default value is `ownerPartyApi`,
   so a tree with no provider behaves exactly as it did before this existed. The
   owner's page, its tests and its fixtures needed no change.
-- **Both implementations are module constants.** `usePartyApi()` returns a
-  stable identity for the life of a tree, so nothing re-runs because of it.
+- **The owner implementation is a module constant** and the crew one is built
+  once per resolved session, so `usePartyApi()` returns a stable identity for
+  the life of a tree and nothing re-runs because of it.
+- **`api.can(capability)` is how a panel hides a control a role does not hold.**
+  Always true for the host, whose own permissions the server judges. Never the
+  authority — every route re-checks — but it is what keeps a Regista from being
+  shown a switch that answers 404.
 
 `PartyWorkspacePage` takes three optional props — which sections exist, where
 the person lands, and what replaces the host's link back to the parties list —
@@ -176,6 +181,12 @@ here rather than cosmetic, and must not be "simplified":
 - A collaborator never gets the host's media library. The slot image field
   offers the party's own album and hides the upload button, which writes into
   the host's library root.
+- A collaborator never enumerates the venue's printers. `print.manage` is this
+  party's print profile; the installation's hardware has no crew route at all,
+  and the panel says the host chose the printer instead of offering a list.
+- Moderating is not configuring. A Regista holds `contributions.moderate` and
+  not `contributions.configure`, so Foto shows the queue and not the
+  upload/approval switches.
 
 See `ARCHITECTURE.md` §14.3.9 for the credential, the two factors and the
 two-device limit.

@@ -362,6 +362,13 @@ var partyCrewCodePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:
 var partyCrewCodeWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewCode:WindowSeconds") ?? 3600;
 // TYPING a code is bounded per challenge by five attempts; this is the outer
 // bound on a machine trying six digits against many challenges from one place.
+//
+// NONE of these three is the whole story, and none is meant to be. An address
+// is not who is being written to: a carrier NAT, a shared office and an
+// attacker rotating addresses all defeat an address partition. What actually
+// protects a mailbox is the budget per CHALLENGE and per COLLABORATOR, which
+// lives in PartyCrewAuthService where the identity is known. These bound the
+// traffic; those bound the email.
 var partyCrewVerifyPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewVerify:PermitLimit") ?? 30;
 var partyCrewVerifyWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewVerify:WindowSeconds") ?? 600;
 var partyInvitationSharePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationShare:PermitLimit") ?? 300;

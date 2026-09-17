@@ -129,6 +129,22 @@ public sealed record PartyCrewVerifyResultDto(
     /// this collaborator's own two devices, so one can be chosen and removed.
     IReadOnlyList<PartyCrewDeviceDto>? Devices);
 
+/// <summary>
+/// One party this browser may operate, as a switcher would draw it.
+///
+/// <para>Derived from this DEVICE's grants alone. It never enumerates the
+/// owner's other parties, carries no album, no owner and no capability, and
+/// exists because one browser may legitimately hold several assignments.</para>
+/// </summary>
+public sealed record PartyCrewAssignmentDto(
+    Guid PartyId,
+    string PartyTitle,
+    string DisplayName,
+    string RoleKey);
+
+/// <summary>Everything this browser may operate. Nothing else about the owner.</summary>
+public sealed record PartyCrewMeDto(IReadOnlyList<PartyCrewAssignmentDto> Assignments);
+
 /// <summary>The crew's own view of where they are and what they may do.</summary>
 public sealed record PartyCrewSessionDto(
     Guid PartyId,

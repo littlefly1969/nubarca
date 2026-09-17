@@ -4104,6 +4104,11 @@ namespace NubArca.Api.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<int>("OtpSendCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<DateTime>("OtpSentAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4125,16 +4130,18 @@ namespace NubArca.Api.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("ux_party_collaborator_auth_challenges_token_hash");
 
-                    b.HasIndex("PartyCollaboratorId")
-                        .HasDatabaseName("ix_party_collaborator_auth_challenges_collaborator");
-
                     b.HasIndex("PartyCollaboratorInviteId");
+
+                    b.HasIndex("PartyCollaboratorId", "CreatedAt")
+                        .HasDatabaseName("ix_party_collaborator_auth_challenges_collaborator");
 
                     b.ToTable("party_collaborator_auth_challenges", null, t =>
                         {
                             t.HasCheckConstraint("ck_party_collaborator_auth_challenges_attempts", "\"FailedAttempts\" >= 0");
 
                             t.HasCheckConstraint("ck_party_collaborator_auth_challenges_otp_proof", "length(\"OtpProof\") = 64");
+
+                            t.HasCheckConstraint("ck_party_collaborator_auth_challenges_sends", "\"OtpSendCount\" >= 0");
 
                             t.HasCheckConstraint("ck_party_collaborator_auth_challenges_token_hash", "length(\"ChallengeTokenHash\") = 64");
                         });

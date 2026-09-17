@@ -83,9 +83,9 @@ internal static class PartyCrewTestKit
         return (device, await verified.Content.ReadFromJsonAsync<JsonElement>());
     }
 
-    internal static async Task<JsonElement> SessionAsync(HttpClient device)
+    internal static async Task<JsonElement> SessionAsync(HttpClient device, Guid partyId)
     {
-        var response = await device.GetAsync("/api/party-crew/session");
+        var response = await device.GetAsync($"/api/party-crew/parties/{partyId}/session");
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }

@@ -157,10 +157,12 @@ public static class PartyCrewRoles
     private static readonly string[] DirectorPreset =
     [
         PartyCrewCapabilities.LifecycleManage,
-        // Deciding whether photographs need approving is the same job as
-        // approving them: a director whose Foto section showed a switch that
-        // refused would be a director the product lied to.
-        PartyCrewCapabilities.ContributionsConfigure,
+        // MODERATING is not CONFIGURING. A director decides what stays up
+        // tonight; whether guests may upload at all, and whether what they
+        // upload needs approving first, is the host's standing decision about
+        // their own party and their own library. The surface hides those
+        // switches from a role that does not hold this, rather than the role
+        // growing to fit the surface.
         PartyCrewCapabilities.ContributionsModerate,
         PartyCrewCapabilities.ActivitiesManage,
         PartyCrewCapabilities.ActivitiesControl,

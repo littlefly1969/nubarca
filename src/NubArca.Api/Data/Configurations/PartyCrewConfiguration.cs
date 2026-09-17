@@ -146,6 +146,9 @@ public sealed class PartyCollaboratorAuthChallengeConfiguration
             t.HasCheckConstraint(
                 "ck_party_collaborator_auth_challenges_attempts",
                 "\"FailedAttempts\" >= 0");
+            t.HasCheckConstraint(
+                "ck_party_collaborator_auth_challenges_sends",
+                "\"OtpSendCount\" >= 0");
         });
         builder.HasKey(c => c.Id);
         builder.Property(c => c.Id).ValueGeneratedNever();
@@ -154,6 +157,7 @@ public sealed class PartyCollaboratorAuthChallengeConfiguration
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.ExpiresAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.OtpSentAt).HasColumnType("timestamp with time zone");
+        builder.Property(c => c.OtpSendCount).HasDefaultValue(1);
         builder.Property(c => c.LastAttemptAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.VerifiedAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.CompletedAt).HasColumnType("timestamp with time zone");
@@ -162,7 +166,7 @@ public sealed class PartyCollaboratorAuthChallengeConfiguration
         builder.HasIndex(c => c.ChallengeTokenHash)
             .IsUnique()
             .HasDatabaseName("ux_party_collaborator_auth_challenges_token_hash");
-        builder.HasIndex(c => c.PartyCollaboratorId)
+        builder.HasIndex(c => new { c.PartyCollaboratorId, c.CreatedAt })
             .HasDatabaseName("ix_party_collaborator_auth_challenges_collaborator");
 
         builder.HasOne<PartyCollaborator>()

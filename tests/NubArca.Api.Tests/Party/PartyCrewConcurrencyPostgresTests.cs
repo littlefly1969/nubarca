@@ -153,12 +153,120 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
         await using var check = NewContext();
         Assert.Equal(1, await check.PartyCollaboratorDeviceGrants
             .CountAsync(g => g.PartyCollaboratorId == _collaboratorId && g.RevokedAt == null));
-        Assert.Equal(1, await check.PartyCrewDevices.CountAsync(d => d.RevokedAt == null));
+        Assert.Equal(1, await MyDevicesAsync(check));
+    }
+
+    [SkippableFact]
+    public async Task One_challenge_never_produces_two_devices()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // NO DEVICES AT ALL, and one challenge verified twice at once. The
+        // device limit cannot decide this: both requests see room for two, so
+        // both would be admitted by a limit check alone. What has to stop the
+        // second is the CHALLENGE being spendable exactly once.
+        var (challenge, otp) = await SeedChallengeAsync();
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthResult<PartyCrewPairing>> Race()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            return await service.VerifyAsync(challenge, otp, "Mozilla/5.0 (Linux; Android 14)", null, null);
+        }
+
+        var results = await Task.WhenAll(Task.Run(Race), Task.Run(Race));
+
+        var paired = results.Count(r => r.Value?.Result.Outcome == PartyCrewVerifyOutcome.Paired);
+        var refused = results.Count(r => r.Error == PartyCrewAuthError.Unavailable);
+        Assert.Equal(1, paired);
+        Assert.Equal(1, refused);
+
+        await using var check = NewContext();
+        Assert.Equal(1, await check.PartyCollaboratorDeviceGrants
+            .CountAsync(g => g.PartyCollaboratorId == _collaboratorId && g.RevokedAt == null));
+        Assert.Equal(1, await MyDevicesAsync(check));
+        Assert.Equal(1, await check.PartyCollaboratorAuthChallenges
+            .CountAsync(c => c.PartyCollaboratorId == _collaboratorId && c.CompletedAt != null));
+        Assert.Equal(1, await check.PartyCollaboratorInvites
+            .CountAsync(i => i.PartyCollaboratorId == _collaboratorId && i.ConsumedAt != null));
+    }
+
+    [SkippableFact]
+    public async Task One_verified_challenge_completes_once_however_many_ask()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // The device-limit road back: a challenge already verified, a slot now
+        // free, and two /complete calls at the same instant. It must produce
+        // one grant, not two — the second has nothing left to spend.
+        var (challenge, otp) = await SeedChallengeAsync();
+        await using (var db = NewContext())
+        {
+            var service = NewService(db);
+            var verified = await service.VerifyAsync(
+                challenge, otp, "Mozilla/5.0 (Linux; Android 14)", null, null);
+            // Verified, and deliberately NOT completed: the seed below leaves
+            // the challenge in the state the limit screen leaves it in.
+            Assert.NotNull(verified.Value);
+        }
+
+        // Undo the pairing that VerifyAsync just did, keeping the challenge
+        // verified — exactly the state a DeviceLimitReached leaves behind.
+        await using (var reset = NewContext())
+        {
+            await reset.PartyCollaboratorDeviceGrants.ExecuteDeleteAsync();
+            await reset.PartyCrewDevices.ExecuteDeleteAsync();
+            await reset.PartyCollaboratorAuthChallenges
+                .ExecuteUpdateAsync(s => s.SetProperty(c => c.CompletedAt, _ => (DateTime?)null));
+            await reset.PartyCollaboratorInvites
+                .ExecuteUpdateAsync(s => s.SetProperty(i => i.ConsumedAt, _ => (DateTime?)null));
+        }
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthResult<PartyCrewPairing>> Race()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            return await service.CompleteAsync(challenge, "Mozilla/5.0 (Linux; Android 14)", null, null);
+        }
+
+        var results = await Task.WhenAll(Task.Run(Race), Task.Run(Race));
+
+        Assert.Equal(1, results.Count(r => r.Value?.Result.Outcome == PartyCrewVerifyOutcome.Paired));
+        Assert.Equal(1, results.Count(r => r.Error == PartyCrewAuthError.Unavailable));
+
+        await using var check = NewContext();
+        Assert.Equal(1, await check.PartyCollaboratorDeviceGrants
+            .CountAsync(g => g.PartyCollaboratorId == _collaboratorId && g.RevokedAt == null));
+        Assert.Equal(1, await check.PartyCollaboratorInvites
+            .CountAsync(i => i.PartyCollaboratorId == _collaboratorId && i.ConsumedAt != null));
     }
 
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     private AppDbContext NewContext() => new(_dbOptions!);
+
+    /// <summary>
+    /// Live devices holding a live grant for THIS test's collaborator.
+    ///
+    /// <para>Scoped deliberately. The collection's reset truncates six tables
+    /// and leans on CASCADE; <c>parties</c> is not among them, so Party Crew
+    /// rows outlive a test and a bare device count would read its siblings'
+    /// work as its own.</para>
+    /// </summary>
+    private Task<int> MyDevicesAsync(AppDbContext db) =>
+        db.PartyCrewDevices
+            .Where(d => d.RevokedAt == null)
+            .Where(d => db.PartyCollaboratorDeviceGrants.Any(
+                g => g.PartyCrewDeviceId == d.Id
+                    && g.PartyCollaboratorId == _collaboratorId
+                    && g.RevokedAt == null))
+            .CountAsync();
 
     private static PartyCrewAuthService NewService(AppDbContext db) => new(
         db,
@@ -235,6 +343,7 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
             CreatedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.Add(PartyCrewLimits.ChallengeLifetime),
             OtpSentAt = DateTime.UtcNow,
+            OtpSendCount = 1,
         });
         await db.SaveChangesAsync();
         return (raw, otp);

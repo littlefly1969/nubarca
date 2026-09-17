@@ -32,6 +32,26 @@ public interface IPartyCrewSignOutService
     /// </summary>
     Task<bool> RevokeAsync(
         PartyCrewAccessContext ctx, Guid grantId, string? ip, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether this BROWSER still helps at some other party.
+    ///
+    /// <para>What decides whether leaving one party also takes the cookie. A
+    /// device is party-agnostic: the same phone can hold two assignments, and
+    /// clearing the credential because one of them ended would silently sign
+    /// the person out of the other.</para>
+    /// </summary>
+    Task<bool> HasOtherAssignmentsAsync(PartyCrewAccessContext ctx, CancellationToken ct = default);
+
+    /// <summary>
+    /// Disconnects this BROWSER from Party Crew entirely — the device and every
+    /// grant it holds, at every party.
+    ///
+    /// <para>A different decision from leaving one party, and deliberately a
+    /// different method: a product that spells them the same loses somebody two
+    /// jobs when they meant to leave one.</para>
+    /// </summary>
+    Task DisconnectDeviceAsync(string? rawDeviceToken, string? ip, CancellationToken ct = default);
 }
 
 public sealed class PartyCrewSignOutService : IPartyCrewSignOutService
@@ -82,6 +102,53 @@ public sealed class PartyCrewSignOutService : IPartyCrewSignOutService
     public Task<bool> RevokeAsync(
         PartyCrewAccessContext ctx, Guid grantId, string? ip, CancellationToken ct = default) =>
         RevokeGrantAsync(ctx, grantId, grantId == ctx.DeviceGrantId ? "self" : "other-device", ip, ct);
+
+    public Task<bool> HasOtherAssignmentsAsync(
+        PartyCrewAccessContext ctx, CancellationToken ct = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        return _db.PartyCollaboratorDeviceGrants
+            .Where(g => g.PartyCrewDeviceId == ctx.DeviceId
+                && g.Id != ctx.DeviceGrantId
+                && g.RevokedAt == null)
+            .AnyAsync(g => _db.PartyCollaborators.Any(
+                c => c.Id == g.PartyCollaboratorId && c.RevokedAt == null), ct);
+    }
+
+    public async Task DisconnectDeviceAsync(
+        string? rawDeviceToken, string? ip, CancellationToken ct = default)
+    {
+        if (!PartyCrewTokens.LooksLikeToken(rawDeviceToken)) return;
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var hash = PartyCrewTokens.Hash(rawDeviceToken!);
+
+        var device = await _db.PartyCrewDevices
+            .FirstOrDefaultAsync(d => d.TokenHash == hash && d.RevokedAt == null, ct);
+        if (device is null) return;
+
+        // Which collaborators are losing this browser, read BEFORE the revoke,
+        // so the audit can name each of them rather than one line about a
+        // device nobody can look up afterwards.
+        var losing = await _db.PartyCollaboratorDeviceGrants
+            .Where(g => g.PartyCrewDeviceId == device.Id && g.RevokedAt == null)
+            .Select(g => g.PartyCollaboratorId)
+            .ToListAsync(ct);
+
+        await _db.PartyCollaboratorDeviceGrants
+            .Where(g => g.PartyCrewDeviceId == device.Id && g.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.RevokedAt, _ => (DateTime?)now), ct);
+        await _db.PartyCrewDevices
+            .Where(d => d.Id == device.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.RevokedAt, _ => (DateTime?)now), ct);
+
+        foreach (var collaboratorId in losing)
+        {
+            await _audit.LogAsync(
+                AuditActor.Crew(collaboratorId),
+                "party.crew.device.disconnect", "PartyCrewDevice", device.Id, ip,
+                new { target = "browser" }, ct);
+        }
+    }
 
     /// <summary>
     /// The grant, not the DEVICE. The same phone may be helping at another

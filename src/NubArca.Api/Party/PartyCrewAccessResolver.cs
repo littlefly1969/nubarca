@@ -8,12 +8,17 @@ namespace NubArca.Api.Party;
 /// <summary>
 /// Everything a Party Crew request is allowed to be, resolved from the cookie.
 ///
-/// <para><b>The client supplies none of it.</b> Not the party, not the owner,
-/// not the album, not the collaborator, not the capabilities. A crew request
-/// carries one opaque device token and the server walks
-/// <c>device → grant → collaborator → party → owner</c> itself — which is what
-/// stops a collaborator on party A reaching party B by changing an id in a URL.
-/// </para>
+/// <para><b>The client names the party and supplies nothing else.</b> Not the
+/// owner, not the album, not the collaborator, not the capabilities. The party
+/// id in the route is a RESOURCE SELECTOR, never an authority: it says which of
+/// this device's assignments the request is about, and it is then required to
+/// match a live grant this device actually holds. A party the device has no
+/// grant for answers the same nothing as no device at all.</para>
+///
+/// <para>It has to be named, because one browser may legitimately hold several
+/// assignments — the same person helping at two parties is one device with two
+/// grants. Resolving that by taking whichever grant the database returned first
+/// would make "which party am I operating" a function of insertion order.</para>
 /// </summary>
 public sealed record PartyCrewAccessContext(
     Guid PartyId,
@@ -45,10 +50,22 @@ public sealed record PartyCrewAccessContext(
 public interface IPartyCrewAccessResolver
 {
     /// <summary>
-    /// The context for one raw device token, or null. Re-read in full on every
-    /// request; nothing is cached into the cookie.
+    /// The context for one raw device token AT one party, or null. Re-read in
+    /// full on every request; nothing is cached into the cookie.
     /// </summary>
-    Task<PartyCrewAccessContext?> ResolveAsync(string? rawDeviceToken, CancellationToken ct = default);
+    Task<PartyCrewAccessContext?> ResolveAsync(
+        string? rawDeviceToken, Guid partyId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Every party this device may operate, for a surface that has to offer a
+    /// choice before one has been made.
+    ///
+    /// <para>Derived only from this device's own grants: it never enumerates
+    /// the owner's other parties, and it carries nothing but what a switcher
+    /// needs to draw a row.</para>
+    /// </summary>
+    Task<IReadOnlyList<PartyCrewAssignmentDto>> AssignmentsAsync(
+        string? rawDeviceToken, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -63,7 +80,8 @@ public interface IPartyCrewAccessResolver
 ///   <item>that device is not revoked and not expired;</item>
 ///   <item>it holds an unrevoked grant;</item>
 ///   <item>the grant's collaborator is not revoked;</item>
-///   <item>the collaborator's party still exists;</item>
+///   <item>that collaborator belongs to the party the route NAMED;</item>
+///   <item>the party still exists;</item>
 ///   <item>the collaborator's capability grants are read fresh;</item>
 ///   <item>the OWNER still holds <c>party.access</c>;</item>
 ///   <item>each capability's required owner permission is still held;</item>
@@ -71,7 +89,8 @@ public interface IPartyCrewAccessResolver
 /// </list>
 ///
 /// <para><b>Nothing is cached into the credential.</b> The cookie is an opaque
-/// token and carries no party, no role and no capability, so revoking a
+/// token and carries no party, no role and no capability — which is also why
+/// the party has to be named by the route — so revoking a
 /// collaborator, changing their role, or taking a permission off the OWNER's
 /// role takes effect on the very next request — with nobody signing out and no
 /// token rotated. That is the same property the guest seam has, and it is why
@@ -98,8 +117,9 @@ public sealed class PartyCrewAccessResolver : IPartyCrewAccessResolver
     }
 
     public async Task<PartyCrewAccessContext?> ResolveAsync(
-        string? rawDeviceToken, CancellationToken ct = default)
+        string? rawDeviceToken, Guid partyId, CancellationToken ct = default)
     {
+        if (partyId == Guid.Empty) return null;
         if (!PartyCrewTokens.LooksLikeToken(rawDeviceToken)) return null;
         var now = _clock.GetUtcNow().UtcDateTime;
         var hash = PartyCrewTokens.Hash(rawDeviceToken!);
@@ -111,7 +131,10 @@ public sealed class PartyCrewAccessResolver : IPartyCrewAccessResolver
             .Where(d => d.TokenHash == hash && d.RevokedAt == null && d.ExpiresAt > now)
             .Join(_db.PartyCollaboratorDeviceGrants.Where(g => g.RevokedAt == null),
                 d => d.Id, g => g.PartyCrewDeviceId, (d, g) => new { Device = d, Grant = g })
-            .Join(_db.PartyCollaborators.Where(c => c.RevokedAt == null),
+            // THE PARTY IS PART OF THE WHERE CLAUSE. Not a filter applied to
+            // whatever came back: a device with two assignments must match on
+            // the one that was asked for, or match nothing.
+            .Join(_db.PartyCollaborators.Where(c => c.RevokedAt == null && c.PartyId == partyId),
                 x => x.Grant.PartyCollaboratorId, c => c.Id,
                 (x, c) => new { x.Device, x.Grant, Collaborator = c })
             .Join(_db.Parties, x => x.Collaborator.PartyId, p => p.Id,
@@ -172,5 +195,36 @@ public sealed class PartyCrewAccessResolver : IPartyCrewAccessResolver
             capabilities,
             found.Device.Id,
             found.Grant.Id);
+    }
+
+    public async Task<IReadOnlyList<PartyCrewAssignmentDto>> AssignmentsAsync(
+        string? rawDeviceToken, CancellationToken ct = default)
+    {
+        if (!PartyCrewTokens.LooksLikeToken(rawDeviceToken)) return [];
+        var now = _clock.GetUtcNow().UtcDateTime;
+        var hash = PartyCrewTokens.Hash(rawDeviceToken!);
+
+        var rows = await _db.PartyCrewDevices
+            .Where(d => d.TokenHash == hash && d.RevokedAt == null && d.ExpiresAt > now)
+            .Join(_db.PartyCollaboratorDeviceGrants.Where(g => g.RevokedAt == null),
+                d => d.Id, g => g.PartyCrewDeviceId, (d, g) => g)
+            .Join(_db.PartyCollaborators.Where(c => c.RevokedAt == null),
+                g => g.PartyCollaboratorId, c => c.Id, (g, c) => c)
+            .Join(_db.Parties, c => c.PartyId, p => p.Id,
+                (c, p) => new { c.PartyId, p.Title, p.OwnerUserId, c.DisplayName, c.RoleKey })
+            .OrderBy(x => x.Title)
+            .ToListAsync(ct);
+
+        // The OWNER's authority still bounds each row, so a party whose host
+        // lost party.access is not offered as somewhere to go.
+        var assignments = new List<PartyCrewAssignmentDto>(rows.Count);
+        foreach (var row in rows)
+        {
+            var effective = await _permissions.GetEffectiveAsync(row.OwnerUserId, ct);
+            if (!effective.Has(Permissions.PartyAccess)) continue;
+            assignments.Add(new PartyCrewAssignmentDto(
+                row.PartyId, row.Title, row.DisplayName, row.RoleKey));
+        }
+        return assignments;
     }
 }

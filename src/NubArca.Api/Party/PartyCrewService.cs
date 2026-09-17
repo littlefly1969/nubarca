@@ -310,8 +310,15 @@ public sealed class PartyCrewService : IPartyCrewService
         if (!exists) return PartyCrewResult<PartyCollaboratorInviteDto>.Fail(PartyCrewError.NotFound);
 
         var now = _clock.GetUtcNow().UtcDateTime;
+
+        // ONE unit of work. `MintInvite` revokes the previous usable links with
+        // an immediate UPDATE and adds the new row as a tracked insert, so
+        // without a transaction a failure between them leaves a collaborator
+        // with no link at all — and no way back except the host noticing.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         var (invite, url) = MintInvite(collaboratorId, now);
         await _db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
 
         await _audit.LogAsync(ownerUserId, "party.crew.invite.rotate", "PartyCollaborator",
             collaboratorId, ip, new { partyId }, ct);

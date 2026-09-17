@@ -5,68 +5,24 @@ import {
   createPartyChallenge,
   createPartyInvitationGroup,
   createPartyRsvpQuestion,
-  crewGetPartyPrintSettings,
-  crewListAlbumItems,
-  crewListPrintStations,
-  crewSetPartyGameSettings,
-  crewSetPartyPrintSettings,
-  crewCheckInPartyGuest,
-  crewCreatePartyAttendanceGuest,
-  crewCreatePartyChallenge,
-  crewCreatePartyInvitationGroup,
-  crewCreatePartyRsvpQuestion,
-  crewDeletePartyAttendanceGuest,
-  crewDeletePartyChallenge,
-  crewDeletePartyInvitationGroup,
-  crewGetAlbumPartySettings,
-  crewGetParty,
-  crewGetPartyGameSnapshot,
-  crewGetPartyInvitationGroup,
-  crewGetPartyRsvpQuestions,
-  crewListPartyChallenges,
-  crewListPartyGuestContent,
-  crewListPartyMessages,
-  crewListPartyUploads,
-  crewModeratePartyMessage,
-  crewModeratePartyUpload,
-  crewPlanPartyGame,
-  crewQueryPartyGuestDirectory,
-  crewRemindPartyInvitation,
-  crewReorderPartyChallenges,
-  crewReorderPartyRsvpQuestions,
-  crewRotatePartyInvitationLink,
-  crewSendPartyGameCommand,
-  crewSendPartyInvitation,
-  crewSetAlbumPartyMode,
-  crewSetAlbumTvVisibility,
-  crewSetPartyCovers,
-  crewSetPartyGuestContent,
-  crewSetPartySlideshowSettings,
-  crewSharePartyInvitation,
-  crewTransitionParty,
-  crewUndoPartyGuestCheckIn,
-  crewUpdatePartyAttendanceGuest,
-  crewUpdatePartyChallenge,
-  crewUpdatePartyInvitationGroup,
-  crewUpdatePartyDetails,
-  crewUpdatePartyRsvpQuestion,
   deletePartyAttendanceGuest,
   deletePartyChallenge,
   deletePartyInvitationGroup,
   getAlbumPartySettings,
   getParty,
-  getPartyPrintSettings,
   getPartyGameSnapshot,
   getPartyInvitationGroup,
+  getPartyPrintSettings,
   getPartyRsvpQuestions,
   listAlbumItems,
   listPartyChallenges,
   listPartyGuestContent,
-  listPrintStations,
   listPartyMessages,
   listPartyUploads,
+  listPrintStations,
   moderatePartyMessage,
   moderatePartyUpload,
+  partyCrewRoutes,
   planPartyGame,
   queryPartyGuestDirectory,
   remindPartyInvitation,
@@ -85,11 +41,11 @@ import {
   sharePartyInvitation,
   transitionParty,
   undoPartyGuestCheckIn,
+  updateParty,
   updatePartyAttendanceGuest,
   updatePartyChallenge,
   updatePartyInvitationGroup,
   updatePartyRsvpQuestion,
-  updateParty,
 } from '@nubarca/api-client';
 
 // WHO IS ASKING — the one difference between a host's workspace and a
@@ -174,6 +130,17 @@ const owner = {
   getPartyGameSnapshot,
   sendPartyGameCommand,
   planPartyGame,
+
+  /**
+   * Whether this surface may do a thing.
+   *
+   * The HOST may do everything their own permissions allow, and the server is
+   * the judge of that — so this is always true for them. A Party Crew surface
+   * answers from the capabilities the server sent back with its session, which
+   * is how a panel hides a control a role does not hold instead of drawing one
+   * that answers 404. It is never the authority: every route re-checks.
+   */
+  can: (_capability: string) => true,
 };
 
 export type PartyApi = typeof owner & {
@@ -190,62 +157,22 @@ export type PartyApi = typeof owner & {
 /** The host's own workspace: the routes that have always existed. */
 export const ownerPartyApi: PartyApi = { ...owner, isOwner: true };
 
-/** The same party, reached by a paired Party Crew device. */
-export const crewPartyApi: PartyApi = {
-  getParty: crewGetParty,
-  updateParty: crewUpdatePartyDetails,
-  transitionParty: crewTransitionParty,
-  setPartyCovers: crewSetPartyCovers,
-
-  getAlbumPartySettings: crewGetAlbumPartySettings,
-  setAlbumPartyMode: crewSetAlbumPartyMode,
-  setPartySlideshowSettings: crewSetPartySlideshowSettings,
-  setPartyGameSettings: crewSetPartyGameSettings,
-  setAlbumTvVisibility: crewSetAlbumTvVisibility,
-  getPartyPrintSettings: crewGetPartyPrintSettings,
-  setPartyPrintSettings: crewSetPartyPrintSettings,
-  listPrintStations: crewListPrintStations,
-
-  listPartyGuestContent: crewListPartyGuestContent,
-  setPartyGuestContent: crewSetPartyGuestContent,
-
-  queryPartyGuestDirectory: crewQueryPartyGuestDirectory,
-  getPartyInvitationGroup: crewGetPartyInvitationGroup,
-  getPartyRsvpQuestions: crewGetPartyRsvpQuestions,
-  createPartyInvitationGroup: crewCreatePartyInvitationGroup,
-  updatePartyInvitationGroup: crewUpdatePartyInvitationGroup,
-  deletePartyInvitationGroup: crewDeletePartyInvitationGroup,
-  rotatePartyInvitationLink: crewRotatePartyInvitationLink,
-  sendPartyInvitation: crewSendPartyInvitation,
-  remindPartyInvitation: crewRemindPartyInvitation,
-  sharePartyInvitation: crewSharePartyInvitation,
-  createPartyRsvpQuestion: crewCreatePartyRsvpQuestion,
-  updatePartyRsvpQuestion: crewUpdatePartyRsvpQuestion,
-  reorderPartyRsvpQuestions: crewReorderPartyRsvpQuestions,
-
-  checkInPartyGuest: crewCheckInPartyGuest,
-  undoPartyGuestCheckIn: crewUndoPartyGuestCheckIn,
-  createPartyAttendanceGuest: crewCreatePartyAttendanceGuest,
-  updatePartyAttendanceGuest: crewUpdatePartyAttendanceGuest,
-  deletePartyAttendanceGuest: crewDeletePartyAttendanceGuest,
-
-  listPartyUploads: crewListPartyUploads,
-  moderatePartyUpload: crewModeratePartyUpload,
-  listPartyMessages: crewListPartyMessages,
-  moderatePartyMessage: crewModeratePartyMessage,
-
-  listAlbumItems: crewListAlbumItems,
-  listPartyChallenges: crewListPartyChallenges,
-  createPartyChallenge: crewCreatePartyChallenge,
-  updatePartyChallenge: crewUpdatePartyChallenge,
-  deletePartyChallenge: crewDeletePartyChallenge,
-  reorderPartyChallenges: crewReorderPartyChallenges,
-  getPartyGameSnapshot: crewGetPartyGameSnapshot,
-  sendPartyGameCommand: crewSendPartyGameCommand,
-  planPartyGame: crewPlanPartyGame,
-
-  isOwner: false,
-};
+/**
+ * The same party, reached by a paired Party Crew device.
+ *
+ * A FACTORY and not a constant, because a crew surface is opened at exactly one
+ * party and holds exactly one set of capabilities. Binding both here is what
+ * lets every function keep the owner's signature — the ids they are handed are
+ * accepted and ignored, and the bound party is the truth.
+ */
+export function crewPartyApi(partyId: string, capabilities: readonly string[]): PartyApi {
+  const routes = partyCrewRoutes(partyId);
+  return {
+    ...routes,
+    isOwner: false,
+    can: (capability: string) => capabilities.includes(capability),
+  };
+}
 
 /**
  * Where a section's "open the queue" row points.

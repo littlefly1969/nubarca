@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import {
   ApiError,
-  endPartyCrewSession,
+  disconnectPartyCrewDevice,
   getPartyCrewSession,
+  leavePartyCrewParty,
   listMyPartyCrewDevices,
   revokeMyPartyCrewDevice,
   type PartyCrewDevice,
@@ -20,6 +21,14 @@ import { PartyWorkspacePage } from './PartyWorkspacePage';
 import './PartyCrew.css';
 
 // THE SAME PARTY, RUN BY SOMEBODY WHO IS NOT ITS HOST.
+//
+// THE URL NAMES THE PARTY, AND THE SERVER CHECKS IT. One browser may hold
+// several assignments — the same person helping at two parties is one device
+// with two grants — so the party id in the route says which of them this page
+// is about. It is a resource selector and never an authority: the server
+// requires it to match a grant this device actually holds, and a party it has
+// no grant for is the same nothing as no device at all. The page therefore
+// asks for the party in the URL and does NOT follow the server somewhere else.
 //
 // NOT A SECOND PRODUCT. This page resolves who the device is, hands the
 // workspace the Party Crew family of routes, and gets back the workspace — the
@@ -40,7 +49,6 @@ import './PartyCrew.css';
 export function PartyCrewWorkspacePage() {
   const { partyId } = useParams<{ partyId: string }>();
   const { t } = useI18n();
-  const navigate = useNavigate();
   const [state, setState] =
     useState<{ kind: 'loading' } | { kind: 'ready'; session: PartyCrewSession } | { kind: 'gone' }>(
       { kind: 'loading' });
@@ -48,22 +56,20 @@ export function PartyCrewWorkspacePage() {
   useEffect(() => {
     let live = true;
     void (async () => {
+      if (!partyId) { setState({ kind: 'gone' }); return; }
       try {
-        const session = await getPartyCrewSession();
-        if (!live) return;
-        // The device resolves to ONE party. A URL naming another is not an
-        // error to explain — it is simply not where this device is.
-        if (partyId && session.partyId !== partyId) {
-          navigate(`/party/crew/${session.partyId}`, { replace: true });
-          return;
-        }
-        setState({ kind: 'ready', session });
+        // THE PARTY IN THE URL, and no other. A device without a grant for it
+        // is told so; it is never quietly moved to one it does have, which
+        // would make the address bar and the page disagree about which evening
+        // somebody is running.
+        const session = await getPartyCrewSession(partyId);
+        if (live) setState({ kind: 'ready', session });
       } catch {
         if (live) setState({ kind: 'gone' });
       }
     })();
     return () => { live = false; };
-  }, [partyId, navigate]);
+  }, [partyId]);
 
   if (state.kind === 'loading') {
     return (
@@ -91,7 +97,7 @@ export function PartyCrewWorkspacePage() {
     crewLandingSection(session.capabilities, status, WORKSPACE_SECTIONS);
 
   return (
-    <PartyApiProvider api={crewPartyApi}>
+    <PartyApiProvider api={crewPartyApi(session.partyId, session.capabilities)}>
       <div className="crew-shell" data-testid="party-crew-workspace">
         <PartyWorkspacePage
           sections={sections}
@@ -123,13 +129,13 @@ function CrewIdentity({ session }: { session: PartyCrewSession }) {
         </span>
       </summary>
       <div className="crew-identity-body">
-        <CrewDevices />
+        <CrewDevices partyId={session.partyId} />
       </div>
     </details>
   );
 }
 
-function CrewDevices() {
+function CrewDevices({ partyId }: { partyId: string }) {
   const { t } = useI18n();
   const [load, setLoad] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [devices, setDevices] = useState<PartyCrewDevice[]>([]);
@@ -138,25 +144,25 @@ function CrewDevices() {
 
   const reload = useCallback(async () => {
     try {
-      setDevices(await listMyPartyCrewDevices());
+      setDevices(await listMyPartyCrewDevices(partyId));
       setLoad('ready');
     } catch {
       setLoad('failed');
     }
-  }, []);
+  }, [partyId]);
 
   useEffect(() => { void reload(); }, [reload]);
 
   // Leaving is final for this browser: the cookie is gone and there is nothing
   // to go back to, so the panel says so rather than showing a dead list.
   if (left) {
-    return <p className="crew-identity-note" role="status">{t('crew.shell.signOutDone')}</p>;
+    return <p className="crew-identity-note" role="status">{t('crew.shell.leftParty')}</p>;
   }
 
   async function drop(grantId: string, isCurrent: boolean) {
     setBusy(true);
     try {
-      await revokeMyPartyCrewDevice(grantId);
+      await revokeMyPartyCrewDevice(partyId, grantId);
       if (isCurrent) { setLeft(true); return; }
       await reload();
     } catch (err) {
@@ -197,17 +203,37 @@ function CrewDevices() {
         </ul>
       )}
 
+      {/* TWO DIFFERENT DECISIONS, and the product says which is which.
+          Leaving one party keeps this browser paired to the others it helps
+          at; disconnecting it ends all of them. A single "log out" that did
+          one and read as the other would lose somebody two jobs when they
+          meant to leave one. */}
       <button
         type="button"
         className="crew-identity-signout"
         disabled={busy}
-        data-testid="crew-sign-out"
+        data-testid="crew-leave-party"
         onClick={() => void (async () => {
           setBusy(true);
-          try { await endPartyCrewSession(); } finally { setBusy(false); setLeft(true); }
+          try { await leavePartyCrewParty(partyId); } finally { setBusy(false); setLeft(true); }
         })()}
       >
-        {t('crew.shell.signOut')}
+        {t('crew.shell.leaveParty')}
+      </button>
+
+      <p className="crew-identity-note">{t('crew.shell.disconnectHelp')}</p>
+
+      <button
+        type="button"
+        className="crew-identity-signout"
+        disabled={busy}
+        data-testid="crew-disconnect-device"
+        onClick={() => void (async () => {
+          setBusy(true);
+          try { await disconnectPartyCrewDevice(); } finally { setBusy(false); setLeft(true); }
+        })()}
+      >
+        {t('crew.shell.disconnect')}
       </button>
     </>
   );

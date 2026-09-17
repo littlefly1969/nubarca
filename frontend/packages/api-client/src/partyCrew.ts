@@ -190,20 +190,62 @@ export function completePartyCrewPairing(): Promise<PartyCrewVerifyResult> {
 
 // ── The crew's own session ──────────────────────────────────────────────────
 
-export function getPartyCrewSession(signal?: AbortSignal): Promise<PartyCrewSession> {
-  return api<PartyCrewSession>('/api/party-crew/session', { signal });
+/** One party this browser may operate. */
+export interface PartyCrewAssignment {
+  partyId: string;
+  partyTitle: string;
+  displayName: string;
+  roleKey: string;
 }
 
-export function endPartyCrewSession(): Promise<void> {
-  return api<void>('/api/party-crew/session', { method: 'DELETE' });
+/**
+ * EVERY party this browser may operate.
+ *
+ * The one crew read with no party in it, because it is what a person needs
+ * before they have chosen one: the same phone may legitimately hold two
+ * assignments. Derived from this device's own grants — never from the owner's
+ * list of parties.
+ */
+export function getPartyCrewAssignments(
+  signal?: AbortSignal,
+): Promise<{ assignments: PartyCrewAssignment[] }> {
+  return api<{ assignments: PartyCrewAssignment[] }>('/api/party-crew/me', { signal });
 }
 
-export function listMyPartyCrewDevices(signal?: AbortSignal): Promise<PartyCrewDevice[]> {
-  return api<PartyCrewDevice[]>('/api/party-crew/devices', { signal });
+const partyPath = (partyId: string) => `/api/party-crew/parties/${encodeURIComponent(partyId)}`;
+
+/** What this device is AT one party, and what that party's shell draws from it. */
+export function getPartyCrewSession(
+  partyId: string, signal?: AbortSignal,
+): Promise<PartyCrewSession> {
+  return api<PartyCrewSession>(`${partyPath(partyId)}/session`, { signal });
 }
 
-export function revokeMyPartyCrewDevice(grantId: string): Promise<void> {
-  return api<void>(`/api/party-crew/devices/${encodeURIComponent(grantId)}`, { method: 'DELETE' });
+/** LEAVE one party. The browser keeps its credential if it helps at another. */
+export function leavePartyCrewParty(partyId: string): Promise<void> {
+  return api<void>(`${partyPath(partyId)}/session`, { method: 'DELETE' });
+}
+
+/**
+ * DISCONNECT this browser from Party Crew entirely — every party at once.
+ *
+ * Deliberately a different call from leaving one party: a product that spells
+ * them the same loses somebody two jobs when they meant to leave one.
+ */
+export function disconnectPartyCrewDevice(): Promise<void> {
+  return api<void>('/api/party-crew/device', { method: 'DELETE' });
+}
+
+export function listMyPartyCrewDevices(
+  partyId: string, signal?: AbortSignal,
+): Promise<PartyCrewDevice[]> {
+  return api<PartyCrewDevice[]>(`${partyPath(partyId)}/devices`, { signal });
+}
+
+export function revokeMyPartyCrewDevice(partyId: string, grantId: string): Promise<void> {
+  return api<void>(`${partyPath(partyId)}/devices/${encodeURIComponent(grantId)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ── The vocabulary ──────────────────────────────────────────────────────────
@@ -224,12 +266,21 @@ export const PARTY_CREW_MAX_DEVICES = 2;
 
 // ── The same party, through the crew's own routes ───────────────────────────
 //
-// One function per owner function, with the SAME name and the SAME parameters,
-// so a surface can be handed either set and cannot tell which it has. The ids
-// are accepted and IGNORED: a crew route names no party, no album and no owner,
-// because the device cookie already resolves to exactly one of each. That is
-// what makes it impossible for a collaborator to reach another party by
-// changing something — there is nothing in the URL to change.
+// A FACTORY, bound to one party. The owner's functions take an id because the
+// host has many parties; a crew surface is opened at exactly one, and every
+// route carries it: `/api/party-crew/parties/{partyId}/…`.
+//
+// The id is a RESOURCE SELECTOR, never an authority. It says which of this
+// browser's assignments the request is about — one device may legitimately hold
+// several, and choosing one by whichever grant the database returned first
+// would make "which party am I operating" a function of insertion order. What
+// authorises the request is still only the device cookie resolved against a
+// live grant, and a party this device has no grant for answers the same nothing
+// as no device at all.
+//
+// Each function keeps the OWNER's exact signature so a surface can be handed
+// either set and cannot tell which it has; the leading id argument is accepted
+// and ignored, because the bound one is the truth.
 
 import type {
   AlbumPartyStatus,
@@ -260,345 +311,8 @@ import type {
   PartyUploadList,
 } from './party';
 import type { AlbumDetail, AlbumItemSummary } from './albums';
+import type { PartyGameCommand, PartyGamePlanAction, PartyGameSnapshot } from './partyGame';
 import type { PrintStation } from './printStations';
-import type {
-  PartyGameCommand,
-  PartyGamePlanAction,
-  PartyGameSnapshot,
-} from './partyGame';
-
-const CREW = '/api/party-crew';
-
-/* The party itself. */
-
-export const crewGetParty = (_partyId: string, signal?: AbortSignal): Promise<Party> =>
-  api<Party>(`${CREW}/party`, { signal });
-
-export const crewUpdatePartyDetails = (
-  _partyId: string,
-  body: {
-    title: string;
-    description?: string | null;
-    eventStartsAt?: string | null;
-    guestAccessExpiresAt?: string | null;
-    libraryAccessExpiresAt?: string | null;
-    version: number;
-  },
-  signal?: AbortSignal,
-): Promise<Party> => api<Party>(`${CREW}/party`, { method: 'PATCH', json: body, signal });
-
-export const crewTransitionParty = (
-  _partyId: string,
-  action: PartyLifecycleAction,
-  version: number,
-  signal?: AbortSignal,
-): Promise<Party> =>
-  api<Party>(`${CREW}/party/${action}`, { method: 'POST', json: { version }, signal });
-
-export const crewSetPartyCovers = (
-  _partyId: string,
-  body: {
-    invitationCoverFileItemId: string | null;
-    liveCoverFileItemId: string | null;
-    version: number;
-  },
-  signal?: AbortSignal,
-): Promise<Party> => api<Party>(`${CREW}/party/covers`, { method: 'PUT', json: body, signal });
-
-/* The album's party settings. */
-
-export const crewGetAlbumPartySettings = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<AlbumPartyStatus> => api<AlbumPartyStatus>(`${CREW}/album-settings`, { signal });
-
-export const crewSetAlbumPartyMode = (
-  _albumId: string,
-  enabled: boolean,
-  uploadEnabled?: boolean,
-  requireUploadApproval?: boolean,
-  signal?: AbortSignal,
-  requireMessageApproval?: boolean,
-): Promise<AlbumPartyStatus> =>
-  api<AlbumPartyStatus>(`${CREW}/album-settings`, {
-    method: 'PATCH',
-    json: { enabled, uploadEnabled, requireUploadApproval, requireMessageApproval },
-    signal,
-  });
-
-export const crewSetPartySlideshowSettings = (
-  _albumId: string,
-  settings: {
-    photoSlideSeconds?: number;
-    maxVideoSlideSeconds?: number;
-    maxPhotoUploadsPerParticipant?: number;
-    maxVideoUploadsPerParticipant?: number;
-    maxMessagesPerParticipant?: number;
-  },
-  signal?: AbortSignal,
-): Promise<AlbumPartyStatus> =>
-  api<AlbumPartyStatus>(`${CREW}/slideshow-settings`, {
-    method: 'PATCH', json: settings, signal,
-  });
-
-export const crewSetAlbumTvVisibility = (
-  _albumId: string, showOnTv: boolean, signal?: AbortSignal,
-): Promise<AlbumDetail> =>
-  api<AlbumDetail>(`${CREW}/tv-visibility`, { method: 'PUT', json: { showOnTv }, signal });
-
-/* What the party tells its guests. */
-
-export const crewListPartyGuestContent = (
-  _partyId: string, signal?: AbortSignal,
-): Promise<PartyGuestContentSlot[]> =>
-  api<PartyGuestContentSlot[]>(`${CREW}/guest-content`, { signal });
-
-export const crewSetPartyGuestContent = (
-  _partyId: string,
-  kind: PartyGuestContentKind,
-  body: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<PartyGuestContentSlot> =>
-  api<PartyGuestContentSlot>(`${CREW}/guest-content/${encodeURIComponent(kind)}`, {
-    method: 'PUT', json: body, signal,
-  });
-
-/* The guest list. */
-
-export const crewQueryPartyGuestDirectory = (
-  _partyId: string, query: GuestDirectoryQuery, signal?: AbortSignal,
-): Promise<GuestDirectoryPage> =>
-  api<GuestDirectoryPage>(`${CREW}/guest-directory/query`, {
-    method: 'POST', json: query, signal,
-  });
-
-export const crewGetPartyInvitationGroup = (
-  _partyId: string, groupId: string, signal?: AbortSignal,
-): Promise<PartyInvitationGroupDetail> =>
-  api<PartyInvitationGroupDetail>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}`, { signal });
-
-export const crewGetPartyRsvpQuestions = (
-  _partyId: string, signal?: AbortSignal,
-): Promise<{ questions: PartyRsvpQuestion[] }> =>
-  api<{ questions: PartyRsvpQuestion[] }>(`${CREW}/rsvp-questions`, { signal });
-
-export const crewCreatePartyInvitationGroup = (
-  _partyId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(`${CREW}/invitation-groups`, {
-    method: 'POST', json: body, signal, headers: MINIMAL,
-  });
-
-export const crewUpdatePartyInvitationGroup = (
-  _partyId: string, groupId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(`${CREW}/invitation-groups/${encodeURIComponent(groupId)}`, {
-    method: 'PUT', json: body, signal, headers: MINIMAL,
-  });
-
-export const crewDeletePartyInvitationGroup = (
-  _partyId: string, groupId: string, version: number, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}?version=${version}`,
-    { method: 'DELETE', signal, headers: MINIMAL });
-
-export const crewRotatePartyInvitationLink = (
-  _partyId: string, groupId: string, version: number, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}/rotate-link`,
-    { method: 'POST', json: { version }, signal, headers: MINIMAL });
-
-export const crewSendPartyInvitation = (
-  _partyId: string,
-  groupId: string,
-  body: { clientRequestId: string; partyVersion?: number },
-  signal?: AbortSignal,
-): Promise<PartyInvitationSendResult> =>
-  api<PartyInvitationSendResult>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}/send`,
-    { method: 'POST', json: body, signal, headers: MINIMAL });
-
-export const crewRemindPartyInvitation = (
-  _partyId: string, groupId: string, clientRequestId: string, signal?: AbortSignal,
-): Promise<PartyInvitationSendResult> =>
-  api<PartyInvitationSendResult>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}/remind`,
-    { method: 'POST', json: { clientRequestId }, signal, headers: MINIMAL });
-
-export const crewSharePartyInvitation = (
-  _partyId: string, groupId: string, body: InvitationShareRequest, signal?: AbortSignal,
-): Promise<InvitationShareResult<Party>> =>
-  api<InvitationShareResult<Party>>(
-    `${CREW}/invitation-groups/${encodeURIComponent(groupId)}/share`,
-    { method: 'POST', json: body, signal, headers: MINIMAL });
-
-export const crewCreatePartyRsvpQuestion = (
-  _partyId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(`${CREW}/rsvp-questions`, {
-    method: 'POST', json: body, signal, headers: MINIMAL,
-  });
-
-export const crewUpdatePartyRsvpQuestion = (
-  _partyId: string, questionId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(`${CREW}/rsvp-questions/${encodeURIComponent(questionId)}`, {
-    method: 'PUT', json: body, signal, headers: MINIMAL,
-  });
-
-export const crewReorderPartyRsvpQuestions = (
-  _partyId: string, questionIds: string[], signal?: AbortSignal,
-): Promise<PartyGuestListMinimal> =>
-  api<PartyGuestListMinimal>(`${CREW}/rsvp-questions/order`, {
-    method: 'PUT', json: { questionIds }, signal, headers: MINIMAL,
-  });
-
-/* Who arrived. */
-
-export const crewCheckInPartyGuest = (
-  _partyId: string, guestId: string, signal?: AbortSignal,
-): Promise<PartyAttendanceChange> =>
-  api<PartyAttendanceChange>(`${CREW}/attendance/guests/${encodeURIComponent(guestId)}`, {
-    method: 'PUT', signal, headers: MINIMAL,
-  });
-
-export const crewUndoPartyGuestCheckIn = (
-  _partyId: string, guestId: string, signal?: AbortSignal,
-): Promise<PartyAttendanceChange> =>
-  api<PartyAttendanceChange>(`${CREW}/attendance/guests/${encodeURIComponent(guestId)}`, {
-    method: 'DELETE', signal, headers: MINIMAL,
-  });
-
-export const crewCreatePartyAttendanceGuest = (
-  _partyId: string, body: PartyAttendanceOtherGuestCreate, signal?: AbortSignal,
-): Promise<PartyAttendanceChange> =>
-  api<PartyAttendanceChange>(`${CREW}/attendance/other-guests`, {
-    method: 'POST', json: body, signal, headers: MINIMAL,
-  });
-
-export const crewUpdatePartyAttendanceGuest = (
-  _partyId: string, attendanceGuestId: string, body: PartyAttendanceOtherGuestUpdate,
-  signal?: AbortSignal,
-): Promise<PartyAttendanceChange> =>
-  api<PartyAttendanceChange>(
-    `${CREW}/attendance/other-guests/${encodeURIComponent(attendanceGuestId)}`,
-    { method: 'PUT', json: body, signal, headers: MINIMAL });
-
-export const crewDeletePartyAttendanceGuest = (
-  _partyId: string, attendanceGuestId: string, signal?: AbortSignal,
-): Promise<PartyAttendanceChange> =>
-  api<PartyAttendanceChange>(
-    `${CREW}/attendance/other-guests/${encodeURIComponent(attendanceGuestId)}`,
-    { method: 'DELETE', signal, headers: MINIMAL });
-
-/* The photographs and the greetings. */
-
-export const crewListPartyUploads = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<PartyUploadList> => api<PartyUploadList>(`${CREW}/uploads`, { signal });
-
-export const crewModeratePartyUpload = (
-  _albumId: string,
-  fileItemId: string,
-  action: 'hide' | 'approve' | 'reject' | 'restore',
-  signal?: AbortSignal,
-): Promise<void> =>
-  api<void>(`${CREW}/uploads/${encodeURIComponent(fileItemId)}/${action}`, {
-    method: 'POST', signal,
-  });
-
-export const crewListPartyMessages = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<PartyMessageList> => api<PartyMessageList>(`${CREW}/messages`, { signal });
-
-export const crewModeratePartyMessage = (
-  _albumId: string, messageId: string, action: PartyMessageAction, signal?: AbortSignal,
-): Promise<void> =>
-  api<void>(`${CREW}/messages/${encodeURIComponent(messageId)}/${action}`, {
-    method: 'POST', signal,
-  });
-
-/* The activities. */
-
-export const crewListAlbumItems = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<AlbumItemSummary[]> => api<AlbumItemSummary[]>(`${CREW}/album-items`, { signal });
-
-export const crewSetPartyGameSettings = (
-  _albumId: string,
-  settings: {
-    gameEnabled: boolean;
-    minChallengeIntervalSeconds: number;
-    maxChallengeIntervalSeconds: number;
-    votesPerGuest: number;
-    maxChallengesPerSession: number | null;
-    priorityVotingEnabled?: boolean;
-  },
-  signal?: AbortSignal,
-): Promise<AlbumPartyStatus> =>
-  api<AlbumPartyStatus>(`${CREW}/game-settings`, { method: 'PATCH', json: settings, signal });
-
-export const crewListPrintStations = (signal?: AbortSignal): Promise<PrintStation[]> =>
-  api<PrintStation[]>(`${CREW}/print-stations`, { signal });
-
-export const crewGetPartyPrintSettings = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<PartyPrintSettings> => api<PartyPrintSettings>(`${CREW}/print-settings`, { signal });
-
-export const crewSetPartyPrintSettings = (
-  _albumId: string, patch: PartyPrintSettingsPatch, signal?: AbortSignal,
-): Promise<PartyPrintSettings> =>
-  api<PartyPrintSettings>(`${CREW}/print-settings`, { method: 'PATCH', json: patch, signal });
-
-
-export const crewListPartyChallenges = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<PartyChallengeList> => api<PartyChallengeList>(`${CREW}/challenges`, { signal });
-
-export const crewCreatePartyChallenge = (
-  _albumId: string, value: PartyChallengeWrite,
-): Promise<PartyChallenge> =>
-  api<PartyChallenge>(`${CREW}/challenges`, { method: 'POST', json: value });
-
-export const crewUpdatePartyChallenge = (
-  _albumId: string, id: string, value: PartyChallengeWrite,
-): Promise<PartyChallenge> =>
-  api<PartyChallenge>(`${CREW}/challenges/${encodeURIComponent(id)}`, {
-    method: 'PUT', json: value,
-  });
-
-export const crewDeletePartyChallenge = (_albumId: string, id: string): Promise<void> =>
-  api<void>(`${CREW}/challenges/${encodeURIComponent(id)}`, { method: 'DELETE' });
-
-export const crewReorderPartyChallenges = (
-  _albumId: string, challengeIds: string[],
-): Promise<void> =>
-  api<void>(`${CREW}/challenges/order`, { method: 'PUT', json: { challengeIds } });
-
-export const crewGetPartyGameSnapshot = (
-  _albumId: string, signal?: AbortSignal,
-): Promise<PartyGameSnapshot> => api<PartyGameSnapshot>(`${CREW}/game`, { signal });
-
-export const crewSendPartyGameCommand = (
-  _albumId: string, command: PartyGameCommand, expectedVersion: number, signal?: AbortSignal,
-): Promise<PartyGameSnapshot> =>
-  api<PartyGameSnapshot>(`${CREW}/game/commands`, {
-    method: 'POST', json: { command, expectedVersion }, signal,
-  });
-
-export const crewPlanPartyGame = (
-  _albumId: string,
-  action: PartyGamePlanAction,
-  challengeId: string,
-  expectedVersion: number,
-  position?: number,
-  signal?: AbortSignal,
-): Promise<PartyGameSnapshot> =>
-  api<PartyGameSnapshot>(`${CREW}/game/plan`, {
-    method: 'POST', json: { action, challengeId, expectedVersion, position }, signal,
-  });
 
 /**
  * `Prefer: return=minimal` on every guest-list and attendance mutation, exactly
@@ -607,3 +321,326 @@ export const crewPlanPartyGame = (
  * ticked a name.
  */
 const MINIMAL = { prefer: 'return=minimal' } as const;
+
+export function partyCrewRoutes(partyId: string) {
+  const at = `/api/party-crew/parties/${encodeURIComponent(partyId)}`;
+
+  return {
+    /* The party itself. */
+
+    getParty: (_p: string, signal?: AbortSignal): Promise<Party> =>
+      api<Party>(`${at}/party`, { signal }),
+
+    updateParty: (
+      _p: string,
+      body: {
+        title: string;
+        description?: string | null;
+        eventStartsAt?: string | null;
+        guestAccessExpiresAt?: string | null;
+        libraryAccessExpiresAt?: string | null;
+        version: number;
+      },
+      signal?: AbortSignal,
+    ): Promise<Party> => api<Party>(`${at}/party`, { method: 'PATCH', json: body, signal }),
+
+    transitionParty: (
+      _p: string, action: PartyLifecycleAction, version: number, signal?: AbortSignal,
+    ): Promise<Party> =>
+      api<Party>(`${at}/party/${action}`, { method: 'POST', json: { version }, signal }),
+
+    setPartyCovers: (
+      _p: string,
+      body: {
+        invitationCoverFileItemId: string | null;
+        liveCoverFileItemId: string | null;
+        version: number;
+      },
+      signal?: AbortSignal,
+    ): Promise<Party> => api<Party>(`${at}/party/covers`, { method: 'PUT', json: body, signal }),
+
+    /* The album's party settings. */
+
+    getAlbumPartySettings: (_a: string, signal?: AbortSignal): Promise<AlbumPartyStatus> =>
+      api<AlbumPartyStatus>(`${at}/album-settings`, { signal }),
+
+    setAlbumPartyMode: (
+      _a: string,
+      enabled: boolean,
+      uploadEnabled?: boolean,
+      requireUploadApproval?: boolean,
+      signal?: AbortSignal,
+      requireMessageApproval?: boolean,
+    ): Promise<AlbumPartyStatus> =>
+      api<AlbumPartyStatus>(`${at}/album-settings`, {
+        method: 'PATCH',
+        json: { enabled, uploadEnabled, requireUploadApproval, requireMessageApproval },
+        signal,
+      }),
+
+    setPartySlideshowSettings: (
+      _a: string,
+      settings: {
+        photoSlideSeconds?: number;
+        maxVideoSlideSeconds?: number;
+        maxPhotoUploadsPerParticipant?: number;
+        maxVideoUploadsPerParticipant?: number;
+        maxMessagesPerParticipant?: number;
+      },
+      signal?: AbortSignal,
+    ): Promise<AlbumPartyStatus> =>
+      api<AlbumPartyStatus>(`${at}/slideshow-settings`, { method: 'PATCH', json: settings, signal }),
+
+    setPartyGameSettings: (
+      _a: string,
+      settings: {
+        gameEnabled: boolean;
+        minChallengeIntervalSeconds: number;
+        maxChallengeIntervalSeconds: number;
+        votesPerGuest: number;
+        maxChallengesPerSession: number | null;
+        priorityVotingEnabled?: boolean;
+      },
+      signal?: AbortSignal,
+    ): Promise<AlbumPartyStatus> =>
+      api<AlbumPartyStatus>(`${at}/game-settings`, { method: 'PATCH', json: settings, signal }),
+
+    setAlbumTvVisibility: (
+      _a: string, showOnTv: boolean, signal?: AbortSignal,
+    ): Promise<AlbumDetail> =>
+      api<AlbumDetail>(`${at}/tv-visibility`, { method: 'PUT', json: { showOnTv }, signal }),
+
+    getPartyPrintSettings: (_a: string, signal?: AbortSignal): Promise<PartyPrintSettings> =>
+      api<PartyPrintSettings>(`${at}/print-settings`, { signal }),
+
+    setPartyPrintSettings: (
+      _a: string, patch: PartyPrintSettingsPatch, signal?: AbortSignal,
+    ): Promise<PartyPrintSettings> =>
+      api<PartyPrintSettings>(`${at}/print-settings`, { method: 'PATCH', json: patch, signal }),
+
+    /**
+     * The venue's printers, which a collaborator does not get.
+     *
+     * Enumerating the owner's print stations is administering their
+     * INSTALLATION, not running this evening — `print.manage` is the party's
+     * print profile and nothing wider. So there is no crew route for it and
+     * this resolves empty; the panel renders without a station picker.
+     */
+    listPrintStations: (_signal?: AbortSignal): Promise<PrintStation[]> =>
+      Promise.resolve([]),
+
+    /* What the party tells its guests. */
+
+    listPartyGuestContent: (_p: string, signal?: AbortSignal): Promise<PartyGuestContentSlot[]> =>
+      api<PartyGuestContentSlot[]>(`${at}/guest-content`, { signal }),
+
+    setPartyGuestContent: (
+      _p: string, kind: PartyGuestContentKind, body: Record<string, unknown>, signal?: AbortSignal,
+    ): Promise<PartyGuestContentSlot> =>
+      api<PartyGuestContentSlot>(`${at}/guest-content/${encodeURIComponent(kind)}`, {
+        method: 'PUT', json: body, signal,
+      }),
+
+    /* The guest list. */
+
+    queryPartyGuestDirectory: (
+      _p: string, query: GuestDirectoryQuery, signal?: AbortSignal,
+    ): Promise<GuestDirectoryPage> =>
+      api<GuestDirectoryPage>(`${at}/guest-directory/query`, {
+        method: 'POST', json: query, signal,
+      }),
+
+    getPartyInvitationGroup: (
+      _p: string, groupId: string, signal?: AbortSignal,
+    ): Promise<PartyInvitationGroupDetail> =>
+      api<PartyInvitationGroupDetail>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}`, { signal }),
+
+    getPartyRsvpQuestions: (
+      _p: string, signal?: AbortSignal,
+    ): Promise<{ questions: PartyRsvpQuestion[] }> =>
+      api<{ questions: PartyRsvpQuestion[] }>(`${at}/rsvp-questions`, { signal }),
+
+    createPartyInvitationGroup: (
+      _p: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(`${at}/invitation-groups`, {
+        method: 'POST', json: body, signal, headers: MINIMAL,
+      }),
+
+    updatePartyInvitationGroup: (
+      _p: string, groupId: string, body: PartyInvitationGroupWrite, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(`${at}/invitation-groups/${encodeURIComponent(groupId)}`, {
+        method: 'PUT', json: body, signal, headers: MINIMAL,
+      }),
+
+    deletePartyInvitationGroup: (
+      _p: string, groupId: string, version: number, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}?version=${version}`,
+        { method: 'DELETE', signal, headers: MINIMAL }),
+
+    rotatePartyInvitationLink: (
+      _p: string, groupId: string, version: number, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}/rotate-link`,
+        { method: 'POST', json: { version }, signal, headers: MINIMAL }),
+
+    sendPartyInvitation: (
+      _p: string,
+      groupId: string,
+      body: { clientRequestId: string; partyVersion?: number },
+      signal?: AbortSignal,
+    ): Promise<PartyInvitationSendResult> =>
+      api<PartyInvitationSendResult>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}/send`,
+        { method: 'POST', json: body, signal, headers: MINIMAL }),
+
+    remindPartyInvitation: (
+      _p: string, groupId: string, clientRequestId: string, signal?: AbortSignal,
+    ): Promise<PartyInvitationSendResult> =>
+      api<PartyInvitationSendResult>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}/remind`,
+        { method: 'POST', json: { clientRequestId }, signal, headers: MINIMAL }),
+
+    sharePartyInvitation: (
+      _p: string, groupId: string, body: InvitationShareRequest, signal?: AbortSignal,
+    ): Promise<InvitationShareResult<Party>> =>
+      api<InvitationShareResult<Party>>(
+        `${at}/invitation-groups/${encodeURIComponent(groupId)}/share`,
+        { method: 'POST', json: body, signal, headers: MINIMAL }),
+
+    createPartyRsvpQuestion: (
+      _p: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(`${at}/rsvp-questions`, {
+        method: 'POST', json: body, signal, headers: MINIMAL,
+      }),
+
+    updatePartyRsvpQuestion: (
+      _p: string, questionId: string, body: PartyRsvpQuestionWrite, signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(`${at}/rsvp-questions/${encodeURIComponent(questionId)}`, {
+        method: 'PUT', json: body, signal, headers: MINIMAL,
+      }),
+
+    reorderPartyRsvpQuestions: (
+      _p: string, questionIds: string[], signal?: AbortSignal,
+    ): Promise<PartyGuestListMinimal> =>
+      api<PartyGuestListMinimal>(`${at}/rsvp-questions/order`, {
+        method: 'PUT', json: { questionIds }, signal, headers: MINIMAL,
+      }),
+
+    /* Who arrived. */
+
+    checkInPartyGuest: (
+      _p: string, guestId: string, signal?: AbortSignal,
+    ): Promise<PartyAttendanceChange> =>
+      api<PartyAttendanceChange>(`${at}/attendance/guests/${encodeURIComponent(guestId)}`, {
+        method: 'PUT', signal, headers: MINIMAL,
+      }),
+
+    undoPartyGuestCheckIn: (
+      _p: string, guestId: string, signal?: AbortSignal,
+    ): Promise<PartyAttendanceChange> =>
+      api<PartyAttendanceChange>(`${at}/attendance/guests/${encodeURIComponent(guestId)}`, {
+        method: 'DELETE', signal, headers: MINIMAL,
+      }),
+
+    createPartyAttendanceGuest: (
+      _p: string, body: PartyAttendanceOtherGuestCreate, signal?: AbortSignal,
+    ): Promise<PartyAttendanceChange> =>
+      api<PartyAttendanceChange>(`${at}/attendance/other-guests`, {
+        method: 'POST', json: body, signal, headers: MINIMAL,
+      }),
+
+    updatePartyAttendanceGuest: (
+      _p: string, attendanceGuestId: string, body: PartyAttendanceOtherGuestUpdate,
+      signal?: AbortSignal,
+    ): Promise<PartyAttendanceChange> =>
+      api<PartyAttendanceChange>(
+        `${at}/attendance/other-guests/${encodeURIComponent(attendanceGuestId)}`,
+        { method: 'PUT', json: body, signal, headers: MINIMAL }),
+
+    deletePartyAttendanceGuest: (
+      _p: string, attendanceGuestId: string, signal?: AbortSignal,
+    ): Promise<PartyAttendanceChange> =>
+      api<PartyAttendanceChange>(
+        `${at}/attendance/other-guests/${encodeURIComponent(attendanceGuestId)}`,
+        { method: 'DELETE', signal, headers: MINIMAL }),
+
+    /* The photographs and the greetings. */
+
+    listPartyUploads: (_a: string, signal?: AbortSignal): Promise<PartyUploadList> =>
+      api<PartyUploadList>(`${at}/uploads`, { signal }),
+
+    moderatePartyUpload: (
+      _a: string,
+      fileItemId: string,
+      action: 'hide' | 'approve' | 'reject' | 'restore',
+      signal?: AbortSignal,
+    ): Promise<void> =>
+      api<void>(`${at}/uploads/${encodeURIComponent(fileItemId)}/${action}`, {
+        method: 'POST', signal,
+      }),
+
+    listPartyMessages: (_a: string, signal?: AbortSignal): Promise<PartyMessageList> =>
+      api<PartyMessageList>(`${at}/messages`, { signal }),
+
+    moderatePartyMessage: (
+      _a: string, messageId: string, action: PartyMessageAction, signal?: AbortSignal,
+    ): Promise<void> =>
+      api<void>(`${at}/messages/${encodeURIComponent(messageId)}/${action}`, {
+        method: 'POST', signal,
+      }),
+
+    /* The activities. */
+
+    listAlbumItems: (_a: string, signal?: AbortSignal): Promise<AlbumItemSummary[]> =>
+      api<AlbumItemSummary[]>(`${at}/album-items`, { signal }),
+
+    listPartyChallenges: (_a: string, signal?: AbortSignal): Promise<PartyChallengeList> =>
+      api<PartyChallengeList>(`${at}/challenges`, { signal }),
+
+    createPartyChallenge: (_a: string, value: PartyChallengeWrite): Promise<PartyChallenge> =>
+      api<PartyChallenge>(`${at}/challenges`, { method: 'POST', json: value }),
+
+    updatePartyChallenge: (
+      _a: string, id: string, value: PartyChallengeWrite,
+    ): Promise<PartyChallenge> =>
+      api<PartyChallenge>(`${at}/challenges/${encodeURIComponent(id)}`, {
+        method: 'PUT', json: value,
+      }),
+
+    deletePartyChallenge: (_a: string, id: string): Promise<void> =>
+      api<void>(`${at}/challenges/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+    reorderPartyChallenges: (_a: string, challengeIds: string[]): Promise<void> =>
+      api<void>(`${at}/challenges/order`, { method: 'PUT', json: { challengeIds } }),
+
+    getPartyGameSnapshot: (_a: string, signal?: AbortSignal): Promise<PartyGameSnapshot> =>
+      api<PartyGameSnapshot>(`${at}/game`, { signal }),
+
+    sendPartyGameCommand: (
+      _a: string, command: PartyGameCommand, expectedVersion: number, signal?: AbortSignal,
+    ): Promise<PartyGameSnapshot> =>
+      api<PartyGameSnapshot>(`${at}/game/commands`, {
+        method: 'POST', json: { command, expectedVersion }, signal,
+      }),
+
+    planPartyGame: (
+      _a: string,
+      action: PartyGamePlanAction,
+      challengeId: string,
+      expectedVersion: number,
+      position?: number,
+      signal?: AbortSignal,
+    ): Promise<PartyGameSnapshot> =>
+      api<PartyGameSnapshot>(`${at}/game/plan`, {
+        method: 'POST', json: { action, challengeId, expectedVersion, position }, signal,
+      }),
+  };
+}
