@@ -349,6 +349,21 @@ var partyInvitationSendWindowSeconds = builder.Configuration.GetValue<int?>("Rat
 // they are not bounded by what a mail relay tolerates, only by what a host
 // working through a long guest list does: one share per group, each a trip to
 // WhatsApp and back. The ceiling keeps a runaway client from filling the ledger.
+// Party Crew pairing. Three different things are being protected, so three
+// different ceilings rather than one number pretending to cover all of them.
+//
+// A LINK is 256 bits and cannot be guessed; the limit is there so trying is not
+// free, and so a leaked link cannot be ground against every party at once.
+var partyCrewInvitePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewInvite:PermitLimit") ?? 20;
+var partyCrewInviteWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewInvite:WindowSeconds") ?? 300;
+// A CODE costs the operator an email every time it is asked for. The service
+// already refuses a resend inside a minute; this bounds the hour.
+var partyCrewCodePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewCode:PermitLimit") ?? 10;
+var partyCrewCodeWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewCode:WindowSeconds") ?? 3600;
+// TYPING a code is bounded per challenge by five attempts; this is the outer
+// bound on a machine trying six digits against many challenges from one place.
+var partyCrewVerifyPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewVerify:PermitLimit") ?? 30;
+var partyCrewVerifyWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewVerify:WindowSeconds") ?? 600;
 var partyInvitationSharePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationShare:PermitLimit") ?? 300;
 var partyInvitationShareWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyInvitationShare:WindowSeconds") ?? 600;
 // Anonymous party FACE SEARCH runs face detection + embedding per request, the
@@ -663,6 +678,41 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // Party Crew pairing, all three partitioned by ADDRESS: the caller has no
+    // account and no session yet, which is the whole point of these routes.
+    options.AddPolicy(NubArca.Api.Endpoints.PartyCrewAuthEndpoints.InviteRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyCrewInvitePermitLimit,
+                Window = TimeSpan.FromSeconds(partyCrewInviteWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    options.AddPolicy(NubArca.Api.Endpoints.PartyCrewAuthEndpoints.CodeRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyCrewCodePermitLimit,
+                Window = TimeSpan.FromSeconds(partyCrewCodeWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    options.AddPolicy(NubArca.Api.Endpoints.PartyCrewAuthEndpoints.VerifyRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = partyCrewVerifyPermitLimit,
+                Window = TimeSpan.FromSeconds(partyCrewVerifyWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
     options.AddPolicy(PartyFaceSearchRateLimitPolicy, httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -792,6 +842,15 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     if (NubArca.Api.Party.PartyInvitationTokens.SecretFrom(builder.Configuration) is null)
     {
         throw NubArca.Api.Party.PartyInvitationTokens.MissingSecret();
+    }
+
+    // The SAME decision for Party Crew's one-time codes. Six digits is a
+    // million possibilities, so the stored proof has to be keyed; a key written
+    // into the source would be a key every installation shares and every reader
+    // knows, and a code plus a forwarded link would then be an account.
+    if (NubArca.Api.Party.PartyCrewTokens.SecretFrom(builder.Configuration) is null)
+    {
+        throw NubArca.Api.Party.PartyCrewTokens.MissingSecret();
     }
 
     builder.Services.AddDbContext<AppDbContext>(options =>
@@ -965,6 +1024,19 @@ if (!string.IsNullOrWhiteSpace(connectionString))
         NubArca.Api.Party.IPartyGuestDirectoryService, NubArca.Api.Party.PartyGuestDirectoryService>();
     // Attendance: who the host saw arrive. Owner routes only.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyAttendanceService, NubArca.Api.Party.PartyAttendanceService>();
+
+    // PARTY CREW: accountless collaborators on one party. The token helper is a
+    // singleton for the same reason PartyInvitationTokens is — key material, no
+    // state. Everything else is per-request, because every Party Crew request
+    // re-reads the whole chain rather than trusting anything in the cookie.
+    builder.Services.AddSingleton<NubArca.Api.Party.PartyCrewTokens>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyCrewService, NubArca.Api.Party.PartyCrewService>();
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyCrewAuthService, NubArca.Api.Party.PartyCrewAuthService>();
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyCrewAccessResolver, NubArca.Api.Party.PartyCrewAccessResolver>();
+    builder.Services.AddScoped<
+        NubArca.Api.Party.IPartyCrewSignOutService, NubArca.Api.Party.PartyCrewSignOutService>();
 
     // Slice 70: background jobs. The operations the handlers drive
     // (metadata / media-derivatives backfill, storage reconcile) are
@@ -1586,6 +1658,13 @@ app.MapPartyGameEndpoints();
 app.MapPartyDisplayEndpoints();
 app.MapPartyPrintEndpoints();
 app.MapPartyPrintOwnerEndpoints();
+
+// PARTY CREW: the host's collaborator panel, the pairing surface, and the
+// collaborator's own view of the party. See Endpoints/PartyCrewEndpoints.cs for
+// why the façade names no party, album or owner id anywhere.
+app.MapPartyCrewOwnerEndpoints();
+app.MapPartyCrewAuthEndpoints();
+app.MapPartyCrewEndpoints();
 
 // Aesthetics Lab / Beauty Lab endpoints — the public TV "Beauty Lab" QR
 // mobile upload below, plus the owner-facing lab surface further down —

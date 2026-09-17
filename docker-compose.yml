@@ -40,6 +40,7 @@ services:
       # Throwaway, like the password above: a host with a database refuses to
       # start without a personal-invitation signing secret. Never reuse it.
       Party__InvitationTokenSecret: "development-only-invitation-secret"
+      Party__CollaboratorOtpSecret: "development-only-party-crew-otp-secret"
       Storage__RootPath: "/var/lib/nubarca/storage"
       TvUpdates__RootPath: "/var/lib/nubarca/tv-updates"
     volumes:

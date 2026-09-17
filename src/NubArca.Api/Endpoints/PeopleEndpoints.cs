@@ -65,7 +65,7 @@ public static class PeopleEndpoints
             }
 
             await audit.LogAsync(
-                userId: ownerUserId,
+                actor: ownerUserId,
                 action: NubArca.Api.Audit.AuditActions.PeopleFaceClusterRebuild,
                 entityType: NubArca.Api.Audit.AuditEntityTypes.User,
                 entityId: ownerUserId,

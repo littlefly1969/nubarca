@@ -17,6 +17,9 @@ import { HelpPage } from './pages/HelpPage';
 import { AlbumsPage } from './pages/AlbumsPage';
 import { PartiesPage } from './pages/PartiesPage';
 import { PartyWorkspacePage } from './pages/PartyWorkspacePage';
+import { PartyCrewDeepPage } from './pages/PartyCrewDeepPage';
+import { PartyCrewPairingPage } from './pages/PartyCrewPairingPage';
+import { PartyCrewWorkspacePage } from './pages/PartyCrewWorkspacePage';
 import { CloudFunctionsPage } from './pages/CloudFunctionsPage';
 import { MediaLibraryPage } from './pages/MediaLibraryPage';
 import { LegacyMediaRedirect } from './media/workspace/LegacyMediaRedirect';
@@ -88,6 +91,19 @@ export function App() {
           <Route path="/party/:token/print" element={<PartyPrintPage />} />
           {/* PUBLIC, unauthenticated TV Beauty Lab mobile UPLOAD landing (QR target). */}
           <Route path="/beauty-lab-upload/:token" element={<BeautyLabUploadPage />} />
+          {/* PARTY CREW. Unauthenticated because a collaborator has no account
+              and never gets one: what stands in for a session is a device
+              cookie that resolves, on the server, to one collaborator on one
+              party. The three pairing routes are the link, the code and the
+              two-device limit; the fourth is the party itself, which reuses the
+              host's workspace through the Party Crew family of routes. */}
+          <Route path="/party/crew/invite" element={<PartyCrewPairingPage />} />
+          <Route path="/party/crew/verify" element={<PartyCrewPairingPage />} />
+          <Route path="/party/crew/devices" element={<PartyCrewPairingPage />} />
+          <Route path="/party/crew/:partyId" element={<PartyCrewWorkspacePage />} />
+          <Route path="/party/crew/:partyId/photos" element={<PartyCrewDeepPage kind="photos" />} />
+          <Route path="/party/crew/:partyId/messages" element={<PartyCrewDeepPage kind="messages" />} />
+          <Route path="/party/crew/:partyId/game" element={<PartyCrewDeepPage kind="game" />} />
           <Route
             path="/tv/pair"
             element={

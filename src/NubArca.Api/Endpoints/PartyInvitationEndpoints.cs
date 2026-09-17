@@ -229,24 +229,9 @@ public static class PartyInvitationEndpoints
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
             var result = await deliveries.ShareAsync(
                 ownerUserId, partyId, groupId, body.Channel, body.ClientRequestId, body.PartyVersion, cancellationToken);
-            // Only a NEW share is an event; a replayed click handed over nothing new.
-            if (result is { Outcome: PartyInvitationOutcome.Ok, Share: { Replayed: false } share })
-            {
-                await audit.LogAsync(
-                    ownerUserId, AuditActions.PartyInvitationShare, AuditEntityTypes.Party, partyId,
-                    httpContext.Connection.RemoteIpAddress?.ToString(),
-                    new { partyId, invitationGroupId = groupId, channel = share.Channel, kind = share.Kind },
-                    cancellationToken);
-            }
-            return result.Outcome switch
-            {
-                PartyInvitationOutcome.Ok => Results.Ok(new { share = result.Share, party = result.Party, item = result.Item }),
-                PartyInvitationOutcome.NotFound => Results.NotFound(),
-                PartyInvitationOutcome.InvalidRequest => Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
-                _ => Results.Json(
-                    new { error = result.Error ?? "conflict", party = result.Party },
-                    statusCode: StatusCodes.Status409Conflict),
-            };
+            return await CompleteShareAsync(
+                audit, result, ownerUserId, partyId, groupId,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
         }).WithName("SharePartyInvitation")
             .RequirePermission(Permissions.PartyAccess)
             .RequireRateLimiting(ShareRateLimitPolicy);
@@ -431,10 +416,47 @@ public static class PartyInvitationEndpoints
         return app;
     }
 
-    private static PartyInvitationGroupWrite Write(GroupRequest body) =>
+    /// <summary>
+    /// A share's audit line and its answer, shared with the Party Crew façade.
+    ///
+    /// <para>Only a NEW share is an event; a replayed click handed over nothing
+    /// new and records nothing. The line names the channel and the kind, never
+    /// the link and never the recipient.</para>
+    /// </summary>
+    internal static async Task<IResult> CompleteShareAsync(
+        IAuditLogger audit,
+        PartyInvitationShareResult result,
+        AuditActor actor,
+        Guid partyId,
+        Guid groupId,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
+        if (result is { Outcome: PartyInvitationOutcome.Ok, Share: { Replayed: false } share })
+        {
+            await audit.LogAsync(
+                actor, AuditActions.PartyInvitationShare, AuditEntityTypes.Party, partyId, ip,
+                new { partyId, invitationGroupId = groupId, channel = share.Channel, kind = share.Kind },
+                cancellationToken);
+        }
+
+        return result.Outcome switch
+        {
+            PartyInvitationOutcome.Ok =>
+                Results.Ok(new { share = result.Share, party = result.Party, item = result.Item }),
+            PartyInvitationOutcome.NotFound => Results.NotFound(),
+            PartyInvitationOutcome.InvalidRequest =>
+                Results.BadRequest(new { error = result.Error ?? "invalid_request" }),
+            _ => Results.Json(
+                new { error = result.Error ?? "conflict", party = result.Party },
+                statusCode: StatusCodes.Status409Conflict),
+        };
+    }
+
+    internal static PartyInvitationGroupWrite Write(GroupRequest body) =>
         new(body.Label, body.RecipientEmail, body.Phone, body.MaxAdditionalGuests, body.Guests);
 
-    private static PartyRsvpQuestionWrite Write(QuestionRequest body) =>
+    internal static PartyRsvpQuestionWrite Write(QuestionRequest body) =>
         new(body.Prompt, body.Kind, body.Required, body.Options, body.IsActive);
 
     // Only a NEW attempt is an event. A replayed click sent nothing, so it
@@ -460,7 +482,7 @@ public static class PartyInvitationEndpoints
             cancellationToken);
     }
 
-    private static IResult ToResult(PartyInvitationResult result, bool minimal)
+    internal static IResult ToResult(PartyInvitationResult result, bool minimal)
     {
         object? list = minimal && result.GuestList is { } full
             ? new GuestListMinimal(
@@ -482,7 +504,7 @@ public static class PartyInvitationEndpoints
 
     // Minimal: the delivery and the party (which a Draft's first invitation
     // publishes), never the list.
-    private static IResult ToResult(PartyInvitationSendResult result, bool minimal) => result.Outcome switch
+    internal static IResult ToResult(PartyInvitationSendResult result, bool minimal) => result.Outcome switch
     {
         PartyInvitationOutcome.Ok => minimal
             ? Results.Ok(new { delivery = result.Delivery, party = result.Party })

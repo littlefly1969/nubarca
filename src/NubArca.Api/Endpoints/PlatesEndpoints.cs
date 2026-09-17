@@ -52,7 +52,7 @@ public static class PlatesEndpoints
                     ownerUserId, file.FileName, file.ContentType, stream, cancellationToken);
 
                 await audit.LogAsync(
-                    userId: ownerUserId,
+                    actor: ownerUserId,
                     action: AuditActions.PlateUpload,
                     entityType: AuditEntityTypes.Plate,
                     entityId: created.Id,

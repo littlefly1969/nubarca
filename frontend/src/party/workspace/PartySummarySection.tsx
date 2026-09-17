@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import {
   ApiError,
-  setAlbumPartyMode,
-  transitionParty,
   type AlbumPartyStatus,
   type Party,
 } from '@nubarca/api-client';
 import { useAuth } from '../../auth/useAuth';
 import { useI18n, type MessageKey } from '../../i18n';
 import { mainMediaSource } from '../partyModel';
+import { usePartyApi } from './partyApi';
 import { PartyShareCard } from './PartyShareCard';
 import {
   attentionBodyKey,
@@ -253,6 +252,7 @@ function NextMove({
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const { party } = facts;
   const album = mainMediaSource(party);
   const intent = primaryIntent(facts);
@@ -287,12 +287,12 @@ function NextMove({
     // still offering to publish something the server had already published —
     // until the host reloaded the page by hand. The party is read again, in
     // the same action, so there is one source of truth for what happened.
-    onAlbumPartyUpdated(await setAlbumPartyMode(album!.albumId, true));
+    onAlbumPartyUpdated(await api.setAlbumPartyMode(album!.albumId, true));
     await onPartyReload();
   });
 
   const transition = (action: 'start-live' | 'end-live') => guarded(async () => {
-    onPartyUpdated(await transitionParty(party.id, action, party.version));
+    onPartyUpdated(await api.transitionParty(party.id, action, party.version));
   });
 
   const story = t(statusStoryKey(party.status));

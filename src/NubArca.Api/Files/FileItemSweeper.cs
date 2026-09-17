@@ -142,7 +142,7 @@ public sealed class FileItemSweeper : BackgroundService
                 }
 
                 await audit.LogAsync(
-                    userId: candidate.OwnerUserId,
+                    actor: candidate.OwnerUserId,
                     action: AuditActions.FilePurge,
                     entityType: AuditEntityTypes.File,
                     entityId: candidate.Id,

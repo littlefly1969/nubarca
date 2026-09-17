@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   ApiError,
   GUEST_CONSOLE_PARAMS,
-  transitionParty,
   unexpectedArrivals,
   type GuestDirectoryState,
   type Party,
@@ -24,6 +23,7 @@ import {
   type WorkspaceFacts,
   type WorkspaceSection,
 } from './partyWorkspaceModel';
+import { usePartyApi } from './partyApi';
 import { Badge, Button, LinkRow, Notice, Panel, SectionHead, Stats } from './ui';
 
 // "LIVE" — the party while it is happening.
@@ -269,6 +269,7 @@ function EndTheParty({
 }) {
   const { t } = useI18n();
   const { invalidateAuth } = useAuth();
+  const api = usePartyApi();
   const [asking, setAsking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -276,7 +277,7 @@ function EndTheParty({
   async function run() {
     setBusy(true); setFailed(false);
     try {
-      onPartyUpdated(await transitionParty(party.id, 'end-live', party.version));
+      onPartyUpdated(await api.transitionParty(party.id, 'end-live', party.version));
       setAsking(false);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }

@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ApiError,
-  getAlbumPartySettings,
-  listPartyMessages,
-  listPartyUploads,
-  listPartyGuestContent,
-  queryPartyGuestDirectory,
   type AlbumPartyStatus,
   type GuestDirectorySummary,
   type Party,
   type PartyGuestContentSlot,
 } from '@nubarca/api-client';
 import { mainMediaSource } from '../partyModel';
+import { usePartyApi } from './partyApi';
 import type { Loaded } from './partyWorkspaceModel';
 
 // Everything the workspace knows about one party, gathered once.
@@ -70,9 +66,18 @@ const ready = <T>(value: T): Loaded<T> => ({ status: 'ready', value });
 
 export function usePartyFacts(
   party: Party | null,
-  { wantsModeration }: { wantsModeration: boolean },
+  {
+    wantsModeration,
+    // Whether this surface has a guest list at all. The host always does; a
+    // Party Crew role without `guests.read` does not, and must not ASK — the
+    // server would refuse it, but a request that is refused is still a request
+    // for names, and the point of the role is that it never makes one.
+    wantsGuests = true,
+  }: { wantsModeration: boolean; wantsGuests?: boolean },
   onUnauthorized: () => void,
 ): PartyFactsExtras {
+  // Host or collaborator: the same four reads, a different family of routes.
+  const api = usePartyApi();
   const [albumParty, setAlbumPartyState] =
     useState<Loaded<AlbumPartyStatus | null>>(LOADING);
   const [slots, setSlots] = useState<Loaded<readonly PartyGuestContentSlot[]>>(LOADING);
@@ -113,7 +118,7 @@ export function usePartyFacts(
     if (!albumId) { setAlbumPartyState(ready(null)); return; }
     const ctrl = new AbortController();
     setAlbumPartyState(LOADING);
-    getAlbumPartySettings(albumId, ctrl.signal)
+    api.getAlbumPartySettings(albumId, ctrl.signal)
       .then((value) => { if (!ctrl.signal.aborted) setAlbumPartyState(ready(value)); })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
@@ -121,13 +126,13 @@ export function usePartyFacts(
         setAlbumPartyState(FAILED);
       });
     return () => ctrl.abort();
-  }, [partyLoaded, albumId, nonce, unauthorized]);
+  }, [partyLoaded, albumId, nonce, unauthorized, api]);
 
   useEffect(() => {
     if (!partyId) { setSlots(LOADING); return; }
     const ctrl = new AbortController();
     setSlots(LOADING);
-    listPartyGuestContent(partyId, ctrl.signal)
+    api.listPartyGuestContent(partyId, ctrl.signal)
       .then((value) => { if (!ctrl.signal.aborted) setSlots(ready(value)); })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
@@ -135,13 +140,17 @@ export function usePartyFacts(
         setSlots(FAILED);
       });
     return () => ctrl.abort();
-  }, [partyId, nonce, unauthorized]);
+  }, [partyId, nonce, unauthorized, api]);
 
   useEffect(() => {
     if (!partyId) { setGuests(LOADING); return; }
+    // No guest list on this surface is a FACT, not a missing answer: the
+    // summary and the console read it the same way they read an open party
+    // that never had one.
+    if (!wantsGuests) { setGuests(ready(null)); return; }
     const ctrl = new AbortController();
     // `take: 0` is the counts alone — no card, no person, no name.
-    queryPartyGuestDirectory(partyId, { take: 0 }, ctrl.signal)
+    api.queryPartyGuestDirectory(partyId, { take: 0 }, ctrl.signal)
       .then((page) => { if (!ctrl.signal.aborted) setGuests(ready(page.summary)); })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
@@ -149,7 +158,7 @@ export function usePartyFacts(
         setGuests(FAILED);
       });
     return () => ctrl.abort();
-  }, [partyId, nonce, unauthorized]);
+  }, [partyId, nonce, unauthorized, api, wantsGuests]);
 
   useEffect(() => {
     if (!albumId || !wantsModeration || party?.status === 'draft') return;
@@ -162,7 +171,7 @@ export function usePartyFacts(
 
     // Two reads, two answers. `Promise.all` with a shared catch would have let
     // one failure decide for both; each settles on its own.
-    void listPartyUploads(albumId, ctrl.signal)
+    void api.listPartyUploads(albumId, ctrl.signal)
       .then((list) => {
         if (!ctrl.signal.aborted) {
           setUploads(ready(list.items.filter((i) => i.status === 'pending').length));
@@ -173,7 +182,7 @@ export function usePartyFacts(
         unauthorized(err);
         setUploads(FAILED);
       });
-    void listPartyMessages(albumId, ctrl.signal)
+    void api.listPartyMessages(albumId, ctrl.signal)
       .then((list) => {
         if (!ctrl.signal.aborted) {
           setMessages(ready(list.items.filter((i) => i.status === 'pending').length));
@@ -185,7 +194,7 @@ export function usePartyFacts(
         setMessages(FAILED);
       });
     return () => ctrl.abort();
-  }, [albumId, wantsModeration, party?.status, nonce, unauthorized]);
+  }, [albumId, wantsModeration, party?.status, nonce, unauthorized, api]);
 
   const setSlot = useCallback((next: PartyGuestContentSlot) => {
     setSlots((current) => (current.status === 'ready'

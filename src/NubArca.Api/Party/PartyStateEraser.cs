@@ -184,6 +184,52 @@ public sealed class PartyStateEraser : IPartyStateEraser
             .Where(g => g.PartyId == partyId)
             .ExecuteDeleteAsync(cancellationToken);
 
+        // PARTY CREW. The collaborators hold a restricting key to the party, so
+        // they and everything naming them go before the root — and in their own
+        // key order: the challenges name an invite AND a collaborator, the
+        // device grants name a device AND a collaborator, and both the plain
+        // grants and the invites name a collaborator.
+        var collaboratorIds = _db.PartyCollaborators
+            .Where(c => c.PartyId == partyId)
+            .Select(c => c.Id);
+
+        // The devices this party's grants point at, remembered BEFORE the grants
+        // are deleted — a device is party-agnostic and is only this party's to
+        // delete if nothing else still holds it.
+        var touchedDeviceIds = await _db.PartyCollaboratorDeviceGrants
+            .Where(g => collaboratorIds.Contains(g.PartyCollaboratorId))
+            .Select(g => g.PartyCrewDeviceId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        await _db.PartyCollaboratorAuthChallenges
+            .Where(c => collaboratorIds.Contains(c.PartyCollaboratorId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyCollaboratorDeviceGrants
+            .Where(g => collaboratorIds.Contains(g.PartyCollaboratorId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyCollaboratorGrants
+            .Where(g => collaboratorIds.Contains(g.PartyCollaboratorId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyCollaboratorInvites
+            .Where(i => collaboratorIds.Contains(i.PartyCollaboratorId))
+            .ExecuteDeleteAsync(cancellationToken);
+        await _db.PartyCollaborators
+            .Where(c => c.PartyId == partyId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        // A device that helped at TWO parties keeps working at the other one:
+        // only the devices left holding nothing are this party's to take. The
+        // person is not signed out of a party that still exists because a
+        // different one was torn down.
+        if (touchedDeviceIds.Count > 0)
+        {
+            await _db.PartyCrewDevices
+                .Where(d => touchedDeviceIds.Contains(d.Id))
+                .Where(d => !_db.PartyCollaboratorDeviceGrants.Any(g => g.PartyCrewDeviceId == d.Id))
+                .ExecuteDeleteAsync(cancellationToken);
+        }
+
         // What the party told its guests, and where it drew its media from.
         await _db.PartyGuestContents
             .Where(c => c.PartyId == partyId)

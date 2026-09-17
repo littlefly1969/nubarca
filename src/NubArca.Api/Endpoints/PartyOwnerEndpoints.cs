@@ -352,28 +352,7 @@ public static class PartyOwnerEndpoints
                     body.TextAlign, body.MediaOrientation, body.MediaCrop, body.TextPlacement),
                 cancellationToken);
 
-            return result.Outcome switch
-            {
-                PartyGuestContentOutcome.Ok => Results.Ok(result.Content),
-                // A kind the product does not define is a not-found rather than
-                // a validation error: there is no such slot to talk about.
-                PartyGuestContentOutcome.UnknownKind => Results.NotFound(),
-                PartyGuestContentOutcome.InvalidPayload =>
-                    Results.BadRequest(new { error = "invalid_content" }),
-                // One answer for a missing, foreign, trashed, vaulted or
-                // non-image file, so it never says whether a file exists.
-                PartyGuestContentOutcome.InvalidMedia =>
-                    Results.BadRequest(new { error = "invalid_media" }),
-                // An unknown presentation, or "poster" with nothing to present.
-                // Its own code because it is the owner's to fix in one click,
-                // unlike a media reference they may no longer control.
-                PartyGuestContentOutcome.InvalidPresentation =>
-                    Results.BadRequest(new { error = "invalid_presentation" }),
-                PartyGuestContentOutcome.VersionConflict => Results.Json(
-                    new { error = "version_conflict", content = result.Content },
-                    statusCode: StatusCodes.Status409Conflict),
-                _ => Results.NotFound(),
-            };
+            return ToResult(result);
         }).WithName("SetPartyGuestContent").RequirePermission(Permissions.PartyAccess);
 
         // One route per ACTION rather than a status the caller chooses:
@@ -425,7 +404,37 @@ public static class PartyOwnerEndpoints
     /// refusal that would confirm the existence of something the caller may not
     /// see is the generic 404 instead.</para>
     /// </summary>
-    private static IResult ToResult(PartyMutationResult result) => result.Outcome switch
+    /// <summary>The guest-content slot's own outcomes, shared with the Party Crew façade.</summary>
+    internal static IResult ToResult(PartyGuestContentResult result) => result.Outcome switch
+    {
+        PartyGuestContentOutcome.Ok => Results.Ok(result.Content),
+
+        // A kind the product does not define is a not-found rather than a
+        // validation error: there is no such slot to talk about.
+        PartyGuestContentOutcome.UnknownKind => Results.NotFound(),
+
+        PartyGuestContentOutcome.InvalidPayload =>
+            Results.BadRequest(new { error = "invalid_content" }),
+
+        // One answer for a missing, foreign, trashed, vaulted or non-image
+        // file, so it never says whether a file exists.
+        PartyGuestContentOutcome.InvalidMedia =>
+            Results.BadRequest(new { error = "invalid_media" }),
+
+        // An unknown presentation, or "poster" with nothing to present. Its own
+        // code because it is the host's to fix in one click, unlike a media
+        // reference they may no longer control.
+        PartyGuestContentOutcome.InvalidPresentation =>
+            Results.BadRequest(new { error = "invalid_presentation" }),
+
+        PartyGuestContentOutcome.VersionConflict => Results.Json(
+            new { error = "version_conflict", content = result.Content },
+            statusCode: StatusCodes.Status409Conflict),
+
+        _ => Results.NotFound(),
+    };
+
+    internal static IResult ToResult(PartyMutationResult result) => result.Outcome switch
     {
         PartyMutationOutcome.Ok => Results.Ok(result.Party),
 

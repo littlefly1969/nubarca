@@ -2,11 +2,10 @@ import { useEffect, useState } from 'react';
 import {
   PARTY_GAME_RANGES,
   PARTY_SLIDESHOW_RANGES,
-  setPartyGameSettings,
-  setPartySlideshowSettings,
   type AlbumPartyStatus,
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
+import { usePartyApi } from './workspace/partyApi';
 import { PartyChallengeManager } from '../albums/PartyChallengeManager';
 
 // The party's NUMBERS: how long a photo holds the slideshow, what one guest may
@@ -35,6 +34,7 @@ export function PartySlideshowSettings({
   onUpdated(next: AlbumPartyStatus): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'saved' | 'invalid' | 'failed'>('idle');
   const [draft, setDraft] = useState({
@@ -68,7 +68,7 @@ export function PartySlideshowSettings({
     if (!valid) { setStatus('invalid'); return; }
     setSaving(true); setStatus('idle');
     try {
-      onUpdated(await setPartySlideshowSettings(albumId, {
+      onUpdated(await api.setPartySlideshowSettings(albumId, {
         photoSlideSeconds: Number(draft.photoSlideSeconds),
         maxVideoSlideSeconds: Number(draft.maxVideoSlideSeconds),
         maxPhotoUploadsPerParticipant: Number(draft.maxPhotoUploadsPerParticipant),
@@ -177,6 +177,7 @@ export function PartyGameSettings({
   onUpdated(next: AlbumPartyStatus): void;
 }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<'idle' | 'saved' | 'failed'>('idle');
   const [draft, setDraft] = useState({
@@ -213,7 +214,7 @@ export function PartyGameSettings({
     if (!valid) return;
     setSaving(true); setStatus('idle');
     try {
-      onUpdated(await setPartyGameSettings(albumId, {
+      onUpdated(await api.setPartyGameSettings(albumId, {
         gameEnabled: draft.gameEnabled,
         priorityVotingEnabled: draft.priorityVotingEnabled,
         minChallengeIntervalSeconds: min,

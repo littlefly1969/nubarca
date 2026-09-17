@@ -1364,6 +1364,111 @@ never `localStorage`, `sessionStorage`, a cookie or IndexedDB. A reload
 therefore has no credential and asks the native shell for a new one rather than
 inventing anything.
 
+### 14.3.9 Party Crew: the fourth kind of credential
+
+**A collaborator is not a user, and that is the whole design.** A party often
+needs a second pair of hands — somebody who runs the screens, moderates the
+photographs, works the door — and until this slice the only way to give them one
+was a NubArca account. A `User` carries a global role whose permissions reach
+the media library, People, the Private Vault, the albums and the
+administration; a co-organizer needs none of that and must never acquire it. So
+Party Crew adds an identity that exists only inside one party and cannot be
+named anywhere else:
+
+```
+USER  ──► ROLE         ──► GLOBAL PERMISSIONS   (PermissionCatalog)
+PARTY ──► COLLABORATOR ──► PARTY CAPABILITIES   (PartyCrewCapabilities)
+```
+
+The two vocabularies are **disjoint by construction**. A Party Crew capability
+is never added to `PermissionCatalog`, a collaborator never appears in
+`AccessRole`/`RolePermission`, and nothing here can be granted to a user or the
+other way round. There is no row that could accidentally be read as both, and no
+path by which a collaborator becomes one.
+
+**Two factors, because a link travels.** A personal invite link is one forward
+away from being somebody else's access, and it travels through exactly the
+channels — a chat, a screenshot, a group — where that happens. So possession of
+the link proves only WHICH collaborator is pairing; possession of the mailbox
+the OWNER chose proves it is them. Neither works alone: the six-digit code is
+bound to the challenge held in the browser that asked for it, so somebody
+reading it over a shoulder or out of a forwarded thread has nothing to type it
+into. The owner is never asked to approve a device, because an owner woken at
+midnight by a party approves everything.
+
+**The code is keyed, not hashed.** Six digits is a million possibilities:
+`SHA-256(482117)` is a lookup table a laptop builds in a second, and storing one
+would mean a database dump yields every live code. What the row holds is
+`HMAC-SHA256(secret, challengeId ‖ "party-crew-otp" ‖ code)`, and the secret has
+no built-in value — the application refuses to start without
+`Party__CollaboratorOtpSecret` (or an explicitly configured
+`Party__TokenSecret`), exactly as personal invitations do. The invite, challenge
+and device tokens are the ordinary scheme: 256 bits of CSPRNG, returned once,
+stored only as SHA-256, never in a body, a URL, a log or browser storage. The
+invite link carries its token in the URL **fragment**, which browsers never send
+to a server.
+
+**At most two devices per collaborator, serialised in the database.** The limit
+is counted on `PartyCollaboratorDeviceGrant` and not on the device, because a
+device is party-agnostic: the same phone helping at two parties is one device
+with two grants, and a person is allowed as many parties as they are invited to.
+Counting and then inserting is a read-modify-write, so `PartyCrewAuthService`
+opens its transaction with a self-assigning `ExecuteUpdateAsync` on the
+collaborator's own row — taking that row's write lock and ordering two
+simultaneous pairings, the same pattern `PartyDisplayService.MintAsync` uses. A
+PostgreSQL test runs the race with two real connections and asserts that three
+grants never exist. Reaching the limit is deliberately **not an error**: the
+challenge stays verified, the person is shown their own two devices, and freeing
+one lets them finish **without typing a second code** — re-proving identity
+because the product could not count to two would be the product's cost charged
+to them.
+
+**Nothing is cached into the credential.** The cookie is an opaque token and
+carries no party, no role and no capability. `PartyCrewAccessResolver` re-reads
+the whole chain on every request — device live, grant unrevoked, collaborator
+unrevoked, party present, grants fresh, and the OWNER still holding
+`party.access` and each capability's required permission — so revoking a
+collaborator, changing their role, or taking a permission off the host's role
+takes effect on the very next request, with nobody signing out and no token
+rotated. That is the same property the guest seam has, and it is why delegation
+here is safe to hand out.
+
+**Delegation can never exceed its source.** The owner's effective permissions
+are an upper bound applied AFTER the collaborator's own grants: a director
+holding `activities.control` whose host lost `party.games` holds nothing,
+because the host cannot run a game either.
+
+**What is never delegable.** Creating a party, choosing or re-pointing its main
+media source, duplicating it, tearing it down, and managing collaborators are
+the owner's for the life of the party — authority that can extend itself is not
+bounded by anything, and a collaborator who could re-point the album could hand
+the host's library to a party. The print station and the TV device are likewise
+owner-only: they are installation hardware, not this evening's. A collaborator
+also never reaches the host's media library — the Party Crew surface offers the
+party's own album and no upload into the library root.
+
+**The façade names nothing.** Every crew route lives under `/api/party-crew` and
+carries **no party id, album id or owner id**, because the device cookie
+resolves all three server-side. A collaborator cannot reach another party by
+changing a URL, because there is no id in the URL to change. Each route declares
+the one capability it needs and answers the same generic 404 for every way it
+can be refused — no device, revoked device, revoked collaborator, missing party,
+owner without the permission, role without the capability. The handlers
+themselves are the host's: the services are owner-scoped and already correct, so
+any handler body that carried validation or audit logic was extracted and both
+surfaces call one implementation.
+
+**The audit names the actor.** `AuditLog` gained a nullable
+`PartyCollaboratorId` and `IAuditLogger` takes an `AuditActor`: a crew action
+records the collaborator, never the owner and never nobody. Writing the owner's
+id would make a co-organizer's revoke read, in every export, as something the
+host did. The column carries no foreign key on purpose — a restricting one would
+make the audit refuse a party teardown, and a cascading one would erase the
+record of what a collaborator did the moment they were removed. Collaborator
+names and addresses never appear in an audit entry; the address is owner-private
+and appears nowhere else in the product, the pairing surface showing only a
+masked form.
+
 ### 14.4 Anonymous Party upload
 
 Anonymous uploads are bounded by Party-specific size and rate limits, ingest through the same blob/file invariants, and are associated with the album and moderation row. Post-ingestion preview and face jobs use higher-priority lanes than global backfills so event content becomes usable quickly without bypassing durability.

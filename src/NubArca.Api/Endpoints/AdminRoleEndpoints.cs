@@ -51,7 +51,7 @@ public static class AdminRoleEndpoints
             }
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminRoleCreate,
                 entityType: AuditEntityTypes.Role,
                 entityId: null,
@@ -78,7 +78,7 @@ public static class AdminRoleEndpoints
             }
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminRoleUpdate,
                 entityType: AuditEntityTypes.Role,
                 entityId: null,
@@ -105,7 +105,7 @@ public static class AdminRoleEndpoints
             }
 
             await audit.LogAsync(
-                userId: httpContext.GetCurrentUserId(),
+                actor: httpContext.GetCurrentUserId(),
                 action: AuditActions.AdminRoleDelete,
                 entityType: AuditEntityTypes.Role,
                 entityId: null,

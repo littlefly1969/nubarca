@@ -42,36 +42,55 @@ public static class PartyPrintOwnerEndpoints
             [FromServices] IAuditLogger audit,
             CancellationToken cancellationToken) =>
         {
-            if (body is null) return Results.BadRequest(new { error = "invalid" });
-
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-            var result = await profiles.SaveAsync(ownerUserId, albumId, body, cancellationToken);
-            if (result.Error == "not_found") return Results.NotFound();
-            if (result.Error is not null) return Results.BadRequest(new { error = result.Error });
-
-            var saved = result.Profile!;
-            // Printing spends the host's own consumables and puts a line of
-            // their text on paper, so the switch, the budgets and the chosen
-            // printer are all worth a trail. The footer TEXT is not recorded:
-            // what was configured is a security question, what it said is not.
-            await audit.LogAsync(
-                ownerUserId, AuditActions.PartyPrintConfigure, AuditEntityTypes.PartyAlbum,
-                albumId, httpContext.Connection.RemoteIpAddress?.ToString(),
-                new
-                {
-                    albumId,
-                    enabled = saved.Enabled,
-                    printStationId = saved.PrintStationId,
-                    printerDeviceId = saved.PrinterDeviceId,
-                    photoEnabled = saved.Photo.Enabled,
-                    photoMaxPrints = saved.Photo.MaxPrints,
-                    stripEnabled = saved.Strip.Enabled,
-                    stripMaxPrints = saved.Strip.MaxPrints,
-                    hasFooterText = saved.FooterText is not null,
-                },
-                cancellationToken);
-
-            return Results.Ok(saved);
+            return await SaveAsync(
+                profiles, audit, ownerUserId, ownerUserId, albumId, body,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
         }).WithName("SetPartyPrintSettings").RequirePartyPrint();
+    }
+
+    /// <summary>
+    /// Saving the party's print profile, shared with the Party Crew façade.
+    ///
+    /// <para>Printing spends the host's own consumables and puts a line of
+    /// their text on paper, so the switch, the budgets and the chosen printer
+    /// are all worth a trail — and the trail names who changed them, host or
+    /// collaborator. The footer TEXT is deliberately not recorded: what was
+    /// configured is a security question, what it said is not.</para>
+    /// </summary>
+    internal static async Task<IResult> SaveAsync(
+        IPartyPrintProfileService profiles,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        PartyPrintProfileRequest? body,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
+        if (body is null) return Results.BadRequest(new { error = "invalid" });
+
+        var result = await profiles.SaveAsync(ownerUserId, albumId, body, cancellationToken);
+        if (result.Error == "not_found") return Results.NotFound();
+        if (result.Error is not null) return Results.BadRequest(new { error = result.Error });
+
+        var saved = result.Profile!;
+        await audit.LogAsync(
+            actor, AuditActions.PartyPrintConfigure, AuditEntityTypes.PartyAlbum, albumId, ip,
+            new
+            {
+                albumId,
+                enabled = saved.Enabled,
+                printStationId = saved.PrintStationId,
+                printerDeviceId = saved.PrinterDeviceId,
+                photoEnabled = saved.Photo.Enabled,
+                photoMaxPrints = saved.Photo.MaxPrints,
+                stripEnabled = saved.Strip.Enabled,
+                stripMaxPrints = saved.Strip.MaxPrints,
+                hasFooterText = saved.FooterText is not null,
+            },
+            cancellationToken);
+
+        return Results.Ok(saved);
     }
 }

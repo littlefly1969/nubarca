@@ -999,6 +999,92 @@
 .pw-option-help { display: block; margin-block-start: 0.125rem; color: var(--text-secondary); font-size: 0.8125rem; line-height: 1.45; }
 
 /* ───────────────────────────────────────────────────────────────────────────
+   Chi ti aiuta — the people who run the evening with the host
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* One person: who they are, what they look after, what they are using, and
+   what the host can do about it. Stacked at every width, because the actions
+   are three words each and a row of them wraps into nonsense at 320px. */
+.pw-crew {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-2);
+  padding-block: var(--pw-3);
+  border-block-end: 1px solid var(--pw-line);
+}
+
+.pw-crew:last-child { border-block-end: 0; padding-block-end: 0; }
+
+/* The address the HOST chose. Long ones wrap rather than push the badge off. */
+.pw-crew-email { overflow-wrap: anywhere; }
+
+.pw-crew-actions { display: flex; flex-wrap: wrap; gap: var(--pw-2); }
+
+.pw-crew-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+  padding: var(--pw-3);
+  background: var(--pw-quiet);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+}
+
+/* The link, the one time it is shown. */
+.pw-crew-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-2);
+  padding: var(--pw-3);
+  background: var(--accent-subtle);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--pw-radius-control);
+}
+
+/* The field and Copia side by side where there is room, stacked where there
+   is not: a 43-character token in a field beside a button does not fit at
+   320px, and a link the host cannot select is a link they cannot send. */
+.pw-crew-link-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pw-2);
+}
+
+.pw-crew-link-row input { flex: 1 1 14rem; min-width: 0; }
+
+.pw-crew-devices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-2);
+}
+
+.pw-crew-device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pw-2);
+  padding: var(--pw-2) var(--pw-3);
+  background: var(--pw-quiet);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+}
+
+/* `1 1 0` and not `1 1 auto`: a long device name wraps instead of pushing
+   Scollega onto its own line. */
+.pw-crew-device-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 0.9375rem;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
    Groups — several panels that belong to one moment of the evening
    ─────────────────────────────────────────────────────────────────────────── */
 

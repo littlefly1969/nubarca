@@ -133,6 +133,53 @@ host — never that a message was sent, delivered or read. The card's status lin
 and its primary action are allowed to disagree: the line says where the
 invitation stands, the button says what pressing it would do.
 
+## The same workspace, run by somebody who is not the host
+
+A party can be run by a **Party Crew** collaborator — somebody with no NubArca
+account, paired to one party from at most two devices. They get this workspace,
+not a second product: the same sections, the same panels, the same words, the
+same loading and failure states.
+
+One object holds the entire difference.
+`frontend/src/party/workspace/partyApi.tsx` exports a `PartyApi` — the ~45
+functions every party surface calls — with two implementations: the host's,
+which calls `/api/parties/{id}` and `/api/albums/{id}/party-*`, and the crew's,
+which calls `/api/party-crew/*` with a device cookie that already knows which
+party it is. Surfaces call `usePartyApi()` and pass whatever ids they have; the
+crew implementation accepts them and ignores them, because its routes take none.
+
+Three properties make this safe to have done at all:
+
+- **The type is the host implementation.** `PartyApi` is `typeof owner`, not a
+  hand-written interface beside it. Adding a function to the host's set is a
+  compile error in the crew's until it is added there too, with the same
+  signature.
+- **The default is the host.** The context's default value is `ownerPartyApi`,
+  so a tree with no provider behaves exactly as it did before this existed. The
+  owner's page, its tests and its fixtures needed no change.
+- **Both implementations are module constants.** `usePartyApi()` returns a
+  stable identity for the life of a tree, so nothing re-runs because of it.
+
+`PartyWorkspacePage` takes three optional props — which sections exist, where
+the person lands, and what replaces the host's link back to the parties list —
+and every one defaults to the host's answer.
+
+**The UI is not the authority.** `frontend/src/party/crew/crewModel.ts` decides
+which sections a role is shown, as pure functions over the capabilities the
+server sent back; every route behind every panel re-reads the grants on the
+server and answers 404 regardless. But two things are genuinely load-bearing
+here rather than cosmetic, and must not be "simplified":
+
+- A role without `guests.read` has no Ospiti section, and `usePartyFacts`
+  therefore makes **no guest request at all** — not a request that gets refused.
+  A counts-only query is still a query for names.
+- A collaborator never gets the host's media library. The slot image field
+  offers the party's own album and hides the upload button, which writes into
+  the host's library root.
+
+See `ARCHITECTURE.md` §14.3.9 for the credential, the two factors and the
+two-device limit.
+
 ## The design system
 
 `frontend/src/party/workspace/PartyWorkspace.css` and `workspace/ui.tsx` carry
@@ -182,12 +229,20 @@ PARTY_FIXTURE_DIR=/tmp/party node scripts/check-party-workspace-layout.mjs \
   --screenshots /tmp/party-shots
 ```
 
-The fixtures render the **real** components against mocked responses — twelve
-states across the whole lifecycle, including an empty draft, an open party with
-no guest list, and the live console — and the script opens each in headless
+The fixtures render the **real** components against mocked responses — the
+lifecycle states in `partyWorkspace.fixtures.tsx`, including an empty draft, an
+open party with no guest list and the live console, plus the Party Crew screens
+in `party/crew/partyCrew.fixtures.tsx`: the code screen, the device-limit
+screen, the collaborator's party and the host's collaborator panel. The script
+opens each in headless
 Chromium with the real stylesheets at 320, 375, 430, 820 and 1440, asserting
 that nothing overflows, no target is under 44px, the side gutter holds and two
 sticky regions never cover each other. It is a dev/QA tool, not a CI job: it
 needs a Chromium binary (`CHROME_BIN`, or Playwright's cache).
+
+A component captured **outside** a `.pw` element loses the design tokens, which
+are declared on it rather than on `:root`, and the script then reports every
+button as 34px. That is the fixture's fault, not the product's: wrap a panel
+fixture in `<main className="pw">`, as the crew fixtures do.
 
 The fixtures contain no production data.

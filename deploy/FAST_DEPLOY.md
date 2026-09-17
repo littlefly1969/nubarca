@@ -63,6 +63,20 @@ production `.env` must carry `NUBARCA_TV_OTA_STORAGE_ROOT`,
 The OTA private key must not be present on the server or in `.env`. See
 [`../docs/tv-release.md`](../docs/tv-release.md) §§3–6.
 
+**Party Crew needs a signing secret before this release starts.** The
+accountless co-organizer's one-time code is proved with a keyed MAC and has no
+built-in key, so the API and the worker refuse to boot without one. Before
+deploying a release that contains Party Crew, confirm the production `.env`
+carries `Party__CollaboratorOtpSecret` — or an explicitly configured
+`Party__TokenSecret`, which it falls back to:
+
+```bash
+grep -E '^Party__(CollaboratorOtpSecret|TokenSecret)=.' .env
+```
+
+An empty result means the containers will crash-loop on boot. Generate one with
+`openssl rand -base64 32`, add it to `.env`, and only then deploy.
+
 Never source `.env`. Let Compose read it through `--env-file .env`; sourcing it
 can truncate the semicolon-delimited PostgreSQL connection string.
 

@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ApiError, PartyGameConflict, getPartyGameSnapshot, planPartyGame, sendPartyGameCommand,
-  type PartyGameCommand, type PartyGameCommandCode, type PartyGamePlanAction,
+  ApiError,
+  PartyGameConflict,
+  type PartyGameCommand,
+  type PartyGameCommandCode,
+  type PartyGamePlanAction,
   type PartyGameSnapshot,
 } from '@nubarca/api-client';
+import { usePartyApi } from './workspace/partyApi';
 
 // The owner's connection to their own game: read it, and move it.
 //
@@ -44,6 +48,7 @@ export interface PartyGameControl {
 
 export function usePartyGameControl(albumId: string | undefined): PartyGameControl {
   const [snapshot, setSnapshot] = useState<PartyGameSnapshot | null>(null);
+  const api = usePartyApi();
   const [connection, setConnection] = useState<ControlConnection>('loading');
   const [stale, setStale] = useState(false);
   const [pending, setPending] = useState<PartyGameCommand | null>(null);
@@ -73,7 +78,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
     const read = async () => {
       if (inFlight.current) return;
       try {
-        const next = await getPartyGameSnapshot(albumId, controller.signal);
+        const next = await api.getPartyGameSnapshot(albumId, controller.signal);
         if (cancelled || inFlight.current) return;
         hasSnapshot.current = true;
         setSnapshot(next);
@@ -112,7 +117,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
       window.removeEventListener('focus', onVisibility);
       window.removeEventListener('online', onVisibility);
     };
-  }, [albumId, tick]);
+  }, [albumId, tick, api]);
 
   const run = useCallback(async (command: PartyGameCommand) => {
     if (!albumId || !snapshot || pending) return;
@@ -120,7 +125,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
     setRefusal(null);
     inFlight.current = true;
     try {
-      setSnapshot(await sendPartyGameCommand(albumId, command, snapshot.version));
+      setSnapshot(await api.sendPartyGameCommand(albumId, command, snapshot.version));
       setConnection('ready');
       setStale(false);
     } catch (error) {
@@ -140,7 +145,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
       inFlight.current = false;
       setPending(null);
     }
-  }, [albumId, snapshot, pending]);
+  }, [albumId, snapshot, pending, api]);
 
   // The plan and the phase share the version contract, the refusal recovery and
   // the in-flight guard, because they are two writes to one authoritative game.
@@ -152,7 +157,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
     setRefusal(null);
     inFlight.current = true;
     try {
-      setSnapshot(await planPartyGame(albumId, action, challengeId, snapshot.version, position));
+      setSnapshot(await api.planPartyGame(albumId, action, challengeId, snapshot.version, position));
       setConnection('ready');
       setStale(false);
     } catch (error) {
@@ -170,7 +175,7 @@ export function usePartyGameControl(albumId: string | undefined): PartyGameContr
       inFlight.current = false;
       setPlanning(false);
     }
-  }, [albumId, snapshot, pending, planning]);
+  }, [albumId, snapshot, pending, planning, api]);
 
   return { snapshot, connection, stale, pending, planning, refusal, run, plan, refresh };
 }

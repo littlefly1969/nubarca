@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
-  getPartyPrintSettings,
-  listPrintStations,
-  setPartyPrintSettings,
   type PartyPrintSettings as Settings,
   type PrintStation,
 } from '@nubarca/api-client';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { useI18n, type MessageKey } from '../i18n';
 
 /* The HOST's print settings for one party.
@@ -68,6 +66,7 @@ function errorKey(code: string): MessageKey {
 
 export function PartyPrintSettings({ albumId }: { albumId: string }) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [stations, setStations] = useState<PrintStation[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -83,8 +82,8 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     const controller = new AbortController();
     setLoad('loading');
     void Promise.all([
-      getPartyPrintSettings(albumId, controller.signal),
-      listPrintStations(controller.signal),
+      api.getPartyPrintSettings(albumId, controller.signal),
+      api.listPrintStations(controller.signal),
     ]).then(([loaded, allStations]) => {
       if (controller.signal.aborted) return;
       setSettings(loaded);
@@ -133,7 +132,7 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     setStatus('saving');
     setError(null);
     try {
-      const saved = await setPartyPrintSettings(albumId, {
+      const saved = await api.setPartyPrintSettings(albumId, {
         enabled: draft.enabled,
         ...(draft.stationId ? { printStationId: draft.stationId } : {}),
         ...(draft.deviceId ? { printerDeviceId: draft.deviceId } : {}),

@@ -71,8 +71,23 @@ const PHASE_LABEL: Record<PartyGameSnapshot['phase'], MessageKey> = {
   finished: 'partyControl.phaseFinished',
 };
 
-export function PartyControlRoomPage() {
-  const { albumId } = useParams<{ albumId: string }>();
+/**
+ * Optional overrides, for the Party Crew surface.
+ *
+ * Both default to what the host's route supplies, so nothing changes for them.
+ * A collaborator reaches this page through `/party/crew/...`, where there is no
+ * album id in the URL and no parties list to go back to — so the id is handed
+ * in (every crew route ignores it and resolves the album server-side) and the
+ * way out points at their own party.
+ */
+export function PartyControlRoomPage({
+  albumId: albumIdProp, back: backProp,
+}: {
+  albumId?: string;
+  back?: { to: string; label: string };
+} = {}) {
+  const { albumId: routeAlbumId } = useParams<{ albumId: string }>();
+  const albumId = albumIdProp ?? routeAlbumId;
   const { t } = useI18n();
   const { snapshot, connection, stale, pending, planning, refusal, run, plan, refresh } =
     usePartyGameControl(albumId);
@@ -84,7 +99,7 @@ export function PartyControlRoomPage() {
   if (connection === 'unavailable') {
     return (
       <div className="page-container">
-        <BackLink albumId={albumId} />
+        <BackLink albumId={albumId} override={backProp} />
         <p className="page-error">{t('partyControl.unavailable')}</p>
       </div>
     );
@@ -92,7 +107,7 @@ export function PartyControlRoomPage() {
   if (connection === 'loading' || !snapshot) {
     return (
       <div className="page-container" aria-busy="true">
-        <BackLink albumId={albumId} />
+        <BackLink albumId={albumId} override={backProp} />
         <p className="empty-state">{t('common.loading')}</p>
       </div>
     );
@@ -110,7 +125,7 @@ export function PartyControlRoomPage() {
 
   return (
     <div className="page-container party-control" data-testid="party-control-room">
-      <BackLink albumId={albumId} />
+      <BackLink albumId={albumId} override={backProp} />
       <div className="admin-page__head">
         <div>
           <h2>{t('partyControl.title')}</h2>
@@ -428,10 +443,16 @@ function PartyPlanPanel({
 // The control room is reached FROM a party, and its way out returns there
 // rather than to an album the host may never have opened. An old bookmark with
 // no party in it still lands on the album.
-function BackLink({ albumId }: { albumId: string | undefined }) {
+function BackLink({
+  albumId, override,
+}: {
+  albumId: string | undefined;
+  override?: { to: string; label: string };
+}) {
   const { t } = useI18n();
   const [searchParams] = useSearchParams();
   const partyId = searchParams.get('party');
+  if (override) return <Link className="back-link" to={override.to}>{override.label}</Link>;
   return partyId
     ? (
       <Link className="back-link" to={`/parties/${partyId}?section=activities`}>

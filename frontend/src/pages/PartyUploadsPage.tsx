@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import {
-  getAlbumPartySettings,
-  listPartyUploads,
-  moderatePartyUpload,
-  setAlbumPartyMode,
   type PartyUploadItem,
   type PartyUploadList,
 } from '@nubarca/api-client';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { ApiError } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
@@ -31,8 +28,23 @@ const STATUS_LABEL_KEY: Record<PartyUploadItem['status'], MessageKey> = {
 // owner hide/remove guest content quickly, and (optionally) require approval
 // before new uploads appear. Approval defaults OFF — uploads stay immediately
 // visible. No storage/blob/token/face internals are ever shown.
-export function PartyUploadsPage() {
-  const { albumId } = useParams<{ albumId: string }>();
+/**
+ * Optional overrides, for the Party Crew surface.
+ *
+ * Both default to what the host's route supplies, so nothing changes for them.
+ * A collaborator reaches this page through `/party/crew/...`, where there is no
+ * album id in the URL and no parties list to go back to — so the id is handed
+ * in (every crew route ignores it and resolves the album server-side) and the
+ * way out points at their own party.
+ */
+export function PartyUploadsPage({
+  albumId: albumIdProp, back: backProp,
+}: {
+  albumId?: string;
+  back?: { to: string; label: string };
+} = {}) {
+  const { albumId: routeAlbumId } = useParams<{ albumId: string }>();
+  const albumId = albumIdProp ?? routeAlbumId;
   const navigate = useNavigate();
   // The queue is reached FROM a party, and its own back link returns there.
   // Falling back to the album keeps an old bookmark working.
@@ -40,20 +52,21 @@ export function PartyUploadsPage() {
   const partyId = searchParams.get('party');
   const { invalidateAuth } = useAuth();
   const { t } = useI18n();
+  const api = usePartyApi();
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     if (!albumId) return;
     setStatus({ kind: 'loading' });
-    listPartyUploads(albumId)
+    api.listPartyUploads(albumId)
       .then((list) => setStatus({ kind: 'ready', list }))
       .catch((err) => {
         if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
-        if (err instanceof ApiError && err.status === 404) { void navigate('/albums'); return; }
+        if (err instanceof ApiError && err.status === 404) { void navigate(backProp?.to ?? '/albums'); return; }
         setStatus({ kind: 'error', message: t('partyUploads.loadError') });
       });
-  }, [albumId, invalidateAuth, navigate, t]);
+  }, [albumId, invalidateAuth, navigate, t, api, backProp?.to]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -73,7 +86,7 @@ export function PartyUploadsPage() {
     )) return;
     setBusy(true);
     try {
-      await moderatePartyUpload(albumId, item.fileItemId, action);
+      await api.moderatePartyUpload(albumId, item.fileItemId, action);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -89,9 +102,9 @@ export function PartyUploadsPage() {
     setBusy(true);
     try {
       // Party stays on; only the approval sub-switch changes (tokens unaffected).
-      await setAlbumPartyMode(albumId, true, undefined, next);
+      await api.setAlbumPartyMode(albumId, true, undefined, next);
       // Re-check settings, then reload the list to reflect the new mode.
-      await getAlbumPartySettings(albumId);
+      await api.getAlbumPartySettings(albumId);
       load();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
@@ -101,9 +114,9 @@ export function PartyUploadsPage() {
     }
   };
 
-  const back = partyId
+  const back = backProp ?? (partyId
     ? { to: `/parties/${partyId}?section=photos`, label: t('partyUploads.backToParty') }
-    : { to: `/albums/${albumId}`, label: t('partyUploads.backToAlbum') };
+    : { to: `/albums/${albumId}`, label: t('partyUploads.backToAlbum') });
 
   if (status.kind === 'loading') {
     return (

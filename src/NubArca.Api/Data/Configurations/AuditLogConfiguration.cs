@@ -32,6 +32,15 @@ public class AuditLogConfiguration : IEntityTypeConfiguration<AuditLog>
         builder.Property(a => a.MetadataJson)
             .HasColumnType("jsonb");
 
+        // Deliberately NO foreign key to party_collaborators, unlike the one
+        // to users below. A restricting key would make the audit trail refuse
+        // a party teardown, and a cascading one would erase the record of
+        // what a collaborator did the moment they were removed. The audit
+        // outlives the actor; that is what it is for.
+        builder.HasIndex(a => new { a.PartyCollaboratorId, a.CreatedAt })
+            .HasDatabaseName("ix_audit_logs_collaborator_created")
+            .HasFilter("\"PartyCollaboratorId\" IS NOT NULL");
+
         builder.HasIndex(a => new { a.UserId, a.CreatedAt })
             .HasDatabaseName("ix_audit_logs_user_created");
 

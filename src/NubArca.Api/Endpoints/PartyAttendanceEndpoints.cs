@@ -218,7 +218,7 @@ public static class PartyAttendanceEndpoints
     /// call was about as the attendance now reads them. A tap on "Segna
     /// arrivato" must not download every guest of a thousand-group party.
     /// </summary>
-    private static IResult ToResult(
+    internal static IResult ToResult(
         PartyAttendanceResult result, bool minimal, Guid? guestId = null, Guid? otherGuestId = null)
     {
         if (!minimal) return ToResult(result);
@@ -244,7 +244,7 @@ public static class PartyAttendanceEndpoints
         };
     }
 
-    private static IResult ToResult(PartyAttendanceResult result) => result.Outcome switch
+    internal static IResult ToResult(PartyAttendanceResult result) => result.Outcome switch
     {
         PartyAttendanceOutcome.Ok => Results.Ok(result.Attendance),
         PartyAttendanceOutcome.NotFound => Results.NotFound(),

@@ -79,6 +79,29 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   party: it is offered "presenze registrate" and never "Attesi 0 · Mancano 0".
   See [party-workspace.md](party-workspace.md).
 
+- **A party can be run by somebody who has no NubArca account, and that is
+  deliberately not a narrow user role.** `PartyCollaborator` is an identity
+  inside ONE party; its capability vocabulary
+  (`PartyCrewCapabilities`) is disjoint from `PermissionCatalog`, and nothing
+  converts between them. Pairing takes two factors — a personal link whose token
+  rides in the URL fragment, and a six-digit code emailed to the address the
+  HOST chose — because a link forwarded in a chat must not be access. The stored
+  proof of a code is keyed (`HMAC-SHA256`), never a bare hash, and the signing
+  secret has no built-in value: the API refuses to start without
+  `Party__CollaboratorOtpSecret` or an explicitly configured
+  `Party__TokenSecret`. At most TWO devices per collaborator, counted on grants
+  (so one phone can help at two parties) and serialised on the collaborator's
+  own row so two simultaneous pairings cannot both take the last slot; hitting
+  the limit is not an error — the challenge stays verified and freeing a slot
+  finishes the pairing with no second code. Nothing is cached into the cookie,
+  so a revoke, a role change or a permission taken off the HOST takes effect on
+  the next request. Every crew route is under `/api/party-crew` and carries no
+  party, album or owner id at all. Three things are easy to undo by accident:
+  the façade must keep naming no ids, `AuditActor` must keep recording a
+  collaborator as a collaborator rather than as the host, and a role without
+  `guests.read` must keep making NO guest request — not a request that gets
+  refused. See `ARCHITECTURE.md` §14.3.9.
+
 - **The party's layout is measured in a real browser, not asserted in jsdom.**
   `frontend/src/party/workspace/partyWorkspace.fixtures.tsx` renders the real
   components against mocked responses and `frontend/scripts/check-party-workspace-layout.mjs`

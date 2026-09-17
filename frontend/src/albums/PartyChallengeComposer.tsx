@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import {
-  createPartyChallenge, updatePartyChallenge,
-  type AlbumItemSummary, type PartyChallenge,
+  type AlbumItemSummary,
+  type PartyChallenge,
   type PartyChallengeVotingMode,
 } from '@nubarca/api-client';
+import { usePartyApi } from '../party/workspace/partyApi';
 import { Modal } from '../components/Overlay';
 import { PartyChallengeCard } from '../party/PartyChallengeCard';
 import {
@@ -95,6 +96,7 @@ export function PartyChallengeComposer({
   albumId, media, challenge, position, total, onClose, onSaved,
 }: PartyChallengeComposerProps) {
   const { t } = useI18n();
+  const api = usePartyApi();
   const initial = useMemo(() => draftFrom(challenge), [challenge]);
   const [draft, setDraft] = useState<Draft>(initial);
   const [step, setStep] = useState<Step>('activity');
@@ -144,8 +146,8 @@ export function PartyChallengeComposer({
       voteQuestion: draft.voteQuestion.trim() || null,
     };
     try {
-      if (challenge) await updatePartyChallenge(albumId, challenge.id, value);
-      else await createPartyChallenge(albumId, value);
+      if (challenge) await api.updatePartyChallenge(albumId, challenge.id, value);
+      else await api.createPartyChallenge(albumId, value);
       onSaved();
     } catch {
       setFailed(true);

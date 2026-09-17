@@ -94,7 +94,7 @@ public static class PartyEndpoints
             var eventStartsAt = root?.EventStartsAt;
 
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyPublicView,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.MainAlbumId,
@@ -562,7 +562,7 @@ public static class PartyEndpoints
             // Aggregate-only audit (no token/hash, no file names, no participant
             // id, no storage internals).
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyUpload,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.MainAlbumId,
@@ -690,7 +690,7 @@ public static class PartyEndpoints
             // Aggregate-only audit (never the selfie, token/hash, query vector, file
             // names, or storage internals).
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyFaceSearch,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.MainAlbumId,
@@ -775,7 +775,7 @@ public static class PartyEndpoints
                 access.OwnerUserId, access.MainAlbumId, searchId, cancellationToken);
 
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyFaceSearchActivateTv,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.MainAlbumId,
@@ -820,7 +820,7 @@ public static class PartyEndpoints
             await faceSearch.DeleteAsync(access.OwnerUserId, access.MainAlbumId, searchId, cancellationToken);
 
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyFaceSearchDelete,
                 entityType: AuditEntityTypes.PartyAlbum,
                 entityId: access.MainAlbumId,
@@ -917,57 +917,9 @@ public static class PartyEndpoints
             CancellationToken cancellationToken) =>
         {
             var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-            var ip = httpContext.Connection.RemoteIpAddress?.ToString();
-
-            if (body is null)
-                return Results.BadRequest(new { error = "Missing request body." });
-
-            if (body.Enabled)
-            {
-                // Capture the prior approval-mode so a change can be audited distinctly.
-                var before = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
-                var enabled = await party.EnableAsync(
-                    ownerUserId, id, ownerUserId, body.UploadEnabled, body.RequireUploadApproval,
-                    body.RequireMessageApproval, cancellationToken);
-                if (enabled is null)
-                    return Results.NotFound();
-                await audit.LogAsync(ownerUserId, AuditActions.PartyEnable, AuditEntityTypes.PartyAlbum,
-                    enabled.LinkId, ip, new { albumId = id, uploadEnabled = body.UploadEnabled }, cancellationToken);
-                // Audit an approval-mode transition separately (never any token/hash).
-                if (body.RequireUploadApproval is bool wantApproval
-                    && (before is null || before.RequireUploadApproval != wantApproval))
-                {
-                    await audit.LogAsync(
-                        ownerUserId,
-                        wantApproval ? AuditActions.PartyApprovalModeEnable : AuditActions.PartyApprovalModeDisable,
-                        AuditEntityTypes.PartyAlbum, enabled.LinkId, ip, new { albumId = id }, cancellationToken);
-                }
-                // The MESSAGE approval mode is a separate decision from the upload
-                // one and gets its own audit line, so "the host started reading
-                // greetings first" is answerable without inferring it from a
-                // photo-moderation event.
-                if (body.RequireMessageApproval is bool wantMessageApproval
-                    && (before is null || before.RequireMessageApproval != wantMessageApproval))
-                {
-                    await audit.LogAsync(
-                        ownerUserId,
-                        wantMessageApproval
-                            ? AuditActions.PartyMessageApprovalModeEnable
-                            : AuditActions.PartyMessageApprovalModeDisable,
-                        AuditEntityTypes.PartyAlbum, enabled.LinkId, ip, new { albumId = id }, cancellationToken);
-                }
-            }
-            else
-            {
-                var ok = await party.DisableAsync(ownerUserId, id, cancellationToken);
-                if (!ok)
-                    return Results.NotFound();
-                await audit.LogAsync(ownerUserId, AuditActions.PartyRevoke, AuditEntityTypes.PartyAlbum,
-                    id, ip, new { albumId = id }, cancellationToken);
-            }
-
-            var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
-            return status is null ? Results.NotFound() : Results.Ok(status);
+            return await PartyAlbumSettingsOperations.SetPartyModeAsync(
+                party, audit, ownerUserId, ownerUserId, id, body,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
         }).WithName("SetAlbumPartyMode").RequirePermission(Permissions.PartyAccess);
 
         // Owner-only party SLIDESHOW/QUOTA settings. Deliberately a separate route
@@ -982,67 +934,18 @@ public static class PartyEndpoints
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromBody] SetPartySlideshowSettingsRequest? body,
             CancellationToken cancellationToken) =>
-        {
-            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-            if (body is null)
-            {
-                return Results.BadRequest(new { error = "Missing request body." });
-            }
-
-            if (body.PhotoSlideSeconds is int photo && !PartySlideshowDefaults.IsValidPhotoSeconds(photo))
-            {
-                return Results.BadRequest(new { error = "photoSlideSeconds out of range." });
-            }
-            if (body.MaxVideoSlideSeconds is int video && !PartySlideshowDefaults.IsValidMaxVideoSeconds(video))
-            {
-                return Results.BadRequest(new { error = "maxVideoSlideSeconds out of range." });
-            }
-            if (body.MaxPhotoUploadsPerParticipant is int maxPhotos && !PartySlideshowDefaults.IsValidQuota(maxPhotos))
-            {
-                return Results.BadRequest(new { error = "maxPhotoUploadsPerParticipant out of range." });
-            }
-            if (body.MaxVideoUploadsPerParticipant is int maxVideos && !PartySlideshowDefaults.IsValidQuota(maxVideos))
-            {
-                return Results.BadRequest(new { error = "maxVideoUploadsPerParticipant out of range." });
-            }
-            if (body.MaxMessagesPerParticipant is int maxMessages && !PartySlideshowDefaults.IsValidQuota(maxMessages))
-            {
-                return Results.BadRequest(new { error = "maxMessagesPerParticipant out of range." });
-            }
-
-            var ok = await party.UpdateSlideshowSettingsAsync(
-                ownerUserId, id,
-                body.PhotoSlideSeconds, body.MaxVideoSlideSeconds,
-                body.MaxPhotoUploadsPerParticipant, body.MaxVideoUploadsPerParticipant,
-                body.MaxMessagesPerParticipant,
-                cancellationToken);
-            if (!ok)
-            {
-                return Results.NotFound();
-            }
-
-            var status = await party.GetOwnerStatusAsync(ownerUserId, id, cancellationToken);
-            return status is null ? Results.NotFound() : Results.Ok(status);
-        }).WithName("SetPartySlideshowSettings").RequirePermission(Permissions.PartyAccess);
+            await PartyAlbumSettingsOperations.SetSlideshowSettingsAsync(
+                party, httpContext.GetCurrentUserId()!.Value, id, body, cancellationToken))
+            .WithName("SetPartySlideshowSettings").RequirePermission(Permissions.PartyAccess);
 
         app.MapMethods("/api/albums/{id:guid}/party-game-settings", ["PATCH"], async (
             Guid id, HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
             [FromBody] NubArca.Api.Party.PartyGameSettingsRequest? body,
             CancellationToken cancellationToken) =>
-        {
-            if (body is null || !PartyChallengeDefaults.IsValid(
-                body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
-                body.VotesPerGuest, body.MaxChallengesPerSession))
-                return Results.BadRequest(new { error = "invalid_party_game_settings" });
-            var ownerId = httpContext.GetCurrentUserId()!.Value;
-            if (!await party.UpdateGameSettingsAsync(ownerId, id, body.GameEnabled,
-                body.MinChallengeIntervalSeconds, body.MaxChallengeIntervalSeconds,
-                body.VotesPerGuest, body.MaxChallengesPerSession, body.PriorityVotingEnabled,
-                cancellationToken))
-                return Results.NotFound();
-            return Results.Ok(await party.GetOwnerStatusAsync(ownerId, id, cancellationToken));
-        }).WithName("SetPartyGameSettings").RequirePartyGames();
+            await PartyAlbumSettingsOperations.SetGameSettingsAsync(
+                party, httpContext.GetCurrentUserId()!.Value, id, body, cancellationToken))
+            .WithName("SetPartyGameSettings").RequirePartyGames();
 
         // Owner-side moderation of anonymous party uploads. Owner-authenticated (normal
         // user session). Lets the owner see guest-uploaded items and their moderation
@@ -1180,7 +1083,7 @@ public static class PartyEndpoints
 
             var message = result.Message!;
             await audit.LogAsync(
-                userId: null,
+                actor: null,
                 action: AuditActions.PartyMessageSubmit,
                 entityType: AuditEntityTypes.PartyMessage,
                 entityId: message.Id,
@@ -1468,7 +1371,7 @@ public static class PartyEndpoints
     // both end at visible but start from different places, and only the action
     // distinguishes them — which is what lets the domain refuse the transitions
     // no route is named after (visible → rejected, pending → hidden).
-    private static async Task<IResult> ModeratePartyMessageAsync(
+    private static Task<IResult> ModeratePartyMessageAsync(
         HttpContext httpContext,
         NubArca.Api.Party.IPartyMessageService messages,
         IAuditLogger audit,
@@ -1478,15 +1381,33 @@ public static class PartyEndpoints
         string auditAction,
         CancellationToken cancellationToken)
     {
-        var actorUserId = httpContext.GetCurrentUserId()!.Value;
-        var result = await messages.ModerateAsync(
-            albumId, actorUserId, messageId, action, cancellationToken);
-        return await CompletePartyMessageMutationAsync(
-            httpContext, audit, result, actorUserId, albumId, messageId, auditAction,
-            new { albumId, messageId, action = action.ToString() }, cancellationToken);
+        var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+        return ModeratePartyMessageAsync(
+            messages, audit, ownerUserId, ownerUserId, albumId, messageId, action, auditAction,
+            httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
     }
 
-    private static async Task<IResult> SetPartyMessageHeroAsync(
+    /// <summary>Moderating one greeting, shared with the Party Crew façade. See the upload twin above.</summary>
+    internal static async Task<IResult> ModeratePartyMessageAsync(
+        NubArca.Api.Party.IPartyMessageService messages,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        Guid messageId,
+        NubArca.Api.Domain.PartyMessageModeration action,
+        string auditAction,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
+        var result = await messages.ModerateAsync(
+            albumId, ownerUserId, messageId, action, cancellationToken);
+        return await CompletePartyMessageMutationAsync(
+            audit, result, actor, messageId, auditAction,
+            new { albumId, messageId, action = action.ToString() }, ip, cancellationToken);
+    }
+
+    private static Task<IResult> SetPartyMessageHeroAsync(
         HttpContext httpContext,
         NubArca.Api.Party.IPartyMessageService messages,
         IAuditLogger audit,
@@ -1496,23 +1417,40 @@ public static class PartyEndpoints
         string auditAction,
         CancellationToken cancellationToken)
     {
-        var actorUserId = httpContext.GetCurrentUserId()!.Value;
+        var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+        return SetPartyMessageHeroAsync(
+            messages, audit, ownerUserId, ownerUserId, albumId, messageId, hero, auditAction,
+            httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+    }
+
+    /// <summary>Choosing the greeting the screens lead with. Shared with the Party Crew façade.</summary>
+    internal static async Task<IResult> SetPartyMessageHeroAsync(
+        NubArca.Api.Party.IPartyMessageService messages,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        Guid messageId,
+        bool hero,
+        string auditAction,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
         var result = await messages.SetHeroAsync(
-            albumId, actorUserId, messageId, hero, cancellationToken);
+            albumId, ownerUserId, messageId, hero, cancellationToken);
         return await CompletePartyMessageMutationAsync(
-            httpContext, audit, result, actorUserId, albumId, messageId, auditAction,
-            new { albumId, messageId, hero }, cancellationToken);
+            audit, result, actor, messageId, auditAction,
+            new { albumId, messageId, hero }, ip, cancellationToken);
     }
 
     private static async Task<IResult> CompletePartyMessageMutationAsync(
-        HttpContext httpContext,
         IAuditLogger audit,
         NubArca.Api.Party.PartyMessageMutation result,
-        Guid actorUserId,
-        Guid albumId,
+        AuditActor actor,
         Guid messageId,
         string auditAction,
         object metadata,
+        string? ip,
         CancellationToken cancellationToken)
     {
         switch (result)
@@ -1529,14 +1467,14 @@ public static class PartyEndpoints
         }
 
         await audit.LogAsync(
-            actorUserId, auditAction, AuditEntityTypes.PartyMessage, messageId,
-            httpContext.Connection.RemoteIpAddress?.ToString(), metadata, cancellationToken);
+            actor, auditAction, AuditEntityTypes.PartyMessage, messageId, ip, metadata,
+            cancellationToken);
         return Results.NoContent();
     }
 
     // Shared owner-moderation action: set a guest upload's status + audit it (album
     // + file id only, never token/hash/storage internals). 404 when foreign/missing.
-    private static async Task<IResult> ModeratePartyUploadAsync(
+    private static Task<IResult> ModeratePartyUploadAsync(
         HttpContext httpContext,
         NubArca.Api.Party.IPartyModerationService moderation,
         IAuditLogger audit,
@@ -1547,14 +1485,38 @@ public static class PartyEndpoints
         CancellationToken cancellationToken)
     {
         var ownerUserId = httpContext.GetCurrentUserId()!.Value;
-        var ip = httpContext.Connection.RemoteIpAddress?.ToString();
+        return ModeratePartyUploadAsync(
+            moderation, audit, ownerUserId, ownerUserId, albumId, fileItemId, status, auditAction,
+            httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Moderating one guest photograph, shared with the Party Crew façade.
+    ///
+    /// <para><c>ownerUserId</c> is whose album it is; <c>actor</c> is who
+    /// decided. For a host they are the same. For a collaborator the album is
+    /// still the host's, and the audit says who actually hid the photograph —
+    /// which is the question somebody asks the morning after.</para>
+    /// </summary>
+    internal static async Task<IResult> ModeratePartyUploadAsync(
+        NubArca.Api.Party.IPartyModerationService moderation,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        Guid fileItemId,
+        string status,
+        string auditAction,
+        string? ip,
+        CancellationToken cancellationToken)
+    {
         var ok = await moderation.SetStatusAsync(
             ownerUserId, albumId, fileItemId, status, ownerUserId, cancellationToken);
         if (!ok)
         {
             return Results.NotFound();
         }
-        await audit.LogAsync(ownerUserId, auditAction, AuditEntityTypes.PartyAlbum,
+        await audit.LogAsync(actor, auditAction, AuditEntityTypes.PartyAlbum,
             albumId, ip, new { albumId, fileItemId }, cancellationToken);
         return Results.NoContent();
     }

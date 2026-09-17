@@ -325,6 +325,10 @@ services:
       # Personal party invitations have NO fallback: the API refuses to start
       # unless this or an explicit Party__TokenSecret is set.
       Party__InvitationTokenSecret: ${Party__InvitationTokenSecret:-}
+      # Party Crew one-time codes: same rule, same reason. Six digits is a
+      # million possibilities, so the stored proof is keyed, and a key written
+      # into the source would be a key every installation shares.
+      Party__CollaboratorOtpSecret: ${Party__CollaboratorOtpSecret:-}
       Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
       # Party face search (public "find your face") — public endpoint tunables.
       # Selfies are downscaled client-side, so the caps are generous safety bounds.
@@ -589,6 +593,7 @@ services:
       # path reads the same production config.
       Party__TokenSecret: ${Party__TokenSecret:-}
       Party__InvitationTokenSecret: ${Party__InvitationTokenSecret:-}
+      Party__CollaboratorOtpSecret: ${Party__CollaboratorOtpSecret:-}
       Party__MaxUploadBytes: ${Party__MaxUploadBytes:-52428800}
       Ai__External__BaseUrl: ${Ai__External__BaseUrl:-}
       Ai__External__ApiKeyRef: ${Ai__External__ApiKeyRef:-}
