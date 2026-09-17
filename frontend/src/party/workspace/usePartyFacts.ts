@@ -66,14 +66,7 @@ const ready = <T>(value: T): Loaded<T> => ({ status: 'ready', value });
 
 export function usePartyFacts(
   party: Party | null,
-  {
-    wantsModeration,
-    // Whether this surface has a guest list at all. The host always does; a
-    // Party Crew role without `guests.read` does not, and must not ASK — the
-    // server would refuse it, but a request that is refused is still a request
-    // for names, and the point of the role is that it never makes one.
-    wantsGuests = true,
-  }: { wantsModeration: boolean; wantsGuests?: boolean },
+  { wantsModeration }: { wantsModeration: boolean },
   onUnauthorized: () => void,
 ): PartyFactsExtras {
   // Host or collaborator: the same four reads, a different family of routes.
@@ -144,21 +137,21 @@ export function usePartyFacts(
 
   useEffect(() => {
     if (!partyId) { setGuests(LOADING); return; }
-    // No guest list on this surface is a FACT, not a missing answer: the
-    // summary and the console read it the same way they read an open party
-    // that never had one.
-    if (!wantsGuests) { setGuests(ready(null)); return; }
     const ctrl = new AbortController();
-    // `take: 0` is the counts alone — no card, no person, no name.
-    api.queryPartyGuestDirectory(partyId, { take: 0 }, ctrl.signal)
-      .then((page) => { if (!ctrl.signal.aborted) setGuests(ready(page.summary)); })
+    // THE COUNTS ALONE — no card, no person, no name. A surface with no guest
+    // list still shows how many are expected and how many arrived, because
+    // somebody running the evening needs that and it is not personal data. The
+    // adapter decides where the numbers come from: the host's own directory, or
+    // a crew route that answers the summary and nothing else.
+    api.getGuestCounts(partyId, ctrl.signal)
+      .then((counts) => { if (!ctrl.signal.aborted) setGuests(ready(counts.summary)); })
       .catch((err) => {
         if (ctrl.signal.aborted) return;
         unauthorized(err);
         setGuests(FAILED);
       });
     return () => ctrl.abort();
-  }, [partyId, nonce, unauthorized, api, wantsGuests]);
+  }, [partyId, nonce, unauthorized, api]);
 
   useEffect(() => {
     if (!albumId || !wantsModeration || party?.status === 'draft') return;

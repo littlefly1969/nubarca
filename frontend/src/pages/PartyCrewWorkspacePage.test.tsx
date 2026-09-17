@@ -187,7 +187,7 @@ describe('the party, run by somebody who is not its host', () => {
     expect(screen.queryByTestId('party-tab-experience')).not.toBeInTheDocument();
   });
 
-  it('never fetches a guest for a director, not even the counts', async () => {
+  it('gives a director the numbers and never a person', async () => {
     const mock = mount({
       [`GET /api/party-crew/parties/${PARTY_ID}/session`]: () => jsonResponse(
         session({ roleKey: 'director', capabilities: DIRECTOR })),
@@ -195,8 +195,12 @@ describe('the party, run by somebody who is not its host', () => {
 
     await screen.findByTestId('party-title');
     await waitFor(() => expect(mock.calls.length).toBeGreaterThan(2));
-    // The workspace's counts-only query is still a guest query, and a role
-    // without guests.read has no business making it.
+
+    // Somebody running the evening needs to know how many are expected and how
+    // many arrived — so the counts ARE read, from a route that answers the
+    // summary and nothing else.
+    expect(mock.calls.some((call) => call.url.endsWith('/guest-counts'))).toBe(true);
+    // And the directory, which returns people, is never asked.
     expect(mock.calls.some((call) => call.url.includes('guest-directory'))).toBe(false);
   });
 
@@ -268,13 +272,31 @@ describe('the party, run by somebody who is not its host', () => {
     expect(screen.getByText(/chiedi un nuovo link/)).toBeInTheDocument();
   });
 
-  it('leaves, and does not pretend the party is still there afterwards', async () => {
+  it('unmounts the party when this device leaves it', async () => {
     mount({ [`DELETE /api/party-crew/parties/${PARTY_ID}/session`]: () => emptyResponse() });
+
+    // The party is on screen, with its data.
+    expect(await screen.findByTestId('party-title')).toBeInTheDocument();
 
     await userEvent.click((await screen.findByTestId('crew-identity')).querySelector('summary')!);
     await userEvent.click(await screen.findByTestId('crew-leave-party'));
 
-    expect(await screen.findByText(/Questo dispositivo non gestisce più questa festa/))
-      .toBeInTheDocument();
+    expect(await screen.findByText(/non gestisce più questa festa/)).toBeInTheDocument();
+    // AND THE WORKSPACE IS GONE. Hiding a menu would leave every name, arrival
+    // and photograph this person had loaded sitting in the DOM of a session
+    // they just ended.
+    expect(screen.queryByTestId('party-title')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-tab-summary')).not.toBeInTheDocument();
+  });
+
+  it('unmounts the party when this browser disconnects entirely', async () => {
+    mount({ 'DELETE /api/party-crew/device': () => emptyResponse() });
+
+    await screen.findByTestId('party-title');
+    await userEvent.click((await screen.findByTestId('crew-identity')).querySelector('summary')!);
+    await userEvent.click(await screen.findByTestId('crew-disconnect-device'));
+
+    expect(await screen.findByText(/non gestisce più nessuna festa/)).toBeInTheDocument();
+    expect(screen.queryByTestId('party-title')).not.toBeInTheDocument();
   });
 });

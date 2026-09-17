@@ -97,6 +97,18 @@ const owner = {
   setPartyGuestContent,
 
   queryPartyGuestDirectory,
+
+  /**
+   * The aggregate counts, for a surface with no guest list.
+   *
+   * The HOST reads them from the directory they already have; a Party Crew role
+   * without `guests.read` reads them from a route that answers the summary and
+   * nothing else. Same shape either way, so the console does not branch.
+   */
+  getGuestCounts: (partyId: string, signal?: AbortSignal) =>
+    queryPartyGuestDirectory(partyId, { take: 0 }, signal)
+      .then((page) => ({ summary: page.summary })),
+
   getPartyInvitationGroup,
   getPartyRsvpQuestions,
   createPartyInvitationGroup,

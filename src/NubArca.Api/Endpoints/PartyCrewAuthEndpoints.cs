@@ -203,6 +203,11 @@ public static class PartyCrewAuthEndpoints
         // own words — those are an operator's business, not a guest's.
         PartyCrewAuthError.DeliveryFailed => Results.BadRequest(new { error = "delivery_failed" }),
         PartyCrewAuthError.DeviceLimitReached => Results.BadRequest(new { error = "device_limit" }),
+        // This browser already helps at this party as somebody else. Said
+        // plainly, because the way out is a decision the person makes: leave
+        // the other assignment first.
+        PartyCrewAuthError.DeviceAlreadyAssigned =>
+            Results.BadRequest(new { error = "device_already_assigned" }),
         _ => Results.NotFound(),
     };
 

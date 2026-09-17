@@ -149,6 +149,9 @@ public sealed class PartyCollaboratorAuthChallengeConfiguration
             t.HasCheckConstraint(
                 "ck_party_collaborator_auth_challenges_sends",
                 "\"OtpSendCount\" >= 0");
+            t.HasCheckConstraint(
+                "ck_party_collaborator_auth_challenges_generation",
+                "\"OtpGeneration\" >= 1");
         });
         builder.HasKey(c => c.Id);
         builder.Property(c => c.Id).ValueGeneratedNever();
@@ -158,6 +161,7 @@ public sealed class PartyCollaboratorAuthChallengeConfiguration
         builder.Property(c => c.ExpiresAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.OtpSentAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.OtpSendCount).HasDefaultValue(1);
+        builder.Property(c => c.OtpGeneration).HasDefaultValue(1);
         builder.Property(c => c.LastAttemptAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.VerifiedAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.CompletedAt).HasColumnType("timestamp with time zone");

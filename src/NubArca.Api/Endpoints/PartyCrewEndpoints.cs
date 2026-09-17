@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using NubArca.Api.Audit;
+using NubArca.Api.Data;
+using NubArca.Api.Files;
 using NubArca.Api.Albums;
 using NubArca.Api.Domain;
 using NubArca.Api.Http;
@@ -214,11 +216,17 @@ public static class PartyCrewEndpoints
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyService parties,
+            [FromServices] AppDbContext db,
             [FromBody] PartyOwnerEndpoints.SetPartyCoversRequest? body,
             CancellationToken ct) =>
             With(http, partyId, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
+                foreach (var cover in new[] { body.InvitationCoverFileItemId, body.LiveCoverFileItemId })
+                {
+                    if (cover is Guid chosen && !await PartyCrewMedia.MayNameAsync(db, ctx, chosen, ct))
+                        return Results.BadRequest(new { error = "invalid_media" });
+                }
                 return PartyOwnerEndpoints.ToResult(await parties.SetCoversAsync(
                     ctx.OwnerUserId, ctx.PartyId, body.InvitationCoverFileItemId,
                     body.LiveCoverFileItemId, body.Version, ct));
@@ -303,6 +311,54 @@ public static class PartyCrewEndpoints
                 return detail is null ? Results.NotFound() : Results.Ok(detail);
             })).WithName("SetPartyCrewTvVisibility");
 
+        // ── The party's photographs ─────────────────────────────────────────
+        //
+        // A collaborator has no NubArca session, so `/api/files/{id}/thumbnail`
+        // resolves nothing for them — a picker that showed rows and no pictures
+        // would be the visible half of that. These serve the same derived,
+        // owner-scoped bytes through the crew's own credential, and only for
+        // files this party may name: the main album, plus whatever the party
+        // already points at.
+
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/media/{fileId:guid}/thumbnail", (
+            Guid partyId,
+            Guid fileId,
+            [FromQuery] string? size,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] AppDbContext db,
+            [FromServices] IFileThumbnailService thumbnails,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, null, ct, async ctx =>
+            {
+                var requested = string.IsNullOrWhiteSpace(size) ? ThumbnailSizes.Small : size!;
+                if (!ThumbnailSizes.IsKnown(requested)) return Results.NotFound();
+                if (!await PartyCrewMedia.MayNameAsync(db, ctx, fileId, ct)) return Results.NotFound();
+
+                var content = await thumbnails.EnsureAsync(fileId, ctx.OwnerUserId, requested, ct);
+                return content is null
+                    ? Results.NotFound()
+                    : Results.File(content.Content, content.MimeType);
+            })).WithName("GetPartyCrewMediaThumbnail");
+
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/media/{fileId:guid}/preview", (
+            Guid partyId,
+            Guid fileId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] AppDbContext db,
+            [FromServices] IFileThumbnailService thumbnails,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, null, ct, async ctx =>
+            {
+                if (!await PartyCrewMedia.MayNameAsync(db, ctx, fileId, ct)) return Results.NotFound();
+                var content = await thumbnails.EnsureAsync(
+                    fileId, ctx.OwnerUserId, ThumbnailSizes.Medium, ct);
+                return content is null
+                    ? Results.NotFound()
+                    : Results.File(content.Content, content.MimeType);
+            })).WithName("GetPartyCrewMediaPreview");
+
         // ── What the party tells its guests ─────────────────────────────────
 
         app.MapGet("/api/party-crew/parties/{partyId:guid}/guest-content", (
@@ -323,11 +379,21 @@ public static class PartyCrewEndpoints
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyGuestContentService content,
+            [FromServices] AppDbContext db,
             [FromBody] PartyOwnerEndpoints.PartyGuestContentRequest? body,
             CancellationToken ct) =>
             With(http, partyId, resolver, PartyCrewCapabilities.ExperienceManage, ct, async ctx =>
             {
                 if (body is null) return Results.BadRequest(new { error = "Missing request body." });
+                // THE SERVER DECIDES WHICH PHOTOGRAPH, not the picker. A
+                // hand-built request naming a file from the host's wider
+                // library is refused here; the host's own route deliberately
+                // allows one, because it is their library.
+                if (body.MediaFileItemId is Guid chosen
+                    && !await PartyCrewMedia.MayNameAsync(db, ctx, chosen, ct))
+                {
+                    return Results.BadRequest(new { error = "invalid_media" });
+                }
                 return PartyOwnerEndpoints.ToResult(await content.UpsertAsync(
                     ctx.OwnerUserId, ctx.PartyId, kind,
                     new PartyGuestContentWrite(
@@ -344,6 +410,29 @@ public static class PartyCrewEndpoints
         // capabilities rather than one, because the reception desk needs the
         // names and the arrival ticks and has no business rewriting the list or
         // sending anything. A DIRECTOR holds neither and never fetches a name.
+
+        // THE NUMBERS, WITHOUT THE PEOPLE. A Regista runs the evening and needs
+        // to know how many are expected and how many have arrived; they do not
+        // need — and must never be sent — a name, an address, a telephone or a
+        // dietary note. This is the counts alone, so the console has something
+        // true to show a role that holds no `guests.read`.
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/guest-counts", (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestDirectoryService directory,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, null, ct, async ctx =>
+            {
+                var result = await directory.PageAsync(
+                    ctx.OwnerUserId, ctx.PartyId,
+                    new PartyGuestDirectoryQuery(null, null, null, 0), ct);
+                // `take: 0` already means no card and no person; the summary is
+                // lifted out so not even an empty items array goes over.
+                return result.Outcome == PartyGuestDirectoryOutcome.Ok
+                    ? Results.Ok(new { summary = result.Page!.Summary })
+                    : Results.NotFound();
+            })).WithName("GetPartyCrewGuestCounts");
 
         app.MapPost("/api/party-crew/parties/{partyId:guid}/guest-directory/query", (
             Guid partyId,
@@ -726,11 +815,17 @@ public static class PartyCrewEndpoints
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
+            [FromServices] AppDbContext db,
             [FromBody] PartyChallengeWriteRequest? body,
             CancellationToken ct) =>
             WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 if (body is null) return Results.BadRequest();
+                if (body.MediaFileItemId is Guid chosen
+                    && !await PartyCrewMedia.MayNameAsync(db, ctx, chosen, ct))
+                {
+                    return Results.BadRequest(new { error = "invalid_media" });
+                }
                 var created = await challenges.CreateAsync(ctx.OwnerUserId, albumId, body, ct);
                 return created is null ? Results.BadRequest() : Results.Ok(created);
             })).WithName("CreatePartyCrewChallenge");
@@ -755,11 +850,17 @@ public static class PartyCrewEndpoints
             HttpContext http,
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyChallengeService challenges,
+            [FromServices] AppDbContext db,
             [FromBody] PartyChallengeWriteRequest? body,
             CancellationToken ct) =>
             WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 if (body is null) return Results.BadRequest();
+                if (body.MediaFileItemId is Guid chosen
+                    && !await PartyCrewMedia.MayNameAsync(db, ctx, chosen, ct))
+                {
+                    return Results.BadRequest(new { error = "invalid_media" });
+                }
                 var updated = await challenges.UpdateAsync(ctx.OwnerUserId, albumId, challengeId, body, ct);
                 return updated is null ? Results.BadRequest() : Results.Ok(updated);
             })).WithName("UpdatePartyCrewChallenge");
@@ -788,7 +889,16 @@ public static class PartyCrewEndpoints
             WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ActivitiesManage, ct, async (ctx, albumId) =>
             {
                 var items = await albums.ListItemsAsync(albumId, ctx.OwnerUserId, ct);
-                return items is null ? Results.NotFound() : Results.Ok(items);
+                if (items is null) return Results.NotFound();
+
+                // THE URLS ARE REWRITTEN, not passed through. The owner's
+                // thumbnail route wants an owner session, which a collaborator
+                // does not have and never will — handed those, the picker would
+                // list rows and render no pictures. These point at this party's
+                // own media route instead, which the device cookie opens.
+                return Results.Ok(items
+                    .Select(i => i with { ThumbnailUrl = CrewThumbnail(ctx.PartyId, i) })
+                    .ToList());
             })).WithName("ListPartyCrewAlbumItems");
 
         // Running it. A separate capability from writing the list: the DIRECTOR
@@ -854,12 +964,36 @@ public static class PartyCrewEndpoints
             [FromServices] IPartyCrewAccessResolver resolver,
             [FromServices] IPartyPrintProfileService profiles,
             [FromServices] IAuditLogger audit,
-            [FromBody] PartyPrintProfileRequest? body,
+            [FromBody] PartyCrewPrintProfileRequest? body,
             CancellationToken ct) =>
-            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.PrintManage, ct, (ctx, albumId) =>
-                PartyPrintOwnerEndpoints.SaveAsync(
-                    profiles, audit, ctx.OwnerUserId, Actor(ctx), albumId, body, Ip(http), ct)))
-            .WithName("SetPartyCrewPrintSettings");
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.PrintManage, ct, async (ctx, albumId) =>
+            {
+                if (body is null) return Results.BadRequest(new { error = "invalid" });
+
+                // THE HARDWARE IS CARRIED OVER, NOT ACCEPTED. The crew request
+                // has no station or printer field at all, and the current
+                // values are read back from the saved profile — so a hand-built
+                // request cannot re-point the venue's equipment, and a
+                // collaborator saving a budget does not blank the printer the
+                // host chose.
+                var current = await profiles.GetAsync(ctx.OwnerUserId, albumId, ct);
+                if (current is null) return Results.NotFound();
+
+                return await PartyPrintOwnerEndpoints.SaveAsync(
+                    profiles, audit, ctx.OwnerUserId, Actor(ctx), albumId,
+                    new PartyPrintProfileRequest(
+                        body.Enabled,
+                        current.PrintStationId,
+                        current.PrinterDeviceId,
+                        body.PhotoEnabled,
+                        body.PhotoMaxPrints,
+                        body.PhotoPrintsPerGuest,
+                        body.StripEnabled,
+                        body.StripMaxPrints,
+                        body.StripPrintsPerGuest,
+                        body.FooterText),
+                    Ip(http), ct);
+            })).WithName("SetPartyCrewPrintSettings");
 
         return app;
     }
@@ -997,6 +1131,17 @@ public static class PartyCrewEndpoints
                     hero, auditAction, Ip(http), ct)))
             .WithName($"PartyCrewMessage{segment}");
     }
+
+    /// <summary>
+    /// A party photograph's thumbnail, on the route a crew device can open.
+    ///
+    /// <para>Null stays null: an item with no derivative has none here either,
+    /// and the picker already filters those out.</para>
+    /// </summary>
+    private static string? CrewThumbnail(Guid partyId, AlbumItemSummary item) =>
+        item.ThumbnailUrl is null
+            ? null
+            : $"/api/party-crew/parties/{partyId}/media/{item.FileItemId}/thumbnail";
 
     /// <summary>
     /// Who the audit names. Never the owner, and never nobody: a collaborator

@@ -40,7 +40,7 @@ public sealed class PartyCrewTokens
     /// Purpose binding. Without it, a key shared with another Party capability
     /// would let a proof minted for one purpose be replayed against the other.
     /// </summary>
-    private static readonly byte[] OtpContext = Encoding.UTF8.GetBytes("party-crew-otp");
+    private static readonly byte[] OtpContext = Encoding.UTF8.GetBytes("party-crew-auth-v1");
 
     private readonly byte[] _secret;
 
@@ -92,11 +92,24 @@ public sealed class PartyCrewTokens
     public static string NewOtp() => RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
 
     /// <summary>The stored proof of one code, bound to the challenge it belongs to.</summary>
-    public string OtpProof(Guid challengeId, string otp)
+    /// <summary>
+    /// <c>HMAC-SHA256(secret, challengeId ‖ "party-crew-auth-v1" ‖ generation ‖ otp)</c>.
+    ///
+    /// <para>The GENERATION is in the message, so a code is valid for the send
+    /// it was minted for and no other. Replacing the proof on a resend already
+    /// stops the previous code matching; binding the generation means the two
+    /// could not collide even if a proof were recovered and replayed.</para>
+    /// </summary>
+    public string OtpProof(Guid challengeId, int generation, string otp)
     {
         using var hmac = new HMACSHA256(_secret);
         var mac = hmac.ComputeHash(
-            [.. challengeId.ToByteArray(), .. OtpContext, .. Encoding.UTF8.GetBytes(otp)]);
+        [
+            .. challengeId.ToByteArray(),
+            .. OtpContext,
+            .. BitConverter.GetBytes(generation),
+            .. Encoding.UTF8.GetBytes(otp),
+        ]);
         return Convert.ToHexString(mac).ToLowerInvariant();
     }
 
@@ -107,9 +120,9 @@ public sealed class PartyCrewTokens
     /// differ, and the time it took says how much of the code was right. With
     /// only a million candidates that is a real shortcut.</para>
     /// </summary>
-    public bool OtpMatches(Guid challengeId, string storedProof, string submitted) =>
+    public bool OtpMatches(Guid challengeId, int generation, string storedProof, string submitted) =>
         CryptographicOperations.FixedTimeEquals(
-            Encoding.ASCII.GetBytes(OtpProof(challengeId, submitted)),
+            Encoding.ASCII.GetBytes(OtpProof(challengeId, generation, submitted)),
             Encoding.ASCII.GetBytes(storedProof));
 
     /// <summary>The pairing page for a raw invite token, relative to the public origin.</summary>

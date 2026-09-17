@@ -142,6 +142,29 @@ public sealed record PartyCrewAssignmentDto(
     string DisplayName,
     string RoleKey);
 
+/// <summary>
+/// The party's print profile, as a COLLABORATOR may write it.
+///
+/// <para>It is the owner's request shape minus two fields, and their absence is
+/// the boundary: <c>PrintStationId</c> and <c>PrinterDeviceId</c> name the
+/// venue's hardware, which outlives this evening and belongs to whoever runs
+/// the installation. <c>party-crew.print.manage</c> is what guests may print
+/// and how much of it — not which machine it comes out of.</para>
+///
+/// <para>A separate type rather than a validated one on purpose: a request that
+/// cannot carry a field cannot smuggle one, and there is no branch anywhere
+/// that could be got wrong later.</para>
+/// </summary>
+public sealed record PartyCrewPrintProfileRequest(
+    bool? Enabled,
+    bool? PhotoEnabled,
+    int? PhotoMaxPrints,
+    int? PhotoPrintsPerGuest,
+    bool? StripEnabled,
+    int? StripMaxPrints,
+    int? StripPrintsPerGuest,
+    string? FooterText);
+
 /// <summary>Everything this browser may operate. Nothing else about the owner.</summary>
 public sealed record PartyCrewMeDto(IReadOnlyList<PartyCrewAssignmentDto> Assignments);
 

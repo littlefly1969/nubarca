@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260917171318_AddPartyCrew")]
+    [Migration("20260917220556_AddPartyCrew")]
     partial class AddPartyCrew
     {
         /// <inheritdoc />
@@ -4102,6 +4102,11 @@ namespace NubArca.Api.Data.Migrations
                     b.Property<DateTime?>("LastAttemptAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("OtpGeneration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.Property<string>("OtpProof")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -4141,6 +4146,8 @@ namespace NubArca.Api.Data.Migrations
                     b.ToTable("party_collaborator_auth_challenges", null, t =>
                         {
                             t.HasCheckConstraint("ck_party_collaborator_auth_challenges_attempts", "\"FailedAttempts\" >= 0");
+
+                            t.HasCheckConstraint("ck_party_collaborator_auth_challenges_generation", "\"OtpGeneration\" >= 1");
 
                             t.HasCheckConstraint("ck_party_collaborator_auth_challenges_otp_proof", "length(\"OtpProof\") = 64");
 

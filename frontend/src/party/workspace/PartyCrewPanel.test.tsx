@@ -4,7 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { AuthedWrapper, emptyResponse, errorResponse, installFetchMock, jsonResponse } from '../../test-utils';
 import { PartyCrewPanel } from './PartyCrewPanel';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  // Web Share is a capability, not a constant: leaving it defined would make a
+  // later test believe every browser has it.
+  Reflect.deleteProperty(navigator, 'share');
+});
 
 const PARTY_ID = 'p1';
 const CREW = `/api/parties/${PARTY_ID}/crew`;
@@ -97,6 +103,45 @@ describe('the host’s side of Party Crew', () => {
     await waitFor(() => expect(screen.queryByTestId('party-crew-link-c1')).not.toBeInTheDocument());
     expect(mock.calls.filter((call) => call.url === CREW && (call.init?.method ?? 'GET') === 'GET')
       .length).toBeGreaterThan(0);
+  });
+
+  it('offers the link on a channel that is not the one the code takes', async () => {
+    // Defined ON the real navigator, not swapped for a copy: userEvent needs
+    // the genuine one for pointer and clipboard setup.
+    const share = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'share', {
+      value: share, configurable: true, writable: true,
+    });
+
+    // The link is shown on the collaborator's own row, so the reload after
+    // creation has to return them — as it does in life.
+    let people: ReturnType<typeof collaborator>[] = [];
+    mount({
+      [`GET ${CREW}`]: () => jsonResponse(overview({ collaborators: people })),
+      [`POST ${CREW}`]: () => {
+        people = [collaborator({ hasPendingInvite: true })];
+        return jsonResponse({
+          collaboratorId: 'c1',
+          inviteUrl: 'https://cloud.example.com/party/crew/invite#token=abc',
+          expiresAt: '2027-06-02T10:00:00Z',
+        });
+      },
+    });
+
+    await userEvent.click(await screen.findByTestId('party-crew-add'));
+    await userEvent.type(screen.getByTestId('party-crew-new-name'), 'Marco');
+    await userEvent.type(screen.getByTestId('party-crew-new-email'), 'marco@example.com');
+    await userEvent.click(within(screen.getByTestId('party-crew-new')).getByText('Aggiungi e crea il link'));
+
+    const link = await screen.findByTestId('party-crew-link-c1');
+    // The two factors are only two factors if they travel apart, so the panel
+    // says so and hands the host a way to do it.
+    expect(within(link).getByText(/il codice arriva via email/)).toBeInTheDocument();
+
+    await userEvent.click(within(link).getByTestId('party-crew-link-share'));
+    expect(share).toHaveBeenCalledWith({
+      url: 'https://cloud.example.com/party/crew/invite#token=abc',
+    });
   });
 
   it('says how many devices are in use, and lets one go without removing the person', async () => {

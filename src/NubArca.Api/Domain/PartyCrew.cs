@@ -159,6 +159,17 @@ public class PartyCollaboratorAuthChallenge
     /// </summary>
     public string OtpProof { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Which code this is, counting from one.
+    ///
+    /// <para>Bound into the proof, so a code is valid for the generation it was
+    /// minted for and no other. Replacing the proof on a resend already stops
+    /// the previous code matching; carrying the generation means a proof cannot
+    /// be replayed across generations even if one were somehow recovered, and
+    /// it gives the audit a number to talk about that is not the code.</para>
+    /// </summary>
+    public int OtpGeneration { get; set; } = 1;
+
     public DateTime CreatedAt { get; set; }
     public DateTime ExpiresAt { get; set; }
 

@@ -286,6 +286,7 @@ import type {
   AlbumPartyStatus,
   GuestDirectoryPage,
   GuestDirectoryQuery,
+  GuestDirectorySummary,
   InvitationShareRequest,
   InvitationShareResult,
   Party,
@@ -442,6 +443,19 @@ export function partyCrewRoutes(partyId: string) {
       }),
 
     /* The guest list. */
+
+    /**
+     * The numbers, for a role that holds no `guests.read`.
+     *
+     * A Regista runs the evening and needs to know how many are expected and
+     * how many arrived; they never receive a name, an address or a note. The
+     * counts-only query is still a query for people, so this is a different
+     * route that answers the summary alone.
+     */
+    getGuestCounts: (
+      _p: string, signal?: AbortSignal,
+    ): Promise<{ summary: GuestDirectorySummary }> =>
+      api<{ summary: GuestDirectorySummary }>(`${at}/guest-counts`, { signal }),
 
     queryPartyGuestDirectory: (
       _p: string, query: GuestDirectoryQuery, signal?: AbortSignal,
