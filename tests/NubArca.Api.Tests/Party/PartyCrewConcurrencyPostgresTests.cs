@@ -471,6 +471,132 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
         Assert.Equal(2, after.OtpGeneration);
     }
 
+    [SkippableFact]
+    public async Task An_email_change_racing_a_pairing_never_leaves_the_old_address_authorised()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // THE PROPERTY CHANGING AN ADDRESS EXISTS TO DESTROY. A device is only
+        // trustworthy because a code went to the address the host chose; when
+        // the host replaces that address they may be naming a different person,
+        // so every device has to go. A pairing landing in the middle of that
+        // change used to survive it: the change revoked the grants it could
+        // see, and the pairing — ordered behind it on the same row — then made
+        // a new one, verified against an address that no longer exists.
+        var (challenge, otp) = await SeedChallengeAsync();
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthResult<PartyCrewPairing>> Pair()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            return await service.VerifyAsync(
+                challenge, otp, "Mozilla/5.0 (Linux; Android 14)", null, null);
+        }
+
+        async Task<PartyCrewError?> ChangeEmail()
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            var result = await service.UpdateAsync(
+                _ownerId, _partyId, _collaboratorId,
+                new PartyCollaboratorUpdateDto(
+                    "Regista", "nuovo@example.com", PartyCrewRoles.Director, 1),
+                null);
+            return result.Error;
+        }
+
+        var pairing = Task.Run(Pair);
+        var change = Task.Run(ChangeEmail);
+        await Task.WhenAll(pairing, change);
+
+        await using var check = NewContext();
+        var collaborator = await check.PartyCollaborators.SingleAsync(c => c.Id == _collaboratorId);
+        var liveGrants = await check.PartyCollaboratorDeviceGrants
+            .CountAsync(g => g.PartyCollaboratorId == _collaboratorId && g.RevokedAt == null);
+
+        if (collaborator.NormalizedEmail == "nuovo@example.com")
+        {
+            // THE CHANGE LANDED. Whether the pairing finished before it or was
+            // refused by it, no device may remain: every one of them was proved
+            // against the address that was just replaced.
+            Assert.Equal(0, liveGrants);
+        }
+        else
+        {
+            // The change lost — and then it changed nothing, so whatever the
+            // pairing produced is still verified against the live address.
+            Assert.Equal("regista@example.com", collaborator.NormalizedEmail);
+        }
+    }
+
+    [SkippableFact]
+    public async Task Two_stale_forms_never_leave_a_role_standing_over_another_role_s_grants()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // Both callers hold the SAME version, which is the whole point: an
+        // in-memory version check passes for both. What makes that dangerous is
+        // that the role and its grants are written by different statements — so
+        // the loser can leave `RoleKey = director` standing over a
+        // co-organizer's capability rows, and AUTHORISATION READS THE ROWS. A
+        // session presenting as Regista would hold a Co-organizzatore's reach
+        // over guests, invitations and attendance.
+        await using (var seed = NewContext())
+        {
+            foreach (var key in PartyCrewRoles.Preset(PartyCrewRoles.Director))
+            {
+                seed.PartyCollaboratorGrants.Add(new PartyCollaboratorGrant
+                {
+                    Id = Guid.NewGuid(),
+                    PartyCollaboratorId = _collaboratorId,
+                    CapabilityKey = key,
+                    CreatedAt = DateTime.UtcNow,
+                });
+            }
+            await seed.SaveChangesAsync();
+        }
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewError?> Update(string role, string name)
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            var result = await service.UpdateAsync(
+                _ownerId, _partyId, _collaboratorId,
+                new PartyCollaboratorUpdateDto(name, "regista@example.com", role, 1), null);
+            return result.Error;
+        }
+
+        var results = await Task.WhenAll(
+            Task.Run(() => Update(PartyCrewRoles.CoOrganizer, "Co")),
+            Task.Run(() => Update(PartyCrewRoles.Director, "Regista di nuovo")));
+
+        // Exactly one wins; the other is told its form was stale.
+        Assert.Equal(1, results.Count(e => e is null));
+        Assert.Equal(1, results.Count(e => e == PartyCrewError.VersionConflict));
+
+        await using var check = NewContext();
+        var collaborator = await check.PartyCollaborators.SingleAsync(c => c.Id == _collaboratorId);
+        var grants = await check.PartyCollaboratorGrants
+            .Where(g => g.PartyCollaboratorId == _collaboratorId)
+            .Select(g => g.CapabilityKey)
+            .ToListAsync();
+
+        // THE ROW AND THE ROWS AGREE, whichever won. This is the assertion the
+        // slice actually depends on: the role a host reads is the authority the
+        // server enforces.
+        Assert.Equal(
+            PartyCrewRoles.Preset(collaborator.RoleKey).OrderBy(k => k, StringComparer.Ordinal),
+            grants.OrderBy(k => k, StringComparer.Ordinal));
+        Assert.Equal(2, collaborator.Version);
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     private AppDbContext NewContext() => new(_dbOptions!);

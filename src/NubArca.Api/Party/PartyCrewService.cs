@@ -222,13 +222,47 @@ public sealed class PartyCrewService : IPartyCrewService
         var validation = Validate(body.DisplayName, body.Email, body.RoleKey);
         if (validation is not null) return PartyCrewResult<PartyCollaboratorDto>.Fail(validation.Value);
 
-        var collaborator = await _db.PartyCollaborators
-            .FirstOrDefaultAsync(c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null, ct);
-        if (collaborator is null) return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.NotFound);
-        if (collaborator.Version != body.Version)
-            return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.VersionConflict);
-
         var now = _clock.GetUtcNow().UtcDateTime;
+
+        // THE PROTOCOL, and every security-relevant change to an existing
+        // collaborator follows it: lock, re-read, check the version, act.
+        //
+        // Reading the row before the transaction and acting on that copy is
+        // what let a pairing slip through the middle of an email change. The
+        // change would revoke the device grants it could see, the pairing —
+        // holding this same row's lock — would then create a new one, and the
+        // party would end with a device verified against an address the host
+        // had just replaced, still authorised. That is precisely the property
+        // changing an address exists to destroy.
+        //
+        // Taking the lock FIRST also fixes the order. Every writer now touches
+        // this row before it touches grants, invites or challenges, so two of
+        // them can never hold half of each other's set.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var locked = await _db.PartyCollaborators
+            .Where(c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.UpdatedAt, c => c.UpdatedAt), ct);
+        if (locked != 1)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.NotFound);
+        }
+
+        // READ AFTER THE LOCK, and from the database rather than the tracker:
+        // whatever the last writer committed is what this decision is made on.
+        var collaborator = await _db.PartyCollaborators
+            .Where(c => c.Id == collaboratorId)
+            .AsTracking()
+            .SingleAsync(ct);
+        await _db.Entry(collaborator).ReloadAsync(ct);
+
+        if (collaborator.Version != body.Version)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.VersionConflict);
+        }
+
         var normalized = Normalize(body.Email.Trim());
         var emailChanged = normalized != collaborator.NormalizedEmail;
         var roleChanged = body.RoleKey != collaborator.RoleKey;
@@ -236,7 +270,10 @@ public sealed class PartyCrewService : IPartyCrewService
         if (emailChanged && await _db.PartyCollaborators.AnyAsync(
                 c => c.PartyId == partyId && c.Id != collaboratorId
                     && c.RevokedAt == null && c.NormalizedEmail == normalized, ct))
+        {
+            await tx.RollbackAsync(ct);
             return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.EmailInUse);
+        }
 
         collaborator.DisplayName = body.DisplayName.Trim();
         collaborator.Email = body.Email.Trim();
@@ -244,14 +281,6 @@ public sealed class PartyCrewService : IPartyCrewService
         collaborator.RoleKey = body.RoleKey;
         collaborator.Version++;
         collaborator.UpdatedAt = now;
-
-        // ONE unit of work, because the pieces below are not the same kind of
-        // write. `ExecuteDelete`/`ExecuteUpdate` hit the database immediately
-        // while the tracked edits above wait for `SaveChanges`, so without a
-        // transaction a failure between them would leave a collaborator with
-        // their old role and NO capabilities — authority silently gone, and
-        // nothing to say so.
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
 
         if (roleChanged)
         {
@@ -274,7 +303,18 @@ public sealed class PartyCrewService : IPartyCrewService
             await RevokeEverythingAsync(collaboratorId, now, ct);
         }
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Unreachable while the lock above holds — which is the point of
+            // keeping it. If a later change loses that lock, this turns a
+            // silent overwrite into the refusal the caller already understands.
+            await tx.RollbackAsync(ct);
+            return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.VersionConflict);
+        }
         await tx.CommitAsync(ct);
 
         // Audited AFTER the commit: a trail that describes a change which was
@@ -346,22 +386,40 @@ public sealed class PartyCrewService : IPartyCrewService
     {
         if (!await OwnsAsync(ownerUserId, partyId, ct)) return PartyCrewError.NotFound;
 
-        var collaborator = await _db.PartyCollaborators
-            .FirstOrDefaultAsync(c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null, ct);
-        if (collaborator is null) return PartyCrewError.NotFound;
-
         var now = _clock.GetUtcNow().UtcDateTime;
+
+        // The SAME protocol as UpdateAsync, for the same reason: a pairing that
+        // committed while this was running would otherwise leave a live grant
+        // on a collaborator the host had just removed.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var locked = await _db.PartyCollaborators
+            .Where(c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.UpdatedAt, c => c.UpdatedAt), ct);
+        if (locked != 1)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewError.NotFound;
+        }
+
+        var collaborator = await _db.PartyCollaborators.SingleAsync(c => c.Id == collaboratorId, ct);
+        await _db.Entry(collaborator).ReloadAsync(ct);
         collaborator.RevokedAt = now;
         collaborator.Version++;
         collaborator.UpdatedAt = now;
 
-        // One unit of work, for the reason UpdateAsync states: the device
-        // revocations are immediate and the collaborator's own row is not, and
-        // "their devices are dead but they are still listed as helping" is not
-        // a state the host should ever be shown.
-        await using var tx = await _db.Database.BeginTransactionAsync(ct);
         await RevokeEverythingAsync(collaboratorId, now, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // As in UpdateAsync: unreachable while the lock holds, kept so that
+            // losing it would refuse the revoke rather than half-apply it.
+            await tx.RollbackAsync(ct);
+            return PartyCrewError.VersionConflict;
+        }
         await tx.CommitAsync(ct);
 
         await _audit.LogAsync(ownerUserId, "party.crew.collaborator.revoke", "PartyCollaborator",

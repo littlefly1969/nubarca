@@ -38,7 +38,20 @@ public sealed class PartyCollaboratorConfiguration : IEntityTypeConfiguration<Pa
         builder.Property(c => c.NormalizedEmail).IsRequired()
             .HasMaxLength(PartyCrewLimits.MaxEmailLength);
         builder.Property(c => c.RoleKey).IsRequired().HasMaxLength(32);
-        builder.Property(c => c.Version).HasDefaultValue(1);
+        // A CONCURRENCY TOKEN, not just a number the service compares.
+        //
+        // Reading the version and checking it in memory protects the sequential
+        // case only: two requests holding the same stale form both read 1, both
+        // pass, and both write. The damage is not a lost display name — it is
+        // that a role and its grants are written by different statements, so
+        // the loser can leave `RoleKey = director` standing over a
+        // co-organizer's capability rows, and authorisation reads the ROWS.
+        //
+        // The mutation path takes this row's write lock first and re-reads
+        // inside it, which is what actually orders the two. This is the second
+        // line: EF puts the original value in the UPDATE's WHERE, so the write
+        // fails rather than silently winning if that lock is ever lost.
+        builder.Property(c => c.Version).HasDefaultValue(1).IsConcurrencyToken();
         builder.Property(c => c.CreatedAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.UpdatedAt).HasColumnType("timestamp with time zone");
         builder.Property(c => c.RevokedAt).HasColumnType("timestamp with time zone");
