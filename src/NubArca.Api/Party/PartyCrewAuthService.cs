@@ -202,6 +202,23 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
             return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.Unavailable);
         }
 
+        // THE INVITE IS READ AGAIN, INSIDE THE LOCK. The copy above was read
+        // before the transaction, and rotation takes this same lock — so
+        // between the two a host may have pressed "send a new link" and the
+        // link in this browser's hand may already be dead. Trusting the earlier
+        // read would send a code for a challenge that can never be completed:
+        // not an escalation, because resolving it refuses later anyway, but a
+        // person staring at "check your email" holding an OTP that opens
+        // nothing. Re-reading here turns that into an honest refusal.
+        var inviteStillLive = await _db.PartyCollaboratorInvites.AnyAsync(
+            i => i.Id == found.Invite.Id
+                && i.RevokedAt == null && i.ConsumedAt == null && i.ExpiresAt > now, ct);
+        if (!inviteStillLive)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.Unavailable);
+        }
+
         var recent = await _db.PartyCollaboratorAuthChallenges
             .CountAsync(
                 c => c.PartyCollaboratorId == found.Collaborator.Id && c.CreatedAt > window, ct);
@@ -243,6 +260,19 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
                 .Where(c => c.Id == challenge.Id)
                 .ExecuteDeleteAsync(ct);
             return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.DeliveryFailed);
+        }
+
+        // AND THE LINK IS CHECKED ONCE MORE, because the lock was released
+        // before the mail went out — it is not a thing to hold a database
+        // transaction across. A rotation in that window has already revoked
+        // this challenge, and answering "check your email" would send somebody
+        // to an inbox holding a code that opens nothing. Better to say the link
+        // was replaced, which is both true and actionable.
+        var stillLive = await _db.PartyCollaboratorAuthChallenges.AnyAsync(
+            c => c.Id == challenge.Id && c.RevokedAt == null, ct);
+        if (!stillLive)
+        {
+            return PartyCrewAuthResult<PartyCrewChallengeStart>.Fail(PartyCrewAuthError.Unavailable);
         }
 
         // AND ONLY NOW do earlier attempts end. Revoking first would mean a
@@ -288,44 +318,71 @@ public sealed class PartyCrewAuthService : IPartyCrewAuthService
         if (state.Challenge.VerifiedAt is not null) return PartyCrewAuthError.Unavailable;
         if (!_email.IsEnabled) return PartyCrewAuthError.MailUnavailable;
 
-        // The floor between two sends. It bounds both a mailbox being used as a
-        // nuisance channel and an attacker farming codes for one challenge.
-        if (now - state.Challenge.OtpSentAt < PartyCrewLimits.ResendInterval)
-            return PartyCrewAuthError.ResendTooSoon;
-
-        // And the ceiling on the whole challenge. The interval only spaces
-        // them: without this, one link is ten emails, a minute apart, for as
-        // long as the challenge lives.
-        if (state.Challenge.OtpSendCount >= PartyCrewLimits.MaxOtpSendsPerChallenge)
-            return PartyCrewAuthError.TooManyAttempts;
+        // THE RIGHT TO SEND IS CLAIMED BEFORE THE SEND, not after it.
+        //
+        // Both bounds live in this one WHERE: the floor between two sends, and
+        // the ceiling on the whole challenge. Checking them in memory and then
+        // sending lets two simultaneous resends both pass — and then, however
+        // carefully the database is guarded afterwards, TWO EMAILS have already
+        // left. Only one of the codes works, and depending on delivery order
+        // the one the person reads last may be the losing one. Claiming the
+        // slot first means the loser never reaches the mailer at all.
+        var generation = state.Challenge.OtpGeneration;
+        var floor = now - PartyCrewLimits.ResendInterval;
+        var leased = await _db.PartyCollaboratorAuthChallenges
+            .Where(c => c.Id == state.Challenge.Id
+                && c.OtpGeneration == generation
+                && c.OtpSentAt <= floor
+                && c.OtpSendCount < PartyCrewLimits.MaxOtpSendsPerChallenge
+                && c.CompletedAt == null && c.RevokedAt == null && c.VerifiedAt == null)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(c => c.OtpSentAt, _ => now)
+                .SetProperty(c => c.OtpSendCount, c => c.OtpSendCount + 1), ct);
+        if (leased != 1)
+        {
+            // Either somebody else is sending this instant, the minute has not
+            // passed, or the challenge has spent its three. One answer for all
+            // three: ask again shortly.
+            return state.Challenge.OtpSendCount + 1 >= PartyCrewLimits.MaxOtpSendsPerChallenge
+                ? PartyCrewAuthError.TooManyAttempts
+                : PartyCrewAuthError.ResendTooSoon;
+        }
 
         var otp = PartyCrewTokens.NewOtp();
-        var generation = state.Challenge.OtpGeneration + 1;
-        var proof = _tokens.OtpProof(state.Challenge.Id, generation, otp);
+        var next = generation + 1;
+        var proof = _tokens.OtpProof(state.Challenge.Id, next, otp);
 
-        // SENT BEFORE THE PROOF IS REPLACED, and this order is the whole fix.
-        // The other way round — replace, save, then send — means a provider
-        // that refuses has killed the code already in somebody's inbox and
-        // delivered nothing to replace it: zero working codes, and no way
-        // forward but a new link. Refused here, the old code still works and
-        // the interval has not restarted, so they can simply ask again.
+        // SENT BEFORE THE PROOF IS REPLACED. The other way round — replace,
+        // save, then send — means a provider that refuses has killed the code
+        // already in somebody's inbox and delivered nothing to replace it: zero
+        // working codes, and no way forward but a new link.
         if (!await SendCodeAsync(state.Collaborator, state.Party, otp, ct))
+        {
+            // The attempt is handed back, because a refusal is not the person's
+            // fault and should not cost them one of three. `OtpSentAt` stays
+            // where the lease put it, so a retry still waits out the interval
+            // and a failing mailer cannot be hammered.
+            await _db.PartyCollaboratorAuthChallenges
+                .Where(c => c.Id == state.Challenge.Id
+                    && c.OtpGeneration == generation
+                    && c.OtpSendCount > 0)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(c => c.OtpSendCount, c => c.OtpSendCount - 1), ct);
             return PartyCrewAuthError.DeliveryFailed;
+        }
 
-        // ACCEPTED, AND CLAIMED ATOMICALLY. Two resends arriving together must
-        // not both "succeed": whichever lands first owns the generation, and
-        // the other is told the budget moved under it rather than leaving two
-        // codes both announced as working and only one that is.
-        var claimed = await _db.PartyCollaboratorAuthChallenges
+        // ACCEPTED. Now — and only now — the previous code stops matching. The
+        // generation guard is still here: the lease already made this the only
+        // sender, and a guard that cannot fail is the cheapest way to keep that
+        // true if the lease above is ever changed.
+        var installed = await _db.PartyCollaboratorAuthChallenges
             .Where(c => c.Id == state.Challenge.Id
-                && c.OtpGeneration == state.Challenge.OtpGeneration
+                && c.OtpGeneration == generation
                 && c.CompletedAt == null && c.RevokedAt == null)
             .ExecuteUpdateAsync(u => u
                 .SetProperty(c => c.OtpProof, _ => proof)
-                .SetProperty(c => c.OtpSentAt, _ => now)
-                .SetProperty(c => c.OtpGeneration, _ => generation)
-                .SetProperty(c => c.OtpSendCount, c => c.OtpSendCount + 1), ct);
-        return claimed == 1 ? null : PartyCrewAuthError.ResendTooSoon;
+                .SetProperty(c => c.OtpGeneration, _ => next), ct);
+        return installed == 1 ? null : PartyCrewAuthError.Unavailable;
     }
 
     // ── 2. The code ─────────────────────────────────────────────────────────

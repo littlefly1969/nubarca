@@ -137,8 +137,12 @@ export function PartyPrintSettings({ albumId }: { albumId: string }) {
     try {
       const saved = await api.setPartyPrintSettings(albumId, {
         enabled: draft.enabled,
-        ...(draft.stationId ? { printStationId: draft.stationId } : {}),
-        ...(draft.deviceId ? { printerDeviceId: draft.deviceId } : {}),
+        // THE HARDWARE IS THE HOST'S TO NAME. A collaborator never sends
+        // these — the crew request shape has no such fields and the server
+        // carries the current values over — so they are not merely empty here,
+        // they are absent.
+        ...(api.isOwner && draft.stationId ? { printStationId: draft.stationId } : {}),
+        ...(api.isOwner && draft.deviceId ? { printerDeviceId: draft.deviceId } : {}),
         photoEnabled: draft.photoEnabled,
         photoMaxPrints: Number(draft.photoMaxPrints || 0),
         photoPrintsPerGuest: Number(draft.photoPerGuest || 0),

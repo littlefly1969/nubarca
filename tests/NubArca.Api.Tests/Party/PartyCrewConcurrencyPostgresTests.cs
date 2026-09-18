@@ -300,6 +300,177 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
         Assert.Equal(1, identities);
     }
 
+    [SkippableFact]
+    public async Task Two_rotations_at_once_leave_exactly_one_usable_link()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // A HOST DOUBLE-PRESSING "SEND A NEW LINK", or two tabs.
+        //
+        // A transaction alone does not decide this: under READ COMMITTED both
+        // rotations revoke the links they can see and both insert, and the
+        // party ends with two live links where the host meant one. Nothing in
+        // the schema forbids it — "at most one live row" cannot be written as
+        // a filtered unique index across a revoke and an insert — so the
+        // mutation path has to serialise, and this is what proves it does.
+        await SeedInviteAsync();
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewResult<PartyCollaboratorInviteDto>> Race()
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            return await service.RotateInviteAsync(_ownerId, _partyId, _collaboratorId, null);
+        }
+
+        var results = await Task.WhenAll(Task.Run(Race), Task.Run(Race));
+        Assert.All(results, r => Assert.True(r.Succeeded));
+
+        await using var check = NewContext();
+        var live = await check.PartyCollaboratorInvites
+            .Where(i => i.PartyCollaboratorId == _collaboratorId
+                && i.RevokedAt == null && i.ConsumedAt == null)
+            .ToListAsync();
+        Assert.Single(live);
+
+        // AND IT IS THE LAST ONE HANDED OUT. A host who pressed twice sends the
+        // second link; the first must be the one that died.
+        var winner = results[1].Value!.InviteUrl;
+        var loser = results[0].Value!.InviteUrl;
+        var winnerHash = PartyCrewTokens.Hash(TokenOf(winner));
+        var loserHash = PartyCrewTokens.Hash(TokenOf(loser));
+        Assert.Contains(live[0].TokenHash, new[] { winnerHash, loserHash });
+
+        // Whichever survived, exactly one of the two links opens anything.
+        var usable = await check.PartyCollaboratorInvites
+            .CountAsync(i => (i.TokenHash == winnerHash || i.TokenHash == loserHash)
+                && i.RevokedAt == null && i.ConsumedAt == null);
+        Assert.Equal(1, usable);
+    }
+
+    [SkippableFact]
+    public async Task A_rotation_racing_a_pairing_never_leaves_a_code_that_opens_nothing()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        var raw = await SeedInviteAsync();
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthResult<PartyCrewChallengeStart>> Start()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            return await service.StartAsync(raw, "Mozilla/5.0 (Linux; Android 14)", null);
+        }
+
+        async Task Rotate()
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            await service.RotateInviteAsync(_ownerId, _partyId, _collaboratorId, null);
+        }
+
+        var started = Task.Run(Start);
+        await Task.WhenAll(started, Task.Run(Rotate));
+        var result = await started;
+
+        await using var check = NewContext();
+
+        // EITHER ORDER IS FINE, and the ordering is genuinely a race: a
+        // rotation that lands after the start has answered is simply the host
+        // winning, and their new link is the way forward. What must always hold
+        // is that a way forward EXISTS — exactly one usable link, whoever won —
+        // and that a refusal is a clean refusal with nothing left behind.
+        Assert.Equal(1, await check.PartyCollaboratorInvites
+            .CountAsync(i => i.PartyCollaboratorId == _collaboratorId
+                && i.RevokedAt == null && i.ConsumedAt == null));
+
+        if (result.Error is not null)
+        {
+            Assert.Equal(PartyCrewAuthError.Unavailable, result.Error);
+            Assert.Empty(await check.PartyCollaboratorAuthChallenges
+                .Where(c => c.PartyCollaboratorId == _collaboratorId
+                    && c.RevokedAt == null && c.CompletedAt == null)
+                .ToListAsync());
+        }
+    }
+
+    [SkippableFact]
+    public async Task A_link_already_replaced_never_sends_a_code_for_it()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // The same collision, ordered rather than raced, so it asserts the fix
+        // rather than a coin toss: the rotation has COMMITTED before the start
+        // begins. Reading the invite before the lock and trusting that copy is
+        // exactly what would send a code for a link that is already dead.
+        var old = await SeedInviteAsync();
+        await using (var db = NewContext())
+        {
+            await NewCrewService(db).RotateInviteAsync(_ownerId, _partyId, _collaboratorId, null);
+        }
+
+        var mailer = new RecordingEmailSender();
+        await using var start = NewContext();
+        var result = await NewService(start, mailer)
+            .StartAsync(old, "Mozilla/5.0 (Linux; Android 14)", null);
+
+        Assert.Equal(PartyCrewAuthError.Unavailable, result.Error);
+        // Nothing sent, and nothing left behind to be completed later.
+        Assert.Empty(mailer.Messages);
+
+        await using var check = NewContext();
+        Assert.Empty(await check.PartyCollaboratorAuthChallenges
+            .Where(c => c.PartyCollaboratorId == _collaboratorId && c.RevokedAt == null)
+            .ToListAsync());
+    }
+
+    [SkippableFact]
+    public async Task Two_resends_at_once_put_one_email_in_the_inbox()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        var (challenge, _) = await SeedChallengeAsync();
+        // Past the interval, so the only thing in the way is the other request.
+        await using (var age = NewContext())
+        {
+            await age.PartyCollaboratorAuthChallenges
+                .ExecuteUpdateAsync(u => u.SetProperty(
+                    c => c.OtpSentAt, DateTime.UtcNow - PartyCrewLimits.ResendInterval * 2));
+        }
+
+        var mailer = new RecordingEmailSender();
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewAuthError?> Race()
+        {
+            await using var db = NewContext();
+            var service = NewService(db, mailer);
+            barrier.SignalAndWait();
+            return await service.ResendAsync(challenge);
+        }
+
+        var results = await Task.WhenAll(Task.Run(Race), Task.Run(Race));
+
+        // ONE PHYSICAL EMAIL. Guarding the database after the send would leave
+        // the row correct and two codes in somebody's inbox — and, depending on
+        // delivery order, the one they read last might be the losing one.
+        Assert.Single(mailer.Messages);
+        Assert.Equal(1, results.Count(r => r is null));
+        Assert.Equal(1, results.Count(r => r is not null));
+
+        await using var check = NewContext();
+        var after = await check.PartyCollaboratorAuthChallenges
+            .SingleAsync(c => c.PartyCollaboratorId == _collaboratorId);
+        Assert.Equal(2, after.OtpSendCount);
+        Assert.Equal(2, after.OtpGeneration);
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     private AppDbContext NewContext() => new(_dbOptions!);
@@ -321,14 +492,43 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
                     && g.RevokedAt == null))
             .CountAsync();
 
-    private static PartyCrewAuthService NewService(AppDbContext db) => new(
+    private static PartyCrewAuthService NewService(
+        AppDbContext db, RecordingEmailSender? mailer = null) => new(
         db,
         TimeProvider.System,
         NewTokens(),
-        new RecordingEmailSender(),
+        mailer ?? new RecordingEmailSender(),
         new NoopAuditLogger(),
         new StaticOptionsMonitor(new MailOptions { PublicOrigin = "https://cloud.example.com" }),
         NullLogger<PartyCrewAuthService>.Instance);
+
+    private static PartyCrewService NewCrewService(AppDbContext db) => new(
+        db,
+        TimeProvider.System,
+        new RecordingEmailSender(),
+        new NoopAuditLogger(),
+        new StaticOptionsMonitor(new MailOptions { PublicOrigin = "https://cloud.example.com" }));
+
+    /// <summary>A live link for this collaborator, and its raw token.</summary>
+    private async Task<string> SeedInviteAsync()
+    {
+        await using var db = NewContext();
+        var raw = PartyCrewTokens.NewToken();
+        db.PartyCollaboratorInvites.Add(new PartyCollaboratorInvite
+        {
+            Id = Guid.NewGuid(),
+            PartyCollaboratorId = _collaboratorId,
+            TokenHash = PartyCrewTokens.Hash(raw),
+            CreatedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.Add(PartyCrewLimits.InviteLifetime),
+        });
+        await db.SaveChangesAsync();
+        return raw;
+    }
+
+    /// <summary>The raw token out of an invite URL's fragment.</summary>
+    private static string TokenOf(string inviteUrl) =>
+        inviteUrl[(inviteUrl.IndexOf("#token=", StringComparison.Ordinal) + "#token=".Length)..];
 
     private static PartyCrewTokens NewTokens() => new(
         new ConfigurationBuilder()
