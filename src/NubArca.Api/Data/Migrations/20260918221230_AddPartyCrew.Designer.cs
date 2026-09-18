@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260917220556_AddPartyCrew")]
+    [Migration("20260918221230_AddPartyCrew")]
     partial class AddPartyCrew
     {
         /// <inheritdoc />
@@ -4057,6 +4057,7 @@ namespace NubArca.Api.Data.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(1);

@@ -1423,6 +1423,21 @@ one lets them finish **without typing a second code** — re-proving identity
 because the product could not count to two would be the product's cost charged
 to them.
 
+**One protocol for every change to a collaborator.** That row lock is not the
+pairing path's private trick: rotating an invite, changing a collaborator and
+revoking one all open a transaction, take the same row's write lock, re-read
+from the database, check the caller's `Version` against what they now find, and
+only then touch invites, challenges or grants. Deciding on a copy read before
+the transaction is what let a pairing slip through the middle of an email
+change — the change revoked the grants it could see, the pairing created a new
+one, and the party ended with a device verified against an address the host had
+just replaced. Because every writer takes this one row first, no two of them can
+hold half of each other's set. `Version` is additionally an EF **concurrency
+token**, so the stale value travels in the `UPDATE`'s `WHERE` and a lost lock
+would refuse the write rather than win it silently; the damage that guards
+against is not a lost display name but a `RoleKey` and its capability rows
+written by different statements, and authorisation reads the rows.
+
 **Nothing is cached into the credential.** The cookie is an opaque token and
 carries no party, no role and no capability. `PartyCrewAccessResolver` re-reads
 the whole chain on every request — device live, grant unrevoked, collaborator
