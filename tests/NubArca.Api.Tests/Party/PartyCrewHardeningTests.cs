@@ -472,6 +472,79 @@ public sealed class PartyCrewHardeningTests : IDisposable
         Assert.Equal(7, after.GetProperty("photo").GetProperty("maxPrints").GetInt32());
     }
 
+    [Fact]
+    public async Task A_refused_resend_gives_the_attempt_back()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        var (_, invite) = await AddCollaboratorAsync(
+            owner, partyId, "Rea", "rea@example.com", PartyCrewRoles.Director);
+
+        var device = _factory.CreateClient();
+        (await device.PostAsJsonAsync(
+            "/api/party-crew/auth/invite", new { token = TokenOf(invite) })).EnsureSuccessStatusCode();
+
+        // The slot is claimed before the send, so a refusal has already spent
+        // one — and is handed back, because a provider's bad day is not the
+        // person's fault and must not cost them one of three.
+        await AdvancePastResendIntervalAsync();
+        _factory.EmailSender.FailDelivery = true;
+        try
+        {
+            var refused = await device.PostAsync("/api/party-crew/auth/resend", null);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        }
+        finally { _factory.EmailSender.FailDelivery = false; }
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var challenge = await db.PartyCollaboratorAuthChallenges
+                .SingleAsync(c => c.RevokedAt == null && c.CompletedAt == null);
+            Assert.Equal(1, challenge.OtpSendCount);
+            Assert.Equal(1, challenge.OtpGeneration);
+        }
+
+        // So the full budget of resends is still there to use.
+        for (var sent = 1; sent < PartyCrewLimits.MaxOtpSendsPerChallenge; sent++)
+        {
+            await AdvancePastResendIntervalAsync();
+            (await device.PostAsync("/api/party-crew/auth/resend", null)).EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
+    public async Task The_crew_print_profile_never_names_the_venue_s_hardware()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        await OpenPublicQrAsync(owner, partyId);
+        var (_, invite) = await AddCollaboratorAsync(
+            owner, partyId, "Regista", "regista@example.com", PartyCrewRoles.Director);
+        var director = await PairAsync(_factory, invite);
+
+        var read = await director.GetAsync($"/api/party-crew/parties/{partyId}/print-settings");
+        read.EnsureSuccessStatusCode();
+        var wire = await read.Content.ReadAsStringAsync();
+
+        // WHETHER printing is set up is a fact about tonight; WHICH machine
+        // does it identifies the installation's hardware, which outlives this
+        // evening and is not the party's data. Not changeable, and not visible.
+        Assert.Contains("printerConfigured", wire);
+        Assert.DoesNotContain("printStationId", wire, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("printerDeviceId", wire, StringComparison.OrdinalIgnoreCase);
+
+        // The write answers through the same projection, or it would hand back
+        // what the read is careful not to.
+        var saved = await director.PatchAsJsonAsync(
+            $"/api/party-crew/parties/{partyId}/print-settings",
+            new { enabled = false, photoEnabled = true, photoMaxPrints = 4 });
+        saved.EnsureSuccessStatusCode();
+        var savedWire = await saved.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("printStationId", savedWire, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("printerDeviceId", savedWire, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     /// <summary>

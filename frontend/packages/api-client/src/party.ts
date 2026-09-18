@@ -515,8 +515,17 @@ export interface PartyPrintProductSettings {
 
 export interface PartyPrintSettings {
   enabled: boolean;
-  printStationId: string | null;
-  printerDeviceId: string | null;
+  /**
+   * Which machine prints, when the reader is allowed to know.
+   *
+   * Absent on the Party Crew projection: a collaborator may set what guests
+   * print and how much of it, while which printer does it identifies the
+   * installation's hardware — the host's, and outliving this evening.
+   */
+  printStationId?: string | null;
+  printerDeviceId?: string | null;
+  /** Party-safe stand-in for the pair above: printing IS set up. */
+  printerConfigured?: boolean;
   // Photo and strip are NEVER summed: they cost different things and the host
   // set them separately.
   photo: PartyPrintProductSettings;

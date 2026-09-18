@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 
+using NubArca.Api.Print;
+
 namespace NubArca.Api.Party;
 
 // Party Crew's wire shapes.
@@ -164,6 +166,38 @@ public sealed record PartyCrewPrintProfileRequest(
     int? StripMaxPrints,
     int? StripPrintsPerGuest,
     string? FooterText);
+
+/// <summary>
+/// The party's print profile, as a COLLABORATOR may read it.
+///
+/// <para>The owner's projection carries <c>PrintStationId</c> and
+/// <c>PrinterDeviceId</c>. A collaborator cannot change them — the write shape
+/// has no such fields — but they have no business SEEING them either: those
+/// identify the installation's hardware, which outlives this evening and is
+/// not the party's data. What matters here is whether printing is set up at
+/// all, which is a fact about tonight.</para>
+/// </summary>
+public sealed record PartyCrewPrintProfileDto(
+    bool Enabled,
+    /// <summary>A printer is configured. Which one is the host's business.</summary>
+    bool PrinterConfigured,
+    PartyPrintProductSettingsDto Photo,
+    PartyPrintProductSettingsDto Strip,
+    string? FooterText,
+    int FooterMaxLength,
+    int MinBudget,
+    int MaxBudget)
+{
+    public static PartyCrewPrintProfileDto From(PartyPrintProfileDto profile) => new(
+        profile.Enabled,
+        profile.PrintStationId is not null && profile.PrinterDeviceId is not null,
+        profile.Photo,
+        profile.Strip,
+        profile.FooterText,
+        profile.FooterMaxLength,
+        profile.MinBudget,
+        profile.MaxBudget);
+}
 
 /// <summary>Everything this browser may operate. Nothing else about the owner.</summary>
 public sealed record PartyCrewMeDto(IReadOnlyList<PartyCrewAssignmentDto> Assignments);

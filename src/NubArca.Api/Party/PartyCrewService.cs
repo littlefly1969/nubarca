@@ -305,17 +305,31 @@ public sealed class PartyCrewService : IPartyCrewService
         if (!CanPair)
             return PartyCrewResult<PartyCollaboratorInviteDto>.Fail(PartyCrewError.MailUnavailable);
 
-        var exists = await _db.PartyCollaborators.AnyAsync(
-            c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null, ct);
-        if (!exists) return PartyCrewResult<PartyCollaboratorInviteDto>.Fail(PartyCrewError.NotFound);
-
         var now = _clock.GetUtcNow().UtcDateTime;
 
-        // ONE unit of work. `MintInvite` revokes the previous usable links with
-        // an immediate UPDATE and adds the new row as a tracked insert, so
-        // without a transaction a failure between them leaves a collaborator
-        // with no link at all — and no way back except the host noticing.
+        // ONE unit of work, and — the part a transaction alone does not give —
+        // SERIALISED on the collaborator.
+        //
+        // A transaction makes "revoke the old, insert the new" atomic within
+        // one call. It does nothing about two calls: under READ COMMITTED both
+        // rotations revoke the links they can see and both insert, and the
+        // party ends with two live links where the host pressed the button
+        // meaning there should be one. Nothing in the schema forbids that — a
+        // filtered unique index cannot express "at most one live row" across
+        // the revoke and the insert — so the mutation path has to. Taking the
+        // collaborator's write lock first is the same discipline the pairing
+        // uses, and it makes the second rotation read the first one's result.
         await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var locked = await _db.PartyCollaborators
+            .Where(c => c.Id == collaboratorId && c.PartyId == partyId && c.RevokedAt == null)
+            .ExecuteUpdateAsync(u => u.SetProperty(c => c.UpdatedAt, c => c.UpdatedAt), ct);
+        if (locked != 1)
+        {
+            await tx.RollbackAsync(ct);
+            return PartyCrewResult<PartyCollaboratorInviteDto>.Fail(PartyCrewError.NotFound);
+        }
+
         var (invite, url) = MintInvite(collaboratorId, now);
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);

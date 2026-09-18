@@ -955,7 +955,13 @@ public static class PartyCrewEndpoints
             WithAlbum(http, partyId, resolver, PartyCrewCapabilities.PrintManage, ct, async (ctx, albumId) =>
             {
                 var profile = await profiles.GetAsync(ctx.OwnerUserId, albumId, ct);
-                return profile is null ? Results.NotFound() : Results.Ok(profile);
+                // PROJECTED, not passed through. A collaborator cannot change
+                // which machine prints — the write shape has no such field —
+                // and has no business reading its id either: that identifies
+                // the installation's hardware, not this evening.
+                return profile is null
+                    ? Results.NotFound()
+                    : Results.Ok(PartyCrewPrintProfileDto.From(profile));
             })).WithName("GetPartyCrewPrintSettings");
 
         app.MapMethods("/api/party-crew/parties/{partyId:guid}/print-settings", ["PATCH"], (
@@ -979,7 +985,7 @@ public static class PartyCrewEndpoints
                 var current = await profiles.GetAsync(ctx.OwnerUserId, albumId, ct);
                 if (current is null) return Results.NotFound();
 
-                return await PartyPrintOwnerEndpoints.SaveAsync(
+                var saved = await PartyPrintOwnerEndpoints.SaveAsync(
                     profiles, audit, ctx.OwnerUserId, Actor(ctx), albumId,
                     new PartyPrintProfileRequest(
                         body.Enabled,
@@ -993,6 +999,13 @@ public static class PartyCrewEndpoints
                         body.StripPrintsPerGuest,
                         body.FooterText),
                     Ip(http), ct);
+
+                // The answer goes back through the same projection, or the
+                // write would hand over the ids the read is careful not to.
+                var after = await profiles.GetAsync(ctx.OwnerUserId, albumId, ct);
+                return saved is IStatusCodeHttpResult { StatusCode: >= 400 } || after is null
+                    ? saved
+                    : Results.Ok(PartyCrewPrintProfileDto.From(after));
             })).WithName("SetPartyCrewPrintSettings");
 
         return app;
