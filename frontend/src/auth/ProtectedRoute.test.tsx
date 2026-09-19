@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { AuthContext } from './AuthContext';
 import { ProtectedRoute } from './ProtectedRoute';
 import { makeAuthValue } from '../test-utils';
+import { I18nProvider } from '../i18n';
 import type { AuthState } from './AuthContext';
 
 afterEach(cleanup);
@@ -29,7 +30,8 @@ function LoginProbe() {
 
 function renderAt(entry: string, state: AuthState) {
   render(
-    <AuthContext.Provider value={makeAuthValue(state)}>
+    <I18nProvider>
+      <AuthContext.Provider value={makeAuthValue(state)}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
           <Route path="/login" element={<LoginProbe />} />
@@ -51,7 +53,8 @@ function renderAt(entry: string, state: AuthState) {
           />
         </Routes>
       </MemoryRouter>
-    </AuthContext.Provider>,
+      </AuthContext.Provider>
+    </I18nProvider>,
   );
 }
 
@@ -104,6 +107,8 @@ describe('ProtectedRoute', () => {
 
     expect(screen.queryByTestId('path')).toBeNull();
     expect(screen.queryByTestId('protected')).toBeNull();
-    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    // The guard now speaks the catalogue's languages, like everything else the
+    // product shows: Italian is the canonical default a test gets.
+    expect(screen.getByText('Caricamento…')).toBeInTheDocument();
   });
 });

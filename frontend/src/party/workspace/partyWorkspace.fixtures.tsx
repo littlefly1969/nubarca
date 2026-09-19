@@ -28,6 +28,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { AuthedWrapper, installFetchMock, jsonResponse } from '../../test-utils';
 import { PartyWorkspacePage } from '../../pages/PartyWorkspacePage';
 import { PartiesPage } from '../../pages/PartiesPage';
+import { PartyGuestbookPage } from '../../pages/PartyGuestbookPage';
 
 const OUT = process.env.PARTY_FIXTURE_DIR ?? '/tmp/party-fixtures';
 
@@ -55,6 +56,9 @@ const albumParty = (over: Record<string, unknown> = {}) => ({
   maxMessagesPerParticipant: 3, gameEnabled: true, priorityVotingEnabled: false,
   minChallengeIntervalSeconds: 300, maxChallengeIntervalSeconds: 540,
   votesPerGuest: 3, maxChallengesPerSession: null,
+  // All three contributions open, so the Foto section is measured with every
+  // switch it can show AND with the book's queue panel under them.
+  slideshowMessagesEnabled: true, guestbookEnabled: true, requireGuestbookApproval: true,
   ...over,
 });
 
@@ -290,6 +294,48 @@ it('guests — an open party with no list at all', async () => {
       jsonResponse({ ...counts({ groups: 0 }), partyStatus: 'published' }),
   });
   await capture('guests-open', 'party-guests');
+});
+
+/* ── The guest book's queue ───────────────────────────────────────────────── */
+
+const DEDICATIONS = [
+  {
+    id: 'g1', authorDisplayName: 'Giulia e Marco', status: 'pending',
+    body: 'Che serata. Grazie di averci voluto qui — ci ricorderemo di questa festa per anni.',
+    createdAt: '2027-06-12T22:10:00Z', moderatedAt: null,
+  },
+  {
+    id: 'g2', authorDisplayName: null, status: 'visible',
+    body: 'Auguri!',
+    createdAt: '2027-06-12T21:48:00Z', moderatedAt: '2027-06-12T21:50:00Z',
+  },
+  {
+    id: 'g3', authorDisplayName: 'La nonna', status: 'hidden',
+    body: 'Sono fiera di te. Un bacio grande.',
+    createdAt: '2027-06-12T21:02:00Z', moderatedAt: '2027-06-12T21:30:00Z',
+  },
+];
+
+it('guest book — the queue a host moderates', async () => {
+  installFetchMock({
+    [`GET /api/parties/${PARTY_ID}/guestbook`]: () => jsonResponse({
+      partyId: PARTY_ID,
+      guestbookEnabled: true,
+      requireGuestbookApproval: true,
+      isOwner: true,
+      entries: DEDICATIONS,
+    }),
+  });
+  render(
+    <AuthedWrapper>
+      <MemoryRouter initialEntries={[`/parties/${PARTY_ID}/guestbook`]}>
+        <Routes>
+          <Route path="/parties/:partyId/guestbook" element={<PartyGuestbookPage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthedWrapper>,
+  );
+  await capture('guestbook-queue', 'party-guestbook-page');
 });
 
 // The two error surfaces the correctness pass added. They exist as fixtures so

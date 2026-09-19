@@ -3056,6 +3056,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'organizer.scopeMediaLibrary': 'All media-library photos',
   'organizer.scopeAll': 'All my photos',
   'organizer.targetRootLabel': 'Target root folder name',
+  'organizer.targetRootPlaceholder': 'Photos',
   'organizer.createInsideCurrent': 'Create it inside the current folder ({folder}) instead of Home',
   'organizer.folderStructure': 'Folder structure',
   'organizer.photosWithoutDate': 'Photos without a date',

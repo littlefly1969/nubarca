@@ -3089,6 +3089,7 @@ const it = {
   'organizer.scopeMediaLibrary': 'Tutte le foto della libreria multimediale',
   'organizer.scopeAll': 'Tutte le mie foto',
   'organizer.targetRootLabel': 'Nome della cartella radice di destinazione',
+  'organizer.targetRootPlaceholder': 'Foto',
   'organizer.createInsideCurrent': 'Creala nella cartella corrente ({folder}) invece che nella Home',
   'organizer.folderStructure': 'Struttura delle cartelle',
   'organizer.photosWithoutDate': 'Foto senza data',

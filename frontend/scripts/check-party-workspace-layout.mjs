@@ -100,6 +100,8 @@ const styles = [
   // deliberate look: a fixed dark brand page a guest meets by scanning a code.
   ['src', 'pages', 'PartyGuestHub.css'],
   ['src', 'pages', 'PartyContribution.css'],
+  // The guest book rides the contribution shell and adds the book itself.
+  ['src', 'pages', 'PartyGuestbook.css'],
   ['src', 'pages', 'PartyGamePage.css'],
   ['src', 'party', 'PartyRsvp.css'],
   ['src', 'party', 'PartyRsvpQuestions.css'],

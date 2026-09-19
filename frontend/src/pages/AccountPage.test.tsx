@@ -187,6 +187,25 @@ describe('AccountPage', () => {
     expect(await screen.findByText('Profilo aggiornato')).toBeInTheDocument();
   });
 
+  it('offers every language the product ships, not the two it began with', () => {
+    installFetchMock({});
+    render(
+      <AuthedWrapper>
+        <AccountPage />
+      </AuthedWrapper>,
+    );
+
+    // The list is derived from LANGUAGES rather than written out here, which is
+    // how this field came to offer two options after the product shipped four —
+    // and how somebody whose profile said `es` opened this page to find it
+    // blank. Each language names ITSELF: a person who cannot read the current
+    // interface cannot read a translated name of the one they want.
+    const options = [...screen.getByLabelText(/Lingua/i).querySelectorAll('option')];
+    expect(options.map((o) => o.value)).toEqual(['it', 'en', 'es', 'de']);
+    expect(options.map((o) => o.textContent))
+      .toEqual(['Italiano', 'English', 'Español', 'Deutsch']);
+  });
+
   it('offers no control for role, permissions, disabled state or email', () => {
     // What is absent is the point: none of these are editable by their owner,
     // and the API this page calls has no field for them either.

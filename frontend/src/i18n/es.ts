@@ -2776,6 +2776,7 @@ const es: Partial<Record<MessageKey, string>> = {
   'organizer.scopeMediaLibrary': 'Todas las fotos de la biblioteca multimedia',
   'organizer.scopeAll': 'Todas mis fotos',
   'organizer.targetRootLabel': 'Nombre de la carpeta raíz de destino',
+  'organizer.targetRootPlaceholder': 'Fotos',
   'organizer.createInsideCurrent': 'Crearla dentro de la carpeta actual ({folder}) en vez de en Inicio',
   'organizer.folderStructure': 'Estructura de carpetas',
   'organizer.photosWithoutDate': 'Fotos sin fecha',

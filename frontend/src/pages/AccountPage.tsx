@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ApiError, changeMyPassword, updateMyProfile } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
+import { LanguageOptions } from '../components/LanguageSwitcher';
 import { PasswordPolicy } from '../account/passwordPolicy';
 import { TimeZoneSelect } from '../account/TimeZoneSelect';
 
@@ -106,8 +107,7 @@ export function AccountPage() {
         <label>
           {t('account.language')}
           <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-            <option value="it">Italiano</option>
-            <option value="en">English</option>
+            <LanguageOptions />
           </select>
         </label>
         <TimeZoneSelect

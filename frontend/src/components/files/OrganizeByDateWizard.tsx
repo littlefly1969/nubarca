@@ -206,7 +206,7 @@ export function OrganizeByDateWizard({
                 value={targetRootName}
                 maxLength={255}
                 onChange={(e) => setTargetRootName(e.target.value)}
-                placeholder="Photos"
+                placeholder={t('organizer.targetRootPlaceholder')}
               />
               <label className="organizer-checkbox">
                 <input type="checkbox" checked={useCurrentBase} onChange={(e) => setUseCurrentBase(e.target.checked)} />

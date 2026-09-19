@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { PartyPrintSettings } from './PartyPrintSettings';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
 import { I18nProvider } from '../i18n';
+import { crewPartyApi, PartyApiProvider } from '../party/workspace/partyApi';
+import { CREW_CAPABILITIES } from '../party/crew/crewModel';
 
 afterEach(() => {
   cleanup();
@@ -305,5 +307,37 @@ describe('PartyPrintSettings (owner panel)', () => {
 
     expect(await screen.findByTestId('party-print-settings')).toBeInTheDocument();
     expect(mock.calls.filter((c) => c.url.includes('party-print-settings'))).toHaveLength(2);
+  });
+
+  // --- The hardware boundary ----------------------------------------------
+
+  it('never shows a collaborator the venue’s equipment', async () => {
+    const fetchMock = installFetchMock({
+      [`GET /api/party-crew/parties/p1/print-settings`]: () => jsonResponse(settings()),
+      // A station route the crew surface must never call. Registering it means
+      // a request would SUCCEED — so if one appears, the assertion below is
+      // about a real call and not about a missing mock.
+      'GET /api/print/stations': () => jsonResponse([station()]),
+    });
+    render(
+      <I18nProvider>
+        <PartyApiProvider api={crewPartyApi('p1', [CREW_CAPABILITIES.printManage])}>
+          <PartyPrintSettings albumId={ALBUM} />
+        </PartyApiProvider>
+      </I18nProvider>,
+    );
+
+    // The printer is the host administering their own equipment, not this
+    // evening's configuration: said in one line, with no picker, no switch and
+    // no station or device name anywhere on the surface.
+    expect(await screen.findByTestId('party-print-crew-station')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-choices')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-enabled')).not.toBeInTheDocument();
+    const text = document.body.textContent ?? '';
+    expect(text).not.toMatch(/Postazione sala|DS620|DNP|st-1|dev-1/);
+
+    // And the listing was never even asked for: the crew client answers it
+    // with an empty list instead of reaching for an owner route.
+    expect(fetchMock.calls.map((c) => c.url)).not.toContain('/api/print/stations');
   });
 });

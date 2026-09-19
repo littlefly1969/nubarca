@@ -176,6 +176,54 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     }
   });
 
+  it('is a page about photographs when the party takes no greetings', async () => {
+    let messagePosts = 0;
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () =>
+        jsonResponse(session({ slideshowMessagesEnabled: false })),
+      'POST /api/party/uptok-1/messages': () => {
+        messagePosts += 1;
+        return jsonResponse({ id: 'm1', status: 'visible', createdAt: '' });
+      },
+    });
+    render(wrapper());
+
+    // ABSENT, not disabled: a choice between one thing is not a choice, and a
+    // greyed-out half would be the product advertising something this party
+    // does not have.
+    await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    expect(screen.queryByTestId('party-mode-message')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-mode-media')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/il tuo messaggio/i)).not.toBeInTheDocument();
+    expect(messagePosts).toBe(0);
+  });
+
+  it('lands a stale composer link on media rather than on a form the server refuses', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () =>
+        jsonResponse(session({ slideshowMessagesEnabled: false })),
+    });
+    // Somebody kept `?mode=message` in their history from before the host
+    // closed the composer. The link still opens a page that works.
+    render(wrapper('uptok-1', '?mode=message'));
+
+    expect(await screen.findByLabelText(/Scegli foto e video da caricare/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/il tuo messaggio/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps the composer for a backend that predates the switch', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      // No `slideshowMessagesEnabled` at all — every party took greetings then.
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session()),
+    });
+    render(wrapper('uptok-1', '?mode=message'));
+
+    expect(await screen.findByLabelText(/il tuo messaggio/i)).toBeInTheDocument();
+  });
+
   it('keeps the chosen mode in the URL, without stacking history entries', async () => {
     mockGeneric();
     render(wrapper());
