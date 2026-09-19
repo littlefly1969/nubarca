@@ -668,6 +668,85 @@ public static class PartyEndpoints
         // face id, person id, person name, or vector. When AI / the face model is
         // disabled or unavailable a safe "unavailable" state is returned (503). The
         // tightest per-IP party window applies (detection + embedding is expensive).
+        // DETECT ONLY, before any search. The guest's phone asks "can you see my
+        // face, and where is it?", and gets an answer with no embedding, no
+        // matching, no session row and nothing recorded.
+        //
+        // It exists so the flow on the phone can be honest. "We cannot see your
+        // face" and "there are several people here" are now reached WITHOUT a
+        // face search — the guest retakes the selfie before anything expensive
+        // or private is spent — and the box that comes back is the box the
+        // search will use, which is what lets the scanner show the guest the
+        // crop their results really come from.
+        //
+        // Same rate-limit window as the search itself: detection is the
+        // expensive half, and a cheaper budget here would be a way around it.
+        app.MapPost("/api/party/{token}/face-search/detect", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] NubArca.Api.Party.IPartyFaceSearchService faceSearch,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            if (access is null || !access.Capabilities.FaceSearch)
+            {
+                return Results.NotFound();
+            }
+
+            if (!httpContext.Request.HasFormContentType)
+            {
+                return Results.BadRequest(new { error = "Expected a multipart form upload." });
+            }
+
+            var form = await httpContext.Request.ReadFormAsync(cancellationToken);
+            var file = form.Files.Count > 0 ? form.Files[0] : null;
+            if (file is null || file.Length == 0)
+            {
+                return Results.BadRequest(new { error = "No image was uploaded." });
+            }
+
+            byte[] bytes;
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                using var ms = new MemoryStream();
+                await stream.CopyToAsync(ms, cancellationToken);
+                bytes = ms.ToArray();
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return Results.BadRequest(new { error = "The image could not be read." });
+            }
+
+            var outcome = await faceSearch.DetectAsync(bytes, file.ContentType, cancellationToken);
+
+            // NOT AUDITED. The search's line records that a guest searched this
+            // party's album; a detection decided nothing about the album, and a
+            // trail that counted "somebody pointed a camera at themselves" would
+            // be collecting the one thing this feature promises not to keep.
+            var dto = new NubArca.Api.Party.PartyFaceDetectResponseDto(
+                outcome.Status,
+                outcome.Face is { } box
+                    ? new NubArca.Api.Party.PartyFaceBoxDto(box.X, box.Y, box.Width, box.Height)
+                    : null);
+
+            return outcome.Status switch
+            {
+                NubArca.Api.Domain.PartyFaceSearchStatuses.Unavailable =>
+                    Results.Json(dto, statusCode: StatusCodes.Status503ServiceUnavailable),
+                NubArca.Api.Domain.PartyFaceSearchStatuses.InvalidImage =>
+                    Results.Json(dto, statusCode: StatusCodes.Status400BadRequest),
+                _ => Results.Ok(dto),
+            };
+        }).WithName("PartyFaceDetect")
+            .RequireRateLimiting(PartyFaceSearchRateLimitPolicy).DisableAntiforgery();
+
         app.MapPost("/api/party/{token}/face-search", async (
             string token,
             HttpContext httpContext,

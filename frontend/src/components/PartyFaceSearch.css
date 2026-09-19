@@ -361,3 +361,53 @@
     min-width: 9rem;
   }
 }
+
+/* ── The viewfinder ─────────────────────────────────────────────────────────
+ *
+ * The live camera, before the shutter. It is MIRRORED, and only here: framing
+ * yourself in a picture that moves the wrong way is genuinely hard, and the
+ * capture is the true image — which is what the detector sees, what the search
+ * embeds, and what the frozen frame and its crop show.
+ *
+ * Sized in `vh` with a cap so the preview is big enough to frame a face on a
+ * 320px phone without pushing the shutter off the sheet. */
+
+.party-face-viewfinder {
+  position: relative;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  width: min(100%, 20rem);
+  aspect-ratio: 3 / 4;
+  max-height: 46vh;
+  border: 1px solid var(--party-face-border);
+  border-radius: 1.35rem;
+  background: rgb(10 15 26 / 55%);
+}
+
+.party-face-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* See above: the preview only. */
+  transform: scaleX(-1);
+}
+
+.party-face-viewfinder-wait {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  font-size: 0.9375rem;
+  color: var(--brand-cyan-glow);
+  background: rgb(10 15 26 / 65%);
+}
+
+.party-face-stage--camera {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.875rem;
+}

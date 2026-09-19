@@ -324,7 +324,10 @@ describe('PartyPage (public party landing)', () => {
     const sheet = await screen.findByTestId('party-face');
     expect(sheet).toHaveAttribute('aria-modal', 'true');
     expect(within(sheet).getByRole('heading', { name: 'Trova le tue foto' })).toBeInTheDocument();
-    expect(screen.getByTestId('party-face-input')).toBeInTheDocument();
+    // jsdom lends no camera, so the sheet lands on its FALLBACK: the operating
+    // system's own camera, behind a real file input. That is the path a browser
+    // that refuses `getUserMedia` takes, and it is the one exercised here.
+    expect(await screen.findByTestId('party-face-input')).toBeInTheDocument();
 
     // Escape closes it and hands focus back to the card that opened it.
     await user.keyboard('{Escape}');
@@ -493,8 +496,13 @@ describe('PartyPage (public party landing)', () => {
     const mock = installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 2 })),
       'GET /api/party/tok-1/items': () => jsonResponse(twoItems),
+      // Detection comes first now, and only a confirmed face reaches the search.
+      'POST /api/party/tok-1/face-search/detect': () => jsonResponse({
+        status: 'found', face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
+      }),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems.items[1]],
+        face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
       }),
       'DELETE /api/party/tok-1/face-search/s1': () => jsonResponse(null, 204),
     });
@@ -507,11 +515,12 @@ describe('PartyPage (public party landing)', () => {
     // Run a face search: only the matching photo stays visible; the full album
     // remains in state (the item count subtitle is unchanged).
     await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
+    // The picked selfie IS the capture: detection and the search follow from
+    // it, with no second confirm step to press.
     await user.upload(
-      screen.getByTestId('party-face-input'),
+      await screen.findByTestId('party-face-input'),
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
-    await user.click(screen.getByTestId('party-face-submit'));
     // The sheet sweeps the face three times before it answers, so this waits
     // as long as a guest does.
     await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
@@ -746,8 +755,12 @@ describe('PartyPage (public party landing)', () => {
     installFetchMock({
       'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 3 })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: twoItems }),
+      'POST /api/party/tok-1/face-search/detect': () => jsonResponse({
+        status: 'found', face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
+      }),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems[1]],
+        face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
       }),
       'DELETE /api/party/tok-1/face-search/s1': () => jsonResponse(null, 204),
     });
@@ -758,10 +771,9 @@ describe('PartyPage (public party landing)', () => {
 
     await user.click(screen.getByRole('button', { name: /Trova le tue foto/i }));
     await user.upload(
-      screen.getByTestId('party-face-input'),
+      await screen.findByTestId('party-face-input'),
       new File([new Uint8Array([1, 2, 3])], 'selfie.png', { type: 'image/png' }),
     );
-    await user.click(screen.getByTestId('party-face-submit'));
     await screen.findByTestId('party-face-count', {}, { timeout: SCAN_WAIT_MS });
     await user.click(screen.getByTestId('party-face-show-results'));
     await waitFor(() => expect(screen.queryByTestId('party-face')).not.toBeInTheDocument());
@@ -954,14 +966,14 @@ describe('PartyPage (public party landing)', () => {
     await screen.findByTestId('party-capability-dedication');
     on.unmount();
 
-    // The backend ties written contributions to the SAME upload enablement, so
-    // a party that accepts nothing offers no dedication either — and there is
-    // no separate flag to consult.
+    // A backend that predates the switch sends no `slideshowMessageUrl` at all,
+    // and for it the old rule still holds: a party that accepts no
+    // contributions offers nowhere to write either.
     mockHub({ contributionUrl: null });
     render(wrapper());
     await screen.findByTestId('party-capability-album');
     expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Lascia una dedica/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Lascia un messaggio/i })).not.toBeInTheDocument();
   });
 
   it('sends the dedication straight to the composer, and everything else to media', async () => {
@@ -970,8 +982,8 @@ describe('PartyPage (public party landing)', () => {
     await screen.findByTestId('party-grid');
 
     // All three go to the ONE contribution URL the backend returned; only the
-    // dedication asks for the composer.
-    expect(screen.getByRole('link', { name: /Lascia una dedica/i }))
+    // slideshow composer asks for its own half of it.
+    expect(screen.getByRole('link', { name: /Lascia un messaggio/i }))
       .toHaveAttribute('href', '/party/upload-token/upload?mode=message');
     expect(screen.getByTestId('party-hub-cta'))
       .toHaveAttribute('href', '/party/upload-token/upload');

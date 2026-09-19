@@ -62,12 +62,21 @@ function view() {
 }
 
 describe('PartyPrintSettings (owner panel)', () => {
-  it('says plainly when there is no print station to print on', async () => {
+  it('says plainly when there is no printer to print on', async () => {
     mount(settings(), []);
     view();
-    // Not an empty select and a switch that cannot be turned on.
+    // Not an empty picker and a switch that cannot be turned on.
     expect(await screen.findByTestId('party-print-no-stations')).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Abilita la stampa/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-enabled')).not.toBeInTheDocument();
+  });
+
+  it('says plainly when a station exists but nothing on it can print 10×15', async () => {
+    mount(settings(), [station({ devices: [device({ supportsPhoto10x15: false })] })]);
+    view();
+    // A station that contributes no usable printer contributes NOTHING: one
+    // honest sentence rather than a station picker above a dead printer picker.
+    expect(await screen.findByTestId('party-print-no-stations')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-choices')).not.toBeInTheDocument();
   });
 
   it('offers each product its OWN budget, never a shared total', async () => {
@@ -90,35 +99,90 @@ describe('PartyPrintSettings (owner panel)', () => {
       devices: [device(), device({ id: 'dev-2', displayName: 'LaserJet', supportsPhoto10x15: false })],
     })]);
     view();
-    const printer = await screen.findByLabelText('Stampante');
     // Both products compose a 10x15 sheet, so a printer that cannot do that
-    // size is never a choice a host can make.
-    expect(within(printer).queryByText('LaserJet')).not.toBeInTheDocument();
-    expect(within(printer).getByText('DS620')).toBeInTheDocument();
+    // size is never a choice a host can make — it is absent, not disabled.
+    expect(await screen.findByTestId('party-print-option-dev-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-option-dev-2')).not.toBeInTheDocument();
+    expect(screen.queryByText('LaserJet')).not.toBeInTheDocument();
   });
 
-  it('explains an empty printer list instead of leaving a dead select', async () => {
-    mount(settings(), [station({ devices: [device({ supportsPhoto10x15: false })] })]);
-    const user = userEvent.setup();
-    view();
-    await user.selectOptions(await screen.findByLabelText('Postazione di stampa'), 'st-1');
-    expect(screen.getByTestId('party-print-no-printers')).toBeInTheDocument();
-    expect(screen.getByLabelText('Stampante')).toBeDisabled();
-  });
-
-  it('forgets the chosen printer when the station changes', async () => {
+  it('is a real radio group: one name, one tab stop, the keyboard included', async () => {
     mount(settings({ printStationId: 'st-1', printerDeviceId: 'dev-1' }), [
       station(),
-      station({ id: 'st-2', name: 'Postazione giardino', devices: [device({ id: 'dev-9', displayName: 'CP1500' })] }),
+      station({
+        id: 'st-2', name: 'Postazione giardino',
+        devices: [device({ id: 'dev-9', displayName: 'CP1500' })],
+      }),
     ]);
+    view();
+
+    const chosen = await screen.findByTestId('party-print-option-dev-1');
+    // NATIVE radios, not clickable divs: the browser gives the group its
+    // arrow keys, its single tab stop and its announced state for free, and a
+    // hand-rolled `role="radio"` would have to reimplement all three.
+    expect(chosen).toHaveAttribute('type', 'radio');
+    expect(chosen).toBeChecked();
+    const other = screen.getByTestId('party-print-option-dev-9');
+    expect(other).not.toBeChecked();
+    // One group, so exactly one of them can be chosen.
+    expect(chosen.getAttribute('name')).toBe(other.getAttribute('name'));
+  });
+
+  it('chooses a printer with the keyboard alone', async () => {
+    const mock = mount(
+      settings({ enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1' }),
+      [
+        station(),
+        station({
+          id: 'st-2', name: 'Postazione giardino',
+          devices: [device({ id: 'dev-9', displayName: 'CP1500' })],
+        }),
+      ],
+      () => jsonResponse(settings({ printStationId: 'st-2', printerDeviceId: 'dev-9' })),
+    );
     const user = userEvent.setup();
     view();
-    const printer = await screen.findByLabelText('Stampante');
-    expect(printer).toHaveValue('dev-1');
-    // A printer belongs to a station: keeping the old one selected would aim
-    // the party at a device the new station does not have.
-    await user.selectOptions(screen.getByLabelText('Postazione di stampa'), 'st-2');
-    expect(screen.getByLabelText('Stampante')).toHaveValue('');
+
+    const chosen = await screen.findByTestId('party-print-option-dev-1');
+    chosen.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByTestId('party-print-option-dev-9')).toBeChecked();
+
+    // And the choice is the one that gets saved: a printer belongs to a
+    // station, so BOTH ids travel together and never half of a stale pair.
+    await user.click(screen.getByTestId('party-print-save'));
+    await screen.findByTestId('party-print-saved');
+    const patch = mock.calls.find((c) => c.method === 'PATCH');
+    expect(JSON.parse(patch!.body!)).toMatchObject({
+      printStationId: 'st-2', printerDeviceId: 'dev-9',
+    });
+  });
+
+  it('keeps an offline printer in the list, and says it is offline', async () => {
+    mount(
+      // Printing switched ON, so the state line is about the PRINTER rather
+      // than about a party that is not printing at all.
+      settings({ enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1' }),
+      [station({ status: 'offline' })],
+    );
+    view();
+
+    // "The printer in the hall is offline" is information a host needs; a list
+    // that silently shrank would leave them wondering where it went.
+    const card = await screen.findByTestId('party-print-option-dev-1-card');
+    expect(within(card).getByText('Offline')).toBeInTheDocument();
+    expect(within(card).getByText(/non risponde/)).toBeInTheDocument();
+    // And the party's own state says it would not print right now.
+    expect(screen.getByTestId('party-print-readiness'))
+      .toHaveTextContent('Stampante offline');
+  });
+
+  it('names where each printer is, so a host recognises the one by the door', async () => {
+    mount(settings(), [station({ name: 'Sala' })]);
+    view();
+    const card = await screen.findByTestId('party-print-option-dev-1-card');
+    expect(within(card).getByText('DS620')).toBeInTheDocument();
+    expect(within(card).getByText('Postazione: Sala')).toBeInTheDocument();
   });
 
   it('saves the whole draft to the print endpoint, and to nothing else', async () => {
@@ -132,15 +196,14 @@ describe('PartyPrintSettings (owner panel)', () => {
     const user = userEvent.setup();
     view();
 
-    await user.click(await screen.findByLabelText(/Abilita la stampa/));
-    await user.selectOptions(screen.getByLabelText('Postazione di stampa'), 'st-1');
-    await user.selectOptions(screen.getByLabelText('Stampante'), 'dev-1');
-    await user.click(within(screen.getByTestId('party-print-photo')).getByRole('checkbox'));
+    await user.click(await screen.findByTestId('party-print-enabled'));
+    await user.click(screen.getByTestId('party-print-option-dev-1'));
+    await user.click(screen.getByTestId('party-print-photo-enabled'));
     await user.type(screen.getByLabelText(/Foto 10×15 — Stampe massime/), '25');
-    await user.type(screen.getByLabelText('Riga sulla stampa'), 'Auguri Anna');
-    await user.click(screen.getByRole('button', { name: 'Salva impostazioni stampa' }));
+    await user.type(screen.getByLabelText('Cosa scrivere sul foglio'), 'Auguri Anna');
+    await user.click(screen.getByTestId('party-print-save'));
 
-    await screen.findByRole('status');
+    await screen.findByTestId('party-print-saved');
     const patch = mock.calls.find((c) => c.method === 'PATCH');
     expect(JSON.parse(patch!.body!)).toMatchObject({
       enabled: true, printStationId: 'st-1', printerDeviceId: 'dev-1',
@@ -172,7 +235,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     );
     const user = userEvent.setup();
     view();
-    await user.click(await screen.findByRole('button', { name: 'Salva impostazioni stampa' }));
+    await user.click(await screen.findByTestId('party-print-save'));
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Non puoi promettere a ogni ospite più foto di quante ne ha la festa.');
   });
@@ -188,7 +251,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     );
     const user = userEvent.setup();
     view();
-    await user.click(await screen.findByRole('button', { name: 'Salva impostazioni stampa' }));
+    await user.click(await screen.findByTestId('party-print-save'));
     // Twelve sheets already came out; the host is told that, not a code.
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Ci sono già più foto stampate di così.');
@@ -203,7 +266,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     );
     const user = userEvent.setup();
     view();
-    await user.click(await screen.findByRole('button', { name: 'Salva impostazioni stampa' }));
+    await user.click(await screen.findByTestId('party-print-save'));
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('Le stampe foto devono essere tra 1 e 500.');
   });
@@ -216,7 +279,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     );
     const user = userEvent.setup();
     view();
-    await user.click(await screen.findByRole('button', { name: 'Salva impostazioni stampa' }));
+    await user.click(await screen.findByTestId('party-print-save'));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Le impostazioni non sono state salvate.');
     expect(alert).not.toHaveTextContent(/Npgsql|boom/);

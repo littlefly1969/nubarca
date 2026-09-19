@@ -11,6 +11,22 @@ declare global {
 }
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+// PIN THE BROWSER'S LANGUAGE, so the suite's baseline is a product decision
+// rather than a property of whoever's machine ran it.
+//
+// The application detects the browser's preferred language when nothing else
+// has been said — which is right for a guest arriving on a QR code, and would
+// otherwise make every test here depend on jsdom's "en-US" default. Italian is
+// the product's canonical language, so that is what an unconfigured test gets;
+// a test that wants another one says so, exactly as a person does, by storing
+// the choice.
+for (const [property, value] of [
+  ['language', 'it-IT'],
+  ['languages', Object.freeze(['it-IT', 'it'])],
+] as const) {
+  Object.defineProperty(navigator, property, { value, configurable: true });
+}
+
 // jsdom has no IntersectionObserver, which the gallery's infinite scroll
 // (slice 80) relies on. Install a controllable mock: it records observed
 // elements per instance, and `triggerIntersection()` (in test-utils) fires the

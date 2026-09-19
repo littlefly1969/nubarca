@@ -1704,3 +1704,170 @@
   align-items: center;
   min-height: var(--pw-tap);
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Choosing one of several — the printer, and anything else with a shortlist
+   ───────────────────────────────────────────────────────────────────────────
+
+   A card you tap, and a native radio underneath it. The input is the control:
+   it keeps the group's single tab stop, its arrow keys and its announced role,
+   and everything here is what that control LOOKS like. Which is why the focus
+   ring is drawn on the CARD from the input's own `:focus-visible` — the input
+   is invisible, and a focus ring nobody can see is not a focus ring.
+
+   320px FIRST. The card is a column at phone width and gains its second column
+   at 30rem; the status badge wraps under the name rather than squeezing it,
+   and nothing here has a fixed width. */
+
+.pw-choices {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.pw-choices-legend {
+  padding: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.pw-choices-hint {
+  margin: var(--pw-1) 0 0;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.pw-choices-list {
+  display: grid;
+  gap: var(--pw-2);
+  margin-block-start: var(--pw-3);
+}
+
+.pw-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pw-3);
+  /* A decision, so the taller tap target. */
+  min-height: var(--pw-tap-lg);
+  padding: var(--pw-3);
+  border: 1px solid var(--pw-line);
+  border-radius: var(--pw-radius-control);
+  background: var(--pw-panel);
+  cursor: pointer;
+  /* Long printer names and station names must wrap rather than push the card
+     past a 320px viewport. */
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pw-choice:hover:not([data-disabled='true']) {
+  border-color: var(--pw-line-strong);
+}
+
+.pw-choice[data-checked='true'] {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.pw-choice[data-disabled='true'] {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The real control. Visually hidden, never `display: none` — which would take
+   it out of the tab order and out of the accessibility tree with it. */
+.pw-choice-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.pw-choice:has(.pw-choice-input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.pw-choice-mark {
+  flex: 0 0 auto;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-block-start: 0.125rem;
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.pw-choice[data-checked='true'] .pw-choice-mark {
+  border-color: var(--accent);
+  /* The dot is a ring of accent inside the circle: one element, no pseudo. */
+  box-shadow: inset 0 0 0 0.1875rem var(--accent);
+}
+
+.pw-choice-text {
+  flex: 1 1 10rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.pw-choice-title {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.pw-choice-meta,
+.pw-choice-note {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pw-choice-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* At phone width the badge sits under the name, so a long printer name is not
+   squeezed into three characters by a status nobody asked to lead with. */
+@media (width >= 30rem) {
+  .pw-choice { flex-wrap: nowrap; }
+  .pw-choice-status { align-self: center; }
+}
+
+/* One printable product — its switch, its two numbers, and what it has spent.
+   The numbers are a grid that is ONE column on a phone: two number inputs side
+   by side at 320px leaves each about 60px, which is not a field somebody types
+   a three-digit budget into. */
+
+.pw-product {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pw-3);
+  padding-block: var(--pw-3);
+  border-block-start: 1px solid var(--pw-line);
+}
+
+.pw-product:first-child { border-block-start: 0; padding-block-start: 0; }
+
+.pw-product-numbers {
+  display: grid;
+  gap: var(--pw-3);
+  grid-template-columns: 1fr;
+}
+
+@media (width >= 30rem) {
+  .pw-product-numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

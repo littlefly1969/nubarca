@@ -36,9 +36,21 @@ function ChevronDownIcon() {
   );
 }
 
-const LABEL_KEY: Record<Language, 'language.italian' | 'language.english'> = {
+type LanguageLabelKey =
+  | 'language.italian'
+  | 'language.english'
+  | 'language.spanish'
+  | 'language.german';
+
+// Each language names ITSELF, in itself: "Deutsch" and not "Tedesco". Somebody
+// looking for their own language in a list is looking for the word they would
+// use, and a person who cannot read the current interface cannot read a
+// translated name of the one they want.
+const LABEL_KEY: Record<Language, LanguageLabelKey> = {
   it: 'language.italian',
   en: 'language.english',
+  es: 'language.spanish',
+  de: 'language.german',
 };
 
 // Compact language selector. Public/unauthenticated surfaces use the default

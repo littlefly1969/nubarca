@@ -6,6 +6,7 @@ export {
   DEFAULT_LANGUAGE,
   LANGUAGES,
   LOCALE,
+  preferredLanguage,
   toLanguage,
   type Language,
 } from './types';
