@@ -53,6 +53,29 @@ const LABEL_KEY: Record<Language, LanguageLabelKey> = {
   de: 'language.german',
 };
 
+/**
+ * The four languages as `<option>`s, for a plain `<select>` somebody else owns.
+ *
+ * The account page and the administrator's user form each have a language
+ * field inside a larger form, where the switcher's own chrome would be wrong.
+ * They used to write their own two options, which is how they came to offer
+ * two languages after the product shipped four — and how a person whose
+ * profile said `es` opened their account page to find the field blank.
+ *
+ * One list, derived from LANGUAGES, so a fifth language is one edit and not a
+ * search.
+ */
+export function LanguageOptions() {
+  const { t } = useI18n();
+  return (
+    <>
+      {LANGUAGES.map((code) => (
+        <option key={code} value={code}>{t(LABEL_KEY[code])}</option>
+      ))}
+    </>
+  );
+}
+
 // Compact language selector. Public/unauthenticated surfaces use the default
 // behavior (updates the i18n provider + localStorage); authenticated surfaces
 // pass `onSelect` to also persist the choice to the user's profile — unchanged

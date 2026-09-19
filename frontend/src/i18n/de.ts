@@ -2776,6 +2776,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'organizer.scopeMediaLibrary': 'Alle Fotos der Medienbibliothek',
   'organizer.scopeAll': 'Alle meine Fotos',
   'organizer.targetRootLabel': 'Name des Zielordners',
+  'organizer.targetRootPlaceholder': 'Fotos',
   'organizer.createInsideCurrent': 'Sie im aktuellen Ordner ({folder}) anlegen statt im Start',
   'organizer.folderStructure': 'Ordnerstruktur',
   'organizer.photosWithoutDate': 'Fotos ohne Datum',

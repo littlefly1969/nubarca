@@ -960,6 +960,66 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   transition, so a stranger gets the generic 404 and never a 400 that would
   confirm the message exists. Hero is not in the table — promote requires
   `visible`, demote always works.
+- **A party takes THREE contributions, and each is its own switch.**
+  Photographs (`UploadEnabled`, the switch that already existed — no second one
+  was invented for them), greetings for the slideshow
+  (`SlideshowMessagesEnabled`) and the guest book (`GuestbookEnabled`) are
+  independent product decisions on one `PartyAlbumLink`, saved one at a time:
+  `PartyContributionSettingsRequest` is nullable in every field, so a client
+  that knows about one switch cannot clear the ones it has never heard of, and
+  two people configuring one party do not silently undo each other. The
+  migration defaults matter more than the model defaults: `SlideshowMessages
+  Enabled` is `DEFAULT TRUE` because every party that existed before the column
+  had a composer, and `GuestbookEnabled` is `DEFAULT FALSE` because nobody's
+  party should acquire a guest book by being upgraded. When greetings are off,
+  the refusal is a 409 `party_messages_disabled` — the request is well formed
+  and the party's configuration is what declines it — and what guests already
+  wrote is KEPT: the TV projection returns nothing, the manager queue stays
+  reachable and reports the flag, and re-enabling brings the greetings back with
+  no row rewritten.
+- **The guest book is its own table, and it never reaches the wall.**
+  `PartyGuestbookEntry` is not a flag on `PartyMessage`, and the difference is
+  the point: a greeting is written to be read out during the evening, a
+  dedication is written to be kept. There is no route that promotes one, no
+  shape shared with the TV feed, and no `PartyGuestbookEntry` anywhere in a TV
+  projection — the invariant is expressed as an ABSENCE, which is also how it is
+  tested. Its scope is the PARTY and not the album (unlike a message, whose
+  scope is the link), because a book survives a QR rotation, an album change and
+  a party that has no album yet — so its routes are `/api/parties/{partyId}/
+  guestbook` and there is no album id on that page. Moderation reuses
+  `PartyMessageTransitions` and `IPartyMessageAccessResolver`: contributions are
+  one job, and a party where somebody may take a greeting down but not a
+  dedication would be a distinction nobody asked for. Reading the book rides the
+  VIEW token (a host may keep a book and accept no photographs at all), while
+  writing additionally needs `Capabilities.Contributions`, which is what lets an
+  ended party's book stay readable and closed.
+- **Telling somebody WHERE the party is does not go through the guest list.**
+  Until `POST /api/parties/{partyId}/address-share`, the only way to say where a
+  party was, was to create an invitation group and share a personal invitation —
+  so a host running an open evening had nothing to send. The payload is the
+  party's name, date and venue and deliberately nothing else: no guest link, no
+  invitation, upload, print or RSVP token, no email address, and no URL at all
+  (the client builds a map search from the address). `HasAddress` is
+  `[JsonIgnore]` for the same reason — in a 200 its only possible value is true.
+  On the Party Crew side the capability is `details.manage`: the address is one
+  of the party's own FACTS, so a co-organizer hands it out and a Regista does
+  not.
+- **A Party Crew e-mail collision is a CONSTRAINT, translated.**
+  `PartyCrewService` catches exactly the PostgreSQL unique violation on
+  `ux_party_collaborators_party_email_live` — never a generic `DbException` —
+  and converts it to `PartyCrewError.EmailInUse`, a 409 `email_in_use`. The
+  whole transaction rolls back, which matters because changing a collaborator's
+  address also revokes their devices, invites and challenges: half of that
+  surviving a lost race would leave a collaborator whose old address still
+  opened the party. Proved against real PostgreSQL in
+  `PartyCrewConcurrencyPostgresTests` — two renames onto one address, and a
+  create racing a rename — by asserting the LOSER's version and e-mail are
+  untouched.
+- **`contributions.configure` and `contributions.moderate` are two capabilities
+  on purpose.** A Regista decides what stays up tonight; whether guests may
+  contribute at all is the host's standing decision about their own party and
+  their own library. The surface shows a director the read-only facts instead of
+  a switch the server would refuse, and the server refuses it regardless.
 - **Deleting an album deletes its Party state, and that was already broken.**
   Every Party table has a restricting FK to the album and `AlbumService.
   DeleteAsync` cleaned up none of them, so deleting an album that had ever had
@@ -969,6 +1029,34 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   the audit trail, and the guest's stored PHOTO is untouched (an upload row is a
   visibility control over a surface that is going away). Face-search sessions
   are deliberately absent — they already cascade from the album.
+- **The face search is a STATE MACHINE, and the face it shows is the face it
+  searched.** The sheet moves through camera → capture → detecting → confirmed →
+  scanning → results, with `no_face`, `multiple_faces`, `search_error`,
+  `camera_error` and `cancelled` as named states rather than as an error string.
+  Detection and search are two calls on purpose: `POST /face-search/detect` runs
+  the SAME decoder, detector and selection rule as the search, so "we cannot see
+  your face" and "there are several people here" are reached without embedding,
+  matching or recording anything — and the crop the guest is shown is provably
+  the one the search used. Which face wins when there are several is
+  `PartyFaceSelection`, a pure rule with its own tests: the leader must beat the
+  runner-up on area AND be near the middle, or the selfie is refused as
+  ambiguous rather than guessed at. The selfie is never stored or uploaded to
+  the album, and the sheet releases its MediaStream, blobs and object URLs on
+  every exit. The deterministic AI backend's synthetic faces are deliberately
+  one dominant and one small off-centre face: two identical boxes are a real
+  ambiguity, and a fixture that stumbled into it would make every plumbing test
+  exercise the refusal instead of the path it is about.
+- **The web interface ships in it/en/es/de, and nothing new ships in one
+  language.** Italian is the canonical catalogue — `it.ts` defines `MessageKey`,
+  every other dictionary is typed against it, and `i18n.test` requires all four
+  to carry every key with matching `{placeholder}` tokens. Two traps: the
+  language list lives in `LANGUAGES` and is rendered by `LanguageOptions`, since
+  the account and admin forms each used to write their own two `<option>`s and
+  so offered two languages after the product shipped four; and
+  `hardcodedStrings.test.ts` fails on any user-facing string written directly
+  into a component, with a NAMED allowlist of the surfaces that predate the
+  catalogue (the file browser, which is the Home page, and the administrator's
+  import wizard). Nothing may be added to that list to make a new surface pass.
 - **A Hero card HOLDS the media, and the postponed advance is a LEDGER.** Every
   automatic slideshow transition goes through one `handleMediaBoundary`; when a
   Hero is due it renders over the current item and returns WITHOUT advancing.

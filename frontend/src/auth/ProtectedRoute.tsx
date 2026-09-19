@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
+import { useI18n } from '../i18n';
 import { useAuth } from './useAuth';
 
 interface ProtectedRouteProps {
@@ -13,8 +14,11 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { state } = useAuth();
   const location = useLocation();
+  const { t } = useI18n();
   if (state.status === 'loading') {
-    return <div className="loading-screen">Loading…</div>;
+    // The FIRST words of every authenticated session, so they are the first
+    // that have to be in the reader's language.
+    return <div className="loading-screen">{t('common.loading')}</div>;
   }
   if (state.status === 'anon') {
     const returnTo = `${location.pathname}${location.search}${location.hash}`;

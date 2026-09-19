@@ -32,6 +32,7 @@ import { PartyPage } from '../../pages/PartyPage';
 import { PartyInvitationPage } from '../../pages/PartyInvitationPage';
 import { PartyUploadPage } from '../../pages/PartyUploadPage';
 import { PartyGamePage } from '../../pages/PartyGamePage';
+import { PartyGuestbookPublicPage } from '../../pages/PartyGuestbookPublicPage';
 
 const OUT = process.env.PARTY_FIXTURE_DIR ?? '/tmp/party-fixtures';
 const TOKEN = 'tok-1';
@@ -86,6 +87,8 @@ const context = (over: Record<string, unknown> = {}) => ({
     gameUrl: `/party/${TOKEN}/game`,
     printUrl: `/party/print-token/print`,
     faceSearch: true,
+    slideshowMessageUrl: '/party/upload-token/upload?mode=message',
+    guestbookUrl: `/party/${TOKEN}/guestbook`,
   },
   library: { available: false, accessEndsAt: null },
   ...over,
@@ -238,6 +241,70 @@ it('contribution — photo or greeting', async () => {
   });
   mount('/party/uptok-1/upload', '/party/:token/upload', <PartyUploadPage />);
   await capture('contribution', 'party-mode-media');
+});
+
+it('contribution — a party that takes no greetings', async () => {
+  installFetchMock({
+    'GET /api/party/uptok-1': () => jsonResponse(context()),
+    // The written half is ABSENT rather than disabled, so the page has one
+    // column and no mode switch. Measured because a page that loses a control
+    // is a page whose spacing has to still work.
+    'POST /api/party/uptok-1/upload-session': () => jsonResponse({
+      maxPhotos: null, maxVideos: null, usedPhotos: 0, usedVideos: 0,
+      remainingPhotos: null, remainingVideos: null,
+      slideshowMessagesEnabled: false,
+    }),
+  });
+  mount('/party/uptok-1/upload', '/party/:token/upload', <PartyUploadPage />);
+  await capture('contribution-media-only', 'upload-quota');
+});
+
+/* ── The guest book ───────────────────────────────────────────────────────── */
+
+const DEDICATIONS = [
+  {
+    id: 'g1', authorDisplayName: 'Giulia e Marco',
+    body: 'Che serata. Grazie di averci voluto qui — ci ricorderemo di questa festa per anni.',
+    createdAt: '2027-06-12T22:10:00Z',
+  },
+  {
+    id: 'g2', authorDisplayName: null,
+    body: 'Auguri!',
+    createdAt: '2027-06-12T21:48:00Z',
+  },
+  {
+    id: 'g3', authorDisplayName: 'La nonna',
+    body: 'Sono fiera di te. Un bacio grande.',
+    createdAt: '2027-06-12T21:02:00Z',
+  },
+];
+
+it('guest book — the composer and what is already written', async () => {
+  installFetchMock({
+    [`GET /api/party/${TOKEN}`]: () => jsonResponse(context()),
+    [`GET /api/party/${TOKEN}/guestbook`]: () => jsonResponse({
+      entries: DEDICATIONS,
+      canWrite: true,
+      maxAuthorDisplayNameLength: 80,
+      maxBodyLength: 1000,
+    }),
+  });
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  await capture('guestbook', 'party-guestbook-form');
+});
+
+it('guest book — closed to new dedications, still readable', async () => {
+  installFetchMock({
+    [`GET /api/party/${TOKEN}`]: () => jsonResponse(context({ phase: 'after' })),
+    [`GET /api/party/${TOKEN}/guestbook`]: () => jsonResponse({
+      entries: DEDICATIONS,
+      canWrite: false,
+      maxAuthorDisplayNameLength: 80,
+      maxBodyLength: 1000,
+    }),
+  });
+  mount(`/party/${TOKEN}/guestbook`, '/party/:token/guestbook', <PartyGuestbookPublicPage />);
+  await capture('guestbook-closed', 'party-guestbook-closed');
 });
 
 /* ── The game ─────────────────────────────────────────────────────────────── */

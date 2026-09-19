@@ -81,7 +81,10 @@ describe('PartyPage (public party landing)', () => {
   // equal to it — a url is the card, a null is no card — so the overrides below
   // still accept the old name and translate it.
   function context(overrides: Record<string, unknown> = {}) {
-    const { contributionUrl, gameUrl, printUrl, faceSearch, gameEnabled, ...rest } = {
+    const {
+      contributionUrl, gameUrl, printUrl, faceSearch, gameEnabled,
+      slideshowMessageUrl, guestbookUrl, ...rest
+    } = {
       contributionUrl: '/party/upload-token/upload' as string | null,
       gameUrl: undefined as string | null | undefined,
       printUrl: null as string | null,
@@ -101,7 +104,17 @@ describe('PartyPage (public party landing)', () => {
       itemCount: 1,
       coverUrl: '/api/party/tok-1/media/f1/preview',
       content: [],
-      capabilities: { contributionUrl, gameUrl: resolvedGameUrl, printUrl, faceSearch },
+      capabilities: {
+        contributionUrl,
+        gameUrl: resolvedGameUrl,
+        printUrl,
+        faceSearch,
+        // A backend that predates the two written contributions sends NEITHER
+        // field. Leaving them off unless a test names them is how these tests
+        // say "older server", and it is what exercises the page's own fallback.
+        ...(slideshowMessageUrl === undefined ? {} : { slideshowMessageUrl }),
+        ...(guestbookUrl === undefined ? {} : { guestbookUrl }),
+      },
       library: { available: false, accessEndsAt: null },
       ...rest,
     };
@@ -974,6 +987,52 @@ describe('PartyPage (public party landing)', () => {
     await screen.findByTestId('party-capability-album');
     expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /Lascia un messaggio/i })).not.toBeInTheDocument();
+  });
+
+  it('offers the guest book only where the party keeps one', async () => {
+    // Off by default, and off for every backend that predates it: no card, no
+    // placeholder, no empty state, no fetch.
+    mockHub();
+    const without = render(wrapper());
+    await screen.findByTestId('party-capability-album');
+    expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
+    without.unmount();
+
+    mockHub({ guestbookUrl: '/party/tok-1/guestbook' });
+    render(wrapper());
+    expect(await screen.findByRole('link', { name: /Firma il guestbook/i }))
+      .toHaveAttribute('href', '/party/tok-1/guestbook');
+  });
+
+  it('keeps the book and the slideshow as two invitations, not one said twice', async () => {
+    mockHub({ guestbookUrl: '/party/tok-1/guestbook' });
+    render(wrapper());
+    await screen.findByTestId('party-capability-guestbook');
+
+    // Different words, different destinations, different promises: one is read
+    // out during the evening, the other is kept. A guest who cannot tell them
+    // apart writes the same thing twice and wonders where one of them went.
+    const book = screen.getByTestId('party-capability-guestbook');
+    const dedication = screen.getByTestId('party-capability-dedication');
+    expect(book).toHaveTextContent(/Una dedica da conservare/i);
+    expect(dedication).toHaveTextContent(/Comparirà sullo schermo durante la festa/i);
+    expect(book.textContent).not.toEqual(dedication.textContent);
+    expect(screen.getByRole('link', { name: /Firma il guestbook/i }))
+      .not.toHaveAttribute('href', '/party/upload-token/upload?mode=message');
+  });
+
+  it('keeps the book when the party takes no greetings at all', async () => {
+    // The three contributions are independent: a host may close the composer
+    // and keep the book, and the hub has to survive every combination rather
+    // than assuming the two written ones travel together.
+    mockHub({ slideshowMessageUrl: null, guestbookUrl: '/party/tok-1/guestbook' });
+    render(wrapper());
+
+    await screen.findByTestId('party-capability-guestbook');
+    expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /Lascia un messaggio/i })).not.toBeInTheDocument();
+    // …and photographs are untouched by either of them.
+    expect(screen.getByTestId('party-hub-cta')).toHaveAttribute('href', '/party/upload-token/upload');
   });
 
   it('sends the dedication straight to the composer, and everything else to media', async () => {

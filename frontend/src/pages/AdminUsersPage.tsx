@@ -16,6 +16,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type I18nContextValue, type MessageKey } from '../i18n';
+import { LanguageOptions } from '../components/LanguageSwitcher';
 import { PasswordPolicy } from '../account/passwordPolicy';
 import { TimeZoneSelect } from '../account/TimeZoneSelect';
 import { Modal, Sheet } from '../components/Overlay';
@@ -374,8 +375,7 @@ function CreateUserModal({
           <label className="field">
             <span className="field__label">{t('adminUsers.fieldLanguage')}</span>
             <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-              <option value="it">Italiano</option>
-              <option value="en">English</option>
+              <LanguageOptions />
             </select>
           </label>
           <TimeZoneSelect
@@ -649,8 +649,7 @@ function ProfileTab({
         <label className="field">
           <span className="field__label">{t('adminUsers.fieldLanguage')}</span>
           <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-            <option value="it">Italiano</option>
-            <option value="en">English</option>
+            <LanguageOptions />
           </select>
         </label>
         <TimeZoneSelect
