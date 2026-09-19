@@ -310,6 +310,10 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyFaceSearchService, NubArca.Api.Party.PartyFaceSearchService>();
             services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
             services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyGuestbookService, NubArca.Api.Party.PartyGuestbookService>();
+            services.AddScoped<
+                NubArca.Api.Party.IPartyAddressShareService, NubArca.Api.Party.PartyAddressShareService>();
             services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
             services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
             // The guest list and the personal invitation. Mirrors Program.cs.

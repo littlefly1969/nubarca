@@ -534,6 +534,118 @@ public sealed class PartyCrewConcurrencyPostgresTests : IAsyncLifetime
     }
 
     [SkippableFact]
+    public async Task Two_collaborators_moving_to_one_address_produce_a_conflict_not_a_crash()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // TWO DIFFERENT PEOPLE, ONE NEW ADDRESS, AT THE SAME INSTANT.
+        //
+        // The row lock every update takes serialises writers on ONE
+        // collaborator; it says nothing about two DIFFERENT collaborators
+        // moving to the same address. Both take their own lock, both read a
+        // party in which nobody holds `team@example.com` yet, and both
+        // proceed — so the application's `AnyAsync` check passes twice and the
+        // filtered unique index is what actually decides.
+        //
+        // That is correct: the database is the last authority, and it is the
+        // only thing that can be. What the LOSER must not get is a 500 — the
+        // request was well-formed, the answer is knowable, and it is the same
+        // answer the pre-check gives when it wins the race.
+        const string contested = "team@example.com";
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewError?> Rename(Guid collaboratorId, string name)
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            var result = await service.UpdateAsync(
+                _ownerId, _partyId, collaboratorId,
+                new PartyCollaboratorUpdateDto(name, contested, PartyCrewRoles.CoOrganizer, 1),
+                null);
+            return result.Error;
+        }
+
+        var results = await Task.WhenAll(
+            Task.Run(() => Rename(_collaboratorId, "Regista")),
+            Task.Run(() => Rename(_otherCollaboratorId, "Co")));
+
+        // One success, one EmailInUse, and — the point of the fix — no
+        // exception escaping as a 500.
+        Assert.Equal(1, results.Count(e => e is null));
+        Assert.Equal(1, results.Count(e => e == PartyCrewError.EmailInUse));
+
+        await using var check = NewContext();
+
+        // THE DATABASE AGREES. Exactly one live collaborator holds it.
+        Assert.Equal(1, await check.PartyCollaborators
+            .CountAsync(c => c.PartyId == _partyId
+                && c.RevokedAt == null
+                && c.NormalizedEmail == contested));
+
+        // AND THE LOSER IS INTACT. An email change revokes every device,
+        // invite and challenge before it saves, so a refusal that did not roll
+        // all of that back would leave somebody signed out of a rename that
+        // never happened.
+        var untouched = await check.PartyCollaborators
+            .AsNoTracking()
+            .Where(c => c.PartyId == _partyId && c.NormalizedEmail != contested)
+            .SingleAsync();
+        Assert.Equal(1, untouched.Version);
+        Assert.Contains(untouched.NormalizedEmail, new[] { "regista@example.com", "co@example.com" });
+    }
+
+    [SkippableFact]
+    public async Task A_new_collaborator_racing_a_rename_for_one_address_is_refused_once()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // The other half of the same invariant, and it costs one more method
+        // rather than a framework: CREATE against UPDATE. The create path has
+        // no row to lock at all — there is no collaborator yet — so the index
+        // is the only thing standing between two inserts.
+        const string contested = "newcomer@example.com";
+
+        using var barrier = new Barrier(2);
+
+        async Task<PartyCrewError?> Create()
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            var result = await service.CreateAsync(
+                _ownerId, _partyId,
+                new PartyCollaboratorWriteDto("Nuovo", contested, PartyCrewRoles.Director),
+                null);
+            return result.Error;
+        }
+
+        async Task<PartyCrewError?> Rename()
+        {
+            await using var db = NewContext();
+            var service = NewCrewService(db);
+            barrier.SignalAndWait();
+            var result = await service.UpdateAsync(
+                _ownerId, _partyId, _collaboratorId,
+                new PartyCollaboratorUpdateDto("Regista", contested, PartyCrewRoles.Director, 1),
+                null);
+            return result.Error;
+        }
+
+        var results = await Task.WhenAll(Task.Run(Create), Task.Run(Rename));
+
+        Assert.Equal(1, results.Count(e => e is null));
+        Assert.Equal(1, results.Count(e => e == PartyCrewError.EmailInUse));
+
+        await using var check = NewContext();
+        Assert.Equal(1, await check.PartyCollaborators
+            .CountAsync(c => c.PartyId == _partyId
+                && c.RevokedAt == null
+                && c.NormalizedEmail == contested));
+    }
+
+    [SkippableFact]
     public async Task Two_stale_forms_never_leave_a_role_standing_over_another_role_s_grants()
     {
         Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");

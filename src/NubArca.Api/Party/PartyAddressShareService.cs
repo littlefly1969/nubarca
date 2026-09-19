@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Data;
 using NubArca.Api.Domain;
@@ -51,7 +52,14 @@ public sealed record PartyAddressShareDto(
     /// <summary>
     /// Whether there is anything to send. An address alone is enough — a venue
     /// name without a street is a place nobody can find.
+    ///
+    /// <para>Never serialized: it is the ENDPOINT's question, asked before it
+    /// decides between a share and a 409, and by the time a body exists the
+    /// answer is already yes. Putting it on the wire would add a field whose
+    /// only possible value is <c>true</c> to something whose whole discipline
+    /// is that it carries the five facts and nothing else.</para>
     /// </summary>
+    [JsonIgnore]
     public bool HasAddress => !string.IsNullOrWhiteSpace(Address);
 }
 
