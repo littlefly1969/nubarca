@@ -282,8 +282,12 @@ export const PARTY_CREW_MAX_DEVICES = 2;
 // either set and cannot tell which it has; the leading id argument is accepted
 // and ignored, because the bound one is the truth.
 
+import { partyContributionsPatch } from '@nubarca/contracts';
 import type {
   AlbumPartyStatus,
+  PartyAddressShare,
+  PartyContributionsPatch,
+  PartyGuestbookManagerList,
   GuestDirectoryPage,
   GuestDirectoryQuery,
   GuestDirectorySummary,
@@ -391,6 +395,42 @@ export function partyCrewRoutes(partyId: string) {
       signal?: AbortSignal,
     ): Promise<AlbumPartyStatus> =>
       api<AlbumPartyStatus>(`${at}/slideshow-settings`, { method: 'PATCH', json: settings, signal }),
+
+    /**
+     * WHICH CONTRIBUTIONS THE PARTY TAKES. `contributions.configure` on the
+     * server; a role without it gets the same generic nothing every capability
+     * it does not hold gets, which is why the panel hides the card rather than
+     * drawing one that answers 404.
+     */
+    setPartyContributionSettings: (
+      _a: string,
+      changes: PartyContributionsPatch,
+      signal?: AbortSignal,
+    ): Promise<AlbumPartyStatus> =>
+      api<AlbumPartyStatus>(`${at}/contributions`, {
+        method: 'PATCH', json: partyContributionsPatch(changes), signal,
+      }),
+
+    /* The guest book. Party-scoped for the crew exactly as for the host: the
+       façade names the party and resolves the owner and album server-side. */
+
+    listPartyGuestbook: (_p: string, signal?: AbortSignal): Promise<PartyGuestbookManagerList> =>
+      api<PartyGuestbookManagerList>(`${at}/guestbook`, { signal }),
+
+    moderatePartyGuestbookEntry: (
+      _p: string, entryId: string, action: PartyMessageAction, signal?: AbortSignal,
+    ): Promise<void> =>
+      api<void>(`${at}/guestbook/${encodeURIComponent(entryId)}/${action}`, {
+        method: 'POST', signal,
+      }),
+
+    /**
+     * WHERE THE PARTY IS. `details.manage` on the server — the party's own
+     * facts, not what the invitation says — so a Regista's request is refused
+     * there and not merely hidden here.
+     */
+    sharePartyAddress: (_p: string, signal?: AbortSignal): Promise<PartyAddressShare> =>
+      api<PartyAddressShare>(`${at}/address-share`, { method: 'POST', signal }),
 
     setPartyGameSettings: (
       _a: string,

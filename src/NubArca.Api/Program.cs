@@ -1015,6 +1015,8 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     // its own narrow owner-or-delegate authorization gate.
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyGuestbookService, NubArca.Api.Party.PartyGuestbookService>();
+    builder.Services.AddScoped<NubArca.Api.Party.IPartyAddressShareService, NubArca.Api.Party.PartyAddressShareService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
     // The guest list: invitation groups, their personal RSVP capability, the
@@ -1658,6 +1660,7 @@ app.MapShareLinkEndpoints();
 // token-scoped/owner-scoped behavior; see that file for the implementation.
 app.MapPartyEndpoints();
 app.MapPartyOwnerEndpoints();
+app.MapPartyGuestbookEndpoints();
 app.MapPartyInvitationEndpoints();
 app.MapPartyGuestDirectoryEndpoints();
 app.MapPartyAttendanceEndpoints();

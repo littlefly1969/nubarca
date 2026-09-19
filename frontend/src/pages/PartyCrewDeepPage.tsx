@@ -4,17 +4,18 @@ import { getPartyCrewSession, type PartyCrewSession } from '@nubarca/api-client'
 import { useI18n } from '../i18n';
 import { PartyApiProvider, crewPartyApi } from '../party/workspace/partyApi';
 import { PartyControlRoomPage } from './PartyControlRoomPage';
+import { PartyGuestbookPage } from './PartyGuestbookPage';
 import { PartyMessagesPage } from './PartyMessagesPage';
 import { PartyUploadsPage } from './PartyUploadsPage';
 import './PartyCrew.css';
 
-// THE THREE PAGES A SECTION OPENS, for a collaborator.
+// THE FOUR PAGES A SECTION OPENS, for a collaborator.
 //
-// The moderation queue, the greetings queue and the control room are the host's
-// own pages, rendered through the Party Crew family of routes. Nothing is
-// duplicated: the same components, the same words, the same keyboard handling —
-// they simply ask a different server route, because `usePartyApi()` returns a
-// different object inside this provider.
+// The moderation queue, the greetings queue, the guest book and the control
+// room are the host's own pages, rendered through the Party Crew family of
+// routes. Nothing is duplicated: the same components, the same words, the same
+// keyboard handling — they simply ask a different server route, because
+// `usePartyApi()` returns a different object inside this provider.
 //
 // IT RESOLVES THE SESSION FIRST, for the capabilities. The adapter needs them
 // to answer `can(...)`, and a page that rendered before they arrived would show
@@ -24,7 +25,7 @@ import './PartyCrew.css';
 // party and resolves its album server-side, so the party id stands in and
 // nothing is ever fetched with it.
 
-type Kind = 'photos' | 'messages' | 'game';
+type Kind = 'photos' | 'messages' | 'guestbook' | 'game';
 
 export function PartyCrewDeepPage({ kind }: { kind: Kind }) {
   const { partyId } = useParams<{ partyId: string }>();
@@ -74,6 +75,9 @@ export function PartyCrewDeepPage({ kind }: { kind: Kind }) {
       <div className="crew-shell" data-testid={`party-crew-${kind}`}>
         {kind === 'photos' && <PartyUploadsPage albumId={session.partyId} back={back} />}
         {kind === 'messages' && <PartyMessagesPage albumId={session.partyId} back={back} />}
+        {/* The BOOK is party-scoped on both surfaces, so it takes the real
+            party id rather than the placeholder the album-scoped pages use. */}
+        {kind === 'guestbook' && <PartyGuestbookPage partyId={session.partyId} back={back} />}
         {kind === 'game' && <PartyControlRoomPage albumId={session.partyId} back={back} />}
       </div>
     </PartyApiProvider>

@@ -5,8 +5,7 @@ using NubArca.Api.Party;
 namespace NubArca.Api.Endpoints;
 
 /// <summary>
-/// The three album-level party settings, written once and called from two
-/// places.
+/// The album-level party settings, written once and called from two places.
 ///
 /// <para>The HOST's routes under <c>/api/albums/{id}/party-*</c> and the Party
 /// Crew façade under <c>/api/party-crew/*</c> perform the SAME operation with
@@ -122,6 +121,88 @@ internal static class PartyAlbumSettingsOperations
         var status = await party.GetOwnerStatusAsync(ownerUserId, albumId, ct);
         return status is null ? Results.NotFound() : Results.Ok(status);
     }
+
+    /// <summary>
+    /// WHICH OF THE THREE CONTRIBUTIONS this party takes, and whether each
+    /// needs approving.
+    ///
+    /// <para>One route because they are one decision a host makes on one card,
+    /// and every field is optional because they are three independent
+    /// switches: a client that only knows about photographs must not be able to
+    /// close the guest book by saving the form it does know about.</para>
+    ///
+    /// <para>Deliberately separate from <see cref="SetPartyModeAsync"/>, which
+    /// is the party's own on/off and can publish a draft and mint a capability.
+    /// Switching the guest book on is not a lifecycle event, and must never be
+    /// able to become one.</para>
+    ///
+    /// <para>Each decision gets its OWN audit line, and only when it actually
+    /// changed. "The host stopped taking greetings" and "the host started
+    /// reading them first" are different facts, and a trail that made you infer
+    /// one from the other would not be a trail.</para>
+    /// </summary>
+    internal static async Task<IResult> SetContributionSettingsAsync(
+        IPartyLinkService party,
+        IAuditLogger audit,
+        Guid ownerUserId,
+        AuditActor actor,
+        Guid albumId,
+        PartyContributionSettingsRequest? body,
+        string? ip,
+        CancellationToken ct)
+    {
+        if (body is null) return Results.BadRequest(new { error = "Missing request body." });
+
+        // Read FIRST, so each line below can be written only for a decision
+        // that really moved. Without this every save would audit six changes.
+        var before = await party.GetOwnerStatusAsync(ownerUserId, albumId, ct);
+        if (before is null) return Results.NotFound();
+
+        var ok = await party.UpdateContributionSettingsAsync(
+            ownerUserId, albumId,
+            body.UploadEnabled, body.RequireUploadApproval,
+            body.SlideshowMessagesEnabled, body.RequireMessageApproval,
+            body.GuestbookEnabled, body.RequireGuestbookApproval, ct);
+        if (!ok)
+        {
+            // No active link. The host has to open the party before deciding
+            // what it takes, and saying so is better than silently writing
+            // switches onto a revoked capability.
+            return Results.NotFound();
+        }
+
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.UploadEnabled, body.UploadEnabled,
+            AuditActions.PartyEnable, AuditActions.PartyRevoke);
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.RequireUploadApproval, body.RequireUploadApproval,
+            AuditActions.PartyApprovalModeEnable, AuditActions.PartyApprovalModeDisable);
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.SlideshowMessagesEnabled, body.SlideshowMessagesEnabled,
+            AuditActions.PartySlideshowMessagesEnable, AuditActions.PartySlideshowMessagesDisable);
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.RequireMessageApproval, body.RequireMessageApproval,
+            AuditActions.PartyMessageApprovalModeEnable, AuditActions.PartyMessageApprovalModeDisable);
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.GuestbookEnabled, body.GuestbookEnabled,
+            AuditActions.PartyGuestbookEnable, AuditActions.PartyGuestbookDisable);
+        await AuditSwitchAsync(audit, actor, albumId, ip, ct,
+            before.RequireGuestbookApproval, body.RequireGuestbookApproval,
+            AuditActions.PartyGuestbookApprovalModeEnable, AuditActions.PartyGuestbookApprovalModeDisable);
+
+        var status = await party.GetOwnerStatusAsync(ownerUserId, albumId, ct);
+        return status is null ? Results.NotFound() : Results.Ok(status);
+    }
+
+    /// <summary>One line, and only when the switch actually moved.</summary>
+    private static Task AuditSwitchAsync(
+        IAuditLogger audit, AuditActor actor, Guid albumId, string? ip, CancellationToken ct,
+        bool before, bool? requested, string onAction, string offAction)
+        => requested is bool next && next != before
+            ? audit.LogAsync(
+                actor, next ? onAction : offAction, AuditEntityTypes.PartyAlbum,
+                albumId, ip, new { albumId }, ct)
+            : Task.CompletedTask;
 
     /// <summary>The hosted game's rules.</summary>
     internal static async Task<IResult> SetGameSettingsAsync(

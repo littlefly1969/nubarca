@@ -5,6 +5,7 @@ import type {
 } from '@nubarca/api-client';
 import { cropFor, DEFAULT_CROP_VIEW } from '../pages/partyPrintGeometry';
 import { useI18n } from '../i18n';
+import { partyVenueMapUrl } from './partyAddress';
 
 // The six typed slots, rendered as TEXT — and, where the host chose one, ONE
 // photograph each.
@@ -275,11 +276,9 @@ function PartyGuestContentSection({
       if (!venue && !address && !mediaUrl) return null;
       // The maps link is BUILT from the address rather than stored: an
       // arbitrary external URL kept as authority would be somebody else's page
-      // one QR code away.
-      const maps = address
-        ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-          [venue, address].filter(Boolean).join(' '))}`
-        : null;
+      // one QR code away. Built by the ONE helper that does it, so the link a
+      // guest follows and the link a host shares are the same link.
+      const maps = partyVenueMapUrl({ venueName: venue, address });
       const words = venue || address ? (
         <>
           {venue && <p className="party-content-strong">{venue}</p>}

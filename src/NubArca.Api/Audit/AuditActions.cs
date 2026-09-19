@@ -287,6 +287,31 @@ public static class AuditActions
     public const string PartyMessageApprovalModeEnable = "party.message.approval_mode.enable";
     public const string PartyMessageApprovalModeDisable = "party.message.approval_mode.disable";
 
+    // WHETHER THE PARTY TAKES GREETINGS FOR THE SLIDESHOW AT ALL, which is a
+    // different decision from whether they need approving and gets its own
+    // line: "the host stopped taking greetings" and "the host started reading
+    // them first" must not have to be told apart by inference.
+    public const string PartySlideshowMessagesEnable = "party.slideshow_messages.enable";
+    public const string PartySlideshowMessagesDisable = "party.slideshow_messages.disable";
+
+    // The guest book: opening it, closing it, its approval mode, and what a
+    // manager decided about one dedication. The BODY is never logged anywhere,
+    // exactly as a greeting's is not.
+    public const string PartyGuestbookEnable = "party.guestbook.enable";
+    public const string PartyGuestbookDisable = "party.guestbook.disable";
+    public const string PartyGuestbookApprovalModeEnable = "party.guestbook.approval_mode.enable";
+    public const string PartyGuestbookApprovalModeDisable = "party.guestbook.approval_mode.disable";
+    public const string PartyGuestbookSubmit = "party.guestbook.submit";
+    public const string PartyGuestbookApprove = "party.guestbook.approve";
+    public const string PartyGuestbookReject = "party.guestbook.reject";
+    public const string PartyGuestbookHide = "party.guestbook.hide";
+    public const string PartyGuestbookRestore = "party.guestbook.restore";
+
+    // The party's ADDRESS, handed to somebody who will pass it on. The line
+    // records that a host shared where the party is — never the address, and
+    // never who it went to, because the product does not know.
+    public const string PartyAddressShare = "party.address.share";
+
     // Anonymous party "find your face" search (aggregate: album id + safe status +
     // result count only; never the uploaded selfie, token/hash, query vector,
     // face/person ids, or similarity scores).
@@ -414,6 +439,7 @@ public static class AuditEntityTypes
     public const string Party = "party";
     public const string PartyAlbum = "party_album";
     public const string PartyMessage = "party_message";
+    public const string PartyGuestbookEntry = "party_guestbook_entry";
     public const string Plate = "plate";
     public const string AestheticLabItem = "aesthetic_lab_item";
     public const string AestheticRun = "aesthetic_run";

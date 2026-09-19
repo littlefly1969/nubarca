@@ -28,6 +28,17 @@ public sealed class PartyMessageService : IPartyMessageService
         Guid? participantId,
         CancellationToken cancellationToken = default)
     {
+        // THE PARTY HAS TO TAKE GREETINGS AT ALL, and that is asked first —
+        // before the text is even looked at. A host who switched the slideshow
+        // composer off gets no greeting stored, no participant slot spent and
+        // no validation opinion about a message nobody will ever see. The guest
+        // surface does not draw the form; this is what makes that a rule rather
+        // than a rendering decision.
+        if (!access.SlideshowMessagesEnabled)
+        {
+            return PartyMessageSubmissionResult.Fail(PartyMessageSubmissionError.Disabled);
+        }
+
         // Normalise BEFORE measuring, so the limit applies to what will be
         // stored rather than to padding the guest cannot see.
         if (!PartyMessageText.TryNormalizeDisplayName(displayName, out var name))
@@ -131,7 +142,7 @@ public sealed class PartyMessageService : IPartyMessageService
             // Authorised, but there is no party running. An empty queue with
             // PartyActive=false is a different thing from "no such album", and
             // the owner UI says so.
-            return new PartyMessageListDto(albumId, false, false, grant.IsOwner, []);
+            return new PartyMessageListDto(albumId, false, false, grant.IsOwner, [], false);
         }
 
         var items = await _db.PartyMessages
@@ -150,8 +161,14 @@ public sealed class PartyMessageService : IPartyMessageService
                 m.HeroPromotedAt))
             .ToListAsync(cancellationToken);
 
+        // THE QUEUE SURVIVES THE SWITCH. Closing the composer must never lock a
+        // manager out of what it already collected — the same rule the product
+        // already applies to `party.access` and the upload queue. The flag is
+        // reported so the surface can say "these are not being shown" rather
+        // than the manager inferring it from a television.
         return new PartyMessageListDto(
-            albumId, true, link.RequireMessageApproval, grant.IsOwner, items);
+            albumId, true, link.RequireMessageApproval, grant.IsOwner, items,
+            link.SlideshowMessagesEnabled);
     }
 
     public async Task<PartyMessageMutation> ModerateAsync(
@@ -240,10 +257,18 @@ public sealed class PartyMessageService : IPartyMessageService
         }
 
         var link = await ActiveLinkAsync(ownerUserId, albumId, cancellationToken);
-        if (link is null)
+        if (link is null || !link.SlideshowMessagesEnabled)
         {
             // TV-visible album, no party running: an empty feed, not a 404. The
             // TV shows no ribbon and keeps polling.
+            //
+            // A party that takes no greetings for the slideshow reads the same
+            // way, and that is the point: switching the composer off empties
+            // the television on its next poll WITHOUT touching a single message
+            // row. The backlog is still in the database, still in the host's
+            // queue, and still in whatever moderation state it was in — it is
+            // simply not eligible, and switching the composer back on makes it
+            // eligible again with nobody re-approving anything.
             return new TvPartyMessagesDto([]);
         }
 
@@ -279,7 +304,7 @@ public sealed class PartyMessageService : IPartyMessageService
                 && p.Enabled && p.RevokedAt == null
                 && (p.ExpiresAt == null || p.ExpiresAt > now))
             .OrderByDescending(p => p.CreatedAt)
-            .Select(p => new ActiveLink(p.Id, p.RequireMessageApproval))
+            .Select(p => new ActiveLink(p.Id, p.RequireMessageApproval, p.SlideshowMessagesEnabled))
             .FirstOrDefaultAsync(cancellationToken);
     }
 
@@ -307,7 +332,8 @@ public sealed class PartyMessageService : IPartyMessageService
         return message is null ? null : new ManagedMessage(message, grant);
     }
 
-    private sealed record ActiveLink(Guid Id, bool RequireMessageApproval);
+    private sealed record ActiveLink(
+        Guid Id, bool RequireMessageApproval, bool SlideshowMessagesEnabled);
 
     private sealed record ManagedMessage(PartyMessage Message, PartyMessageManagerGrant Grant);
 }

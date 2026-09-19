@@ -285,6 +285,81 @@ public static class PartyCrewEndpoints
                     links, ctx.OwnerUserId, albumId, body, ct)))
             .WithName("SetPartyCrewSlideshowSettings");
 
+        // WHICH CONTRIBUTIONS THE PARTY TAKES. `contributions.configure` and
+        // nothing else: a REGISTA moderates what guests left and does not
+        // decide whether they may leave it, so this route answers them the same
+        // generic nothing every capability they do not hold answers.
+        app.MapMethods("/api/party-crew/parties/{partyId:guid}/contributions", ["PATCH"], (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyLinkService links,
+            [FromServices] IAuditLogger audit,
+            [FromBody] PartyContributionSettingsRequest? body,
+            CancellationToken ct) =>
+            WithAlbum(http, partyId, resolver, PartyCrewCapabilities.ContributionsConfigure, ct,
+                (ctx, albumId) => PartyAlbumSettingsOperations.SetContributionSettingsAsync(
+                    links, audit, ctx.OwnerUserId, Actor(ctx), albumId, body, Ip(http), ct)))
+            .WithName("SetPartyCrewContributionSettings");
+
+        // ── The guest book ──────────────────────────────────────────────────
+        //
+        // The same façade shape as the greetings: the party is the resource
+        // selector, the owner and the album are resolved server-side, and the
+        // capability is `contributions.moderate` — one job, so somebody who may
+        // take a greeting down may take a dedication down.
+
+        app.MapGet("/api/party-crew/parties/{partyId:guid}/guestbook", (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestbookService guestbook,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, async ctx =>
+            {
+                // THE OWNER'S OWN id, never the collaborator's: a collaborator
+                // owns nothing, and the service authorises against the party's
+                // owner exactly as the host's own route does.
+                var list = await guestbook.ListForManagerAsync(ctx.PartyId, ctx.OwnerUserId, ct);
+                return list is null ? Results.NotFound() : Results.Ok(list);
+            })).WithName("ListPartyCrewGuestbook");
+
+        MapGuestbookModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
+        MapGuestbookModeration(app, "reject", PartyMessageModeration.Reject, AuditActions.PartyGuestbookReject);
+        MapGuestbookModeration(app, "hide", PartyMessageModeration.Hide, AuditActions.PartyGuestbookHide);
+        MapGuestbookModeration(app, "restore", PartyMessageModeration.Restore, AuditActions.PartyGuestbookRestore);
+
+        // ── Where the party is ──────────────────────────────────────────────
+        //
+        // `details.manage`, because the party's address is one of its own
+        // FACTS — its name, its date, where it is — and not part of what the
+        // invitation says. A Regista runs the evening and does not hand out its
+        // address, so this answers them the same nothing every other capability
+        // they do not hold answers.
+        app.MapPost("/api/party-crew/parties/{partyId:guid}/address-share", (
+            Guid partyId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyAddressShareService addresses,
+            [FromServices] IAuditLogger audit,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, PartyCrewCapabilities.DetailsManage, ct, async ctx =>
+            {
+                var share = await addresses.GetAsync(ctx.OwnerUserId, ctx.PartyId, ct);
+                if (share is null) return Results.NotFound();
+                if (!share.HasAddress)
+                {
+                    return Results.Json(
+                        new { error = "party_address_missing" },
+                        statusCode: StatusCodes.Status409Conflict);
+                }
+
+                await audit.LogAsync(
+                    Actor(ctx), AuditActions.PartyAddressShare, AuditEntityTypes.Party,
+                    ctx.PartyId, Ip(http), null, ct);
+                return Results.Ok(share);
+            })).WithName("SharePartyCrewAddress");
+
         app.MapMethods("/api/party-crew/parties/{partyId:guid}/game-settings", ["PATCH"], (
             Guid partyId,
             HttpContext http,
@@ -1125,6 +1200,24 @@ public static class PartyCrewEndpoints
                     messages, audit, ctx.OwnerUserId, Actor(ctx), albumId, messageId,
                     action, auditAction, Ip(http), ct)))
             .WithName($"PartyCrewMessage{segment}");
+    }
+
+    private static void MapGuestbookModeration(
+        IEndpointRouteBuilder app, string segment, PartyMessageModeration action, string auditAction)
+    {
+        app.MapPost($"/api/party-crew/parties/{{partyId:guid}}/guestbook/{{entryId:guid}}/{segment}", (
+            Guid partyId,
+            Guid entryId,
+            HttpContext http,
+            [FromServices] IPartyCrewAccessResolver resolver,
+            [FromServices] IPartyGuestbookService guestbook,
+            [FromServices] IAuditLogger audit,
+            CancellationToken ct) =>
+            With(http, partyId, resolver, PartyCrewCapabilities.ContributionsModerate, ct, ctx =>
+                PartyGuestbookEndpoints.ModerateAsync(
+                    guestbook, audit, ctx.PartyId, ctx.OwnerUserId, Actor(ctx), entryId,
+                    action, auditAction, Ip(http), ct)))
+            .WithName($"PartyCrewGuestbook{segment}");
     }
 
     private static void MapMessageHero(

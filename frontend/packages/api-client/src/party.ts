@@ -11,6 +11,9 @@ import type {
   PartyInvitationGroupWrite,
   PartyInvitationSendMinimal,
   PartyInvitationView,
+  PartyContributionsPatch,
+  PartyGuestbookManagerList,
+  PartyGuestbookPage,
   PartyMessageAction,
   PartyMessageList,
   PartyRsvpQuestion,
@@ -26,6 +29,7 @@ import type {
 } from '@nubarca/contracts';
 import {
   PREFER_RETURN_MINIMAL,
+  partyContributionsPatch,
   partyGuestDirectoryQueryPath,
   partyInvitationGroupDetailPath,
   partyInvitationSharePath,
@@ -58,7 +62,13 @@ import {
 
 export type {
   AlbumPartyStatus,
+  PartyContributionSettings,
+  PartyContributionsPatch,
   PartyGameSettings,
+  PartyGuestbookEntry,
+  PartyGuestbookManagedEntry,
+  PartyGuestbookManagerList,
+  PartyGuestbookPage,
   PartyMessage,
   PartyMessageAction,
   PartyMessageList,
@@ -72,7 +82,10 @@ export type {
 export {
   DESTRUCTIVE_PARTY_MESSAGE_ACTIONS,
   PARTY_GAME_RANGES,
+  PARTY_GUESTBOOK_LIMITS,
   PARTY_SLIDESHOW_RANGES,
+  contributionSettingsFromStatus,
+  partyContributionsPatch,
   clampToRange,
   invalidGameFields,
   invalidSlideshowFields,
@@ -395,6 +408,25 @@ export function setPartySlideshowSettings(
   });
 }
 
+/**
+ * WHICH CONTRIBUTIONS THIS PARTY TAKES — photographs, greetings for the
+ * slideshow, the guest book — and the approval mode of each.
+ *
+ * A different endpoint from `setAlbumPartyMode` on purpose: none of these six
+ * switches may rotate a token, publish a draft or move the party's lifecycle,
+ * and a route that cannot do those things is easier to trust than a body that
+ * promises not to. Only what CHANGED is sent; omitted means unchanged.
+ */
+export function setPartyContributionSettings(
+  albumId: string,
+  changes: PartyContributionsPatch,
+  signal?: AbortSignal,
+): Promise<AlbumPartyStatus> {
+  return api<AlbumPartyStatus>(`/api/albums/${albumId}/party-contributions`, {
+    method: 'PATCH', json: partyContributionsPatch(changes), signal,
+  });
+}
+
 export function getAlbumPartySettings(
   albumId: string,
   signal?: AbortSignal,
@@ -669,6 +701,22 @@ export interface PartyGuestCapabilities {
   gameUrl: string | null;
   printUrl: string | null;
   faceSearch: boolean;
+  /**
+   * Where a guest writes a greeting FOR THE SLIDESHOW, or null when this party
+   * takes none.
+   *
+   * Its own field rather than something derived from `contributionUrl`,
+   * because deriving it is exactly how a party that takes no greetings ends up
+   * offering somewhere to write one. Optional for a backend that predates the
+   * switch — and a client that finds it absent falls back to the contribution
+   * URL, which is what that backend meant.
+   */
+  slideshowMessageUrl?: string | null;
+  /**
+   * The guest book's own route, or null when this party keeps none. Present
+   * for as long as the book is READABLE, which outlasts the party itself.
+   */
+  guestbookUrl?: string | null;
 }
 
 export interface PartyGuestLibrary {
@@ -945,6 +993,9 @@ export interface PartyUploadSession {
   maxMessages?: number | null;
   usedMessages?: number;
   remainingMessages?: number | null;
+  /** Whether the written half of the contribution page exists at all. Absent
+   * means true, which is what every backend before the switch meant. */
+  slideshowMessagesEnabled?: boolean;
 }
 
 // Idempotent. Safe to call on every page load: it mints a session the first
@@ -1182,6 +1233,101 @@ export function moderatePartyMessage(
     `/api/albums/${albumId}/party-messages/${messageId}/${action}`,
     { method: 'POST', signal },
   );
+}
+
+// --- The GUEST BOOK ---
+//
+// A separate resource from the greetings above, on separate routes, with
+// separate types. There is deliberately no function here that promotes a
+// dedication, and none that a television would call.
+//
+// The public half rides the party's VIEW token — the one on the QR — because
+// reading the book is part of looking at the party and a host may keep a book
+// while accepting no photographs at all.
+
+export function getPartyGuestbook(
+  token: string,
+  signal?: AbortSignal,
+): Promise<PartyGuestbookPage> {
+  return api<PartyGuestbookPage>(
+    `/api/party/${encodeURIComponent(token)}/guestbook`, { signal });
+}
+
+export interface PartyGuestbookSubmission {
+  id: string;
+  /** 'pending' when the host reads dedications first, else 'visible'. */
+  status: 'visible' | 'pending';
+  createdAt: string;
+}
+
+export function submitPartyGuestbookEntry(
+  token: string,
+  entry: { authorDisplayName?: string | null; body: string },
+  signal?: AbortSignal,
+): Promise<PartyGuestbookSubmission> {
+  return api<PartyGuestbookSubmission>(
+    `/api/party/${encodeURIComponent(token)}/guestbook`,
+    { method: 'POST', json: entry, signal },
+  );
+}
+
+/** Owner or delegate. PARTY-scoped, because the book is: it survives a QR
+ * rotation, an album change, and the party having no album at all. */
+export function listPartyGuestbook(
+  partyId: string,
+  signal?: AbortSignal,
+): Promise<PartyGuestbookManagerList> {
+  return api<PartyGuestbookManagerList>(
+    `/api/parties/${partyId}/guestbook`, { signal });
+}
+
+export function moderatePartyGuestbookEntry(
+  partyId: string,
+  entryId: string,
+  action: PartyMessageAction,
+  signal?: AbortSignal,
+): Promise<void> {
+  return api<void>(
+    `/api/parties/${partyId}/guestbook/${entryId}/${action}`,
+    { method: 'POST', signal },
+  );
+}
+
+// --- WHERE THE PARTY IS ---
+
+/**
+ * The facts a share is composed from: the party's name, when it starts, and
+ * its venue.
+ *
+ * Deliberately no URL of any kind — not the guest link, not an invitation
+ * token, not an email address. Telling somebody where the party is and
+ * inviting them are different acts, and an address forwarded through a chat
+ * must not carry a capability with it.
+ */
+export interface PartyAddressShare {
+  title: string;
+  eventStartsAt: string | null;
+  venueName: string | null;
+  address: string | null;
+  note: string | null;
+}
+
+/**
+ * Records that the host shared where their party is, and hands back the facts
+ * to say it with.
+ *
+ * A POST because sharing is an act the trail records — never the address
+ * itself, and never who it went to, which the product does not know. It has
+ * NOTHING to do with the guest list: a party with no guests, no groups and no
+ * RSVPs answers this exactly as one with two hundred does. `409
+ * party_address_missing` means the host has not written the venue yet.
+ */
+export function sharePartyAddress(
+  partyId: string,
+  signal?: AbortSignal,
+): Promise<PartyAddressShare> {
+  return api<PartyAddressShare>(
+    `/api/parties/${partyId}/address-share`, { method: 'POST', signal });
 }
 
 // --- Public guest message submission (anonymous, upload-token scoped) ---

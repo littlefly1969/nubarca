@@ -16,10 +16,12 @@ import {
   getPartyRsvpQuestions,
   listAlbumItems,
   listPartyChallenges,
+  listPartyGuestbook,
   listPartyGuestContent,
   listPartyMessages,
   listPartyUploads,
   listPrintStations,
+  moderatePartyGuestbookEntry,
   moderatePartyMessage,
   moderatePartyUpload,
   partyCrewRoutes,
@@ -35,9 +37,11 @@ import {
   setAlbumTvVisibility,
   setPartyCovers,
   setPartyGameSettings,
+  setPartyContributionSettings,
   setPartyGuestContent,
   setPartyPrintSettings,
   setPartySlideshowSettings,
+  sharePartyAddress,
   sharePartyInvitation,
   transitionParty,
   undoPartyGuestCheckIn,
@@ -86,6 +90,7 @@ const owner = {
 
   getAlbumPartySettings,
   setAlbumPartyMode,
+  setPartyContributionSettings,
   setPartySlideshowSettings,
   setPartyGameSettings,
   setAlbumTvVisibility,
@@ -132,6 +137,17 @@ const owner = {
   moderatePartyUpload,
   listPartyMessages,
   moderatePartyMessage,
+  listPartyGuestbook,
+  moderatePartyGuestbookEntry,
+
+  /**
+   * WHERE THE PARTY IS, ready to hand to somebody.
+   *
+   * Nothing about it reads a guest, a group, an invitation or an RSVP — which
+   * is the point of it. `details.manage` on the crew side; the host always
+   * holds it over their own party.
+   */
+  sharePartyAddress,
 
   listAlbumItems,
   listPartyChallenges,
@@ -195,8 +211,17 @@ export function crewPartyApi(partyId: string, capabilities: readonly string[]): 
  * which surface it is on.
  */
 export function partyDeepLink(
-  api: PartyApi, kind: 'photos' | 'messages' | 'game', partyId: string, albumId: string,
+  api: PartyApi,
+  kind: 'photos' | 'messages' | 'game' | 'guestbook',
+  partyId: string,
+  albumId: string,
 ): string {
+  // THE BOOK IS THE PARTY'S, not the album's, so its queue is named by the
+  // party on BOTH surfaces — the one destination here that does not follow the
+  // album-scoped shape, because the resource does not either.
+  if (kind === 'guestbook') {
+    return api.isOwner ? `/parties/${partyId}/guestbook` : `/party/crew/${partyId}/guestbook`;
+  }
   return api.isOwner
     ? `/albums/${albumId}/party-${kind === 'photos' ? 'uploads' : kind}?party=${partyId}`
     : `/party/crew/${partyId}/${kind}`;

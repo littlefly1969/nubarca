@@ -60,3 +60,38 @@ export function isPartyMessageSubmittable(
   if (partyMessageLength(body) > PARTY_MESSAGE_LIMITS.text) return false;
   return partyMessageLength(normalizePartyMessageText(displayName)) <= PARTY_MESSAGE_LIMITS.displayName;
 }
+
+// ── The guest book ──────────────────────────────────────────────────────────
+//
+// The SAME normalisation, with the book's own limits. A dedication is written
+// to be kept rather than read out over music, so it gets more room — but the
+// rules about what text IS do not change, and there is deliberately no second
+// implementation of them here: `normalizePartyMessageText` is the one mirror of
+// `PartyMessageText.Normalize`, and the backend's `PartyGuestbookText` reuses
+// the same function on its side for the same reason.
+
+export const PARTY_GUESTBOOK_TEXT_LIMITS = {
+  authorDisplayName: 80,
+  body: 1000,
+} as const;
+
+export function partyGuestbookBodyRemaining(value: string | null | undefined): number {
+  return PARTY_GUESTBOOK_TEXT_LIMITS.body
+    - partyMessageLength(normalizePartyMessageText(value));
+}
+
+export function partyGuestbookAuthorRemaining(value: string | null | undefined): number {
+  return PARTY_GUESTBOOK_TEXT_LIMITS.authorDisplayName
+    - partyMessageLength(normalizePartyMessageText(value));
+}
+
+export function isPartyGuestbookSubmittable(
+  body: string | null | undefined,
+  authorDisplayName: string | null | undefined,
+): boolean {
+  const text = normalizePartyMessageText(body);
+  if (text.length === 0) return false;
+  if (partyMessageLength(text) > PARTY_GUESTBOOK_TEXT_LIMITS.body) return false;
+  return partyMessageLength(normalizePartyMessageText(authorDisplayName))
+    <= PARTY_GUESTBOOK_TEXT_LIMITS.authorDisplayName;
+}

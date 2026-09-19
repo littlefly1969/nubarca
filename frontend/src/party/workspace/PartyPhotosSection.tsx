@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import {
   ApiError,
+  contributionSettingsFromStatus,
   type AlbumPartyStatus,
   type Party,
+  type PartyContributionsPatch,
 } from '@nubarca/api-client';
 import { useAuth } from '../../auth/useAuth';
 import { usePermissions } from '../../auth/usePermissions';
@@ -63,11 +65,21 @@ export function PartyPhotosSection({
   const albumId = album?.albumId ?? null;
   const open = albumParty?.partyMode === true;
 
-  async function toggleUpload(next: boolean) {
+  const contributions = albumParty ? contributionSettingsFromStatus(albumParty) : null;
+
+  /**
+   * ONE switch, saved on its own.
+   *
+   * The three contributions are independent product decisions, so only the one
+   * that moved travels: sending the whole current state back would work until
+   * two people configured one party at once, at which point the second save
+   * would quietly restore what the first had just changed.
+   */
+  async function toggle(changes: PartyContributionsPatch) {
     if (!albumId) return;
     setBusy(true); setFailed(false);
     try {
-      onAlbumPartyUpdated(await api.setAlbumPartyMode(albumId, true, next));
+      onAlbumPartyUpdated(await api.setPartyContributionSettings(albumId, changes));
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) { invalidateAuth(); return; }
       setFailed(true);
@@ -93,12 +105,23 @@ export function PartyPhotosSection({
 
       {albumId === null || albumPartyFailed ? null : (
         <>
+          {/* THE THREE CONTRIBUTIONS, on one card, in the order a host thinks
+              about them: what people bring, what goes on the screen, what stays
+              in the book.
+
+              They are three switches and not one, because they are three
+              decisions. A shared album with nothing written on the television
+              is a real party; so is a guest book with no photographs. And the
+              two written ones are deliberately named for what they DO — a
+              message is read out during the evening, a dedication is kept —
+              because "messages" said twice would be the one mistake this card
+              exists to avoid. */}
           <Panel
             title={t('party.photos.contributions')}
             note={t('party.photos.contributionsNote')}
             testId="party-contributions"
           >
-            {!open ? (
+            {!open || !contributions ? (
               <Notice tone="info" testId="party-photos-needs-access">
                 <p>{t('party.photos.needsAccess')}</p>
               </Notice>
@@ -108,22 +131,96 @@ export function PartyPhotosSection({
                   testId="party-photos-uploads"
                   label={t('party.photos.uploadsLabel')}
                   note={t('party.photos.uploadsNote')}
-                  checked={albumParty?.uploadEnabled ?? false}
+                  checked={contributions.uploadEnabled}
                   disabled={busy}
-                  onChange={(next) => void toggleUpload(next)}
+                  onChange={(next) => void toggle({ uploadEnabled: next })}
+                />
+                <SwitchRow
+                  testId="party-contributions-messages"
+                  label={t('party.contributions.messagesLabel')}
+                  note={t('party.contributions.messagesNote')}
+                  checked={contributions.slideshowMessagesEnabled}
+                  disabled={busy}
+                  onChange={(next) => void toggle({ slideshowMessagesEnabled: next })}
+                />
+                <SwitchRow
+                  testId="party-contributions-guestbook"
+                  label={t('party.contributions.guestbookLabel')}
+                  note={t('party.contributions.guestbookNote')}
+                  checked={contributions.guestbookEnabled}
+                  disabled={busy}
+                  onChange={(next) => void toggle({ guestbookEnabled: next })}
                 />
               </div>
             ) : (
-              <p className="pw-small pw-muted">
-                {albumParty?.uploadEnabled
-                  ? t('party.photos.uploadsOnReadOnly')
-                  : t('party.photos.uploadsOffReadOnly')}
-              </p>
+              /* A REGISTA moderates what guests left and does not decide
+                 whether they may leave it. They are told what is true rather
+                 than shown a switch the server would refuse. */
+              <ul className="pw-facts" data-testid="party-contributions-readonly">
+                <li>
+                  <span className="pw-fact-label">{t('party.photos.uploadsLabel')}</span>
+                  <span className="pw-fact-value">
+                    {contributions.uploadEnabled
+                      ? t('party.contributions.on')
+                      : t('party.contributions.off')}
+                  </span>
+                </li>
+                <li>
+                  <span className="pw-fact-label">{t('party.contributions.messagesLabel')}</span>
+                  <span className="pw-fact-value">
+                    {contributions.slideshowMessagesEnabled
+                      ? t('party.contributions.on')
+                      : t('party.contributions.off')}
+                  </span>
+                </li>
+                <li>
+                  <span className="pw-fact-label">{t('party.contributions.guestbookLabel')}</span>
+                  <span className="pw-fact-value">
+                    {contributions.guestbookEnabled
+                      ? t('party.contributions.on')
+                      : t('party.contributions.off')}
+                  </span>
+                </li>
+              </ul>
             )}
             {failed && (
               <Notice tone="error"><p>{t('party.overview.saveFailed')}</p></Notice>
             )}
           </Panel>
+
+          {/* The book's own queue, beside the greetings' — reachable on
+              `party.access` alone, because closing a channel must never lock
+              anybody out of the queue it filled. It is NOT inside the card
+              above: configuring a contribution and reading what it collected
+              are two different jobs, and the product already separates them. */}
+          {contributions?.guestbookEnabled && (
+            <Panel
+              title={t('party.guestbook.queueHeading')}
+              note={t('party.guestbook.queueNote')}
+              testId="party-guestbook-queue-panel"
+            >
+              <LinkRow
+                to={partyDeepLink(api, 'guestbook', party.id, albumId)}
+                testId="party-guestbook-queue"
+                title={t('party.guestbook.openQueue')}
+                note={contributions.requireGuestbookApproval
+                  ? t('party.guestbook.approvalOn')
+                  : t('party.guestbook.approvalOff')}
+              />
+              {canContributions && (
+                <div className="pw-rows">
+                  <SwitchRow
+                    testId="party-guestbook-approval"
+                    label={t('party.guestbook.approvalLabel')}
+                    note={t('party.guestbook.approvalNote')}
+                    checked={contributions.requireGuestbookApproval}
+                    disabled={busy}
+                    onChange={(next) => void toggle({ requireGuestbookApproval: next })}
+                  />
+                </div>
+              )}
+            </Panel>
+          )}
 
           <Panel
             title={t('party.photos.queueHeading')}
