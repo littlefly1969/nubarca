@@ -41,7 +41,15 @@ public sealed record AlbumPartyStatusDto(
     // Whether the guests are asked which activities they would like to see,
     // before the match starts. Off by default, which is what every party before
     // the column meant.
-    bool PriorityVotingEnabled = false);
+    bool PriorityVotingEnabled = false,
+    // THE THREE CONTRIBUTIONS, as the host configures them. Photographs are
+    // `UploadEnabled` above — the switch that already existed, and no second
+    // one was invented for them. These are the other two, and each is a
+    // separate product decision: a shared album with nothing on the television,
+    // a book with no album, or all three at once.
+    bool SlideshowMessagesEnabled = true,
+    bool GuestbookEnabled = false,
+    bool RequireGuestbookApproval = false);
 
 // Derived public URLs for an active party link (relative, e.g. "/party/{token}"
 // and "/party/{token}/upload"). Never a token hash. UploadUrl is null when the
@@ -90,7 +98,13 @@ public sealed record PartyUploadSessionDto(
     // mean the host set no limit.
     int? MaxMessages = null,
     int UsedMessages = 0,
-    int? RemainingMessages = null);
+    int? RemainingMessages = null,
+    // WHETHER THIS PARTY TAKES GREETINGS AT ALL. The contribution page holds
+    // two halves on one token, and this is how it knows whether the written
+    // half exists — so a party that takes photographs and no greetings shows a
+    // page about photographs rather than a disabled tab. True by default, which
+    // is what every party before the switch meant.
+    bool SlideshowMessagesEnabled = true);
 
 // Result of enabling party mode: the same status plus a convenience flag that
 // the frontend can use to surface the (re)generated link.
@@ -142,7 +156,16 @@ public sealed record PartyAccess(
     bool RequireMessageApproval = false,
     // Greetings one guest may send, on the same principle and with the same
     // 0 = unlimited convention as the media quotas above.
-    int MaxMessagesPerParticipant = 0);
+    int MaxMessagesPerParticipant = 0,
+    // WHETHER THIS PARTY TAKES GREETINGS FOR THE SLIDESHOW AT ALL. A different
+    // question from whether they need approving: approval is about what a
+    // greeting becomes, this is about whether there is anywhere to write one.
+    // True by default, which is what every party before the column meant.
+    bool SlideshowMessagesEnabled = true,
+    // Whether this party keeps a guest book. Opt-in, so an absent value is the
+    // same "no book here" every party had before it existed.
+    bool GuestbookEnabled = false,
+    bool RequireGuestbookApproval = false);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,
@@ -206,7 +229,23 @@ public sealed record PartyGuestCapabilitiesDto(
     string? ContributionUrl = null,
     string? GameUrl = null,
     string? PrintUrl = null,
-    bool FaceSearch = false);
+    bool FaceSearch = false,
+    // THE TWO WRITTEN CONTRIBUTIONS, each stating where it lives or not being
+    // here at all. They are separate fields rather than one because they are
+    // separate things: a greeting is written to be read out on a television and
+    // a dedication is written to be kept, and a party may take either, both, or
+    // neither.
+    //
+    // The slideshow composer shares the contribution URL — same token, same
+    // session, same page, a different half of it — so it is that URL with the
+    // composer asked for. It is absent whenever the party takes no greetings,
+    // which is what stops the guest surface from drawing a card, a tab, a form,
+    // an empty state or a fetch for a contribution that does not exist here.
+    string? SlideshowMessageUrl = null,
+    // The book's own route on the VIEW token. Present whenever the book is
+    // READABLE — during the party and for as long as the memories last — and
+    // absent otherwise, so a keepsake outlives the composer that filled it.
+    string? GuestbookUrl = null);
 
 // Whether the memories are reachable, and until when if the host said so.
 public sealed record PartyGuestLibraryDto(bool Available, DateTime? AccessEndsAt = null);
@@ -296,6 +335,13 @@ public enum PartyMessageSubmissionError
     // budget, the other says the requests are coming too fast. They get
     // different status codes because a client must be able to tell them apart.
     LimitReached,
+
+    // THIS PARTY DOES NOT TAKE GREETINGS FOR THE SLIDESHOW. Not a quota, not a
+    // rate limit and not a moderation decision: there is no composer on the
+    // guest surface at all, and a request that reached here was built by hand.
+    // Refused by the SERVER rather than by the absence of a form, because a
+    // surface the browser stops drawing is not a rule.
+    Disabled,
 }
 
 public sealed record PartyMessageSubmissionResult(
@@ -332,7 +378,13 @@ public sealed record PartyMessageListDto(
     bool PartyActive,
     bool RequireMessageApproval,
     bool IsOwner,
-    IReadOnlyList<PartyMessageDto> Items);
+    IReadOnlyList<PartyMessageDto> Items,
+    // Whether the party is still TAKING greetings for the slideshow. The queue
+    // is reachable either way — closing a channel must never lock somebody out
+    // of the queue it filled — so this is what lets the surface say "nothing
+    // here is being shown" instead of leaving a manager to infer it from a
+    // television that went quiet.
+    bool SlideshowMessagesEnabled = true);
 
 // TV projection of the live message feed. One flat list, oldest first, already
 // filtered to the currently active party and to Visible; the TV decides which
@@ -399,3 +451,102 @@ public sealed record PartyChallengePresentationDto(
 public sealed record PartyPlaybackSnapshotDto(
     string Mode, PartyChallengePresentationDto? ActiveChallenge,
     DateTime? NextChallengeAt, int CompletedCount);
+
+// --- PARTY GUEST BOOK ---
+//
+// A separate resource from the greetings above, with its own table, its own
+// switch, its own moderation queue and no path whatsoever to a television. The
+// DTOs are separate for the same reason the entity is: a shape shared with
+// PartyMessage is one refactor away from a projection that reads both.
+
+// ONE DEDICATION, as a guest reads it. The signature the author typed and the
+// text, and nothing else — never the participant, the link, the moderator, the
+// owner, or the status (a guest only ever receives entries that are public, so
+// a status field could only ever say "visible").
+public sealed record PartyGuestbookEntryDto(
+    Guid Id,
+    string? AuthorDisplayName,
+    string Body,
+    DateTime CreatedAt);
+
+// THE BOOK, as a guest reads it. Newest first: the last thing written is the
+// thing somebody just wrote, and a keepsake that opens on page one of a hundred
+// is a keepsake nobody scrolls.
+public sealed record PartyGuestbookPageDto(
+    IReadOnlyList<PartyGuestbookEntryDto> Entries,
+    // Whether the guest may add to it right now. Distinct from the book
+    // existing: an ended party's book may still be readable while closed to new
+    // dedications, and the surface says which.
+    bool CanWrite,
+    int MaxAuthorDisplayNameLength = PartyGuestbookLimits.MaxAuthorDisplayNameLength,
+    int MaxBodyLength = PartyGuestbookLimits.MaxBodyLength);
+
+// What the guest gets back after writing. The id so the page can key its own
+// optimistic entry, and the status so it can say "in the book" or "waiting to
+// be approved".
+public sealed record PartyGuestbookSubmissionDto(
+    Guid Id,
+    string Status, // "visible" | "pending"
+    DateTime CreatedAt);
+
+// Why a dedication was refused. The HTTP layer maps these to a status code and
+// a stable machine code; the service never formats copy of its own.
+public enum PartyGuestbookSubmissionError
+{
+    // Empty, whitespace-only, or over the limit after normalisation.
+    InvalidBody,
+
+    // Present but over the limit after normalisation.
+    InvalidAuthorDisplayName,
+
+    // This party keeps no guest book. Same shape of refusal as a greeting sent
+    // to a party that takes none: a hand-built request, refused by the server.
+    Disabled,
+}
+
+public sealed record PartyGuestbookSubmissionResult(
+    PartyGuestbookSubmissionDto? Entry,
+    PartyGuestbookSubmissionError? Error)
+{
+    public static PartyGuestbookSubmissionResult Ok(PartyGuestbookSubmissionDto entry) =>
+        new(entry, null);
+
+    public static PartyGuestbookSubmissionResult Fail(PartyGuestbookSubmissionError error) =>
+        new(null, error);
+}
+
+// Owner/delegate view of ONE dedication: the text, the signature, and the
+// moderation state. No owner id, no moderator id, no participant id and no
+// link id — the same restraint PartyMessageDto exercises, for the same reason.
+public sealed record PartyGuestbookManagedEntryDto(
+    Guid Id,
+    string? AuthorDisplayName,
+    string Body,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? ModeratedAt);
+
+// The manager queue for a party's book. `IsOwner` is what the UI uses to decide
+// whether to render the configuration switches, exactly as on the greetings
+// queue: a delegate moderates the book and does not decide whether there is one.
+public sealed record PartyGuestbookManagerListDto(
+    Guid PartyId,
+    bool GuestbookEnabled,
+    bool RequireGuestbookApproval,
+    bool IsOwner,
+    IReadOnlyList<PartyGuestbookManagedEntryDto> Entries);
+
+// --- CONTRIBUTION CONFIGURATION ---
+
+// The host's (or a `contributions.configure` collaborator's) decision about
+// which of the three contributions this party takes. Every field is nullable
+// so a client that knows about one switch cannot switch the others off by
+// saving the form it does know about — the same rule PartyGameSettingsRequest
+// applies to PriorityVotingEnabled.
+public sealed record PartyContributionSettingsRequest(
+    bool? UploadEnabled = null,
+    bool? RequireUploadApproval = null,
+    bool? SlideshowMessagesEnabled = null,
+    bool? RequireMessageApproval = null,
+    bool? GuestbookEnabled = null,
+    bool? RequireGuestbookApproval = null);

@@ -17,8 +17,10 @@ const it = {
   'partyHub.face': 'Trova le tue foto',
   'partyHub.faceHelp': 'Scatta un selfie',
   'partyHub.voteHelp': 'Partecipa ora',
-  'partyHub.dedication': 'Lascia una dedica',
-  'partyHub.dedicationHelp': 'Un pensiero speciale per la festa',
+  'partyHub.dedication': 'Lascia un messaggio',
+  'partyHub.dedicationHelp': 'Comparirà sullo schermo durante la festa',
+  'partyHub.guestbook': 'Firma il guestbook',
+  'partyHub.guestbookHelp': 'Una dedica da conservare',
   'partyHub.live': 'Live',
   'partyHub.print': 'Crea il tuo ricordo',
   'partyHub.printHelp': 'Foto o striscia da stampare',
@@ -634,6 +636,39 @@ const it = {
   'party.photos.uploadsNote': 'Quante ne può mandare ciascuno lo decidi più sotto.',
   'party.photos.uploadsOnReadOnly': 'Gli ospiti possono aggiungere fotografie.',
   'party.photos.uploadsOffReadOnly': 'Gli ospiti non possono aggiungere fotografie.',
+
+  // The THREE contributions. The two written ones are named for what they DO —
+  // a messaggio is read out during the evening, una dedica resta nel libro —
+  // because the same word for both is the one mistake this card avoids.
+  'party.contributions.messagesLabel': 'Messaggi per lo slideshow',
+  'party.contributions.messagesNote':
+    'Mostra i messaggi degli ospiti sullo schermo durante la festa.',
+  'party.contributions.guestbookLabel': 'Guestbook',
+  'party.contributions.guestbookNote':
+    'Raccogli dediche e ricordi in un libro degli ospiti separato, che resta dopo la festa.',
+  'party.contributions.on': 'Attivo',
+  'party.contributions.off': 'Non attivo',
+
+  'party.guestbook.queueHeading': 'Il guestbook',
+  'party.guestbook.queueNote': 'Le dediche che gli ospiti hanno lasciato.',
+  'party.guestbook.openQueue': 'Apri il guestbook',
+  'party.guestbook.approvalLabel': 'Le dediche richiedono approvazione',
+  'party.guestbook.approvalNote':
+    'Se attiva, le nuove dediche aspettano prima di comparire nel libro. Disattivarla non pubblica quelle già in attesa.',
+  'party.guestbook.approvalOn': 'Le nuove dediche aspettano la tua approvazione.',
+  'party.guestbook.approvalOff': 'Le nuove dediche entrano nel libro appena arrivano.',
+
+  // WHERE THE PARTY IS. Never the guest link: dire dov'è la festa e invitare
+  // qualcuno sono due cose diverse, e questa card fa solo la prima.
+  'party.address.heading': 'Il luogo della festa',
+  'party.address.note': 'Condividilo con chi vuoi, anche senza invitarlo.',
+  'party.address.share': 'Condividi indirizzo',
+  'party.address.shareWhen': 'Quando: {date}',
+  'party.address.openMap': 'Apri la mappa',
+  'party.address.shared': 'Indirizzo condiviso.',
+  'party.address.copied': 'Indirizzo copiato.',
+  'party.address.failed': 'Non sono riuscito a condividere l’indirizzo.',
+  'party.address.set': 'Imposta indirizzo',
   'party.photos.queueHeading': 'Quello che hanno mandato',
   'party.photos.queueNote': 'Qui decidi cosa diventa pubblico e cosa sparisce.',
   'party.photos.approvalOn': 'Le nuove foto aspettano la tua approvazione.',
@@ -1372,6 +1407,57 @@ const it = {
   'partyMessages.approvalError': 'Impossibile aggiornare la modalità di approvazione.',
   'partyMessages.delegateNotice':
     'Puoi moderare i messaggi di questo album. Le altre impostazioni party restano al proprietario.',
+
+  // --- Owner/delegate guest book moderation ---
+  'partyGuestbook.title': 'Guestbook',
+  'partyGuestbook.intro':
+    'Le dediche che gli ospiti hanno lasciato. Restano nel libro e non compaiono mai sulla TV.',
+  'partyGuestbook.queue': 'Le dediche',
+  'partyGuestbook.emptyTitle': 'Nessuna dedica, per ora',
+  'partyGuestbook.empty': 'Ancora nessuno ha scritto nel guestbook.',
+  'partyGuestbook.statusInBook': 'Nel libro',
+  'partyGuestbook.filterInBook': 'Nel libro',
+  'partyGuestbook.approve': 'Metti nel libro',
+  'partyGuestbook.hide': 'Togli dal libro',
+  'partyGuestbook.loadError': 'Impossibile caricare il guestbook.',
+  'partyGuestbook.updateError': 'Impossibile aggiornare la dedica.',
+  'partyGuestbook.delegateNotice':
+    'Puoi moderare il guestbook di questa festa. Le altre impostazioni restano all’organizzatore.',
+  'partyGuestbook.disabledNotice':
+    'Il guestbook è spento: gli ospiti non lo vedono e non possono scriverci. Quello che c’è resta qui.',
+
+  // --- The PUBLIC guest book (guest-facing) ---
+  'partyGuestbookPublic.title': 'Guestbook',
+  'partyGuestbookPublic.subtitle': 'Lascia un ricordo che resta.',
+  'partyGuestbookPublic.forParty': 'Un ricordo per {party}.',
+  'partyGuestbookPublic.backToParty': 'Torna alla festa',
+  'partyGuestbookPublic.unavailable': 'Questa festa non ha un guestbook.',
+  'partyGuestbookPublic.loadError': 'Non riesco a caricare il guestbook.',
+  'partyGuestbookPublic.closed': 'Il guestbook è chiuso: puoi leggerlo, ma non si può più scrivere.',
+  'partyGuestbookPublic.entriesTitle': 'Le dediche',
+  'partyGuestbookPublic.empty': 'Non c’è ancora niente: la prima dedica può essere la tua.',
+  'partyGuestbookPublic.anonymous': 'Un ospite',
+  'partyGuestbookPublic.composer': 'Lascia la tua dedica',
+  'partyGuestbookPublic.composerFor': 'Lascia un ricordo per {party}',
+  'partyGuestbookPublic.composerHelp':
+    'Resta nel libro degli ospiti. Non finisce sullo schermo della festa.',
+  'partyGuestbookPublic.nameLabel': 'Come ti firmi (facoltativo)',
+  'partyGuestbookPublic.namePlaceholder': 'Il tuo nome',
+  'partyGuestbookPublic.nameOverLimit': 'La firma può essere al massimo di {max} caratteri.',
+  'partyGuestbookPublic.bodyLabel': 'La tua dedica',
+  'partyGuestbookPublic.bodyPlaceholder': 'Scrivi qui il tuo ricordo…',
+  'partyGuestbookPublic.remaining': 'Restano {count} caratteri',
+  'partyGuestbookPublic.overLimit': 'La dedica può essere al massimo di {max} caratteri.',
+  'partyGuestbookPublic.send': 'Lascia la tua dedica',
+  'partyGuestbookPublic.sending': 'Invio…',
+  'partyGuestbookPublic.sentTitle': 'Grazie',
+  'partyGuestbookPublic.sentVisible': 'La tua dedica è nel guestbook.',
+  'partyGuestbookPublic.sentPending': 'La tua dedica è arrivata: comparirà dopo un controllo.',
+  'partyGuestbookPublic.writeAnother': 'Scrivi un’altra dedica',
+  'partyGuestbookPublic.disabled': 'Il guestbook è stato chiuso.',
+  'partyGuestbookPublic.rejected': 'Dedica non valida: controlla lunghezza e contenuto.',
+  'partyGuestbookPublic.tooMany': 'Troppe dediche in poco tempo. Aspetta un momento e riprova.',
+  'partyGuestbookPublic.failed': 'Non sono riuscito a inviare la dedica.',
 
   // --- TV pairing / browser fallback (/tv) ---
   'tv.title': 'NubArca TV',

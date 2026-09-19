@@ -73,6 +73,27 @@ public interface IPartyLinkService
         int? maxMessagesPerParticipant,
         CancellationToken cancellationToken = default);
 
+    // WHICH OF THE THREE CONTRIBUTIONS this party takes — photographs,
+    // greetings for the slideshow, and the guest book — plus the approval mode
+    // of each. Every argument is nullable and omitted means UNCHANGED, so a
+    // client that knows about two switches cannot turn the third off by saving
+    // the form it does know about.
+    //
+    // Deliberately separate from EnableAsync for the same reason
+    // UpdateSlideshowSettingsAsync is: none of these may mint a link, rotate a
+    // token, or move the party's lifecycle. Returns false when the album has no
+    // active link or is not the caller's.
+    Task<bool> UpdateContributionSettingsAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        bool? uploadEnabled,
+        bool? requireUploadApproval,
+        bool? slideshowMessagesEnabled,
+        bool? requireMessageApproval,
+        bool? guestbookEnabled,
+        bool? requireGuestbookApproval,
+        CancellationToken cancellationToken = default);
+
     // `priorityVotingEnabled` is nullable for the same reason every other
     // optional settings field is: omitted means unchanged, so a client written
     // before pre-game preferences existed cannot switch them off by saving the

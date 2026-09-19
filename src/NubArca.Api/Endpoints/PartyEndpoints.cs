@@ -40,6 +40,14 @@ public static class PartyEndpoints
     // Program.cs for the (untouched) rate limiter policy registration —
     // duplicated here only as the literal policy names, not new policies.
     private const string PartyPublicRateLimitPolicy = "party-public";
+
+    // The two public Party policies the guest book shares. It is deliberately
+    // not given policies of its own: reading the book is an ordinary public
+    // Party read and writing in it is a public Party write, so they belong in
+    // the same windows as the surfaces beside them rather than in a third
+    // budget an operator would have to learn about.
+    internal const string PublicRateLimitPolicy = PartyPublicRateLimitPolicy;
+    internal const string MessageRateLimitPolicy = PartyMessageRateLimitPolicy;
     private const string PartyPublicMediaRateLimitPolicy = "party-public-media";
     private const string PartyUploadRateLimitPolicy = "party-upload";
     private const string PartyFaceSearchRateLimitPolicy = "party-face-search";
@@ -171,7 +179,22 @@ public static class PartyEndpoints
                     // lives, and its absence is the whole answer.
                     gameEnabled ? NubArca.Api.Party.PartyLinkService.BuildGameUrl(token) : null,
                     printUrl,
-                    access.Capabilities.FaceSearch),
+                    access.Capabilities.FaceSearch,
+                    // THE SLIDESHOW COMPOSER. Its own field rather than the
+                    // client deriving it from the contribution URL, because
+                    // deriving it is exactly how a party that takes no
+                    // greetings ends up offering somewhere to write one. Null
+                    // whenever the party takes none — and the hub has no card,
+                    // no tab, no empty state and no feed to fetch.
+                    access.SlideshowMessagesEnabled && contributionUrl is not null
+                        ? NubArca.Api.Party.PartyContributionModes.Message(contributionUrl)
+                        : null,
+                    // THE BOOK, which outlives the composer: readable for as
+                    // long as the memories are, so it is not inside the `live`
+                    // branch above.
+                    access.GuestbookEnabled && access.Experience.AllowsAlbumMedia
+                        ? NubArca.Api.Party.PartyLinkService.BuildGuestbookUrl(token)
+                        : null),
                 new NubArca.Api.Party.PartyGuestLibraryDto(
                     access.Experience.LibraryAvailable,
                     access.Experience.LibraryAccessEndsAt)));
@@ -628,7 +651,13 @@ public static class PartyEndpoints
                 Remaining(quota.MaxVideos, quota.UsedVideos),
                 Unlimited(access.MaxMessagesPerParticipant),
                 usedMessages,
-                Remaining(access.MaxMessagesPerParticipant, usedMessages)));
+                Remaining(access.MaxMessagesPerParticipant, usedMessages),
+                // WHETHER THE WRITTEN HALF OF THIS PAGE EXISTS. Reported here
+                // rather than left to the page to assume, so a party that takes
+                // photographs and no greetings renders a page about
+                // photographs — with no composer, no switch between two halves
+                // and nothing to ask the server for.
+                access.SlideshowMessagesEnabled));
         }).WithName("PartyUploadSession").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
 
         // PUBLIC party FACE SEARCH (anonymous, VIEW-token scoped). A guest uploads one
@@ -938,6 +967,27 @@ public static class PartyEndpoints
                 party, httpContext.GetCurrentUserId()!.Value, id, body, cancellationToken))
             .WithName("SetPartySlideshowSettings").RequirePermission(Permissions.PartyAccess);
 
+        // WHICH CONTRIBUTIONS THE PARTY TAKES — photographs, greetings for the
+        // slideshow, the guest book — and the approval mode of each. Its own
+        // route rather than a wider `party-settings` save, for the reason the
+        // slideshow settings have one: none of these six switches may rotate a
+        // token, publish a draft or move the party's lifecycle, and a route
+        // that cannot do those things is easier to trust than a body that
+        // promises not to.
+        app.MapMethods("/api/albums/{id:guid}/party-contributions", ["PATCH"], async (
+            Guid id,
+            HttpContext httpContext,
+            [FromServices] NubArca.Api.Party.IPartyLinkService party,
+            [FromServices] IAuditLogger audit,
+            [FromBody] NubArca.Api.Party.PartyContributionSettingsRequest? body,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            return await PartyAlbumSettingsOperations.SetContributionSettingsAsync(
+                party, audit, ownerUserId, ownerUserId, id, body,
+                httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+        }).WithName("SetPartyContributionSettings").RequirePartyContributions();
+
         app.MapMethods("/api/albums/{id:guid}/party-game-settings", ["PATCH"], async (
             Guid id, HttpContext httpContext,
             [FromServices] NubArca.Api.Party.IPartyLinkService party,
@@ -1064,6 +1114,18 @@ public static class PartyEndpoints
                     error = "guest_message_limit_reached",
                     maxMessages = access.MaxMessagesPerParticipant,
                 }, statusCode: StatusCodes.Status409Conflict);
+            }
+
+            // THE PARTY TAKES NO GREETINGS. A 409 like the quota above — the
+            // request is well-formed and the party's configuration is what
+            // refuses it — with its own stable code, so a client can tell "you
+            // have sent your allowance" apart from "there is nowhere to write
+            // one here". Nothing was stored and no allowance was spent.
+            if (result.Error is NubArca.Api.Party.PartyMessageSubmissionError.Disabled)
+            {
+                return Results.Json(
+                    new { error = "party_messages_disabled" },
+                    statusCode: StatusCodes.Status409Conflict);
             }
 
             if (result.Error is NubArca.Api.Party.PartyMessageSubmissionError error)

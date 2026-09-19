@@ -55,6 +55,19 @@ public sealed class PartyStateEraser : IPartyStateEraser
             .Where(m => linkIds.Contains(m.PartyAlbumLinkId))
             .ExecuteDeleteAsync(cancellationToken);
 
+        // THE GUEST BOOK. Keyed by the PARTY rather than by a link — which is
+        // the whole point of it — so it is selected by the party and not by the
+        // list above. It still names a link and a participant as provenance, so
+        // it goes before both of those are deleted.
+        //
+        // The book is not spared. It is the keepsake of an event that is being
+        // torn down, and leaving dedications behind pointing at nothing would
+        // be worse than taking them: a host who deletes their party expects the
+        // party to be gone.
+        await _db.PartyGuestbookEntries
+            .Where(e => e.PartyId == partyId)
+            .ExecuteDeleteAsync(cancellationToken);
+
         // The HOSTED GAME's runtime, and it has to go before four of the deletes
         // below rather than one. Its restricting foreign keys reach further than
         // the party link: a vote names a PARTICIPANT, a round names a CHALLENGE,

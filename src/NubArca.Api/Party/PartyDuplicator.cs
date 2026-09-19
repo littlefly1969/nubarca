@@ -298,6 +298,15 @@ public sealed class PartyDuplicator : IPartyDuplicator
                     UploadEnabled = sourceLink.UploadEnabled,
                     RequireUploadApproval = sourceLink.RequireUploadApproval,
                     RequireMessageApproval = sourceLink.RequireMessageApproval,
+                    // WHICH CONTRIBUTIONS THIS PARTY TAKES is part of how the
+                    // evening is run, so it is copied like every other switch
+                    // above. What is NOT copied is the guest book's CONTENTS:
+                    // a dedication is written to one person at one party, and
+                    // duplicating the party must never duplicate what somebody
+                    // wrote at it.
+                    SlideshowMessagesEnabled = sourceLink.SlideshowMessagesEnabled,
+                    GuestbookEnabled = sourceLink.GuestbookEnabled,
+                    RequireGuestbookApproval = sourceLink.RequireGuestbookApproval,
                     PhotoSlideSeconds = sourceLink.PhotoSlideSeconds,
                     MaxVideoSlideSeconds = sourceLink.MaxVideoSlideSeconds,
                     MaxPhotoUploadsPerParticipant = sourceLink.MaxPhotoUploadsPerParticipant,

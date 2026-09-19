@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 using NubArca.Api.Audit;
 using NubArca.Api.Auth.Recovery;
 using NubArca.Api.Data;
@@ -72,6 +73,17 @@ public sealed class PartyCrewService : IPartyCrewService
     // Deliberately permissive and purely structural. An address is validated by
     // sending to it, not by a regular expression opinionated about what a domain
     // may contain — that is exactly how a valid address gets refused.
+    /// <summary>
+    /// The live-email unique index, by name.
+    ///
+    /// <para>Named rather than inferred: a bare
+    /// <c>catch (DbUpdateException)</c> would report a foreign-key violation, a
+    /// check constraint or a deadlock as "that address is taken", which is a
+    /// lie the caller cannot see through. Only THIS index means what
+    /// <see cref="PartyCrewError.EmailInUse"/> says.</para>
+    /// </summary>
+    private const string LiveEmailUniqueIndex = "ux_party_collaborators_party_email_live";
+
     private static readonly Regex EmailShape =
         new(@"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
@@ -103,6 +115,19 @@ public sealed class PartyCrewService : IPartyCrewService
     /// </para>
     /// </summary>
     private string? Origin => PartyLinkPreview.Origin(_mail.CurrentValue.PublicOrigin);
+
+    /// <summary>
+    /// Exactly the live-email collision, and nothing else.
+    ///
+    /// <para>PostgreSQL's unique-violation SQLSTATE AND the index's own name
+    /// must both match, so no other constraint on this table — and no other
+    /// table — can be reported as an address already in use. The repository's
+    /// existing idiom, applied to a second invariant.</para>
+    /// </summary>
+    private static bool IsLiveEmailCollision(DbUpdateException ex) =>
+        ex.InnerException is PostgresException pg
+        && pg.SqlState == PostgresErrorCodes.UniqueViolation
+        && pg.ConstraintName == LiveEmailUniqueIndex;
 
     /// <summary>Party Crew needs outbound mail AND somewhere to send people.</summary>
     internal bool CanPair => _email.IsEnabled && Origin is not null;
@@ -203,7 +228,21 @@ public sealed class PartyCrewService : IPartyCrewService
         ApplyPreset(collaborator.Id, body.RoleKey, now);
 
         var (invite, url) = MintInvite(collaborator.Id, now);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsLiveEmailCollision(ex))
+        {
+            // THE DATABASE IS THE LAST AUTHORITY, and it just used it. The
+            // check above is a courtesy — it answers first, in the common case,
+            // with nothing written — but two requests can both pass it before
+            // either commits, and only the index can settle that. The loser is
+            // told the same thing the courtesy check tells them, because it is
+            // the same fact.
+            _db.ChangeTracker.Clear();
+            return PartyCrewResult<PartyCollaboratorInviteDto>.Fail(PartyCrewError.EmailInUse);
+        }
 
         await _audit.LogAsync(ownerUserId, "party.crew.collaborator.create", "PartyCollaborator",
             collaborator.Id, ip, new { partyId, role = body.RoleKey }, ct);
@@ -314,6 +353,31 @@ public sealed class PartyCrewService : IPartyCrewService
             // silent overwrite into the refusal the caller already understands.
             await tx.RollbackAsync(ct);
             return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.VersionConflict);
+        }
+        catch (DbUpdateException ex) when (IsLiveEmailCollision(ex))
+        {
+            // TWO COLLABORATORS, ONE ADDRESS, AT THE SAME INSTANT.
+            //
+            // The lock above serialises writers on ONE collaborator's row; it
+            // says nothing about two DIFFERENT collaborators moving to the same
+            // address. Both take their own lock, both read a party in which
+            // nobody holds that address yet, and both proceed — and then the
+            // filtered unique index decides, which is exactly the right thing
+            // to be deciding it.
+            //
+            // What the loser must not get is a 500. The request was
+            // well-formed, the answer is knowable, and it is the same answer
+            // the pre-check gives when it wins the race: that address is
+            // already in use at this party.
+            //
+            // The whole transaction goes with it. An email change had already
+            // revoked this collaborator's devices, invites and challenges by
+            // the time this fired, and those revocations describe a change that
+            // is not happening — a collaborator must not come out of a failed
+            // rename signed out of every device.
+            await tx.RollbackAsync(ct);
+            _db.ChangeTracker.Clear();
+            return PartyCrewResult<PartyCollaboratorDto>.Fail(PartyCrewError.EmailInUse);
         }
         await tx.CommitAsync(ct);
 

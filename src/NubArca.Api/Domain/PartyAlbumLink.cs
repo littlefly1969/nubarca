@@ -90,6 +90,49 @@ public class PartyAlbumLink
     // backlog somebody already declined to approve.
     public bool RequireMessageApproval { get; set; }
 
+    /// <summary>
+    /// Whether this party takes MESSAGES FOR THE SLIDESHOW at all.
+    ///
+    /// <para>The third of three independent contributions, beside
+    /// <see cref="UploadEnabled"/> (photographs) and
+    /// <see cref="GuestbookEnabled"/> (the book). A host may run a shared album
+    /// with nothing written on the television, or a guest book with no
+    /// television at all, and none of those three answers the other two.</para>
+    ///
+    /// <para><b>True by default, which is what every party written before this
+    /// column meant.</b> Switching it off is not a deletion: existing greetings
+    /// stay in the database and stay administrable, they simply stop being
+    /// eligible for any projection, and the guest surface stops offering the
+    /// composer at all rather than showing a disabled one. Switching it back on
+    /// returns them to whatever their moderation state already said.</para>
+    /// </summary>
+    public bool SlideshowMessagesEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Whether this party keeps a GUEST BOOK.
+    ///
+    /// <para>Off by default, including for every party that existed before the
+    /// column: a book is a thing a host decides to keep, and materialising one
+    /// for parties nobody asked would fill the guest surface with an empty
+    /// keepsake.</para>
+    ///
+    /// <para>Switching it off hides the surface and refuses new dedications; it
+    /// deletes nothing. Entries wait, in the state they were in, for the host to
+    /// change their mind.</para>
+    /// </summary>
+    public bool GuestbookEnabled { get; set; }
+
+    /// <summary>
+    /// When true, a new DEDICATION lands as pending and is not shown in the
+    /// public book until a manager approves it.
+    ///
+    /// <para>The same decision the host already makes about photographs and
+    /// about greetings, made separately for the same reason those two are
+    /// separate: a host may want the wall curated and the book open, or the
+    /// reverse. Changing it governs NEW submissions only.</para>
+    /// </summary>
+    public bool RequireGuestbookApproval { get; set; }
+
     // --- Slideshow timing (owner-configurable, TV-facing) ---
     // How long a PHOTO holds the party slideshow, in seconds. The TV reads these
     // through its album-items context; changing either takes effect on the TV's

@@ -216,6 +216,7 @@ public sealed class PartyLinkService : IPartyLinkService
             {
                 p.Id, p.UploadEnabled, p.UploadTokenHash, p.RequireUploadApproval,
                 p.RequireMessageApproval,
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval,
                 p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.MaxMessagesPerParticipant,
@@ -252,7 +253,16 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.MaxChallengesPerSession,
             // Same rule as every other sub-switch: an inert link is not holding
             // a party to anything.
-            partyMode && active!.PriorityVotingEnabled);
+            partyMode && active!.PriorityVotingEnabled,
+            // The other two contributions, on the same rule — with one
+            // difference that matters. Greetings default to ON, so an album
+            // with no link yet must report the value a first enable would
+            // actually produce (true), not the value an inert link reports
+            // (false). Reporting false here would have the host's own panel
+            // show a switch off that the server is about to turn on.
+            partyMode ? active!.SlideshowMessagesEnabled : true,
+            partyMode && active!.GuestbookEnabled,
+            partyMode && active!.RequireGuestbookApproval);
     }
 
     public async Task<bool> UpdateSlideshowSettingsAsync(
@@ -289,6 +299,66 @@ public sealed class PartyLinkService : IPartyLinkService
         if (maxPhotoUploadsPerParticipant is int maxPhotos) link.MaxPhotoUploadsPerParticipant = maxPhotos;
         if (maxVideoUploadsPerParticipant is int maxVideos) link.MaxVideoUploadsPerParticipant = maxVideos;
         if (maxMessagesPerParticipant is int maxMessages) link.MaxMessagesPerParticipant = maxMessages;
+        link.UpdatedAt = now;
+        await _db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// THE THREE CONTRIBUTIONS, in one write.
+    ///
+    /// <para>Photographs, greetings for the slideshow and the guest book are
+    /// independent product decisions, so they are independently nullable here:
+    /// a client that knows about two of them cannot switch the third off by
+    /// saving the form it does know about. That is the same rule
+    /// <c>UpdateGameSettingsAsync</c> applies to pre-game preferences, and it
+    /// exists for the same reason.</para>
+    ///
+    /// <para>Switching a contribution OFF is not a deletion and never touches a
+    /// row somebody wrote. What it changes is eligibility: the guest surface
+    /// stops offering it, the submission endpoint refuses it, and the slideshow
+    /// stops reading it. Switching it back on returns what is already there to
+    /// whatever its moderation state already said.</para>
+    ///
+    /// <para>Nothing here rotates a token, so a printed QR keeps working across
+    /// every one of these changes.</para>
+    /// </summary>
+    public async Task<bool> UpdateContributionSettingsAsync(
+        Guid ownerUserId,
+        Guid albumId,
+        bool? uploadEnabled,
+        bool? requireUploadApproval,
+        bool? slideshowMessagesEnabled,
+        bool? requireMessageApproval,
+        bool? guestbookEnabled,
+        bool? requireGuestbookApproval,
+        CancellationToken cancellationToken = default)
+    {
+        var now = _clock.GetUtcNow().UtcDateTime;
+        // The ACTIVE link only, exactly as the slideshow and game settings do:
+        // a revoked or superseded row is inert and must not be edited back into
+        // relevance.
+        var link = await _db.PartyAlbumLinks
+            .Where(p => p.AlbumId == albumId && p.OwnerUserId == ownerUserId
+                && p.Enabled && p.RevokedAt == null
+                && (p.ExpiresAt == null || p.ExpiresAt > now))
+            .OrderByDescending(p => p.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (link is null)
+        {
+            return false;
+        }
+
+        if (uploadEnabled is bool upload) link.UploadEnabled = upload;
+        if (requireUploadApproval is bool uploadApproval) link.RequireUploadApproval = uploadApproval;
+        if (slideshowMessagesEnabled is bool messages) link.SlideshowMessagesEnabled = messages;
+        if (requireMessageApproval is bool messageApproval) link.RequireMessageApproval = messageApproval;
+        if (guestbookEnabled is bool guestbook) link.GuestbookEnabled = guestbook;
+        if (requireGuestbookApproval is bool guestbookApproval)
+        {
+            link.RequireGuestbookApproval = guestbookApproval;
+        }
+
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
         return true;
@@ -405,7 +475,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
                 p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
-                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
@@ -427,7 +498,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
                 p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
-                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: false, cancellationToken);
@@ -454,7 +526,8 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.Id, p.PartyId, p.Enabled && p.UploadEnabled, p.RevokedAt, p.ExpiresAt,
                 p.RequireUploadApproval,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
-                p.RequireMessageApproval, p.MaxMessagesPerParticipant))
+                p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
         return await BuildAccessAsync(link, isUploadGrant: true, cancellationToken);
@@ -467,7 +540,13 @@ public sealed class PartyLinkService : IPartyLinkService
         Guid Id, Guid PartyId, bool Live, DateTime? RevokedAt, DateTime? ExpiresAt,
         bool RequireUploadApproval,
         int MaxPhotoUploadsPerParticipant, int MaxVideoUploadsPerParticipant,
-        bool RequireMessageApproval, int MaxMessagesPerParticipant);
+        bool RequireMessageApproval, int MaxMessagesPerParticipant,
+        // WHICH CONTRIBUTIONS THIS PARTY TAKES. Carried on EVERY grant, not
+        // only the upload one: the three are independent switches, and the
+        // guest book lives on the view token while the slideshow composer
+        // lives on the upload token. A grant that knew about only one of them
+        // would make the seam decide which contribution a caller meant.
+        bool SlideshowMessagesEnabled, bool GuestbookEnabled, bool RequireGuestbookApproval);
 
     // THE SEAM.
     //
@@ -585,9 +664,13 @@ public sealed class PartyLinkService : IPartyLinkService
                 party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience,
                 link.RequireUploadApproval,
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
-                link.RequireMessageApproval, link.MaxMessagesPerParticipant)
+                link.RequireMessageApproval, link.MaxMessagesPerParticipant,
+                link.SlideshowMessagesEnabled, link.GuestbookEnabled, link.RequireGuestbookApproval)
             : new PartyAccess(
-                party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience);
+                party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience,
+                SlideshowMessagesEnabled: link.SlideshowMessagesEnabled,
+                GuestbookEnabled: link.GuestbookEnabled,
+                RequireGuestbookApproval: link.RequireGuestbookApproval);
     }
 
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.
@@ -636,6 +719,12 @@ public sealed class PartyLinkService : IPartyLinkService
     internal static string BuildGameUrl(string viewToken) => $"/party/{viewToken}/game";
 
     internal static string BuildTvStageUrl(string viewToken) => $"/party/{viewToken}/tv";
+
+    // The guest book lives on the VIEW token, not the upload one. Reading the
+    // book is part of looking at the party, and a party may keep a book while
+    // accepting no photographs at all — the three contributions are
+    // independent, so the book does not ride on the upload capability.
+    internal static string BuildGuestbookUrl(string viewToken) => $"/party/{viewToken}/guestbook";
 
     private static string BuildPartyUrl(string token) => $"/party/{token}";
     private static string BuildUploadUrl(string uploadToken) => $"/party/{uploadToken}/upload";

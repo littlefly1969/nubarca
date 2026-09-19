@@ -52,6 +52,8 @@ import { PartyControlRoomPage } from './pages/PartyControlRoomPage';
 import { PartyPrintPage } from './pages/PartyPrintPage';
 import { PartyUploadsPage } from './pages/PartyUploadsPage';
 import { PartyMessagesPage } from './pages/PartyMessagesPage';
+import { PartyGuestbookPage } from './pages/PartyGuestbookPage';
+import { PartyGuestbookPublicPage } from './pages/PartyGuestbookPublicPage';
 import { BeautyLabUploadPage } from './pages/BeautyLabUploadPage';
 
 export function App() {
@@ -78,6 +80,11 @@ export function App() {
           <Route path="/party/invite/:token" element={<PartyInvitationPage />} />
           {/* PUBLIC, unauthenticated party UPLOAD landing (separate upload QR). */}
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
+          {/* PUBLIC, unauthenticated GUEST BOOK, on the party's VIEW token —
+              the one on the QR. Reading the book is part of looking at the
+              party, and a host may keep a book while accepting no photographs
+              at all, so it does not ride on the upload capability. */}
+          <Route path="/party/:token/guestbook" element={<PartyGuestbookPublicPage />} />
           <Route path="/party/:token/challenges" element={<PartyChallengesPage />} />
           <Route path="/party/:token/game" element={<PartyGamePage />} />
           <Route path="/party/:token/tv" element={<PartyTvStagePage />} />
@@ -103,6 +110,7 @@ export function App() {
           <Route path="/party/crew/:partyId" element={<PartyCrewWorkspacePage />} />
           <Route path="/party/crew/:partyId/photos" element={<PartyCrewDeepPage kind="photos" />} />
           <Route path="/party/crew/:partyId/messages" element={<PartyCrewDeepPage kind="messages" />} />
+          <Route path="/party/crew/:partyId/guestbook" element={<PartyCrewDeepPage kind="guestbook" />} />
           <Route path="/party/crew/:partyId/game" element={<PartyCrewDeepPage kind="game" />} />
           <Route
             path="/tv/pair"
@@ -161,6 +169,18 @@ export function App() {
               element={
                 <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
                   <PartyMessagesPage />
+                </PermissionRoute>
+              }
+            />
+            {/* THE GUEST BOOK is PARTY-scoped, not album-scoped, because the
+                book is: it survives a QR rotation, an album change and a party
+                that has no album yet. `party.access` alone opens it, like every
+                other moderation queue. */}
+            <Route
+              path="/parties/:partyId/guestbook"
+              element={
+                <PermissionRoute permissions={[PERMISSIONS.partyAccess]}>
+                  <PartyGuestbookPage />
                 </PermissionRoute>
               }
             />

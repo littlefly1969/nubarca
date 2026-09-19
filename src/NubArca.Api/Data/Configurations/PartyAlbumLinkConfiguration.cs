@@ -20,6 +20,21 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         builder.Property(p => p.UploadEnabled).HasDefaultValue(false);
         builder.Property(p => p.RequireUploadApproval).HasDefaultValue(false);
         builder.Property(p => p.GameEnabled).HasDefaultValue(false);
+
+        // THE THREE CONTRIBUTIONS, and the one default that is not false.
+        //
+        // `SlideshowMessagesEnabled` is TRUE in the database as well as in the
+        // C# initialiser, and the second half is what matters: a migration's
+        // ADD COLUMN takes its value from the store default, not from a
+        // property initialiser EF never sees. Without this line every party
+        // that already exists would come back from the upgrade having silently
+        // stopped taking greetings — which is exactly what the switch means,
+        // applied to hosts who never touched it.
+        builder.Property(p => p.SlideshowMessagesEnabled).HasDefaultValue(true);
+        // The book is opt-in, including for every party that predates it: a
+        // keepsake nobody asked for is clutter on the guest surface.
+        builder.Property(p => p.GuestbookEnabled).HasDefaultValue(false);
+        builder.Property(p => p.RequireGuestbookApproval).HasDefaultValue(false);
         // 0 is unlimited, and it is the migration default: no existing party
         // acquires a message limit it never had.
         builder.Property(p => p.MaxMessagesPerParticipant).HasDefaultValue(0);

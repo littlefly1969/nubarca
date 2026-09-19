@@ -8,6 +8,7 @@ import { useAuth } from '../../auth/useAuth';
 import { useI18n, type MessageKey } from '../../i18n';
 import { mainMediaSource } from '../partyModel';
 import { usePartyApi } from './partyApi';
+import { PartyAddressCard } from './PartyAddressCard';
 import { PartyShareCard } from './PartyShareCard';
 import {
   attentionBodyKey,
@@ -176,6 +177,13 @@ export function PartySummarySection({
           <GuestRow facts={facts} onNavigate={onNavigate} />
         </div>
       </Panel>
+
+      {/* WHERE THE PARTY IS, above the link to the party itself, because they
+          are different decisions and the smaller one comes first: telling
+          somebody the address is not inviting them, and giving away the guest
+          link is not telling them where to go. Neither depends on the guest
+          list in any way. */}
+      <PartyAddressCard party={party} slots={facts.slots} onNavigate={onNavigate} />
 
       {albumParty?.partyMode && albumParty.partyUrl
         ? <PartyShareCard partyUrl={albumParty.partyUrl} />

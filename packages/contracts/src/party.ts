@@ -62,6 +62,58 @@ export interface AlbumPartyStatus {
    * inform the host's planning and choose nothing by themselves. Optional for
    * a backend that predates them. */
   priorityVotingEnabled?: boolean;
+  /** Whether this party takes MESSAGES FOR THE SLIDESHOW at all — a different
+   * question from `requireMessageApproval`, which is about what one becomes.
+   * Optional for a backend that predates the switch, and absent means TRUE:
+   * every party written before it took greetings. */
+  slideshowMessagesEnabled?: boolean;
+  /** Whether this party keeps a GUEST BOOK. Opt-in, so absent means false. */
+  guestbookEnabled?: boolean;
+  /** New dedications wait for approval before appearing in the book.
+   * Independent of the other two approval flags. */
+  requireGuestbookApproval?: boolean;
+}
+
+/**
+ * THE THREE CONTRIBUTIONS, read out of a status with the server's own
+ * defaults filled in.
+ *
+ * Photographs are `uploadEnabled` — the switch that already existed, and no
+ * second one was invented for them. The other two are optional on the wire, so
+ * this is where "absent means greetings are on, and the book is not" is stated
+ * once instead of at every call site.
+ */
+export interface PartyContributionSettings {
+  uploadEnabled: boolean;
+  requireUploadApproval: boolean;
+  slideshowMessagesEnabled: boolean;
+  requireMessageApproval: boolean;
+  guestbookEnabled: boolean;
+  requireGuestbookApproval: boolean;
+}
+
+export function contributionSettingsFromStatus(
+  status: Pick<
+    AlbumPartyStatus,
+    | 'uploadEnabled'
+    | 'requireUploadApproval'
+    | 'requireMessageApproval'
+    | 'slideshowMessagesEnabled'
+    | 'guestbookEnabled'
+    | 'requireGuestbookApproval'
+  >,
+): PartyContributionSettings {
+  return {
+    uploadEnabled: status.uploadEnabled,
+    requireUploadApproval: status.requireUploadApproval,
+    // ABSENT MEANS TRUE, and only here. A backend that predates the switch
+    // takes greetings, and a client that read `undefined` as `false` would
+    // draw an off switch over a party that is on.
+    slideshowMessagesEnabled: status.slideshowMessagesEnabled ?? true,
+    requireMessageApproval: status.requireMessageApproval,
+    guestbookEnabled: status.guestbookEnabled ?? false,
+    requireGuestbookApproval: status.requireGuestbookApproval ?? false,
+  };
 }
 
 // ── Validation ranges (§33, §34) ───────────────────────────────────────────
@@ -208,6 +260,102 @@ export function partySettingsPatch(
   return patch;
 }
 
+/**
+ * THE wire body for PATCH /api/albums/{id}/party-contributions.
+ *
+ * Every field is optional and omitted means UNCHANGED — which is the opposite
+ * of `PartySettingsPatch` above, and deliberately so. That one carries a
+ * MASTER switch whose absence would turn the party off; this one carries six
+ * independent sub-switches, and a client that knows about two of them must not
+ * be able to close the guest book by saving the form it does know about.
+ */
+export interface PartyContributionsPatch {
+  uploadEnabled?: boolean;
+  requireUploadApproval?: boolean;
+  slideshowMessagesEnabled?: boolean;
+  requireMessageApproval?: boolean;
+  guestbookEnabled?: boolean;
+  requireGuestbookApproval?: boolean;
+}
+
+/**
+ * The patch for the ONE switch being changed, and nothing else.
+ *
+ * Sending the whole current state back would work until two people configured
+ * one party at once, at which point the second save would quietly restore
+ * whatever the first had changed. So only what moved travels.
+ */
+export function partyContributionsPatch(
+  changes: PartyContributionsPatch,
+): PartyContributionsPatch {
+  const patch: PartyContributionsPatch = {};
+  for (const key of [
+    'uploadEnabled',
+    'requireUploadApproval',
+    'slideshowMessagesEnabled',
+    'requireMessageApproval',
+    'guestbookEnabled',
+    'requireGuestbookApproval',
+  ] as const) {
+    if (changes[key] !== undefined) patch[key] = changes[key];
+  }
+  return patch;
+}
+
+// ── The guest book ─────────────────────────────────────────────────────────
+//
+// A SEPARATE resource from the greetings above, and the types say so: nothing
+// here extends PartyMessage, and there is no field that could carry a
+// dedication onto a television. The moderation STATUS vocabulary is shared,
+// because "what can happen to something a guest left" has one answer.
+
+/** The server's limits, quoted by the composer's counter and its validator. */
+export const PARTY_GUESTBOOK_LIMITS = {
+  maxAuthorDisplayNameLength: 80,
+  maxBodyLength: 1000,
+} as const;
+
+/** One dedication as a GUEST reads it. No status: a guest only ever receives
+ * entries that are in the book. */
+export interface PartyGuestbookEntry {
+  id: string;
+  /** The signature the author typed, or null when they did not sign it. */
+  authorDisplayName: string | null;
+  /** PLAIN TEXT. Render as text — never through a markup or URI interpreter. */
+  body: string;
+  createdAt: string;
+}
+
+export interface PartyGuestbookPage {
+  entries: PartyGuestbookEntry[];
+  /** Whether a dedication may be ADDED right now. Reading and writing are
+   * different questions: the book outlives the party, and nothing new goes
+   * into it once the party is over. */
+  canWrite: boolean;
+  maxAuthorDisplayNameLength: number;
+  maxBodyLength: number;
+}
+
+/** One dedication as a MANAGER reads it — with its moderation state. */
+export interface PartyGuestbookManagedEntry {
+  id: string;
+  authorDisplayName: string | null;
+  body: string;
+  status: PartyMessageStatus;
+  createdAt: string;
+  moderatedAt: string | null;
+}
+
+export interface PartyGuestbookManagerList {
+  partyId: string;
+  guestbookEnabled: boolean;
+  requireGuestbookApproval: boolean;
+  /** False for a DELEGATE, who moderates the book and does not decide whether
+   * there is one. The SERVER enforces it; this only decides what to draw. */
+  isOwner: boolean;
+  entries: PartyGuestbookManagedEntry[];
+}
+
 // ── Game defaults ──────────────────────────────────────────────────────────
 
 /**
@@ -307,6 +455,11 @@ export interface PartyMessageList {
    * (§37: the delegation is narrow, and a client flag is not the boundary). */
   isOwner: boolean;
   items: PartyMessage[];
+  /** Whether the party is still TAKING greetings. The queue is reachable
+   * either way — closing a channel never locks anyone out of the queue it
+   * filled — so this is what lets the surface say "none of this is being
+   * shown". Absent means true, like everywhere else. */
+  slideshowMessagesEnabled?: boolean;
 }
 
 /**

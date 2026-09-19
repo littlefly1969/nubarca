@@ -161,6 +161,44 @@ public static class PartyOwnerEndpoints
             return Results.Created($"/api/parties/{created.Id}", created);
         }).WithName("DuplicateParty").RequirePermission(Permissions.PartyAccess);
 
+        // WHERE THE PARTY IS, ready to hand to somebody.
+        //
+        // It has NOTHING to do with the guest list. A host with no guests, no
+        // invitation groups and no RSVPs may still tell a neighbour where to
+        // come, and until this route that was impossible: the only way to say
+        // where the party was, was to create a group and share a personal
+        // invitation. Nothing here reads a guest, a group, an invitation or an
+        // RSVP, and nothing here returns a token, a link or an address book.
+        //
+        // A POST rather than a GET because sharing is an ACT, and the trail
+        // records that the host shared where their party is — never the
+        // address, and never who it went to, which the product does not know.
+        app.MapPost("/api/parties/{partyId:guid}/address-share", async (
+            Guid partyId,
+            HttpContext httpContext,
+            [FromServices] IPartyAddressShareService addresses,
+            [FromServices] IAuditLogger audit,
+            CancellationToken cancellationToken) =>
+        {
+            var ownerUserId = httpContext.GetCurrentUserId()!.Value;
+            var share = await addresses.GetAsync(ownerUserId, partyId, cancellationToken);
+            if (share is null) return Results.NotFound();
+            if (!share.HasAddress)
+            {
+                // A party whose venue the host has not written yet. Told apart
+                // from "no such party" on purpose: this one the host can fix,
+                // and the surface offers to take them there.
+                return Results.Json(
+                    new { error = "party_address_missing" },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            await audit.LogAsync(
+                ownerUserId, AuditActions.PartyAddressShare, AuditEntityTypes.Party, partyId,
+                httpContext.Connection.RemoteIpAddress?.ToString(), null, cancellationToken);
+            return Results.Ok(share);
+        }).WithName("SharePartyAddress").RequirePermission(Permissions.PartyAccess);
+
         app.MapGet("/api/parties/{partyId:guid}", async (
             Guid partyId,
             HttpContext httpContext,

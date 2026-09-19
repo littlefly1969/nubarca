@@ -190,7 +190,16 @@ export function PartyUploadPage() {
   // the entry: flipping between the two halves of one page is not a journey,
   // and Back should leave the page rather than walk the tabs.
   const [searchParams, setSearchParams] = useSearchParams();
-  const contribution = contributionModeFrom(searchParams.get(CONTRIBUTION_MODE_PARAM));
+  // WHETHER THE WRITTEN HALF EXISTS AT ALL, from the server. A party may take
+  // photographs and no greetings, and then this page is a page about
+  // photographs: no switch between two halves, no composer, and a `?mode=message`
+  // that somebody kept in their history resolves to media rather than to a form
+  // the server would refuse. `undefined` is a backend that predates the switch,
+  // where every party took greetings.
+  const messagesEnabled = session?.slideshowMessagesEnabled !== false;
+  const requestedMode = contributionModeFrom(searchParams.get(CONTRIBUTION_MODE_PARAM));
+  const contribution: ContributionMode =
+    requestedMode === 'message' && !messagesEnabled ? 'media' : requestedMode;
   const setContribution = useCallback((mode: ContributionMode) => {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -425,7 +434,13 @@ export function PartyUploadPage() {
 
         {/* Two buttons in a named group rather than a half-built tablist: the
             previous markup announced tabs without aria-controls, panels or the
-            arrow-key behaviour a tablist promises. */}
+            arrow-key behaviour a tablist promises.
+
+            The group is ABSENT, not disabled, when the party takes no
+            greetings. A choice between one thing is not a choice, and a
+            disabled half would be the product advertising something this party
+            does not have. */}
+        {messagesEnabled && (
         <div className="party-contribution-modes" role="group" aria-label={t('partyUpload.modeLabel')}>
           <button
             type="button"
@@ -453,6 +468,7 @@ export function PartyUploadPage() {
             {t('partyMessage.tabMessage')}
           </button>
         </div>
+        )}
 
         {contribution === 'message' && token && (
           <PartyGuestMessageForm
