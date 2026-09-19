@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { DEFAULT_LANGUAGE, LOCALE, toLanguage, type Language } from './types';
+import {
+  DEFAULT_LANGUAGE, LOCALE, preferredLanguage, toLanguage, type Language,
+} from './types';
 import it, { type MessageKey } from './it';
 import en from './en';
+import es from './es';
+import de from './de';
 import { I18nContext, type I18nContextValue, type PluralKey, type TranslateParams } from './I18nContext';
 import { readStoredItem } from '../storage/brandedStorageKey';
 
@@ -10,6 +14,8 @@ const STORAGE_KEY = 'nubarca.lang';
 const DICTIONARIES: Record<Language, Partial<Record<MessageKey, string>>> = {
   it,
   en,
+  es,
+  de,
 };
 
 // Fill {placeholder} tokens from params. Missing params are left as-is so a
@@ -24,9 +30,33 @@ function interpolate(template: string, params?: TranslateParams): string {
 // Resolve the initial language once, at mount, from (in priority order):
 // 1. an explicit ?lang= querystring override (public deep links / QR),
 // 2. a previously persisted localStorage choice,
-// 3. the Italian default.
+// 3. what the BROWSER asks for, which is the only signal a guest arriving on a
+//    QR code has ever given us,
+// 4. the Italian default.
 // The authenticated user's server preference is applied afterwards by the
 // AuthProvider bridge (which calls setLanguage on session resolve).
+//
+// Browser detection sits BELOW the stored choice on purpose: somebody who
+// picked a language once has said something the browser's header has not, and
+// a detection that overrode it would undo their decision on every visit.
+/**
+ * What the browser says it prefers, defensively.
+ *
+ * Wrapped because reading it is not always safe: a test that substitutes
+ * `navigator`, and some embedded browsers, make the getter throw. A language
+ * preference is a nicety, and a nicety must never be able to stop the
+ * application rendering.
+ */
+function browserLanguages(): readonly string[] | undefined {
+  try {
+    if (typeof navigator === 'undefined') return undefined;
+    if (Array.isArray(navigator.languages)) return navigator.languages;
+    return navigator.language ? [navigator.language] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveInitialLanguage(): Language {
   if (typeof window !== 'undefined') {
     const fromQuery = toLanguage(new URLSearchParams(window.location.search).get('lang'));
@@ -34,6 +64,8 @@ function resolveInitialLanguage(): Language {
     // readStoredItem swallows a blocked-storage failure and returns null.
     const stored = toLanguage(readStoredItem(STORAGE_KEY));
     if (stored) return stored;
+    const fromBrowser = preferredLanguage(browserLanguages());
+    if (fromBrowser) return fromBrowser;
   }
   return DEFAULT_LANGUAGE;
 }

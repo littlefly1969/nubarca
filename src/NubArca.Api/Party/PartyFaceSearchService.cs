@@ -82,6 +82,34 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         _configuredFaceProfileKey = string.IsNullOrWhiteSpace(key) ? null : key;
     }
 
+    public async Task<PartyFaceDetectOutcome> DetectAsync(
+        byte[] selfieBytes,
+        string? declaredContentType,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_enabled)
+        {
+            return PartyFaceDetectOutcome.State(PartyFaceSearchStatuses.Unavailable);
+        }
+
+        // THE SAME VALIDATION, THE SAME DETECTOR, THE SAME RULE the search
+        // runs. That is not a convenience: it is the property the guest's
+        // scanner tile depends on. If this step could resolve a different face
+        // from the one the search will embed, the frame would be a picture of a
+        // decision nobody made.
+        var resolved = await ResolveFaceAsync(selfieBytes, declaredContentType, cancellationToken);
+        if (resolved.Status is string failed)
+        {
+            return PartyFaceDetectOutcome.State(failed);
+        }
+
+        var face = resolved.Face!;
+        // No session, no embedding, no candidates, no row. A detection is not a
+        // search, and nothing here can be re-read, activated or cancelled.
+        return PartyFaceDetectOutcome.Found(
+            new PartyFaceBox(face.X, face.Y, face.Width, face.Height));
+    }
+
     public async Task<PartyFaceSearchOutcome> SearchAsync(
         Guid ownerUserId,
         Guid albumId,
@@ -101,92 +129,34 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         // their face crops) so short-lived party rows never accumulate.
         await CleanupExpiredQuietlyAsync(ownerUserId, albumId, cancellationToken);
 
-        // 1) Validate the selfie in memory (never stored). Cheap client-type gate
-        //    first, then an authoritative header decode for real dimensions.
-        if (selfieBytes.Length == 0 || selfieBytes.Length > _maxBytes
-            || !SafeContentType.IsTrustedImage(declaredContentType))
+        // 1–3) Validate the selfie, resolve the face package, detect, and decide
+        //      WHICH face the guest meant. One method, shared with DetectAsync,
+        //      because the face the phone was shown must be the face this
+        //      embeds — two implementations would eventually disagree and the
+        //      scanner tile would become a picture of a decision nobody made.
+        var resolved = await ResolveFaceAsync(selfieBytes, declaredContentType, cancellationToken);
+        if (resolved.Status is string failed)
         {
-            return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.InvalidImage);
+            // A CONTENT verdict is recorded (it is a thing that happened at this
+            // party); an environment one is not, because nothing about the album
+            // was decided.
+            return failed is PartyFaceSearchStatuses.NoFace or PartyFaceSearchStatuses.MultipleFaces
+                ? await RecordEmptyAsync(
+                    ownerUserId, albumId, partyAlbumLinkId, failed, cancellationToken)
+                : PartyFaceSearchOutcome.State(failed);
         }
 
-        try
-        {
-            var info = Image.Identify(selfieBytes);
-            if (info is null || info.Width <= 0 || info.Height <= 0
-                || info.Width > _maxDimension || info.Height > _maxDimension)
-            {
-                return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.InvalidImage);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.InvalidImage);
-        }
+        var embedder = resolved.Embedder!;
+        var profile = resolved.Profile!;
+        var chosen = resolved.Face!;
 
-        // 2) Resolve the face package (detector + embedder). One AiProfile
-        //    encapsulates both, so they share a ProfileId. Any unavailability (AI
-        //    disabled, no default profile, model files missing) is a safe
-        //    "unavailable" state — NEVER a content failure.
-        var detector = await FaceProfileResolver.ResolveDetectorAsync(
-            _resolver, null, _configuredFaceProfileKey, cancellationToken);
-        var embedder = await FaceProfileResolver.ResolveEmbedderAsync(
-            _resolver, null, _configuredFaceProfileKey, cancellationToken);
-        if (!detector.IsAvailable || !embedder.IsAvailable
-            || detector.Resolution.ProfileKey is null
-            || !string.Equals(detector.Resolution.ProfileKey, embedder.Resolution.ProfileKey, StringComparison.Ordinal))
-        {
-            return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.Unavailable);
-        }
-
-        var profile = await _profiles.GetProfileByKeyAsync(detector.Resolution.ProfileKey!, cancellationToken);
-        if (profile is null)
-        {
-            return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.Unavailable);
-        }
-
-        // 3) Detect faces in the selfie; pick the largest (most prominent) one.
-        //    MVP behaviour: multiple faces → the largest bbox is used.
-        var settings = await _faceSettings.GetAsync(cancellationToken);
-        AiFaceDetectionResult detection;
-        try
-        {
-            detection = await detector.Backend!.DetectFacesAsync(selfieBytes, profile, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            // A whole-image decode/inference failure is an environment/processing
-            // state to the guest, not a content verdict on the album.
-            return PartyFaceSearchOutcome.State(PartyFaceSearchStatuses.Unavailable);
-        }
-
-        var faces = detection.Faces;
-        if (faces.Count == 0)
-        {
-            return await RecordEmptyAsync(
-                ownerUserId, albumId, partyAlbumLinkId, PartyFaceSearchStatuses.NoFace, cancellationToken);
-        }
-        if (faces.Count > settings.MaxFacesPerImage)
-        {
-            faces = faces.OrderByDescending(f => f.Width * f.Height).Take(settings.MaxFacesPerImage).ToList();
-        }
-
-        var largest = faces.OrderByDescending(f => f.Width * f.Height).First();
-
-        // 4) Embed the largest face. Prefer the aligned (real ONNX) path when the
+        // 4) Embed the CHOSEN face. Prefer the aligned (real ONNX) path when the
         //    backend supports it; else the plain per-face path (mirrors the
         //    embedding backfill exactly so query + candidate spaces match).
         float[]? queryVector;
         try
         {
-            queryVector = await EmbedQueryAsync(embedder.Backend!, profile, selfieBytes, largest, cancellationToken);
+            queryVector = await EmbedQueryAsync(embedder, profile, selfieBytes, chosen, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -218,7 +188,12 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
                 (x, e) => new { x.FileItemId, e.EmbeddingBytes })
             .ToListAsync(cancellationToken);
 
-        var threshold = settings.ClampSearchThreshold(settings.SearchDefaultSimilarityThreshold);
+        // The matching threshold. Read here rather than carried out of the
+        // detection step: it is a property of the SEARCH, and nothing about
+        // resolving which face the guest meant depends on it.
+        var searchSettings = await _faceSettings.GetAsync(cancellationToken);
+        var threshold = searchSettings.ClampSearchThreshold(
+            searchSettings.SearchDefaultSimilarityThreshold);
 
         // Best cosine per FileItem (a file matches if ANY of its faces is similar
         // enough). Only the ordering survives — the score itself is never exposed.
@@ -267,7 +242,7 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         //    enabled do we store the small indicator crop (never the full selfie).
         var now = _clock.GetUtcNow().UtcDateTime;
         Guid? faceCropBlobId = _tvActivationEnabled && ranked.Count > 0
-            ? await TryStoreFaceCropAsync(selfieBytes, largest, cancellationToken)
+            ? await TryStoreFaceCropAsync(selfieBytes, chosen, cancellationToken)
             : null;
         var session = new PartyFaceSearchSession
         {
@@ -314,7 +289,7 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
         // biometric detail the crop does not need.
         return new PartyFaceSearchOutcome(
             PartyFaceSearchStatuses.Ready, session.Id, ranked.Count, ranked,
-            new PartyFaceBox(largest.X, largest.Y, largest.Width, largest.Height));
+            new PartyFaceBox(chosen.X, chosen.Y, chosen.Width, chosen.Height));
     }
 
     public async Task<PartyFaceSearchView?> GetAsync(
@@ -604,6 +579,137 @@ public sealed class PartyFaceSearchService : IPartyFaceSearchService
     private async Task<bool> IsOwnerTvAlbumAsync(Guid ownerUserId, Guid albumId, CancellationToken cancellationToken) =>
         await _db.Albums.AsNoTracking()
             .AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId && a.ShowOnTv, cancellationToken);
+
+    /// <summary>
+    /// What one selfie resolves to: a refusal, or the FACE the pipeline will
+    /// use — with the package that found it.
+    ///
+    /// <para>This is the whole of steps 1–3, in one place, because
+    /// <see cref="DetectAsync"/> and <see cref="SearchAsync"/> must reach the
+    /// same face from the same bytes. A second copy of the decode, the detector
+    /// resolution or the selection rule would work until one of the three
+    /// changed, at which point the scanner tile on the guest's phone would show
+    /// a face the search did not use — which is the one thing the two-step flow
+    /// exists to make impossible.</para>
+    ///
+    /// <para><c>Status</c> is non-null exactly when there is nothing to search
+    /// for, and carries the reason: an invalid image, an unavailable face
+    /// package, no face, or several with no way to tell which.</para>
+    /// </summary>
+    private async Task<ResolvedFace> ResolveFaceAsync(
+        byte[] selfieBytes, string? declaredContentType, CancellationToken cancellationToken)
+    {
+        // 1) Validate the selfie in memory (never stored). Cheap client-type
+        //    gate first, then an authoritative header decode for real dimensions.
+        if (selfieBytes.Length == 0 || selfieBytes.Length > _maxBytes
+            || !SafeContentType.IsTrustedImage(declaredContentType))
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.InvalidImage);
+        }
+
+        try
+        {
+            var info = Image.Identify(selfieBytes);
+            if (info is null || info.Width <= 0 || info.Height <= 0
+                || info.Width > _maxDimension || info.Height > _maxDimension)
+            {
+                return ResolvedFace.Failed(PartyFaceSearchStatuses.InvalidImage);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.InvalidImage);
+        }
+
+        // 2) Resolve the face package (detector + embedder). One AiProfile
+        //    encapsulates both, so they share a ProfileId. Any unavailability
+        //    (AI disabled, no default profile, model files missing) is a safe
+        //    "unavailable" state — NEVER a content failure.
+        var detector = await FaceProfileResolver.ResolveDetectorAsync(
+            _resolver, null, _configuredFaceProfileKey, cancellationToken);
+        var embedder = await FaceProfileResolver.ResolveEmbedderAsync(
+            _resolver, null, _configuredFaceProfileKey, cancellationToken);
+        if (!detector.IsAvailable || !embedder.IsAvailable
+            || detector.Resolution.ProfileKey is null
+            || !string.Equals(detector.Resolution.ProfileKey, embedder.Resolution.ProfileKey, StringComparison.Ordinal))
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.Unavailable);
+        }
+
+        var profile = await _profiles.GetProfileByKeyAsync(detector.Resolution.ProfileKey!, cancellationToken);
+        if (profile is null)
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.Unavailable);
+        }
+
+        // 3) Detect, and decide WHICH face the guest meant.
+        var settings = await _faceSettings.GetAsync(cancellationToken);
+        AiFaceDetectionResult detection;
+        try
+        {
+            detection = await detector.Backend!.DetectFacesAsync(selfieBytes, profile, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // A whole-image decode/inference failure is an environment/processing
+            // state to the guest, not a content verdict on the album.
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.Unavailable);
+        }
+
+        var faces = detection.Faces;
+        if (faces.Count > settings.MaxFacesPerImage)
+        {
+            faces = faces.OrderByDescending(f => f.Width * f.Height).Take(settings.MaxFacesPerImage).ToList();
+        }
+
+        var choice = PartyFaceSelection.Choose(Boxes(faces));
+        if (choice.Ambiguous)
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.MultipleFaces);
+        }
+        if (choice.Face is not PartyFaceSelection.DetectedFaceBox chosenBox)
+        {
+            return ResolvedFace.Failed(PartyFaceSearchStatuses.NoFace);
+        }
+
+        // Back to the detector's own face, so the LANDMARKS travel with it: the
+        // aligned embedding path needs them, and the selection rule deliberately
+        // does not read them.
+        return new ResolvedFace(
+            null, faces.First(f => Same(f, chosenBox)), profile, embedder.Backend!);
+    }
+
+    private sealed record ResolvedFace(
+        string? Status, DetectedFace? Face, AiProfile? Profile, IFaceEmbedder? Embedder)
+    {
+        public static ResolvedFace Failed(string status) => new(status, null, null, null);
+    }
+
+    /// <summary>The detector's faces, reduced to the geometry the rule reads.</summary>
+    private static IReadOnlyList<PartyFaceSelection.DetectedFaceBox> Boxes(
+        IReadOnlyList<DetectedFace> faces) =>
+        faces.Select(f => new PartyFaceSelection.DetectedFaceBox(f.X, f.Y, f.Width, f.Height))
+            .ToList();
+
+    /// <summary>
+    /// The detected face a chosen box came from.
+    ///
+    /// <para>Identity by the four numbers the box was built from, which is
+    /// exact: the box is a projection of this face and nothing rounded it. Two
+    /// faces with identical geometry are the same face as far as every
+    /// downstream step is concerned.</para>
+    /// </summary>
+    private static bool Same(DetectedFace face, PartyFaceSelection.DetectedFaceBox box) =>
+        face.X == box.X && face.Y == box.Y
+        && face.Width == box.Width && face.Height == box.Height;
 
     private async Task<PartyFaceSearchOutcome> RecordEmptyAsync(
         Guid ownerUserId, Guid albumId, Guid? partyAlbumLinkId, string status, CancellationToken cancellationToken)

@@ -281,6 +281,17 @@ public sealed record PartyFaceSearchResponseDto(
 /// <summary>The detected face, in fractions of the analysed image.</summary>
 public sealed record PartyFaceBoxDto(double X, double Y, double Width, double Height);
 
+/// <summary>
+/// The answer to "can you see my face, and where is it?" — and nothing else.
+///
+/// <para>No search id, no results, no count: a detection is not a search, and a
+/// shape that could carry matches would eventually be asked to. `Status` is a
+/// machine code the frontend maps to localized copy — "found", or one of the
+/// search's own refusals: "no_face", "multiple_faces", "invalid_image",
+/// "unavailable".</para>
+/// </summary>
+public sealed record PartyFaceDetectResponseDto(string Status, PartyFaceBoxDto? Face = null);
+
 // Result of explicitly activating a search as the album's TV face filter. The
 // version is the server-assigned monotonic activation order (an opaque counter
 // — no identity, no timestamps from the client).

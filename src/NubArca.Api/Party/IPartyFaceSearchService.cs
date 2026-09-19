@@ -17,6 +17,35 @@ namespace NubArca.Api.Party;
 //     "unavailable" state (an environment/config state, never a content failure).
 public interface IPartyFaceSearchService
 {
+    /// <summary>
+    /// DETECT ONLY: is there exactly one face in this selfie, and where?
+    ///
+    /// <para>It exists so the guest's phone can be honest about what it is
+    /// doing. The experience is a sequence — take a selfie, find the face,
+    /// watch it be searched for — and a single call that did all three could
+    /// only reveal the face at the same instant as the answer, which makes the
+    /// middle step a decoration. With this, "we cannot see your face" and
+    /// "there are several people here" are reached WITHOUT a search: nothing is
+    /// embedded, nothing is matched, nothing is recorded, and the guest is
+    /// asked for another selfie before any of that is spent.</para>
+    ///
+    /// <para>It runs the SAME decoder, the SAME detector and the SAME
+    /// selection rule as <see cref="SearchAsync"/> — that is the point of it.
+    /// The face this returns is the face the search will use, which is what
+    /// lets the phone show the guest the crop their results actually come
+    /// from.</para>
+    ///
+    /// <para>The selfie is processed in memory and never stored; no session
+    /// row is written, so a detection is not a search and cannot be re-read,
+    /// activated or cancelled. Statuses are the same vocabulary minus
+    /// <c>ready</c>: a detection that found the face returns
+    /// <see cref="PartyFaceDetectOutcome.Found"/>.</para>
+    /// </summary>
+    Task<PartyFaceDetectOutcome> DetectAsync(
+        byte[] selfieBytes,
+        string? declaredContentType,
+        CancellationToken cancellationToken = default);
+
     // Run a face search. `selfieBytes` are validated + processed in memory only.
     // Returns a safe outcome (status + short-lived session id when a search was
     // recorded + the live-visible matched file ids in rank order).
@@ -142,6 +171,32 @@ public sealed record PartyFaceSearchOutcome(
 {
     public static PartyFaceSearchOutcome State(string status) =>
         new(status, null, 0, Array.Empty<Guid>());
+}
+
+/// <summary>
+/// What a DETECTION found: a safe status and, when exactly one face was
+/// resolved, where it is in the selfie.
+///
+/// <para>Carries no session, no album, no owner and no embedding — a detection
+/// is not a search, and there is deliberately nothing here that could be
+/// mistaken for one.</para>
+/// </summary>
+public sealed record PartyFaceDetectOutcome(string Status, PartyFaceBox? Face = null)
+{
+    public static PartyFaceDetectOutcome State(string status) => new(status, null);
+
+    public static PartyFaceDetectOutcome Found(PartyFaceBox face) =>
+        new(PartyFaceDetectStatuses.Found, face);
+}
+
+/// <summary>
+/// A detection's own vocabulary: the search's statuses, minus the ones only a
+/// search can produce.
+/// </summary>
+public static class PartyFaceDetectStatuses
+{
+    /// <summary>Exactly one face, and the box says where.</summary>
+    public const string Found = "found";
 }
 
 // A stored search re-projected against the live album: its id + currently-visible

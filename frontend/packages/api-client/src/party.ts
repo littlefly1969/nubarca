@@ -1099,7 +1099,26 @@ export function uploadToPartyWithProgress(
 // Safe machine status the UI maps to localized copy. The selfie is processed in
 // memory server-side and never stored; no similarity score / face id / person id
 // / vector is ever returned.
-export type PartyFaceSearchStatus = 'ready' | 'no_face' | 'invalid_image' | 'unavailable';
+export type PartyFaceSearchStatus =
+  | 'ready'
+  | 'no_face'
+  /**
+   * Several faces, and no way to tell which one the guest is. The server
+   * REFUSES rather than searching for the largest, because the failure mode of
+   * guessing is handing somebody a stranger's evening. Nothing was embedded,
+   * matched or recorded.
+   */
+  | 'multiple_faces'
+  | 'invalid_image'
+  | 'unavailable';
+
+/** What a DETECTION answers. Never 'ready': a detection is not a search. */
+export type PartyFaceDetectStatus =
+  | 'found'
+  | 'no_face'
+  | 'multiple_faces'
+  | 'invalid_image'
+  | 'unavailable';
 
 /**
  * Where the detected face is, as FRACTIONS of the analysed image.
@@ -1153,6 +1172,54 @@ export async function partyFaceSearch(
       && 'status' in (err.body as Record<string, unknown>)
     ) {
       return err.body as PartyFaceSearchResponse;
+    }
+    throw err;
+  }
+}
+
+/**
+ * The answer to "can you see my face, and where is it?" — with no search.
+ *
+ * No search id, no items, no count: a detection decided nothing about the
+ * album, and a shape that could carry matches would eventually be asked to.
+ */
+export interface PartyFaceDetectResponse {
+  status: PartyFaceDetectStatus;
+  face?: PartyFaceBox | null;
+}
+
+/**
+ * Detect the face in one selfie, WITHOUT searching for it.
+ *
+ * It is the step that lets the phone be honest: "we cannot see your face" and
+ * "there are several people here" are reached before anything is embedded,
+ * matched or recorded, and the box that comes back is the box the search will
+ * use — which is what lets the scanner show the guest the crop their results
+ * really come from.
+ *
+ * Normalises the 400/503 bodies back into a response the UI renders as a
+ * localized state, exactly as the search does.
+ */
+export async function partyFaceDetect(
+  token: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<PartyFaceDetectResponse> {
+  const form = new FormData();
+  form.append('file', file, file.name);
+  try {
+    return await api<PartyFaceDetectResponse>(
+      `/api/party/${encodeURIComponent(token)}/face-search/detect`,
+      { method: 'POST', formData: form, signal },
+    );
+  } catch (err) {
+    if (
+      err instanceof ApiError
+      && err.body
+      && typeof err.body === 'object'
+      && 'status' in (err.body as Record<string, unknown>)
+    ) {
+      return err.body as PartyFaceDetectResponse;
     }
     throw err;
   }

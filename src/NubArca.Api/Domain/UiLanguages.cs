@@ -1,17 +1,26 @@
 namespace NubArca.Api.Domain;
 
 // The closed set of UI languages NubArca ships. Italian is the canonical
-// default; English is the optional second language. Arbitrary browser locale
-// strings are never persisted — only these exact codes pass Normalize.
+// default; the others are what the web interface is fully translated into.
+// Arbitrary browser locale strings are never persisted — only these exact codes
+// pass Normalize.
+//
+// This list and `frontend/src/i18n/types.ts` are one decision in two places: the
+// server persists an authenticated user's choice, so a code the browser offers
+// and the server refuses is a preference that silently reverts on the next
+// sign-in.
 public static class UiLanguages
 {
     public const string Italian = "it";
     public const string English = "en";
+    public const string Spanish = "es";
+    public const string German = "de";
 
     // Canonical default when a user has no explicit preference.
     public const string Default = Italian;
 
-    public static readonly IReadOnlyList<string> All = new[] { Italian, English };
+    public static readonly IReadOnlyList<string> All =
+        new[] { Italian, English, Spanish, German };
 
     // True when the code is exactly a supported language (case-insensitive,
     // trimmed). Rejects null/empty and any unsupported/locale-extended string

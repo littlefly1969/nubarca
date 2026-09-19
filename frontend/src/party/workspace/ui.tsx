@@ -334,6 +334,87 @@ export function Badge({
   );
 }
 
+/* ── Choosing one of several ───────────────────────────────────────────────── */
+
+/**
+ * ONE choice out of several, as a card you can tap — and a real radio.
+ *
+ * <b>It is a native <code>&lt;input type="radio"&gt;</code> inside a
+ * <code>&lt;label&gt;</code>, and that is the whole accessibility story.</b>
+ * The browser gives the group a single tab stop, arrow keys that move the
+ * selection, the right role and state for a screen reader, and a name to read
+ * out — none of which a <code>div</code> with an <code>onClick</code> has, and
+ * all of which a hand-rolled <code>role="radio"</code> would have to
+ * reimplement and keep working. The card is what the radio LOOKS like, not a
+ * replacement for it.
+ *
+ * A DISABLED option stays in the list rather than disappearing. "The printer
+ * in the hall is offline" is information a host needs; a list that silently
+ * shrank would leave them wondering where it went.
+ */
+export function ChoiceCard({
+  name, value, checked, disabled, onSelect, title, meta, status, note, testId,
+}: {
+  name: string;
+  value: string;
+  checked: boolean;
+  disabled?: boolean;
+  onSelect(value: string): void;
+  title: string;
+  /** The quiet second line: where it is, what it is. */
+  meta?: ReactNode;
+  /** Its state, as a badge — never colour alone. */
+  status?: ReactNode;
+  /** Why it cannot be chosen, or what a host should know before choosing it. */
+  note?: string;
+  testId?: string;
+}) {
+  return (
+    <label
+      className="pw-choice"
+      data-testid={testId ? `${testId}-card` : undefined}
+      data-checked={checked ? 'true' : undefined}
+      data-disabled={disabled ? 'true' : undefined}
+    >
+      <input
+        className="pw-choice-input"
+        type="radio"
+        name={name}
+        value={value}
+        checked={checked}
+        disabled={disabled}
+        data-testid={testId}
+        onChange={() => onSelect(value)}
+      />
+      <span className="pw-choice-mark" aria-hidden="true" />
+      <span className="pw-choice-text">
+        <span className="pw-choice-title">{title}</span>
+        {meta && <span className="pw-choice-meta">{meta}</span>}
+        {note && <span className="pw-choice-note">{note}</span>}
+      </span>
+      {status && <span className="pw-choice-status">{status}</span>}
+    </label>
+  );
+}
+
+/** The group the cards live in: one legend, one tab stop, arrow keys. */
+export function ChoiceGroup({
+  label, hint, children, testId,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+  testId?: string;
+}) {
+  return (
+    <fieldset className="pw-choices" data-testid={testId}>
+      <legend className="pw-choices-legend">{label}</legend>
+      {hint && <p className="pw-choices-hint">{hint}</p>}
+      <div className="pw-choices-list">{children}</div>
+    </fieldset>
+  );
+}
+
 /** A number that IS the information. Rendered as a definition list, always labelled. */
 export function Stats({
   label, items, testId,

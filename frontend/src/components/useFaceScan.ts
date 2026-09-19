@@ -27,6 +27,16 @@ export const SCAN_MIN_PASSES = 3;
 export interface FaceScan<T> {
   /** True while the scan is running — drives the animation, nothing else. */
   scanning: boolean;
+  /**
+   * How many full sweeps have completed.
+   *
+   * It is what makes "at least three, and more while the server is still
+   * thinking" a fact rather than an intention: the UI reads it for the
+   * screen-reader line, and a test reads it to assert that a slow answer kept
+   * the line moving instead of freezing on pass three. It is NOT progress —
+   * there is no total to be a fraction of.
+   */
+  passes: number;
   /** Begin a scan. Any scan already running is discarded. */
   begin: () => void;
   /** The answer arrived; released once the passes are done (or at once). */
@@ -45,7 +55,9 @@ export interface FaceScan<T> {
  */
 export function useFaceScan<T>(onSettled: (value: T) => void): FaceScan<T> {
   const [scanning, setScanning] = useState(false);
+  const [passes, setPasses] = useState(0);
   const timerRef = useRef<number | null>(null);
+  const passTimerRef = useRef<number | null>(null);
   const passesDoneRef = useRef(false);
   const pendingRef = useRef<{ value: T } | null>(null);
   // The callback is read at fire time, so a re-render never leaves a stale one
@@ -58,12 +70,20 @@ export function useFaceScan<T>(onSettled: (value: T) => void): FaceScan<T> {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    if (passTimerRef.current !== null) {
+      window.clearInterval(passTimerRef.current);
+      passTimerRef.current = null;
+    }
   }, []);
 
   const release = useCallback(() => {
     const pending = pendingRef.current;
     if (!pending || !passesDoneRef.current) return;
     pendingRef.current = null;
+    if (passTimerRef.current !== null) {
+      window.clearInterval(passTimerRef.current);
+      passTimerRef.current = null;
+    }
     setScanning(false);
     settledRef.current(pending.value);
   }, []);
@@ -72,12 +92,18 @@ export function useFaceScan<T>(onSettled: (value: T) => void): FaceScan<T> {
     clearTimer();
     pendingRef.current = null;
     setScanning(true);
+    setPasses(0);
     passesDoneRef.current = false;
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       passesDoneRef.current = true;
       release();
     }, SCAN_PASS_MS * SCAN_MIN_PASSES);
+    // The counter keeps going past the minimum on purpose: a slow answer keeps
+    // the line sweeping, and the count is how the surface says so truthfully.
+    passTimerRef.current = window.setInterval(() => {
+      setPasses((n) => n + 1);
+    }, SCAN_PASS_MS);
   }, [clearTimer, release]);
 
   const settle = useCallback((value: T) => {
@@ -90,9 +116,10 @@ export function useFaceScan<T>(onSettled: (value: T) => void): FaceScan<T> {
     pendingRef.current = null;
     passesDoneRef.current = false;
     setScanning(false);
+    setPasses(0);
   }, [clearTimer]);
 
   useEffect(() => () => clearTimer(), [clearTimer]);
 
-  return { scanning, begin, settle, reset };
+  return { scanning, passes, begin, settle, reset };
 }

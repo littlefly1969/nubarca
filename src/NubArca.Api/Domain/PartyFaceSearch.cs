@@ -100,6 +100,13 @@ public static class PartyFaceSearchStatuses
     // No face was detected in the uploaded selfie.
     public const string NoFace = "no_face";
 
+    // SEVERAL faces, and no way to tell which of them is the guest. A content
+    // state like NoFace, and deliberately NOT a silent choice: see
+    // PartyFaceSelection for why picking the largest one anyway is the one
+    // failure mode this product cannot accept. Nothing is embedded, nothing is
+    // searched and nothing is recorded — the guest takes another selfie.
+    public const string MultipleFaces = "multiple_faces";
+
     // The uploaded bytes were not a decodable/allowed image.
     public const string InvalidImage = "invalid_image";
 
