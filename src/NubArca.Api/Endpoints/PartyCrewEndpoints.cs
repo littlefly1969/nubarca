@@ -321,7 +321,15 @@ public static class PartyCrewEndpoints
                 // owns nothing, and the service authorises against the party's
                 // owner exactly as the host's own route does.
                 var list = await guestbook.ListForManagerAsync(ctx.PartyId, ctx.OwnerUserId, ct);
-                return list is null ? Results.NotFound() : Results.Ok(list);
+                if (list is null) return Results.NotFound();
+
+                // …which is also why the answer has to be corrected on the way
+                // out. The service was asked the question AS the owner, so it
+                // says `IsOwner`, and this caller is a collaborator moderating
+                // on the host's behalf. The surface reads that flag to decide
+                // what it may offer, so leaving it true would show a
+                // collaborator the host's own switches.
+                return Results.Ok(list with { IsOwner = false });
             })).WithName("ListPartyCrewGuestbook");
 
         MapGuestbookModeration(app, "approve", PartyMessageModeration.Approve, AuditActions.PartyGuestbookApprove);
