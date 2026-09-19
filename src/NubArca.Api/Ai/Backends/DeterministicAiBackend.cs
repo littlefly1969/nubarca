@@ -83,20 +83,32 @@ public sealed class DeterministicAiBackend
         var faces = new List<DetectedFace>(faceCount);
         for (var i = 0; i < faceCount; i++)
         {
-            var baseX = 0.1 + 0.4 * i;                 // 0.1 or 0.5
-            var w = 0.30;
-            var hgt = 0.30;
-            var y = 0.20;
+            // THE FIRST FACE IS THE SUBJECT: bigger, and near the middle. The
+            // second is somebody further back and off to one side.
+            //
+            // The sizes are deliberate rather than incidental. Two identical
+            // boxes are a real ambiguity, and PartyFaceSelection refuses one on
+            // purpose — which would make every plumbing test that happens to
+            // hash to two faces exercise the refusal instead of the path it is
+            // about. A synthetic fixture should not accidentally encode "two
+            // people standing side by side": it should look like the ordinary
+            // case, and the AMBIGUOUS case belongs in the rule's own tests,
+            // where it can be stated instead of stumbled into.
+            var isSubject = i == 0;
+            var w = isSubject ? 0.34 : 0.16;
+            var hgt = isSubject ? 0.34 : 0.16;
+            var x = isSubject ? 0.33 : 0.04;
+            var y = isSubject ? 0.33 : 0.12;
             var landmarks = new List<FaceLandmark>(5)
             {
-                new(baseX + 0.08, y + 0.10), // left eye
-                new(baseX + 0.22, y + 0.10), // right eye
-                new(baseX + 0.15, y + 0.17), // nose
-                new(baseX + 0.10, y + 0.24), // left mouth
-                new(baseX + 0.20, y + 0.24), // right mouth
+                new(x + w * 0.27, y + hgt * 0.33), // left eye
+                new(x + w * 0.73, y + hgt * 0.33), // right eye
+                new(x + w * 0.50, y + hgt * 0.57), // nose
+                new(x + w * 0.33, y + hgt * 0.80), // left mouth
+                new(x + w * 0.67, y + hgt * 0.80), // right mouth
             };
             faces.Add(new DetectedFace(
-                baseX, y, w, hgt,
+                x, y, w, hgt,
                 Confidence: 0.90 - 0.05 * i,
                 Landmarks: landmarks));
         }
