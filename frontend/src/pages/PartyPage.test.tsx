@@ -511,7 +511,8 @@ describe('PartyPage (public party landing)', () => {
       'GET /api/party/tok-1/items': () => jsonResponse(twoItems),
       // Detection comes first now, and only a confirmed face reaches the search.
       'POST /api/party/tok-1/face-search/detect': () => jsonResponse({
-        status: 'found', face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
+        status: 'found', selectionToken: 'detect-ticket',
+        face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
       }),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems.items[1]],
@@ -769,7 +770,8 @@ describe('PartyPage (public party landing)', () => {
       'GET /api/party/tok-1': () => jsonResponse(context({ itemCount: 3 })),
       'GET /api/party/tok-1/items': () => jsonResponse({ albumName: 'Beach Party', items: twoItems }),
       'POST /api/party/tok-1/face-search/detect': () => jsonResponse({
-        status: 'found', face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
+        status: 'found', selectionToken: 'detect-ticket',
+        face: { x: 0.3, y: 0.25, width: 0.25, height: 0.3 },
       }),
       'POST /api/party/tok-1/face-search': () => jsonResponse({
         status: 'ready', searchId: 's1', resultCount: 1, items: [twoItems[1]],

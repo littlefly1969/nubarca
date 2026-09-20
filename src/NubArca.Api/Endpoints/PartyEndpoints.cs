@@ -734,7 +734,8 @@ public static class PartyEndpoints
                 outcome.Status,
                 outcome.Face is { } box
                     ? new NubArca.Api.Party.PartyFaceBoxDto(box.X, box.Y, box.Width, box.Height)
-                    : null);
+                    : null,
+                outcome.SelectionToken);
 
             return outcome.Status switch
             {
@@ -791,9 +792,14 @@ public static class PartyEndpoints
                 return Results.BadRequest(new { error = "The image could not be read." });
             }
 
+            // The detection's ticket, travelling beside the selfie in the same
+            // form. Never in the URL: a query string is the one place a value
+            // reliably ends up in an access log and in somebody's history.
+            var selectionToken = form["selectionToken"].ToString();
+
             var outcome = await faceSearch.SearchAsync(
                 access.OwnerUserId, access.MainAlbumId, access.PartyAlbumLinkId,
-                bytes, file.ContentType, cancellationToken);
+                bytes, file.ContentType, selectionToken, cancellationToken);
 
             // Aggregate-only audit (never the selfie, token/hash, query vector, file
             // names, or storage internals).
@@ -820,6 +826,15 @@ public static class PartyEndpoints
                     Results.Json(dto, statusCode: StatusCodes.Status503ServiceUnavailable),
                 NubArca.Api.Domain.PartyFaceSearchStatuses.InvalidImage =>
                     Results.Json(dto, statusCode: StatusCodes.Status400BadRequest),
+                // The request was well formed and nothing is wrong with the
+                // photograph: what is missing is a confirmation of which face
+                // it is about.
+                NubArca.Api.Domain.PartyFaceSearchStatuses.InvalidSelection =>
+                    Results.Json(dto, statusCode: StatusCodes.Status400BadRequest),
+                // A conflict in the plainest sense: the selfie no longer agrees
+                // with the decision the guest was shown.
+                NubArca.Api.Domain.PartyFaceSearchStatuses.FaceSelectionChanged =>
+                    Results.Json(dto, statusCode: StatusCodes.Status409Conflict),
                 _ => Results.Ok(dto),
             };
         }).WithName("PartyFaceSearch").RequireRateLimiting(PartyFaceSearchRateLimitPolicy).DisableAntiforgery();

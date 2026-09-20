@@ -1132,6 +1132,7 @@ const de: Partial<Record<MessageKey, string>> = {
   'partyFace.noFace': 'Wir sehen dein Gesicht nicht gut. Mach noch ein Selfie und schau direkt in die Kamera.',
   'partyFace.invalidImage': 'Dieses Bild ist ungültig. Versuch ein anderes Foto.',
   'partyFace.unavailable': 'Die Gesichtssuche ist noch nicht verfügbar.',
+  'partyFace.selectionChanged': 'Dein Gesicht hat sich bewegt, während wir gesucht haben. Mach bitte noch ein Selfie.',
   'partyFace.error': 'Die Suche konnte nicht abgeschlossen werden. Versuch es noch einmal.',
   'partyFace.newSearch': 'Versuch ein anderes Foto',
   'partyFace.showAll': 'Alle Fotos zeigen',

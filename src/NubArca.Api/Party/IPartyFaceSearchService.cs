@@ -49,12 +49,19 @@ public interface IPartyFaceSearchService
     // Run a face search. `selfieBytes` are validated + processed in memory only.
     // Returns a safe outcome (status + short-lived session id when a search was
     // recorded + the live-visible matched file ids in rank order).
+    /// <summary>
+    /// Run a face search. <paramref name="selectionToken"/> is the ticket the
+    /// detection issued for the face the guest was shown: it is REQUIRED, and
+    /// it is what makes the searched face the framed face rather than whatever
+    /// the detector happens to prefer on this run.
+    /// </summary>
     Task<PartyFaceSearchOutcome> SearchAsync(
         Guid ownerUserId,
         Guid albumId,
         Guid? partyAlbumLinkId,
         byte[] selfieBytes,
         string? declaredContentType,
+        string? selectionToken,
         CancellationToken cancellationToken = default);
 
     // Re-load a stored search's currently-visible matches (rank order), scoped to
@@ -181,12 +188,20 @@ public sealed record PartyFaceSearchOutcome(
 /// is not a search, and there is deliberately nothing here that could be
 /// mistaken for one.</para>
 /// </summary>
-public sealed record PartyFaceDetectOutcome(string Status, PartyFaceBox? Face = null)
+public sealed record PartyFaceDetectOutcome(
+    string Status,
+    PartyFaceBox? Face = null,
+    /// <summary>
+    /// The opaque, short-lived proof of WHICH face this detection chose, to be
+    /// handed back to the search. Present only alongside a found face: a
+    /// refusal confirms nothing, so there is nothing to carry.
+    /// </summary>
+    string? SelectionToken = null)
 {
     public static PartyFaceDetectOutcome State(string status) => new(status, null);
 
-    public static PartyFaceDetectOutcome Found(PartyFaceBox face) =>
-        new(PartyFaceDetectStatuses.Found, face);
+    public static PartyFaceDetectOutcome Found(PartyFaceBox face, string selectionToken) =>
+        new(PartyFaceDetectStatuses.Found, face, selectionToken);
 }
 
 /// <summary>

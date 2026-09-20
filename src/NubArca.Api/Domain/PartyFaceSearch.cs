@@ -114,4 +114,17 @@ public static class PartyFaceSearchStatuses
     // switched off, or the face embedder could not process the selfie). This is an
     // environment/config state, never a content failure.
     public const string Unavailable = "unavailable";
+
+    // The search was asked to run without a usable confirmation of WHICH face
+    // the guest meant: no selection ticket, or one that was malformed, expired,
+    // tampered with, minted for a different selfie, or minted under a face
+    // package this installation no longer runs. Never a verdict about the
+    // photograph — the guest takes another selfie.
+    public const string InvalidSelection = "invalid_selection";
+
+    // The confirmed face could not be found again in the selfie that arrived.
+    // A detector is not obliged to be deterministic, and when its answer moves
+    // the product refuses rather than silently embedding a DIFFERENT face than
+    // the one framed on the phone.
+    public const string FaceSelectionChanged = "face_selection_changed";
 }

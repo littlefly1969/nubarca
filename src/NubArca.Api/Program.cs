@@ -1010,6 +1010,11 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<NubArca.Api.Party.IPartyParticipantService, NubArca.Api.Party.PartyParticipantService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();
+    // The face a detection confirmed, carried to the search. A singleton:
+    // it holds key material and no state.
+    builder.Services.AddSingleton<
+        NubArca.Api.Party.IPartyFaceSelectionTickets,
+        NubArca.Api.Party.PartyFaceSelectionTickets>();
     builder.Services.AddScoped<NubArca.Api.Party.IPartyFaceSearchService, NubArca.Api.Party.PartyFaceSearchService>();
     // Guest party MESSAGES: a text-only domain beside the media pipeline, with
     // its own narrow owner-or-delegate authorization gate.

@@ -68,6 +68,12 @@ type FaceState =
   /** The sweep is running and the search is in flight (or already answered). */
   | { kind: 'scanning'; face: FaceBox }
   | { kind: 'results'; res: PartyFaceSearchResponse; face: FaceBox | null }
+  /**
+   * The face that was confirmed could not be found again in the selfie the
+   * search received, or the confirmation itself had expired. Not an error the
+   * guest caused and not a verdict on the photograph: one more selfie.
+   */
+  | { kind: 'selection_changed' }
   | { kind: 'search_error' };
 
 type TvState = 'idle' | 'activating' | 'active' | 'error';
@@ -179,6 +185,11 @@ export function PartyFaceSearch({
   const fileInputRef = useRef<HTMLInputElement>(null);
   // The captured bytes, held only for as long as the search needs them.
   const shotRef = useRef<File | null>(null);
+  // The detection's proof of WHICH face was confirmed, held in memory beside
+  // the selfie it belongs to and dropped with it. Never storage, never a URL:
+  // it is meaningless without those exact bytes anyway, and a value that
+  // outlives them is a value somebody has to reason about later.
+  const ticketRef = useRef<string | null>(null);
   // The in-flight request, so closing or cancelling can stop it. Without this a
   // response arriving after the guest walked away re-applied a filter to an
   // album they were already browsing unfiltered.
@@ -202,6 +213,7 @@ export function PartyFaceSearch({
       return null;
     });
     shotRef.current = null;
+    ticketRef.current = null;
     setSelfieAspect(0);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }, []);
@@ -271,6 +283,10 @@ export function PartyFaceSearch({
    */
   const examine = useCallback(async (shot: File, url: string) => {
     shotRef.current = shot;
+    // A new selfie invalidates the last confirmation before anything else
+    // happens, so no path below can reach the search holding a ticket that
+    // belongs to a photograph the guest has already replaced.
+    ticketRef.current = null;
     setPreviewUrl((previous) => {
       if (previous && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(previous);
       return url;
@@ -294,13 +310,14 @@ export function PartyFaceSearch({
 
       if (detected.status === 'no_face') { setState({ kind: 'no_face' }); return; }
       if (detected.status === 'multiple_faces') { setState({ kind: 'multiple_faces' }); return; }
-      if (detected.status !== 'found' || !detected.face) {
-        // invalid_image, unavailable, or a `found` with no box: nothing to
-        // frame and nothing to search for.
+      if (detected.status !== 'found' || !detected.face || !detected.selectionToken) {
+        // invalid_image, unavailable, or a `found` with no box or no ticket:
+        // nothing to frame, or nothing that could prove what was framed.
         setState({ kind: 'search_error' });
         return;
       }
       face = detected.face;
+      ticketRef.current = detected.selectionToken;
     } catch (err) {
       if (ctrl.signal.aborted) return;
       void err;
@@ -317,13 +334,30 @@ export function PartyFaceSearch({
     confirmTimerRef.current = window.setTimeout(() => {
       confirmTimerRef.current = null;
       if (ctrl.signal.aborted) return;
+      const ticket = ticketRef.current;
+      if (!ticket) {
+        setState({ kind: 'selection_changed' });
+        return;
+      }
+
       setState({ kind: 'scanning', face });
       scan.begin();
 
-      partyFaceSearch(token, shot, ctrl.signal)
+      // The confirmed face travels WITH the selfie. The server will not choose
+      // again: it either finds this face in these bytes or refuses, which is
+      // what makes the crop above a picture of the decision behind the results.
+      partyFaceSearch(token, shot, ticket, ctrl.signal)
         .then((res) => {
           if (ctrl.signal.aborted) return;
           requestRef.current = null;
+          if (res.status === 'invalid_selection' || res.status === 'face_selection_changed') {
+            // The confirmation no longer holds. Nothing was searched, and the
+            // one honest next step is another selfie.
+            scan.reset();
+            ticketRef.current = null;
+            setState({ kind: 'selection_changed' });
+            return;
+          }
           // THE RESULT WAITS FOR THE SWEEP. Two things arrive together and are
           // shown at different moments on purpose: the guest watches the line
           // pass over their own face, which is the whole point of the effect,
@@ -562,6 +596,16 @@ export function PartyFaceSearch({
           </div>
         );
 
+      case 'selection_changed':
+        return (
+          <div className="party-face-stage">
+            {renderShot()}
+            <p className="party-face-lede" role="alert" data-testid="party-face-selection-changed">
+              {t('partyFace.selectionChanged')}
+            </p>
+          </div>
+        );
+
       case 'search_error':
         return (
           <div className="party-face-stage">
@@ -716,6 +760,7 @@ export function PartyFaceSearch({
 
       case 'no_face':
       case 'multiple_faces':
+      case 'selection_changed':
       case 'search_error':
         return (
           <button

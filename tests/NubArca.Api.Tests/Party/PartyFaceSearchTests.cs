@@ -300,11 +300,23 @@ public sealed class PartyFaceSearchTests
             sp.GetRequiredService<NubArca.Api.Ai.Faces.IFaceSettingsProvider>(),
             sp.GetRequiredService<IAiVectorSerializer>(),
             sp.GetRequiredService<NubArca.Api.Storage.IBlobService>(),
+            sp.GetRequiredService<IPartyFaceSelectionTickets>(),
             sp.GetRequiredService<TimeProvider>(),
             sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>());
 
-        var outcome = await service.SearchAsync(ownerId, albumId, null, Png(16), "image/png");
-        Assert.Equal("no_face", outcome.Status);
+        // "No face" is now decided where the face is CHOSEN — by the detection
+        // — and it issues no ticket, because there is no confirmed face behind
+        // a refusal.
+        var detected = await service.DetectAsync(Png(16), "image/png");
+        Assert.Equal("no_face", detected.Status);
+        Assert.Null(detected.Face);
+        Assert.Null(detected.SelectionToken);
+
+        // And the search the guest never gets to make is refused on exactly
+        // that ground: nobody confirmed a face, so there is nothing to embed.
+        var outcome = await service.SearchAsync(
+            ownerId, albumId, null, Png(16), "image/png", detected.SelectionToken);
+        Assert.Equal("invalid_selection", outcome.Status);
         Assert.Null(outcome.SearchId);
         Assert.Empty(outcome.FileItemIds);
     }
@@ -753,13 +765,57 @@ public sealed class PartyFaceSearchTests
         return fileId;
     }
 
-    private static Task<HttpResponseMessage> FaceSearchAsync(
+    private static Task<HttpResponseMessage> FaceDetectAsync(
         HttpClient anon, string token, byte[] bytes, string contentType = "image/png")
     {
         var part = new ByteArrayContent(bytes);
         part.Headers.ContentType = new MediaTypeHeaderValue(contentType);
         var multipart = new MultipartFormDataContent { { part, "file", "selfie" } };
-        return anon.PostAsync($"/api/party/{token}/face-search", multipart);
+        return anon.PostAsync($"/api/party/{token}/face-search/detect", multipart);
+    }
+
+    /// <summary>
+    /// The ticket a detection issues for this selfie, or null when it refused
+    /// to confirm a face (and therefore issued none).
+    /// </summary>
+    private static async Task<string?> SelectionTokenAsync(
+        HttpClient anon, string token, byte[] bytes, string contentType = "image/png")
+    {
+        var response = await FaceDetectAsync(anon, token, bytes, contentType);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var body = await ReadJsonAsync(response);
+        return body.TryGetProperty("selectionToken", out var ticket)
+            && ticket.ValueKind == JsonValueKind.String
+                ? ticket.GetString()
+                : null;
+    }
+
+    /// <summary>
+    /// A search, as the phone actually performs one: detect first, then search
+    /// with the ticket that detection issued. Every test below therefore
+    /// exercises the BOUND flow rather than a search that chose its own face.
+    /// A test that wants to present a different ticket — or none — passes one.
+    /// </summary>
+    private static async Task<HttpResponseMessage> FaceSearchAsync(
+        HttpClient anon, string token, byte[] bytes, string contentType = "image/png",
+        string? selectionToken = null, bool detectFirst = true)
+    {
+        selectionToken ??= detectFirst
+            ? await SelectionTokenAsync(anon, token, bytes, contentType)
+            : null;
+
+        var part = new ByteArrayContent(bytes);
+        part.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        var multipart = new MultipartFormDataContent { { part, "file", "selfie" } };
+        if (selectionToken is not null)
+        {
+            multipart.Add(new StringContent(selectionToken), "selectionToken");
+        }
+        return await anon.PostAsync($"/api/party/{token}/face-search", multipart);
     }
 
     private static Task<HttpResponseMessage> UploadAsync(
