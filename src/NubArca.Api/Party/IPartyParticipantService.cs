@@ -61,6 +61,16 @@ public interface IPartyParticipantService
     // What this guest has spent on greetings, for the surfaces that show it.
     Task<int> MessageCountAsync(Guid participantId, CancellationToken cancellationToken = default);
 
+    // The SAME atomic claim for a dedication, against the book's own budget.
+    // Deliberately a second counter rather than a share of the greetings': a
+    // message is read out once and a dedication is kept, so a host who wants
+    // many of one and few of the other is asking for two numbers.
+    Task<bool> TryClaimGuestbookAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default);
+
+    // What this guest has spent on dedications.
+    Task<int> GuestbookCountAsync(Guid participantId, CancellationToken cancellationToken = default);
+
     // ATOMIC per-guest print claim, on the same principle as the upload slot:
     // one statement decides and records. `max` of 0 means the host set no
     // per-guest limit, so the claim always succeeds and only counts.

@@ -398,6 +398,7 @@ export function setPartySlideshowSettings(
     maxPhotoUploadsPerParticipant?: number;
     maxVideoUploadsPerParticipant?: number;
     maxMessagesPerParticipant?: number;
+    maxGuestbookEntriesPerParticipant?: number;
   },
   signal?: AbortSignal,
 ): Promise<AlbumPartyStatus> {

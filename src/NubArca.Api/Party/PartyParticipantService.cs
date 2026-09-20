@@ -434,4 +434,26 @@ public sealed class PartyParticipantService : IPartyParticipantService
             .Where(p => p.Id == participantId)
             .Select(p => p.SubmittedMessageCount)
             .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<bool> TryClaimGuestbookAsync(
+        Guid participantId, int max, CancellationToken cancellationToken = default)
+    {
+        // One statement decides and records, for the same reason the greeting's
+        // claim does: a COUNT followed by an INSERT lets two dedications sent at
+        // once both read "one slot left" and both take it.
+        var affected = await _db.Database.ExecuteSqlRawAsync(
+            "UPDATE party_participants "
+            + "SET \"SubmittedGuestbookCount\" = \"SubmittedGuestbookCount\" + 1, \"LastSeenAt\" = {1} "
+            + "WHERE \"Id\" = {0} AND ({2} = 0 OR \"SubmittedGuestbookCount\" < {2})",
+            [participantId, _clock.GetUtcNow().UtcDateTime, max],
+            cancellationToken);
+        return affected == 1;
+    }
+
+    public async Task<int> GuestbookCountAsync(
+        Guid participantId, CancellationToken cancellationToken = default) =>
+        await _db.PartyParticipants.AsNoTracking()
+            .Where(p => p.Id == participantId)
+            .Select(p => p.SubmittedGuestbookCount)
+            .FirstOrDefaultAsync(cancellationToken);
 }

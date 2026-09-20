@@ -38,6 +38,10 @@ public class PartyAlbumLinkConfiguration : IEntityTypeConfiguration<PartyAlbumLi
         // 0 is unlimited, and it is the migration default: no existing party
         // acquires a message limit it never had.
         builder.Property(p => p.MaxMessagesPerParticipant).HasDefaultValue(0);
+        // Same rule for the book's own budget: 0 is unlimited, and it is the
+        // column's default, so no existing party acquires a limit on dedications
+        // it never had.
+        builder.Property(p => p.MaxGuestbookEntriesPerParticipant).HasDefaultValue(0);
         builder.Property(p => p.MinChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MinIntervalSeconds);
         builder.Property(p => p.MaxChallengeIntervalSeconds).HasDefaultValue(PartyChallengeDefaults.MaxIntervalSeconds);
         builder.Property(p => p.VotesPerGuest).HasDefaultValue(PartyChallengeDefaults.VotesPerGuest);

@@ -110,12 +110,15 @@ internal static class PartyAlbumSettingsOperations
             return Results.BadRequest(new { error = "maxVideoUploadsPerParticipant out of range." });
         if (body.MaxMessagesPerParticipant is int maxMessages && !PartySlideshowDefaults.IsValidQuota(maxMessages))
             return Results.BadRequest(new { error = "maxMessagesPerParticipant out of range." });
+        if (body.MaxGuestbookEntriesPerParticipant is int maxDedications
+            && !PartySlideshowDefaults.IsValidQuota(maxDedications))
+            return Results.BadRequest(new { error = "maxGuestbookEntriesPerParticipant out of range." });
 
         var ok = await party.UpdateSlideshowSettingsAsync(
             ownerUserId, albumId,
             body.PhotoSlideSeconds, body.MaxVideoSlideSeconds,
             body.MaxPhotoUploadsPerParticipant, body.MaxVideoUploadsPerParticipant,
-            body.MaxMessagesPerParticipant, ct);
+            body.MaxMessagesPerParticipant, body.MaxGuestbookEntriesPerParticipant, ct);
         if (!ok) return Results.NotFound();
 
         var status = await party.GetOwnerStatusAsync(ownerUserId, albumId, ct);

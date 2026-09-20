@@ -50,6 +50,7 @@ export interface AlbumPartyStatus {
   maxVideoUploadsPerParticipant: number;
   /** 0 means unlimited. Optional for a backend that predates the quota. */
   maxMessagesPerParticipant?: number;
+  maxGuestbookEntriesPerParticipant?: number;
   // Optional for rolling compatibility with a pre-game backend.
   gameEnabled?: boolean;
   minChallengeIntervalSeconds?: number;
@@ -151,6 +152,12 @@ export interface PartySlideshowSettings {
   maxVideoUploadsPerParticipant: number;
   /** Greetings one guest may send. 0 is unlimited, like the media quotas. */
   maxMessagesPerParticipant: number;
+  /**
+   * Dedications one guest may write in the book. Its own budget and not a
+   * share of the greetings': a message is read out once during the evening and
+   * a dedication is kept, so a host sets the two apart.
+   */
+  maxGuestbookEntriesPerParticipant: number;
 }
 
 /** Every field that is out of range, so a form can mark them all at once
@@ -171,6 +178,9 @@ export function invalidSlideshowFields(s: PartySlideshowSettings): string[] {
   }
   if (!isWithinRange(s.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota)) {
     bad.push('maxMessagesPerParticipant');
+  }
+  if (!isWithinRange(s.maxGuestbookEntriesPerParticipant, PARTY_SLIDESHOW_RANGES.quota)) {
+    bad.push('maxGuestbookEntriesPerParticipant');
   }
   return bad;
 }
@@ -397,6 +407,7 @@ export function slideshowSettingsFromStatus(status: AlbumPartyStatus): PartySlid
     // A backend that predates the quota reports nothing, which reads as the
     // unlimited it in fact was.
     maxMessagesPerParticipant: status.maxMessagesPerParticipant ?? 0,
+    maxGuestbookEntriesPerParticipant: status.maxGuestbookEntriesPerParticipant ?? 0,
   };
 }
 

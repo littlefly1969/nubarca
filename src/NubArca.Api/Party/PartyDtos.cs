@@ -30,6 +30,10 @@ public sealed record AlbumPartyStatusDto(
     int MaxPhotoUploadsPerParticipant = 0,
     int MaxVideoUploadsPerParticipant = 0,
     int MaxMessagesPerParticipant = 0,
+    // Dedications ONE guest may write in the book. Its own budget, not a share
+    // of the greetings': the two are kept for different lengths of time and a
+    // host sets them apart.
+    int MaxGuestbookEntriesPerParticipant = 0,
     // When true, new guest MESSAGES wait for approval before reaching the TV.
     // Independent of RequireUploadApproval, and owner-only to change.
     bool RequireMessageApproval = false,
@@ -104,7 +108,17 @@ public sealed record PartyUploadSessionDto(
     // half exists — so a party that takes photographs and no greetings shows a
     // page about photographs rather than a disabled tab. True by default, which
     // is what every party before the switch meant.
-    bool SlideshowMessagesEnabled = true);
+    bool SlideshowMessagesEnabled = true,
+    // WHETHER PHOTOGRAPHS ARE OPEN. Reported for the same reason the composer's
+    // switch is: this page has three halves now, and each renders only when its
+    // own channel is open. A party that takes dedications and nothing else is a
+    // page about dedications.
+    bool UploadEnabled = true,
+    // The book's half, and what this guest has left in it.
+    bool GuestbookEnabled = false,
+    int? MaxGuestbookEntries = null,
+    int UsedGuestbookEntries = 0,
+    int? RemainingGuestbookEntries = null);
 
 // Result of enabling party mode: the same status plus a convenience flag that
 // the frontend can use to surface the (re)generated link.
@@ -165,7 +179,16 @@ public sealed record PartyAccess(
     // Whether this party keeps a guest book. Opt-in, so an absent value is the
     // same "no book here" every party had before it existed.
     bool GuestbookEnabled = false,
-    bool RequireGuestbookApproval = false);
+    bool RequireGuestbookApproval = false,
+    // Dedications one guest may write, on the same 0 = unlimited convention as
+    // the other quotas. Carried on the VIEW grant as well, because that is the
+    // token the book is written on.
+    int MaxGuestbookEntriesPerParticipant = 0,
+    // Whether PHOTOGRAPHS are open. Carried rather than folded into the grant's
+    // validity, because the upload token now means "may contribute" and each of
+    // the three contributions answers for itself. A view grant leaves it false;
+    // nothing reads it there.
+    bool UploadEnabled = false);
 
 // --- PUBLIC (anonymous) party DTOs ---
 // Deliberately minimal. NO owner identity, GPS, DateTaken, raw metadata,
@@ -500,7 +523,10 @@ public sealed record PartyGuestbookPageDto(
     // dedications, and the surface says which.
     bool CanWrite,
     int MaxAuthorDisplayNameLength = PartyGuestbookLimits.MaxAuthorDisplayNameLength,
-    int MaxBodyLength = PartyGuestbookLimits.MaxBodyLength);
+    int MaxBodyLength = PartyGuestbookLimits.MaxBodyLength,
+    // What this guest has left to write, or null for no limit — so the page can
+    // say it before somebody composes a dedication it will refuse.
+    int? Remaining = null);
 
 // What the guest gets back after writing. The id so the page can key its own
 // optimistic entry, and the status so it can say "in the book" or "waiting to
@@ -508,7 +534,10 @@ public sealed record PartyGuestbookPageDto(
 public sealed record PartyGuestbookSubmissionDto(
     Guid Id,
     string Status, // "visible" | "pending"
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    // How many dedications this guest has left, or null when the host set no
+    // limit. Same shape as a greeting's, so one surface renders both.
+    int? Remaining = null);
 
 // Why a dedication was refused. The HTTP layer maps these to a status code and
 // a stable machine code; the service never formats copy of its own.
@@ -523,6 +552,12 @@ public enum PartyGuestbookSubmissionError
     // This party keeps no guest book. Same shape of refusal as a greeting sent
     // to a party that takes none: a hand-built request, refused by the server.
     Disabled,
+
+    // This guest has written the dedications the host allowed them. A PRODUCT
+    // limit and deliberately not rate limiting: one says the book has a budget,
+    // the other says the requests are arriving too fast, and a guest can act on
+    // only one of them.
+    LimitReached,
 }
 
 public sealed record PartyGuestbookSubmissionResult(

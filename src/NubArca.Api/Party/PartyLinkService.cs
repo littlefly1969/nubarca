@@ -220,6 +220,7 @@ public sealed class PartyLinkService : IPartyLinkService
                 p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.MaxMessagesPerParticipant,
+                p.MaxGuestbookEntriesPerParticipant,
                 p.GameEnabled, p.MinChallengeIntervalSeconds,
                 p.MaxChallengeIntervalSeconds, p.VotesPerGuest,
                 p.MaxChallengesPerSession, p.PriorityVotingEnabled,
@@ -232,7 +233,13 @@ public sealed class PartyLinkService : IPartyLinkService
         var partyMode = active is not null;
         var viewUrl = partyMode ? BuildPartyUrl(DeriveToken(active!.Id)) : null;
         var uploadOn = partyMode && active!.UploadEnabled && active.UploadTokenHash is not null;
-        var uploadUrl = uploadOn ? BuildUploadUrl(DeriveUploadToken(active!.Id)) : null;
+        // THE PAGE EXISTS IF ANY CONTRIBUTION DOES. It is one page with three
+        // halves, and tying its address to the photo switch made the composer
+        // and the book vanish with the photographs. `uploadOn` below stays the
+        // PHOTO switch, which is what the host's own panel renders.
+        var contributesSomething = partyMode && active!.UploadTokenHash is not null
+            && (active.UploadEnabled || active.SlideshowMessagesEnabled || active.GuestbookEnabled);
+        var uploadUrl = contributesSomething ? BuildUploadUrl(DeriveUploadToken(active!.Id)) : null;
         var requireApproval = partyMode && active!.RequireUploadApproval;
         return new AlbumPartyStatusDto(
             albumId, partyId, album.ShowOnTv, partyMode, viewUrl, uploadOn, uploadUrl, requireApproval,
@@ -243,6 +250,7 @@ public sealed class PartyLinkService : IPartyLinkService
             active?.MaxPhotoUploadsPerParticipant ?? 0,
             active?.MaxVideoUploadsPerParticipant ?? 0,
             active?.MaxMessagesPerParticipant ?? 0,
+            active?.MaxGuestbookEntriesPerParticipant ?? 0,
             // Same rule as the upload approval flag: an inert link cannot be
             // holding a party to an approval mode.
             partyMode && active!.RequireMessageApproval,
@@ -273,6 +281,7 @@ public sealed class PartyLinkService : IPartyLinkService
         int? maxPhotoUploadsPerParticipant,
         int? maxVideoUploadsPerParticipant,
         int? maxMessagesPerParticipant,
+        int? maxGuestbookEntriesPerParticipant,
         CancellationToken cancellationToken = default)
     {
         var now = _clock.GetUtcNow().UtcDateTime;
@@ -299,6 +308,10 @@ public sealed class PartyLinkService : IPartyLinkService
         if (maxPhotoUploadsPerParticipant is int maxPhotos) link.MaxPhotoUploadsPerParticipant = maxPhotos;
         if (maxVideoUploadsPerParticipant is int maxVideos) link.MaxVideoUploadsPerParticipant = maxVideos;
         if (maxMessagesPerParticipant is int maxMessages) link.MaxMessagesPerParticipant = maxMessages;
+        if (maxGuestbookEntriesPerParticipant is int maxDedications)
+        {
+            link.MaxGuestbookEntriesPerParticipant = maxDedications;
+        }
         link.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
         return true;
@@ -443,6 +456,7 @@ public sealed class PartyLinkService : IPartyLinkService
                 (p, a) => new
                 {
                     p.AlbumId, p.Id, p.CreatedAt, p.UploadEnabled, p.UploadTokenHash,
+                    p.SlideshowMessagesEnabled, p.GuestbookEnabled,
                     p.PhotoSlideSeconds, p.MaxVideoSlideSeconds,
                 })
             .ToListAsync(cancellationToken);
@@ -450,7 +464,10 @@ public sealed class PartyLinkService : IPartyLinkService
         foreach (var group in rows.GroupBy(r => r.AlbumId))
         {
             var latest = group.OrderByDescending(r => r.CreatedAt).First();
-            var uploadUrl = latest.UploadEnabled && latest.UploadTokenHash is not null
+            // Same rule as the owner's status: the contribution page is
+            // offered when ANY of the three is open, not only photographs.
+            var uploadUrl = latest.UploadTokenHash is not null
+                && (latest.UploadEnabled || latest.SlideshowMessagesEnabled || latest.GuestbookEnabled)
                 ? BuildUploadUrl(DeriveUploadToken(latest.Id))
                 : null;
             result[group.Key] = new PartyLinkUrls(
@@ -473,9 +490,10 @@ public sealed class PartyLinkService : IPartyLinkService
             .Where(p => p.Id == partyAlbumLinkId)
             .Select(p => new LinkRow(
                 p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
-                p.RequireUploadApproval,
+                p.RequireUploadApproval, p.UploadEnabled,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.MaxGuestbookEntriesPerParticipant,
                 p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -496,9 +514,10 @@ public sealed class PartyLinkService : IPartyLinkService
             .Where(p => p.TokenHash == hash)
             .Select(p => new LinkRow(
                 p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
-                p.RequireUploadApproval,
+                p.RequireUploadApproval, p.UploadEnabled,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.MaxGuestbookEntriesPerParticipant,
                 p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -523,10 +542,18 @@ public sealed class PartyLinkService : IPartyLinkService
             .AsNoTracking()
             .Where(p => p.UploadTokenHash == hash)
             .Select(p => new LinkRow(
-                p.Id, p.PartyId, p.Enabled && p.UploadEnabled, p.RevokedAt, p.ExpiresAt,
-                p.RequireUploadApproval,
+                // THE TOKEN MEANS "this guest may contribute", and no longer
+                // "photographs are open". Folding the photo switch in here made
+                // the other two contributions depend on it: turning photographs
+                // off took the whole contribution page away, and with it the
+                // composer and the book. Which channel is open is now asked by
+                // the ACTION, where it belongs — one switch per contribution,
+                // which is what three independent switches were supposed to mean.
+                p.Id, p.PartyId, p.Enabled, p.RevokedAt, p.ExpiresAt,
+                p.RequireUploadApproval, p.UploadEnabled,
                 p.MaxPhotoUploadsPerParticipant, p.MaxVideoUploadsPerParticipant,
                 p.RequireMessageApproval, p.MaxMessagesPerParticipant,
+                p.MaxGuestbookEntriesPerParticipant,
                 p.SlideshowMessagesEnabled, p.GuestbookEnabled, p.RequireGuestbookApproval))
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -538,9 +565,10 @@ public sealed class PartyLinkService : IPartyLinkService
     // expression for both tokens rather than two that must be kept in step.
     private sealed record LinkRow(
         Guid Id, Guid PartyId, bool Live, DateTime? RevokedAt, DateTime? ExpiresAt,
-        bool RequireUploadApproval,
+        bool RequireUploadApproval, bool UploadEnabled,
         int MaxPhotoUploadsPerParticipant, int MaxVideoUploadsPerParticipant,
         bool RequireMessageApproval, int MaxMessagesPerParticipant,
+        int MaxGuestbookEntriesPerParticipant,
         // WHICH CONTRIBUTIONS THIS PARTY TAKES. Carried on EVERY grant, not
         // only the upload one: the three are independent switches, and the
         // guest book lives on the view token while the slideshow composer
@@ -665,12 +693,18 @@ public sealed class PartyLinkService : IPartyLinkService
                 link.RequireUploadApproval,
                 link.MaxPhotoUploadsPerParticipant, link.MaxVideoUploadsPerParticipant,
                 link.RequireMessageApproval, link.MaxMessagesPerParticipant,
-                link.SlideshowMessagesEnabled, link.GuestbookEnabled, link.RequireGuestbookApproval)
+                link.SlideshowMessagesEnabled, link.GuestbookEnabled, link.RequireGuestbookApproval,
+                link.MaxGuestbookEntriesPerParticipant, link.UploadEnabled)
+            // The book's budget rides the VIEW grant too, because that is the
+            // token a dedication is written on. A quota carried only by the
+            // upload grant would be a limit the surface that spends it cannot
+            // see.
             : new PartyAccess(
                 party.Id, party.OwnerUserId, albumId, link.Id, capabilities, experience,
                 SlideshowMessagesEnabled: link.SlideshowMessagesEnabled,
                 GuestbookEnabled: link.GuestbookEnabled,
-                RequireGuestbookApproval: link.RequireGuestbookApproval);
+                RequireGuestbookApproval: link.RequireGuestbookApproval,
+                MaxGuestbookEntriesPerParticipant: link.MaxGuestbookEntriesPerParticipant);
     }
 
     // view token = URL-safe base64 of HMAC-SHA256(secret, linkId). ~43 chars, 256-bit.

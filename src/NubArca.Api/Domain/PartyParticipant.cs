@@ -62,6 +62,13 @@ public class PartyParticipant
     public int SubmittedMessageCount { get; set; }
 
     /// <summary>
+    /// Dedications this guest has written. History on the same terms as every
+    /// counter here: a dedication the host later hides has still been written,
+    /// so the slot stays spent.
+    /// </summary>
+    public int SubmittedGuestbookCount { get; set; }
+
+    /// <summary>
     /// Set when this row was folded into the browser's single identity for this
     /// party during the legacy-cookie migration, and is therefore no longer
     /// reachable by any lookup.

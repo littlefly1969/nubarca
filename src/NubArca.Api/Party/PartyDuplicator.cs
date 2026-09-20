@@ -312,6 +312,7 @@ public sealed class PartyDuplicator : IPartyDuplicator
                     MaxPhotoUploadsPerParticipant = sourceLink.MaxPhotoUploadsPerParticipant,
                     MaxVideoUploadsPerParticipant = sourceLink.MaxVideoUploadsPerParticipant,
                     MaxMessagesPerParticipant = sourceLink.MaxMessagesPerParticipant,
+                    MaxGuestbookEntriesPerParticipant = sourceLink.MaxGuestbookEntriesPerParticipant,
                     GameEnabled = sourceLink.GameEnabled,
                     PriorityVotingEnabled = sourceLink.PriorityVotingEnabled,
                     MinChallengeIntervalSeconds = sourceLink.MinChallengeIntervalSeconds,
