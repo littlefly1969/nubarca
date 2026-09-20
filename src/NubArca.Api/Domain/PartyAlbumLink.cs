@@ -165,6 +165,20 @@ public class PartyAlbumLink
     /// </summary>
     public int MaxMessagesPerParticipant { get; set; }
 
+    /// <summary>
+    /// Dedications ONE guest may write in the book through this link. 0 is
+    /// unlimited, which is the default and what every party before this column
+    /// meant.
+    ///
+    /// Its own budget, not a share of the greetings': a message is read out
+    /// once during the evening and a dedication is kept for ever, so a host who
+    /// wants many of one and few of the other is asking for two numbers. The
+    /// spending rule is the greetings' rule — a dedication spends a slot
+    /// whether it lands visible or pending, and hiding or rejecting one never
+    /// gives it back.
+    /// </summary>
+    public int MaxGuestbookEntriesPerParticipant { get; set; }
+
     public bool GameEnabled { get; set; }
 
     /// <summary>

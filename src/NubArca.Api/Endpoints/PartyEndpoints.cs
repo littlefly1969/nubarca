@@ -522,6 +522,18 @@ public static class PartyEndpoints
                 return Results.NotFound();
             }
 
+            // THE PHOTO SWITCH, asked here rather than by the token. A party
+            // that takes greetings and dedications but no photographs is a real
+            // party, and its guests must still reach the page — so this refusal
+            // belongs to the upload, not to the link. Same shape as the
+            // composer's: well formed, and declined by configuration.
+            if (!access.UploadEnabled)
+            {
+                return Results.Json(
+                    new { error = "party_uploads_disabled" },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
             if (!httpContext.Request.HasFormContentType)
             {
                 return Results.BadRequest(new { error = "Expected a multipart form upload." });
@@ -642,6 +654,7 @@ public static class PartyEndpoints
             // Greetings are a guest allowance like the media ones, so they are
             // reported beside them rather than through a surface of their own.
             var usedMessages = await participants.MessageCountAsync(id, cancellationToken);
+            var usedGuestbook = await participants.GuestbookCountAsync(id, cancellationToken);
             return Results.Ok(new NubArca.Api.Party.PartyUploadSessionDto(
                 Unlimited(quota.MaxPhotos),
                 Unlimited(quota.MaxVideos),
@@ -657,7 +670,12 @@ public static class PartyEndpoints
                 // photographs and no greetings renders a page about
                 // photographs — with no composer, no switch between two halves
                 // and nothing to ask the server for.
-                access.SlideshowMessagesEnabled));
+                access.SlideshowMessagesEnabled,
+                access.UploadEnabled,
+                access.GuestbookEnabled,
+                Unlimited(access.MaxGuestbookEntriesPerParticipant),
+                usedGuestbook,
+                Remaining(access.MaxGuestbookEntriesPerParticipant, usedGuestbook)));
         }).WithName("PartyUploadSession").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
 
         // PUBLIC party FACE SEARCH (anonymous, VIEW-token scoped). A guest uploads one
@@ -1754,4 +1772,5 @@ public sealed record SetPartySlideshowSettingsRequest(
     int? MaxPhotoUploadsPerParticipant = null,
     int? MaxVideoUploadsPerParticipant = null,
     // Greetings per guest, on the same 0 = unlimited scale as the media quotas.
-    int? MaxMessagesPerParticipant = null);
+    int? MaxMessagesPerParticipant = null,
+    int? MaxGuestbookEntriesPerParticipant = null);

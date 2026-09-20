@@ -71,6 +71,7 @@ public interface IPartyLinkService
         int? maxPhotoUploadsPerParticipant,
         int? maxVideoUploadsPerParticipant,
         int? maxMessagesPerParticipant,
+        int? maxGuestbookEntriesPerParticipant,
         CancellationToken cancellationToken = default);
 
     // WHICH OF THE THREE CONTRIBUTIONS this party takes — photographs,

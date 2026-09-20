@@ -25,8 +25,12 @@ public interface IPartyGuestbookService
     /// past the point where its pages are reachable) — one generic not-found
     /// upstream, exactly like every other absent Party capability.
     /// </summary>
+    /// <para><paramref name="participantId"/> is this browser's anonymous guest,
+    /// and is what lets the page say how many dedications they have left before
+    /// they compose one the server would refuse. Absent simply means the count
+    /// is not known here.</para>
     Task<PartyGuestbookPageDto?> GetPublicPageAsync(
-        PartyAccess access, CancellationToken cancellationToken = default);
+        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Writes a dedication. Refuses — without storing anything — when the party

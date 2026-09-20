@@ -21,17 +21,22 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
     private readonly AppDbContext _db;
     private readonly TimeProvider _clock;
     private readonly IPartyMessageAccessResolver _access;
+    private readonly IPartyParticipantService _participants;
 
     public PartyGuestbookService(
-        AppDbContext db, TimeProvider clock, IPartyMessageAccessResolver access)
+        AppDbContext db,
+        TimeProvider clock,
+        IPartyMessageAccessResolver access,
+        IPartyParticipantService participants)
     {
         _db = db;
         _clock = clock;
         _access = access;
+        _participants = participants;
     }
 
     public async Task<PartyGuestbookPageDto?> GetPublicPageAsync(
-        PartyAccess access, CancellationToken cancellationToken = default)
+        PartyAccess access, Guid? participantId = null, CancellationToken cancellationToken = default)
     {
         if (!Readable(access))
         {
@@ -52,7 +57,15 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
                 e.Id, e.AuthorDisplayName, e.Body, e.CreatedAt))
             .ToListAsync(cancellationToken);
 
-        return new PartyGuestbookPageDto(entries, CanWrite: Writable(access));
+        return new PartyGuestbookPageDto(
+            entries,
+            CanWrite: Writable(access),
+            Remaining: participantId is Guid guest && access.MaxGuestbookEntriesPerParticipant > 0
+                ? Math.Max(
+                    0,
+                    access.MaxGuestbookEntriesPerParticipant
+                        - await _participants.GuestbookCountAsync(guest, cancellationToken))
+                : null);
     }
 
     public async Task<PartyGuestbookSubmissionResult> SubmitAsync(
@@ -106,11 +119,46 @@ public sealed class PartyGuestbookService : IPartyGuestbookService
             UpdatedAt = now,
         };
 
-        _db.PartyGuestbookEntries.Add(entry);
-        await _db.SaveChangesAsync(cancellationToken);
+        if (participantId is not Guid writer)
+        {
+            // No guest identity, no budget to spend. Only reachable through a
+            // hand-built access; the endpoint always resolves one first.
+            _db.PartyGuestbookEntries.Add(entry);
+            await _db.SaveChangesAsync(cancellationToken);
+            return PartyGuestbookSubmissionResult.Ok(
+                new PartyGuestbookSubmissionDto(entry.Id, entry.Status, entry.CreatedAt));
+        }
 
-        return PartyGuestbookSubmissionResult.Ok(
-            new PartyGuestbookSubmissionDto(entry.Id, entry.Status, entry.CreatedAt));
+        // CLAIM FIRST, INSIDE THE TRANSACTION. A slot taken by a dedication
+        // that then fails to insert has to roll back with it, or a guest loses
+        // a go to something nobody will ever read.
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+        if (!await _participants.TryClaimGuestbookAsync(
+                writer, access.MaxGuestbookEntriesPerParticipant, cancellationToken))
+        {
+            await tx.RollbackAsync(cancellationToken);
+            return PartyGuestbookSubmissionResult.Fail(PartyGuestbookSubmissionError.LimitReached);
+        }
+
+        _db.PartyGuestbookEntries.Add(entry);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await tx.RollbackAsync(cancellationToken);
+            _db.ChangeTracker.Clear();
+            throw;
+        }
+
+        var used = await _participants.GuestbookCountAsync(writer, cancellationToken);
+        return PartyGuestbookSubmissionResult.Ok(new PartyGuestbookSubmissionDto(
+            entry.Id, entry.Status, entry.CreatedAt,
+            access.MaxGuestbookEntriesPerParticipant > 0
+                ? Math.Max(0, access.MaxGuestbookEntriesPerParticipant - used)
+                : null));
     }
 
     public async Task<PartyGuestbookManagerListDto?> ListForManagerAsync(
