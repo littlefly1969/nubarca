@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using NubArca.Api.Access;
 using NubArca.Api.Audit;
 using NubArca.Api.Domain;
@@ -390,6 +391,73 @@ public static class PartyInvitationEndpoints
         // THE COVER the invitation opens on, and only while it is the one the
         // invitation shows. An album's chosen cover is served through album
         // membership, a party's own choice through its reference rule.
+        // THE LINK PREVIEW for a PERSONAL invitation — what a chat app draws
+        // when the host forwards one.
+        //
+        // The party's own link already had this; the invitation is a different
+        // route and a different token family, so it got the SPA's one
+        // index.html and drew the product's logo under the word "NubArca". A
+        // host sharing an invitation was therefore sending a card that said
+        // nothing about their party.
+        //
+        // IT DESCRIBES THE PARTY AND NEVER THE GUEST. An invitation is personal
+        // and the card is not: the link gets forwarded, quoted and screenshotted
+        // into group chats, so the name of the person it was addressed to, who
+        // else is on the list and what anybody answered stay out of it. What a
+        // crawler may draw is exactly what a poster on a wall could say.
+        //
+        // Not audited, and it takes no answer: a crawler drawing a card is not a
+        // guest opening an invitation, and nothing here mutates the RSVP.
+        app.MapGet("/api/party-invitations/{token}/link-preview", async (
+            string token,
+            HttpContext httpContext,
+            [FromServices] IPartyRsvpService rsvp,
+            [FromServices] NubArca.Api.Data.AppDbContext db,
+            [FromServices] Microsoft.Extensions.Options.IOptionsMonitor<
+                NubArca.Api.Auth.Recovery.MailOptions> mail,
+            CancellationToken cancellationToken) =>
+        {
+            SetNoStore(httpContext);
+            var english = httpContext.Request.Headers.AcceptLanguage.ToString()
+                .StartsWith("en", StringComparison.OrdinalIgnoreCase);
+            var origin = PartyLinkPreview.Origin(mail.CurrentValue.PublicOrigin);
+            const string html = "text/html; charset=utf-8";
+
+            // One answer for every link that opens no invitation — unknown,
+            // rotated, revoked, or a party still in draft: the plain product
+            // card, which tells a crawler nothing it could not read off the
+            // home page.
+            var access = await rsvp.ResolveAsync(token, cancellationToken);
+            var party = access is null
+                ? null
+                : await db.Parties.AsNoTracking()
+                    .Where(p => p.Id == access.PartyId)
+                    .Select(p => new { p.Title, p.EventStartsAt, p.Version })
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (access is null || party is null)
+            {
+                return Results.Content(PartyLinkPreview.Generic(origin), html);
+            }
+
+            var enc = Uri.EscapeDataString(token);
+            var cover = await rsvp.CoverAsync(access, cancellationToken);
+            return Results.Content(PartyLinkPreview.ForParty(
+                origin,
+                PartyInvitationTokens.InvitationPath(enc),
+                party.Title,
+                PartyLinkPreview.Describe(
+                    access.Experience.Phase, party.EventStartsAt, english),
+                // The same picture the invitation itself opens on, served on
+                // the invitation's OWN token — the only address a crawler can
+                // fetch without credentials. The party's version is the cache
+                // key, so choosing a new cover spends one.
+                cover is { } pick
+                    ? $"/api/party-invitations/{enc}/cover/{pick.Which}/media?v={party.Version}"
+                    : null),
+                html);
+        }).WithName("GetPartyInvitationLinkPreview")
+            .RequireRateLimiting(PartyPublicRateLimitPolicy);
+
         app.MapGet("/api/party-invitations/{token}/cover/{which}/media", async (
             string token,
             string which,

@@ -116,6 +116,87 @@ public sealed class PartyLinkPreviewTests : IDisposable
         Assert.Null(PartyLinkPreview.Origin("not a url"));
     }
 
+    // --- the PERSONAL invitation's card --------------------------------------
+
+    [Fact]
+    public async Task A_Shared_Invitation_Is_Drawn_With_The_Partys_Name_Its_Day_And_Its_Cover()
+    {
+        var party = await SeedPartyAsync();
+        await RenameAsync(party, "50 Cesare", new DateTime(2027, 2, 10, 12, 0, 0, DateTimeKind.Utc));
+        var invitation = await UploadPngAsync(party.Owner, "invito.png");
+        await PutCoversAsync(party, invitation, null);
+        var token = await InviteTokenAsync(party, "Sara", "sara@example.com");
+
+        var html = await InvitePreviewAsync(token);
+
+        // The party's own card, on the invitation's route: this is the link a
+        // host actually forwards, and until it had a preview of its own it drew
+        // the product's logo under the word "NubArca".
+        Assert.Contains("<meta property=\"og:title\" content=\"50 Cesare\">", html);
+        Assert.Contains("<meta property=\"og:description\" content=\"Sei invitato · 10 febbraio 2027\">", html);
+        Assert.Contains($"<meta property=\"og:url\" content=\"{Origin}/party/invite/{token}\">", html);
+        Assert.Contains("summary_large_image", html);
+        Assert.Contains("noindex", html);
+
+        // And the picture is fetchable by a stranger's crawler, on the
+        // invitation's OWN token — the only address it holds.
+        var image = Regex.Match(html, "og:image\" content=\"([^\"]+)\"").Groups[1].Value;
+        Assert.StartsWith($"{Origin}/api/party-invitations/{token}/cover/invitation/media", image);
+        Assert.Equal(
+            HttpStatusCode.OK,
+            (await _factory.CreateClient().GetAsync(image[Origin.Length..])).StatusCode);
+    }
+
+    [Fact]
+    public async Task The_Invitations_Card_Describes_The_Party_And_Never_The_Guest()
+    {
+        var party = await SeedPartyAsync();
+        await RenameAsync(party, "50 Cesare", null);
+        var token = await InviteTokenAsync(party, "Sara Bianchi", "sara.bianchi@example.com");
+
+        var html = await InvitePreviewAsync(token);
+
+        // THE INVARIANT. A forwarded invitation is quoted and screenshotted into
+        // group chats, so who it was addressed to, their address and their
+        // answer must not be in the card a crawler draws. What it may say is
+        // what a poster on a wall could say.
+        Assert.DoesNotContain("Sara", html);
+        Assert.DoesNotContain("Bianchi", html);
+        Assert.DoesNotContain("example.com", html);
+        Assert.DoesNotContain("rsvp", html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("50 Cesare", html);
+    }
+
+    [Fact]
+    public async Task A_Link_That_Opens_No_Invitation_Gets_The_Plain_Product_Card()
+    {
+        var html = await InvitePreviewAsync("not-an-invitation-token");
+
+        Assert.Contains("<meta property=\"og:title\" content=\"NubArca\">", html);
+        Assert.Contains($"<meta property=\"og:image\" content=\"{Origin}/brand/nubarca-pwa-512.png\">", html);
+        Assert.DoesNotContain("og:description", html);
+        Assert.DoesNotContain("og:url", html);
+    }
+
+    [Fact]
+    public async Task Drawing_The_Card_Takes_No_Answer_And_Leaves_The_Invitation_Untouched()
+    {
+        var party = await SeedPartyAsync();
+        var token = await InviteTokenAsync(party, "Luca", "luca@example.com");
+        var before = await _factory.CreateClient()
+            .GetFromJsonAsync<JsonElement>($"/api/party-invitations/{token}");
+
+        await InvitePreviewAsync(token);
+
+        // A crawler is not a guest. Nothing it does may count as opening the
+        // invitation or change what the host sees.
+        var after = await _factory.CreateClient()
+            .GetFromJsonAsync<JsonElement>($"/api/party-invitations/{token}");
+        Assert.Equal(
+            before.GetProperty("invitation").GetProperty("version").GetInt32(),
+            after.GetProperty("invitation").GetProperty("version").GetInt32());
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private sealed record SeededParty(HttpClient Owner, Guid PartyId, string Token);
@@ -149,6 +230,36 @@ public sealed class PartyLinkPreviewTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/html", response.Content.Headers.ContentType!.MediaType);
         return await response.Content.ReadAsStringAsync();
+    }
+
+    private async Task<string> InvitePreviewAsync(string token, string? acceptLanguage = null)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get, $"/api/party-invitations/{token}/link-preview");
+        request.Headers.UserAgent.ParseAdd("WhatsApp/2.24.1 A");
+        if (acceptLanguage is not null) request.Headers.AcceptLanguage.ParseAdd(acceptLanguage);
+        var response = await _factory.CreateClient().SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("text/html", response.Content.Headers.ContentType!.MediaType);
+        return await response.Content.ReadAsStringAsync();
+    }
+
+    /// <summary>A group with one named guest, and the personal token for it.</summary>
+    private async Task<string> InviteTokenAsync(SeededParty party, string name, string email)
+    {
+        var created = await party.Owner.PostAsJsonAsync(
+            $"/api/parties/{party.PartyId}/invitation-groups",
+            new
+            {
+                label = name, recipientEmail = email, phone = (string?)null,
+                maxAdditionalGuests = 0, guests = new[] { new { name } }, version = 0,
+            });
+        created.EnsureSuccessStatusCode();
+        var body = await created.Content.ReadFromJsonAsync<JsonElement>();
+        var groupId = body.GetProperty("groups").EnumerateArray()
+            .Single(g => g.GetProperty("label").GetString() == name)
+            .GetProperty("id").GetGuid();
+        return PartyInvitationTestKit.CurrentToken(_factory, groupId);
     }
 
     private static async Task<int> VersionAsync(SeededParty party) =>
