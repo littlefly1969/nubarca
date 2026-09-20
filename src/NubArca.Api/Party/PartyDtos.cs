@@ -290,7 +290,17 @@ public sealed record PartyFaceBoxDto(double X, double Y, double Width, double He
 /// search's own refusals: "no_face", "multiple_faces", "invalid_image",
 /// "unavailable".</para>
 /// </summary>
-public sealed record PartyFaceDetectResponseDto(string Status, PartyFaceBoxDto? Face = null);
+public sealed record PartyFaceDetectResponseDto(
+    string Status,
+    PartyFaceBoxDto? Face = null,
+    /// <summary>
+    /// The opaque ticket the phone hands back with the selfie when it asks for
+    /// the search, so the face that was framed is the face that gets embedded.
+    /// Present only with a found face. It carries no identity and authorises
+    /// nothing; it is kept in memory for the length of one search and never in
+    /// a URL, storage or a log.
+    /// </summary>
+    string? SelectionToken = null);
 
 // Result of explicitly activating a search as the album's TV face filter. The
 // version is the server-assigned monotonic activation order (an opaque counter

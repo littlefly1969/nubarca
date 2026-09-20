@@ -1244,6 +1244,7 @@ const it = {
   'partyFace.noFace': 'Non riusciamo a vedere bene il tuo volto. Scatta un altro selfie con il viso rivolto verso la fotocamera.',
   'partyFace.invalidImage': 'Immagine non valida. Prova con un’altra foto.',
   'partyFace.unavailable': 'La ricerca per volto non è ancora disponibile.',
+  'partyFace.selectionChanged': 'Il tuo viso si è spostato mentre cercavamo. Scatta un altro selfie.',
   'partyFace.error': 'Impossibile completare la ricerca. Riprova.',
   'partyFace.newSearch': 'Prova con un’altra foto',
   'partyFace.showAll': 'Mostra tutte le foto',

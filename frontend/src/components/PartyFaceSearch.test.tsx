@@ -163,6 +163,9 @@ const readyBody = {
 };
 
 const DETECT = 'POST /api/party/tok-1/face-search/detect';
+
+/** The ticket a detection issues for the face it confirmed. */
+const TICKET = 'ticket-for-face-a';
 const SEARCH = 'POST /api/party/tok-1/face-search';
 
 /** Wait until the camera is live and press the shutter. */
@@ -267,7 +270,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const camera = installCamera();
     const order: string[] = [];
     installFetchMock({
-      [DETECT]: () => { order.push('detect'); return jsonResponse({ status: 'found', face: FACE }); },
+      [DETECT]: () => { order.push('detect'); return jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }); },
       [SEARCH]: () => { order.push('search'); return jsonResponse(readyBody); },
     });
     renderSheet();
@@ -283,7 +286,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
   it('frames the DETECTED face, using the box the search will use', async () => {
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse(readyBody),
     });
     renderSheet();
@@ -351,7 +354,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const filters: (PartyFaceFilter | null)[] = [];
     installCamera();
     const mock = installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse(readyBody),
     });
     renderSheet({ onFilterChange: (f) => filters.push(f) });
@@ -368,7 +371,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     try {
       installCamera();
       installFetchMock({
-        [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+        [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
         [SEARCH]: () => jsonResponse(readyBody),
       });
       renderSheet();
@@ -398,7 +401,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     try {
       installCamera();
       installFetchMock({
-        [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+        [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
         [SEARCH]: () => new Promise<Response>((resolve) => { release = resolve; }),
       });
       renderSheet();
@@ -424,7 +427,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
   it('shows a short generic error, never a status code or API detail', async () => {
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => new Response('boom', { status: 500 }),
     });
     renderSheet();
@@ -441,7 +444,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
   it('localizes the unavailable state (capability off / 503)', async () => {
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       // 503 with the safe DTO in the body: the client normalises it back into
       // a response the sheet renders as a state, rather than throwing.
       [SEARCH]: () => jsonResponse(
@@ -459,7 +462,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const filters: (PartyFaceFilter | null)[] = [];
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse({ ...readyBody, resultCount: 0, items: [] }),
     });
     renderSheet({ onFilterChange: (f) => filters.push(f) });
@@ -475,7 +478,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const filters: (PartyFaceFilter | null)[] = [];
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse(readyBody),
     });
     renderSheet({
@@ -495,7 +498,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     const cancelled: (string | null)[] = [];
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => new Promise<Response>(() => { /* never answers */ }),
     });
     renderSheet({ onCancelSearch: (id) => cancelled.push(id) });
@@ -517,7 +520,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     let shown = 0;
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse(readyBody),
     });
     renderSheet({ onOpenChange: (o) => opens.push(o), onShowResults: () => { shown += 1; } });
@@ -534,7 +537,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     let release: ((value: Response) => void) | null = null;
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => new Promise<Response>((resolve) => { release = resolve; }),
     });
     const view = renderSheet({ onFilterChange: (f) => filters.push(f) });
@@ -551,7 +554,7 @@ describe('PartyFaceSearch (public "find your photos")', () => {
 
   it('releases the camera and the selfie when the sheet closes', async () => {
     const camera = installCamera();
-    installFetchMock({ [DETECT]: () => jsonResponse({ status: 'found', face: FACE }) });
+    installFetchMock({ [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }) });
     const view = renderSheet();
     await waitFor(() => expect(camera.requests).toHaveLength(1));
 
@@ -561,10 +564,118 @@ describe('PartyFaceSearch (public "find your photos")', () => {
     expect(camera.stopped).toBeGreaterThan(0);
   });
 
+  // ── The face in the frame is the face that was searched ─────────────────
+
+  it('sends the detection\u2019s ticket with the selfie, and never in the URL', async () => {
+    installCamera();
+    let sent: string | null = null;
+    let searchUrl = '';
+    installFetchMock({
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
+      [SEARCH]: (req) => {
+        searchUrl = req.url;
+        sent = (req.init?.body as FormData).get('selectionToken') as string | null;
+        return jsonResponse(readyBody);
+      },
+    });
+    renderSheet();
+    await completeSearch();
+
+    // The ticket the detection issued, in the body beside the bytes it was
+    // minted for. A query string would put it in an access log and in the
+    // phone's history.
+    expect(sent).toBe(TICKET);
+    expect(searchUrl).not.toContain(TICKET);
+    expect(searchUrl).not.toContain('selectionToken');
+  });
+
+  it('keeps the ticket out of every store a page can leave behind', async () => {
+    installCamera();
+    installFetchMock({
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
+      [SEARCH]: () => jsonResponse(readyBody),
+    });
+    renderSheet();
+    await completeSearch();
+
+    // It lives in memory beside the selfie and dies with it. Anything durable
+    // would outlive the bytes that give it meaning, and become one more thing
+    // somebody has to reason about.
+    expect(JSON.stringify(window.localStorage)).not.toContain(TICKET);
+    expect(JSON.stringify(window.sessionStorage)).not.toContain(TICKET);
+    expect(document.documentElement.outerHTML).not.toContain(TICKET);
+    expect(window.location.href).not.toContain(TICKET);
+  });
+
+  it('never reuses the ticket of a selfie the guest replaced', async () => {
+    installCamera();
+    const issued = ['ticket-first', 'ticket-second'];
+    const presented: (string | null)[] = [];
+    let detections = 0;
+    installFetchMock({
+      [DETECT]: () => jsonResponse({
+        status: 'found', face: FACE, selectionToken: issued[detections++] ?? 'ticket-extra',
+      }),
+      [SEARCH]: (req) => {
+        presented.push((req.init?.body as FormData).get('selectionToken') as string | null);
+        // An empty result, so the primary action is "take another one" and the
+        // retake is the ordinary path rather than a contrived one.
+        return jsonResponse({ status: 'ready', searchId: null, resultCount: 0, items: [] });
+      },
+    });
+    renderSheet();
+    await completeSearch();
+
+    await userEvent.setup().click(await screen.findByTestId('party-face-retry'));
+    await completeSearch();
+
+    // Each search carried the ticket of the selfie it was made from. A retake
+    // that kept the first one would be searching a photograph that no longer
+    // exists, with a confirmation of a face nobody is looking at.
+    expect(presented).toEqual(['ticket-first', 'ticket-second']);
+  });
+
+  it('asks for another selfie when the confirmed face can no longer be honoured', async () => {
+    for (const status of ['face_selection_changed', 'invalid_selection']) {
+      installCamera();
+      installFetchMock({
+        [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
+        [SEARCH]: () => jsonResponse(
+          { status, searchId: null, resultCount: 0, items: [] },
+          status === 'invalid_selection' ? 400 : 409),
+      });
+      const view = renderSheet();
+      await shoot();
+
+      // Not an error, and not a verdict about the photograph: the one honest
+      // next step, offered as the primary action.
+      expect(await screen.findByTestId('party-face-selection-changed')).toBeInTheDocument();
+      expect(screen.getByTestId('party-face-retry')).toBeInTheDocument();
+      expect(screen.queryByTestId('party-face-count')).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it('does not search at all when a detection confirms no face to carry', async () => {
+    installCamera();
+    let searched = 0;
+    installFetchMock({
+      // A found face with no ticket is a server that cannot prove what it
+      // chose. There is nothing to honour, so nothing is sent.
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [SEARCH]: () => { searched += 1; return jsonResponse(readyBody); },
+    });
+    renderSheet();
+    await shoot();
+
+    expect(await screen.findByTestId('party-face-error')).toBeInTheDocument();
+    expect(searched).toBe(0);
+  });
+
   it('never renders face/person/score internals', async () => {
     installCamera();
     installFetchMock({
-      [DETECT]: () => jsonResponse({ status: 'found', face: FACE }),
+      [DETECT]: () => jsonResponse({ status: 'found', face: FACE, selectionToken: TICKET }),
       [SEARCH]: () => jsonResponse(readyBody),
     });
     renderSheet();

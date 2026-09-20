@@ -1042,7 +1042,19 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   runner-up on area AND be near the middle, or the selfie is refused as
   ambiguous rather than guessed at. The selfie is never stored or uploaded to
   the album, and the sheet releases its MediaStream, blobs and object URLs on
-  every exit. The deterministic AI backend's synthetic faces are deliberately
+  every exit. **The two calls are bound by a SELECTION TICKET**, because
+  running the same rule twice is not the same as making the decision once: a
+  detector may legitimately reorder its output or report a nearer face on the
+  second run, and the search would then embed somebody else under a picture of
+  the guest. So the detection issues an opaque, unpersisted, HMAC-bound ticket
+  (CSPRNG nonce, 3-minute expiry, the chosen box) whose message also covers the
+  selfie's hash and the active `AiProfile` id — bound without being disclosed,
+  so a ticket cannot travel to other bytes or survive a model change. The
+  search re-runs the detector only to recover landmarks, then MATCHES the
+  confirmed box by IoU ≥ 0.9 instead of choosing again; no match, no search
+  (`face_selection_changed`), and no ticket at all means no search
+  (`invalid_selection`). A refusal issues no ticket, so `no_face` and
+  `multiple_faces` cannot reach a search. The deterministic AI backend's synthetic faces are deliberately
   one dominant and one small off-centre face: two identical boxes are a real
   ambiguity, and a fixture that stumbled into it would make every plumbing test
   exercise the refusal instead of the path it is about.

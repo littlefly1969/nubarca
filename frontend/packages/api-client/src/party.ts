@@ -1110,6 +1110,20 @@ export type PartyFaceSearchStatus =
    */
   | 'multiple_faces'
   | 'invalid_image'
+  /**
+   * The search was asked to run without a usable confirmation of WHICH face
+   * the guest meant — no selection token, or one that is malformed, expired,
+   * or minted for a different selfie. Not a verdict about the photograph: the
+   * guest takes another one.
+   */
+  | 'invalid_selection'
+  /**
+   * The confirmed face could not be found again in the selfie that arrived.
+   * A detector may legitimately change its mind between the two calls, and the
+   * server refuses rather than embedding a DIFFERENT face than the one framed
+   * on the phone.
+   */
+  | 'face_selection_changed'
   | 'unavailable';
 
 /** What a DETECTION answers. Never 'ready': a detection is not a search. */
@@ -1155,10 +1169,15 @@ export interface PartyFaceSearchResponse {
 export async function partyFaceSearch(
   token: string,
   file: File,
+  selectionToken: string,
   signal?: AbortSignal,
 ): Promise<PartyFaceSearchResponse> {
   const form = new FormData();
   form.append('file', file, file.name);
+  // In the BODY, beside the selfie it belongs to. Not in the query string: a
+  // URL is the one place a value reliably ends up in an access log and in
+  // somebody's history.
+  form.append('selectionToken', selectionToken);
   try {
     return await api<PartyFaceSearchResponse>(
       `/api/party/${encodeURIComponent(token)}/face-search`,
@@ -1186,6 +1205,16 @@ export async function partyFaceSearch(
 export interface PartyFaceDetectResponse {
   status: PartyFaceDetectStatus;
   face?: PartyFaceBox | null;
+  /**
+   * The opaque proof of WHICH face this detection chose, handed back with the
+   * selfie when the search runs — which is what makes the searched face the
+   * framed face rather than whatever the detector prefers on its next run.
+   *
+   * Present only with a found face. It authorises nothing and identifies
+   * nobody. Keep it in memory beside the selfie it belongs to and drop it with
+   * that selfie: never a URL, never storage, never a log.
+   */
+  selectionToken?: string | null;
 }
 
 /**

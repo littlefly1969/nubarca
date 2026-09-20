@@ -307,6 +307,11 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<NubArca.Api.Party.IPartyParticipantService, NubArca.Api.Party.PartyParticipantService>();
             services.AddScoped<NubArca.Api.Party.IPartyUploadService, NubArca.Api.Party.PartyUploadService>();
             services.AddScoped<NubArca.Api.Party.IPartyModerationService, NubArca.Api.Party.PartyModerationService>();
+            // The face a detection confirmed, carried to the search. A singleton:
+            // it holds key material and no state.
+            services.AddSingleton<
+                NubArca.Api.Party.IPartyFaceSelectionTickets,
+                NubArca.Api.Party.PartyFaceSelectionTickets>();
             services.AddScoped<NubArca.Api.Party.IPartyFaceSearchService, NubArca.Api.Party.PartyFaceSearchService>();
             services.AddScoped<NubArca.Api.Party.IPartyMessageAccessResolver, NubArca.Api.Party.PartyMessageAccessResolver>();
             services.AddScoped<NubArca.Api.Party.IPartyMessageService, NubArca.Api.Party.PartyMessageService>();
