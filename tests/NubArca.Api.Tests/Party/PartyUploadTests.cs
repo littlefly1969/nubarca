@@ -75,17 +75,26 @@ public sealed class PartyUploadTests : IDisposable
         var albumId = await CreateAlbumAsync(owner, "Party");
         var uploadToken = UploadTokenFromStatus(await EnablePartyAsync(owner, albumId));
 
-        // Party stays on, upload sub-switch off. View token stays valid; upload dies.
+        // Party stays on, photographs off.
         var status = await (await owner.PatchAsJsonAsync(
             $"/api/albums/{albumId}/party-settings", new { enabled = true, uploadEnabled = false }))
             .Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(status.GetProperty("partyMode").GetBoolean());
         Assert.False(status.GetProperty("uploadEnabled").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, status.GetProperty("uploadUrl").ValueKind);
+        // The contribution page SURVIVES, because this party still takes
+        // greetings: its address is offered when any of the three channels is
+        // open, not only when photographs are.
+        Assert.NotEqual(JsonValueKind.Null, status.GetProperty("uploadUrl").ValueKind);
 
+        // The upload itself is refused, and says why rather than pretending the
+        // link is unknown: the request is well formed and the configuration is
+        // what declines it.
         var anon = _factory.CreateClient();
         var result = await UploadAsync(anon, uploadToken, ("a.png", ImageFixtures.PlainPng(), "image/png"));
-        Assert.Equal(HttpStatusCode.NotFound, result.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, result.StatusCode);
+        Assert.Equal(
+            "party_uploads_disabled",
+            (await result.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
 
         // View still works.
         Assert.Equal(HttpStatusCode.OK,
@@ -248,8 +257,22 @@ public sealed class PartyUploadTests : IDisposable
         // The upload URL is a landing path, not a token hash.
         Assert.EndsWith("/upload", album.GetProperty("partyUploadUrl").GetString());
 
-        // Owner turns upload off → the TV upload URL disappears (view stays).
+        // Photographs off, greetings still on → the code STAYS, because it
+        // opens the contribution page and that page still has something to
+        // offer. Tying it to photographs alone is what used to make a party
+        // that wanted greetings and no photographs unreachable.
         (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings", new { enabled = true, uploadEnabled = false }))
+            .EnsureSuccessStatusCode();
+        var withMessages = (await TvJsonAsync(cookie, "/api/tv/albums"))[0];
+        Assert.True(withMessages.GetProperty("partyEnabled").GetBoolean());
+        Assert.StartsWith("/party/", withMessages.GetProperty("partyUploadUrl").GetString());
+
+        // Every channel closed → nothing to contribute, and the code goes. The
+        // URL is still conditional; the condition is now all three rather than
+        // one of them.
+        (await owner.PatchAsJsonAsync(
+            $"/api/albums/{albumId}/party-contributions",
+            new { slideshowMessagesEnabled = false, guestbookEnabled = false }))
             .EnsureSuccessStatusCode();
         var after = (await TvJsonAsync(cookie, "/api/tv/albums"))[0];
         Assert.True(after.GetProperty("partyEnabled").GetBoolean());

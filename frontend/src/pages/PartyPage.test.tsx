@@ -266,10 +266,10 @@ describe('PartyPage (public party landing)', () => {
     // A real destination is a real link; an action that opens something in
     // place is a real button. Never a clickable div either way.
     //
-    // Three links: the dedication, the ONE game, and the album. The activity
-    // deck used to be a fourth card for a second vote, and there is now one
-    // Party Game that holds both halves in the phases the server owns.
-    expect(within(deck).getAllByRole('link')).toHaveLength(3);
+    // Two links: the ONE game and the album. The written contributions used to
+    // have a card each here; they live on the contribution page now, behind the
+    // single "share a moment" call to action, so one act has one entrance.
+    expect(within(deck).getAllByRole('link')).toHaveLength(2);
     expect(within(deck).getByRole('link', { name: /Esplora l’album/i }))
       .toHaveAttribute('href', '#party-photos');
     expect(within(deck).getByRole('link', { name: /Il gioco dal vivo/i }))
@@ -291,9 +291,9 @@ describe('PartyPage (public party landing)', () => {
     expect(screen.queryByTestId('party-capability-game')).not.toBeInTheDocument();
     // The retired second entry is absent in both directions.
     expect(screen.queryByTestId('party-capability-challenges')).not.toBeInTheDocument();
-    // The rest of the deck is unaffected: dedication and album still link out,
-    // and the face action is still a button.
-    expect(within(deck).getAllByRole('link')).toHaveLength(2);
+    // The rest of the deck is unaffected: the album still links out, and the
+    // face action is still a button.
+    expect(within(deck).getAllByRole('link')).toHaveLength(1);
     expect(within(deck).getByRole('button', { name: /Trova le tue foto/i })).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-face')).toBeInTheDocument();
     expect(screen.getByTestId('party-capability-album')).toBeInTheDocument();
@@ -881,7 +881,6 @@ describe('PartyPage (public party landing)', () => {
       .map((el) => `${el.getAttribute('data-testid')}:${el.getAttribute('data-variant')}`))
       .toEqual([
         'party-capability-face:signature',
-        'party-capability-dedication:activity',
         'party-capability-game:activity',
         'party-capability-album:utility',
       ]);
@@ -963,99 +962,36 @@ describe('PartyPage (public party landing)', () => {
     render(wrapper());
     await screen.findByTestId('party-grid');
     // Song requests are planned, not built: no card, no placeholder, no
-    // disabled tile, no stray copy. Dedications and printing ARE built, and
-    // each is gated on its own signal — dedications ride contribution
-    // enablement and are a real card here; printing has no print URL on this
-    // party, which looks exactly like a feature that does not exist, because
-    // an unavailable capability is an absent one.
+    // disabled tile, no stray copy. Printing IS built and has no print URL on
+    // this party, which looks exactly like a feature that does not exist —
+    // because an unavailable capability is an absent one.
     const page = document.body.textContent ?? '';
     expect(page).not.toMatch(/canzone|brano|musica|stampa|ricordo/i);
-    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(4);
+    expect(document.querySelectorAll('[data-testid^="party-capability-"]')).toHaveLength(3);
     expect(document.querySelectorAll('.party-guest-hub-capability [disabled]')).toHaveLength(0);
     expect(document.querySelectorAll('[aria-disabled="true"]')).toHaveLength(0);
   });
 
-  it('offers the dedication only where contributions are accepted', async () => {
-    mockHub();
-    const on = render(wrapper());
-    await screen.findByTestId('party-capability-dedication');
-    on.unmount();
-
-    // A backend that predates the switch sends no `slideshowMessageUrl` at all,
-    // and for it the old rule still holds: a party that accepts no
-    // contributions offers nowhere to write either.
-    mockHub({ contributionUrl: null });
-    render(wrapper());
-    await screen.findByTestId('party-capability-album');
-    expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Lascia un messaggio/i })).not.toBeInTheDocument();
-  });
-
-  it('offers the guest book only where the party keeps one', async () => {
-    // Off by default, and off for every backend that predates it: no card, no
-    // placeholder, no empty state, no fetch.
-    mockHub();
-    const without = render(wrapper());
-    await screen.findByTestId('party-capability-album');
-    expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
-    without.unmount();
-
-    mockHub({ guestbookUrl: '/party/tok-1/guestbook' });
-    render(wrapper());
-    expect(await screen.findByRole('link', { name: /Firma il guestbook/i }))
-      .toHaveAttribute('href', '/party/tok-1/guestbook');
-  });
-
-  it('keeps the book and the slideshow as two invitations, not one said twice', async () => {
-    mockHub({ guestbookUrl: '/party/tok-1/guestbook' });
-    render(wrapper());
-    await screen.findByTestId('party-capability-guestbook');
-
-    // Different words, different destinations, different promises: one is read
-    // out during the evening, the other is kept. A guest who cannot tell them
-    // apart writes the same thing twice and wonders where one of them went.
-    const book = screen.getByTestId('party-capability-guestbook');
-    const dedication = screen.getByTestId('party-capability-dedication');
-    expect(book).toHaveTextContent(/Una dedica da conservare/i);
-    expect(dedication).toHaveTextContent(/Comparirà sullo schermo durante la festa/i);
-    expect(book.textContent).not.toEqual(dedication.textContent);
-    expect(screen.getByRole('link', { name: /Firma il guestbook/i }))
-      .not.toHaveAttribute('href', '/party/upload-token/upload?mode=message');
-  });
-
-  it('keeps the book when the party takes no greetings at all', async () => {
-    // The three contributions are independent: a host may close the composer
-    // and keep the book, and the hub has to survive every combination rather
-    // than assuming the two written ones travel together.
-    mockHub({ slideshowMessageUrl: null, guestbookUrl: '/party/tok-1/guestbook' });
-    render(wrapper());
-
-    await screen.findByTestId('party-capability-guestbook');
-    expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Lascia un messaggio/i })).not.toBeInTheDocument();
-    // …and photographs are untouched by either of them.
-    expect(screen.getByTestId('party-hub-cta')).toHaveAttribute('href', '/party/upload-token/upload');
-  });
-
-  it('sends the dedication straight to the composer, and everything else to media', async () => {
-    mockHub();
+  it('offers ONE way to contribute, and the channels live behind it', async () => {
+    mockHub({ slideshowMessageUrl: '/party/upload-token/upload?mode=message',
+              guestbookUrl: '/party/tok-1/guestbook' });
     render(wrapper());
     await screen.findByTestId('party-grid');
 
-    // All three go to the ONE contribution URL the backend returned; only the
-    // slideshow composer asks for its own half of it.
-    expect(screen.getByRole('link', { name: /Lascia un messaggio/i }))
-      .toHaveAttribute('href', '/party/upload-token/upload?mode=message');
+    // The hub used to carry a card for the greeting and a card for the book
+    // beside the photographs — three entrances to one act, each with its own
+    // words. There is one now, and the three channels are tabs on the page it
+    // opens, so a guest chooses WHAT to leave after deciding to leave
+    // something rather than before.
     expect(screen.getByTestId('party-hub-cta'))
       .toHaveAttribute('href', '/party/upload-token/upload');
+    expect(screen.queryByTestId('party-capability-dedication')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-capability-guestbook')).not.toBeInTheDocument();
 
-    await move(hero, false);
-    expect(screen.getByTestId('party-dock-share'))
-      .toHaveAttribute('href', '/party/upload-token/upload');
-
-    // The general entrance is not a duplicate of the dedication: two of the
-    // three carry no mode at all.
-    expect(document.querySelectorAll('a[href*="mode=message"]')).toHaveLength(1);
+    // And nothing reaches the composer or the book from here, by any route:
+    // the server may still report where they are, and the hub does not use it.
+    expect(document.querySelectorAll('a[href*="mode=message"]')).toHaveLength(0);
+    expect(document.querySelectorAll('a[href*="/guestbook"]')).toHaveLength(0);
   });
 
   // --- Guest dock -----------------------------------------------------------

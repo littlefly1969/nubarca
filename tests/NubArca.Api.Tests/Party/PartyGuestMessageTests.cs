@@ -859,7 +859,7 @@ public sealed class PartyGuestMessageTests : IDisposable
     }
 
     [Fact]
-    public async Task Disabling_Guest_Upload_Also_Closes_The_Message_Form()
+    public async Task Closing_Photographs_Leaves_The_Message_Form_Open()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
         var albumId = await CreateAlbumAsync(owner, "Festa");
@@ -868,11 +868,26 @@ public sealed class PartyGuestMessageTests : IDisposable
         (await owner.PatchAsJsonAsync($"/api/albums/{albumId}/party-settings",
             new { enabled = true, uploadEnabled = false })).EnsureSuccessStatusCode();
 
-        // Writing is contributing. The upload token authorizes both, so the one
-        // switch closes both — a host who has stopped taking contributions has
-        // not accidentally left a text channel open.
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await SubmitRawAsync(uploadToken, new { text = "Ciao" })).StatusCode);
+        // THE THREE CONTRIBUTIONS ARE THREE DECISIONS. This test used to assert
+        // the opposite, on the reasoning that one token authorised everything
+        // and so one switch closed everything — which made a party that wanted
+        // greetings and no photographs impossible to configure. The token means
+        // "this guest may contribute"; which channel is open is asked by the
+        // action.
+        var greeting = await SubmitRawAsync(uploadToken, new { text = "Ciao" });
+        greeting.EnsureSuccessStatusCode();
+
+        // And photographs really are closed — the refusal moved, it did not
+        // disappear.
+        var part = new ByteArrayContent(ImageFixtures.PlainPng());
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+        var upload = await _factory.CreateClient().PostAsync(
+            $"/api/party/{uploadToken}/upload",
+            new MultipartFormDataContent { { part, "file", "guest.png" } });
+        Assert.Equal(HttpStatusCode.Conflict, upload.StatusCode);
+        Assert.Equal(
+            "party_uploads_disabled",
+            (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
     }
 
     [Fact]

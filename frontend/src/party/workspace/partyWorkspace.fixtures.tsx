@@ -244,7 +244,7 @@ it('activities', async () => {
   mountWorkspace('?section=activities', {
     [`GET /api/parties/${PARTY_ID}`]: () => jsonResponse(party({ status: 'published' })),
   });
-  await capture('activities', 'party-activities-messages');
+  await capture('activities', 'party-activities-game');
 });
 
 it('screens', async () => {

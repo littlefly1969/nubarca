@@ -376,7 +376,8 @@ public sealed class PartyDisplayTakeoverPostgresTests : IAsyncLifetime
             throw new NotSupportedException();
         public Task<bool> UpdateSlideshowSettingsAsync(Guid ownerUserId, Guid albumId, int? photoSlideSeconds,
             int? maxVideoSlideSeconds, int? maxPhotoUploadsPerParticipant, int? maxVideoUploadsPerParticipant,
-            int? maxMessagesPerParticipant, CancellationToken cancellationToken = default) =>
+            int? maxMessagesPerParticipant, int? maxGuestbookEntriesPerParticipant,
+            CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task<bool> UpdateContributionSettingsAsync(Guid ownerUserId, Guid albumId,
             bool? uploadEnabled, bool? requireUploadApproval, bool? slideshowMessagesEnabled,
