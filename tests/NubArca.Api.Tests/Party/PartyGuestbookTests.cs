@@ -96,6 +96,69 @@ public sealed class PartyGuestbookTests : IDisposable
         Assert.Equal("Che serata. Grazie di tutto.", entry.GetProperty("body").GetString());
     }
 
+    // THE CONTRIBUTION PAGE READS THE BOOK IT OFFERS. A guest reaches the book
+    // from the contribution page holding the UPLOAD token, and that page has to
+    // READ before it can offer a composer — so a read that took only the view
+    // token answered 404 to the very guests it had just invited to write, and
+    // the page told them the party kept no book. Both doors, one book.
+    [Fact]
+    public async Task The_book_opens_on_the_contribution_token_as_well_as_the_party_token()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+
+        await SubmitAsync(party.UploadToken, "Giulia", "Che serata.");
+
+        var fromContribution = await PublicBookAsync(party.UploadToken);
+        Assert.True(fromContribution.GetProperty("canWrite").GetBoolean());
+        Assert.Equal(
+            "Che serata.",
+            fromContribution.GetProperty("entries")[0].GetProperty("body").GetString());
+
+        // The SAME book, not a second one: the party token sees what the
+        // contribution token wrote.
+        var fromParty = await PublicBookAsync(party.ViewToken);
+        Assert.Equal(
+            fromContribution.GetProperty("entries")[0].GetProperty("id").GetGuid(),
+            fromParty.GetProperty("entries")[0].GetProperty("id").GetGuid());
+    }
+
+    // The book does not ride in on the PHOTOGRAPH switch. A host who keeps a
+    // book and accepts no photographs still has guests who can read and sign
+    // it — which is the whole point of the three contributions being three
+    // independent decisions.
+    [Fact]
+    public async Task A_party_that_accepts_no_photographs_still_opens_its_book_to_a_contributor()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        await SetContributionsAsync(owner, party.AlbumId, new { uploadEnabled = false });
+
+        var page = await PublicBookAsync(party.UploadToken);
+        Assert.True(page.GetProperty("canWrite").GetBoolean());
+
+        var submitted = await SubmitAsync(party.UploadToken, "Marco", "Auguri!");
+        Assert.Equal(PartyMessageStatuses.Visible, submitted.GetProperty("status").GetString());
+    }
+
+    // Reading on the contribution token widens NOTHING: the book's own switch
+    // still decides, and a closed book is the same generic nothing through
+    // either door.
+    [Fact]
+    public async Task A_closed_book_is_nothing_through_the_contribution_token_too()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: false);
+
+        var client = _factory.CreateClient();
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await client.GetAsync($"/api/party/{party.UploadToken}/guestbook")).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.NotFound,
+            (await client.GetAsync($"/api/party/{party.ViewToken}/guestbook")).StatusCode);
+    }
+
     [Fact]
     public async Task A_dedication_without_a_signature_carries_null_rather_than_an_empty_string()
     {
