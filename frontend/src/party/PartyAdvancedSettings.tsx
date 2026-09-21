@@ -41,6 +41,7 @@ export function PartySlideshowSettings({
     photoSlideSeconds: '', maxVideoSlideSeconds: '',
     maxPhotoUploadsPerParticipant: '', maxVideoUploadsPerParticipant: '',
     maxMessagesPerParticipant: '',
+    maxGuestbookEntriesPerParticipant: '',
   });
 
   // Seeded from the server whenever it says something different, so the form
@@ -52,17 +53,19 @@ export function PartySlideshowSettings({
       maxPhotoUploadsPerParticipant: String(party.maxPhotoUploadsPerParticipant),
       maxVideoUploadsPerParticipant: String(party.maxVideoUploadsPerParticipant),
       maxMessagesPerParticipant: String(party.maxMessagesPerParticipant ?? 0),
+      maxGuestbookEntriesPerParticipant: String(party.maxGuestbookEntriesPerParticipant ?? 0),
     });
   }, [party.albumId, party.photoSlideSeconds, party.maxVideoSlideSeconds,
     party.maxPhotoUploadsPerParticipant, party.maxVideoUploadsPerParticipant,
-    party.maxMessagesPerParticipant]);
+    party.maxMessagesPerParticipant, party.maxGuestbookEntriesPerParticipant]);
 
   const valid =
     inRange(draft.photoSlideSeconds, PARTY_SLIDESHOW_RANGES.photoSeconds)
     && inRange(draft.maxVideoSlideSeconds, PARTY_SLIDESHOW_RANGES.maxVideoSeconds)
     && inRange(draft.maxPhotoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
     && inRange(draft.maxVideoUploadsPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
-    && inRange(draft.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
+    && inRange(draft.maxMessagesPerParticipant, PARTY_SLIDESHOW_RANGES.quota)
+    && inRange(draft.maxGuestbookEntriesPerParticipant, PARTY_SLIDESHOW_RANGES.quota);
 
   async function save() {
     if (!valid) { setStatus('invalid'); return; }
@@ -74,6 +77,7 @@ export function PartySlideshowSettings({
         maxPhotoUploadsPerParticipant: Number(draft.maxPhotoUploadsPerParticipant),
         maxVideoUploadsPerParticipant: Number(draft.maxVideoUploadsPerParticipant),
         maxMessagesPerParticipant: Number(draft.maxMessagesPerParticipant),
+        maxGuestbookEntriesPerParticipant: Number(draft.maxGuestbookEntriesPerParticipant),
       }));
       setStatus('saved');
     } catch {
@@ -144,6 +148,20 @@ export function PartySlideshowSettings({
           value={draft.maxMessagesPerParticipant} disabled={saving}
           aria-label={t('party.maxMessagesPerParticipant')}
           onChange={(e) => setDraft((d) => ({ ...d, maxMessagesPerParticipant: e.target.value }))}
+        />
+        <span className="pw-number-suffix">{t('party.zeroMeansUnlimited')}</span>
+      </label>
+
+      <label className="pw-number">
+        <span>{t('party.maxGuestbookEntriesPerParticipant')}</span>
+        <input
+          type="number" inputMode="numeric"
+          min={PARTY_SLIDESHOW_RANGES.quota.min} max={PARTY_SLIDESHOW_RANGES.quota.max}
+          value={draft.maxGuestbookEntriesPerParticipant} disabled={saving}
+          aria-label={t('party.maxGuestbookEntriesPerParticipant')}
+          onChange={(e) => setDraft((d) => ({
+            ...d, maxGuestbookEntriesPerParticipant: e.target.value,
+          }))}
         />
         <span className="pw-number-suffix">{t('party.zeroMeansUnlimited')}</span>
       </label>

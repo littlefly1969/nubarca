@@ -488,7 +488,7 @@ const it = {
   'party.section.live': 'Live',
   'party.section.experience': 'Esperienza',
   'party.section.guests': 'Ospiti',
-  'party.section.photos': 'Foto',
+  'party.section.photos': 'Contributi degli ospiti',
   'party.section.activities': 'Attività',
   'party.section.screens': 'Schermi e stampa',
   'party.section.settings': 'Impostazioni',
@@ -649,9 +649,9 @@ const it = {
   'partyContent.visibleWhen': 'Quando la vedono',
 
   'party.photos.lede': 'Dove vivono le fotografie, e chi può aggiungerne.',
-  'party.photos.contributions': 'Foto dagli ospiti',
+  'party.photos.contributions': 'Cosa possono lasciare gli ospiti',
   'party.photos.contributionsNote':
-    'Se lo attivi, gli ospiti possono mandare le loro fotografie dal link della festa.',
+    'Foto, messaggi sullo schermo e dediche nel guestbook: tre decisioni separate.',
   'party.photos.needsAccess': 'Prima apri la festa agli ospiti: finché è chiusa nessuno può mandare niente.',
   'party.photos.uploadsLabel': 'Gli ospiti possono aggiungere foto e video',
   'party.photos.uploadsNote': 'Quante ne può mandare ciascuno lo decidi più sotto.',
@@ -661,6 +661,10 @@ const it = {
   // The THREE contributions. The two written ones are named for what they DO —
   // a messaggio is read out during the evening, una dedica resta nel libro —
   // because the same word for both is the one mistake this card avoids.
+  'party.photos.approvalLabel': 'Le foto richiedono approvazione',
+  'party.photos.approvalNote': 'Se attiva, le nuove foto aspettano prima di comparire. Disattivarla non pubblica quelle già in attesa.',
+  'party.messages.approvalLabel': 'I messaggi richiedono approvazione',
+  'party.messages.approvalNote': 'Se attiva, i nuovi messaggi aspettano prima di andare sullo schermo. Disattivarla non pubblica quelli già in attesa.',
   'party.contributions.messagesLabel': 'Messaggi per lo slideshow',
   'party.contributions.messagesNote':
     'Mostra i messaggi degli ospiti sullo schermo durante la festa.',
@@ -1282,6 +1286,7 @@ const it = {
   'party.maxVideosPerParticipant': 'Massimo video per partecipante',
   'party.secondsSuffix': 'secondi',
   'party.maxMessagesPerParticipant': 'Messaggi per invitato',
+  'party.maxGuestbookEntriesPerParticipant': 'Dediche per ospite',
   'party.zeroMeansUnlimited': '0 = illimitato',
   'party.slideshowSettingsTitle': 'Slideshow e limiti per partecipante',
   'party.saveSettings': 'Salva impostazioni',

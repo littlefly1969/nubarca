@@ -7,8 +7,7 @@ import { mainMediaSource } from '../partyModel';
 import { CREW_CAPABILITIES } from '../crew/crewModel';
 import { partyDeepLink, usePartyApi } from './partyApi';
 import { Badge, Button, EmptyState, LinkRow, Notice, Panel, SectionHead } from './ui';
-import { QueueBadge } from './PartyLiveSection';
-import type { Loaded } from './partyWorkspaceModel';
+
 
 // "ATTIVITÀ" — what there is to DO at the party, as opposed to what there is
 // to look at.
@@ -24,12 +23,11 @@ import type { Loaded } from './partyWorkspaceModel';
 // up in front of people.
 
 export function PartyActivitiesSection({
-  party, albumParty, albumPartyFailed, moderation, onAlbumPartyUpdated, onRetry,
+  party, albumParty, albumPartyFailed, onAlbumPartyUpdated, onRetry,
 }: {
   party: Party;
   albumParty: AlbumPartyStatus | null;
   albumPartyFailed: boolean;
-  moderation: { uploads: Loaded<number>; messages: Loaded<number> };
   onAlbumPartyUpdated(next: AlbumPartyStatus): void;
   onRetry(): void;
 }) {
@@ -78,22 +76,6 @@ export function PartyActivitiesSection({
           <p>{t('party.activities.needsAccess')}</p>
         </Notice>
       )}
-
-      <Panel
-        title={t('party.activities.messages')}
-        note={t('party.activities.messagesNote')}
-        testId="party-activities-messages"
-      >
-        <LinkRow
-          to={partyDeepLink(api, 'messages', party.id, albumId)}
-          testId="party-activities-messages-link"
-          title={t('partyMessages.title')}
-          note={albumParty?.requireMessageApproval
-            ? t('party.activities.approvalOn')
-            : t('party.activities.approvalOff')}
-          after={<QueueBadge queue={moderation.messages} />}
-        />
-      </Panel>
 
       {canGames ? (
         <Panel

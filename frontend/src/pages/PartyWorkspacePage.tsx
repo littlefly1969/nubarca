@@ -412,7 +412,6 @@ export function PartyWorkspacePage({
               party={current}
               albumParty={albumParty}
               albumPartyFailed={facts.albumParty.status === 'error'}
-              moderation={facts.moderation}
               onAlbumPartyUpdated={facts.setAlbumParty}
               onRetry={facts.refresh}
             />
