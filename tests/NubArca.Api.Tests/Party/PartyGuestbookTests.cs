@@ -313,6 +313,71 @@ public sealed class PartyGuestbookTests : IDisposable
         Assert.Equal("Da conservare", reopened.GetProperty("entries")[0].GetProperty("body").GetString());
     }
 
+    // ── The book's own budget ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task A_guest_writes_what_the_host_allowed_and_is_then_refused_with_its_own_code()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        (await owner.PatchAsJsonAsync(
+            $"/api/albums/{party.AlbumId}/party-slideshow-settings",
+            new { maxGuestbookEntriesPerParticipant = 2 })).EnsureSuccessStatusCode();
+
+        // ONE browser, so one budget: the guest session is a cookie, and the
+        // client carries it exactly as a phone does.
+        var guest = _factory.CreateClient();
+        for (var i = 1; i <= 2; i++)
+        {
+            var accepted = await guest.PostAsJsonAsync(
+                $"/api/party/{party.ViewToken}/guestbook",
+                new { authorDisplayName = (string?)null, body = $"Dedica {i}" });
+            accepted.EnsureSuccessStatusCode();
+            var body = await accepted.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(2 - i, body.GetProperty("remaining").GetInt32());
+        }
+
+        var refused = await guest.PostAsJsonAsync(
+            $"/api/party/{party.ViewToken}/guestbook",
+            new { authorDisplayName = (string?)null, body = "Una di troppo" });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        // Its OWN code: "you have written your allowance" is a different thing
+        // to tell somebody than "there is no book here" or "you are going too
+        // fast", and a guest can act on only one of the three.
+        Assert.Equal("guestbook_limit_reached", await ErrorOf(refused));
+
+        // Nothing was stored for the refusal.
+        Assert.Equal(2, (await PublicBookAsync(party.ViewToken)).GetProperty("entries").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Hiding_a_dedication_does_not_hand_the_slot_back()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync(OwnerEmail);
+        var party = await OpenPartyAsync(owner, guestbook: true);
+        (await owner.PatchAsJsonAsync(
+            $"/api/albums/{party.AlbumId}/party-slideshow-settings",
+            new { maxGuestbookEntriesPerParticipant = 1 })).EnsureSuccessStatusCode();
+
+        var guest = _factory.CreateClient();
+        var written = await guest.PostAsJsonAsync(
+            $"/api/party/{party.ViewToken}/guestbook",
+            new { authorDisplayName = "Ada", body = "Scritta" });
+        written.EnsureSuccessStatusCode();
+        var entryId = (await written.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+
+        // Moderation is a judgement about the dedication, not a refund. A host
+        // who takes one down has not handed its author another go at sending
+        // it — otherwise declining something would be an invitation to resend.
+        Assert.Equal(HttpStatusCode.NoContent, await ModerateAsync(owner, party.PartyId, entryId, "hide"));
+
+        var again = await guest.PostAsJsonAsync(
+            $"/api/party/{party.ViewToken}/guestbook",
+            new { authorDisplayName = "Ada", body = "Ancora" });
+        Assert.Equal(HttpStatusCode.Conflict, again.StatusCode);
+        Assert.Equal("guestbook_limit_reached", await ErrorOf(again));
+    }
+
     // ── The hard invariant ──────────────────────────────────────────────────
 
     [Fact]

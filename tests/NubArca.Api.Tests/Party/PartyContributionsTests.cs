@@ -224,6 +224,62 @@ public sealed class PartyContributionsTests : IDisposable
         Assert.True(after.GetProperty("uploadEnabled").GetBoolean());
     }
 
+    // ── None of the three depends on another ────────────────────────────────
+
+    [Fact]
+    public async Task Closing_photographs_leaves_the_other_two_reachable()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner);
+        var status = await EnablePartyAsync(owner, albumId);
+        var uploadToken = UploadTokenFromStatus(status);
+        await SetContributionsAsync(owner, albumId, new { guestbookEnabled = true });
+
+        var closed = await SetContributionsAsync(owner, albumId, new { uploadEnabled = false });
+
+        // THE PAGE SURVIVES. Its address used to hang off the photo switch, so
+        // closing photographs took the composer and the book away with them —
+        // three independent switches in the card and one switch in the product.
+        Assert.NotEqual(JsonValueKind.Null, closed.GetProperty("uploadUrl").ValueKind);
+        var session = await UploadSessionAsync(uploadToken);
+        Assert.False(session.GetProperty("uploadEnabled").GetBoolean());
+        Assert.True(session.GetProperty("slideshowMessagesEnabled").GetBoolean());
+        Assert.True(session.GetProperty("guestbookEnabled").GetBoolean());
+
+        // A greeting still lands.
+        (await SubmitMessageAsync(uploadToken, "Ada", "Auguri")).GetProperty("id").GetGuid();
+
+        // A dedication still lands, written on the contribution page's own
+        // token — the book is read on the QR's token and written from here.
+        var dedication = await _factory.CreateClient().PostAsJsonAsync(
+            $"/api/party/{uploadToken}/guestbook",
+            new { authorDisplayName = "Ada", body = "Da conservare" });
+        dedication.EnsureSuccessStatusCode();
+
+        // And the photographs really are closed: the refusal moved from the
+        // token to the action, and says which.
+        var upload = await UploadGuestPhotoAsync(uploadToken);
+        Assert.Equal(HttpStatusCode.Conflict, upload.StatusCode);
+        Assert.Equal("party_uploads_disabled", await ErrorOf(upload));
+    }
+
+    [Fact]
+    public async Task With_every_channel_closed_there_is_nowhere_to_contribute()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var albumId = await CreateAlbumAsync(owner);
+        await EnablePartyAsync(owner, albumId);
+
+        // The address is conditional still; the condition is now all three
+        // rather than one of them.
+        var closed = await SetContributionsAsync(
+            owner, albumId,
+            new { uploadEnabled = false, slideshowMessagesEnabled = false, guestbookEnabled = false });
+        Assert.Equal(JsonValueKind.Null, closed.GetProperty("uploadUrl").ValueKind);
+        // The party itself is untouched: guests still see it.
+        Assert.NotEqual(JsonValueKind.Null, closed.GetProperty("partyUrl").ValueKind);
+    }
+
     // ── Whose decision it is ────────────────────────────────────────────────
 
     [Fact]

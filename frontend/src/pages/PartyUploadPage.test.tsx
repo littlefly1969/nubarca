@@ -224,6 +224,95 @@ describe('PartyUploadPage (public anonymous upload)', () => {
     expect(await screen.findByLabelText(/il tuo messaggio/i)).toBeInTheDocument();
   });
 
+  it('offers only the channels this party takes, and no tabs when there is one', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      // Photographs closed, the book open: a real party, and one that used to
+      // be unreachable because the page's address hung off the photo switch.
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session({
+        uploadEnabled: false, slideshowMessagesEnabled: false, guestbookEnabled: true,
+      })),
+      'GET /api/party/uptok-1/guestbook': () => jsonResponse({
+        entries: [], canWrite: true, maxAuthorDisplayNameLength: 80, maxBodyLength: 1000,
+      }),
+    });
+    render(wrapper());
+
+    // One channel, so no tabs: a choice between one thing is not a choice.
+    expect(await screen.findByTestId('party-guestbook-form')).toBeInTheDocument();
+    expect(screen.queryByTestId('party-mode-media')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-mode-message')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-mode-guestbook')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Scegli foto e video da caricare/i)).toBeNull();
+  });
+
+  it('shows all three tabs when the party takes all three', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session({
+        guestbookEnabled: true,
+      })),
+      'GET /api/party/uptok-1/guestbook': () => jsonResponse({
+        entries: [], canWrite: true, maxAuthorDisplayNameLength: 80, maxBodyLength: 1000,
+      }),
+    });
+    render(wrapper());
+    const user = userEvent.setup();
+
+    await screen.findByTestId('party-mode-media');
+    expect(screen.getByTestId('party-mode-message')).toBeInTheDocument();
+    expect(screen.getByTestId('party-mode-guestbook')).toBeInTheDocument();
+
+    // The book is the BOOK here, not a bare form: with the hub's card gone,
+    // this is where a guest reads what others wrote as well as adding to it.
+    await user.click(screen.getByTestId('party-mode-guestbook'));
+    expect(await screen.findByTestId('party-guestbook-form')).toBeInTheDocument();
+  });
+
+  it('says what is left to write, before somebody writes it', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session({
+        maxMessages: 3, usedMessages: 1, remainingMessages: 2,
+      })),
+    });
+    render(wrapper('uptok-1', '?mode=message'));
+
+    // A budget discovered by being refused is a budget the product kept to
+    // itself — the photo quota has always said so, and now both written
+    // channels do too.
+    expect(await screen.findByTestId('party-message-remaining-sends'))
+      .toHaveTextContent(/ancora 2 messaggi/i);
+  });
+
+  it('offers the way home the page never had', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session({
+        partyUrl: '/party/tok-1',
+      })),
+    });
+    render(wrapper());
+
+    // A guest who arrived by scanning a code had no way back at all.
+    expect(await screen.findByTestId('party-upload-back'))
+      .toHaveAttribute('href', '/party/tok-1');
+  });
+
+  it('no longer promises a camera it does not open', async () => {
+    installFetchMock({
+      'GET /api/party/uptok-1': () => errorResponse(404),
+      'POST /api/party/uptok-1/upload-session': () => jsonResponse(session()),
+    });
+    render(wrapper());
+
+    // There is no `capture` attribute and never was: the picker opens the
+    // gallery. Gallery-only was the decision; only the sentence was wrong.
+    const input = await screen.findByLabelText(/Scegli foto e video da caricare/i);
+    expect(input).not.toHaveAttribute('capture');
+    expect(document.body.textContent).not.toMatch(/scatta ora/i);
+  });
+
   it('keeps the chosen mode in the URL, without stacking history entries', async () => {
     mockGeneric();
     render(wrapper());
