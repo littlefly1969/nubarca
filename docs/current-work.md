@@ -977,6 +977,28 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   wrote is KEPT: the TV projection returns nothing, the manager queue stays
   reachable and reports the flag, and re-enabling brings the greetings back with
   no row rewritten.
+- **The upload TOKEN opens the contribution page; the upload SWITCH opens only
+  photographs.** `ResolveUploadAsync` once required `UploadEnabled`, which made
+  the photograph switch the master switch for all three contributions: a host
+  who wanted a guest book and no photographs got a guest page that resolved to
+  nothing. The token now resolves whenever the party link is live, and the
+  photograph rule moved down to the one action it governs, which refuses with a
+  409 `party_uploads_disabled`. Reaching the page and being allowed to do a
+  particular thing on it are separate questions, and only the second one is
+  about photographs. The backend says which of the three are open on the upload
+  session, and the page renders the halves it is offered — so the three switches
+  are three independent decisions rather than three names for one. Guestbook
+  writing accepts EITHER token (`ResolvePublicAsync` then `ResolveUploadAsync`),
+  because a guest arriving by QR and a guest arriving by contribution link are
+  writing in the same book.
+- **Every contribution a guest can exhaust reports what is left.** Dedications
+  gained `MaxGuestbookEntriesPerParticipant` and `SubmittedGuestbookCount`
+  alongside the photograph and greeting quotas, claimed by the same conditional
+  single-statement UPDATE the others use (`... WHERE "Id" = @id AND (@max = 0 OR
+  "SubmittedGuestbookCount" < @max)`), so two devices sharing one participant
+  cannot both take the last slot. `0` is unlimited, which is what every party
+  that predates the column already meant, so the migration grants nobody a limit
+  they never had.
 - **The guest book is its own table, and it never reaches the wall.**
   `PartyGuestbookEntry` is not a flag on `PartyMessage`, and the difference is
   the point: a greeting is written to be read out during the evening, a
