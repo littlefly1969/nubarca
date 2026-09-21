@@ -26,7 +26,6 @@ import {
   PartyBeforeHome,
   PartyPhaseChangeBanner,
 } from '../party/PartyGuestSurfaces';
-import { withContributionMode } from './partyContributionMode';
 import { PRODUCT_NAME } from '../brand/brand';
 import { rememberFaceFilter, rememberPartyHome } from './partyGuestMemo';
 import './PartyGuestHub.css';
@@ -178,22 +177,7 @@ export function galleryShapes(count: number): GalleryShape[] {
   return shapes;
 }
 
-function BookIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M4 5.2A1.7 1.7 0 0 1 5.7 3.5H11a2 2 0 0 1 2 2v14a1.6 1.6 0 0 0-1.6-1.6H5.7A1.7 1.7 0 0 1 4 16.2Z" />
-      <path d="M20 5.2a1.7 1.7 0 0 0-1.7-1.7H13a2 2 0 0 0-2 2v14a1.6 1.6 0 0 1 1.6-1.6h5.7a1.7 1.7 0 0 0 1.7-1.7Z" />
-    </svg>
-  );
-}
 
-function HeartIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M12 19.6C7.9 16.9 4.5 14.2 4.5 10.6A3.9 3.9 0 0 1 12 8.6a3.9 3.9 0 0 1 7.5 2c0 3.6-3.4 6.3-7.5 9Z" />
-    </svg>
-  );
-}
 
 function PlayIcon() {
   return (
@@ -717,15 +701,10 @@ export function PartyPage() {
   const contributionUrl = context.capabilities.contributionUrl;
   const printUrl = context.capabilities.printUrl;
   const gameUrl = context.capabilities.gameUrl;
-  const guestbookUrl = context.capabilities.guestbookUrl ?? null;
   // A BACKEND THAT PREDATES THE SWITCH sends no field at all, and for it the
   // old rule is still the right one: a party that accepts contributions
   // accepts greetings. `null` from a backend that HAS the field means the host
   // switched them off, and is respected as such — which is why `undefined` and
-  // `null` are told apart here rather than collapsed with `??`.
-  const slideshowMessageUrl = context.capabilities.slideshowMessageUrl === undefined
-    ? (contributionUrl ? withContributionMode(contributionUrl, 'message') : null)
-    : context.capabilities.slideshowMessageUrl;
   // Rank-ordered filtered view: face-search matches first-to-last, restricted
   // to items still visible in the live album (a match hidden since the search
   // simply drops out on the next poll).
@@ -755,40 +734,6 @@ export function PartyPage() {
       target: { kind: 'action', onSelect: () => setFaceOpen(true) },
       variant: 'signature',
       available: true,
-    },
-    {
-      // A MESSAGE FOR THE SLIDESHOW. The server states where it lives, exactly
-      // like printing and the game, and its absence is the whole answer: a
-      // party that takes no greetings has no card, no tab, no empty state and
-      // no feed to fetch.
-      //
-      // It used to be derived from `contributionUrl`, on the reasoning that one
-      // switch governed every written contribution. That stopped being true the
-      // moment greetings and the guest book became separate decisions — and
-      // deriving a capability from another one is exactly how a surface the
-      // server does not have gets offered. The fallback below is for a BACKEND
-      // that predates the field, where the old reasoning still holds.
-      id: 'dedication',
-      titleKey: 'partyHub.dedication',
-      descriptionKey: 'partyHub.dedicationHelp',
-      icon: <HeartIcon />,
-      target: { kind: 'anchor', href: slideshowMessageUrl ?? '' },
-      variant: 'activity',
-      available: Boolean(slideshowMessageUrl),
-    },
-    {
-      // THE GUEST BOOK. A different intention from the card above and named
-      // for it: a message is read out during the evening, a dedication is
-      // kept. Its URL outlives the party — the book stays readable for as long
-      // as the memories do — which is why it is not gated on `live` here and
-      // the server decides.
-      id: 'guestbook',
-      titleKey: 'partyHub.guestbook',
-      descriptionKey: 'partyHub.guestbookHelp',
-      icon: <BookIcon />,
-      target: { kind: 'route', to: guestbookUrl ?? '' },
-      variant: 'activity',
-      available: Boolean(guestbookUrl),
     },
     {
       // The hosted game. Like printing, the server states where it lives and a

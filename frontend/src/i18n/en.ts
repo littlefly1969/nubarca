@@ -1236,7 +1236,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyUpload.titleGeneric': 'Share with the party',
   'partyUpload.subtitle': 'Photos, videos or a dedication',
   'partyUpload.pickerTitle': 'Add photos and videos',
-  'partyUpload.pickerHelp': 'Pick from your gallery or take one now',
+  'partyUpload.pickerHelp': 'Choose from your gallery',
   'partyUpload.modeLabel': 'What would you like to share',
   'partyUpload.intro':
     'Uploads are visible to the album owner and may appear in the party album. Photos only.',
@@ -1354,6 +1354,12 @@ const en: Partial<Record<MessageKey, string>> = {
 
   // --- Public party guest MESSAGES ---
   'partyMessage.tabMedia': 'Photos and videos',
+  'partyMessage.sendsLeft': 'You can still send {count} messages.',
+  'partyMessage.tabGuestbook': 'Guest book',
+  'partyUpload.backToParty': 'Back to the party',
+  'partyUpload.messagesRemaining': 'Messages: {remaining} of {max} left',
+  'partyUpload.messagesUnlimited': 'Messages: unlimited',
+  'partyGuestbookPublic.entriesLeft': 'You can still leave {count} dedications.',
   'partyMessage.tabMessage': 'Dedication',
   'partyMessage.headline': 'Leave a dedication',
   'partyMessage.sentTitle': 'Dedication sent',

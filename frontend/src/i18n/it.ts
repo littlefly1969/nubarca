@@ -1260,7 +1260,7 @@ const it = {
   'partyUpload.titleGeneric': 'Condividi con la festa',
   'partyUpload.subtitle': 'Foto, video o una dedica',
   'partyUpload.pickerTitle': 'Aggiungi foto e video',
-  'partyUpload.pickerHelp': 'Scegli dalla galleria o scatta ora',
+  'partyUpload.pickerHelp': 'Scegli dalla galleria',
   'partyUpload.modeLabel': 'Cosa vuoi condividere',
   'partyUpload.intro':
     'I caricamenti sono visibili al proprietario dell’album e potrebbero comparire nell’album party. Solo foto.',
@@ -1378,6 +1378,12 @@ const it = {
 
   // --- Public party guest MESSAGES ---
   'partyMessage.tabMedia': 'Foto e video',
+  'partyMessage.sendsLeft': 'Puoi mandare ancora {count} messaggi.',
+  'partyMessage.tabGuestbook': 'Guestbook',
+  'partyUpload.backToParty': 'Torna alla festa',
+  'partyUpload.messagesRemaining': 'Messaggi: {remaining} di {max} disponibili',
+  'partyUpload.messagesUnlimited': 'Messaggi: illimitati',
+  'partyGuestbookPublic.entriesLeft': 'Puoi lasciare ancora {count} dediche.',
   'partyMessage.tabMessage': 'Dedica',
   'partyMessage.headline': 'Lascia una dedica',
   'partyMessage.sentTitle': 'Dedica inviata',

@@ -118,7 +118,11 @@ public sealed record PartyUploadSessionDto(
     bool GuestbookEnabled = false,
     int? MaxGuestbookEntries = null,
     int UsedGuestbookEntries = 0,
-    int? RemainingGuestbookEntries = null);
+    int? RemainingGuestbookEntries = null,
+    // THE WAY BACK. This page is reached from the party and knew no way home:
+    // it holds the upload token and the party lives on the view one, so the
+    // address has to come from the server that holds both.
+    string? PartyUrl = null);
 
 // Result of enabling party mode: the same status plus a convenience flag that
 // the frontend can use to surface the (re)generated link.

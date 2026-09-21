@@ -994,9 +994,20 @@ export interface PartyUploadSession {
   maxMessages?: number | null;
   usedMessages?: number;
   remainingMessages?: number | null;
-  /** Whether the written half of the contribution page exists at all. Absent
-   * means true, which is what every backend before the switch meant. */
+  /** Whether the slideshow composer exists at all. Absent means true, which is
+   * what every backend before the switch meant. */
   slideshowMessagesEnabled?: boolean;
+  /** Whether PHOTOGRAPHS are open. A party may take dedications and no
+   * photographs, and then this page is a page about dedications. */
+  uploadEnabled?: boolean;
+  /** The book's half of the page, and what this guest has left in it. */
+  guestbookEnabled?: boolean;
+  maxGuestbookEntries?: number | null;
+  usedGuestbookEntries?: number;
+  remainingGuestbookEntries?: number | null;
+  /** Where the party is, so this page has a way home. Absent on a backend
+   * that predates it, and then no link is drawn. */
+  partyUrl?: string | null;
 }
 
 // Idempotent. Safe to call on every page load: it mints a session the first
@@ -1355,6 +1366,8 @@ export interface PartyGuestbookSubmission {
   /** 'pending' when the host reads dedications first, else 'visible'. */
   status: 'visible' | 'pending';
   createdAt: string;
+  /** What this guest has left, or null for no limit. */
+  remaining?: number | null;
 }
 
 export function submitPartyGuestbookEntry(
