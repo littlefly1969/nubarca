@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router';
 import {
   PartyGameConflict, partyGameYesPercent, setPartyGamePreference, submitPartyGameVote,
   type PartyGamePreferences, type PartyGamePublicSnapshot, type PartyGameVoteCode,
+  type PartyGameAnswer,
   type PartyGameVoteValue,
 } from '@nubarca/api-client';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -49,7 +50,7 @@ export function PartyGamePage() {
   const { t } = useI18n();
   const { snapshot, connection, stale, refresh, adopt } =
     usePartyGameSnapshot(token, { join: true });
-  const [sending, setSending] = useState<PartyGameVoteValue | null>(null);
+  const [sending, setSending] = useState<PartyGameAnswer | null>(null);
   const [voteError, setVoteError] = useState(false);
   // The preference surface the phone is holding: whatever the last snapshot
   // said, or the answer the last tap produced. Both come from the server —
@@ -101,7 +102,7 @@ export function PartyGamePage() {
   // this one's problem.
   useEffect(() => { setVoteError(false); }, [roundId]);
 
-  const vote = useCallback(async (value: PartyGameVoteValue) => {
+  const vote = useCallback(async (value: PartyGameAnswer) => {
     if (!token || !roundId || sending) return;
     setSending(value);
     setVoteError(false);
@@ -260,27 +261,46 @@ export function PartyGamePage() {
             {voteError && (
               <p className="inline-error" role="alert">{t('partyGuestGame.voteFailed')}</p>
             )}
-            {/* Two targets, thumb-sized, in the lower half of the screen, and
-                nothing to scroll past to reach them. */}
-            <div className="party-game-answers">
-              {(['yes', 'no'] as PartyGameVoteValue[]).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className="party-game-answer"
-                  data-value={value}
-                  data-testid={`party-game-vote-${value}`}
-                  aria-pressed={snapshot.myVote === value}
-                  // Which answer is in flight, so the tap has an effect before
-                  // the network answers. A control that only reacts when the
-                  // response lands reads as a control that did not work.
-                  data-pending={sending === value ? 'true' : undefined}
-                  disabled={sending !== null}
-                  onClick={() => void vote(value)}
-                >
-                  {t(value === 'yes' ? 'partyGuestGame.passed' : 'partyGuestGame.failed')}
-                </button>
-              ))}
+            {/* Thumb-sized targets in the lower half of the screen, and nothing
+                to scroll past to reach them. A verdict round has two of them
+                and their words are the product's; a choice round has the
+                HOST'S answers, between two and six, and their words are his.
+                One list either way, because a guest is doing the same thing:
+                answering the question above with one tap. */}
+            <div className="party-game-answers" data-mode={challenge?.votingMode ?? 'binary'}>
+              {challenge?.votingMode === 'choice'
+                ? (challenge.options ?? []).map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className="party-game-answer"
+                    data-testid={`party-game-option-${option.id}`}
+                    aria-pressed={snapshot.myVote === option.id}
+                    data-pending={sending === option.id ? 'true' : undefined}
+                    disabled={sending !== null}
+                    onClick={() => void vote(option.id)}
+                  >
+                    {option.label}
+                  </button>
+                ))
+                : (['yes', 'no'] as PartyGameVoteValue[]).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="party-game-answer"
+                    data-value={value}
+                    data-testid={`party-game-vote-${value}`}
+                    aria-pressed={snapshot.myVote === value}
+                    // Which answer is in flight, so the tap has an effect before
+                    // the network answers. A control that only reacts when the
+                    // response lands reads as a control that did not work.
+                    data-pending={sending === value ? 'true' : undefined}
+                    disabled={sending !== null}
+                    onClick={() => void vote(value)}
+                  >
+                    {t(value === 'yes' ? 'partyGuestGame.passed' : 'partyGuestGame.failed')}
+                  </button>
+                ))}
             </div>
           </section>
         )}

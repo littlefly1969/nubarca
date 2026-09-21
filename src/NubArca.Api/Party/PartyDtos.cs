@@ -448,6 +448,14 @@ public sealed record TvPartyMessageDto(
 public sealed record TvPartyMessagesDto(IReadOnlyList<TvPartyMessageDto> Messages);
 
 // --- PARTY CHALLENGES ---
+// One answer the room may pick in a `choice` round, and what it costs. Carried
+// on the challenge rather than fetched separately: an activity's answers are
+// part of the activity, and a client that has one without the other has half a
+// question. Absent/empty for every other voting mode.
+public sealed record PartyChallengeOptionDto(Guid Id, string Label, string? Outcome);
+
+public sealed record PartyChallengeOptionWrite(string? Label, string? Outcome);
+
 // The owner's view of one prepared activity. The three rule fields are optional
 // on the wire with the domain defaults, so a client written before the composer
 // still parses one and a client written after it still reads a legacy row.
@@ -457,7 +465,8 @@ public sealed record PartyChallengeDto(
     DateTime CreatedAt, DateTime UpdatedAt,
     int? DurationSeconds = null,
     string VotingMode = PartyChallengeVotingModes.Binary,
-    string? VoteQuestion = null);
+    string? VoteQuestion = null,
+    IReadOnlyList<PartyChallengeOptionDto>? Options = null);
 
 public sealed record PartyChallengeListDto(Guid AlbumId, IReadOnlyList<PartyChallengeDto> Items);
 
@@ -469,7 +478,10 @@ public sealed record PartyChallengeWriteRequest(
     bool IsEnabled = true,
     int? DurationSeconds = null,
     string? VotingMode = null,
-    string? VoteQuestion = null);
+    string? VoteQuestion = null,
+    // Null means UNCHANGED, so a client written before choice rounds cannot
+    // wipe the answers a host wrote by saving the form it does know about.
+    IReadOnlyList<PartyChallengeOptionWrite>? Options = null);
 
 public sealed record PartyChallengeReorderRequest(IReadOnlyList<Guid>? ChallengeIds);
 
@@ -494,7 +506,8 @@ public sealed record PartyChallengePresentationDto(
     Guid Id, string Title, string Body, string Kind, string? MediaUrl,
     int? DurationSeconds = null,
     string VotingMode = PartyChallengeVotingModes.Binary,
-    string? VoteQuestion = null);
+    string? VoteQuestion = null,
+    IReadOnlyList<PartyChallengeOptionDto>? Options = null);
 
 public sealed record PartyPlaybackSnapshotDto(
     string Mode, PartyChallengePresentationDto? ActiveChallenge,

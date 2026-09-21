@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import {
+  PARTY_CHALLENGE_OPTION_LIMITS,
   type AlbumItemSummary,
   type PartyChallenge,
+  type PartyChallengeOptionWrite,
   type PartyChallengeVotingMode,
 } from '@nubarca/api-client';
 import { usePartyApi } from '../party/workspace/partyApi';
@@ -35,6 +37,19 @@ import './PartyDeck.css';
 // draft is dirty the overlay stops being dismissable, and closing deliberately
 // asks once, in place.
 
+// Named per mode rather than spelled as a ternary, because there are three of
+// them now and a nested ternary is where the fourth one goes wrong.
+const VOTING_LABELS: Record<PartyChallengeVotingMode, MessageKey> = {
+  binary: 'partyComposer.votingBinary',
+  choice: 'partyComposer.votingChoice',
+  none: 'partyComposer.votingNone',
+};
+const VOTING_HELP: Record<PartyChallengeVotingMode, MessageKey> = {
+  binary: 'partyComposer.votingBinaryHelp',
+  choice: 'partyComposer.votingChoiceHelp',
+  none: 'partyComposer.votingNoneHelp',
+};
+
 const STEPS = ['activity', 'rules', 'preview'] as const;
 type Step = (typeof STEPS)[number];
 
@@ -64,7 +79,18 @@ interface Draft {
   durationSeconds: number | null;
   votingMode: PartyChallengeVotingMode;
   voteQuestion: string;
+  /**
+   * The answers, kept for the WHOLE editing session rather than only while
+   * `choice` is selected. A host who tries the other modes and comes back has
+   * not thrown their answers away — only what is SAVED depends on the mode.
+   */
+  options: PartyChallengeOptionWrite[];
   isEnabled: boolean;
+}
+
+/** Two empty answers: the fewest a choice is made between. */
+function blankBallot(): PartyChallengeOptionWrite[] {
+  return [{ label: '', outcome: null }, { label: '', outcome: null }];
 }
 
 function draftFrom(challenge: PartyChallenge | null): Draft {
@@ -75,6 +101,9 @@ function draftFrom(challenge: PartyChallenge | null): Draft {
     durationSeconds: challenge?.durationSeconds ?? null,
     votingMode: challenge?.votingMode ?? 'binary',
     voteQuestion: challenge?.voteQuestion ?? '',
+    options: challenge?.options?.length
+      ? challenge.options.map((o) => ({ label: o.label, outcome: o.outcome }))
+      : blankBallot(),
     isEnabled: challenge?.isEnabled ?? true,
   };
 }
@@ -107,8 +136,30 @@ export function PartyChallengeComposer({
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
 
+  const setOption = (index: number, patch: Partial<PartyChallengeOptionWrite>) =>
+    setDraft((current) => ({
+      ...current,
+      options: current.options.map((o, i) => (i === index ? { ...o, ...patch } : o)),
+    }));
+
+  const addOption = () =>
+    setDraft((current) => (current.options.length >= PARTY_CHALLENGE_OPTION_LIMITS.max
+      ? current
+      : { ...current, options: [...current.options, { label: '', outcome: null }] }));
+
+  const removeOption = (index: number) =>
+    setDraft((current) => (current.options.length <= PARTY_CHALLENGE_OPTION_LIMITS.min
+      ? current
+      : { ...current, options: current.options.filter((_, i) => i !== index) }));
+
+  // The ballot is an ARRAY, so identity is the wrong question for it: every
+  // edit replaces it, and a draft that was never touched still holds the very
+  // array `initial` does. Comparing its contents is what keeps "unsaved
+  // changes" honest for a choice round.
   const dirty = useMemo(
-    () => (Object.keys(initial) as (keyof Draft)[]).some((key) => draft[key] !== initial[key]),
+    () => (Object.keys(initial) as (keyof Draft)[]).some((key) => (key === 'options'
+      ? JSON.stringify(draft.options) !== JSON.stringify(initial.options)
+      : draft[key] !== initial[key])),
     [draft, initial],
   );
   const activityValid = draft.title.trim().length > 0 && draft.body.trim().length > 0;
@@ -144,6 +195,15 @@ export function PartyChallengeComposer({
       durationSeconds: draft.durationSeconds,
       votingMode: draft.votingMode,
       voteQuestion: draft.voteQuestion.trim() || null,
+      // Only the mode that is ANSWERED with a ballot sends one. An empty array
+      // for the other modes is deliberate and not the same as omitting the
+      // field: it says "this activity has no answers", which is what clears a
+      // ballot a host has moved away from.
+      options: draft.votingMode === 'choice'
+        ? draft.options
+          .filter((o) => o.label.trim() !== '')
+          .map((o) => ({ label: o.label.trim(), outcome: o.outcome?.trim() || null }))
+        : [],
     };
     try {
       if (challenge) await api.updatePartyChallenge(albumId, challenge.id, value);
@@ -355,33 +415,96 @@ export function PartyChallengeComposer({
               {t('partyComposer.votingLabel')}
             </span>
             <div className="party-composer-choices" role="radiogroup" aria-labelledby="party-composer-voting">
-              {(['binary', 'none'] as PartyChallengeVotingMode[]).map((mode) => (
+              {(['binary', 'choice', 'none'] as PartyChallengeVotingMode[]).map((mode) => (
                 <button
                   key={mode}
                   type="button"
                   role="radio"
+                  data-testid={`party-composer-voting-${mode}`}
                   aria-checked={draft.votingMode === mode}
                   className={draft.votingMode === mode ? 'is-selected' : undefined}
                   onClick={() => set('votingMode', mode)}
                 >
-                  <strong>{t(mode === 'binary' ? 'partyComposer.votingBinary' : 'partyComposer.votingNone')}</strong>
-                  <span>{t(mode === 'binary' ? 'partyComposer.votingBinaryHelp' : 'partyComposer.votingNoneHelp')}</span>
+                  <strong>{t(VOTING_LABELS[mode])}</strong>
+                  <span>{t(VOTING_HELP[mode])}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {draft.votingMode === 'binary' && (
+          {draft.votingMode !== 'none' && (
             <label className="field">
               <span className="field__label">{t('partyComposer.questionLabel')}</span>
               <input
                 maxLength={120}
-                placeholder={t('partyComposer.questionPlaceholder')}
+                placeholder={t(draft.votingMode === 'choice'
+                  ? 'partyComposer.questionChoicePlaceholder'
+                  : 'partyComposer.questionPlaceholder')}
                 value={draft.voteQuestion}
                 onChange={(e) => set('voteQuestion', e.target.value)}
               />
               <span className="field__help">{t('partyComposer.questionHelp')}</span>
             </label>
+          )}
+
+          {/* THE BALLOT. Each answer is what the room taps, and beside it what
+              happens if the room picks it — the two belong together on one row
+              because a host writes them in one thought: "if they say this, then
+              that". An answer with no consequence is allowed; an answer with no
+              words is not, and is simply dropped on save. */}
+          {draft.votingMode === 'choice' && (
+            <div className="field" data-testid="party-composer-ballot">
+              <span className="field__label">{t('partyComposer.optionsLabel')}</span>
+              <span className="field__help">{t('partyComposer.optionsHelp')}</span>
+              <ol className="party-composer-ballot">
+                {draft.options.map((option, index) => (
+                  // The index IS the identity here: these rows have no id until
+                  // the server mints one, and two blank answers are genuinely
+                  // the same value. Reordering is not offered, so nothing can
+                  // make the index wrong under a row.
+                  // eslint-disable-next-line react/no-array-index-key
+                  <li key={index}>
+                    <input
+                      aria-label={t('partyComposer.optionLabel', { n: index + 1 })}
+                      data-testid={`party-composer-option-${index}`}
+                      maxLength={PARTY_CHALLENGE_OPTION_LIMITS.labelLength}
+                      placeholder={t('partyComposer.optionPlaceholder')}
+                      value={option.label}
+                      onChange={(e) => setOption(index, { label: e.target.value })}
+                    />
+                    <input
+                      aria-label={t('partyComposer.optionOutcome', { n: index + 1 })}
+                      data-testid={`party-composer-outcome-${index}`}
+                      maxLength={PARTY_CHALLENGE_OPTION_LIMITS.outcomeLength}
+                      placeholder={t('partyComposer.outcomePlaceholder')}
+                      value={option.outcome ?? ''}
+                      onChange={(e) => setOption(index, { outcome: e.target.value })}
+                    />
+                    {draft.options.length > PARTY_CHALLENGE_OPTION_LIMITS.min && (
+                      <button
+                        type="button"
+                        className="party-composer-ballot-remove"
+                        aria-label={t('partyComposer.optionRemove', { n: index + 1 })}
+                        data-testid={`party-composer-option-remove-${index}`}
+                        onClick={() => removeOption(index)}
+                      >×</button>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              {/* Absent at six rather than disabled: there is nothing to
+                  explain, and a control that never works is noise. */}
+              {draft.options.length < PARTY_CHALLENGE_OPTION_LIMITS.max && (
+                <button
+                  type="button"
+                  className="party-composer-ballot-add"
+                  data-testid="party-composer-option-add"
+                  onClick={addOption}
+                >
+                  {t('partyComposer.optionAdd')}
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}

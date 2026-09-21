@@ -118,6 +118,95 @@ describe('the activity composer', () => {
     expect(sent.body).toBe('Sali sul tavolo.');
   });
 
+  it('writes a ballot of two to six answers, each with what it costs', async () => {
+    const posted: string[] = [];
+    mount([], 0, {
+      [`POST ${DECK}`]: ({ body }: { body: string | null }) => {
+        posted.push(body ?? '');
+        return jsonResponse(challenge(), 201);
+      },
+    });
+    const user = userEvent.setup();
+    const composer = await openComposer(user);
+
+    await user.type(within(composer).getByLabelText(/titolo/i), 'La penitenza');
+    await user.type(within(composer).getByLabelText(/cosa deve fare/i), 'La sala decide.');
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+
+    await user.click(within(composer).getByTestId('party-composer-voting-choice'));
+
+    // Two empty answers are offered, because two is the fewest a choice is
+    // made between — and neither of them can be removed.
+    expect(within(composer).getByTestId('party-composer-option-0')).toBeInTheDocument();
+    expect(within(composer).getByTestId('party-composer-option-1')).toBeInTheDocument();
+    expect(within(composer).queryByTestId('party-composer-option-remove-0')).toBeNull();
+
+    await user.type(within(composer).getByTestId('party-composer-option-0'), 'Ballare');
+    await user.type(within(composer).getByTestId('party-composer-outcome-0'), 'Balla da solo');
+    await user.type(within(composer).getByTestId('party-composer-option-1'), 'Cantare');
+    await user.click(within(composer).getByTestId('party-composer-option-add'));
+    await user.type(within(composer).getByTestId('party-composer-option-2'), 'Niente');
+
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+    await user.click(within(composer).getByTestId('party-composer-save'));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    const sent = JSON.parse(posted[0]);
+    expect(sent.votingMode).toBe('choice');
+    expect(sent.options).toEqual([
+      { label: 'Ballare', outcome: 'Balla da solo' },
+      { label: 'Cantare', outcome: null },
+      { label: 'Niente', outcome: null },
+    ]);
+  });
+
+  it('stops offering answers at six', async () => {
+    mount([]);
+    const user = userEvent.setup();
+    const composer = await openComposer(user);
+    await user.type(within(composer).getByLabelText(/titolo/i), 'Scelta');
+    await user.type(within(composer).getByLabelText(/cosa deve fare/i), 'Corpo.');
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+    await user.click(within(composer).getByTestId('party-composer-voting-choice'));
+
+    for (let i = 0; i < 4; i += 1) {
+      await user.click(within(composer).getByTestId('party-composer-option-add'));
+    }
+    expect(within(composer).getByTestId('party-composer-option-5')).toBeInTheDocument();
+    // Absent at six rather than disabled: a control that never works is noise.
+    expect(within(composer).queryByTestId('party-composer-option-add')).toBeNull();
+  });
+
+  it('clears the ballot when the round stops being a choice', async () => {
+    const posted: string[] = [];
+    mount([], 0, {
+      [`POST ${DECK}`]: ({ body }: { body: string | null }) => {
+        posted.push(body ?? '');
+        return jsonResponse(challenge(), 201);
+      },
+    });
+    const user = userEvent.setup();
+    const composer = await openComposer(user);
+    await user.type(within(composer).getByLabelText(/titolo/i), 'Scelta');
+    await user.type(within(composer).getByLabelText(/cosa deve fare/i), 'Corpo.');
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+
+    await user.click(within(composer).getByTestId('party-composer-voting-choice'));
+    await user.type(within(composer).getByTestId('party-composer-option-0'), 'Ballare');
+    // Back to a verdict: the answers stay on screen for the host who changes
+    // their mind again, but they are NOT what gets saved.
+    await user.click(within(composer).getByTestId('party-composer-voting-binary'));
+    expect(within(composer).queryByTestId('party-composer-ballot')).toBeNull();
+
+    await user.click(within(composer).getByRole('button', { name: /avanti/i }));
+    await user.click(within(composer).getByTestId('party-composer-save'));
+
+    await waitFor(() => expect(posted).toHaveLength(1));
+    // An empty array, not an omitted field: it SAYS "no answers", which is what
+    // clears a ballot the host moved away from.
+    expect(JSON.parse(posted[0]).options).toEqual([]);
+  });
+
   it('never asks for a category, and never offers one', async () => {
     mount([]);
     const user = userEvent.setup();

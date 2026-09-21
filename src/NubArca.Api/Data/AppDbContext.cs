@@ -151,6 +151,7 @@ public class AppDbContext : DbContext
     // television — see PartyGuestbookEntry.
     public DbSet<PartyGuestbookEntry> PartyGuestbookEntries => Set<PartyGuestbookEntry>();
     public DbSet<PartyChallenge> PartyChallenges => Set<PartyChallenge>();
+    public DbSet<PartyChallengeOption> PartyChallengeOptions => Set<PartyChallengeOption>();
     public DbSet<PartyChallengeVote> PartyChallengeVotes => Set<PartyChallengeVote>();
     public DbSet<PartyChallengeSession> PartyChallengeSessions => Set<PartyChallengeSession>();
     public DbSet<PartyChallengeCompletion> PartyChallengeCompletions => Set<PartyChallengeCompletion>();

@@ -33,7 +33,21 @@ public sealed class PartyChallengeService : IPartyChallengeService
                 .GroupBy(x => x.PartyChallengeId)
                 .Select(g => new { Id = g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct)
             : [];
-        return new PartyChallengeListDto(albumId, rows.Select(x => OwnerDto(x, counts.GetValueOrDefault(x.Id))).ToList());
+        // ONE query for every ballot on the page, grouped in memory. The
+        // alternative is an options query per activity, and a deck of twenty is
+        // exactly the list a host scrolls.
+        var ids = rows.Where(x => PartyChallengeVotingModes.UsesOptions(x.VotingMode))
+            .Select(x => x.Id).ToList();
+        var ballots = ids.Count == 0
+            ? []
+            : (await _db.PartyChallengeOptions.AsNoTracking()
+                .Where(o => ids.Contains(o.PartyChallengeId))
+                .OrderBy(o => o.Position).ToListAsync(ct))
+                .GroupBy(o => o.PartyChallengeId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<PartyChallengeOption>)g.ToList());
+        return new PartyChallengeListDto(albumId, rows
+            .Select(x => OwnerDto(x, counts.GetValueOrDefault(x.Id), ballots.GetValueOrDefault(x.Id)))
+            .ToList());
     }
 
     public async Task<PartyChallengeDto?> CreateAsync(Guid ownerId, Guid albumId, PartyChallengeWriteRequest request, CancellationToken ct = default)
@@ -61,8 +75,9 @@ public sealed class PartyChallengeService : IPartyChallengeService
             VoteQuestion = NormalizeVoteQuestion(request.VoteQuestion),
         };
         _db.PartyChallenges.Add(row);
+        await ApplyOptionsAsync(row, request, ct);
         await _db.SaveChangesAsync(ct);
-        return OwnerDto(row, 0);
+        return OwnerDto(row, 0, await OptionsAsync(row.Id, ct));
     }
 
     public async Task<PartyChallengeDto?> UpdateAsync(Guid ownerId, Guid albumId, Guid challengeId, PartyChallengeWriteRequest request, CancellationToken ct = default)
@@ -88,12 +103,13 @@ public sealed class PartyChallengeService : IPartyChallengeService
         row.VoteQuestion = NormalizeVoteQuestion(request.VoteQuestion);
         row.UpdatedAt = Now;
         if (!row.IsEnabled) await ReleaseVotesForChallengeAsync(row.Id, ct);
+        await ApplyOptionsAsync(row, request, ct);
         await _db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         var linkId = await ActiveLinkIdAsync(ownerId, albumId, ct);
         var count = linkId is Guid lid
             ? await _db.PartyChallengeVotes.CountAsync(v => v.PartyAlbumLinkId == lid && v.PartyChallengeId == row.Id, ct) : 0;
-        return OwnerDto(row, count);
+        return OwnerDto(row, count, await OptionsAsync(row.Id, ct));
     }
 
     public async Task<bool> DeleteAsync(Guid ownerId, Guid albumId, Guid challengeId, CancellationToken ct = default)
@@ -301,18 +317,97 @@ public sealed class PartyChallengeService : IPartyChallengeService
         // be a mode the runtime can actually run.
         && (r.VotingMode is null || PartyChallengeVotingModes.IsKnown(r.VotingMode))
         && (r.VoteQuestion is null
-            || r.VoteQuestion.Trim().Length <= PartyChallengeLimits.MaxVoteQuestionLength);
+            || r.VoteQuestion.Trim().Length <= PartyChallengeLimits.MaxVoteQuestionLength)
+        && ValidOptions(r);
+
+    /// <summary>
+    /// Whether the ballot this write carries can actually be voted on.
+    ///
+    /// <para>Options are only meaningful for a `choice` round, and a choice
+    /// round is only playable with between two and six answers that each say
+    /// something. A write that sends NO options is always valid — null means
+    /// unchanged, which is what lets a client that predates choice rounds keep
+    /// saving activities it does understand.</para>
+    /// </summary>
+    private static bool ValidOptions(PartyChallengeWriteRequest r)
+    {
+        if (r.Options is null) return true;
+        var kept = r.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label)).ToList();
+        // Sending options for a mode that does not use them is a client bug, not
+        // something to quietly store: the row would be unreachable either way.
+        if (!PartyChallengeVotingModes.UsesOptions(r.VotingMode)) return kept.Count == 0;
+        return PartyChallengeLimits.IsValidOptionCount(kept.Count)
+            && kept.All(o => o.Label!.Trim().Length <= PartyChallengeLimits.MaxOptionLabelLength
+                && (o.Outcome is null
+                    || o.Outcome.Trim().Length <= PartyChallengeLimits.MaxOptionOutcomeLength));
+    }
 
     // A blank question is no question: the room gets the localized default
     // rather than an empty line where one was expected.
     private static string? NormalizeVoteQuestion(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    private static PartyChallengeDto OwnerDto(PartyChallenge x, int votes) =>
+    private static PartyChallengeDto OwnerDto(
+        PartyChallenge x, int votes, IReadOnlyList<PartyChallengeOption>? options = null) =>
         new(x.Id, x.Title, x.Body, x.Kind, x.MediaFileItemId,
             x.MediaFileItemId is Guid id ? $"/api/files/{id}/thumbnail?size=medium" : null,
             x.IsEnabled, x.SortOrder, votes, x.CreatedAt, x.UpdatedAt,
-            x.DurationSeconds, x.VotingMode, x.VoteQuestion);
+            x.DurationSeconds, x.VotingMode, x.VoteQuestion,
+            Ballot(x.VotingMode, options));
+
+    /// The answers, in the order the room sees them — and nothing at all for a
+    /// mode that is not answered with them.
+    internal static IReadOnlyList<PartyChallengeOptionDto>? Ballot(
+        string votingMode, IReadOnlyList<PartyChallengeOption>? options) =>
+        !PartyChallengeVotingModes.UsesOptions(votingMode) || options is null
+            ? null
+            : options.OrderBy(o => o.Position)
+                .Select(o => new PartyChallengeOptionDto(o.Id, o.Label, o.Outcome))
+                .ToList();
+
+    /// <summary>
+    /// Rewrites an activity's ballot to exactly what the host just saved.
+    ///
+    /// <para>Options are REPLACED rather than merged: the composer sends the
+    /// whole ballot because that is what the host was looking at, and matching
+    /// rows up by position would make a reorder indistinguishable from an edit.
+    /// Replacing means a vote already cast for a removed answer has nothing to
+    /// point at — which is correct, and is why a round in flight is not the
+    /// moment to rewrite the question.</para>
+    ///
+    /// <para>A write with no options leaves the stored ballot alone; a mode that
+    /// does not use options drops it, because keeping answers to a question
+    /// nobody will be asked is how stale data survives.</para>
+    /// </summary>
+    private async Task ApplyOptionsAsync(
+        PartyChallenge row, PartyChallengeWriteRequest request, CancellationToken ct)
+    {
+        var usesOptions = PartyChallengeVotingModes.UsesOptions(row.VotingMode);
+        if (request.Options is null && usesOptions) return;
+
+        var existing = await _db.PartyChallengeOptions
+            .Where(o => o.PartyChallengeId == row.Id).ToListAsync(ct);
+        if (existing.Count > 0) _db.PartyChallengeOptions.RemoveRange(existing);
+        if (!usesOptions || request.Options is null) return;
+
+        var position = 0;
+        foreach (var option in request.Options.Where(o => !string.IsNullOrWhiteSpace(o.Label)))
+        {
+            _db.PartyChallengeOptions.Add(new PartyChallengeOption
+            {
+                Id = Guid.NewGuid(),
+                PartyChallengeId = row.Id,
+                Position = position++,
+                Label = option.Label!.Trim(),
+                Outcome = string.IsNullOrWhiteSpace(option.Outcome) ? null : option.Outcome.Trim(),
+            });
+        }
+    }
+
+    private Task<List<PartyChallengeOption>> OptionsAsync(Guid challengeId, CancellationToken ct) =>
+        _db.PartyChallengeOptions.AsNoTracking()
+            .Where(o => o.PartyChallengeId == challengeId)
+            .OrderBy(o => o.Position).ToListAsync(ct);
 
     private async Task ReleaseVotesForChallengeAsync(Guid challengeId, CancellationToken ct)
     {

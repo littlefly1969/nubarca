@@ -122,7 +122,23 @@ export function PartyPhotosSection({
             testId="party-contributions"
           >
             {!open || !contributions ? (
-              <Notice tone="info" testId="party-photos-needs-access">
+              /* THE LOCK POINTS AT ITS OWN KEY. Guest access is what mints the
+                 link these settings live on, so there is nothing to configure
+                 until it is on — but it is also the step a host reads as "start
+                 the party" and postpones, which left them unable to prepare.
+                 Publishing is not starting: the party stays in its BEFORE phase,
+                 where guests reach a landing page and contribute nothing. So the
+                 notice says that, and hands over the one switch that opens it
+                 rather than leaving the host to find it. */
+              <Notice
+                tone="info"
+                testId="party-photos-needs-access"
+                actions={
+                  <Button tone="quiet" onClick={() => onNavigate('settings')} data-testid="party-photos-open-access">
+                    {t('party.photos.openAccess')}
+                  </Button>
+                }
+              >
                 <p>{t('party.photos.needsAccess')}</p>
               </Notice>
             ) : canContributions ? (

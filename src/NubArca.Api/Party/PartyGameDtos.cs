@@ -48,7 +48,24 @@ public sealed record PartyGameVotingDto(
     int Eligible,
     int? Yes = null,
     int? No = null,
-    bool? Passed = null);
+    bool? Passed = null,
+    IReadOnlyList<PartyGameOptionResultDto>? Options = null);
+
+/// <summary>
+/// One answer of a `choice` round, with how much of the room picked it.
+///
+/// <para>Counts, again, and not percentages — for the same reason the binary
+/// split is counts. <c>Winning</c> is decided here because a tie is a product
+/// question with one answer: the FIRST answer the host wrote wins it, since the
+/// order on the ballot is an order the host chose and a coin toss is not a
+/// result a room can be told.</para>
+///
+/// <para><c>Outcome</c> travels with the option so the television can announce
+/// the consequence in the same frame as the result, without a second lookup at
+/// the moment the room is watching.</para>
+/// </summary>
+public sealed record PartyGameOptionResultDto(
+    Guid Id, string Label, string? Outcome, int Votes, bool Winning);
 
 /// <summary>
 /// One activity as the host PLANNING the evening sees it: where it sits, what

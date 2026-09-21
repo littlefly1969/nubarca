@@ -223,11 +223,34 @@ public sealed class PartyDuplicator : IPartyDuplicator
                 .Where(c => c.AlbumId == albumId)
                 .OrderBy(c => c.SortOrder).ThenBy(c => c.Id)
                 .ToListAsync(cancellationToken);
+            // One query for every ballot in the deck, so a copy costs the same
+            // whether the host wrote one choice round or twenty.
+            var deckBallots = (await _db.PartyChallengeOptions.AsNoTracking()
+                    .Where(o => deck.Select(c => c.Id).Contains(o.PartyChallengeId))
+                    .OrderBy(o => o.Position).ToListAsync(cancellationToken))
+                .GroupBy(o => o.PartyChallengeId)
+                .ToDictionary(g => g.Key, g => g.ToList());
             foreach (var challenge in deck)
             {
+                var copyId = Guid.NewGuid();
+                // The ANSWERS are part of the question, so a re-run that copied
+                // a choice round without them would arrive with a ballot nobody
+                // could vote on. New ids, because the votes that named the old
+                // ones belong to the evening that was.
+                foreach (var option in deckBallots.GetValueOrDefault(challenge.Id, []))
+                {
+                    _db.PartyChallengeOptions.Add(new PartyChallengeOption
+                    {
+                        Id = Guid.NewGuid(),
+                        PartyChallengeId = copyId,
+                        Position = option.Position,
+                        Label = option.Label,
+                        Outcome = option.Outcome,
+                    });
+                }
                 _db.PartyChallenges.Add(new PartyChallenge
                 {
-                    Id = Guid.NewGuid(),
+                    Id = copyId,
                     AlbumId = album.Id,
                     Title = challenge.Title,
                     Body = challenge.Body,

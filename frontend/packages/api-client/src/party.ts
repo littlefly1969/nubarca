@@ -885,7 +885,33 @@ export type PartyChallengeKind = 'dare' | 'penalty' | 'guess' | 'custom';
 // How the room decides. The set is designed to grow — rating, multiple choice,
 // quiz — so this stays a string union whose members the server also knows;
 // nothing here is an index into an ordering.
-export type PartyChallengeVotingMode = 'none' | 'binary';
+export type PartyChallengeVotingMode = 'none' | 'binary' | 'choice';
+
+/**
+ * One answer the room may pick in a `choice` round, and what it costs.
+ *
+ * `outcome` is the half that makes the mode worth having — "so the guest of
+ * honour has to do this" — and is null when the answer speaks for itself.
+ */
+export interface PartyChallengeOption {
+  id: string;
+  label: string;
+  outcome: string | null;
+}
+
+/** An answer as the composer sends it: no id, because the server mints them. */
+export interface PartyChallengeOptionWrite {
+  label: string;
+  outcome: string | null;
+}
+
+/** Two is a choice; six is what a television can still be read from across. */
+export const PARTY_CHALLENGE_OPTION_LIMITS = {
+  min: 2,
+  max: 6,
+  labelLength: 60,
+  outcomeLength: 200,
+} as const;
 
 // The activity's rules, as fields rather than as prose inside `body`. Optional
 // on the wire so a response from a server that predates them still parses.
@@ -895,6 +921,14 @@ export interface PartyChallengeRules {
   votingMode?: PartyChallengeVotingMode;
   /** null = the localized default question. */
   voteQuestion?: string | null;
+  /**
+   * The ballot, for `choice` rounds only — null or absent for every other mode.
+   *
+   * On a WRITE, omitting it means UNCHANGED, so a client that predates choice
+   * rounds cannot wipe the answers a host wrote by saving the form it does
+   * understand.
+   */
+  options?: PartyChallengeOption[] | null;
 }
 
 export interface PartyChallenge extends PartyChallengeRules {
@@ -920,9 +954,19 @@ export interface PartyChallengeList { albumId: string; items: PartyChallenge[]; 
  * for — omitted, the server gives a new activity `custom` and leaves an
  * existing one's kind exactly as it was.
  */
-export interface PartyChallengeWrite extends PartyChallengeRules {
+export interface PartyChallengeWrite extends Omit<PartyChallengeRules, 'options'> {
   title: string; body: string; kind?: PartyChallengeKind;
   mediaFileItemId: string | null; isEnabled: boolean;
+  /**
+   * The ballot, WITHOUT ids — the server mints those, and a client that sent
+   * one would be claiming to know an identity it cannot have.
+   *
+   * Omitted means UNCHANGED; an empty array means "this activity has no
+   * answers", which is what clears a ballot a host has moved away from. The two
+   * are deliberately different, so a client that predates choice rounds cannot
+   * wipe one by saving the form it does understand.
+   */
+  options?: PartyChallengeOptionWrite[];
 }
 export function listPartyChallenges(albumId: string, signal?: AbortSignal): Promise<PartyChallengeList> {
   return api<PartyChallengeList>(`/api/albums/${albumId}/party-challenges`, { signal });

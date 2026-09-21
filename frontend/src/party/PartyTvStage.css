@@ -126,6 +126,24 @@
 .party-stage-verdict[data-passed='true'] { color: var(--success); }
 .party-stage-verdict[data-passed='false'] { color: var(--danger); }
 
+/* A choice round's winning answer is the host's own words, so it is NOT
+   uppercased and carries no pass/fail colour — there is nothing to agree with.
+   The consequence sits under it, quieter and in a sentence, because it is read
+   out rather than chanted. */
+.party-stage-result .party-stage-verdict:not([data-passed]) {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-primary);
+}
+.party-stage-outcome {
+  margin: 0.4em 0 0;
+  max-width: 24ch;
+  font-size: clamp(1rem, 3.4vh, 2.6rem);
+  line-height: 1.25;
+  color: var(--text-secondary);
+  text-wrap: balance;
+}
+
 /* The reveal is sequenced: the headline lands, then the number, then the
    verdict. Each step is short and each is a fade-and-rise, never a bounce. */
 .party-stage-result .party-stage-verdict-intro,

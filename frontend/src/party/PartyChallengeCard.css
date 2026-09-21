@@ -254,8 +254,17 @@
    is never this narrow. */
 @media (max-width: 640px) {
   .party-activity[data-mode='preview'] {
+    /* INLINE containment, not size. `container-type: size` contains BOTH axes,
+       so the box kept its 18rem whatever was inside it and the copy was cut off
+       by the card's `overflow: hidden` — with `justify-content: center` the cut
+       fell on both ends, slicing the title through the middle. Containing only
+       the inline axis lets the height follow the content, which is what a
+       stacked preview needs; the type below already measures in `cqw`, so it
+       still resolves against the container. */
+    container-type: inline-size;
     aspect-ratio: auto;
     min-height: 18rem;
+    height: auto;
     font-size: clamp(0.6rem, 3.4cqw, 1rem);
   }
   .party-activity[data-mode='preview'][data-media='true'] .party-activity-card {
