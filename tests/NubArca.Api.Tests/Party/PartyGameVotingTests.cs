@@ -364,8 +364,17 @@ public sealed class PartyGameVotingTests : IDisposable
         [
             "id", "title", "body", "kind", "mediaUrl",
             "durationSeconds", "votingMode", "voteQuestion",
+            // THE BALLOT IS GUEST-VISIBLE ON PURPOSE: a choice round cannot be
+            // answered by somebody who cannot see its answers. It carries the
+            // host's labels and their stated outcomes and nothing else — no
+            // counts, so a guest choosing is not told what the room picked
+            // first, which is the same rule `preferences` follows. Null for
+            // every other voting mode.
+            "options",
         ];
-        string[] allowedVoting = ["received", "eligible", "yes", "no", "passed"];
+        // `options` here is the RESULT per answer, and like `yes`/`no`/`passed`
+        // it is null until the host closes voting.
+        string[] allowedVoting = ["received", "eligible", "yes", "no", "passed", "options"];
         string[] allowedPreferences = ["open", "votesPerGuest", "votesUsed", "votesRemaining", "items"];
         string[] allowedPreferenceItem = ["id", "title", "body", "mediaUrl", "selected"];
 

@@ -147,6 +147,52 @@ describe('the television stage', () => {
     expect(screen.getByTestId('party-stage-verdict')).toHaveAttribute('data-passed', 'true');
   });
 
+  it('announces the winning answer and what it costs', async () => {
+    serve(() => snapshot({
+      phase: 'result',
+      challenge: { ...snapshot().challenge!, votingMode: 'choice' },
+      voting: {
+        received: 20, eligible: 22, yes: null, no: null, passed: null,
+        options: [
+          { id: 'o1', label: 'Ballare', outcome: 'Balla da solo', votes: 7, winning: true },
+          { id: 'o2', label: 'Cantare', outcome: 'Canta il ritornello', votes: 6, winning: false },
+          { id: 'o3', label: 'Niente', outcome: null, votes: 7, winning: false },
+        ],
+      },
+    }));
+    mount();
+
+    // The room hears what it decided, then what it costs.
+    expect(await screen.findByTestId('party-stage-choice')).toHaveTextContent('Ballare');
+    expect(screen.getByTestId('party-stage-outcome')).toHaveTextContent('Balla da solo');
+    // 7 of 20 cast, rounded once, here.
+    expect(screen.getByTestId('party-stage-percent')).toHaveTextContent('35%');
+    // A choice round has no pass/fail: there is nothing to have passed.
+    expect(screen.queryByTestId('party-stage-verdict')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/superata/i);
+  });
+
+  it('announces nothing when a choice round drew no votes at all', async () => {
+    serve(() => snapshot({
+      phase: 'result',
+      challenge: { ...snapshot().challenge!, votingMode: 'choice' },
+      voting: {
+        received: 0, eligible: 9, yes: null, no: null, passed: null,
+        options: [
+          { id: 'o1', label: 'Ballare', outcome: 'Balla', votes: 0, winning: false },
+          { id: 'o2', label: 'Cantare', outcome: null, votes: 0, winning: false },
+        ],
+      },
+    }));
+    mount();
+
+    // "Everyone abstained" is not a verdict, and a television must not announce
+    // one — least of all a consequence for the guest of honour.
+    expect(await screen.findByText(/si passa alla prossima/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('party-stage-choice')).toBeNull();
+    expect(screen.queryByTestId('party-stage-outcome')).toBeNull();
+  });
+
   it('says a challenge failed as a word, not only as a colour', async () => {
     serve(() => snapshot({
       phase: 'result',

@@ -39,8 +39,8 @@ describe('PartySlideshowSettings', () => {
     expect(screen.getByTestId('party-slideshow-settings')).toBeInTheDocument();
     expect(screen.getByLabelText(/Durata foto nello slideshow/i)).toHaveValue(9);
     expect(screen.getByLabelText(/Durata massima video nello slideshow/i)).toHaveValue(60);
-    expect(screen.getByLabelText(/Massimo foto per partecipante/i)).toHaveValue(0);
-    expect(screen.getByLabelText(/Massimo video per partecipante/i)).toHaveValue(0);
+    expect(screen.getByLabelText(/Foto per partecipante/i)).toHaveValue(0);
+    expect(screen.getByLabelText(/Video per partecipante/i)).toHaveValue(0);
   });
 
   it('refuses to save an out-of-range value and never calls the API', async () => {
@@ -69,7 +69,7 @@ describe('PartySlideshowSettings', () => {
     const photo = screen.getByLabelText(/Durata foto nello slideshow/i);
     await userEvent.clear(photo);
     await userEvent.type(photo, '15');
-    const quota = screen.getByLabelText(/Massimo foto per partecipante/i);
+    const quota = screen.getByLabelText(/Foto per partecipante/i);
     await userEvent.clear(quota);
     await userEvent.type(quota, '20');
 

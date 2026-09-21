@@ -234,6 +234,48 @@ describe('the guest live game', () => {
     expect(screen.getByTestId('party-game-vote-yes')).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('offers the HOST\u2019s answers on a choice round, and sends the one tapped', async () => {
+    const votes: unknown[] = [];
+    const choice = snapshot({
+      challenge: {
+        ...snapshot().challenge!,
+        votingMode: 'choice',
+        voteQuestion: 'Cosa deve fare?',
+        options: [
+          { id: 'o1', label: 'Ballare', outcome: 'Balla da solo' },
+          { id: 'o2', label: 'Cantare', outcome: null },
+          { id: 'o3', label: 'Niente', outcome: null },
+        ],
+      },
+    });
+    let current = choice;
+    installFetchMock({
+      [`GET /api/party/${TOKEN}/game`]: () => jsonResponse(current),
+      [`POST /api/party/${TOKEN}/game/join`]: () => jsonResponse(current),
+      [`POST /api/party/${TOKEN}/game/vote`]: ({ body }: { body: string | null }) => {
+        votes.push(JSON.parse(body ?? '{}'));
+        current = { ...choice, myVote: 'o2' };
+        return jsonResponse(current);
+      },
+    });
+    mount();
+
+    // The host's words, not the product's — and no yes/no anywhere.
+    expect(await screen.findByTestId('party-game-option-o1')).toHaveTextContent('Ballare');
+    expect(screen.getByTestId('party-game-option-o3')).toHaveTextContent('Niente');
+    expect(screen.queryByTestId('party-game-vote-yes')).toBeNull();
+
+    await userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      .click(screen.getByTestId('party-game-option-o2'));
+    await waitFor(() => expect(votes).toHaveLength(1));
+    // The ANSWER is the option's id, and it names the round it answers.
+    expect(votes[0]).toEqual({ roundId: 'r1', value: 'o2' });
+
+    expect(await screen.findByTestId('party-game-confirmed')).toBeInTheDocument();
+    expect(screen.getByTestId('party-game-option-o2')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('party-game-option-o1')).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('uses the question the host wrote when there is one', async () => {
     const withQuestion = snapshot({
       challenge: { ...snapshot().challenge!, voteQuestion: 'Ce l’ha fatta davvero?' },

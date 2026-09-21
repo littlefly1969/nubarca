@@ -85,11 +85,19 @@ public sealed class PartyGameVoteConfiguration : IEntityTypeConfiguration<PartyG
 {
     public void Configure(EntityTypeBuilder<PartyGameVote> b)
     {
+        // AN ANSWER IS A VERDICT OR AN OPTION ID. A binary round is answered
+        // with one of two words; a choice round is answered with the id of one
+        // of the activity's own options, and WHICH ids are acceptable is a
+        // question about that activity — so the constraint checks the SHAPE and
+        // the service checks the membership. `length` rather than a uuid regex
+        // because the same constraint has to hold on PostgreSQL and on the
+        // SQLite the tests run against.
         b.ToTable("party_game_votes", t =>
-            t.HasCheckConstraint("ck_party_game_votes_value", "\"Value\" IN ('yes','no')"));
+            t.HasCheckConstraint("ck_party_game_votes_value",
+                "\"Value\" IN ('yes','no') OR length(\"Value\") = 36"));
         b.HasKey(x => x.Id);
         b.Property(x => x.Id).ValueGeneratedNever();
-        b.Property(x => x.Value).IsRequired().HasMaxLength(10);
+        b.Property(x => x.Value).IsRequired().HasMaxLength(36);
         b.Property(x => x.CreatedAt).HasColumnType("timestamp with time zone");
         b.Property(x => x.UpdatedAt).HasColumnType("timestamp with time zone");
 

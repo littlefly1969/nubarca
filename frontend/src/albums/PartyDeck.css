@@ -267,19 +267,92 @@
 }
 .party-composer-choices button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
-.party-composer-toggle {
+/* `.field` and `.party-composer-toggle` are both one class, so which of them
+   set the direction came down to which stylesheet the bundler happened to emit
+   last — and `.field`'s `column` won, standing the checkbox on top of its own
+   label. Qualifying the selector with `.field` settles it by specificity rather
+   than by luck. The checkbox also has to shed the text-input dressing `.field
+   input` gives it: a checkbox with padding and a background renders as a big
+   empty square with a tick lost in it. */
+.field.party-composer-toggle {
   flex-direction: row;
   align-items: flex-start;
   gap: 0.6rem;
 }
-.party-composer-toggle input { width: auto; min-height: 0; margin-top: 0.2rem; }
-.party-composer-toggle > span { display: flex; flex-direction: column; gap: 0.2rem; }
+.field.party-composer-toggle input {
+  flex: none;
+  width: auto;
+  min-height: 0;
+  margin-top: 0.2rem;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.field.party-composer-toggle > span { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+
+/* ---- The ballot ----------------------------------------------------------
+   One row per answer: what the room taps, and what happens if it wins. They sit
+   side by side because a host writes them as one thought — "if they say this,
+   then that" — and stack on a phone, where two fields on a line are two fields
+   nobody can read. */
+.party-composer-ballot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.party-composer-ballot > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.party-composer-ballot input { min-width: 0; }
+.party-composer-ballot-remove {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.party-composer-ballot-add {
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .party-composer-ballot > li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  /* The consequence takes the full second line, under both. */
+  .party-composer-ballot > li > input:nth-of-type(2) { grid-column: 1 / -1; }
+}
 
 /* On a phone the composer is the whole screen (Overlay already does that), and
    its controls become full-width so nothing needs a precise tap. */
 @media (max-width: 640px) {
-  .party-composer-actions { justify-content: stretch; }
+  /* ONE ROW, always. `flex: 1 1 8rem` plus the wrap above sent Indietro and
+     Salva attività onto separate lines as soon as a label grew — two full-width
+     buttons stacked down the screen, which is both ugly and a waste of the one
+     screen a phone has. A zero basis makes them SHARE the row instead of each
+     claiming 8rem before wrapping, and nowrap says the row is the contract. */
+  .party-composer-actions { justify-content: stretch; flex-wrap: nowrap; }
   .party-composer-actions button,
-  .party-composer-primary { flex: 1 1 8rem; min-height: 3rem; }
+  .party-composer-primary { flex: 1 1 0; min-width: 0; min-height: 3rem; }
   .party-deck-row-actions button { min-height: 2.75rem; }
 }

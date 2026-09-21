@@ -76,8 +76,12 @@ it('asks the guest list for NUMBERS, and for names only when the host opens it',
   const mock = renderWorkspace();
 
   await screen.findByTestId('party-tab-guests');
-  // "Ospiti", not "Invitati": a party may be open and invite nobody at all.
-  expect(screen.getByTestId('party-tab-guests')).toHaveTextContent('Ospiti');
+  // "Invitati": the section where the host MANAGES people is named for the
+  // list it holds, and `ospiti` is left to the guest-facing surfaces. Note the
+  // console still counts `Invitati` as a METRIC — a subset of what it lists,
+  // beside `Altri arrivi` — so the two readings of the word now sit on one
+  // page. See the note in the guests section.
+  expect(screen.getByTestId('party-tab-guests')).toHaveTextContent('Invitati');
 
   // The summary needs the counts, and asks for exactly those: `take: 0` is the
   // totals alone. No card, no person, no name reaches a page that is not the

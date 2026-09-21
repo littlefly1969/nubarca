@@ -1,5 +1,7 @@
 import { api, ApiError } from './client';
-import type { PartyChallengeKind, PartyChallengeVotingMode } from './party';
+import type {
+  PartyChallengeKind, PartyChallengeOption, PartyChallengeVotingMode,
+} from './party';
 
 // The live Party Game, as the three surfaces that watch it see it.
 //
@@ -52,7 +54,18 @@ export type PartyGameCommand =
   // `result`, because it RESOLVES the round the room just saw the outcome of.
   | 'return_to_party';
 
+/**
+ * The two answers a VERDICT round has.
+ *
+ * A choice round is answered with the id of one of the activity's own options
+ * instead, so anything that carries "whatever this guest answered" — `myVote`,
+ * what the vote endpoint takes — is a plain string, and the server decides
+ * which strings are answers to which question.
+ */
 export type PartyGameVoteValue = 'yes' | 'no';
+
+/** A verdict, or the id of a choice round's option. */
+export type PartyGameAnswer = PartyGameVoteValue | (string & {});
 
 /**
  * What the room has said. `yes` / `no` / `passed` are null until the audience
@@ -65,6 +78,12 @@ export interface PartyGameVoting {
   yes: number | null;
   no: number | null;
   passed: boolean | null;
+  /**
+   * The result of a `choice` round, per answer. Null while voting is open, for
+   * the same reason `yes`/`no` are: the room learns the split when the host
+   * decides to reveal it, not before.
+   */
+  options?: PartyGameOptionResult[] | null;
 }
 
 export interface PartyGameChallenge {
@@ -76,6 +95,24 @@ export interface PartyGameChallenge {
   durationSeconds: number | null;
   votingMode: PartyChallengeVotingMode;
   voteQuestion: string | null;
+  /** The answers, for a `choice` round. Null for every other mode. */
+  options?: PartyChallengeOption[] | null;
+}
+
+/**
+ * One answer's share of the room, once the host has closed voting.
+ *
+ * Counts and not a percentage, so two surfaces cannot round one party's verdict
+ * differently — a caller divides by `received` itself. `winning` is decided by
+ * the server because a tie is a product question with one answer: the first
+ * answer the host wrote takes it.
+ */
+export interface PartyGameOptionResult {
+  id: string;
+  label: string;
+  outcome: string | null;
+  votes: number;
+  winning: boolean;
 }
 
 /** Where one activity stands in the match, as the control room reads it. */
@@ -189,7 +226,7 @@ export interface PartyGamePublicSnapshot {
   roundId: string | null;
   voting: PartyGameVoting | null;
   /** This caller's own answer. Always null for a television: it holds no session. */
-  myVote: PartyGameVoteValue | null;
+  myVote: PartyGameAnswer | null;
   /**
    * The pre-game preference surface, or null when the host did not ask the
    * room. It travels WITH the snapshot because a phone in the lobby needs both
@@ -374,7 +411,7 @@ function asPreferenceConflict(error: unknown): unknown {
 }
 
 export async function submitPartyGameVote(
-  token: string, roundId: string, value: PartyGameVoteValue, signal?: AbortSignal,
+  token: string, roundId: string, value: PartyGameAnswer, signal?: AbortSignal,
 ): Promise<PartyGamePublicSnapshot> {
   try {
     return await api<PartyGamePublicSnapshot>(
@@ -396,6 +433,25 @@ export function partyGameYesPercent(voting: PartyGameVoting | null | undefined):
   if (!voting || voting.yes === null || voting.no === null) return null;
   const cast = voting.yes + voting.no;
   return cast === 0 ? null : Math.round((voting.yes / cast) * 100);
+}
+
+/**
+ * The winning answer of a `choice` round, with its share of the room.
+ *
+ * Null while voting is open, and null when nobody voted — "everyone abstained"
+ * is not a verdict, and a television must not announce one. The percentage is
+ * computed HERE, from the counts the server sent, for the same reason the
+ * server sends counts: one place rounds it, so one party sees one number.
+ */
+export function partyGameWinningOption(
+  voting: PartyGameVoting | null | undefined,
+): { option: PartyGameOptionResult; percent: number } | null {
+  const options = voting?.options;
+  if (!options || options.length === 0 || !voting) return null;
+  const cast = options.reduce((total, o) => total + o.votes, 0);
+  if (cast === 0) return null;
+  const option = options.find((o) => o.winning);
+  return option ? { option, percent: Math.round((option.votes / cast) * 100) } : null;
 }
 
 function asConflict<TCode extends string, TSnapshot>(error: unknown): unknown {

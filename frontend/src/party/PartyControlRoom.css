@@ -170,6 +170,94 @@
   cursor: pointer;
 }
 
+/* ---- The plan ------------------------------------------------------------
+   The running order, as a list of rows the host reorders with their thumb.
+
+   These rules were MISSING, and unstyled markup does not degrade gracefully:
+   the thumbnail is an `<img>` with no box, so it rendered at its natural size
+   and filled the phone; the copy is a `<strong>` beside two `<span>`s, so with
+   no layout they ran together into one word — "CoraggioDa giocare0 preferenze".
+   A row is a grid, and every part of it is given a size here. */
+
+.party-control-plan { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+.party-control-plan-head h3 { margin: 0 0 0.2rem; }
+.party-control-plan-head p { margin: 0; }
+
+.party-control-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.party-control-plan-list > li {
+  display: grid;
+  grid-template-columns: 2rem 3.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+/* Without a picture the copy takes the frame's column too, rather than leaving
+   a hole where the thumbnail would have been. */
+.party-control-plan-list > li:not(:has(> img)) { grid-template-columns: 2rem minmax(0, 1fr) auto; }
+
+/* Played is done, excluded is a decision, disabled is a setting. All three are
+   quieter than what is still to come, which is what the host is scanning for. */
+.party-control-plan-list > li[data-state='current'] { border-color: var(--accent-strong); }
+.party-control-plan-list > li[data-state='played'],
+.party-control-plan-list > li[data-excluded='true'] { opacity: 0.6; }
+
+.party-control-plan-position {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.party-control-plan-list > li > img {
+  display: block;
+  width: 3.25rem;
+  height: 3.25rem;
+  object-fit: cover;
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+}
+.party-control-plan-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.party-control-plan-copy > strong { overflow-wrap: anywhere; }
+.party-control-plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+}
+.party-control-plan-votes { font-variant-numeric: tabular-nums; }
+
+.party-control-plan-actions { display: flex; gap: 0.35rem; }
+.party-control-plan-actions button,
+.party-control-plan-toggle {
+  min-height: 2.75rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.party-control-plan-actions button:disabled,
+.party-control-plan-toggle:disabled { opacity: 0.5; cursor: default; }
+
 /* ---- Responsive ---------------------------------------------------------- */
 
 /* Tablet and below: one column, ordered status → now → next → command. */
@@ -194,4 +282,19 @@
   .party-control-secondary,
   .party-control-commands .btn-danger { flex: 1 1 8rem; }
   .party-control-qr > div { width: 4.5rem; }
+
+  /* A phone has no room for number, thumbnail, copy AND two button groups on
+     one line. The identity stays on the first row and the controls drop to a
+     second, full-width one — so a thumb reaches them without the row becoming
+     a column of single words. */
+  .party-control-plan-list > li,
+  .party-control-plan-list > li:not(:has(> img)) {
+    grid-template-columns: 2rem 3.25rem minmax(0, 1fr);
+  }
+  .party-control-plan-list > li:not(:has(> img)) { grid-template-columns: 2rem minmax(0, 1fr); }
+  .party-control-plan-actions,
+  .party-control-plan-toggle { grid-column: 1 / -1; }
+  .party-control-plan-actions { flex-wrap: wrap; }
+  .party-control-plan-actions button:first-child { flex: 1 1 8rem; }
+  .party-control-plan-toggle { width: 100%; }
 }

@@ -321,11 +321,26 @@ public sealed class PartyGameService : IPartyGameService
                 var mediaOk = row.MediaFileItemId is Guid mediaId
                     && await PartyMediaReference.IsEligibleAsync(
                         _db, access.OwnerUserId, mediaId, cancellationToken);
+                // THE BALLOT TRAVELS WITH THE QUESTION. A guest cannot answer a
+                // choice round without seeing its answers, and the television
+                // draws them beside the question — so they are part of the
+                // activity being presented, not a second request made at the
+                // moment the room is waiting. The OUTCOME is carried too: it is
+                // the host's own line, written in advance, and withholding it
+                // until the result would cost another round trip on the frame
+                // that matters most.
+                var ballot = PartyChallengeVotingModes.UsesOptions(row.VotingMode)
+                    ? await _db.PartyChallengeOptions.AsNoTracking()
+                        .Where(o => o.PartyChallengeId == row.Id)
+                        .OrderBy(o => o.Position)
+                        .Select(o => new PartyChallengeOptionDto(o.Id, o.Label, o.Outcome))
+                        .ToListAsync(cancellationToken)
+                    : null;
                 challenge = new PartyChallengePresentationDto(row.Id, row.Title, row.Body, row.Kind,
                     // Token-less sentinel; the endpoint rewrites it against the
                     // caller's own token, exactly as the guest challenge list does.
                     mediaOk ? $"/api/party/challenge-media/{row.Id}" : null,
-                    row.DurationSeconds, row.VotingMode, row.VoteQuestion);
+                    row.DurationSeconds, row.VotingMode, row.VoteQuestion, ballot);
 
                 if (PartyChallengeVotingModes.CollectsVotes(row.VotingMode))
                 {
@@ -353,7 +368,12 @@ public sealed class PartyGameService : IPartyGameService
         PartyAccess access, Guid? participantId, Guid? roundId, string? value,
         CancellationToken cancellationToken = default)
     {
-        if (!PartyGameVoteValues.IsKnown(value))
+        // WHAT COUNTS AS AN ANSWER DEPENDS ON THE QUESTION, so the real check
+        // waits until the challenge is known. This one only rejects what could
+        // never be an answer to anything — an absent value, or one too long to
+        // be either a verdict or an option id — so a malformed tap is refused
+        // before it costs a query.
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 64)
             return PartyGameVoteResult.Fail(PartyGameVoteError.UnknownValue);
         var linkId = access.PartyAlbumLinkId;
 
@@ -393,6 +413,22 @@ public sealed class PartyGameService : IPartyGameService
         var challenge = await CurrentChallengeAsync(session, cancellationToken);
         if (!PartyChallengeVotingModes.CollectsVotes(challenge?.VotingMode))
             return await RefuseAsync(PartyGameVoteError.VotingClosed);
+
+        // A `choice` round is answered with one of ITS OWN options, and the id
+        // is checked against this challenge rather than merely parsed: an id
+        // from another activity is a well-formed guid and would otherwise be
+        // recorded as a vote for nothing.
+        if (PartyChallengeVotingModes.UsesOptions(challenge!.VotingMode))
+        {
+            if (!Guid.TryParse(value, out var optionId)
+                || !await _db.PartyChallengeOptions.AsNoTracking().AnyAsync(
+                    o => o.Id == optionId && o.PartyChallengeId == challenge.Id, cancellationToken))
+                return await RefuseAsync(PartyGameVoteError.UnknownValue);
+        }
+        else if (!PartyGameVoteValues.IsKnown(value))
+        {
+            return await RefuseAsync(PartyGameVoteError.UnknownValue);
+        }
 
         var accepted = await TryRecordAsync(session.Id, activeRound, voter, value!, cancellationToken);
         if (!accepted) return await RefuseAsync(PartyGameVoteError.VotingClosed);
@@ -974,9 +1010,22 @@ public sealed class PartyGameService : IPartyGameService
             .GroupBy(x => x.Value)
             .Select(g => new { Value = g.Key, Count = g.Count() })
             .ToListAsync(ct);
+
+        // The challenge of THIS ROUND, not of whatever round the session happens
+        // to point at now: a tally is about the round it was asked for, and the
+        // two diverge the moment the game moves on.
+        var challenge = await _db.PartyGameRounds.AsNoTracking()
+            .Where(x => x.Id == roundId)
+            .Join(_db.PartyChallenges.AsNoTracking(), r => r.PartyChallengeId, c => c.Id, (r, c) => c)
+            .FirstOrDefaultAsync(ct);
+        var choice = PartyChallengeVotingModes.UsesOptions(challenge?.VotingMode);
+
+        // A choice round counts EVERY answer it was given; a binary one counts
+        // the two it has. Either way `received` is what was actually cast, so
+        // the progress bar never outruns the ballot.
         var yes = tallies.FirstOrDefault(x => x.Value == PartyGameVoteValues.Yes)?.Count ?? 0;
         var no = tallies.FirstOrDefault(x => x.Value == PartyGameVoteValues.No)?.Count ?? 0;
-        var received = yes + no;
+        var received = choice ? tallies.Sum(x => x.Count) : yes + no;
 
         var since = Now.AddSeconds(-PartyGamePresence.WindowSeconds);
         var present = await _db.PartyParticipants.AsNoTracking()
@@ -986,9 +1035,31 @@ public sealed class PartyGameService : IPartyGameService
         // Whoever voted is in the room, whatever their last heartbeat says.
         var eligible = Math.Max(present, received);
 
-        return includeResult
-            ? new PartyGameVotingDto(received, eligible, yes, no, yes > no)
-            : new PartyGameVotingDto(received, eligible);
+        if (!includeResult) return new PartyGameVotingDto(received, eligible);
+        if (!choice) return new PartyGameVotingDto(received, eligible, yes, no, yes > no);
+
+        var options = await _db.PartyChallengeOptions.AsNoTracking()
+            .Where(o => o.PartyChallengeId == challenge!.Id)
+            .OrderBy(o => o.Position).ToListAsync(ct);
+        var counts = tallies.ToDictionary(x => x.Value, x => x.Count, StringComparer.Ordinal);
+        var top = options.Count == 0
+            ? 0
+            : options.Max(o => counts.GetValueOrDefault(o.Id.ToString(), 0));
+
+        // A TIE GOES TO THE FIRST ANSWER THE HOST WROTE. The ballot's order is
+        // an order somebody chose, which makes it a better tiebreak than any
+        // rule the room would have to be told about — and with nobody voting at
+        // all there is no winner, because "everyone abstained" is not a verdict.
+        var winner = top == 0
+            ? (Guid?)null
+            : options.First(o => counts.GetValueOrDefault(o.Id.ToString(), 0) == top).Id;
+
+        return new PartyGameVotingDto(received, eligible, Options: options
+            .Select(o => new PartyGameOptionResultDto(
+                o.Id, o.Label, o.Outcome,
+                counts.GetValueOrDefault(o.Id.ToString(), 0),
+                o.Id == winner))
+            .ToList());
     }
 
     /// <summary>

@@ -7,13 +7,13 @@ import {
 import { useAuth } from '../../auth/useAuth';
 import { usePermissions } from '../../auth/usePermissions';
 import { PERMISSIONS } from '../../auth/permissions';
-import { cloudToolUrl } from '../../cloud/cloudTools';
 import { useI18n } from '../../i18n';
 import { PartyPrintSettings } from '../../albums/PartyPrintSettings';
 import { mainMediaSource } from '../partyModel';
 import { absoluteGuestUrl } from './PartyShareCard';
 import { usePartyApi } from './partyApi';
 import { Button, EmptyState, LinkRow, Notice, Panel, SectionHead, SwitchRow } from './ui';
+import { PartyTvTargets } from './PartyTvTargets';
 
 // "SCHERMI E STAMPA" — the party as it appears on something other than a phone.
 //
@@ -122,18 +122,13 @@ export function PartyScreensSection({
             {t('party.screens.stageLocked')}
           </p>
         )}
-        {/* Paired televisions are INSTALLATION hardware — they outlive this
-            party and belong to whoever runs the server. A collaborator points
-            a screen at this evening; they do not pair or unpair devices. */}
-        {api.isOwner && (
-          <LinkRow
-            to={cloudToolUrl('tv-devices')}
-            testId="party-screens-devices"
-            title={t('cloud.tvDevices')}
-            note={t('party.screens.devicesNote')}
-          />
-        )}
       </Panel>
+
+      {/* Paired televisions are INSTALLATION hardware — they outlive this party
+          and belong to whoever runs the server. A collaborator points a screen
+          at this evening; they do not pair or unpair devices, so only an owner
+          sees this at all. */}
+      {api.isOwner && <PartyTvTargets albumId={albumId} />}
 
       {canPrint ? (
         <Panel

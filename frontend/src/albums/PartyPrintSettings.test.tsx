@@ -224,7 +224,7 @@ describe('PartyPrintSettings (owner panel)', () => {
     view();
     // A party budget alone is spent by whoever reaches the studio first; this
     // is the number that makes the paper last the evening.
-    expect(await screen.findByLabelText(/Foto 10×15 — Stampe per ospite/))
+    expect(await screen.findByLabelText(/Foto 10×15 — Stampe per partecipante/))
       .toHaveValue(2);
     expect(screen.getByLabelText(/Foto 10×15 — Stampe massime/)).toHaveValue(40);
   });

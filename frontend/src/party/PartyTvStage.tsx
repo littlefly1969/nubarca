@@ -1,4 +1,6 @@
-import { partyGameYesPercent, type PartyGamePublicSnapshot } from '@nubarca/api-client';
+import {
+  partyGameWinningOption, partyGameYesPercent, type PartyGamePublicSnapshot,
+} from '@nubarca/api-client';
 import { PartyChallengeCard } from './PartyChallengeCard';
 import { useCountdown, formatCountdown } from './useCountdown';
 import { useRoundIntro, stageScene, type StageScene } from './stageScene';
@@ -70,6 +72,7 @@ export function PartyTvStage({
   const challenge = snapshot.challenge;
   const voting = snapshot.voting;
   const percent = partyGameYesPercent(voting);
+  const winner = partyGameWinningOption(voting);
   const round = t('partyActivity.round', {
     round: snapshot.roundNumber, total: snapshot.totalChallenges,
   });
@@ -166,7 +169,29 @@ export function PartyTvStage({
         // Scene 5. The headline lands, then the number, then the verdict.
         <div className="party-stage-centre party-stage-result">
           <p className="party-stage-eyebrow">{challenge?.title ?? round}</p>
-          {percent === null ? (
+          {/* A CHOICE ROUND ANNOUNCES A WINNER AND A CONSEQUENCE, in that
+              order: the room hears what it decided, then what it costs. The
+              outcome came down with the result, so there is nothing to fetch on
+              the one frame everybody is watching. A verdict round keeps the
+              percentage and the pass/fail it always had. */}
+          {winner ? (
+            <>
+              <h1 className="party-stage-headline party-stage-verdict-intro">
+                {t('partyStage.audienceDecided')}
+              </h1>
+              <p className="party-stage-percent" data-testid="party-stage-percent">
+                {winner.percent}%
+              </p>
+              <p className="party-stage-verdict" data-testid="party-stage-choice">
+                {winner.option.label}
+              </p>
+              {winner.option.outcome && (
+                <p className="party-stage-outcome" data-testid="party-stage-outcome">
+                  {winner.option.outcome}
+                </p>
+              )}
+            </>
+          ) : percent === null ? (
             <h1 className="party-stage-headline">{t('partyStage.resultNoVote')}</h1>
           ) : (
             <>

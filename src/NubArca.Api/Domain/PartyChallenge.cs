@@ -57,13 +57,28 @@ public static class PartyChallengeVotingModes
     /// One question, two answers. Did they do it?
     public const string Binary = "binary";
 
+    /// <summary>
+    /// One question, the host's OWN answers — between two and six of them, each
+    /// carrying what happens to the guest of honour if the room picks it.
+    ///
+    /// <para>It is a separate mode rather than "binary with labels" because the
+    /// two are different questions: binary asks the room to JUDGE something that
+    /// already happened, choice asks it to DECIDE what happens next. A binary
+    /// round has a verdict; a choice round has a winner and a consequence.</para>
+    /// </summary>
+    public const string Choice = "choice";
+
     public static readonly IReadOnlySet<string> All =
-        new HashSet<string>([None, Binary], StringComparer.Ordinal);
+        new HashSet<string>([None, Binary, Choice], StringComparer.Ordinal);
 
     public static bool IsKnown(string? value) => value is not null && All.Contains(value);
 
     /// Whether this mode opens a voting phase at all.
-    public static bool CollectsVotes(string? value) => value == Binary;
+    public static bool CollectsVotes(string? value) => value is Binary or Choice;
+
+    /// Whether this mode is answered with one of the challenge's OWN options
+    /// rather than with a fixed yes/no.
+    public static bool UsesOptions(string? value) => value == Choice;
 }
 
 public static class PartyChallengeKinds
@@ -90,6 +105,47 @@ public static class PartyChallengeLimits
 
     public static bool IsValidDuration(int? value) =>
         value is null || (value >= MinDurationSeconds && value <= MaxDurationSeconds);
+
+    // TWO IS A CHOICE, SIX IS A SCREEN. Below two there is nothing to decide;
+    // above six the television stops being readable from the far side of a room
+    // and a guest scrolls a ballot on their phone. The bounds are the product's,
+    // not the storage's, and they are asserted in three places on purpose: here,
+    // in the check constraint, and in the composer.
+    public const int MinOptions = 2;
+    public const int MaxOptions = 6;
+    public const int MaxOptionLabelLength = 60;
+    public const int MaxOptionOutcomeLength = 200;
+
+    public static bool IsValidOptionCount(int value) =>
+        value >= MinOptions && value <= MaxOptions;
+}
+
+/// <summary>
+/// One answer the room may pick, and what it costs.
+///
+/// <para><see cref="Label"/> is what a guest taps and what the television shows
+/// beside the percentage. <see cref="Outcome"/> is the half that makes the mode
+/// worth having: "the room has voted — 35% say this, so you are doing that". It
+/// is optional, because a host may want the room to choose between things that
+/// speak for themselves.</para>
+///
+/// <para>Rows belong to the challenge and are ordered by <see cref="Position"/>.
+/// A VOTE names an option by its id, never by its position: a host who reorders
+/// the answers between rounds has not changed what anybody voted for.</para>
+/// </summary>
+public sealed class PartyChallengeOption
+{
+    public Guid Id { get; set; }
+    public Guid PartyChallengeId { get; set; }
+
+    /// 0-based, dense, and the order the room sees. Uniqueness per challenge is
+    /// enforced by the database so two saves racing cannot interleave.
+    public int Position { get; set; }
+
+    public string Label { get; set; } = string.Empty;
+
+    /// What happens if this answer wins. Null is "nothing stated".
+    public string? Outcome { get; set; }
 }
 
 public sealed class PartyChallengeVote

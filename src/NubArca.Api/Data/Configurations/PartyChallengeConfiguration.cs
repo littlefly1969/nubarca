@@ -12,7 +12,7 @@ public sealed class PartyChallengeConfiguration : IEntityTypeConfiguration<Party
         {
             t.HasCheckConstraint("ck_party_challenges_kind", "\"Kind\" IN ('dare','penalty','guess','custom')");
             t.HasCheckConstraint("ck_party_challenges_sort_order", "\"SortOrder\" >= 0");
-            t.HasCheckConstraint("ck_party_challenges_voting_mode", "\"VotingMode\" IN ('none','binary')");
+            t.HasCheckConstraint("ck_party_challenges_voting_mode", "\"VotingMode\" IN ('none','binary','choice')");
             t.HasCheckConstraint("ck_party_challenges_duration",
                 "\"DurationSeconds\" IS NULL OR (\"DurationSeconds\" >= 5 AND \"DurationSeconds\" <= 3600)");
         });
@@ -37,6 +37,32 @@ public sealed class PartyChallengeConfiguration : IEntityTypeConfiguration<Party
         // of the file nulls it and the activity survives without a picture.
         b.HasOne<FileItem>().WithMany().HasForeignKey(x => x.MediaFileItemId).OnDelete(DeleteBehavior.SetNull);
         b.HasIndex(x => x.MediaFileItemId).HasDatabaseName("ix_party_challenges_media_file");
+    }
+}
+
+public sealed class PartyChallengeOptionConfiguration : IEntityTypeConfiguration<PartyChallengeOption>
+{
+    public void Configure(EntityTypeBuilder<PartyChallengeOption> b)
+    {
+        b.ToTable("party_challenge_options", t =>
+        {
+            // The product's own bounds, restated where the data lives. A row
+            // outside them could only arrive from a path that skipped the
+            // service, and that is exactly when a constraint earns its keep.
+            t.HasCheckConstraint("ck_party_challenge_options_position",
+                "\"Position\" >= 0 AND \"Position\" <= 5");
+        });
+        b.HasKey(x => x.Id);
+        b.Property(x => x.Id).ValueGeneratedNever();
+        b.Property(x => x.Label).IsRequired()
+            .HasMaxLength(PartyChallengeLimits.MaxOptionLabelLength);
+        b.Property(x => x.Outcome).HasMaxLength(PartyChallengeLimits.MaxOptionOutcomeLength);
+        // Deleting an activity takes its answers with it: an option has no
+        // meaning apart from the question it answers.
+        b.HasOne<PartyChallenge>().WithMany().HasForeignKey(x => x.PartyChallengeId)
+            .OnDelete(DeleteBehavior.Cascade);
+        b.HasIndex(x => new { x.PartyChallengeId, x.Position }).IsUnique()
+            .HasDatabaseName("ux_party_challenge_options_position");
     }
 }
 
