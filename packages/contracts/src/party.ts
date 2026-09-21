@@ -344,6 +344,9 @@ export interface PartyGuestbookPage {
   canWrite: boolean;
   maxAuthorDisplayNameLength: number;
   maxBodyLength: number;
+  /** Dedications this guest has left, or null when the host set no limit —
+   * said before somebody composes one the server would refuse. */
+  remaining?: number | null;
 }
 
 /** One dedication as a MANAGER reads it — with its moderation state. */

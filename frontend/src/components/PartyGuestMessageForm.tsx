@@ -24,6 +24,14 @@ import { useI18n } from '../i18n';
 
 interface Props {
   uploadToken: string;
+  /**
+   * Greetings this guest has left, or null when the host set no limit.
+   *
+   * Said BEFORE somebody writes one, for the same reason the photo quota is:
+   * a budget discovered by being refused is a budget the product kept to
+   * itself.
+   */
+  remainingSends?: number | null;
   // Called after a successful send, so the host page can refresh anything it
   // shows about this guest's contributions. Optional.
   onSent?: () => void;
@@ -37,7 +45,9 @@ type Phase =
   | { kind: 'sending' }
   | { kind: 'sent'; pending: boolean };
 
-export function PartyGuestMessageForm({ uploadToken, onSent, onShareMedia }: Props) {
+export function PartyGuestMessageForm({
+  uploadToken, remainingSends = null, onSent, onShareMedia,
+}: Props) {
   const { t } = useI18n();
   const [displayName, setDisplayName] = useState('');
   const [text, setText] = useState('');
@@ -117,6 +127,16 @@ export function PartyGuestMessageForm({ uploadToken, onSent, onShareMedia }: Pro
     >
       <h2 className="party-dedication-title">{t('partyMessage.headline')}</h2>
       <p className="party-dedication-intro">{t('partyMessage.intro')}</p>
+
+      {remainingSends !== null && (
+        <p
+          className="party-contribution-quota"
+          data-testid="party-message-remaining-sends"
+          aria-live="polite"
+        >
+          {t('partyMessage.sendsLeft', { count: String(remainingSends) })}
+        </p>
+      )}
 
       <label className="party-dedication-field">
         <span className="party-dedication-label">{t('partyMessage.nameLabel')}</span>

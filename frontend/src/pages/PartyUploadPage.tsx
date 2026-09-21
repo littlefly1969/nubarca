@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router';
+import { Link, useParams, useSearchParams } from 'react-router';
 import {
   ApiError,
   classifyPartyFile,
@@ -13,6 +13,7 @@ import { useI18n } from '../i18n';
 import { PRODUCT_NAME } from '../brand/brand';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 import { PartyGuestMessageForm } from '../components/PartyGuestMessageForm';
+import { PartyGuestbookPanel } from '../components/PartyGuestbookPanel';
 import {
   CONTRIBUTION_MODE_PARAM, contributionModeFrom, type ContributionMode,
 } from './partyContributionMode';
@@ -62,6 +63,16 @@ function HeartIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="M12 19.6C7.9 16.9 4.5 14.2 4.5 10.6A3.9 3.9 0 0 1 12 8.6a3.9 3.9 0 0 1 7.5 2c0 3.6-3.4 6.3-7.5 9Z" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 5.2A1.7 1.7 0 0 1 5.7 3.5H19v14.3H5.7A1.7 1.7 0 0 0 4 19.5Z" />
+      <path d="M4 19.5a1.7 1.7 0 0 0 1.7 1.7H19" />
+      <path d="M8.2 8.1h6.6M8.2 11.4h4.4" />
     </svg>
   );
 }
@@ -197,9 +208,24 @@ export function PartyUploadPage() {
   // the server would refuse. `undefined` is a backend that predates the switch,
   // where every party took greetings.
   const messagesEnabled = session?.slideshowMessagesEnabled !== false;
+  const photosEnabled = session?.uploadEnabled !== false;
+  const guestbookEnabled = session?.guestbookEnabled === true;
   const requestedMode = contributionModeFrom(searchParams.get(CONTRIBUTION_MODE_PARAM));
-  const contribution: ContributionMode =
-    requestedMode === 'message' && !messagesEnabled ? 'media' : requestedMode;
+  // A mode this party does not take resolves to one it does, so a link kept in
+  // somebody's history opens a page that works instead of a form the server
+  // would refuse. Photographs first when they are open, because that is what a
+  // party is mostly; otherwise whichever written channel exists.
+  const open = (mode: ContributionMode): boolean =>
+    mode === 'media' ? photosEnabled
+      : mode === 'message' ? messagesEnabled
+        : guestbookEnabled;
+  const fallback: ContributionMode =
+    photosEnabled ? 'media' : messagesEnabled ? 'message' : 'guestbook';
+  const contribution: ContributionMode = open(requestedMode) ? requestedMode : fallback;
+  // How many choices there really are. One is not a choice, so the group is
+  // absent rather than a single pressed button with nothing to switch to.
+  const offered = (['media', 'message', 'guestbook'] as const).filter(open);
+  const partyUrl = session?.partyUrl ?? null;
   const setContribution = useCallback((mode: ContributionMode) => {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -432,6 +458,15 @@ export function PartyUploadPage() {
           <p className="party-contribution-help">{t('partyUpload.subtitle')}</p>
         </header>
 
+        {/* THE WAY BACK. This page is reached from the party and had no way
+            home: a guest who finished contributing was left with the browser's
+            Back button, or nothing at all if they arrived from a QR code. */}
+        {partyUrl && (
+          <Link className="party-contribution-back" to={partyUrl} data-testid="party-upload-back">
+            ← {t('partyUpload.backToParty')}
+          </Link>
+        )}
+
         {/* Two buttons in a named group rather than a half-built tablist: the
             previous markup announced tabs without aria-controls, panels or the
             arrow-key behaviour a tablist promises.
@@ -440,8 +475,16 @@ export function PartyUploadPage() {
             greetings. A choice between one thing is not a choice, and a
             disabled half would be the product advertising something this party
             does not have. */}
-        {messagesEnabled && (
+        {/* One button per channel this party actually takes, in a named group
+            rather than a half-built tablist. The group is ABSENT when there is
+            only one: a choice between one thing is not a choice, and a lone
+            pressed button is the product advertising a decision nobody has.
+
+            Switching is locked while media is in flight — moving away would
+            leave the queue running behind a progress bar nobody can see. */}
+        {offered.length > 1 && (
         <div className="party-contribution-modes" role="group" aria-label={t('partyUpload.modeLabel')}>
+          {offered.includes('media') && (
           <button
             type="button"
             className="party-contribution-mode"
@@ -453,31 +496,52 @@ export function PartyUploadPage() {
             <PhotoVideoIcon />
             {t('partyMessage.tabMedia')}
           </button>
+          )}
+          {offered.includes('message') && (
           <button
             type="button"
             className="party-contribution-mode"
             data-testid="party-mode-message"
             aria-pressed={contribution === 'message'}
-            // Switching away mid-upload would leave the queue running behind a
-            // hidden progress bar, so the choice is locked while media is
-            // in flight.
             onClick={() => setContribution('message')}
             disabled={busy}
           >
             <HeartIcon />
             {t('partyMessage.tabMessage')}
           </button>
+          )}
+          {offered.includes('guestbook') && (
+          <button
+            type="button"
+            className="party-contribution-mode"
+            data-testid="party-mode-guestbook"
+            aria-pressed={contribution === 'guestbook'}
+            onClick={() => setContribution('guestbook')}
+            disabled={busy}
+          >
+            <BookIcon />
+            {t('partyMessage.tabGuestbook')}
+          </button>
+          )}
         </div>
         )}
 
         {contribution === 'message' && token && (
           <PartyGuestMessageForm
             uploadToken={token}
+            remainingSends={session?.remainingMessages ?? null}
             onShareMedia={() => setContribution('media')}
           />
         )}
 
-        {contribution === 'media' && (<>
+        {contribution === 'guestbook' && token && (
+          <PartyGuestbookPanel
+            token={token}
+            remaining={session?.remainingGuestbookEntries ?? null}
+          />
+        )}
+
+        {contribution === 'media' && photosEnabled && (<>
         <p className="party-contribution-intro">{t('partyUpload.intro')}</p>
 
         {session && (

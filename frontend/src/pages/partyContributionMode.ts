@@ -1,16 +1,17 @@
 // Which half of the contribution page a guest lands on.
 //
 // The party surface has ONE contribution destination — the upload token's page,
-// which the backend hands out as `contributionUrl` — and two things a guest can
-// leave there: media, or a written dedication. The mode is a query parameter on
-// that same URL rather than a second route, because the two share a token, a
-// session and an enablement flag; splitting them into two routes would mean
-// duplicating all three.
+// which the backend hands out as `contributionUrl` — and THREE things a guest
+// can leave there: photographs, a greeting for the screen, or a dedication for
+// the book. The mode is a query parameter on that same URL rather than three
+// routes, because all three share a token and a session; splitting them would
+// mean duplicating both.
 //
-// So: "share a moment" opens the page as it comes (media), and "leave a
-// dedication" opens the same page already on the composer.
+// The page is reachable whenever ANY of the three is open, and each half
+// renders only when its own switch is on — which is what makes them three
+// independent decisions rather than three names for one.
 
-export type ContributionMode = 'media' | 'message';
+export type ContributionMode = 'media' | 'message' | 'guestbook';
 
 export const CONTRIBUTION_MODE_PARAM = 'mode';
 
@@ -22,7 +23,9 @@ export const CONTRIBUTION_MODE_PARAM = 'mode';
  * always safe.
  */
 export function contributionModeFrom(value: string | null | undefined): ContributionMode {
-  return value === 'message' ? 'message' : 'media';
+  if (value === 'message') return 'message';
+  if (value === 'guestbook') return 'guestbook';
+  return 'media';
 }
 
 /**

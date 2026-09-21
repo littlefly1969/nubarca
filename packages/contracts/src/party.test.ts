@@ -89,7 +89,7 @@ test('a valid slideshow configuration reports no bad field', () => {
     maxVideoSlideSeconds: 30,
     maxPhotoUploadsPerParticipant: 0,
     maxVideoUploadsPerParticipant: 5,
-    maxMessagesPerParticipant: 3,
+    maxMessagesPerParticipant: 3, maxGuestbookEntriesPerParticipant: 2,
   }), []);
 });
 
@@ -101,7 +101,9 @@ test('every out-of-range slideshow field is reported at once', () => {
     maxPhotoUploadsPerParticipant: -1,
     maxVideoUploadsPerParticipant: 99999,
     maxMessagesPerParticipant: -4,
+    maxGuestbookEntriesPerParticipant: -1,
   }).sort(), [
+    'maxGuestbookEntriesPerParticipant',
     'maxMessagesPerParticipant',
     'maxPhotoUploadsPerParticipant',
     'maxVideoSlideSeconds',
@@ -118,7 +120,7 @@ test('zero is a legal quota: it means unlimited', () => {
     maxPhotoUploadsPerParticipant: 0,
     maxVideoUploadsPerParticipant: 0,
     // Greetings share the convention: nothing here is a limit of zero.
-    maxMessagesPerParticipant: 0,
+    maxMessagesPerParticipant: 0, maxGuestbookEntriesPerParticipant: 0,
   }), []);
 });
 
@@ -321,7 +323,7 @@ test('slideshow settings are always present, so nothing is defaulted', () => {
     // The one exception, and it defaults to the behaviour it replaced: a
     // backend that predates the greeting quota reports nothing, which reads as
     // the unlimited it in fact was.
-    maxMessagesPerParticipant: 0,
+    maxMessagesPerParticipant: 0, maxGuestbookEntriesPerParticipant: 0,
   });
 });
 

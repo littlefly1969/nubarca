@@ -675,7 +675,8 @@ public static class PartyEndpoints
                 access.GuestbookEnabled,
                 Unlimited(access.MaxGuestbookEntriesPerParticipant),
                 usedGuestbook,
-                Remaining(access.MaxGuestbookEntriesPerParticipant, usedGuestbook)));
+                Remaining(access.MaxGuestbookEntriesPerParticipant, usedGuestbook),
+                $"/party/{Uri.EscapeDataString(party.DeriveViewToken(linkId))}"));
         }).WithName("PartyUploadSession").RequireRateLimiting(PartyUploadRateLimitPolicy).DisableAntiforgery();
 
         // PUBLIC party FACE SEARCH (anonymous, VIEW-token scoped). A guest uploads one
