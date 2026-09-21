@@ -47,7 +47,16 @@ public static class PartyGuestbookEndpoints
             CancellationToken cancellationToken) =>
         {
             NoStore(httpContext);
-            var access = await party.ResolvePublicAsync(token, cancellationToken);
+            // EITHER TOKEN READS, for the same reason either token writes. A
+            // guest reaches the book from the contribution page holding the
+            // UPLOAD token, and that page has to READ the book before it can
+            // offer the composer — so a read that accepted only the view token
+            // answered 404 to the very guests it had just invited to write, and
+            // the page reported a party with no book. Neither token is widened:
+            // each still resolves only its own hash, and `Readable` still asks
+            // the book's own switch.
+            var access = await party.ResolvePublicAsync(token, cancellationToken)
+                ?? await party.ResolveUploadAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
 
             // RESOLVE, never create. Reading the book is not arriving at the
@@ -75,13 +84,12 @@ public static class PartyGuestbookEndpoints
             CancellationToken cancellationToken) =>
         {
             NoStore(httpContext);
-            // EITHER TOKEN WRITES. The book is READ on the view token, which is
-            // the one printed on the QR and the one a keepsake outlives the
-            // party on. But a dedication is written from the contribution page,
-            // which a guest reaches on the upload token — so a write accepts
-            // that one too, and the three contributions share one page as they
-            // are meant to. Neither token is widened: each still resolves only
-            // its own hash, and the book's own switch still decides.
+            // EITHER TOKEN WRITES, exactly as either token reads. The view
+            // token is the one printed on the QR and the one a keepsake
+            // outlives the party on; the upload token is the one a guest
+            // reaches the contribution page with. Both doors open the same
+            // book. Neither token is widened: each still resolves only its own
+            // hash, and the book's own switch still decides.
             var access = await party.ResolvePublicAsync(token, cancellationToken)
                 ?? await party.ResolveUploadAsync(token, cancellationToken);
             if (access is null) return Results.NotFound();
