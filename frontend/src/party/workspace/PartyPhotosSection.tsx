@@ -126,6 +126,7 @@ export function PartyPhotosSection({
                 <p>{t('party.photos.needsAccess')}</p>
               </Notice>
             ) : canContributions ? (
+              <>
               <div className="pw-rows">
                 <SwitchRow
                   testId="party-photos-uploads"
@@ -152,6 +153,46 @@ export function PartyPhotosSection({
                   onChange={(next) => void toggle({ guestbookEnabled: next })}
                 />
               </div>
+
+              {/* WHETHER YOU READ IT FIRST, beside whether you take it at all.
+                  The two questions are asked about the same channel and were
+                  answered in three different places — one here, one two
+                  sections away, one inside a queue. A switch appears only when
+                  its channel is open, because moderating something nobody can
+                  send is a setting with nothing behind it. */}
+              <div className="pw-rows">
+                {contributions.uploadEnabled && (
+                  <SwitchRow
+                    testId="party-photos-approval"
+                    label={t('party.photos.approvalLabel')}
+                    note={t('party.photos.approvalNote')}
+                    checked={contributions.requireUploadApproval}
+                    disabled={busy}
+                    onChange={(next) => void toggle({ requireUploadApproval: next })}
+                  />
+                )}
+                {contributions.slideshowMessagesEnabled && (
+                  <SwitchRow
+                    testId="party-messages-approval"
+                    label={t('party.messages.approvalLabel')}
+                    note={t('party.messages.approvalNote')}
+                    checked={contributions.requireMessageApproval}
+                    disabled={busy}
+                    onChange={(next) => void toggle({ requireMessageApproval: next })}
+                  />
+                )}
+                {contributions.guestbookEnabled && (
+                  <SwitchRow
+                    testId="party-guestbook-approval"
+                    label={t('party.guestbook.approvalLabel')}
+                    note={t('party.guestbook.approvalNote')}
+                    checked={contributions.requireGuestbookApproval}
+                    disabled={busy}
+                    onChange={(next) => void toggle({ requireGuestbookApproval: next })}
+                  />
+                )}
+              </div>
+              </>
             ) : (
               /* A REGISTA moderates what guests left and does not decide
                  whether they may leave it. They are told what is true rather
@@ -193,42 +234,17 @@ export function PartyPhotosSection({
               anybody out of the queue it filled. It is NOT inside the card
               above: configuring a contribution and reading what it collected
               are two different jobs, and the product already separates them. */}
-          {contributions?.guestbookEnabled && (
-            <Panel
-              title={t('party.guestbook.queueHeading')}
-              note={t('party.guestbook.queueNote')}
-              testId="party-guestbook-queue-panel"
-            >
-              <LinkRow
-                to={partyDeepLink(api, 'guestbook', party.id, albumId)}
-                testId="party-guestbook-queue"
-                title={t('party.guestbook.openQueue')}
-                note={contributions.requireGuestbookApproval
-                  ? t('party.guestbook.approvalOn')
-                  : t('party.guestbook.approvalOff')}
-              />
-              {canContributions && (
-                <div className="pw-rows">
-                  <SwitchRow
-                    testId="party-guestbook-approval"
-                    label={t('party.guestbook.approvalLabel')}
-                    note={t('party.guestbook.approvalNote')}
-                    checked={contributions.requireGuestbookApproval}
-                    disabled={busy}
-                    onChange={(next) => void toggle({ requireGuestbookApproval: next })}
-                  />
-                </div>
-              )}
-            </Panel>
-          )}
-
+          {/* WHAT THEY SENT, in one place. The three queues were scattered —
+              photographs here, greetings two sections away under Attività,
+              dedications in a panel of their own — so the same job was done in
+              three places depending on which channel somebody had in mind.
+              Each row is reachable on `party.access` alone: closing a channel
+              must never lock the host out of what it collected. */}
           <Panel
             title={t('party.photos.queueHeading')}
             note={t('party.photos.queueNote')}
             testId="party-moderation"
           >
-            {/* Reachable on `party.access` alone: closing the channel must never
-                lock the host out of the queue it filled. */}
             <LinkRow
               to={partyDeepLink(api, 'photos', party.id, albumId)}
               testId="party-photos-queue"
@@ -238,6 +254,25 @@ export function PartyPhotosSection({
                 : t('party.photos.approvalOff')}
               after={<QueueBadge queue={moderation.uploads} />}
             />
+            <LinkRow
+              to={partyDeepLink(api, 'messages', party.id, albumId)}
+              testId="party-messages-queue"
+              title={t('partyMessages.title')}
+              note={albumParty?.requireMessageApproval
+                ? t('party.activities.approvalOn')
+                : t('party.activities.approvalOff')}
+              after={<QueueBadge queue={moderation.messages} />}
+            />
+            {contributions?.guestbookEnabled && (
+              <LinkRow
+                to={partyDeepLink(api, 'guestbook', party.id, albumId)}
+                testId="party-guestbook-queue"
+                title={t('party.guestbook.openQueue')}
+                note={contributions.requireGuestbookApproval
+                  ? t('party.guestbook.approvalOn')
+                  : t('party.guestbook.approvalOff')}
+              />
+            )}
           </Panel>
 
           <Panel

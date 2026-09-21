@@ -473,7 +473,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.section.live': 'Live',
   'party.section.experience': 'Experience',
   'party.section.guests': 'Guests',
-  'party.section.photos': 'Photos',
+  'party.section.photos': 'Guest contributions',
   'party.section.activities': 'Activities',
   'party.section.screens': 'Screens & printing',
   'party.section.settings': 'Settings',
@@ -630,7 +630,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyContent.visibleWhen': 'When they see it',
 
   'party.photos.lede': 'Where the photographs live, and who may add to them.',
-  'party.photos.contributions': 'Photos from guests',
+  'party.photos.contributions': 'What guests may leave',
   'party.photos.contributionsNote': 'With this on, guests can send their own photographs from the party link.',
   'party.photos.needsAccess': 'Open the party to guests first: while it is shut nobody can send anything.',
   'party.photos.uploadsLabel': 'Guests can add photos and videos',
@@ -638,6 +638,10 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.photos.uploadsOnReadOnly': 'Guests can add photographs.',
   'party.photos.uploadsOffReadOnly': 'Guests cannot add photographs.',
 
+  'party.photos.approvalLabel': 'Photographs need approving',
+  'party.photos.approvalNote': 'When on, new photographs wait before appearing. Turning it off does not publish the ones already waiting.',
+  'party.messages.approvalLabel': 'Messages need approving',
+  'party.messages.approvalNote': 'When on, new messages wait before reaching the screen. Turning it off does not publish the ones already waiting.',
   'party.contributions.messagesLabel': 'Messages for the slideshow',
   'party.contributions.messagesNote':
     'Show your guests\u2019 messages on the screen during the party.',
@@ -1258,6 +1262,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'party.maxVideosPerParticipant': 'Maximum videos per participant',
   'party.secondsSuffix': 'seconds',
   'party.maxMessagesPerParticipant': 'Messages per guest',
+  'party.maxGuestbookEntriesPerParticipant': 'Dedications per guest',
   'party.zeroMeansUnlimited': '0 = unlimited',
   'party.slideshowSettingsTitle': 'Slideshow and per-participant limits',
   'party.saveSettings': 'Save settings',

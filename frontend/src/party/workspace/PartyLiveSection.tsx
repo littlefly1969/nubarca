@@ -232,6 +232,19 @@ function RightNow({
           : t('party.activities.approvalOff')}
         after={<QueueBadge queue={moderation.messages} />}
       />
+      {/* THE BOOK, which the live console was missing: during the party a host
+          moderates all three channels, and two of them were here. Its route is
+          the PARTY's, not the album's, because the book is. */}
+      {albumParty?.guestbookEnabled && (
+        <LinkRow
+          to={`/parties/${party.id}/guestbook`}
+          testId="party-live-guestbook"
+          title={t('party.guestbook.openQueue')}
+          note={albumParty.requireGuestbookApproval
+            ? t('party.guestbook.approvalOn')
+            : t('party.guestbook.approvalOff')}
+        />
+      )}
       {albumParty?.gameEnabled && perms.hasAll([PERMISSIONS.partyAccess, PERMISSIONS.partyGames]) && (
         <LinkRow
           to={`/albums/${albumId}/party-game?party=${party.id}`}
