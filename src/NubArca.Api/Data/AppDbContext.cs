@@ -38,6 +38,10 @@ public class AppDbContext : DbContext
     public DbSet<BlobMetadata> BlobMetadata => Set<BlobMetadata>();
     public DbSet<FileItemUserMetadata> FileItemUserMetadata => Set<FileItemUserMetadata>();
     public DbSet<Album> Albums => Set<Album>();
+    public DbSet<AlbumShareLink> AlbumShareLinks => Set<AlbumShareLink>();
+    public DbSet<AlbumShareGuest> AlbumShareGuests => Set<AlbumShareGuest>();
+    public DbSet<AlbumShareChallenge> AlbumShareChallenges => Set<AlbumShareChallenge>();
+    public DbSet<AlbumShareDevice> AlbumShareDevices => Set<AlbumShareDevice>();
     public DbSet<AlbumItem> AlbumItems => Set<AlbumItem>();
 
     // SHARE-ALBUM-01: live album shares between authenticated users. One row per

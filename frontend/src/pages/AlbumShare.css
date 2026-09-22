@@ -1,0 +1,185 @@
+/* AN ALBUM, SHARED BY LINK.
+ *
+ * Built on PartyContribution.css rather than beside it: the shell, the brand
+ * bar, the dark surface and the primary button are that file's, and this adds
+ * only what an album has and a party contribution does not — a grid of what is
+ * already there, and a viewer to take one out of.
+ *
+ * Phone first, because a link arrives in a message and a message is read on a
+ * phone. Every target is at least 44px, and nothing needs a precise tap. */
+
+.album-share-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+}
+.album-share-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: clamp(1.6rem, 6vw, 2.4rem);
+  line-height: 1.15;
+  text-wrap: balance;
+}
+.album-share-count {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+.album-share-subtitle {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-heading);
+  font-size: 1.125rem;
+}
+
+/* ---- The grid -----------------------------------------------------------
+   `auto-fill` with a floor rather than a fixed column count: three across on a
+   phone, more on a tablet, and never one enormous tile on a narrow screen. */
+.album-share-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.4rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.album-share-tile {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-button);
+  overflow: hidden;
+  background: var(--surface-subtle);
+  cursor: pointer;
+}
+.album-share-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.album-share-tile:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* A triangle, drawn rather than shipped: one more image request per video tile
+   would cost more than the mark is worth. */
+.album-share-video {
+  position: absolute;
+  right: 0.35rem;
+  bottom: 0.35rem;
+  width: 0;
+  height: 0;
+  border-top: 0.35rem solid transparent;
+  border-bottom: 0.35rem solid transparent;
+  border-left: 0.6rem solid rgb(255 255 255 / 0.9);
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.6));
+}
+
+/* ---- The viewer ---------------------------------------------------------- */
+.album-share-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 1rem;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  background: rgb(0 0 0 / 0.92);
+}
+.album-share-lightbox img {
+  max-width: 100%;
+  /* Room for the close button above and the download below, so neither ever
+     sits on top of the photograph. */
+  max-height: calc(100% - 8rem);
+  object-fit: contain;
+  border-radius: var(--radius-card);
+}
+.album-share-close {
+  position: absolute;
+  top: max(0.5rem, env(safe-area-inset-top));
+  right: 0.5rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.12);
+  color: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.album-share-download { text-decoration: none; }
+
+/* ---- Adding ------------------------------------------------------------- */
+.album-share-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  background: var(--surface-raised);
+}
+.album-share-input {
+  width: 100%;
+  min-height: 2.75rem;
+  color: inherit;
+  font: inherit;
+}
+.album-share-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-variant-numeric: tabular-nums;
+}
+.album-share-progress p { margin: 0; }
+/* The ceiling is a fact the owner has to act on, not a failure the visitor
+   caused — warned, not alarmed. */
+.album-share-stopped { color: var(--warn, #d08700); }
+/* The browser limit, said quietly and always. */
+.album-share-caveat { opacity: 0.8; }
+
+/* ---- The gate ----------------------------------------------------------- */
+.album-share-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.album-share-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 22rem;
+}
+.album-share-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.album-share-field > span {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+.album-share-field input {
+  min-height: 2.75rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-button);
+  background: var(--surface-subtle);
+  color: var(--text-primary);
+  font: inherit;
+}
+/* A six-digit code is read back aloud, so it is spaced and monospaced. */
+.album-share-field input[inputmode='numeric'] {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 1.25rem;
+  letter-spacing: 0.3em;
+}

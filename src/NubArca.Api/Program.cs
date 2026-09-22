@@ -956,6 +956,17 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Albums.Sharing.IAlbumSharingService,
         NubArca.Api.Albums.Sharing.AlbumSharingService>();
+    // SHARE BY LINK. The other kind of sharing this product has, and it is not
+    // a variant of the one above: no account, no invitation, no role — a token
+    // anybody holding may exercise. The token service is a SINGLETON because it
+    // holds the key and nothing else; the two scoped services do the work.
+    builder.Services.AddSingleton<NubArca.Api.Albums.Sharing.AlbumShareTokens>();
+    builder.Services.AddScoped<
+        NubArca.Api.Albums.Sharing.IAlbumShareService,
+        NubArca.Api.Albums.Sharing.AlbumShareService>();
+    builder.Services.AddScoped<
+        NubArca.Api.Albums.Sharing.IAlbumShareAuth,
+        NubArca.Api.Albums.Sharing.AlbumShareAuth>();
     // SHARE-ALBUM-03: the collaborative editing surface. One implementation for
     // Owner and Editor, so neither can drift from the other's authorization,
     // concurrency or audit.
@@ -1729,6 +1740,7 @@ app.MapAlbumEndpoints();
 // overlaps "/api/albums/{id}/members...", and /api/shared-albums is a distinct
 // prefix.
 app.MapAlbumSharingEndpoints();
+app.MapAlbumShareLinkEndpoints();
 app.MapAlbumTransferEndpoints();
 
 // Album-nested Party settings/moderation endpoints and album item/membership

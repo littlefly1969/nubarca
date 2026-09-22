@@ -44,6 +44,7 @@ import { TvPairApprovalPage } from './pages/TvPairApprovalPage';
 import { PartyPage } from './pages/PartyPage';
 import { PartyInvitationPage } from './pages/PartyInvitationPage';
 import { PartyUploadPage } from './pages/PartyUploadPage';
+import { AlbumSharePage } from './pages/AlbumSharePage';
 import { PartyChallengesPage } from './pages/PartyChallengesPage';
 import { PartyGamePage } from './pages/PartyGamePage';
 import { PartyTvStagePage } from './pages/PartyTvStagePage';
@@ -80,6 +81,10 @@ export function App() {
           <Route path="/party/invite/:token" element={<PartyInvitationPage />} />
           {/* PUBLIC, unauthenticated party UPLOAD landing (separate upload QR). */}
           <Route path="/party/:token/upload" element={<PartyUploadPage />} />
+          {/* SHARE BY LINK, on its own path. Deliberately not under /party:
+              this link is not that link, and a visitor following one has not
+              been handed the other. */}
+          <Route path="/album/:token" element={<AlbumSharePage />} />
           {/* PUBLIC, unauthenticated GUEST BOOK, on the party's VIEW token —
               the one on the QR. Reading the book is part of looking at the
               party, and a host may keep a book while accepting no photographs
