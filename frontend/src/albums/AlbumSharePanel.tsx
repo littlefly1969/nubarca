@@ -14,6 +14,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n } from '../i18n';
+import { AlbumShareLinkPanel } from './AlbumShareLinkPanel';
 
 // SHARE-ALBUM-01: the OWNER's "who is this album shared with" panel.
 //
@@ -279,6 +280,14 @@ export function AlbumSharePanel({ albumId, albumName, onClose, returnFocusRef }:
         </header>
 
         <div className="ws-sheet-body">
+          {/* TWO KINDS OF SHARING, one drawer, in the order somebody decides
+              between them. A link is for people who have no account here — the
+              relatives, the photographer — and an invitation is for people who
+              do. Putting them side by side is what stops somebody inviting an
+              address that will never accept, or sending a public link to a
+              colleague who should have had a membership. */}
+          <AlbumShareLinkPanel albumId={albumId} />
+
           <fieldset className="ws-filter-section">
             <legend>{t('albumShare.inviteLegend')}</legend>
             <p className="muted">{t('albumShare.inviteHelp')}</p>

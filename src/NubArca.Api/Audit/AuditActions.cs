@@ -59,6 +59,15 @@ public static class AuditActions
     // Contributor → Viewer. Metadata: membership id + the new role.
     public const string AlbumShareRoleChange = "album.share_role_change";
 
+    // LINK sharing — the anonymous, token-based half. Named apart from the
+    // member half above because they are different powers and an operator
+    // reading the trail has to be able to tell which one somebody used.
+    public const string AlbumShareLinkCreate = "album.share_link_create";
+    public const string AlbumShareLinkRotate = "album.share_link_rotate";
+    public const string AlbumShareLinkRevoke = "album.share_link_revoke";
+    public const string AlbumShareLinkUpload = "album.share_link_upload";
+    public const string AlbumShareLinkDownload = "album.share_link_download";
+
     // SHARE-ALBUM-02: linked, revocable contributions. Three actors are
     // genuinely distinct here and the trail must keep them apart — the ACTOR
     // (AuditLog.UserId), the ALBUM OWNER, and the SOURCE-FILE OWNER — because

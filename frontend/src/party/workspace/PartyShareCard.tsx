@@ -22,7 +22,13 @@ export function absoluteGuestUrl(relative: string): string {
   return `${window.location.origin}${relative}`;
 }
 
-function useQrSvg(url: string | null, size: number): string | null {
+/**
+ * A QR for an address, generated in the browser.
+ *
+ * Exported because the album share panel needs exactly this and a second
+ * implementation would be a second answer to "what does this QR point at".
+ */
+export function useQrSvg(url: string | null, size: number): string | null {
   const [svg, setSvg] = useState<string | null>(null);
   useEffect(() => {
     if (!url) { setSvg(null); return; }

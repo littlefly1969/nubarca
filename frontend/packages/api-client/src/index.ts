@@ -31,6 +31,7 @@ export * from './people';
 export * from './adminFaceAI';
 export * from './tv';
 export * from './party';
+export * from './albumShare';
 export * from './partyCrew';
 export * from './partyGame';
 export * from './partyMessageText';

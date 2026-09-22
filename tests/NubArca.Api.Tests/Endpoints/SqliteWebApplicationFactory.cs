@@ -135,6 +135,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         // work without one. The test's own; a test may override it below.
         builder.UseSetting("Party:InvitationTokenSecret", "test-invitation-secret");
         builder.UseSetting("Party:CollaboratorOtpSecret", "test-party-crew-otp-secret");
+        builder.UseSetting("Albums:ShareTokenSecret", "test-album-share-secret");
 
         if (_poolable)
         {
@@ -319,6 +320,15 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 NubArca.Api.Party.IPartyGuestbookService, NubArca.Api.Party.PartyGuestbookService>();
             services.AddScoped<
                 NubArca.Api.Party.IPartyAddressShareService, NubArca.Api.Party.PartyAddressShareService>();
+            // Share by link. Mirrors Program.cs: the token service holds the
+            // key and is a singleton, the two that do the work are scoped.
+            services.AddSingleton<NubArca.Api.Albums.Sharing.AlbumShareTokens>();
+            services.AddScoped<
+                NubArca.Api.Albums.Sharing.IAlbumShareService,
+                NubArca.Api.Albums.Sharing.AlbumShareService>();
+            services.AddScoped<
+                NubArca.Api.Albums.Sharing.IAlbumShareAuth,
+                NubArca.Api.Albums.Sharing.AlbumShareAuth>();
             services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
             services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
             // The guest list and the personal invitation. Mirrors Program.cs.
@@ -545,6 +555,18 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
 
             _databaseInitialized = true;
         }
+    }
+
+    // Moves every album-share challenge's last-sent stamp far enough into the
+    // past that the resend interval has elapsed. A test about the GENERATION
+    // should not be a test about waiting sixty seconds.
+    public async Task AdvanceAlbumShareResendWindowAsync()
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var past = DateTime.UtcNow - TimeSpan.FromHours(1);
+        await db.AlbumShareChallenges.ExecuteUpdateAsync(
+            setters => setters.SetProperty(c => c.LastSentAt, past));
     }
 
     // Creates a fresh user with a known password and returns their id.

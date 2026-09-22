@@ -17,6 +17,7 @@ import { PartyGuestbookPanel } from '../components/PartyGuestbookPanel';
 import {
   CONTRIBUTION_MODE_PARAM, contributionModeFrom, type ContributionMode,
 } from './partyContributionMode';
+import { useUploadWakeLock } from '../uploads/useUploadWakeLock';
 import './PartyContribution.css';
 
 // PUBLIC, unauthenticated party UPLOAD landing. Reached by scanning the "Upload
@@ -106,80 +107,6 @@ const EMPTY_RUN: RunResult = {
 // each response steers the rest of the run.
 const QUEUE_CONCURRENCY = 1;
 
-// Best-effort Screen Wake Lock for one foreground upload. The initial request
-// is made directly from the upload click (important on WebKit), then reacquired
-// only when an in-flight upload returns to a visible tab. Unsupported/denied
-// locks never affect the upload itself.
-function useUploadWakeLock() {
-  const wantedRef = useRef(false);
-  const lockRef = useRef<WakeLockSentinel | null>(null);
-  const pendingRef = useRef<Promise<void> | null>(null);
-
-  const releaseCurrent = useCallback(() => {
-    const lock = lockRef.current;
-    lockRef.current = null;
-    if (lock && !lock.released) void lock.release().catch(() => { /* best effort */ });
-  }, []);
-
-  const request = useCallback(() => {
-    if (!wantedRef.current || document.visibilityState !== 'visible'
-      || lockRef.current !== null || pendingRef.current !== null
-      || !('wakeLock' in navigator)) return;
-
-    try {
-      let pending: Promise<void>;
-      pending = navigator.wakeLock.request('screen')
-        .then(async (lock) => {
-          if (!wantedRef.current || document.visibilityState !== 'visible') {
-            await lock.release().catch(() => { /* upload already stopped/hidden */ });
-            return;
-          }
-          lockRef.current = lock;
-          lock.addEventListener('release', () => {
-            if (lockRef.current === lock) lockRef.current = null;
-          }, { once: true });
-        })
-        .catch(() => { /* unsupported by policy/system: keep uploading */ })
-        .finally(() => {
-          if (pendingRef.current === pending) pendingRef.current = null;
-        });
-      pendingRef.current = pending;
-    } catch {
-      // A synchronous browser rejection is also non-fatal to the upload.
-    }
-  }, []);
-
-  const start = useCallback(() => {
-    wantedRef.current = true;
-    request();
-  }, [request]);
-
-  const stop = useCallback(() => {
-    wantedRef.current = false;
-    releaseCurrent();
-  }, [releaseCurrent]);
-
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // If the hidden document still has a request settling, retry exactly
-        // after it clears its pending guard. A successful old request makes the
-        // retry a no-op; a rejected one no longer loses this visible transition.
-        const pending = pendingRef.current;
-        if (pending) void pending.then(request);
-        else request();
-      } else releaseCurrent();
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      wantedRef.current = false;
-      releaseCurrent();
-    };
-  }, [releaseCurrent, request]);
-
-  return { start, stop };
-}
 
 export function PartyUploadPage() {
   const { token } = useParams<{ token: string }>();
