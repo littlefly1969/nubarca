@@ -70,17 +70,17 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
 {
     private readonly AppDbContext _db;
     private readonly AlbumShareTokens _tokens;
-    private readonly IEmailSender _email;
+    private readonly IAlbumShareMailDispatcher _mail;
     private readonly TimeProvider _clock;
     private readonly ILogger<AlbumShareAuth> _logger;
 
     public AlbumShareAuth(
-        AppDbContext db, AlbumShareTokens tokens, IEmailSender email,
+        AppDbContext db, AlbumShareTokens tokens, IAlbumShareMailDispatcher mail,
         TimeProvider clock, ILogger<AlbumShareAuth> logger)
     {
         _db = db;
         _tokens = tokens;
-        _email = email;
+        _mail = mail;
         _clock = clock;
         _logger = logger;
     }
@@ -105,6 +105,23 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
         if (guest is null) return AlbumShareChallengeOutcome.Accepted;
 
         var now = Now;
+
+        // ONE RESEND AT A TIME, per address. Reading the challenge, bumping its
+        // generation and writing a new proof is read-modify-write: two resends
+        // arriving together both read generation 1, both write 2, and the
+        // loser's email carries a code that will never verify — a person
+        // staring at six digits that are simply wrong. The transaction opens by
+        // writing the GUEST's own row, a self-assignment that changes nothing
+        // and exists to take that row's write lock, so the second resend reads
+        // the first one's result instead of the state before it. It is the same
+        // discipline the album mutations use, applied to an address.
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(cancellationToken) : null;
+        try
+        {
+        await _db.AlbumShareGuests.Where(g => g.Id == guest.Id)
+            .ExecuteUpdateAsync(s => s.SetProperty(g => g.Email, g => g.Email), cancellationToken);
+
         var challenge = await _db.AlbumShareChallenges
             .FirstOrDefaultAsync(c => c.AlbumShareGuestId == guest.Id, cancellationToken);
 
@@ -116,6 +133,7 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
             // what an unlisted address is told, because any difference here is
             // a read of the guest list. The operator can still see it.
             _logger.LogInformation("album.share.code.suppressed LinkId={LinkId}", link.Id);
+            if (owned) await tx!.CommitAsync(cancellationToken);
             return AlbumShareChallengeOutcome.Accepted;
         }
 
@@ -139,16 +157,10 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
             // is written. Two live codes would double an attacker's chances for
             // no benefit to anybody.
             //
-            // Two resends racing each other both read the same generation and
-            // both write the next one; the second SaveChanges wins the row, and
-            // its proof is the one that survives — so the loser's email carries
-            // a code that never verifies. Bumping from the STORED value rather
-            // than from the read one keeps the generations distinct, and the
-            // cooldown above already makes this rare rather than routine.
-            challenge.Generation = await _db.AlbumShareChallenges.AsNoTracking()
-                .Where(c => c.Id == challenge.Id)
-                .Select(c => c.Generation)
-                .FirstAsync(cancellationToken) + 1;
+            // The read above happened under the guest's write lock, so this
+            // value is the committed one and no concurrent resend can be
+            // holding a stale copy of it.
+            challenge.Generation += 1;
             challenge.Attempts = 0;
             challenge.VerifiedAt = null;
         }
@@ -176,6 +188,7 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
                 .AnyAsync(c => c.AlbumShareGuestId == guest.Id, cancellationToken);
             if (!winner) throw;
             _logger.LogInformation("album.share.code.raced LinkId={LinkId}", link.Id);
+            if (owned) await tx!.RollbackAsync(cancellationToken);
             return AlbumShareChallengeOutcome.Accepted;
         }
 
@@ -183,12 +196,12 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
             .Where(a => a.Id == link.AlbumId).Select(a => a.Name)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
-        // SENT WITHOUT WAITING FOR IT. An unlisted address returns as soon as
-        // the lookup misses; a listed one used to wait for the SMTP round trip,
-        // and that difference is measurable from outside — a slower answer
-        // means "this address is on the list". Handing delivery off keeps the
-        // two paths the same length, and nothing downstream depends on the
-        // result: a failed send is already indistinguishable by design.
+        // QUEUED, NOT SENT HERE. An unlisted address returns as soon as the
+        // lookup misses; a listed one used to wait for the SMTP round trip, and
+        // that difference is measurable from outside — a slower answer means
+        // "this address is on the list". The dispatcher is owned, bounded and
+        // drained by a hosted service, so this is constant-time without being
+        // unowned work.
         var message = new EmailMessage(
             guest.Email,
             guest.DisplayName ?? guest.Email,
@@ -201,26 +214,17 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
              Vale {(int)AlbumShareLimits.ChallengeLifetime.TotalMinutes} minuti ed è valido una volta sola.
              Se non hai chiesto tu questo codice, ignora questo messaggio.
              """);
-        var linkId = link.Id;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // A token of its own: the request may be finished, and often is.
-                using var sending = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                if (!await _email.SendAsync(message, sending.Token))
-                {
-                    // The line names the link, never the address and never the code.
-                    _logger.LogWarning("album.share.code.undelivered LinkId={LinkId}", linkId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "album.share.code.undelivered LinkId={LinkId}", linkId);
-            }
-        }, CancellationToken.None);
+        // COMMITTED BEFORE THE CODE LEAVES. Queueing a code whose proof might
+        // still roll back would be a code nobody can use.
+        if (owned) await tx!.CommitAsync(cancellationToken);
+        _mail.Enqueue(message, link.Id);
 
         return AlbumShareChallengeOutcome.Accepted;
+        }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
     }
 
     public async Task<AlbumShareVerifyOutcome> VerifyAsync(

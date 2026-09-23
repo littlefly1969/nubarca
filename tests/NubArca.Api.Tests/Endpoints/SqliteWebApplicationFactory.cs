@@ -330,6 +330,13 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
             services.AddScoped<
                 NubArca.Api.Albums.Sharing.IAlbumShareAuth,
                 NubArca.Api.Albums.Sharing.AlbumShareAuth>();
+            // The dispatcher and its drain, exactly as Program.cs registers
+            // them — a test that asserts on what was sent needs the same path
+            // production uses, not a shortcut around it.
+            services.AddSingleton<NubArca.Api.Albums.Sharing.AlbumShareMailDispatcher>();
+            services.AddSingleton<NubArca.Api.Albums.Sharing.IAlbumShareMailDispatcher>(
+                sp => sp.GetRequiredService<NubArca.Api.Albums.Sharing.AlbumShareMailDispatcher>());
+            services.AddHostedService<NubArca.Api.Albums.Sharing.AlbumShareMailService>();
             services.AddScoped<NubArca.Api.Party.IPartyChallengeService, NubArca.Api.Party.PartyChallengeService>();
             services.AddScoped<NubArca.Api.Party.IPartyGameService, NubArca.Api.Party.PartyGameService>();
             // The guest list and the personal invitation. Mirrors Program.cs.

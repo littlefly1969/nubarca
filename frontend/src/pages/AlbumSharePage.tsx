@@ -203,15 +203,17 @@ function Lightbox({
           its poster, so a visitor opening one got a still frame and no way to
           watch it. The preview route serves the poster, which is what a video
           element should show before it starts. */}
-      {item.isVideo ? (
+      {item.isVideo && item.playbackUrl ? (
         <video
-          src={item.downloadUrl ?? undefined}
+          src={item.playbackUrl}
           poster={item.previewUrl}
           controls
           playsInline
           data-testid="album-share-video"
         />
       ) : (
+        // An image, or a video this installation cannot transcode: the poster
+        // is what there is, and showing it is better than an empty frame.
         <img src={item.previewUrl} alt="" />
       )}
       {item.downloadUrl ? (

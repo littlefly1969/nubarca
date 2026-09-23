@@ -17,6 +17,18 @@ public sealed class PartyUploadService : IPartyUploadService
     // clutter the owner's root; they're then added to the target party album.
     private const string PartyUploadsFolder = "Party uploads";
 
+    /// <summary>
+    /// Where a file lands when nobody's party put it there.
+    ///
+    /// <para>An album's share link ingests through this service, and everything
+    /// it produced used to say Party: the folder, and a name prefixed for a
+    /// party's guests. An owner opening their library found their cousin's
+    /// holiday photographs filed under an evening that never happened. The
+    /// folder is chosen from the CALLER's nature, not from the class's name.
+    /// </para>
+    /// </summary>
+    private const string SharedLinkUploadsFolder = "Album uploads";
+
     // Per-file ceilings for anonymous uploads, on top of the global
     // Storage:MaxUploadBytes. Images keep the historical 50 MiB (phone photos);
     // videos get their OWN, larger ceiling, because raising one number for both
@@ -100,9 +112,14 @@ public sealed class PartyUploadService : IPartyUploadService
             return PartyUploadOutcome.RejectedTooLarge;
         }
 
-        var safeName = BuildSafeName(fileName, declaredVideo);
+        var safeName = BuildSafeName(
+            fileName, declaredVideo, partyAlbumLinkId is null ? "shared" : "party");
+        // A party's contributions live under the party's folder; everything
+        // else that arrives on a public link lives under the album's own.
         var folderId = await _folders.EnsureFolderPathAsync(
-            ownerUserId, null, [PartyUploadsFolder], cancellationToken);
+            ownerUserId, null,
+            [partyAlbumLinkId is null ? SharedLinkUploadsFolder : PartyUploadsFolder],
+            cancellationToken);
 
         FileItem created;
         try
@@ -298,7 +315,7 @@ public sealed class PartyUploadService : IPartyUploadService
     // Strip any directory components (path-traversal safety), keep a bounded,
     // printable name, and prefix a short unique token so concurrent guests
     // uploading "IMG_0001.jpg" don't collide on the owner's active-sibling name.
-    private static string BuildSafeName(string? fileName, bool declaredVideo)
+    private static string BuildSafeName(string? fileName, bool declaredVideo, string prefix)
     {
         var baseName = Path.GetFileName(fileName ?? string.Empty).Trim();
         if (string.IsNullOrEmpty(baseName))
@@ -314,6 +331,10 @@ public sealed class PartyUploadService : IPartyUploadService
             baseName = baseName[^120..];
         }
         var unique = Guid.NewGuid().ToString("N")[..8];
-        return $"party-{unique}-{baseName}";
+        // The prefix is what stops two guests uploading "IMG_0001.jpg" from
+        // colliding on the owner's active-sibling name. It says WHERE the file
+        // came from, so it must not say "party" for a file no party sent —
+        // that name follows the photograph into the owner's library forever.
+        return $"{prefix}-{unique}-{baseName}";
     }
 }

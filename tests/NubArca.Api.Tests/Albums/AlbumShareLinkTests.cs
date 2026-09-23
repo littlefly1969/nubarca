@@ -248,36 +248,14 @@ public sealed class AlbumShareLinkTests : IDisposable
             view.EnumerateObject().Select(p => p.Name).Order());
     }
 
-    [Fact]
-    public async Task Two_requests_arriving_together_make_ONE_link()
-    {
-        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
-        var album = await AlbumAsync(owner);
-
-        // READ-THEN-MINT used to let both see "no link" and both mint one. A
-        // second, hidden capability over somebody's album is the bug nobody
-        // notices: revoking finds one row and the other keeps opening. The
-        // partial unique index refuses the loser's insert, and the loser adopts
-        // the winner's link instead of failing.
-        var both = await Task.WhenAll(
-            owner.PostAsync($"/api/albums/{album}/share-link", null),
-            owner.PostAsync($"/api/albums/{album}/share-link", null));
-
-        foreach (var response in both) response.EnsureSuccessStatusCode();
-        var tokens = new List<string>();
-        foreach (var response in both)
-        {
-            tokens.Add(TokenOf(await response.Content.ReadFromJsonAsync<JsonElement>()));
-        }
-        Assert.Equal(tokens[0], tokens[1]);
-        Assert.Equal(1, await _factory.CountLiveAlbumShareLinksAsync(album));
-
-        // And revoking closes EVERYTHING, so no second address survives it.
-        (await owner.DeleteAsync($"/api/albums/{album}/share-link")).EnsureSuccessStatusCode();
-        Assert.Equal(0, await _factory.CountLiveAlbumShareLinksAsync(album));
-        Assert.Equal(HttpStatusCode.NotFound,
-            (await _factory.CreateClient().GetAsync($"/api/album-share/{tokens[0]}")).StatusCode);
-    }
+    // THE CONCURRENT CREATE LIVES IN AlbumShareConcurrencyPostgresTests.
+    //
+    // It cannot live here. This host hands every scope ONE pooled SQLite
+    // connection, so two "simultaneous" requests are serialised by the
+    // transport before they reach the code — and now that the mutations open a
+    // real transaction, a second one on that connection does not race, it
+    // throws "cannot start a transaction within a transaction". A race that
+    // cannot happen proves nothing about a race that can.
 
     [Fact]
     public async Task Rotating_leaves_exactly_one_live_link_behind_it()

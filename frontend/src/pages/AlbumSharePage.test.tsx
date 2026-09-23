@@ -47,6 +47,7 @@ function items() {
         thumbnailUrl: `/api/album-share/${TOKEN}/media/i1/thumbnail`,
         previewUrl: `/api/album-share/${TOKEN}/media/i1/preview`,
         downloadUrl: `/api/album-share/${TOKEN}/media/i1/download`,
+        playbackUrl: null,
         isVideo: false,
       },
       {
@@ -56,6 +57,9 @@ function items() {
         // A video on a link whose owner has not allowed originals: there is no
         // safe rendition to hand over, so the server sends no URL at all.
         downloadUrl: null,
+        // Playback is offered even with originals off: HLS is a transcoded
+        // ladder, never the camera's file.
+        playbackUrl: `/api/album-share/${TOKEN}/media/i2/video`,
         isVideo: true,
       },
     ],
@@ -120,6 +124,8 @@ it('plays a video instead of showing its poster, and says why it cannot be taken
   const video = await screen.findByTestId('album-share-video');
   expect(video.tagName).toBe('VIDEO');
   expect(video).toHaveAttribute('poster', `/api/album-share/${TOKEN}/media/i2/preview`);
+  // The ladder, not the original — which is why it is offered at all.
+  expect(video).toHaveAttribute('src', `/api/album-share/${TOKEN}/media/i2/video`);
 
   // And no download button, because the route would have answered 404.
   expect(screen.queryByTestId('album-share-download')).toBeNull();

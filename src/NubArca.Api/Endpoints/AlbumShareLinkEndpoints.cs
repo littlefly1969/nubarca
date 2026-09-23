@@ -72,6 +72,13 @@ public static class AlbumShareLinkEndpoints
     // and an OTP mill behind a browsing budget.
     private const string PublicRateLimitPolicy = PartyEndpoints.PublicRateLimitPolicy;
     public const string UploadRateLimitPolicy = "album-share-upload";
+
+    // A GALLERY IS MANY REQUESTS. Forty thumbnails, then a preview, then a
+    // video's playlist and every one of its segments — all from one visitor
+    // scrolling once. On the browsing budget that exhausts a share before it
+    // has finished drawing, and takes the album's other visitors with it, so
+    // media gets the generous ceiling the party's own media surface has.
+    public const string MediaRateLimitPolicy = "album-share-media";
     public const string CodeRateLimitPolicy = "album-share-code";
 
     public static IEndpointRouteBuilder MapAlbumShareLinkEndpoints(this IEndpointRouteBuilder app)
@@ -257,15 +264,20 @@ public static class AlbumShareLinkEndpoints
                         i.FileItemId,
                         $"/api/album-share/{enc}/media/{i.FileItemId}/thumbnail",
                         $"/api/album-share/{enc}/media/{i.FileItemId}/preview",
-                        // A VIDEO HAS NO SAFE RENDITION TO HAND OVER. The
-                        // derivative pipeline makes a poster and nothing
-                        // downloadable, so with originals off there is simply
-                        // no file to give — offering a button that answers 404
-                        // is worse than offering none. With originals on the
-                        // real file is there, and the link says so.
+                        // TAKING A COPY AND WATCHING IT ARE DIFFERENT POWERS,
+                        // so they are different URLs. A download hands over a
+                        // file; with originals off a video has none to hand
+                        // over, because the derivative pipeline makes a poster
+                        // and nothing downloadable.
                         !isVideo || access.AllowOriginalDownload
                             ? $"/api/album-share/{enc}/media/{i.FileItemId}/download"
                             : null,
+                        // Playback is HLS — a transcoded ladder, never the
+                        // original — so it is offered whatever the download
+                        // switch says. That is the whole point of separating
+                        // them: a visitor can watch without the owner having
+                        // to hand over the camera's file.
+                        isVideo ? $"/api/album-share/{enc}/media/{i.FileItemId}/video" : null,
                         isVideo);
                 }).ToList(),
                 NextCursor: null));
@@ -295,7 +307,7 @@ public static class AlbumShareLinkEndpoints
                 return await PartyEndpoints.ServeAuthorizedDerivativeAsync(
                     access.OwnerUserId, fileId, kind.Value, v, httpContext,
                     thumbnails, stripper, cancellationToken);
-            }).WithName($"GetAlbumShareMedia{v}").RequireRateLimiting(PublicRateLimitPolicy);
+            }).WithName($"GetAlbumShareMedia{v}").RequireRateLimiting(MediaRateLimitPolicy);
         }
 
         // THE DOWNLOAD. What a visitor actually came for, and the one route that
@@ -343,7 +355,68 @@ public static class AlbumShareLinkEndpoints
                 original.Content,
                 NubArca.Api.Security.SafeContentType.ForServing(original.DetectedContentType),
                 original.FileName);
-        }).WithName("GetAlbumShareDownload").RequireRateLimiting(PublicRateLimitPolicy);
+        }).WithName("GetAlbumShareDownload").RequireRateLimiting(MediaRateLimitPolicy);
+
+        // WATCHING A VIDEO, WITHOUT HANDING OVER THE FILE.
+        //
+        // HLS-only, deliberately. The only alternative to a transcoded ladder
+        // is streaming the ORIGINAL bytes, which is exactly what the owner's
+        // download switch gates — so a playback URL that fell back to the
+        // original would be a way around it. With the provider off this is a
+        // 404 and the page keeps the poster, which is the honest degradation.
+        app.MapGet("/api/album-share/{token}/media/{fileId:guid}/video", async (
+            string token, Guid fileId,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] NubArca.Api.Party.IPartyMediaService media,
+            [FromServices] VideoHlsServingService hlsServing,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            if (!hlsServing.Enabled) return Results.NotFound();
+            var access = await GrantAsync(shares, token, httpContext, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var kind = await media.GetVisibleMediaKindAsync(
+                access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
+            if (kind != NubArca.Api.Party.PartyMediaKind.Video) return Results.NotFound();
+
+            var master = await hlsServing.GetMasterAsync(
+                fileId, access.OwnerUserId, cancellationToken);
+            return master.Status switch
+            {
+                VideoHlsMasterStatus.Ready => Results.Text(
+                    master.MasterPlaylist!, VideoHlsServingService.MasterContentType),
+                VideoHlsMasterStatus.Preparing =>
+                    VideoHlsServingService.Preparing(httpContext.Response),
+                _ => Results.NotFound(),
+            };
+        }).WithName("GetAlbumShareVideo").RequireRateLimiting(MediaRateLimitPolicy);
+
+        // Ladder child files. The FULL grant is re-resolved on every segment,
+        // so a revoke mid-playback stops the next one. `file` is untrusted URL
+        // input and is whitelisted inside HlsDerivativeStorage, unchanged.
+        app.MapGet("/api/album-share/{token}/media/{fileId:guid}/video/{rendition}/{file}", async (
+            string token, Guid fileId, string rendition, string file,
+            HttpContext httpContext,
+            [FromServices] IAlbumShareService shares,
+            [FromServices] NubArca.Api.Party.IPartyMediaService media,
+            [FromServices] VideoHlsServingService hlsServing,
+            CancellationToken cancellationToken) =>
+        {
+            NoStore(httpContext);
+            if (!hlsServing.Enabled) return Results.NotFound();
+            var access = await GrantAsync(shares, token, httpContext, cancellationToken);
+            if (access is null) return Results.NotFound();
+            var kind = await media.GetVisibleMediaKindAsync(
+                access.OwnerUserId, access.AlbumId, fileId, cancellationToken);
+            if (kind != NubArca.Api.Party.PartyMediaKind.Video) return Results.NotFound();
+
+            var content = await hlsServing.OpenLadderFileAsync(
+                fileId, access.OwnerUserId, $"{rendition}/{file}", cancellationToken);
+            return content is null
+                ? Results.NotFound()
+                : Results.File(content.Content, content.ContentType);
+        }).WithName("GetAlbumShareVideoHlsFile").RequireRateLimiting(MediaRateLimitPolicy);
 
         app.MapPost("/api/album-share/{token}/upload", async (
             string token,
