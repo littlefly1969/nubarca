@@ -22,6 +22,34 @@ public interface IAlbumShareAuth
     /// answered differently for a listed and an unlisted address would be a way
     /// to enumerate the owner's guest list, which is exactly the information
     /// the list exists to protect.</para>
+    ///
+    /// <para><b>SECURITY DECISION — the residual timing channel, accepted.</b>
+    /// The two paths are identical in everything a caller reads and differ in
+    /// how long they take. An unlisted address misses one indexed lookup and
+    /// returns; a listed one additionally opens a transaction, takes a row
+    /// lock, writes a challenge and commits. Delivery no longer counts — that
+    /// was the large, network-scale difference and it is dispatched without
+    /// being awaited — but a database-scale one remains, on the order of a
+    /// single short write.</para>
+    ///
+    /// <para>This is accepted rather than overlooked, for three reasons. The
+    /// route is rate-limited to ten attempts an hour per address, so
+    /// distinguishing a sub-millisecond difference through network jitter would
+    /// need far more samples than an attacker is given. Equalising it properly
+    /// would mean doing the same write for addresses nobody listed — creating
+    /// state, and a denial-of-service surface, on behalf of strangers — which
+    /// is a worse trade than the channel it closes. And a fixed artificial
+    /// delay is not a defence: it is a constant an attacker subtracts, and it
+    /// would slow every legitimate visitor to hide something the rate limit
+    /// already buries.</para>
+    ///
+    /// <para>What IS eliminated, and must stay eliminated: the status code and
+    /// body are identical for listed, unlisted and malformed addresses,
+    /// including under the resend cooldown and after exhausted attempts; and no
+    /// answer waits on SMTP. Those are covered by tests. If the threat model
+    /// ever changes — a share exposed to an attacker who can measure the server
+    /// directly rather than across a network — the honest fix is to make the
+    /// listed path's work unconditional, not to pad the unlisted one.</para>
     /// </summary>
     Task<AlbumShareChallengeOutcome> ChallengeAsync(
         string? token, string? email, CancellationToken cancellationToken = default);

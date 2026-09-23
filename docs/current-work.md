@@ -999,6 +999,53 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   cannot both take the last slot. `0` is unlimited, which is what every party
   that predates the column already meant, so the migration grants nobody a limit
   they never had.
+- **An album is shared by LINK, and that is not the sharing it already had.**
+  `AlbumMember` invites an ACCOUNT by address, who signs in and holds a role;
+  `AlbumShareLink` is a token anybody holding may exercise. Neither is the
+  other's fallback and no caller resolves through both. It is also not a party
+  link: the album token is `HMAC(secret, "nubarca-album-share-v1" ‖ linkId)` and
+  the party's is `HMAC(secret, linkId)`, so one cannot open the other's surface
+  — not because a check forbids it, but because the digests live in different
+  spaces and cannot collide. A check can be forgotten on a new endpoint; this
+  cannot. There is no delete route at all: a visitor may add and take, and the
+  one power an owner cannot lend by accident is the power to destroy.
+- **The share's ceiling belongs to the LINK, not to a person**, because a share
+  has no people in it — anybody holding the address is the same anonymous
+  caller, so a per-person quota has no honest subject. Reaching it refuses the
+  upload and leaves reading open: a link that switched itself off is one the
+  owner would hear about from complaints. The same count governs BOTH ways onto
+  the guest list, because reactivating a removed address and adding a new one
+  are the same act as far as a limit is concerned.
+- **Every album-share mutation is ordered behind the ALBUM's row lock.** The
+  album is the anchor rather than the link because it is the one row that
+  predates the first link and outlives the last — locking the link could not
+  order a create against another create. The resend does the same on the
+  guest's row. These are the invariants `AlbumShareConcurrencyPostgresTests`
+  exists for, and they cannot be tested on the SQLite host: it hands every
+  scope one pooled connection, so concurrency is serialised by the transport
+  before it reaches the code.
+- **Watching a video and taking a copy are different powers**, so they are
+  different URLs. `playbackUrl` serves HLS — a transcoded ladder, never the
+  camera's file — and is offered whatever the download switch says;
+  `downloadUrl` is null when there is nothing safe to hand over. Originals are
+  off by default because an original carries the GPS the camera wrote and a
+  link is a public share.
+- **A one-time code has exactly one observable end.** Delivered, or counted
+  under `DroppedCapacity`, `UndeliveredSend` or `DroppedShutdown` — kept apart
+  because they ask an operator for different things. `BoundedChannelFullMode.
+  DropWrite` makes `TryWrite` return TRUE while discarding the item, so the
+  runtime's drop callback is the only honest detector; and shutdown completes
+  the WRITER before draining, so codes already accepted are delivered rather
+  than cancelled with the host. No log line ever carries an address or a code.
+- **The share's residual timing channel is accepted, deliberately.** Status and
+  body are identical for listed, unlisted and malformed addresses — including
+  under the resend cooldown and after exhausted attempts — and no answer waits
+  on SMTP. A database-scale difference remains, because only a listed address
+  causes a write. Equalising it would mean creating state for strangers, and a
+  fixed delay is a constant an attacker subtracts; the rate limit of ten
+  attempts an hour is what makes the residue impractical. Recorded at
+  `IAlbumShareAuth.ChallengeAsync` so it stays a decision rather than an
+  accident.
 - **The guest book is its own table, and it never reaches the wall.**
   `PartyGuestbookEntry` is not a flag on `PartyMessage`, and the difference is
   the point: a greeting is written to be read out during the evening, a
