@@ -209,11 +209,36 @@ public sealed class AlbumShareService : IAlbumShareService
             : request.DisplayName.Trim()[..Math.Min(
                 request.DisplayName.Trim().Length, AlbumShareLimits.MaxDisplayNameLength)];
 
+        // THE CEILING IS COUNTED ONCE, FOR BOTH WAYS IN. Reactivating a removed
+        // address and creating a new row are the same act as far as the limit
+        // is concerned — somebody who was not on the list becomes somebody who
+        // is — and checking it on only one of the two was a way past it:
+        // fifty, remove A, add B, re-add A, fifty-one. Counted here so the
+        // branches below cannot disagree, and inside the album lock so two
+        // callers cannot both read forty-nine.
+        var live = await _db.AlbumShareGuests.CountAsync(
+            g => g.AlbumShareLinkId == link.Id && g.RevokedAt == null, cancellationToken);
+
         var existing = await _db.AlbumShareGuests
             .FirstOrDefaultAsync(g => g.AlbumShareLinkId == link.Id && g.Email == email,
                 cancellationToken);
         if (existing is not null)
         {
+            // Already on the list: idempotent, and it costs no slot because it
+            // takes none — the address is already counted in `live`.
+            if (existing.RevokedAt is null)
+            {
+                existing.DisplayName = name ?? existing.DisplayName;
+                await _db.SaveChangesAsync(cancellationToken);
+                return new AlbumShareGuestDto(
+                    existing.Id, existing.Email, existing.DisplayName, existing.CreatedAt);
+            }
+
+            // Removed, and coming back: that IS an addition, so it meets the
+            // same wall a new address would, with the same answer. The row is
+            // left revoked rather than half-restored.
+            if (live >= AlbumShareLimits.MaxGuests) return null;
+
             // Re-adding somebody the owner removed REUSES their row rather than
             // leaving two with different verdicts about the same address.
             existing.RevokedAt = null;
@@ -223,8 +248,6 @@ public sealed class AlbumShareService : IAlbumShareService
                 existing.Id, existing.Email, existing.DisplayName, existing.CreatedAt);
         }
 
-        var live = await _db.AlbumShareGuests.CountAsync(
-            g => g.AlbumShareLinkId == link.Id && g.RevokedAt == null, cancellationToken);
         if (live >= AlbumShareLimits.MaxGuests) return null;
 
         var guest = new AlbumShareGuest

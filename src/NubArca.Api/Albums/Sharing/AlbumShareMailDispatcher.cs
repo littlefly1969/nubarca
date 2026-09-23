@@ -38,35 +38,74 @@ public sealed class AlbumShareMailDispatcher : IAlbumShareMailDispatcher, IDispo
     /// most; a backlog past this is a mail server that has stopped, not a busy
     /// evening, and queueing thousands would only turn that into memory.
     /// </summary>
-    private const int Capacity = 256;
+    public const int DefaultCapacity = 256;
 
-    private readonly Channel<(EmailMessage Message, Guid LinkId)> _channel =
-        Channel.CreateBounded<(EmailMessage, Guid)>(new BoundedChannelOptions(Capacity)
-        {
-            // DROP RATHER THAN BLOCK. The caller is an HTTP request that must
-            // answer in constant time; making it wait for a full queue would
-            // reintroduce the very timing difference this class removes.
-            FullMode = BoundedChannelFullMode.DropWrite,
-            SingleReader = true,
-        });
-
+    private readonly Channel<QueuedCode> _channel;
     private readonly ILogger<AlbumShareMailDispatcher> _logger;
+    private int _dropped;
 
-    public AlbumShareMailDispatcher(ILogger<AlbumShareMailDispatcher> logger) => _logger = logger;
+    /// <summary>
+    /// How many codes have been discarded because the queue was full.
+    ///
+    /// <para>A counter and not just a log line: a drop means somebody is
+    /// staring at an inbox for a code that will never arrive, and that has to
+    /// be countable rather than only greppable.</para>
+    /// </summary>
+    public int Dropped => Volatile.Read(ref _dropped);
 
-    public ChannelReader<(EmailMessage Message, Guid LinkId)> Reader => _channel.Reader;
+    public AlbumShareMailDispatcher(
+        ILogger<AlbumShareMailDispatcher> logger, int capacity = DefaultCapacity)
+    {
+        _logger = logger;
+        _channel = Channel.CreateBounded<QueuedCode>(
+            new BoundedChannelOptions(capacity)
+            {
+                // DROP RATHER THAN BLOCK. The caller is an HTTP request that
+                // must answer in constant time; making it wait for a full queue
+                // would reintroduce the very timing difference this class
+                // removes.
+                FullMode = BoundedChannelFullMode.DropWrite,
+                SingleReader = true,
+            },
+            // THE DROP CALLBACK IS THE ONLY HONEST DETECTOR.
+            //
+            // `TryWrite` returns TRUE under `DropWrite` — the write is accepted
+            // and the item is thrown away — so checking its result found
+            // nothing, and every discarded code was lost in silence while the
+            // challenge that produced it sat committed in the database. The
+            // runtime hands the dropped item to this callback instead, which is
+            // the one place that knows.
+            OnDropped);
+    }
+
+    public ChannelReader<QueuedCode> Reader => _channel.Reader;
 
     public void Enqueue(EmailMessage message, Guid linkId)
     {
-        if (!_channel.Writer.TryWrite((message, linkId)))
-        {
-            // The line names the link, never the address and never the code.
-            _logger.LogWarning("album.share.code.dropped LinkId={LinkId}", linkId);
-        }
+        // The result is deliberately ignored: under `DropWrite` it is true even
+        // when the item was discarded, and the callback above is what reports
+        // that. A completed channel (shutdown) returns false and is not a drop
+        // worth counting — nothing is being delivered any more either way.
+        _channel.Writer.TryWrite(new QueuedCode(message, linkId));
+    }
+
+    private void OnDropped(QueuedCode item)
+    {
+        Interlocked.Increment(ref _dropped);
+        // The link and the running total. NEVER the address and never the
+        // code: a log that named either would turn a delivery problem into a
+        // disclosure, and this line exists to be read by an operator who has no
+        // business with either.
+        _logger.LogWarning(
+            "album.share.code.dropped LinkId={LinkId} DroppedTotal={DroppedTotal}",
+            item.LinkId, Dropped);
     }
 
     public void Dispose() => _channel.Writer.TryComplete();
 }
+
+/// <summary>One code on its way out. The link identifies it; nothing else does.</summary>
+public readonly record struct QueuedCode(EmailMessage Message, Guid LinkId);
 
 /// <summary>
 /// Drains the dispatcher, one message at a time.
