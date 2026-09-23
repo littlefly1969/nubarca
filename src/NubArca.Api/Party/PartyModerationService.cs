@@ -32,7 +32,12 @@ public sealed class PartyModerationService : IPartyModerationService
         // A file the owner separately deleted drops out via the DeletedAt filter.
         var rows = await _db.PartyUploadItems
             .AsNoTracking()
-            .Where(pu => pu.OwnerUserId == ownerUserId && pu.AlbumId == albumId)
+            // PARTY-SCOPED, not merely album-scoped. A row with no link id is
+            // not a party contribution and has no moderation to be part of;
+            // filtering on the album alone once let an album share's uploads
+            // appear in a party's queue.
+            .Where(pu => pu.OwnerUserId == ownerUserId && pu.AlbumId == albumId
+                && pu.PartyAlbumLinkId != null)
             .Join(_db.FileItems.AsNoTracking(),
                 pu => pu.FileItemId,
                 f => f.Id,

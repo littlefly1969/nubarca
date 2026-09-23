@@ -43,6 +43,15 @@ export interface AlbumShareUpdate {
   label?: string | null;
   maxUploads?: number;
   expiresAt?: string | null;
+  /**
+   * Removes the expiry.
+   *
+   * A nullable date alone cannot ask for this: "no expiry" IS null, and null
+   * already means unchanged everywhere else here — so without this an owner
+   * who once set a date could never take it off through the typed client, even
+   * though the server had gained the ability.
+   */
+  clearExpiry?: boolean;
 }
 
 /** The album as somebody holding the link sees it. Names nothing else. */
@@ -60,7 +69,12 @@ export interface AlbumShareItem {
   id: string;
   thumbnailUrl: string;
   previewUrl: string;
-  downloadUrl: string;
+  /**
+   * Null when there is nothing safe to hand over — today, a video on a link
+   * whose owner has not allowed originals. The page offers no button rather
+   * than one that answers 404.
+   */
+  downloadUrl: string | null;
   isVideo: boolean;
 }
 

@@ -1522,6 +1522,7 @@ const it = {
   'albumLink.itemCount_one': '{count} foto',
   'albumLink.itemCount_other': '{count} foto',
   'albumLink.empty': 'Non c’è ancora niente. Se puoi, aggiungi tu la prima.',
+  'albumLink.videoNeedsOriginals': 'Questo video si può solo guardare qui: chi possiede l’album non ha aperto il download degli originali.',
   'albumLink.download': 'Scarica',
   'albumLink.downloadOriginal': 'Scarica l’originale',
   'albumLink.addTitle': 'Aggiungi le tue foto',

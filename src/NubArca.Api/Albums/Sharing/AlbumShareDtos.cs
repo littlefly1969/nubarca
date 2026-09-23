@@ -116,8 +116,16 @@ public sealed record AlbumSharePublicDto(
     /// <summary>Null when the link has no ceiling; otherwise what is left.</summary>
     int? UploadsRemaining);
 
+/// <summary>
+/// One item as a visitor sees it.
+///
+/// <para><c>DownloadUrl</c> is NULL when there is nothing safe to hand over —
+/// today, a video on a link whose owner has not allowed originals, because the
+/// derivative pipeline produces a poster and no downloadable rendition. A URL
+/// that answers 404 is a worse answer than no URL.</para>
+/// </summary>
 public sealed record AlbumShareItemDto(
-    Guid Id, string ThumbnailUrl, string PreviewUrl, string DownloadUrl, bool IsVideo);
+    Guid Id, string ThumbnailUrl, string PreviewUrl, string? DownloadUrl, bool IsVideo);
 
 public sealed record AlbumShareItemsDto(
     IReadOnlyList<AlbumShareItemDto> Items, string? NextCursor);

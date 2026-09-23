@@ -212,19 +212,36 @@ public sealed class PartyUploadService : IPartyUploadService
             // (immediately visible — the default). This is a VISIBILITY control
             // only; the owner's stored file is untouched. Owner-added content
             // never gets a row, so it stays visible.
-            _db.PartyUploadItems.Add(new PartyUploadItem
+            //
+            // A PARTY UPLOAD ITEM BELONGS TO A PARTY, and the absence of a link
+            // id is what says there is not one. This method is reachable
+            // without a party — an album's share link ingests through it, and
+            // every party-shaped argument is optional precisely so it can —
+            // and it used to write this row anyway. That was not cosmetic: the
+            // moderation queue lists rows by album, so somebody's album-link
+            // photographs turned up in a party's moderation; and
+            // PartyStateEraser deletes every row for the album, so tearing the
+            // party down silently took their provenance with it. A feature that
+            // advertises independence from the Party must not leave state the
+            // Party owns.
+            if (partyAlbumLinkId is not null)
             {
-                Id = Guid.NewGuid(),
-                OwnerUserId = ownerUserId,
-                AlbumId = albumId,
-                PartyAlbumLinkId = partyAlbumLinkId,
-                PartyParticipantId = participantId,
-                FileItemId = created.Id,
-                Status = requireApproval ? PartyUploadStatuses.Pending : PartyUploadStatuses.Approved,
-                UploadedAt = now,
-                ModeratedAt = null,
-                ModeratedByUserId = null,
-            });
+                _db.PartyUploadItems.Add(new PartyUploadItem
+                {
+                    Id = Guid.NewGuid(),
+                    OwnerUserId = ownerUserId,
+                    AlbumId = albumId,
+                    PartyAlbumLinkId = partyAlbumLinkId,
+                    PartyParticipantId = participantId,
+                    FileItemId = created.Id,
+                    Status = requireApproval
+                        ? PartyUploadStatuses.Pending
+                        : PartyUploadStatuses.Approved,
+                    UploadedAt = now,
+                    ModeratedAt = null,
+                    ModeratedByUserId = null,
+                });
+            }
             await _db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
@@ -247,23 +264,32 @@ public sealed class PartyUploadService : IPartyUploadService
             return PartyUploadOutcome.Failed;
         }
 
+        // THE COMMIT ABOVE IS THE POINT OF NO RETURN. Past it the file is in
+        // the album, and this method owes its caller an honest ACCEPTED —
+        // whatever happens next.
+        //
         // Best-effort: kick off the derivative + metadata jobs so the media
         // renders in the party grid and on TV. This is the SAME pipeline entry
         // point for both kinds — it already discriminates image (medium/small,
         // metadata, faces) from video (poster, preview strip, ffprobe, HLS) — so
         // no party-specific video path exists. A failure here never fails the
         // upload (party media is also generated lazily on first request).
+        //
+        // CANCELLATION IS SWALLOWED HERE, and that is not the usual advice. It
+        // used to rethrow, which made a caller believe a committed upload had
+        // failed: a guest closing their phone mid-pipeline left the photograph
+        // in the album while the album-share endpoint handed its ceiling slot
+        // back, so repeated cancellations walked a share past the limit that
+        // exists to stop somebody filling a disk. Reporting "failed" for work
+        // that is already durable is the bug; the token is respected right up
+        // to the commit, which is where respecting it still means something.
         try
         {
             await _mediaPipeline.OnPartyFileIngestedAsync(ownerUserId, created.Id, cancellationToken);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
         catch
         {
-            // swallowed — safe, aggregate-only
+            // swallowed — safe, aggregate-only, and the file is already in
         }
 
         return isVideo ? PartyUploadOutcome.AcceptedVideo : PartyUploadOutcome.AcceptedPhoto;

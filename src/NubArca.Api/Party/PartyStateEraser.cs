@@ -111,8 +111,11 @@ public sealed class PartyStateEraser : IPartyStateEraser
             // question they answered — is this guest photograph visible? — has
             // already been settled on the files themselves, which is what makes
             // the surviving album self-contained.
+            // Only the rows a PARTY made. A row without a link id came from
+            // somewhere else — an album's own share link — and dismantling the
+            // party is no reason to erase it.
             await _db.PartyUploadItems
-                .Where(u => u.AlbumId == album)
+                .Where(u => u.AlbumId == album && u.PartyAlbumLinkId != null)
                 .ExecuteDeleteAsync(cancellationToken);
 
             await _db.PartyChallenges

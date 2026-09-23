@@ -46,7 +46,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         Assert.Equal(HttpStatusCode.Accepted, (await visitor.PostAsJsonAsync(
             $"/api/album-share/{token}/challenge", new { email = Listed })).StatusCode);
 
-        var code = LastCode();
+        var code = await LastCodeAsync();
         var verified = await visitor.PostAsJsonAsync(
             $"/api/album-share/{token}/verify", new { email = Listed, code });
         Assert.Equal(HttpStatusCode.NoContent, verified.StatusCode);
@@ -87,6 +87,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
 
         // The cooldown did its real job: ONE mail, not two, and only to the
         // address the owner listed.
+        await _factory.WaitForShareCodesAsync(1);
         Assert.Single(_factory.EmailSender.Messages);
         Assert.Equal(Listed, _factory.EmailSender.Messages[0].ToAddress);
     }
@@ -126,7 +127,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         var visitor = _factory.CreateClient();
 
         await visitor.PostAsJsonAsync($"/api/album-share/{token}/challenge", new { email = Listed });
-        var first = LastCode();
+        var first = await LastCodeAsync();
 
         // The resend interval is what stops a loop; this test is about the
         // generation, so it reaches past the clock by asking the owner to
@@ -134,7 +135,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         _factory.EmailSender.Reset();
         await _factory.AdvanceAlbumShareResendWindowAsync();
         await visitor.PostAsJsonAsync($"/api/album-share/{token}/challenge", new { email = Listed });
-        var second = LastCode();
+        var second = await LastCodeAsync();
         Assert.NotEqual(first, second);
 
         // The OLD code is no longer an answer to anything.
@@ -154,7 +155,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         var (_, token) = await GuardedShareAsync(owner);
         var visitor = _factory.CreateClient();
         await visitor.PostAsJsonAsync($"/api/album-share/{token}/challenge", new { email = Listed });
-        var real = LastCode();
+        var real = await LastCodeAsync();
         var wrong = real == "000000" ? "111111" : "000000";
 
         for (var i = 0; i < 5; i++)
@@ -183,7 +184,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         var visitor = _factory.CreateClient();
         await visitor.PostAsJsonAsync($"/api/album-share/{token}/challenge", new { email = Listed });
         (await visitor.PostAsJsonAsync($"/api/album-share/{token}/verify",
-            new { email = Listed, code = LastCode() })).EnsureSuccessStatusCode();
+            new { email = Listed, code = await LastCodeAsync() })).EnsureSuccessStatusCode();
         Assert.Equal(HttpStatusCode.OK, (await visitor.GetAsync($"/api/album-share/{token}")).StatusCode);
 
         var link = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/share-link");
@@ -220,7 +221,7 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
         var (_, token) = await GuardedShareAsync(owner);
         await Ask(_factory.CreateClient(), token, Listed);
-        var code = LastCode();
+        var code = await LastCodeAsync();
 
         // TWO PHONES, ONE CODE, AT ONCE. Read-then-write used to let both see a
         // live challenge and both mint a device, which is what "one-time" must
@@ -252,15 +253,81 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
 
         await Ask(visitor, tokenA, Listed);
         (await visitor.PostAsJsonAsync($"/api/album-share/{tokenA}/verify",
-            new { email = Listed, code = LastCode() })).EnsureSuccessStatusCode();
+            new { email = Listed, code = await LastCodeAsync() })).EnsureSuccessStatusCode();
 
         await Ask(visitor, tokenB, Listed);
         (await visitor.PostAsJsonAsync($"/api/album-share/{tokenB}/verify",
-            new { email = Listed, code = LastCode() })).EnsureSuccessStatusCode();
+            new { email = Listed, code = await LastCodeAsync() })).EnsureSuccessStatusCode();
 
         // BOTH still open, at the same time, with no second code asked for.
         Assert.Equal(HttpStatusCode.OK, (await visitor.GetAsync($"/api/album-share/{tokenA}")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await visitor.GetAsync($"/api/album-share/{tokenB}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Concurrent_first_challenges_are_indistinguishable_for_listed_and_unlisted()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var (_, token) = await GuardedShareAsync(owner);
+        _factory.EmailSender.Reset();
+        var visitor = _factory.CreateClient();
+
+        // THE ORACLE THE SECOND COMMIT LEFT OPEN. Two first-time challenges for
+        // one listed address both read "no challenge" and both insert; the
+        // unique index refuses the loser, and that refusal used to escape as a
+        // 500. An unlisted address can never produce one, so (202, 500) against
+        // (202, 202) read the guest list all over again.
+        var listed = await Task.WhenAll(
+            Ask(visitor, token, Listed), Ask(visitor, token, Listed));
+        var stranger = await Task.WhenAll(
+            Ask(visitor, token, "chiunque@example.com"),
+            Ask(visitor, token, "chiunque@example.com"));
+
+        foreach (var response in listed.Concat(stranger))
+        {
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+        }
+
+        // And only ONE code went out: the loser stepped aside rather than
+        // sending a second that would have invalidated the first.
+        await _factory.WaitForShareCodesAsync(1);
+        Assert.Single(_factory.EmailSender.Messages);
+    }
+
+    [Fact]
+    public async Task A_code_in_flight_cannot_be_admitted_after_a_resend_replaced_it()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var (_, token) = await GuardedShareAsync(owner);
+        var visitor = _factory.CreateClient();
+
+        await Ask(visitor, token, Listed);
+        var first = await LastCodeAsync();
+
+        // The resend writes generation 2, and the old code stops verifying.
+        //
+        // WHAT THIS DOES NOT PROVE, said plainly so nobody reads it as more:
+        // the claim now also matches on the generation and the proof, and that
+        // guard covers a window this test cannot reach — a verify that has
+        // ALREADY validated generation 1 while a resend lands before its claim.
+        // Sequentially the HMAC comparison rejects the old code long before the
+        // claim, so this passes with or without that predicate, and a
+        // deliberately racy version could not assert anything either: a verify
+        // that genuinely wins the race SHOULD be admitted, because the code was
+        // live when it was used. The guard is defence no test here
+        // demonstrates, and pretending otherwise would be worse than saying so.
+        await _factory.AdvanceAlbumShareResendWindowAsync();
+        _factory.EmailSender.Reset();
+        await Ask(visitor, token, Listed);
+        var second = await LastCodeAsync();
+        Assert.NotEqual(first, second);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await visitor.PostAsJsonAsync(
+            $"/api/album-share/{token}/verify",
+            new { email = Listed, code = first })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await visitor.PostAsJsonAsync(
+            $"/api/album-share/{token}/verify",
+            new { email = Listed, code = second })).StatusCode);
     }
 
     // --- helpers -----------------------------------------------------------
@@ -284,8 +351,11 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         return (response.StatusCode, error);
     }
 
-    private string LastCode()
+    private async Task<string> LastCodeAsync(int expected = 1)
     {
+        await _factory.WaitForShareCodesAsync(expected);
+        Assert.True(_factory.EmailSender.Messages.Count >= expected,
+            $"expected {expected} code(s), saw {_factory.EmailSender.Messages.Count}");
         var body = _factory.EmailSender.Messages[^1].TextBody;
         var match = Regex.Match(body, @"\b(\d{6})\b");
         Assert.True(match.Success, "the message carried no six-digit code");

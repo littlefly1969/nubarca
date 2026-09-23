@@ -558,6 +558,32 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
         }
     }
 
+    // How many PARTY provenance rows an album carries. The album-share ingest
+    // must create none: they are the Party's, and it does not have one.
+    public async Task<int> CountPartyUploadItemsAsync(Guid albumId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.PartyUploadItems.CountAsync(u => u.AlbumId == albumId);
+    }
+
+    // Waits, briefly, for a share code to actually be handed to the sender.
+    //
+    // The challenge endpoint dispatches the mail WITHOUT awaiting it, so that a
+    // listed and an unlisted address take the same time to answer — a slower
+    // reply is itself a way to read the guest list. That makes the recording
+    // sender's contents eventually-consistent, so a test asks for them rather
+    // than assuming they have already arrived. Bounded, so a genuine failure to
+    // send fails the test instead of hanging it.
+    public async Task WaitForShareCodesAsync(int count, int timeoutMs = 5000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (EmailSender.Messages.Count < count && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(20);
+        }
+    }
+
     // How many LIVE links one album has. The invariant is "one", and a test
     // that only checked the tokens matched would miss a second hidden row.
     public async Task<int> CountLiveAlbumShareLinksAsync(Guid albumId)
