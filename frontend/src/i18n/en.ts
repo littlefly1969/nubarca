@@ -1522,8 +1522,6 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumLink.codeLabel': '6-digit code',
   'albumLink.enter': 'Enter',
   'albumLink.wrongCode': 'That code is wrong or has expired.',
-  'albumLink.tooManyAttempts': 'Too many attempts. Ask for a new code.',
-  'albumLink.codeTooSoon': 'A code has just gone out. Wait a minute before asking for another.',
   'albumLink.codeFailed': 'The code could not be sent. Try again.',
   'partyGuestbookPublic.unavailable': 'This party has no guest book.',
   'partyGuestbookPublic.loadError': 'The guest book could not be loaded.',

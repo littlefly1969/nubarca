@@ -358,6 +358,10 @@ var partyCrewInvitePermitLimit = builder.Configuration.GetValue<int?>("RateLimit
 var partyCrewInviteWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewInvite:WindowSeconds") ?? 300;
 // A CODE costs the operator an email every time it is asked for. The service
 // already refuses a resend inside a minute; this bounds the hour.
+var albumShareUploadPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareUpload:PermitLimit") ?? 30;
+var albumShareUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareUpload:WindowSeconds") ?? 60;
+var albumShareCodePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareCode:PermitLimit") ?? 10;
+var albumShareCodeWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareCode:WindowSeconds") ?? 3600;
 var partyCrewCodePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewCode:PermitLimit") ?? 10;
 var partyCrewCodeWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewCode:WindowSeconds") ?? 3600;
 // TYPING a code is bounded per challenge by five attempts; this is the outer
@@ -694,6 +698,33 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = partyCrewInvitePermitLimit,
                 Window = TimeSpan.FromSeconds(partyCrewInviteWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // An anonymous album-share UPLOAD is as expensive as a party one and gets
+    // the same budget, not the browsing budget it shared before.
+    options.AddPolicy(NubArca.Api.Endpoints.AlbumShareLinkEndpoints.UploadRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = albumShareUploadPermitLimit,
+                Window = TimeSpan.FromSeconds(albumShareUploadWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
+    // Handing out one-time codes and checking them is where an attacker spends
+    // their time, so it is the tightest budget on the feature — the same shape
+    // Party Crew's own code route uses, for the same reason.
+    options.AddPolicy(NubArca.Api.Endpoints.AlbumShareLinkEndpoints.CodeRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = albumShareCodePermitLimit,
+                Window = TimeSpan.FromSeconds(albumShareCodeWindowSeconds),
                 QueueLimit = 0,
                 AutoReplenishment = true,
             }));

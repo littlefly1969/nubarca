@@ -86,7 +86,13 @@ public sealed record AlbumShareUpdateRequest(
     bool? RequireSecondFactor = null,
     string? Label = null,
     int? MaxUploads = null,
-    DateTime? ExpiresAt = null);
+    DateTime? ExpiresAt = null,
+    /// <summary>
+    /// Removes the expiry, which a nullable date alone cannot ask for: "no
+    /// expiry" IS null, and null already means unchanged everywhere else here.
+    /// Without this an owner who once set a date could never take it off.
+    /// </summary>
+    bool ClearExpiry = false);
 
 public sealed record AlbumShareGuestRequest(string? Email, string? DisplayName);
 

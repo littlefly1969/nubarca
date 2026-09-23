@@ -1546,8 +1546,6 @@ const it = {
   'albumLink.codeLabel': 'Codice a 6 cifre',
   'albumLink.enter': 'Entra',
   'albumLink.wrongCode': 'Codice non valido o scaduto.',
-  'albumLink.tooManyAttempts': 'Troppi tentativi. Chiedi un codice nuovo.',
-  'albumLink.codeTooSoon': 'Un codice è appena partito. Aspetta un minuto prima di chiederne un altro.',
   'albumLink.codeFailed': 'Non è stato possibile mandare il codice. Riprova.',
   'partyGuestbookPublic.unavailable': 'Questa festa non ha un guestbook.',
   'partyGuestbookPublic.loadError': 'Non riesco a caricare il guestbook.',

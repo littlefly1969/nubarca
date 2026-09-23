@@ -2592,6 +2592,11 @@ namespace NubArca.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AlbumId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_album_share_links_one_live")
+                        .HasFilter("\"Enabled\" AND \"RevokedAt\" IS NULL");
+
                     b.HasIndex("TokenHash")
                         .IsUnique()
                         .HasDatabaseName("ux_album_share_links_token");

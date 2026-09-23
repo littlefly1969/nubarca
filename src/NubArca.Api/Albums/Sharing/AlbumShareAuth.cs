@@ -37,16 +37,34 @@ public interface IAlbumShareAuth
 
 public enum AlbumShareChallengeOutcome
 {
-    /// <summary>Accepted for processing. Says nothing about whether mail was sent.</summary>
+    /// <summary>
+    /// Accepted for processing. Says NOTHING about whether the address is
+    /// listed, whether mail was sent, or whether a cooldown suppressed it.
+    ///
+    /// <para>There used to be a third value here for the resend cooldown, and
+    /// it was an enumeration oracle: an unlisted address answered the same way
+    /// twice, while a listed one answered differently the second time within a
+    /// minute — so two requests read the owner's guest list. The cooldown still
+    /// exists and still suppresses the mail; it is simply INVISIBLE from
+    /// outside, which is the only place it was ever doing harm.</para>
+    /// </summary>
     Accepted,
-    /// <summary>The link itself does not open. The only refusal a caller ever sees here.</summary>
+
+    /// <summary>The link itself does not open. The only refusal a caller sees.</summary>
     NotFound,
-    /// <summary>A code went out moments ago; asking again that fast is a mistake, not an attack.</summary>
-    TooSoon,
 }
 
-public sealed record AlbumShareVerifyOutcome(
-    bool Verified, string? DeviceToken = null, string? ErrorCode = null);
+/// <summary>
+/// The result of checking a code.
+///
+/// <para>There is deliberately NO reason on a failure. Exhausted attempts and a
+/// wrong code used to be distinguishable, and that was a second enumeration
+/// oracle: only a listed address can ever exhaust anything, so
+/// <c>too_many_attempts</c> said "this address is on the list" to anybody
+/// willing to guess six times. The distinction lives in the log, where it
+/// helps an operator and tells a caller nothing.</para>
+/// </summary>
+public sealed record AlbumShareVerifyOutcome(bool Verified, string? DeviceToken = null);
 
 public sealed class AlbumShareAuth : IAlbumShareAuth
 {
@@ -93,7 +111,12 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
         if (challenge?.LastSentAt is DateTime sent
             && now - sent < AlbumShareLimits.ResendInterval)
         {
-            return AlbumShareChallengeOutcome.TooSoon;
+            // SUPPRESSED, NOT REFUSED. Nothing is sent and nothing is written,
+            // so the previous code stays valid — but the caller is told exactly
+            // what an unlisted address is told, because any difference here is
+            // a read of the guest list. The operator can still see it.
+            _logger.LogInformation("album.share.code.suppressed LinkId={LinkId}", link.Id);
+            return AlbumShareChallengeOutcome.Accepted;
         }
 
         var code = AlbumShareTokens.NewOtp();
@@ -158,35 +181,57 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
         var link = await LiveLinkAsync(token, cancellationToken);
         if (link is null) return new AlbumShareVerifyOutcome(false);
         if (code is not { Length: 6 } || !code.All(char.IsAsciiDigit))
-            return new AlbumShareVerifyOutcome(false, ErrorCode: AlbumShareErrors.InvalidCode);
+            return new AlbumShareVerifyOutcome(false);
 
         var normalized = AlbumShareTokens.NormalizeEmail(email);
         var guest = await _db.AlbumShareGuests.AsNoTracking().FirstOrDefaultAsync(
             g => g.AlbumShareLinkId == link.Id && g.Email == normalized && g.RevokedAt == null,
             cancellationToken);
-        if (guest is null)
-            return new AlbumShareVerifyOutcome(false, ErrorCode: AlbumShareErrors.InvalidCode);
+        // An unlisted address takes the SAME exit as a wrong code. Only a listed
+        // one can ever exhaust attempts, so any separate answer here would say
+        // "this address is on the list" to whoever asked twice.
+        if (guest is null) return new AlbumShareVerifyOutcome(false);
 
         var now = Now;
-        var challenge = await _db.AlbumShareChallenges
-            .FirstOrDefaultAsync(c => c.AlbumShareGuestId == guest.Id, cancellationToken);
-        if (challenge is null || challenge.ExpiresAt <= now)
-            return new AlbumShareVerifyOutcome(false, ErrorCode: AlbumShareErrors.InvalidCode);
-        if (challenge.Attempts >= AlbumShareLimits.MaxOtpAttempts)
-            return new AlbumShareVerifyOutcome(false, ErrorCode: AlbumShareErrors.TooManyAttempts);
 
-        // The attempt is counted BEFORE the comparison, so a crash or a
-        // cancelled request between the two cannot buy a free guess.
-        challenge.Attempts += 1;
-        await _db.SaveChangesAsync(cancellationToken);
+        // THE ATTEMPT IS SPENT BY A CONDITIONAL UPDATE, not by read-then-write.
+        // Two phones submitting at once used to both read a live challenge and
+        // both increment from the same value, so one of the two guesses was
+        // free. Asking the database to increment only while the row still looks
+        // live makes the count the database's to keep.
+        var counted = await _db.AlbumShareChallenges
+            .Where(c => c.AlbumShareGuestId == guest.Id
+                && c.VerifiedAt == null
+                && c.ExpiresAt > now
+                && c.Attempts < AlbumShareLimits.MaxOtpAttempts)
+            .ExecuteUpdateAsync(
+                s => s.SetProperty(c => c.Attempts, c => c.Attempts + 1), cancellationToken);
+        if (counted == 0)
+        {
+            // Expired, already spent, or out of guesses. One answer for all
+            // three, and the reason only in the log.
+            _logger.LogInformation("album.share.verify.closed LinkId={LinkId}", link.Id);
+            return new AlbumShareVerifyOutcome(false);
+        }
+
+        var challenge = await _db.AlbumShareChallenges.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.AlbumShareGuestId == guest.Id, cancellationToken);
+        if (challenge is null) return new AlbumShareVerifyOutcome(false);
 
         if (!_tokens.OtpMatches(challenge.Id, challenge.Generation, challenge.OtpProof, code))
-            return new AlbumShareVerifyOutcome(false, ErrorCode: AlbumShareErrors.InvalidCode);
+            return new AlbumShareVerifyOutcome(false);
 
-        // SPENT ON USE. A code that still worked after it had been accepted
-        // would be a code sitting in somebody's inbox indefinitely.
-        challenge.VerifiedAt = now;
-        challenge.ExpiresAt = now;
+        // THE CODE IS SPENT BY THE SAME KIND OF STATEMENT, and exactly one
+        // caller can win it. `VerifiedAt == null` in the predicate is the
+        // compare; setting it is the swap. A correct code submitted twice at
+        // the same instant therefore mints ONE device, not two — which is what
+        // "one-time" has to mean to be worth saying.
+        var claimed = await _db.AlbumShareChallenges
+            .Where(c => c.Id == challenge.Id && c.VerifiedAt == null && c.ExpiresAt > now)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(c => c.VerifiedAt, now)
+                .SetProperty(c => c.ExpiresAt, now), cancellationToken);
+        if (claimed == 0) return new AlbumShareVerifyOutcome(false);
 
         var raw = AlbumShareTokens.NewDeviceToken();
         _db.AlbumShareDevices.Add(new AlbumShareDevice
