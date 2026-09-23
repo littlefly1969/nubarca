@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using NubArca.Api.Domain;
 using NubArca.Api.Tests.Endpoints;
 
 namespace NubArca.Api.Tests.Albums;
@@ -333,6 +334,39 @@ public sealed class AlbumShareLinkTests : IDisposable
         Assert.Equal(0, queue.GetProperty("items").GetArrayLength());
     }
 
+    [Fact]
+    public async Task Readding_a_revoked_guest_does_not_exceed_max_guests()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+        await ShareAsync(owner, album);
+
+        // Fill the list exactly.
+        for (var i = 0; i < AlbumShareLimits.MaxGuests; i++)
+        {
+            (await AddGuestAsync(owner, album, $"g{i}@example.com")).EnsureSuccessStatusCode();
+        }
+
+        // THE WAY PAST THE CEILING. Remove one, add a different one — back to
+        // the limit — then bring the removed one back. The count was checked
+        // only when a NEW row was created, so a reactivation walked straight
+        // through it: fifty, remove A, add B, re-add A, fifty-one.
+        var first = await GuestIdAsync(owner, album, "g0@example.com");
+        (await owner.DeleteAsync($"/api/albums/{album}/share-link/guests/{first}"))
+            .EnsureSuccessStatusCode();
+        (await AddGuestAsync(owner, album, "new@example.com")).EnsureSuccessStatusCode();
+
+        var readd = await AddGuestAsync(owner, album, "g0@example.com");
+
+        // Refused with the SAME answer a new address gets at the ceiling, and
+        // the row is left revoked rather than half-restored.
+        Assert.Equal(HttpStatusCode.BadRequest, readd.StatusCode);
+        var link = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/share-link");
+        var live = link.GetProperty("guests").EnumerateArray().ToList();
+        Assert.Equal(AlbumShareLimits.MaxGuests, live.Count);
+        Assert.DoesNotContain(live, g => g.GetProperty("email").GetString() == "g0@example.com");
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private static MultipartFormDataContent OneFile()
@@ -363,6 +397,18 @@ public sealed class AlbumShareLinkTests : IDisposable
         var response = await owner.PostAsync($"/api/albums/{album}/share-link", null);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    private static Task<HttpResponseMessage> AddGuestAsync(
+        HttpClient owner, Guid album, string email) =>
+        owner.PostAsJsonAsync($"/api/albums/{album}/share-link/guests", new { email });
+
+    private static async Task<Guid> GuestIdAsync(HttpClient owner, Guid album, string email)
+    {
+        var link = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/share-link");
+        return link.GetProperty("guests").EnumerateArray()
+            .Single(g => g.GetProperty("email").GetString() == email)
+            .GetProperty("id").GetGuid();
     }
 
     private static async Task<Guid> AlbumAsync(HttpClient owner)

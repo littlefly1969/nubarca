@@ -230,6 +230,64 @@ public sealed class AlbumShareConcurrencyPostgresTests : IAsyncLifetime
         Assert.InRange(live, 1, AlbumShareLimits.MaxGuests);
     }
 
+    [SkippableFact]
+    public async Task A_reactivation_racing_a_new_address_for_the_last_slot_respects_the_ceiling()
+    {
+        Skip.IfNot(_fixture.Available, "PostgreSQL container is not available.");
+
+        // One slot left, and a REVOKED address waiting to come back. The two
+        // ways onto the list used to be counted in different places — only a
+        // new row met the ceiling — so a reactivation and an addition arriving
+        // together could both be admitted into a single slot.
+        await using (var setup = NewContext())
+        {
+            var service = NewService(setup);
+            await service.CreateAsync(_ownerId, _albumId, _ownerId);
+            for (var i = 0; i < AlbumShareLimits.MaxGuests; i++)
+            {
+                await service.AddGuestAsync(
+                    _ownerId, _albumId, new AlbumShareGuestRequest($"g{i}@example.com", null));
+            }
+            var back = await setup.AlbumShareGuests
+                .FirstAsync(g => g.Email == "g0@example.com");
+            await service.RemoveGuestAsync(_ownerId, _albumId, back.Id);
+        }
+
+        using var barrier = new Barrier(2);
+
+        async Task Reactivate()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            try
+            {
+                await service.AddGuestAsync(
+                    _ownerId, _albumId, new AlbumShareGuestRequest("g0@example.com", null));
+            }
+            catch { /* a loser under contention is a refusal, not a failure */ }
+        }
+
+        async Task AddNew()
+        {
+            await using var db = NewContext();
+            var service = NewService(db);
+            barrier.SignalAndWait();
+            try
+            {
+                await service.AddGuestAsync(
+                    _ownerId, _albumId, new AlbumShareGuestRequest("new@example.com", null));
+            }
+            catch { /* same */ }
+        }
+
+        await Task.WhenAll(Task.Run(Reactivate), Task.Run(AddNew));
+
+        await using var check = NewContext();
+        var live = await check.AlbumShareGuests.CountAsync(g => g.RevokedAt == null);
+        Assert.Equal(AlbumShareLimits.MaxGuests, live);
+    }
+
     // --- plumbing ----------------------------------------------------------
 
     private AppDbContext NewContext() => new(_dbOptions!);

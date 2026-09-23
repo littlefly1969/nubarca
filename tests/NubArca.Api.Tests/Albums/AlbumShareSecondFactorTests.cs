@@ -58,7 +58,9 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         // And the SAME client, carrying it, is simply in.
         var open = await visitor.GetAsync($"/api/album-share/{token}");
         Assert.Equal(HttpStatusCode.OK, open.StatusCode);
-        Assert.Equal(album, album);
+        // ...and it is THIS album they are in, not merely some album.
+        Assert.Equal("Album", (await open.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("albumName").GetString()![..5]);
     }
 
     [Fact]
