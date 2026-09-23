@@ -75,6 +75,15 @@ export interface AlbumShareItem {
    * than one that answers 404.
    */
   downloadUrl: string | null;
+  /**
+   * The HLS ladder, for a video.
+   *
+   * Offered whatever the download switch says, because watching and taking a
+   * copy are different powers: playback is a transcoded rendition and never
+   * the camera's file. Null for an image, and null when the installation has
+   * no HLS provider — in which case the poster is the honest fallback.
+   */
+  playbackUrl: string | null;
   isVideo: boolean;
 }
 

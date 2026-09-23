@@ -125,7 +125,20 @@ public sealed record AlbumSharePublicDto(
 /// that answers 404 is a worse answer than no URL.</para>
 /// </summary>
 public sealed record AlbumShareItemDto(
-    Guid Id, string ThumbnailUrl, string PreviewUrl, string? DownloadUrl, bool IsVideo);
+    Guid Id,
+    string ThumbnailUrl,
+    string PreviewUrl,
+    /// <summary>Null when there is no file safe to hand over — a video whose
+    /// owner has not allowed originals.</summary>
+    string? DownloadUrl,
+    /// <summary>
+    /// The HLS ladder, for a video. Offered whatever the download switch says,
+    /// because watching and taking a copy are different powers: playback is a
+    /// transcoded rendition and never the camera's file. Null for an image, and
+    /// null when the installation has no HLS provider.
+    /// </summary>
+    string? PlaybackUrl,
+    bool IsVideo);
 
 public sealed record AlbumShareItemsDto(
     IReadOnlyList<AlbumShareItemDto> Items, string? NextCursor);

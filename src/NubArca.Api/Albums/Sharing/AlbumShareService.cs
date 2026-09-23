@@ -43,9 +43,16 @@ public sealed class AlbumShareService : IAlbumShareService
 
         try
         {
-            var minted = await MintAsync(
-                ownerUserId, albumId, createdByUserId, cancellationToken);
-            return await ProjectAsync(minted, cancellationToken);
+            return await SerializedAsync(albumId, async () =>
+            {
+                // Re-read INSIDE the lock: the check above was optimistic and
+                // somebody may have minted while we waited our turn.
+                var already = await ActiveAsync(albumId, cancellationToken);
+                if (already is not null) return await ProjectAsync(already, cancellationToken);
+                var minted = await MintAsync(
+                    ownerUserId, albumId, createdByUserId, cancellationToken);
+                return await ProjectAsync(minted, cancellationToken);
+            }, cancellationToken);
         }
         catch (DbUpdateException)
         {
@@ -72,10 +79,17 @@ public sealed class AlbumShareService : IAlbumShareService
     {
         if (!await OwnsAsync(ownerUserId, albumId, cancellationToken)) return null;
 
+        return await SerializedAsync(albumId, async () =>
+        {
         var now = Now;
         // The settings survive the rotation and the LIST does not: the owner
         // meant to change the address, not to rebuild their configuration.
         // Guests belong to the link row, so they are copied across explicitly.
+        //
+        // READING THE GUESTS AND REWRITING THEM IS ONE ACT. Under the album
+        // lock nothing can add to the list we are about to copy, and nothing
+        // can remove from it after we have copied — which is what stops a
+        // removed address coming back to life on the new link.
         var previous = await ActiveAsync(albumId, cancellationToken);
         var carried = previous is null
             ? []
@@ -83,12 +97,11 @@ public sealed class AlbumShareService : IAlbumShareService
                 .Where(g => g.AlbumShareLinkId == previous.Id && g.RevokedAt == null)
                 .ToListAsync(cancellationToken);
 
-        // ONE TRANSACTION. Revoking the old address and minting the new one are
-        // halves of one act: a crash between them would leave the album either
-        // with no way in or — worse, once the unique index exists — unable to
-        // mint one because the old row still counts as live.
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-
+        // ONE TRANSACTION — the album lock's, opened by SerializedAsync above.
+        // Revoking the old address and minting the new one are halves of one
+        // act: a crash between them would leave the album either with no way in
+        // or — worse, once the unique index exists — unable to mint one because
+        // the old row still counts as live.
         if (previous is not null)
         {
             previous.Enabled = false;
@@ -112,8 +125,8 @@ public sealed class AlbumShareService : IAlbumShareService
             });
         }
         await _db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
         return await ProjectAsync(link, cancellationToken);
+        }, cancellationToken);
     }
 
     public async Task<AlbumShareLinkDto?> UpdateAsync(
@@ -121,11 +134,15 @@ public sealed class AlbumShareService : IAlbumShareService
         CancellationToken cancellationToken = default)
     {
         if (!await OwnsAsync(ownerUserId, albumId, cancellationToken)) return null;
+        if (request.MaxUploads is int max && !AlbumShareLimits.IsValidMaxUploads(max)) return null;
+        return await SerializedAsync(albumId, async () =>
+        {
+        // Read INSIDE the lock, so a rotation cannot swap the link out from
+        // under this save and silently discard it.
         var link = await _db.AlbumShareLinks
             .FirstOrDefaultAsync(x => x.AlbumId == albumId && x.Enabled && x.RevokedAt == null,
                 cancellationToken);
         if (link is null) return null;
-        if (request.MaxUploads is int max && !AlbumShareLimits.IsValidMaxUploads(max)) return null;
         if (request.Label is { Length: > AlbumShareLimits.MaxLabelLength }) return null;
 
         // Omitted means unchanged, one field at a time — so two surfaces
@@ -148,22 +165,28 @@ public sealed class AlbumShareService : IAlbumShareService
         link.UpdatedAt = Now;
         await _db.SaveChangesAsync(cancellationToken);
         return await ProjectAsync(link, cancellationToken);
+        }, cancellationToken);
     }
 
     public async Task<bool> RevokeAsync(
         Guid ownerUserId, Guid albumId, CancellationToken cancellationToken = default)
     {
         if (!await OwnsAsync(ownerUserId, albumId, cancellationToken)) return false;
-        var now = Now;
-        // Idempotent by construction: a set-based update over whatever is still
-        // open, which is zero rows when the owner revokes twice.
-        await _db.AlbumShareLinks
-            .Where(x => x.AlbumId == albumId && x.Enabled)
-            .ExecuteUpdateAsync(s => s
-                .SetProperty(x => x.Enabled, false)
-                .SetProperty(x => x.RevokedAt, now)
-                .SetProperty(x => x.UpdatedAt, now), cancellationToken);
-        return true;
+        return await SerializedAsync(albumId, async () =>
+        {
+            var now = Now;
+            // Idempotent by construction: a set-based update over whatever is
+            // still open, which is zero rows when the owner revokes twice. Held
+            // behind the album lock so it cannot run between a rotation's
+            // revoke and its mint and leave the new link alive.
+            await _db.AlbumShareLinks
+                .Where(x => x.AlbumId == albumId && x.Enabled)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(x => x.Enabled, false)
+                    .SetProperty(x => x.RevokedAt, now)
+                    .SetProperty(x => x.UpdatedAt, now), cancellationToken);
+            return true;
+        }, cancellationToken);
     }
 
     public async Task<AlbumShareGuestDto?> AddGuestAsync(
@@ -172,6 +195,11 @@ public sealed class AlbumShareService : IAlbumShareService
     {
         if (!await OwnsAsync(ownerUserId, albumId, cancellationToken)) return null;
         if (!AlbumShareTokens.IsPlausibleEmail(request.Email)) return null;
+        return await SerializedAsync(albumId, async () =>
+        {
+        // COUNTING AND INSERTING ARE ONE ACT under the lock. "Count the guests,
+        // then add one" is two statements: fifty addresses arriving together
+        // all read forty-nine and all conclude there is room.
         var link = await ActiveAsync(albumId, cancellationToken);
         if (link is null) return null;
 
@@ -210,6 +238,7 @@ public sealed class AlbumShareService : IAlbumShareService
         _db.AlbumShareGuests.Add(guest);
         await _db.SaveChangesAsync(cancellationToken);
         return new AlbumShareGuestDto(guest.Id, guest.Email, guest.DisplayName, guest.CreatedAt);
+        }, cancellationToken);
     }
 
     public async Task<bool> RemoveGuestAsync(
@@ -217,6 +246,10 @@ public sealed class AlbumShareService : IAlbumShareService
         CancellationToken cancellationToken = default)
     {
         if (!await OwnsAsync(ownerUserId, albumId, cancellationToken)) return false;
+        return await SerializedAsync(albumId, async () =>
+        {
+        // Behind the lock, so a rotation cannot copy this address forward after
+        // it has been removed — which is how a revoked guest came back to life.
         var link = await ActiveAsync(albumId, cancellationToken);
         if (link is null) return false;
 
@@ -233,6 +266,7 @@ public sealed class AlbumShareService : IAlbumShareService
             .Where(d => d.AlbumShareGuestId == guestId && d.RevokedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.RevokedAt, now), cancellationToken);
         return true;
+        }, cancellationToken);
     }
 
     // ── The seam ────────────────────────────────────────────────────────────
@@ -316,6 +350,57 @@ public sealed class AlbumShareService : IAlbumShareService
                 cancellationToken);
 
     // ── Internals ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Runs one album's share mutation with every other one ORDERED BEHIND IT.
+    ///
+    /// <para><b>Why a lock and not a re-read.</b> Every mutation here is
+    /// read-modify-write over rows that belong together — the link, its guest
+    /// list, its counters. A rotation reads the guests, revokes the link, mints
+    /// a new one and copies them across; an <c>AddGuest</c> landing in the
+    /// middle attaches to the row that is about to be closed and vanishes, and
+    /// a <c>RemoveGuest</c> landing there is copied forward and comes back to
+    /// life. Neither is visible in a single-threaded test and both are a
+    /// capability somebody thought they had taken away.</para>
+    ///
+    /// <para>So the transaction OPENS by writing the ALBUM's own row — a
+    /// self-assignment that changes nothing and exists to take that row's write
+    /// lock. The album is the right anchor because it is the one row that
+    /// exists before the first link and survives the last: locking the link
+    /// could not order a <c>Create</c> against another <c>Create</c>, which is
+    /// exactly the race that produced two live links.</para>
+    ///
+    /// <para>Opening with a write also means the transaction never upgrades a
+    /// shared lock to an exclusive one, which is the shape SQLite refuses to
+    /// wait on — so the same code runs under both test databases.</para>
+    /// </summary>
+    private async Task<T> SerializedAsync<T>(
+        Guid albumId, Func<Task<T>> body, CancellationToken ct)
+    {
+        var owned = _db.Database.CurrentTransaction is null;
+        var tx = owned ? await _db.Database.BeginTransactionAsync(ct) : null;
+        try
+        {
+            await _db.Albums.Where(a => a.Id == albumId)
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.UpdatedAt, a => a.UpdatedAt), ct);
+            var result = await body();
+            if (owned) await tx!.CommitAsync(ct);
+            return result;
+        }
+        catch
+        {
+            if (owned && tx is not null)
+            {
+                try { await tx.RollbackAsync(ct); } catch { /* connection already gone */ }
+            }
+            _db.ChangeTracker.Clear();
+            throw;
+        }
+        finally
+        {
+            if (tx is not null) await tx.DisposeAsync();
+        }
+    }
 
     private Task<bool> OwnsAsync(Guid ownerUserId, Guid albumId, CancellationToken ct) =>
         _db.Albums.AsNoTracking().AnyAsync(a => a.Id == albumId && a.OwnerUserId == ownerUserId, ct);

@@ -358,6 +358,8 @@ var partyCrewInvitePermitLimit = builder.Configuration.GetValue<int?>("RateLimit
 var partyCrewInviteWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:PartyCrewInvite:WindowSeconds") ?? 300;
 // A CODE costs the operator an email every time it is asked for. The service
 // already refuses a resend inside a minute; this bounds the hour.
+var albumShareMediaPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareMedia:PermitLimit") ?? 3000;
+var albumShareMediaWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareMedia:WindowSeconds") ?? 60;
 var albumShareUploadPermitLimit = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareUpload:PermitLimit") ?? 30;
 var albumShareUploadWindowSeconds = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareUpload:WindowSeconds") ?? 60;
 var albumShareCodePermitLimit = builder.Configuration.GetValue<int?>("RateLimits:AlbumShareCode:PermitLimit") ?? 10;
@@ -702,6 +704,20 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
             }));
 
+    // A gallery is MANY requests — thumbnails, a preview, a video's playlist
+    // and all its segments — from one visitor scrolling once. The party's own
+    // media surface already has a ceiling for exactly this shape.
+    options.AddPolicy(NubArca.Api.Endpoints.AlbumShareLinkEndpoints.MediaRateLimitPolicy, httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = albumShareMediaPermitLimit,
+                Window = TimeSpan.FromSeconds(albumShareMediaWindowSeconds),
+                QueueLimit = 0,
+                AutoReplenishment = true,
+            }));
+
     // An anonymous album-share UPLOAD is as expensive as a party one and gets
     // the same budget, not the browsing budget it shared before.
     options.AddPolicy(NubArca.Api.Endpoints.AlbumShareLinkEndpoints.UploadRateLimitPolicy, httpContext =>
@@ -998,6 +1014,13 @@ if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.AddScoped<
         NubArca.Api.Albums.Sharing.IAlbumShareAuth,
         NubArca.Api.Albums.Sharing.AlbumShareAuth>();
+    // The code dispatcher is OWNED work, not fire-and-forget: a bounded channel
+    // with a hosted drain, so a challenge answers in constant time without
+    // leaving an unobserved task behind it.
+    builder.Services.AddSingleton<NubArca.Api.Albums.Sharing.AlbumShareMailDispatcher>();
+    builder.Services.AddSingleton<NubArca.Api.Albums.Sharing.IAlbumShareMailDispatcher>(
+        sp => sp.GetRequiredService<NubArca.Api.Albums.Sharing.AlbumShareMailDispatcher>());
+    builder.Services.AddHostedService<NubArca.Api.Albums.Sharing.AlbumShareMailService>();
     // SHARE-ALBUM-03: the collaborative editing surface. One implementation for
     // Owner and Editor, so neither can drift from the other's authorization,
     // concurrency or audit.
