@@ -1404,8 +1404,6 @@ const es: Partial<Record<MessageKey, string>> = {
   'albumLink.codeLabel': 'Código de 6 cifras',
   'albumLink.enter': 'Entrar',
   'albumLink.wrongCode': 'Código no válido o caducado.',
-  'albumLink.tooManyAttempts': 'Demasiados intentos. Pide un código nuevo.',
-  'albumLink.codeTooSoon': 'Acaba de salir un código. Espera un minuto antes de pedir otro.',
   'albumLink.codeFailed': 'No se ha podido enviar el código. Inténtalo de nuevo.',
   'partyGuestbookPublic.unavailable': 'Esta fiesta no tiene libro de visitas.',
   'partyGuestbookPublic.loadError': 'No se ha podido cargar el libro de visitas.',

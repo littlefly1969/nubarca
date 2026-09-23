@@ -35,10 +35,44 @@ namespace NubArca.Api.Endpoints;
 /// </summary>
 public static class AlbumShareLinkEndpoints
 {
-    /// <summary>The cookie a verified visitor carries. Scoped to the share routes.</summary>
-    private const string DeviceCookie = "NubArca.AlbumShare";
+    /// <summary>
+    /// The cookie a verified visitor carries, SCOPED TO ONE LINK.
+    ///
+    /// <para>It used to be one cookie at <c>/api/album-share</c> for the whole
+    /// feature, and a visitor holding two protected albums kept losing the
+    /// first: verifying B replaced A's cookie, returning to A asked for a code
+    /// again, and verifying A then broke B. The device token was always bound
+    /// to its link on the server; the cookie simply could not hold two. Naming
+    /// and pathing it per link lets the browser keep one grant per album, which
+    /// is what ninety days of "verified device" has to mean.</para>
+    /// </summary>
+    private static string DeviceCookieName(string token) =>
+        $"NubArca.AlbumShare.{Fingerprint(token)}";
 
+    private static string CookiePath(string token) =>
+        $"/api/album-share/{Uri.EscapeDataString(token)}";
+
+    /// <summary>
+    /// A short, stable, URL-safe name for one link's cookie.
+    ///
+    /// <para>Derived from the token rather than being the token: a cookie NAME
+    /// travels in plain sight through logs and developer tools, and there is no
+    /// reason for the capability itself to be the thing written there.</para>
+    /// </summary>
+    private static string Fingerprint(string token) =>
+        Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(token)))[..16];
+
+    // THREE POLICIES, not one. Browsing a shared album is cheap and frequent;
+    // accepting a file is expensive; handing out one-time codes is where an
+    // attacker spends their time. The party surface already makes exactly this
+    // distinction — 300/min public against 30/min upload — and reusing only its
+    // public policy for all three would have put an anonymous upload endpoint
+    // and an OTP mill behind a browsing budget.
     private const string PublicRateLimitPolicy = PartyEndpoints.PublicRateLimitPolicy;
+    public const string UploadRateLimitPolicy = "album-share-upload";
+    public const string CodeRateLimitPolicy = "album-share-code";
 
     public static IEndpointRouteBuilder MapAlbumShareLinkEndpoints(this IEndpointRouteBuilder app)
     {
@@ -168,7 +202,7 @@ public static class AlbumShareLinkEndpoints
             CancellationToken cancellationToken) =>
         {
             NoStore(httpContext);
-            var resolved = await shares.ResolveAsync(token, Device(httpContext), cancellationToken);
+            var resolved = await shares.ResolveAsync(token, Device(httpContext, token), cancellationToken);
             if (resolved.Kind == AlbumShareResolution.NeedsSecondFactor)
             {
                 // The ONE place this surface says more than "no". The caller is
@@ -339,33 +373,61 @@ public static class AlbumShareLinkEndpoints
                     break;
                 }
 
-                NubArca.Api.Party.PartyUploadOutcome outcome;
+                // THE SLOT IS HELD UNTIL THE FILE IS PROVEN IN. `committed`
+                // starts false and only a genuine acceptance sets it, so every
+                // other way out of this block — a refusal, a throw, and above
+                // all a CANCELLATION — hands the slot back.
+                //
+                // Cancellation was the one that mattered: it used to rethrow
+                // straight out of here, past the release, so a phone that lost
+                // signal after the claim and before the commit burned a slot
+                // permanently. Repeated, that walks a share to its ceiling over
+                // files that never arrived.
+                var committed = false;
                 try
                 {
                     await using var stream = file.OpenReadStream();
                     // Every party-shaped argument omitted: no moderation, no
                     // per-person quota, no link to an evening. The service was
                     // already written to work without one.
-                    outcome = await uploads.UploadAsync(
+                    var outcome = await uploads.UploadAsync(
                         access.OwnerUserId, access.AlbumId,
                         file.FileName, file.ContentType, file.Length, stream,
                         cancellationToken: cancellationToken);
+                    committed = outcome is NubArca.Api.Party.PartyUploadOutcome.AcceptedPhoto
+                        or NubArca.Api.Party.PartyUploadOutcome.AcceptedVideo;
+                    if (committed) accepted++; else rejected++;
                 }
-                catch (OperationCanceledException) { throw; }
-                catch { outcome = NubArca.Api.Party.PartyUploadOutcome.Failed; }
-
-                if (outcome is NubArca.Api.Party.PartyUploadOutcome.AcceptedPhoto
-                    or NubArca.Api.Party.PartyUploadOutcome.AcceptedVideo)
-                {
-                    accepted++;
-                }
-                else
+                catch
                 {
                     rejected++;
-                    // A refused file did not arrive, so the slot it claimed goes
-                    // back. A ceiling that counted failures would close a share
-                    // over photographs nobody can see.
-                    await shares.ReleaseUploadSlotAsync(access.LinkId, cancellationToken);
+                    throw;
+                }
+                finally
+                {
+                    if (!committed)
+                    {
+                        // A DIFFERENT TOKEN, deliberately. By the time a
+                        // cancellation reaches here the request's own token is
+                        // already cancelled, so compensating with it would do
+                        // nothing at all — which is how this kind of leak
+                        // usually survives the fix that was supposed to close
+                        // it. The compensation is small, bounded and must
+                        // outlive the request that triggered it.
+                        using var compensation = new CancellationTokenSource(
+                            TimeSpan.FromSeconds(10));
+                        try
+                        {
+                            await shares.ReleaseUploadSlotAsync(
+                                access.LinkId, compensation.Token);
+                        }
+                        catch
+                        {
+                            // The slot stays claimed. That is a number an owner
+                            // can raise, and losing it is strictly better than
+                            // failing the response over bookkeeping.
+                        }
+                    }
                 }
             }
 
@@ -376,7 +438,7 @@ public static class AlbumShareLinkEndpoints
                 new { accepted, rejected }, cancellationToken);
 
             return Results.Ok(new { accepted, rejected, stopped });
-        }).WithName("UploadToAlbumShare").RequireRateLimiting(PublicRateLimitPolicy);
+        }).WithName("UploadToAlbumShare").RequireRateLimiting(UploadRateLimitPolicy);
 
         MapSecondFactor(app);
     }
@@ -392,18 +454,16 @@ public static class AlbumShareLinkEndpoints
         {
             NoStore(httpContext);
             var outcome = await auth.ChallengeAsync(token, body?.Email, cancellationToken);
-            return outcome switch
-            {
-                // ACCEPTED whether or not the address is on the list, and
-                // whether or not the mail went out. Any other answer would make
-                // this link a way to enumerate the owner's guest list.
-                AlbumShareChallengeOutcome.Accepted => Results.Accepted(),
-                AlbumShareChallengeOutcome.TooSoon => Results.Json(
-                    new { error = AlbumShareErrors.ResendTooSoon },
-                    statusCode: StatusCodes.Status429TooManyRequests),
-                _ => Results.NotFound(),
-            };
-        }).WithName("ChallengeAlbumShare").RequireRateLimiting(PublicRateLimitPolicy);
+            // ONE ANSWER. Listed or not, delivered or not, suppressed by the
+            // cooldown or not — 202. The cooldown used to answer 429 and that
+            // was an oracle: an unlisted address said 202 twice, a listed one
+            // said 202 then 429, so two requests read the owner's guest list.
+            // The only refusal left is the link itself not opening, which the
+            // caller already knows because they are holding it.
+            return outcome == AlbumShareChallengeOutcome.NotFound
+                ? Results.NotFound()
+                : Results.Accepted();
+        }).WithName("ChallengeAlbumShare").RequireRateLimiting(CodeRateLimitPolicy);
 
         app.MapPost("/api/album-share/{token}/verify", async (
             string token,
@@ -418,23 +478,32 @@ public static class AlbumShareLinkEndpoints
                 httpContext.Request.Headers.UserAgent.ToString(), cancellationToken);
             if (!result.Verified || result.DeviceToken is null)
             {
+                // ONE REFUSAL, for a wrong code, an expired one, a spent one,
+                // an exhausted run and an unlisted address alike. Telling the
+                // difference would say "this address is on the list" to anybody
+                // willing to guess six times — the same oracle the challenge
+                // route had, reached from the other side.
                 return Results.Json(
-                    new { error = result.ErrorCode ?? AlbumShareErrors.InvalidCode },
+                    new { error = AlbumShareErrors.InvalidCode },
                     statusCode: StatusCodes.Status401Unauthorized);
             }
 
             // HTTP-only, so no script on the page can read it, and scoped to the
             // share routes so it is not offered to anything else on the origin.
-            httpContext.Response.Cookies.Append(DeviceCookie, result.DeviceToken, new CookieOptions
-            {
-                HttpOnly = true,
-                Secure = httpContext.Request.IsHttps,
-                SameSite = SameSiteMode.Lax,
-                Path = "/api/album-share",
-                MaxAge = AlbumShareLimits.DeviceLifetime,
-            });
+            httpContext.Response.Cookies.Append(
+                DeviceCookieName(token), result.DeviceToken, new CookieOptions
+                {
+                    HttpOnly = true,
+                    Secure = httpContext.Request.IsHttps,
+                    SameSite = SameSiteMode.Lax,
+                    // Scoped to THIS link, so a second protected album cannot
+                    // evict the first and the browser is not offered a grant on
+                    // a request it has no business carrying it to.
+                    Path = CookiePath(token),
+                    MaxAge = AlbumShareLimits.DeviceLifetime,
+                });
             return Results.NoContent();
-        }).WithName("VerifyAlbumShare").RequireRateLimiting(PublicRateLimitPolicy);
+        }).WithName("VerifyAlbumShare").RequireRateLimiting(CodeRateLimitPolicy);
     }
 
     // ── Shared plumbing ─────────────────────────────────────────────────────
@@ -446,12 +515,14 @@ public static class AlbumShareLinkEndpoints
     private static async Task<AlbumShareAccess?> GrantAsync(
         IAlbumShareService shares, string token, HttpContext httpContext, CancellationToken ct)
     {
-        var resolved = await shares.ResolveAsync(token, Device(httpContext), ct);
+        var resolved = await shares.ResolveAsync(token, Device(httpContext, token), ct);
         return resolved.Access;
     }
 
-    private static string? Device(HttpContext httpContext) =>
-        httpContext.Request.Cookies.TryGetValue(DeviceCookie, out var value) ? value : null;
+    private static string? Device(HttpContext httpContext, string token) =>
+        httpContext.Request.Cookies.TryGetValue(DeviceCookieName(token), out var value)
+            ? value
+            : null;
 
     private static string? Ip(HttpContext httpContext) =>
         httpContext.Connection.RemoteIpAddress?.ToString();

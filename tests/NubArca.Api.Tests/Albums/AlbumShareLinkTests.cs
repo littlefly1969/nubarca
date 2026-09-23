@@ -248,6 +248,77 @@ public sealed class AlbumShareLinkTests : IDisposable
             view.EnumerateObject().Select(p => p.Name).Order());
     }
 
+    [Fact]
+    public async Task Two_requests_arriving_together_make_ONE_link()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+
+        // READ-THEN-MINT used to let both see "no link" and both mint one. A
+        // second, hidden capability over somebody's album is the bug nobody
+        // notices: revoking finds one row and the other keeps opening. The
+        // partial unique index refuses the loser's insert, and the loser adopts
+        // the winner's link instead of failing.
+        var both = await Task.WhenAll(
+            owner.PostAsync($"/api/albums/{album}/share-link", null),
+            owner.PostAsync($"/api/albums/{album}/share-link", null));
+
+        foreach (var response in both) response.EnsureSuccessStatusCode();
+        var tokens = new List<string>();
+        foreach (var response in both)
+        {
+            tokens.Add(TokenOf(await response.Content.ReadFromJsonAsync<JsonElement>()));
+        }
+        Assert.Equal(tokens[0], tokens[1]);
+        Assert.Equal(1, await _factory.CountLiveAlbumShareLinksAsync(album));
+
+        // And revoking closes EVERYTHING, so no second address survives it.
+        (await owner.DeleteAsync($"/api/albums/{album}/share-link")).EnsureSuccessStatusCode();
+        Assert.Equal(0, await _factory.CountLiveAlbumShareLinksAsync(album));
+        Assert.Equal(HttpStatusCode.NotFound,
+            (await _factory.CreateClient().GetAsync($"/api/album-share/{tokens[0]}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Rotating_leaves_exactly_one_live_link_behind_it()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+        await ShareAsync(owner, album);
+
+        (await owner.PostAsync($"/api/albums/{album}/share-link/rotate", null))
+            .EnsureSuccessStatusCode();
+
+        // The revoke and the mint are one transaction, so there is never a
+        // moment with two live rows and never one with none.
+        Assert.Equal(1, await _factory.CountLiveAlbumShareLinksAsync(album));
+    }
+
+    [Fact]
+    public async Task An_expiry_can_be_taken_off_again()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+        await ShareAsync(owner, album);
+
+        var dated = await owner.PatchAsJsonAsync($"/api/albums/{album}/share-link",
+            new { expiresAt = "2030-01-01T00:00:00Z" });
+        dated.EnsureSuccessStatusCode();
+        Assert.Equal(JsonValueKind.String,
+            (await dated.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("expiresAt").ValueKind);
+
+        // "No expiry" IS null, and null already means unchanged everywhere on
+        // this request — so without an explicit sentence an owner who once set
+        // a date could never take it off.
+        var cleared = await owner.PatchAsJsonAsync($"/api/albums/{album}/share-link",
+            new { clearExpiry = true });
+        cleared.EnsureSuccessStatusCode();
+        Assert.Equal(JsonValueKind.Null,
+            (await cleared.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("expiresAt").ValueKind);
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private static MultipartFormDataContent OneFile()

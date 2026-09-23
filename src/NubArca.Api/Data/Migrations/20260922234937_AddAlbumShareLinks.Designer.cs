@@ -12,7 +12,7 @@ using NubArca.Api.Data;
 namespace NubArca.Api.Data.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260922213659_AddAlbumShareLinks")]
+    [Migration("20260922234937_AddAlbumShareLinks")]
     partial class AddAlbumShareLinks
     {
         /// <inheritdoc />
@@ -2594,6 +2594,11 @@ namespace NubArca.Api.Data.Migrations
                         .HasDefaultValue(true);
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AlbumId")
+                        .IsUnique()
+                        .HasDatabaseName("ux_album_share_links_one_live")
+                        .HasFilter("\"Enabled\" AND \"RevokedAt\" IS NULL");
 
                     b.HasIndex("TokenHash")
                         .IsUnique()

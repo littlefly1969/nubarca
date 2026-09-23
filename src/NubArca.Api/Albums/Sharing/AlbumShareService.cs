@@ -41,8 +41,29 @@ public sealed class AlbumShareService : IAlbumShareService
         var existing = await ActiveAsync(albumId, cancellationToken);
         if (existing is not null) return await ProjectAsync(existing, cancellationToken);
 
-        return await ProjectAsync(await MintAsync(ownerUserId, albumId, createdByUserId, cancellationToken),
-            cancellationToken);
+        try
+        {
+            var minted = await MintAsync(
+                ownerUserId, albumId, createdByUserId, cancellationToken);
+            return await ProjectAsync(minted, cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // SOMEBODY ELSE MINTED FIRST, between our read and our insert. The
+            // partial unique index refused the second row, which is the point:
+            // the loser adopts the winner's link rather than handing the owner a
+            // second capability over the same album. The owner sees one link
+            // either way, which is what they asked for.
+            //
+            // The re-read is what decides this WAS a lost race: if no live link
+            // exists now, the insert failed for some other reason and the
+            // caller deserves to be told rather than handed a null they cannot
+            // explain.
+            _db.ChangeTracker.Clear();
+            var winner = await ActiveAsync(albumId, cancellationToken);
+            if (winner is null) throw;
+            return await ProjectAsync(winner, cancellationToken);
+        }
     }
 
     public async Task<AlbumShareLinkDto?> RotateAsync(
@@ -62,11 +83,20 @@ public sealed class AlbumShareService : IAlbumShareService
                 .Where(g => g.AlbumShareLinkId == previous.Id && g.RevokedAt == null)
                 .ToListAsync(cancellationToken);
 
+        // ONE TRANSACTION. Revoking the old address and minting the new one are
+        // halves of one act: a crash between them would leave the album either
+        // with no way in or — worse, once the unique index exists — unable to
+        // mint one because the old row still counts as live.
+        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
+
         if (previous is not null)
         {
             previous.Enabled = false;
             previous.RevokedAt = now;
             previous.UpdatedAt = now;
+            // Flushed BEFORE the new row is added, so the index sees the old one
+            // already closed rather than two live rows for an instant.
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
         var link = await MintAsync(ownerUserId, albumId, createdByUserId, cancellationToken, previous);
@@ -82,6 +112,7 @@ public sealed class AlbumShareService : IAlbumShareService
             });
         }
         await _db.SaveChangesAsync(cancellationToken);
+        await tx.CommitAsync(cancellationToken);
         return await ProjectAsync(link, cancellationToken);
     }
 
@@ -107,7 +138,13 @@ public sealed class AlbumShareService : IAlbumShareService
         {
             link.Label = string.IsNullOrWhiteSpace(request.Label) ? null : request.Label.Trim();
         }
-        if (request.ExpiresAt is not null) link.ExpiresAt = request.ExpiresAt;
+        // EXPIRY IS THE ONE FIELD WHERE `null` IS A VALUE. Everywhere else on
+        // this request null means unchanged, but "no expiry" is itself null, so
+        // a nullable field alone could never say it — once an owner set a date
+        // there was no way back. `ClearExpiry` is that sentence, said
+        // explicitly, and leaves the omitted-means-unchanged rule intact.
+        if (request.ClearExpiry) link.ExpiresAt = null;
+        else if (request.ExpiresAt is not null) link.ExpiresAt = request.ExpiresAt;
         link.UpdatedAt = Now;
         await _db.SaveChangesAsync(cancellationToken);
         return await ProjectAsync(link, cancellationToken);

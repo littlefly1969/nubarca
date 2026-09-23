@@ -1404,8 +1404,6 @@ const de: Partial<Record<MessageKey, string>> = {
   'albumLink.codeLabel': '6-stelliger Code',
   'albumLink.enter': 'Eintreten',
   'albumLink.wrongCode': 'Der Code ist falsch oder abgelaufen.',
-  'albumLink.tooManyAttempts': 'Zu viele Versuche. Bitte um einen neuen Code.',
-  'albumLink.codeTooSoon': 'Gerade ist ein Code rausgegangen. Warte eine Minute, bevor du einen neuen anforderst.',
   'albumLink.codeFailed': 'Der Code konnte nicht gesendet werden. Versuche es erneut.',
   'partyGuestbookPublic.unavailable': 'Diese Party hat kein Gästebuch.',
   'partyGuestbookPublic.loadError': 'Das Gästebuch konnte nicht geladen werden.',

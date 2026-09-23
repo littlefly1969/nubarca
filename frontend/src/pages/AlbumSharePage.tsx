@@ -377,10 +377,11 @@ function SecondFactorGate({
       // screen says the same thing either way. Telling somebody their address
       // is not on the list would be telling them whose is.
       setSent(true);
-    } catch (err) {
-      setError(err instanceof ApiError && err.status === 429
-        ? t('albumLink.codeTooSoon')
-        : t('albumLink.codeFailed'));
+    } catch {
+      // The server answers 202 for a listed address, an unlisted one and a
+      // cooldown alike, so anything that lands here is a real failure to reach
+      // it — never a verdict about the address.
+      setError(t('albumLink.codeFailed'));
     } finally { setBusy(false); }
   }
 
@@ -390,11 +391,12 @@ function SecondFactorGate({
     try {
       await verifyAlbumShare(token, email.trim(), code.trim());
       onVerified();
-    } catch (err) {
-      const body = err instanceof ApiError ? (err.body as { error?: string } | null) : null;
-      setError(body?.error === ALBUM_SHARE_ERRORS.tooManyAttempts
-        ? t('albumLink.tooManyAttempts')
-        : t('albumLink.wrongCode'));
+    } catch {
+      // ONE MESSAGE, because the server gives one refusal. A "too many
+      // attempts" of its own would say "this address is on the list" to
+      // anybody willing to guess six times — the oracle the server closed, put
+      // back by the client.
+      setError(t('albumLink.wrongCode'));
     } finally { setBusy(false); }
   }
 

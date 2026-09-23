@@ -149,6 +149,7 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
                 "PartyUpload", "PartyMessage", "BeautyLabUpload", "PartyFaceSearch",
                 "PartyGameRead", "PartyGameVote", "PartyRsvp", "PartyInvitationSend", "PartyInvitationShare",
                 "PartyCrewInvite", "PartyCrewCode", "PartyCrewVerify",
+                "AlbumShareUpload", "AlbumShareCode",
                 "SemanticSearch", "TvPersonalInterpret", "CastGrantCreate", "PrintEnrollment"
             })
             {
@@ -555,6 +556,25 @@ public sealed class SqliteWebApplicationFactory : WebApplicationFactory<Program>
 
             _databaseInitialized = true;
         }
+    }
+
+    // How many LIVE links one album has. The invariant is "one", and a test
+    // that only checked the tokens matched would miss a second hidden row.
+    public async Task<int> CountLiveAlbumShareLinksAsync(Guid albumId)
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.AlbumShareLinks.CountAsync(
+            x => x.AlbumId == albumId && x.Enabled && x.RevokedAt == null);
+    }
+
+    // How many devices a share has admitted. A concurrency test needs the
+    // count, not the rows: "exactly one" is the whole assertion.
+    public async Task<int> CountAlbumShareDevicesAsync()
+    {
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.AlbumShareDevices.CountAsync(d => d.RevokedAt == null);
     }
 
     // Moves every album-share challenge's last-sent stamp far enough into the

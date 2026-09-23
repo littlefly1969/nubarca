@@ -37,6 +37,18 @@ public sealed class AlbumShareLinkConfiguration : IEntityTypeConfiguration<Album
         // something that no longer exists is not a capability.
         b.HasOne<Album>().WithMany().HasForeignKey(x => x.AlbumId).OnDelete(DeleteBehavior.Cascade);
         b.HasIndex(x => new { x.AlbumId, x.Enabled }).HasDatabaseName("ix_album_share_links_album");
+        // ONE LIVE LINK PER ALBUM, enforced where it cannot be raced.
+        //
+        // The service reads "is there an active one?" and mints if not, and two
+        // requests arriving together both read "no" and both mint. A second
+        // hidden capability over somebody's album is exactly the bug nobody
+        // notices: revoking finds one row, and the other keeps opening. A
+        // partial unique index makes the second insert fail instead, which the
+        // service catches and turns into "use the one that won".
+        b.HasIndex(x => x.AlbumId)
+            .IsUnique()
+            .HasFilter("\"Enabled\" AND \"RevokedAt\" IS NULL")
+            .HasDatabaseName("ux_album_share_links_one_live");
     }
 }
 

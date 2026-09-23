@@ -170,6 +170,13 @@ namespace NubArca.Api.Data.Migrations
                 columns: new[] { "AlbumId", "Enabled" });
 
             migrationBuilder.CreateIndex(
+                name: "ux_album_share_links_one_live",
+                table: "album_share_links",
+                column: "AlbumId",
+                unique: true,
+                filter: "\"Enabled\" AND \"RevokedAt\" IS NULL");
+
+            migrationBuilder.CreateIndex(
                 name: "ux_album_share_links_token",
                 table: "album_share_links",
                 column: "TokenHash",

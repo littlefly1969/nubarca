@@ -238,7 +238,15 @@ public static class AlbumShareErrors
     /// The link's total ceiling is reached. The owner raises it; nothing switches off.
     public const string UploadLimitReached = "upload_limit_reached";
 
+    /// <summary>
+    /// The ONE refusal the second factor ever gives: wrong code, expired code,
+    /// already-spent code, exhausted attempts and an unlisted address alike.
+    ///
+    /// <para>There used to be codes for "too many attempts" and "asked again
+    /// too soon" and both were enumeration oracles — only a listed address can
+    /// exhaust attempts or trip a cooldown, so either one answered "this
+    /// address is on the owner's list". The distinctions live in the log now,
+    /// where they help an operator and tell a caller nothing.</para>
+    /// </summary>
     public const string InvalidCode = "invalid_code";
-    public const string TooManyAttempts = "too_many_attempts";
-    public const string ResendTooSoon = "resend_too_soon";
 }

@@ -76,13 +76,15 @@ export interface AlbumShareUploadReport {
   stopped: string | null;
 }
 
+// The whole public vocabulary. There is deliberately no code for "too many
+// attempts" or "asked again too soon": the server answers the same way for a
+// listed and an unlisted address in both cases, because any difference is a
+// way to read the owner's guest list.
 export const ALBUM_SHARE_ERRORS = {
   secondFactorRequired: 'second_factor_required',
   uploadsDisabled: 'uploads_disabled',
   uploadLimitReached: 'upload_limit_reached',
   invalidCode: 'invalid_code',
-  tooManyAttempts: 'too_many_attempts',
-  resendTooSoon: 'resend_too_soon',
 } as const;
 
 // ── Owner ─────────────────────────────────────────────────────────────────
