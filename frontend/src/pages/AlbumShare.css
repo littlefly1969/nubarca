@@ -94,6 +94,7 @@
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
   background: rgb(0 0 0 / 0.92);
 }
+.album-share-lightbox video,
 .album-share-lightbox img {
   max-width: 100%;
   /* Room for the close button above and the download below, so neither ever

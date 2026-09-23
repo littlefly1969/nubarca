@@ -138,22 +138,58 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
             // code from the previous email stops verifying the moment this one
             // is written. Two live codes would double an attacker's chances for
             // no benefit to anybody.
-            challenge.Generation += 1;
+            //
+            // Two resends racing each other both read the same generation and
+            // both write the next one; the second SaveChanges wins the row, and
+            // its proof is the one that survives — so the loser's email carries
+            // a code that never verifies. Bumping from the STORED value rather
+            // than from the read one keeps the generations distinct, and the
+            // cooldown above already makes this rare rather than routine.
+            challenge.Generation = await _db.AlbumShareChallenges.AsNoTracking()
+                .Where(c => c.Id == challenge.Id)
+                .Select(c => c.Generation)
+                .FirstAsync(cancellationToken) + 1;
             challenge.Attempts = 0;
             challenge.VerifiedAt = null;
         }
         challenge.OtpProof = _tokens.OtpProof(challenge.Id, challenge.Generation, code);
         challenge.ExpiresAt = now + AlbumShareLimits.ChallengeLifetime;
         challenge.LastSentAt = now;
-        await _db.SaveChangesAsync(cancellationToken);
+
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // GET-OR-CREATE, CONCURRENTLY. Two first-time challenges for one
+            // address both read null and both insert; the unique index on the
+            // guest refuses the second. That refusal used to escape as a 500,
+            // and a 500 is an answer an unlisted address never gets — so the
+            // pair (202, 500) against (202, 202) read the owner's guest list,
+            // which is precisely the oracle this file exists to avoid.
+            //
+            // The loser simply steps aside: the winner's code is in the post,
+            // and sending a second one would invalidate the first.
+            _db.ChangeTracker.Clear();
+            var winner = await _db.AlbumShareChallenges.AsNoTracking()
+                .AnyAsync(c => c.AlbumShareGuestId == guest.Id, cancellationToken);
+            if (!winner) throw;
+            _logger.LogInformation("album.share.code.raced LinkId={LinkId}", link.Id);
+            return AlbumShareChallengeOutcome.Accepted;
+        }
 
         var albumName = await _db.Albums.AsNoTracking()
             .Where(a => a.Id == link.AlbumId).Select(a => a.Name)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
-        // Delivery failing does not change the answer, for the same reason an
-        // unlisted address does not: the caller must not be able to tell.
-        var delivered = await _email.SendAsync(new EmailMessage(
+        // SENT WITHOUT WAITING FOR IT. An unlisted address returns as soon as
+        // the lookup misses; a listed one used to wait for the SMTP round trip,
+        // and that difference is measurable from outside — a slower answer
+        // means "this address is on the list". Handing delivery off keeps the
+        // two paths the same length, and nothing downstream depends on the
+        // result: a failed send is already indistinguishable by design.
+        var message = new EmailMessage(
             guest.Email,
             guest.DisplayName ?? guest.Email,
             $"Il tuo codice per «{albumName}»",
@@ -164,13 +200,26 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
 
              Vale {(int)AlbumShareLimits.ChallengeLifetime.TotalMinutes} minuti ed è valido una volta sola.
              Se non hai chiesto tu questo codice, ignora questo messaggio.
-             """), cancellationToken);
-        if (!delivered)
+             """);
+        var linkId = link.Id;
+        _ = Task.Run(async () =>
         {
-            // The line names the link, never the address and never the code.
-            _logger.LogWarning(
-                "album.share.code.undelivered LinkId={LinkId}", link.Id);
-        }
+            try
+            {
+                // A token of its own: the request may be finished, and often is.
+                using var sending = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                if (!await _email.SendAsync(message, sending.Token))
+                {
+                    // The line names the link, never the address and never the code.
+                    _logger.LogWarning("album.share.code.undelivered LinkId={LinkId}", linkId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "album.share.code.undelivered LinkId={LinkId}", linkId);
+            }
+        }, CancellationToken.None);
+
         return AlbumShareChallengeOutcome.Accepted;
     }
 
@@ -226,12 +275,31 @@ public sealed class AlbumShareAuth : IAlbumShareAuth
         // compare; setting it is the swap. A correct code submitted twice at
         // the same instant therefore mints ONE device, not two — which is what
         // "one-time" has to mean to be worth saying.
+        //
+        // THE GENERATION IS IN THE PREDICATE, and it has to be. Without it a
+        // verify that had already validated generation 1 could win this claim
+        // after a concurrent resend wrote generation 2 — admitting somebody on
+        // a code the resend was supposed to have killed, which breaks the one
+        // property a resend exists to provide. Matching the proof as well
+        // closes the same window from the other side, since a resend rewrites
+        // both together.
         var claimed = await _db.AlbumShareChallenges
-            .Where(c => c.Id == challenge.Id && c.VerifiedAt == null && c.ExpiresAt > now)
+            .Where(c => c.Id == challenge.Id
+                && c.VerifiedAt == null
+                && c.ExpiresAt > now
+                && c.Generation == challenge.Generation
+                && c.OtpProof == challenge.OtpProof)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(c => c.VerifiedAt, now)
                 .SetProperty(c => c.ExpiresAt, now), cancellationToken);
-        if (claimed == 0) return new AlbumShareVerifyOutcome(false);
+        if (claimed == 0)
+        {
+            // Somebody resent while this guess was in flight. The code that was
+            // just validated is no longer the live one, and admitting on it
+            // would be exactly the bug.
+            _logger.LogInformation("album.share.verify.superseded LinkId={LinkId}", link.Id);
+            return new AlbumShareVerifyOutcome(false);
+        }
 
         var raw = AlbumShareTokens.NewDeviceToken();
         _db.AlbumShareDevices.Add(new AlbumShareDevice

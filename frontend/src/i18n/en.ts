@@ -1498,6 +1498,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'albumLink.itemCount_one': '{count} photo',
   'albumLink.itemCount_other': '{count} photos',
   'albumLink.empty': 'Nothing here yet. If you can, add the first one.',
+  'albumLink.videoNeedsOriginals': 'This video can only be watched here: whoever owns the album has not opened original downloads.',
   'albumLink.download': 'Download',
   'albumLink.downloadOriginal': 'Download the original',
   'albumLink.addTitle': 'Add your photos',

@@ -250,12 +250,24 @@ public static class AlbumShareLinkEndpoints
                 // An id, a picture and whether it moves. No file name, no date
                 // taken, no hash — the party surface leaks none of those and a
                 // share is not a reason to start.
-                items.Select(i => new AlbumShareItemDto(
-                    i.FileItemId,
-                    $"/api/album-share/{enc}/media/{i.FileItemId}/thumbnail",
-                    $"/api/album-share/{enc}/media/{i.FileItemId}/preview",
-                    $"/api/album-share/{enc}/media/{i.FileItemId}/download",
-                    i.Kind == NubArca.Api.Party.PartyMediaKind.Video)).ToList(),
+                items.Select(i =>
+                {
+                    var isVideo = i.Kind == NubArca.Api.Party.PartyMediaKind.Video;
+                    return new AlbumShareItemDto(
+                        i.FileItemId,
+                        $"/api/album-share/{enc}/media/{i.FileItemId}/thumbnail",
+                        $"/api/album-share/{enc}/media/{i.FileItemId}/preview",
+                        // A VIDEO HAS NO SAFE RENDITION TO HAND OVER. The
+                        // derivative pipeline makes a poster and nothing
+                        // downloadable, so with originals off there is simply
+                        // no file to give — offering a button that answers 404
+                        // is worse than offering none. With originals on the
+                        // real file is there, and the link says so.
+                        !isVideo || access.AllowOriginalDownload
+                            ? $"/api/album-share/{enc}/media/{i.FileItemId}/download"
+                            : null,
+                        isVideo);
+                }).ToList(),
                 NextCursor: null));
         }).WithName("GetAlbumShareItems").RequireRateLimiting(PublicRateLimitPolicy);
 

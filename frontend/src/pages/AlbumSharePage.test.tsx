@@ -53,7 +53,9 @@ function items() {
         id: 'i2',
         thumbnailUrl: `/api/album-share/${TOKEN}/media/i2/thumbnail`,
         previewUrl: `/api/album-share/${TOKEN}/media/i2/preview`,
-        downloadUrl: `/api/album-share/${TOKEN}/media/i2/download`,
+        // A video on a link whose owner has not allowed originals: there is no
+        // safe rendition to hand over, so the server sends no URL at all.
+        downloadUrl: null,
         isVideo: true,
       },
     ],
@@ -105,6 +107,23 @@ it('opens a photograph at preview size and hands it over on request', async () =
   expect(download).toHaveAttribute('href', `/api/album-share/${TOKEN}/media/i1/download`);
   // The owner left originals off, so the button does not promise one.
   expect(download).toHaveTextContent(/^Scarica$/);
+});
+
+it('plays a video instead of showing its poster, and says why it cannot be taken', async () => {
+  const user = userEvent.setup();
+  serve();
+  mount();
+
+  await user.click(await screen.findByTestId('album-share-item-i2'));
+  // It used to be drawn as an <img> of the poster: a still frame and no way to
+  // watch it.
+  const video = await screen.findByTestId('album-share-video');
+  expect(video.tagName).toBe('VIDEO');
+  expect(video).toHaveAttribute('poster', `/api/album-share/${TOKEN}/media/i2/preview`);
+
+  // And no download button, because the route would have answered 404.
+  expect(screen.queryByTestId('album-share-download')).toBeNull();
+  expect(screen.getByTestId('album-share-no-download')).toBeInTheDocument();
 });
 
 it('says when the owner allowed the real file', async () => {

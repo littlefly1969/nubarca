@@ -319,6 +319,42 @@ public sealed class AlbumShareLinkTests : IDisposable
                 .GetProperty("expiresAt").ValueKind);
     }
 
+    [Fact]
+    public async Task A_share_upload_leaves_no_state_the_party_owns()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+
+        // The album has a party TOO, which is the case that exposed this: the
+        // ingest wrote a PartyUploadItem whatever the caller was, the party's
+        // moderation queue listed rows by album, and tearing the party down
+        // deleted every row for the album. A feature that advertises
+        // independence must not leave state the Party owns.
+        var settings = await owner.PatchAsJsonAsync(
+            $"/api/albums/{album}/party-settings", new { enabled = true });
+        settings.EnsureSuccessStatusCode();
+
+        var token = TokenOf(await ShareAsync(owner, album));
+        var uploaded = await _factory.CreateClient()
+            .PostAsync($"/api/album-share/{token}/upload", OneFile());
+        uploaded.EnsureSuccessStatusCode();
+        Assert.Equal(1, (await uploaded.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("accepted").GetInt32());
+
+        // The photograph is in the album...
+        var items = await _factory.CreateClient()
+            .GetFromJsonAsync<JsonElement>($"/api/album-share/{token}/items");
+        Assert.Equal(1, items.GetProperty("items").GetArrayLength());
+
+        // ...and NOWHERE in the party. No provenance row, so nothing for the
+        // moderation queue to list and nothing for the eraser to take away.
+        Assert.Equal(0, await _factory.CountPartyUploadItemsAsync(album));
+
+        var queue = await owner.GetFromJsonAsync<JsonElement>(
+            $"/api/albums/{album}/party-uploads");
+        Assert.Equal(0, queue.GetProperty("items").GetArrayLength());
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private static MultipartFormDataContent OneFile()

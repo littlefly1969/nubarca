@@ -199,15 +199,36 @@ function Lightbox({
       {/* MEDIUM in the viewer, again as the rest of the product does. The
           original leaves only through the download below, and only when the
           owner allowed it. */}
-      <img src={item.previewUrl} alt="" />
-      <a
-        className="party-contribution-primary album-share-download"
-        href={item.downloadUrl}
-        download
-        data-testid="album-share-download"
-      >
-        {t(canDownloadOriginal ? 'albumLink.downloadOriginal' : 'albumLink.download')}
-      </a>
+      {/* A VIDEO IS PLAYED, NOT LOOKED AT. It used to be drawn as an <img> of
+          its poster, so a visitor opening one got a still frame and no way to
+          watch it. The preview route serves the poster, which is what a video
+          element should show before it starts. */}
+      {item.isVideo ? (
+        <video
+          src={item.downloadUrl ?? undefined}
+          poster={item.previewUrl}
+          controls
+          playsInline
+          data-testid="album-share-video"
+        />
+      ) : (
+        <img src={item.previewUrl} alt="" />
+      )}
+      {item.downloadUrl ? (
+        <a
+          className="party-contribution-primary album-share-download"
+          href={item.downloadUrl}
+          download
+          data-testid="album-share-download"
+        >
+          {t(canDownloadOriginal ? 'albumLink.downloadOriginal' : 'albumLink.download')}
+        </a>
+      ) : (
+        // Said, rather than left as a button that would answer 404.
+        <p className="party-contribution-hint" data-testid="album-share-no-download">
+          {t('albumLink.videoNeedsOriginals')}
+        </p>
+      )}
     </div>
   );
 }
