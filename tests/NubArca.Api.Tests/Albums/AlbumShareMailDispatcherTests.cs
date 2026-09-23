@@ -35,7 +35,7 @@ public sealed class AlbumShareMailDispatcherTests
 
         // `TryWrite` returns TRUE under DropWrite, so the old detector saw
         // nothing at all. The runtime's drop callback is what knows.
-        Assert.Equal(1, dispatcher.Dropped);
+        Assert.Equal(1, dispatcher.DroppedCapacity);
 
         var line = Assert.Single(log.Warnings);
         Assert.Contains(linkId.ToString(), line);
@@ -61,7 +61,7 @@ public sealed class AlbumShareMailDispatcherTests
             dispatcher.Enqueue(Message($"g{i}@example.com", "000000"), Guid.NewGuid());
         }
 
-        Assert.Equal(99, dispatcher.Dropped);
+        Assert.Equal(99, dispatcher.DroppedCapacity);
     }
 
     [Fact]
@@ -104,9 +104,90 @@ public sealed class AlbumShareMailDispatcherTests
         }
 
         await sender.WaitForAsync(20);
-        Assert.Equal(0, dispatcher.Dropped);
+        Assert.Equal(0, dispatcher.DroppedCapacity);
 
         await drain.Service.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Shutdown_drains_every_message_already_queued()
+    {
+        var sender = new ScriptedSender();
+        using var drain = Drain(sender, out var dispatcher);
+        await drain.Service.StartAsync(CancellationToken.None);
+
+        // Block the drain on the first message, so the rest are certainly still
+        // sitting in the channel when shutdown begins — which is exactly the
+        // state that used to lose them.
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.Script.Enqueue(_ => { held.Task.GetAwaiter().GetResult(); return true; });
+        for (var i = 0; i < 4; i++) sender.Script.Enqueue(_ => true);
+        for (var i = 0; i < 5; i++)
+        {
+            dispatcher.Enqueue(Message($"g{i}@example.com", "000000"), Guid.NewGuid());
+        }
+        await sender.WaitForAsync(1);
+
+        var stopping = drain.Service.StopAsync(CancellationToken.None);
+        held.SetResult();
+        await stopping;
+
+        // WHAT THIS PINS, and what it does not. It pins that a shutdown
+        // delivers everything already accepted. It does NOT fail if the reader
+        // goes back to taking the stopping token — verified by trying it —
+        // because completing the writer makes the reader reach the end of the
+        // channel before that token is ever cancelled. The writer completion is
+        // the fix; `Enqueue_after_shutdown_is_not_silently_accepted` is the
+        // test that fails without it. Reading on `None` remains correct for the
+        // case `StopAsync` never runs at all, and is defence this file does not
+        // demonstrate.
+        Assert.Equal(5, sender.Seen.Count);
+        Assert.Equal(0, dispatcher.DroppedShutdown);
+    }
+
+    [Fact]
+    public async Task Enqueue_after_shutdown_is_not_silently_accepted()
+    {
+        var sender = new ScriptedSender();
+        using var drain = Drain(sender, out var dispatcher);
+        await drain.Service.StartAsync(CancellationToken.None);
+        await drain.Service.StopAsync(CancellationToken.None);
+
+        dispatcher.Enqueue(Message("late@example.com", "999999"), Guid.NewGuid());
+
+        // Refused and COUNTED. Looking taken and then simply not existing is
+        // the one outcome a committed challenge cannot afford.
+        Assert.Equal(1, dispatcher.DroppedShutdown);
+        Assert.Empty(sender.Seen);
+    }
+
+    [Fact]
+    public async Task Shutdown_timeout_reports_messages_left_undelivered()
+    {
+        var sender = new ScriptedSender();
+        using var drain = Drain(sender, out var dispatcher);
+        await drain.Service.StartAsync(CancellationToken.None);
+
+        // A relay that never answers. The drain cannot finish, so the deadline
+        // decides — and what is left behind must be counted rather than
+        // forgotten, because somebody is waiting for each of those codes.
+        var wedged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        sender.Script.Enqueue(_ => { wedged.Task.GetAwaiter().GetResult(); return true; });
+        for (var i = 0; i < 3; i++)
+        {
+            dispatcher.Enqueue(Message($"g{i}@example.com", "000000"), Guid.NewGuid());
+        }
+        await sender.WaitForAsync(1);
+
+        // The host's own token is what bounds this in production; cancelling it
+        // here is the same path, reached without waiting ten real seconds.
+        using var immediate = new CancellationTokenSource();
+        await immediate.CancelAsync();
+        await drain.Service.StopAsync(immediate.Token);
+
+        // Two never left the queue, and the count says so.
+        Assert.Equal(2, dispatcher.DroppedShutdown);
+        wedged.SetResult();
     }
 
     // --- plumbing ----------------------------------------------------------

@@ -95,6 +95,78 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  backend_concurrency:
+    # THE RACES ARE PART OF THE GATE.
+    #
+    # Album Share's concurrency invariants — one live link per album, a
+    # rotation that cannot resurrect a removed address, one challenge per
+    # resend, a guest ceiling that holds both ways in — can only be tested
+    # against real PostgreSQL: the fast lane's SQLite host hands every scope one
+    # pooled connection, so "concurrent" requests are serialised by the
+    # transport before they reach the code. Those tests carry
+    # Category=External, which the fast lane excludes, so until now the most
+    # important properties of the feature were not in the merge gate at all.
+    name: Backend concurrency (PostgreSQL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
+
+      - name: Build
+        run: >-
+          dotnet build tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
+          --configuration Release
+          --no-restore
+
+      # Deliberately NOT the whole External suite, which is a nightly's worth of
+      # work. These are the races this feature's correctness rests on.
+      - name: Run Album Share concurrency tests
+        run: >-
+          dotnet test tests/NubArca.Api.Tests/NubArca.Api.Tests.csproj
+          --configuration Release
+          --no-restore
+          --no-build
+          --filter "FullyQualifiedName~AlbumShareConcurrencyPostgresTests"
+          --logger "console;verbosity=normal"
+          --logger trx
+          --results-directory "$GITHUB_WORKSPACE/TestResults/backend-concurrency"
+
+      # A SKIPPED RACE IS NOT A PASSED ONE. The fixture answers
+      # `Skip.IfNot(Available)` when Docker is missing, so a runner without it
+      # would produce a green job that tested nothing. The gate has to fail when
+      # the races could not run, not only when they ran and lost.
+      - name: Assert the races actually ran
+        run: python3 scripts/assert-concurrency-gate.py
+          "$GITHUB_WORKSPACE/TestResults/backend-concurrency"
+
+      - name: Upload concurrency test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-concurrency-test-results
+          path: TestResults/backend-concurrency/**/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
   print_agent:
     name: Print Agent build and tests
     runs-on: ubuntu-24.04
