@@ -367,6 +367,33 @@ public sealed class AlbumShareLinkTests : IDisposable
         Assert.DoesNotContain(live, g => g.GetProperty("email").GetString() == "g0@example.com");
     }
 
+    [Fact]
+    public async Task Removing_a_guest_by_the_id_from_before_a_rotation_still_removes_them()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var album = await AlbumAsync(owner);
+        await ShareAsync(owner, album);
+        (await AddGuestAsync(owner, album, "zia@example.com")).EnsureSuccessStatusCode();
+        var before = await GuestIdAsync(owner, album, "zia@example.com");
+
+        // The rotation copies the guest onto the new link under a NEW id — so
+        // `before` now names a row on a link that no longer opens. This is the
+        // order the race produces, imposed here so it does not depend on timing.
+        (await owner.PostAsync($"/api/albums/{album}/share-link/rotate", null))
+            .EnsureSuccessStatusCode();
+        Assert.NotEqual(before, await GuestIdAsync(owner, album, "zia@example.com"));
+
+        // The removal used to look for `before` on the live link, find nothing,
+        // answer 404 and leave the person on the list.
+        var removed = await owner.DeleteAsync(
+            $"/api/albums/{album}/share-link/guests/{before}");
+        Assert.Equal(HttpStatusCode.NoContent, removed.StatusCode);
+
+        var link = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/share-link");
+        Assert.DoesNotContain(link.GetProperty("guests").EnumerateArray(),
+            g => g.GetProperty("email").GetString() == "zia@example.com");
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private static MultipartFormDataContent OneFile()

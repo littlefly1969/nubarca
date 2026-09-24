@@ -273,20 +273,45 @@ public sealed class AlbumShareService : IAlbumShareService
         {
         // Behind the lock, so a rotation cannot copy this address forward after
         // it has been removed — which is how a revoked guest came back to life.
+        //
+        // THE ID NAMES A PERSON, NOT A ROW. A rotation copies every live guest
+        // onto the new link under a NEW id, so an owner who removes somebody
+        // using the id they saw a moment ago — or whose removal simply lands
+        // just after a rotation — is holding the id of a row on a link that no
+        // longer opens. Matching that id against the live link alone found
+        // nothing, returned "not found", and left the person on the list. So
+        // the id is resolved against ANY of this album's links, reduced to the
+        // one thing that survives a rotation — the normalised address — and the
+        // removal is applied to that address on the live link.
+        var albumLinks = _db.AlbumShareLinks
+            .Where(l => l.AlbumId == albumId)
+            .Select(l => l.Id);
+        var email = await _db.AlbumShareGuests.AsNoTracking()
+            .Where(g => g.Id == guestId && albumLinks.Contains(g.AlbumShareLinkId))
+            .Select(g => g.Email)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (email is null) return false;
+
         var link = await ActiveAsync(albumId, cancellationToken);
         if (link is null) return false;
 
         var now = Now;
         var closed = await _db.AlbumShareGuests
-            .Where(g => g.Id == guestId && g.AlbumShareLinkId == link.Id && g.RevokedAt == null)
+            .Where(g => g.AlbumShareLinkId == link.Id && g.Email == email && g.RevokedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(g => g.RevokedAt, now), cancellationToken);
         if (closed == 0) return false;
 
         // A DEVICE IS ONLY AS GOOD AS THE ADDRESS BEHIND IT. Removing somebody
         // has to close the phone they already verified, or the removal would
-        // take effect only when that phone's cookie happened to expire.
+        // take effect only when that phone's cookie happened to expire. Every
+        // row this address has had on this album counts, because after a
+        // rotation the phone that matters is bound to the NEW row, not to the
+        // id the owner passed in.
+        var identity = _db.AlbumShareGuests
+            .Where(g => g.Email == email && albumLinks.Contains(g.AlbumShareLinkId))
+            .Select(g => g.Id);
         await _db.AlbumShareDevices
-            .Where(d => d.AlbumShareGuestId == guestId && d.RevokedAt == null)
+            .Where(d => identity.Contains(d.AlbumShareGuestId) && d.RevokedAt == null)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.RevokedAt, now), cancellationToken);
         return true;
         }, cancellationToken);

@@ -33,9 +33,15 @@ public interface IAlbumShareAuth
     /// single short write.</para>
     ///
     /// <para>This is accepted rather than overlooked, for three reasons. The
-    /// route is rate-limited to ten attempts an hour per address, so
-    /// distinguishing a sub-millisecond difference through network jitter would
-    /// need far more samples than an attacker is given. Equalising it properly
+    /// route is rate-limited to ten attempts an hour per SOURCE IP — the policy
+    /// partitions on the remote address, not on the email being probed — so a
+    /// single source cannot collect the samples it would take to pull a
+    /// sub-millisecond difference out of network jitter. That bound is per
+    /// source: an attacker spreading requests across many addresses gets
+    /// proportionally more samples, and nothing here pretends otherwise. The
+    /// channel stays accepted because what it leaks is one bit per address at
+    /// a cost that scales with the number of sources an attacker controls.
+    /// Equalising it properly
     /// would mean doing the same write for addresses nobody listed — creating
     /// state, and a denial-of-service surface, on behalf of strangers — which
     /// is a worse trade than the channel it closes. And a fixed artificial
