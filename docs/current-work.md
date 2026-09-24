@@ -1042,8 +1042,12 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   under the resend cooldown and after exhausted attempts — and no answer waits
   on SMTP. A database-scale difference remains, because only a listed address
   causes a write. Equalising it would mean creating state for strangers, and a
-  fixed delay is a constant an attacker subtracts; the rate limit of ten
-  attempts an hour is what makes the residue impractical. Recorded at
+  fixed delay is a constant an attacker subtracts. The rate limit of ten
+  attempts an hour is PER SOURCE IP — the policy partitions on the remote
+  address, not on the email being probed — so it bounds one source and not a
+  distributed attacker, whose sample budget grows with the sources they
+  control. The residue is accepted on that basis, not on a per-address limit
+  that does not exist. Recorded at
   `IAlbumShareAuth.ChallengeAsync` so it stays a decision rather than an
   accident.
 - **The guest book is its own table, and it never reaches the wall.**

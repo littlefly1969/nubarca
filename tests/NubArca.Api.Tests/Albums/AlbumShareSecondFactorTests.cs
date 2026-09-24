@@ -240,6 +240,37 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         Assert.Equal(1, await _factory.CountAlbumShareDevicesAsync());
     }
 
+    [Fact]
+    public async Task A_guest_removed_by_their_pre_rotation_id_loses_the_phone_they_verified_after_it()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var (album, _) = await GuardedShareAsync(owner);
+        var before = await GuestIdOf(owner, album, Listed);
+
+        // Rotate: the address moves to the new link under a new row, and the
+        // visitor verifies THERE — so their device is bound to the new row, not
+        // to the id the owner is about to use.
+        var rotated = await owner.PostAsync($"/api/albums/{album}/share-link/rotate", null);
+        rotated.EnsureSuccessStatusCode();
+        var token = (await rotated.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("url").GetString()!["/album/".Length..];
+
+        var visitor = _factory.CreateClient();
+        await Ask(visitor, token, Listed);
+        (await visitor.PostAsJsonAsync($"/api/album-share/{token}/verify",
+            new { email = Listed, code = await LastCodeAsync() })).EnsureSuccessStatusCode();
+        Assert.Equal(HttpStatusCode.OK, (await visitor.GetAsync($"/api/album-share/{token}")).StatusCode);
+
+        // Removed by the OLD id. Revoking devices by that id alone would have
+        // closed nothing, because the phone that matters is bound to the new row.
+        (await owner.DeleteAsync($"/api/albums/{album}/share-link/guests/{before}"))
+            .EnsureSuccessStatusCode();
+
+        Assert.Equal(HttpStatusCode.Unauthorized,
+            (await visitor.GetAsync($"/api/album-share/{token}")).StatusCode);
+        Assert.Equal(0, await _factory.CountAlbumShareDevicesAsync());
+    }
+
     // --- helpers -----------------------------------------------------------
 
     private static Task<HttpResponseMessage> Ask(HttpClient client, string token, string email) =>
@@ -259,6 +290,14 @@ public sealed class AlbumShareSecondFactorTests : IDisposable
         }
         catch { /* a body without an error is itself part of what is observed */ }
         return (response.StatusCode, error);
+    }
+
+    private static async Task<Guid> GuestIdOf(HttpClient owner, Guid album, string email)
+    {
+        var link = await owner.GetFromJsonAsync<JsonElement>($"/api/albums/{album}/share-link");
+        return link.GetProperty("guests").EnumerateArray()
+            .Single(g => g.GetProperty("email").GetString() == email)
+            .GetProperty("id").GetGuid();
     }
 
     private async Task<string> LastCodeAsync(int expected = 1)

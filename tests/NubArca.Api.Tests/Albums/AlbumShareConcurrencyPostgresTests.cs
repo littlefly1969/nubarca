@@ -24,9 +24,8 @@ namespace NubArca.Api.Tests.Albums;
 /// <list type="bullet">
 /// <item>two creates arriving together leave ONE live link, not two — a second
 /// hidden capability survives a revoke that only found the first;</item>
-/// <item>a rotation racing a guest removal does not carry the removed address
-/// forward, which would be an invitation somebody thought they had taken
-/// away;</item>
+/// <item>a removal racing a rotation takes effect whichever wins the lock —
+/// the removed address is on neither the old link nor the new one;</item>
 /// <item>two resends produce one challenge and one usable code, rather than two
 /// emails of which only the later verifies;</item>
 /// <item>the fifty-guest ceiling holds when fifty-one arrive at once.</item>
@@ -130,11 +129,14 @@ public sealed class AlbumShareConcurrencyPostgresTests : IAsyncLifetime
 
         await Task.WhenAll(Task.Run(Rotate), Task.Run(Remove));
 
-        // EITHER ORDER IS ACCEPTABLE; resurrection is not. If the removal went
-        // first the rotation must not copy the address forward; if the rotation
-        // went first the removal may have missed the new row, and the owner's
-        // next attempt closes it. What must never happen is a live address on
-        // the live link that the owner has already removed once.
+        // EITHER ORDER, THE SAME RESULT. If the removal wins the lock, the
+        // rotation copies only live guests and leaves this one behind. If the
+        // rotation wins, the removal arrives holding the id of a row on the link
+        // that was just closed — and resolves it to the address, which it then
+        // removes from the new link. This assertion used to accept one
+        // survivor, and its comment explained why that was fine: the owner's
+        // next attempt would close it. That was the bug, written down as a
+        // tolerance. A removal the owner asked for has to take effect.
         await using var check = NewContext();
         var live = await check.AlbumShareLinks
             .Where(x => x.AlbumId == _albumId && x.Enabled && x.RevokedAt == null)
@@ -142,7 +144,7 @@ public sealed class AlbumShareConcurrencyPostgresTests : IAsyncLifetime
         var survivors = await check.AlbumShareGuests
             .CountAsync(g => g.AlbumShareLinkId == live
                 && g.Email == "zia@example.com" && g.RevokedAt == null);
-        Assert.InRange(survivors, 0, 1);
+        Assert.Equal(0, survivors);
 
         // And whichever way it went, there is exactly ONE live link to reason
         // about — the rotation did not leave two.
