@@ -762,8 +762,9 @@
   background: var(--pw-quiet);
 }
 
-.pw-stat dt { color: var(--text-secondary); font-size: 0.75rem; line-height: 1.3; }
-.pw-stat dd {
+.pw-stat-label { display: block; color: var(--text-secondary); font-size: 0.75rem; line-height: 1.3; }
+.pw-stat-value {
+  display: block;
   margin: 0.125rem 0 0;
   font-family: var(--font-heading);
   font-size: 1.5rem;
@@ -772,8 +773,33 @@
   font-variant-numeric: tabular-nums;
 }
 
-.pw-stat[data-tone='warn'] dd { color: var(--danger); }
-.pw-stat[data-tone='accent'] dd { color: var(--accent); }
+.pw-stat[data-tone='warn'] .pw-stat-value { color: var(--danger); }
+.pw-stat[data-tone='accent'] .pw-stat-value { color: var(--accent); }
+
+/* A number that opens the list it counts. Quiet at rest — it is still a
+   number first — and plainly a control under a pointer or a focus ring, with
+   a small arrow so a thumb knows before it tries. */
+.pw-stat--link {
+  position: relative;
+  width: 100%;
+  min-height: 44px;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.pw-stat--link:not(:disabled)::after {
+  content: '›';
+  position: absolute;
+  top: var(--pw-3);
+  inset-inline-end: var(--pw-3);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1;
+}
+.pw-stat--link:not(:disabled):hover { border-color: var(--accent); }
+.pw-stat--link:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.pw-stat--link:disabled { cursor: default; }
 
 /* ───────────────────────────────────────────────────────────────────────────
    Checklist — the next steps, as things to do rather than metrics
@@ -1248,7 +1274,7 @@
 .pw-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* While the party is on, the arrivals read from across a room. */
-.pw-panel--feature[data-testid='party-live-arrivals'] .pw-stat dd { font-size: 2rem; }
+.pw-panel--feature[data-testid='party-live-arrivals'] .pw-stat-value { font-size: 2rem; }
 
 /* ───────────────────────────────────────────────────────────────────────────
    Cards — a list of parties, each one a whole tap target

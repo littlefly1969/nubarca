@@ -198,9 +198,66 @@ describe('the guest console', () => {
     // One line about the invitation, and it never claims the message arrived.
     expect(within(card).getByTestId('guest-invite-g1')).toHaveTextContent(/^WhatsApp condiviso · oggi/);
     const metrics = screen.getByTestId('guest-metrics');
-    expect(metrics.querySelector('[data-metric="invited"] dd')).toHaveTextContent('2');
-    expect(metrics.querySelector('[data-metric="attending"] dd')).toHaveTextContent('2');
-    expect(metrics.querySelector('[data-metric="pending"] dd')).toHaveTextContent('1');
+    expect(metrics.querySelector('[data-metric="invited"] .guest-metric-value')).toHaveTextContent('2');
+    expect(metrics.querySelector('[data-metric="attending"] .guest-metric-value')).toHaveTextContent('2');
+    expect(metrics.querySelector('[data-metric="pending"] .guest-metric-value')).toHaveTextContent('1');
+    // A server that predates the count shows no number rather than a false zero.
+    expect(metrics.querySelector('[data-metric="notInvited"] .guest-metric-value')).toHaveTextContent('–');
+  });
+
+  it('makes every number the filter for what it counts, and a second press lets go of it', async () => {
+    const mock = installFetchMock({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
+        summary: summary({
+          rsvp: rsvpSummary({ invited: 9, attending: 4, missingResponses: 3, declined: 2 }),
+          notInvitedGuests: 5,
+        }),
+      })),
+    });
+    renderConsole();
+
+    // ONE row, to read and to tap: each number is labelled by what it counts,
+    // in the order the phase offers its filters.
+    const tiles = within(await screen.findByTestId('guest-metrics')).getAllByRole('button');
+    expect(tiles.map((tile) => tile.textContent)).toEqual([
+      '9In lista', '4Confermati', '3Da rispondere', '2Non presenti', '5Da invitare',
+    ]);
+    // Nothing chosen yet: the whole list is what is shown, and the row says so.
+    expect(screen.getByTestId('guest-filter-all')).toHaveAttribute('aria-pressed', 'true');
+
+    await userEvent.click(screen.getByTestId('guest-filter-not_invited'));
+    await waitFor(() => expect(where()).toContain('guestState=not_invited'));
+    expect(screen.getByTestId('guest-filter-not_invited')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('guest-filter-all')).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => expect(queries(mock.calls, DIRECTORY).some((q) => q.state === 'not_invited')).toBe(true));
+
+    // Pressing the chosen number again is how a host goes back to everybody.
+    await userEvent.click(screen.getByTestId('guest-filter-not_invited'));
+    await waitFor(() => expect(where()).not.toContain('guestState'));
+    expect(screen.getByTestId('guest-filter-all')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('Live: the door’s numbers are its filters, and "Attesi" opens who is expected', async () => {
+    const mock = installFetchMock({
+      [`POST ${DIRECTORY}`]: () => jsonResponse(page({
+        partyStatus: 'live',
+        summary: summary({
+          attendance: attendanceSummary({
+            expectedPeople: 6, expectedArrived: 2, expectedMissing: 4,
+            unexpectedKnownGuests: 1, otherArrivals: 1, totalArrivals: 4,
+          }),
+        }),
+      })),
+    });
+    renderConsole({ party: party({ status: 'live', version: 3 }) });
+
+    const tiles = within(await screen.findByTestId('guest-metrics')).getAllByRole('button');
+    expect(tiles.map((tile) => tile.textContent)).toEqual([
+      '2In lista', '6Attesi', '4Arrivati', '4Mancano', '2Altri arrivi',
+    ]);
+    await userEvent.click(screen.getByTestId('guest-filter-attending'));
+    await waitFor(() => expect(queries(mock.calls, DIRECTORY).some((q) => q.state === 'attending')).toBe(true));
+    expect(screen.getByTestId('guest-filter-attending')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('holds a thousand groups without mounting a thousand cards', async () => {
@@ -752,13 +809,13 @@ describe('the guest console', () => {
 
     // The door's numbers, and the person right there on the card.
     const metrics = await screen.findByTestId('guest-metrics');
-    expect(metrics.querySelector('[data-metric="expected"] dd')).toHaveTextContent('2');
+    expect(metrics.querySelector('[data-metric="expected"] .guest-metric-value')).toHaveTextContent('2');
     await userEvent.click(screen.getByTestId('guest-checkin-m'));
 
     await waitFor(() => expect(screen.getByTestId('guest-person-m')).toHaveAttribute('data-arrived', 'true'));
     expect(screen.getByTestId('guest-undo-m')).toBeInTheDocument();
     expect(screen.getByTestId('guest-notice')).toHaveTextContent('Arrivo di Mario Rossi registrato');
-    expect(screen.getByTestId('guest-metrics').querySelector('[data-metric="arrived"] dd')).toHaveTextContent('1');
+    expect(screen.getByTestId('guest-metrics').querySelector('[data-metric="arrived"] .guest-metric-value')).toHaveTextContent('1');
     expect(screen.getByTestId('guest-arrived-g1')).toHaveTextContent('Arrivati: 1 di 2');
     const checkIn = mock.calls.find((c) => c.method === 'PUT' && c.url.endsWith('/attendance/guests/m'));
     expect((checkIn?.init?.headers as Record<string, string>).Prefer).toBe('return=minimal');
@@ -802,7 +859,7 @@ describe('the guest console', () => {
     renderConsole({ party: party({ status: 'live', version: 3 }) });
 
     const metrics = await screen.findByTestId('guest-metrics');
-    expect(metrics.querySelector('[data-metric="recorded"] dd')).toHaveTextContent('2');
+    expect(metrics.querySelector('[data-metric="recorded"] .guest-metric-value')).toHaveTextContent('2');
     expect(screen.getByTestId('guest-recorded-note')).toHaveTextContent('non è il numero di chi è alla festa');
     // Nothing to filter by when nobody was expected.
     expect(screen.queryByTestId('guest-filter-to_arrive')).not.toBeInTheDocument();

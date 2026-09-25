@@ -78,7 +78,14 @@ public sealed record PartyGuestDirectorySummaryDto(
     int Groups,
     int OtherArrivals,
     PartyRsvpSummaryDto Rsvp,
-    PartyAttendanceSummaryDto Attendance);
+    PartyAttendanceSummaryDto Attendance,
+    /// <summary>
+    /// Named guests whose invitation has not been sent or shared yet — the
+    /// number on the console's "not invited" filter. People, like every other
+    /// number beside it, and taken from the groups that very filter lists, so
+    /// the number and the list it opens cannot disagree.
+    /// </summary>
+    int NotInvitedGuests = 0);
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
 [JsonDerivedType(typeof(PartyGuestDirectoryGroupItemDto), "group")]

@@ -47,8 +47,10 @@ import './PartyGuestConsole.css';
 // The same surface serves a party of ten and one of a thousand, because it
 // never holds the whole guest list: the SERVER searches, filters and orders it,
 // and the console shows the page it asked for. What the host sees first is the
-// few numbers that matter, one search field and the filters of the phase they
-// are in; each group is a card that opens on demand.
+// few numbers that matter — and each of them IS a filter of the phase they are
+// in, so there is one row to read and to tap, not a row of numbers above a row
+// of filters that name the same things differently — then one search field;
+// each group is a card that opens on demand.
 //
 // Before the party it is about the invitation: one primary action shares the
 // group's personal link — WhatsApp, email or a copied link, all the same link —
@@ -96,6 +98,34 @@ const ERROR_KEYS: Record<string, MessageKey> = {
 };
 
 const SEARCH_DEBOUNCE_MS = 250;
+
+type GuestMetric =
+  | 'invited' | 'attending' | 'pending' | 'declined' | 'notInvited'
+  | 'expected' | 'arrived' | 'missing' | 'others';
+
+/**
+ * The number on a filter's tile, and what it is called. Every number counts
+ * PEOPLE — the list it opens shows their groups — and each is the count of
+ * exactly what its filter lists, so pressing a number never shows a list that
+ * contradicts it. Null: a server that predates the count.
+ */
+function guestTile(
+  state: GuestDirectoryState, live: boolean, summary: GuestDirectorySummary,
+): { metric: GuestMetric; value: number | null } {
+  switch (state) {
+    case 'attending':
+      return live
+        ? { metric: 'expected', value: summary.attendance.expectedPeople }
+        : { metric: 'attending', value: summary.rsvp.attending };
+    case 'pending': return { metric: 'pending', value: summary.rsvp.missingResponses };
+    case 'declined': return { metric: 'declined', value: summary.rsvp.declined };
+    case 'not_invited': return { metric: 'notInvited', value: summary.notInvitedGuests ?? null };
+    case 'arrived': return { metric: 'arrived', value: summary.attendance.totalArrivals };
+    case 'to_arrive': return { metric: 'missing', value: summary.attendance.expectedMissing };
+    case 'unexpected': return { metric: 'others', value: unexpectedArrivals(summary.attendance) };
+    case 'all': return { metric: 'invited', value: summary.rsvp.invited };
+  }
+}
 
 export function PartyGuestListTab({
   party, onPartyUpdated, onGuestCountsChanged,
@@ -456,29 +486,39 @@ export function PartyGuestListTab({
         </button>
       </div>
 
-      {summary && (hasGuestList || live) && (
+      {/* THE NUMBERS ARE THE FILTERS. Each one counts people and opens the
+          groups it counts; the one that is pressed says what the list below is
+          showing. Pressing it again goes back to everybody. */}
+      {summary && hasGuestList && (
+        <div className="guest-metrics" role="group" data-testid="guest-metrics" aria-label={t('party.console.filters')}>
+          {filters.map((candidate) => {
+            const tile = guestTile(candidate, live, summary);
+            const pressed = state === candidate;
+            return (
+              <button
+                key={candidate} type="button" className="guest-metric" data-metric={tile.metric}
+                data-zero={tile.value === 0 || undefined}
+                aria-pressed={pressed} data-testid={`guest-filter-${candidate}`}
+                onClick={() => setParam(
+                  GUEST_CONSOLE_PARAMS.state, candidate === 'all' || pressed ? null : candidate)}
+              >
+                <span className="guest-metric-value" data-testid={`guest-metric-${tile.metric}`}>
+                  {tile.value ?? '–'}
+                </span>
+                <span className="guest-metric-label">{t(`party.console.metric.${tile.metric}` as MessageKey)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {summary && live && !hasGuestList && (
         <dl className="guest-metrics" data-testid="guest-metrics" aria-label={t('party.console.metrics')}>
-          {(live
-            ? hasGuestList
-              ? ([
-                ['expected', summary.attendance.expectedPeople],
-                ['arrived', summary.attendance.totalArrivals],
-                ['missing', summary.attendance.expectedMissing],
-                ['others', unexpectedArrivals(summary.attendance)],
-              ] as const)
-              : ([['recorded', summary.attendance.totalArrivals]] as const)
-            : ([
-              ['invited', summary.rsvp.invited],
-              ['attending', summary.rsvp.attending],
-              ['pending', summary.rsvp.missingResponses],
-              ['declined', summary.rsvp.declined],
-            ] as const)
-          ).map(([key, value]) => (
-            <div key={key} className="guest-metric" data-metric={key}>
-              <dt>{t(`party.console.metric.${key}` as MessageKey)}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
+          <div className="guest-metric guest-metric--static" data-metric="recorded">
+            <dt className="guest-metric-label">{t('party.console.metric.recorded')}</dt>
+            <dd className="guest-metric-value" data-testid="guest-metric-recorded">
+              {summary.attendance.totalArrivals}
+            </dd>
+          </div>
         </dl>
       )}
 
@@ -518,19 +558,6 @@ export function PartyGuestListTab({
               {t(live ? 'party.console.addPerson' : 'party.console.addGroup')}
             </button>
           </div>
-          {filters.length > 0 && (
-            <div className="guest-filters" role="group" aria-label={t('party.console.filters')}>
-              {filters.map((candidate) => (
-                <button
-                  key={candidate} type="button" className="row-action guest-filter"
-                  aria-pressed={state === candidate} data-testid={`guest-filter-${candidate}`}
-                  onClick={() => setParam(GUEST_CONSOLE_PARAMS.state, candidate === 'all' ? null : candidate)}
-                >
-                  {t(`party.console.filter.${candidate}` as MessageKey)}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
@@ -574,7 +601,7 @@ export function PartyGuestListTab({
             />
           ) : (
             <GuestVirtualList
-              items={directory.items} resetKey={`${state} ${q}`}
+              items={directory.items} resetKey={`${state}\u0000${q}`}
               hasMore={directory.hasMore} loadingMore={directory.loadingMore} onNearEnd={nearEnd}
               renderItem={(item) => (item.kind === 'group' ? (
                 <GuestGroupCard

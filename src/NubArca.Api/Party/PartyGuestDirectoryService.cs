@@ -402,6 +402,14 @@ public sealed class PartyGuestDirectoryService : IPartyGuestDirectoryService
             p.PartyInvitationGroupId == g.Id && !p.IsAdditionalGuest
             && !rsvps.Any(r => r.PartyGuestId == p.Id && r.Status != PartyRsvpStatuses.Pending)), cancellationToken);
         var others = await _db.PartyAttendanceGuests.CountAsync(o => o.PartyId == partyId, cancellationToken);
+        // THE FILTER COUNTS ITSELF. The console makes every number a filter, so
+        // the "not invited" tile needs a number — the named guests of the groups
+        // that same query lists, never a second definition of "not invited"
+        // that could drift away from the first. People, not groups, because
+        // every other number beside it counts people.
+        var notInvitedGroups = Groups(partyId, null, PartyGuestDirectoryStates.NotInvited);
+        var notInvited = await _db.PartyGuests.AsNoTracking().CountAsync(p =>
+            !p.IsAdditionalGuest && notInvitedGroups.Any(g => g.Id == p.PartyInvitationGroupId), cancellationToken);
 
         return new PartyGuestDirectorySummaryDto(
             groups,
@@ -409,7 +417,8 @@ public sealed class PartyGuestDirectoryService : IPartyGuestDirectoryService
             PartyInvitationService.Summarize(
                 groups, people.Select(b => (b.IsAdditionalGuest, b.Status, b.Count)), unanswered),
             PartyAttendanceService.Summarize(
-                people.SelectMany(b => Enumerable.Repeat((b.Status, b.Arrived), b.Count)), others));
+                people.SelectMany(b => Enumerable.Repeat((b.Status, b.Arrived), b.Count)), others),
+            notInvited);
     }
 
     // --- The cursor ---------------------------------------------------------------------

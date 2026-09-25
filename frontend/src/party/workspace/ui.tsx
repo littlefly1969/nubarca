@@ -420,15 +420,41 @@ export function Stats({
   label, items, testId,
 }: {
   label: string;
-  items: readonly { key: string; label: string; value: number | string; tone?: 'warn' | 'accent' }[];
+  items: readonly {
+    key: string;
+    label: string;
+    value: number | string;
+    tone?: 'warn' | 'accent';
+    /** The number opens what it counts: the tile becomes the way there. */
+    onSelect?: () => void;
+    testId?: string;
+  }[];
   testId?: string;
 }) {
+  // Numbers that lead somewhere are buttons — one row to read and to tap,
+  // rather than numbers above a second row of links naming the same things.
+  if (items.some((item) => item.onSelect)) {
+    return (
+      <div className="pw-stats" role="group" aria-label={label} data-testid={testId}>
+        {items.map((item) => (
+          <button
+            key={item.key} type="button" className="pw-stat pw-stat--link"
+            data-metric={item.key} data-tone={item.tone} data-testid={item.testId}
+            disabled={!item.onSelect} onClick={item.onSelect}
+          >
+            <span className="pw-stat-label">{item.label}</span>
+            <span className="pw-stat-value">{item.value}</span>
+          </button>
+        ))}
+      </div>
+    );
+  }
   return (
     <dl className="pw-stats" aria-label={label} data-testid={testId}>
       {items.map((item) => (
         <div key={item.key} className="pw-stat" data-metric={item.key} data-tone={item.tone}>
-          <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
+          <dt className="pw-stat-label">{item.label}</dt>
+          <dd className="pw-stat-value">{item.value}</dd>
         </div>
       ))}
     </dl>
