@@ -120,6 +120,12 @@ export function partyRsvpAnswered(invitation: PartyInvitationRsvp): boolean {
  * window that has closed. `onChange` is what turns it from a record into a
  * door back to the form — present while the reply can still be changed, absent
  * once it cannot.
+ *
+ * It is a RECEIPT, not a second form: one line per person with their answer as
+ * a small tag, the answers to the host's questions as label and value, and the
+ * way back to the form as one small button beside the heading. It used to
+ * restate that the group had answered, spell every status out as a sentence
+ * and end on a full-width button — a card as tall as the form it summarised.
  */
 export function PartyRsvpSummary({
   invitation, phase, notice, onChange,
@@ -131,45 +137,29 @@ export function PartyRsvpSummary({
   onChange?(): void;
 }) {
   const { t } = useI18n();
+  const answered = partyRsvpAnswered(invitation);
   return (
     <section
       className="party-rsvp party-rsvp--summary" data-testid="party-rsvp"
       data-mode={invitation.canRespond ? 'answered' : 'read-only'}
       aria-labelledby="party-rsvp-title"
     >
-      <h2 className="party-rsvp-title" id="party-rsvp-title">{t('partyRsvp.heading')}</h2>
-      <p className="party-rsvp-for">{t('partyRsvp.for', { label: invitation.label })}</p>
-      {/* Why it cannot be changed, when it cannot — and that it still can,
-          when it can. Either way the guest is told, never left guessing. */}
-      <p className="party-rsvp-closed" role="status">
-        {invitation.canRespond
-          ? t('partyRsvp.answeredNote')
-          : phase === 'after' ? t('partyRsvp.closed.after') : t('partyRsvp.closed.live')}
-      </p>        <ul className="party-rsvp-summary">
-          {invitation.guests.map((g) => (
-            <li key={g.id} data-status={g.status}>
-              <strong>{g.name}</strong>
-              {g.isAdditionalGuest && <span className="party-rsvp-chip">+1</span>}
-              <span> — {t(`partyRsvp.status.${g.status}` as MessageKey)}</span>
-            </li>
-          ))}
-        </ul>
-        {invitation.questions.length > 0 && (
-          <dl className="party-rsvp-answers">
-            {invitation.questions.map((q) => (
-              <div key={q.id}>
-                <dt>{q.prompt}</dt>
-                <dd>
-                  {q.answer === null
-                    ? t('partyRsvp.noAnswer')
-                    : typeof q.answer === 'boolean'
-                      ? (q.answer ? t('partyRsvp.yes') : t('partyRsvp.no'))
-                      : q.answer}
-                </dd>
-              </div>
-            ))}
-          </dl>
+      <header className="party-rsvp-receipt-head">
+        {answered && <span className="party-rsvp-receipt-mark" aria-hidden="true">✓</span>}
+        <div className="party-rsvp-receipt-titles">
+          <h2 className="party-rsvp-title" id="party-rsvp-title">{t('partyRsvp.heading')}</h2>
+          <p className="party-rsvp-for">{t('partyRsvp.for', { label: invitation.label })}</p>
+        </div>
+        {onChange && (
+          <button
+            type="button" className="party-rsvp-change" data-testid="party-rsvp-change"
+            onClick={onChange}
+          >
+            {t('partyRsvp.change')}
+          </button>
         )}
+      </header>
+
       {notice && (
         <p
           className={`party-rsvp-notice party-rsvp-notice--${notice.tone}`}
@@ -179,13 +169,49 @@ export function PartyRsvpSummary({
           {t(notice.messageKey)}
         </p>
       )}
-      {onChange && (
-        <button
-          type="button" className="party-rsvp-change" data-testid="party-rsvp-change"
-          onClick={onChange}
-        >
-          {t('partyRsvp.change')}
-        </button>
+
+      <ul className="party-rsvp-summary">
+        {invitation.guests.map((g) => (
+          <li key={g.id} className="party-rsvp-summary-row" data-status={g.status}>
+            <span className="party-rsvp-summary-who">
+              <span className="party-rsvp-summary-name">
+                {g.name}
+                {g.isAdditionalGuest && <span className="party-rsvp-chip">+1</span>}
+              </span>
+              {g.status === 'attending' && g.dietaryNotes && (
+                <span className="party-rsvp-summary-note">{g.dietaryNotes}</span>
+              )}
+            </span>
+            <span className="party-rsvp-tag" data-status={g.status}>
+              {t(`partyRsvp.status.${g.status}` as MessageKey)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      {invitation.questions.length > 0 && (
+        <dl className="party-rsvp-answers">
+          {invitation.questions.map((q) => (
+            <div key={q.id}>
+              <dt>{q.prompt}</dt>
+              <dd data-empty={q.answer === null || undefined}>
+                {q.answer === null
+                  ? t('partyRsvp.noAnswer')
+                  : typeof q.answer === 'boolean'
+                    ? (q.answer ? t('partyRsvp.yes') : t('partyRsvp.no'))
+                    : q.answer}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {/* Why it cannot be changed, once it cannot. While it can, the button
+          beside the heading already says so. */}
+      {!invitation.canRespond && (
+        <p className="party-rsvp-closed" role="status">
+          {phase === 'after' ? t('partyRsvp.closed.after') : t('partyRsvp.closed.live')}
+        </p>
       )}
     </section>
   );
@@ -266,16 +292,28 @@ export function PartyRsvpSheet({
         {named.map((guest) => {
           const person = draft.people[guest.id];
           return (
-            <fieldset key={guest.id} className="party-rsvp-person" data-testid={`party-rsvp-person-${guest.id}`}>
+            <fieldset
+              key={guest.id} className="party-rsvp-person" data-status={person?.status}
+              data-testid={`party-rsvp-person-${guest.id}`}
+            >
               <legend>{guest.name}</legend>
-              <div className="party-rsvp-choice" role="radiogroup" aria-label={guest.name}>
+              {/* Two halves of one control, as wide as the sheet: the answer
+                  is the whole point of the form, so it gets the biggest
+                  targets on it. The radio stays a real radio underneath. */}
+              <div className="party-rsvp-segment" role="radiogroup" aria-label={guest.name}>
                 {(['attending', 'declined'] as const).map((status) => (
-                  <label key={status} className="party-rsvp-option" data-selected={person?.status === status}>
+                  <label
+                    key={status} className="party-rsvp-option" data-value={status}
+                    data-selected={person?.status === status}
+                  >
                     <input
-                      type="radio" name={`rsvp-${guest.id}`} value={status}
+                      type="radio" className="party-rsvp-radio" name={`rsvp-${guest.id}`} value={status}
                       checked={person?.status === status} disabled={saving}
                       onChange={() => setPerson(guest.id, { status })}
                     />
+                    {/* Drawn by the stylesheet, so the option's name is its
+                        words alone — "Ci sarò", not "✓Ci sarò". */}
+                    <span className="party-rsvp-option-mark" aria-hidden="true" />
                     <span>{t(`partyRsvp.${status}` as MessageKey)}</span>
                   </label>
                 ))}
@@ -297,7 +335,11 @@ export function PartyRsvpSheet({
         {invitation.maxAdditionalGuests > 0 && coming && (
           <fieldset className="party-rsvp-extras" data-testid="party-rsvp-extras">
             <legend>{t('partyRsvp.additionalHeading')}</legend>
-            <p className="party-rsvp-help">{t('partyRsvp.additionalHelp', { max: invitation.maxAdditionalGuests })}</p>
+            <p className="party-rsvp-help">
+              {invitation.maxAdditionalGuests === 1
+                ? t('partyRsvp.additionalHelpOne')
+                : t('partyRsvp.additionalHelp', { max: invitation.maxAdditionalGuests })}
+            </p>
             {draft.extras.map((extra, index) => (
               <div key={extra.key} className="party-rsvp-extra">
                 <label className="party-rsvp-field">
@@ -315,7 +357,7 @@ export function PartyRsvpSheet({
                   />
                 </label>
                 <button
-                  type="button" className="party-rsvp-link" disabled={saving}
+                  type="button" className="party-rsvp-link party-rsvp-extra-remove" disabled={saving}
                   onClick={() => setDraft((d) => ({ ...d, extras: d.extras.filter((x) => x.key !== extra.key) }))}
                 >
                   {t('partyRsvp.additionalRemove')}
@@ -324,7 +366,7 @@ export function PartyRsvpSheet({
             ))}
             {draft.extras.length < invitation.maxAdditionalGuests && (
               <button
-                type="button" className="party-rsvp-link" data-testid="party-rsvp-add-extra" disabled={saving}
+                type="button" className="party-rsvp-add" data-testid="party-rsvp-add-extra" disabled={saving}
                 onClick={() => setDraft((d) => ({
                   ...d,
                   extras: [...d.extras, { key: `extra-${(extraKey += 1)}`, name: '', dietaryNotes: '' }],
@@ -344,7 +386,7 @@ export function PartyRsvpSheet({
               const label = (
                 <>
                   {q.prompt}
-                  {q.required && <span className="party-rsvp-required"> ({t('partyRsvp.required')})</span>}
+                  {q.required && <>{' '}<span className="party-rsvp-required">{t('partyRsvp.required')}</span></>}
                 </>
               );
               if (q.kind === 'short_text') {
@@ -371,9 +413,11 @@ export function PartyRsvpSheet({
                     {choices.map((choice) => (
                       <label key={String(choice.value)} className="party-rsvp-option" data-selected={value === choice.value}>
                         <input
-                          type="radio" name={`question-${q.id}`} checked={value === choice.value} disabled={saving}
+                          type="radio" className="party-rsvp-radio" name={`question-${q.id}`}
+                          checked={value === choice.value} disabled={saving}
                           onChange={() => setAnswer(q.id, choice.value)}
                         />
+                        <span className="party-rsvp-option-mark" aria-hidden="true" />
                         <span>{choice.text}</span>
                       </label>
                     ))}
