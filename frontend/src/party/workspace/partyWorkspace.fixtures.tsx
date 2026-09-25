@@ -94,6 +94,7 @@ const counts = (over: { groups?: number; rsvp?: Record<string, number>; attendan
       expectedPeople: 31, expectedArrived: 22, expectedMissing: 9,
       unexpectedKnownGuests: 1, otherArrivals: 3, totalArrivals: 26, ...over.attendance,
     },
+    notInvitedGuests: 5,
   },
 });
 

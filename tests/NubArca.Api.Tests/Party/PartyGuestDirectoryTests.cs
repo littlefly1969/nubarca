@@ -278,6 +278,36 @@ public sealed class PartyGuestDirectoryTests : IDisposable
     // --- Filters ------------------------------------------------------------------------
 
     [Fact]
+    public async Task The_not_invited_number_counts_the_people_of_the_groups_its_filter_lists()
+    {
+        var (_, owner) = await NewHostAsync(_factory);
+        var partyId = await CreatePartyAsync(owner);
+        // Two groups nobody has invited yet — one of three people — and one that was.
+        await AddGroupAsync(owner, partyId, "Bianchi", "bianchi@example.com", 1, new[] { "Paolo", "Marta", "Leo" });
+        var elena = (await AddGroupAsync(owner, partyId, "Elena", "elena@example.com", 0, new[] { "Elena" }))
+            .GetProperty("id").GetGuid();
+        var dario = (await AddGroupAsync(owner, partyId, "Dario", "dario@example.com", 0, new[] { "Dario" }))
+            .GetProperty("id").GetGuid();
+        await InviteAsync(_factory, owner, partyId, dario);
+
+        async Task<int> Number() =>
+            (await PageAsync(owner, partyId)).GetProperty("summary").GetProperty("notInvitedGuests").GetInt32();
+        async Task<string[]> Listed() => Names(await PageAsync(owner, partyId, new Query(State: "not_invited")));
+
+        // PEOPLE, like every number beside it on the console — three and one,
+        // not two groups; an unused +1 is nobody — and exactly the groups the
+        // filter opens, so pressing the number never contradicts it.
+        Assert.Equal(4, await Number());
+        Assert.Equal(new[] { "Bianchi", "Elena" }, await Listed());
+
+        // Handing over a link is inviting: the number and the list move together.
+        (await owner.PostAsJsonAsync($"/api/parties/{partyId}/invitation-groups/{elena}/share",
+            new { channel = "copy", clientRequestId = Guid.NewGuid() })).EnsureSuccessStatusCode();
+        Assert.Equal(3, await Number());
+        Assert.Equal(new[] { "Bianchi" }, await Listed());
+    }
+
+    [Fact]
     public async Task Filters_follow_the_answers_before_the_party_and_the_arrivals_during_it()
     {
         var (_, owner) = await NewHostAsync(_factory);

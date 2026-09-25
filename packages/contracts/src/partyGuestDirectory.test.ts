@@ -42,10 +42,10 @@ test('the vocabularies are the server’s, and closed', () => {
 });
 
 test('each phase offers its own filters, and an open party none', () => {
-  assert.deepEqual(guestDirectoryStatesFor('draft', true), ['all', 'pending', 'attending', 'declined', 'not_invited']);
-  assert.deepEqual(guestDirectoryStatesFor('published', true), ['all', 'pending', 'attending', 'declined', 'not_invited']);
-  assert.deepEqual(guestDirectoryStatesFor('live', true), ['all', 'to_arrive', 'arrived', 'unexpected']);
-  assert.deepEqual(guestDirectoryStatesFor('ended', true), ['all', 'to_arrive', 'arrived', 'unexpected']);
+  assert.deepEqual(guestDirectoryStatesFor('draft', true), ['all', 'attending', 'pending', 'declined', 'not_invited']);
+  assert.deepEqual(guestDirectoryStatesFor('published', true), ['all', 'attending', 'pending', 'declined', 'not_invited']);
+  assert.deepEqual(guestDirectoryStatesFor('live', true), ['all', 'attending', 'arrived', 'to_arrive', 'unexpected']);
+  assert.deepEqual(guestDirectoryStatesFor('ended', true), ['all', 'attending', 'arrived', 'to_arrive', 'unexpected']);
   assert.deepEqual(guestDirectoryStatesFor('live', false), []);
   assert.deepEqual(guestDirectoryStatesFor('draft', false), []);
   assert.equal(isAttendancePhase('live'), true);

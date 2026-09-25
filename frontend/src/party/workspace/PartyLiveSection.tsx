@@ -141,11 +141,26 @@ function Arrivals({
         <Stats
           testId="party-live-metrics"
           label={t('party.console.metrics')}
+          // Each number opens the console on exactly what it counts — the
+          // console's own filters, not a second list.
           items={[
-            { key: 'arrived', label: t('party.console.metric.arrived'), value: attendance.totalArrivals, tone: 'accent' },
-            { key: 'expected', label: t('party.console.metric.expected'), value: attendance.expectedPeople },
-            { key: 'missing', label: t('party.console.metric.missing'), value: attendance.expectedMissing, tone: attendance.expectedMissing > 0 ? 'warn' : undefined },
-            { key: 'others', label: t('party.console.metric.others'), value: unexpectedArrivals(attendance) },
+            {
+              key: 'arrived', label: t('party.console.metric.arrived'), value: attendance.totalArrivals,
+              tone: 'accent', testId: 'party-live-filter-arrived', onSelect: () => onOpenGuests('arrived'),
+            },
+            {
+              key: 'expected', label: t('party.console.metric.expected'), value: attendance.expectedPeople,
+              testId: 'party-live-filter-attending', onSelect: () => onOpenGuests('attending'),
+            },
+            {
+              key: 'missing', label: t('party.console.metric.missing'), value: attendance.expectedMissing,
+              tone: attendance.expectedMissing > 0 ? 'warn' : undefined,
+              testId: 'party-live-filter-to_arrive', onSelect: () => onOpenGuests('to_arrive'),
+            },
+            {
+              key: 'others', label: t('party.console.metric.others'), value: unexpectedArrivals(attendance),
+              testId: 'party-live-filter-unexpected', onSelect: () => onOpenGuests('unexpected'),
+            },
           ]}
         />
       ) : (
@@ -170,22 +185,6 @@ function Arrivals({
           {t('party.live.openDoor')}
         </Button>
       </div>
-
-      {/* The console's own filters, one tap away. They are shortcuts INTO the
-          list, not a second list. */}
-      {listed && (
-        <div className="pw-chips" role="group" aria-label={t('party.live.shortcuts')}>
-          {(['to_arrive', 'arrived', 'unexpected'] as const).map((filter) => (
-            <button
-              key={filter} type="button" className="pw-chip"
-              data-testid={`party-live-filter-${filter}`}
-              onClick={() => onOpenGuests(filter)}
-            >
-              {t(`party.console.filter.${filter}` as MessageKey)}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Cooperative attendance, said once: the host is not the only way a name
           gets ticked off, and a room of two hundred should not queue at a

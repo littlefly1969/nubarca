@@ -71,15 +71,17 @@ export function isAttendancePhase(partyStatus: PartyStatus): boolean {
 }
 
 /**
- * The filters a phase offers. Before the party: what people declared, and who
- * has not been invited yet. From the moment it is live: who arrived. With no
- * guest list there is nothing to filter by — everybody listed is an arrival.
+ * The filters a phase offers, in the order the console shows its numbers —
+ * because each number IS one of these filters. Before the party: the list,
+ * what people declared, and who has not been invited yet. From the moment it
+ * is live: who is expected and who arrived. With no guest list there is
+ * nothing to filter by — everybody listed is an arrival.
  */
 export function guestDirectoryStatesFor(partyStatus: PartyStatus, hasGuestList: boolean): GuestDirectoryState[] {
   if (!hasGuestList) return [];
   return isAttendancePhase(partyStatus)
-    ? ['all', 'to_arrive', 'arrived', 'unexpected']
-    : ['all', 'pending', 'attending', 'declined', 'not_invited'];
+    ? ['all', 'attending', 'arrived', 'to_arrive', 'unexpected']
+    : ['all', 'attending', 'pending', 'declined', 'not_invited'];
 }
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
@@ -107,6 +109,13 @@ export interface GuestDirectorySummary {
   otherArrivals: number;
   rsvp: PartyRsvpSummary;
   attendance: PartyAttendanceSummary;
+  /**
+   * Named guests whose invitation was not sent or shared yet — counted over the
+   * groups the "not invited" filter lists, so the number and the list it opens
+   * cannot disagree. Optional on the wire: a server that predates it simply
+   * shows no number.
+   */
+  notInvitedGuests?: number;
 }
 
 export interface GuestDirectoryPerson {
