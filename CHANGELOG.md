@@ -6,6 +6,19 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The guest console's numbers are its filters, and a nicer RSVP
+
+- **Tap a number to see who it counts.** In *Invitati* the numbers — in lista,
+  confermati, da rispondere, non presenti, da invitare; and during the party
+  attesi, arrivati, mancano, altri arrivi — are the filters themselves. The one
+  pressed is what the list shows; tap it again for everybody. *Da invitare* now
+  has its number too. The *Live* section's numbers open the same lists.
+- **Answering an invitation looks like part of the invitation.** "Ci sarò" and
+  "Non ci sarò" are two wide buttons per person, the questions are tidy choices,
+  and the send button is the same blue as the one that opened it. Once sent, the
+  reply is a short receipt — a tag per person, the answers, and *Modifica* —
+  instead of a card as tall as the form.
+
 ### Any browser can be a NubArca TV
 
 - **A mini-PC under the television is a NubArca TV.** Open `/tv` in Chrome,
