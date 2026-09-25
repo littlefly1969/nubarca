@@ -2033,6 +2033,18 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   profile included; hardware sleep/resume, Windows/Edge and real remotes are a
   manual matrix.
 
+- **The console's numbers ARE its filters.** One row, not numbers above a row of
+  chips naming the same things differently: each tile counts PEOPLE, opens the
+  groups it counts, and is pressed while it is what the list shows; pressing it
+  again returns to everybody. The order is `guestDirectoryStatesFor` — before
+  the party *In lista · Confermati · Da rispondere · Non presenti · Da
+  invitare*, from live *In lista · Attesi · Arrivati · Mancano · Altri arrivi*
+  (live now offers `attending`, which "Attesi" opens). *Da invitare* is
+  `notInvitedGuests`, the named guests of the groups the `not_invited` filter
+  itself lists — never a second definition of "not invited" — and a server
+  without it shows "–", not a false zero. The Live section's numbers are the
+  same shortcuts into the console.
+
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
 Known, scoped, deliberately NOT fixed by the portrait/rotation slice.
