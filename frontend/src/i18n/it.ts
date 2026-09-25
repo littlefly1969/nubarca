@@ -1116,8 +1116,7 @@ const it = {
 
   'partyRsvp.heading': 'La tua risposta',
   'partyRsvp.openSheet': 'Rispondi all’invito',
-  'partyRsvp.change': 'Cambia la risposta',
-  'partyRsvp.answeredNote': 'Hai già risposto. Puoi cambiare quando vuoi.',
+  'partyRsvp.change': 'Modifica',
   'partyRsvp.for': 'Invito per {label}',
   'partyRsvp.attending': 'Ci sarò',
   'partyRsvp.declined': 'Non ci sarò',
@@ -1127,6 +1126,7 @@ const it = {
   'partyRsvp.dietary': 'Allergie o esigenze alimentari',
   'partyRsvp.additionalHeading': 'Accompagnatori',
   'partyRsvp.additionalHelp': 'Puoi portare fino a {max} persone.',
+  'partyRsvp.additionalHelpOne': 'Puoi portare una persona.',
   'partyRsvp.additionalName': 'Accompagnatore',
   'partyRsvp.additionalAdd': 'Aggiungi un accompagnatore',
   'partyRsvp.additionalRemove': 'Togli',

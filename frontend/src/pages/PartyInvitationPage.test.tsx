@@ -178,6 +178,52 @@ describe('PartyInvitationPage (a personal invitation)', () => {
     expect(screen.getByTestId('party-rsvp-submit')).toHaveTextContent('Aggiorna la risposta');
   });
 
+  it('keeps the sent reply as a short receipt: a tag per person, the answers, one way back', async () => {
+    installFetchMock({
+      [`GET ${VIEW_URL}`]: () => jsonResponse(view({
+        invitation: {
+          guests: [
+            person('m', 'Mario', 'attending', { dietaryNotes: 'Senza glutine' }),
+            person('l', 'Laura', 'declined'),
+            person('x', 'Giulia', 'attending', { isAdditionalGuest: true }),
+          ],
+          questions: [{ ...QUESTIONS[1], answer: 'Pesce' }, { ...QUESTIONS[2], answer: null }],
+        },
+      })),
+    });
+    render(page());
+
+    const rsvp = await screen.findByTestId('party-rsvp');
+    const rows = within(rsvp).getAllByRole('listitem');
+    // Each person once, with their answer as a tag — not a sentence per line.
+    expect(rows.map((row) => row.getAttribute('data-status'))).toEqual(['attending', 'declined', 'attending']);
+    expect(rows[0]).toHaveTextContent('Senza glutine');
+    expect(rows[1].querySelector('.party-rsvp-tag')).toHaveTextContent('non ci sarà');
+    expect(within(rsvp).getByText('Pesce')).toBeInTheDocument();
+    expect(within(rsvp).getByText('Nessuna risposta')).toBeInTheDocument();
+    // The button beside the heading already says the reply can change; the
+    // card no longer spends a line restating it, nor a closed notice it is not.
+    expect(within(rsvp).getByTestId('party-rsvp-change')).toHaveTextContent('Modifica');
+    expect(rsvp).not.toHaveTextContent('Hai già risposto');
+    expect(within(rsvp).queryByRole('status')).not.toBeInTheDocument();
+    // And the floating bar is gone: changing the reply is the receipt's door.
+    expect(screen.queryByTestId('party-rsvp-open')).not.toBeInTheDocument();
+  });
+
+  it('draws each answer as one wide choice, and a single plus-one as one person', async () => {
+    installFetchMock({ [`GET ${VIEW_URL}`]: () => jsonResponse(view()) });
+    render(page());
+    await openReply();
+
+    // Real radios under the drawing: the name of the choice is its words alone.
+    const coming = within(person$('m')).getByRole('radio', { name: 'Ci sarò' });
+    await userEvent.click(coming);
+    expect(coming).toBeChecked();
+    expect(coming.closest('label')).toHaveAttribute('data-selected', 'true');
+    expect(person$('m')).toHaveAttribute('data-status', 'attending');
+    expect(screen.getByTestId('party-rsvp-extras')).toHaveTextContent('Puoi portare una persona.');
+  });
+
   it('asks a coming group for the required answers and a declining one for nothing', async () => {
     installFetchMock({
       [`GET ${VIEW_URL}`]: () => jsonResponse(view({ invitation: { questions: [QUESTIONS[1]] } })),

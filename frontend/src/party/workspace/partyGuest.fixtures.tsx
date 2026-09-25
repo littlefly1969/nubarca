@@ -216,6 +216,19 @@ it('invitation — the reply sheet, open', async () => {
   await capture('invitation-sheet', 'party-rsvp-sheet');
 });
 
+it('invitation — the reply sheet, coming with a +1', async () => {
+  installFetchMock({ [`GET ${INVITE_URL}`]: () => jsonResponse(invitation()) });
+  mount(`/party/invite/${INVITE}`, '/party/invite/:token', <PartyInvitationPage />);
+  const { fireEvent } = await import('@testing-library/react');
+  fireEvent.click(await screen.findByTestId('party-rsvp-open'));
+  const mario = await screen.findByTestId('party-rsvp-person-m');
+  fireEvent.click(mario.querySelector('input[value="attending"]')!);
+  const laura = screen.getByTestId('party-rsvp-person-l');
+  fireEvent.click(laura.querySelector('input[value="declined"]')!);
+  fireEvent.click(await screen.findByTestId('party-rsvp-add-extra'));
+  await capture('invitation-sheet-coming', 'party-rsvp-extras');
+});
+
 it('invitation — while the party is live', async () => {
   installFetchMock({
     [`GET ${INVITE_URL}`]: () => jsonResponse(invitation({

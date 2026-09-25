@@ -1094,8 +1094,7 @@ const en: Partial<Record<MessageKey, string>> = {
 
   'partyRsvp.heading': 'Your reply',
   'partyRsvp.openSheet': 'Reply to the invitation',
-  'partyRsvp.change': 'Change the reply',
-  'partyRsvp.answeredNote': 'You have replied. You can change it whenever you like.',
+  'partyRsvp.change': 'Edit',
   'partyRsvp.for': 'Invitation for {label}',
   'partyRsvp.attending': 'I’ll be there',
   'partyRsvp.declined': 'Can’t make it',
@@ -1105,6 +1104,7 @@ const en: Partial<Record<MessageKey, string>> = {
   'partyRsvp.dietary': 'Allergies or dietary needs',
   'partyRsvp.additionalHeading': 'Plus-ones',
   'partyRsvp.additionalHelp': 'You can bring up to {max} people.',
+  'partyRsvp.additionalHelpOne': 'You can bring one person.',
   'partyRsvp.additionalName': 'Plus-one',
   'partyRsvp.additionalAdd': 'Add a plus-one',
   'partyRsvp.additionalRemove': 'Remove',
