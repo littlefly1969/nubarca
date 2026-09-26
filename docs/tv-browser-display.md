@@ -6,6 +6,10 @@ A NubArca TV is either:
 - a **paired browser display** — any modern browser on `/tv`: a mini-PC under
   the television, a Raspberry-class Chromium box, a laptop on a projector, a Mac.
 
+A paired display **remains paired until its TV session is revoked** (removed
+from TV Devices) **or expires**. A lost network, a browser or machine restart,
+a server restart or a sleep does not end the pairing.
+
 Both are the same thing to the server and to the owner. They pair the same way,
 appear in the same **TV Devices** list, are assigned to the general experience
 or to a party the same way, are taken over by a party's game and handed back
@@ -20,14 +24,14 @@ reached with a party's own link and it is outside this contract.
 
 | | |
 |---|---|
-| **Boot** | `GET /api/tv/session` decides. Only a `401` sends the display to pairing. No network, a timeout, a server that is restarting: the display keeps its pairing and asks again on a capped backoff (2 s … 30 s), showing "Riconnessione…". |
+| **Boot** | `GET /api/tv/session` decides. Only a `401` — the session was revoked or has expired — sends the display to pairing. No network, a timeout, a server that is restarting: the display keeps its pairing and asks again on a capped backoff (2 s … 30 s), showing "Riconnessione…". |
 | **Admission** | The first answer carries the assignment. A display assigned to a party starts **in** the party — slideshow, game or "unavailable" — and never passes through the mode selector. |
-| **Control plane** | While the page is visible: one read every 5 s, never two at once, a heartbeat once a minute. The owner's assignment takes the screen from whatever is on it (a Personal Area is locked on the way). |
+| **Control plane** | While the page is visible: one read every 5 s, never two at once, a heartbeat once a minute. Every request the display waits on — the control plane, the party's photographs, the game's grant and stage, the party's answer at each photograph — has a deadline: an answer that never comes is given up on and asked again, never waited on for ever. The owner's assignment takes the screen from whatever is on it (a Personal Area is locked on the way). |
 | **Party** | Photos on the party's own timing, **real video** (HLS or progressive) with the party's cap measured on media time, guest uploads arriving live, the greetings band and Hero cards, the challenge that holds the wall, a guest's face search sent to the screen, the game on the canonical stage — all authorised by the TV session and a display grant minted from it, never by a party token. |
 | **Party → another party** | A different party is a different mount: nothing of the previous one (photograph, Hero, face filter, video position, challenge, game grant) survives. |
 | **BACK** | Never leaves an assigned party — that is the owner's decision. On an assigned party it can only leave fullscreen. |
 | **Resume** | Coming back from sleep, a switched-off screen, a hidden tab or a frozen page, the display asks for the wake lock again and re-reads the control plane and everything on screen **at once**. A sleep the browser did not announce is detected from the clock. |
-| **Revocation** | The next request answers `401`: media stops, the Personal Area grant is dropped, the party is unmounted, and the display shows "session revoked" beside a fresh pairing code. |
+| **Revocation or expiry** | The next request answers `401`: media stops, the Personal Area grant is dropped, the party is unmounted, and the display shows "session revoked" beside a fresh pairing code. |
 
 The rules behind all of this are the native app's. The browser carries a port
 of them (`frontend/src/tv/semantics/`) and
@@ -106,7 +110,9 @@ never contains a token, a URL, a Personal Area code or a greeting.
 `scripts/tv-browser-e2e.sh` brings up a throwaway stack (PostgreSQL in Docker,
 the API, an owner, the built frontend behind the same origin) and drives a
 headless Chrome through the whole life of a display: pair, assign, slideshow,
-game takeover, game hand-back, reload straight into the party, revoke. It runs
+game takeover, game hand-back, reload straight into the party, a real browser
+shutdown and restart on the same profile (no new pairing, straight back into
+the party), revoke. It runs
 in CI on every pull request (`Browser TV end-to-end`); `E2E_SHOTS=<dir>` keeps a
 screenshot of each step.
 

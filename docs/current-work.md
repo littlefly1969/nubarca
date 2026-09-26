@@ -2009,22 +2009,29 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   viewer remote) and `semantics/nativeParity.test.ts` loads the app's modules
   from `tv/src` and runs both on the same cases — a rule changed on one side
   fails the web suite, and a new native export must be ported or excused.
-  Three things are easy to undo by accident. **Only a 401 unpairs**: a boot or
-  a poll that fails for any other reason keeps the session and retries on a
-  capped backoff. **Every poll is single-flight with a timeout**
-  (`platform/usePoll.ts`): a read asked for mid-flight runs after the one in
-  the air, so an old answer can never land last, and a half-open socket after a
-  sleep cannot hold the loop. **Nothing platform-specific leaks into the Party
+  Three things are easy to undo by accident. **Only a 401 unpairs** — the TV
+  session was revoked or has expired: a boot or a poll that fails for any
+  other reason keeps the session and retries on a capped backoff. **Every
+  request the display waits on is bounded**: polls are single-flight with a
+  timeout (`platform/usePoll.ts` — a read asked for mid-flight runs after the
+  one in the air, so an old answer can never land last), including the game
+  stage's snapshot poll; the one-off requests — the assigned slideshow's first
+  load, the game grant mint, the party boundary POST — carry a `startDeadline`
+  and treat its expiry as a transient failure, so a half-open socket after a
+  sleep can hold nothing for ever, and a boundary is settled at most once.
+  **Nothing platform-specific leaks into the Party
   logic**: wake lock, fullscreen, lifecycle/resume (including a sleep detected
   from the clock) and key mapping are the injected `DisplayPlatform`, which the
   tests replace. The game renders the canonical stage IN-PROCESS
   (`PartyDisplayStage`, shared with `/party-display/stage`) from a grant minted
-  by the TV session — never a party token. The browser deliberately diverges
-  from the app in one place: the greetings band records the message on screen
-  after commit, not during render, so hiding an earlier greeting no longer skips
-  the one being read (the app still has that defect; fix it in the next TV
-  release). `scripts/tv-browser-e2e.sh` proves the whole life of a display in
-  CI; hardware sleep/resume, Windows/Edge and real remotes are a manual matrix.
+  by the TV session — never a party token. The greetings band's position is a
+  `RibbonCursor` (index AND the message on screen, one piece of state) in both
+  renderers: an id kept in a ref written during render was overwritten by a new
+  feed before the refresh read it, so hiding an earlier greeting skipped the one
+  being read — fixed in the app and the browser alike. `scripts/tv-browser-e2e.sh`
+  proves the whole life of a display in CI, a real Chromium restart on the same
+  profile included; hardware sleep/resume, Windows/Edge and real remotes are a
+  manual matrix.
 
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
