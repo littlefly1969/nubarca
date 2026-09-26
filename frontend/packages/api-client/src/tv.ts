@@ -167,6 +167,13 @@ export interface TvAlbumItem {
   previewStripUrl: string | null;
 }
 
+// A party's slideshow timing as a television consumes it: seconds, matching the
+// owner contract, converted to milliseconds at the point of use.
+export interface TvPartySlideshow {
+  photoSeconds: number;
+  maxVideoSeconds: number;
+}
+
 export interface TvAlbumItems {
   id: string;
   name: string;
@@ -174,6 +181,9 @@ export interface TvAlbumItems {
   partyEnabled: boolean;
   partyUrl: string | null;
   partyUploadUrl: string | null;
+  // The active party link's timing, or null (absent from an older server) when
+  // the album is not a party.
+  partySlideshow?: TvPartySlideshow | null;
 }
 
 export function listTvAlbums(signal?: AbortSignal): Promise<TvAlbum[]> {
@@ -182,6 +192,77 @@ export function listTvAlbums(signal?: AbortSignal): Promise<TvAlbum[]> {
 
 export function listTvAlbumItems(albumId: string, signal?: AbortSignal): Promise<TvAlbumItems> {
   return api<TvAlbumItems>(`/api/tv/albums/${encodeURIComponent(albumId)}/items`, { signal });
+}
+
+// --- The party on a television: greetings, the challenge hold, the game ---
+// Every one of these is authorised by the TELEVISION's session cookie (path
+// /api/tv) and scoped by the server to what that session may show. None takes
+// a party token; none names a party the caller chose.
+
+/** One visible guest greeting. Hidden, pending and rejected ones never arrive. */
+export interface TvPartyMessage {
+  id: string;
+  displayName: string | null;
+  text: string;
+  createdAt: string;
+  isHero: boolean;
+  heroPromotedAt: string | null;
+}
+
+export interface TvPartyMessages {
+  messages: TvPartyMessage[];
+}
+
+export function listTvPartyMessages(albumId: string, signal?: AbortSignal): Promise<TvPartyMessages> {
+  return api<TvPartyMessages>(`/api/tv/albums/${encodeURIComponent(albumId)}/party-messages`, { signal });
+}
+
+export interface TvPartyChallenge {
+  id: string;
+  title: string;
+  body: string;
+  kind: 'dare' | 'penalty' | 'guess' | 'custom';
+  mediaUrl: string | null;
+}
+
+/** Whether the wall is showing media or HOLDING on a challenge card. */
+export interface TvPartyPlayback {
+  mode: 'media' | 'challenge_hold';
+  activeChallenge: TvPartyChallenge | null;
+  nextChallengeAt: string | null;
+  completedCount: number;
+}
+
+export function getTvPartyPlayback(albumId: string, signal?: AbortSignal): Promise<TvPartyPlayback> {
+  return api<TvPartyPlayback>(`/api/tv/albums/${encodeURIComponent(albumId)}/party-playback`, { signal });
+}
+
+/** One media boundary reached: the server answers whether a challenge now holds the wall. */
+export function advanceTvPartyBoundary(albumId: string, signal?: AbortSignal): Promise<TvPartyPlayback> {
+  return api<TvPartyPlayback>(
+    `/api/tv/albums/${encodeURIComponent(albumId)}/party-playback/boundary`, { method: 'POST', signal });
+}
+
+/** The room is done with the challenge on screen. */
+export function completeTvPartyChallenge(albumId: string, signal?: AbortSignal): Promise<TvPartyPlayback> {
+  return api<TvPartyPlayback>(
+    `/api/tv/albums/${encodeURIComponent(albumId)}/party-playback/next`, { method: 'POST', signal });
+}
+
+/**
+ * A capability to SHOW the party this television is assigned to, minted from
+ * its session alone: no body, no party token, no party id. 404 means the
+ * television is not assigned to a showable party right now; 401 that the
+ * session itself is gone.
+ */
+export interface TvPartyDisplayGrant {
+  grant: string;
+  expiresAt: string;
+  expiresInSeconds?: number;
+}
+
+export function mintTvPartyDisplayGrant(signal?: AbortSignal): Promise<TvPartyDisplayGrant> {
+  return api<TvPartyDisplayGrant>('/api/tv/party-display/grant', { method: 'POST', signal });
 }
 
 // --- TV active party face filter ---
