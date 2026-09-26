@@ -240,6 +240,47 @@ jobs:
       - name: Build
         run: npm run build
 
+  # A browser running /tv is a NubArca display: paired, assigned, taken over
+  # by a game and handed back, reloaded, revoked — end to end, in a real
+  # headless Chrome against a real API and database. See
+  # scripts/tv-browser-e2e.sh; nothing in it is an installation.
+  tv-browser-e2e:
+    name: Browser TV end-to-end
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('global.json', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run the browser display end to end
+        run: CHROME_BIN="$(command -v google-chrome)" scripts/tv-browser-e2e.sh
+
   tv:
     name: TV typecheck and tests
     runs-on: ubuntu-24.04
