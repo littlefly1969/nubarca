@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import { useI18n } from '../i18n';
-import { readDisplayContext, selectInitialLevel } from './hlsLevelSelection';
-import { EMPTY_BUDGET, classifyFatalError, planRecovery } from './hlsRecovery';
+import { attachHlsSource } from './attachHls';
 import {
   INITIAL_POLL_STATE,
   classifyVideoDelivery,
@@ -270,84 +269,19 @@ export function HlsVideoPlayer({
     void import('hls.js').catch(() => { /* the attach effect reports it */ });
   }, [mode]);
 
-  // Attach the HLS source once the element for 'hls' mode is mounted.
+  // Attach the HLS source once the element for 'hls' mode is mounted — native
+  // HLS where the browser has it, hls.js over MSE everywhere else, with the
+  // startup level and the bounded recovery in attachHls.ts. `true`: this player
+  // requests wrapper fullscreen on `play` (see onPlay below) and its wrapper is
+  // already 100vw x 100vh, so the viewport IS the watched size.
   useEffect(() => {
     if (mode !== 'hls') return;
     const video = videoRef.current;
     if (!video) return;
-
-    // Safari (and iOS WebKit) plays HLS natively. Native playback does NOT
-    // expose the level list and gives no supported way to pin a start level:
-    // WebKit owns the ladder decision there. The startup policy below is
-    // therefore MSE-only, and that limitation is real rather than worked
-    // around — the alternative would be forcing Safari through hls.js, which
-    // trades a worse decoder path for a marginal first-frame gain.
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = videoUrl;
-      return;
-    }
-
-    let destroyed = false;
-    let hls: { destroy(): void } | null = null;
-    let recoveries = EMPTY_BUDGET;
-
-    void import('hls.js').then(({ default: Hls }) => {
-      if (destroyed || !videoRef.current) return;
-      if (!Hls.isSupported()) {
-        // No MSE either — nothing else to try.
-        setMode('error');
-        return;
-      }
-      const instance = new Hls({
-        // Cap automatic selection at what the element can actually show. hls.js
-        // re-measures as the element resizes, so entering or leaving
-        // fullscreen moves the cap without any listener of ours.
-        capLevelToPlayerSize: true,
-        // Fragment loading is started by hand below, AFTER the start level is
-        // known — otherwise the first fragment is already in flight at
-        // whatever level the playlist happened to list first.
-        autoStartLoad: false,
-      });
-
-      instance.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
-        if (destroyed) return;
-        const level = selectInitialLevel(
-          data.levels.map((l) => ({ width: l.width, height: l.height, bitrate: l.bitrate })),
-          // true: this player requests wrapper fullscreen on `play` (see
-          // onPlay below) and its wrapper is already 100vw x 100vh, so the
-          // viewport IS the watched size. An embedded player would pass false.
-          readDisplayContext(videoRef.current, true),
-        );
-        // `startLevel` picks the FIRST fragment only; it does not pin playback
-        // the way assigning `currentLevel` would, so ABR stays in charge.
-        instance.startLevel = level;
-        instance.startLoad();
-      });
-
-      instance.on(Hls.Events.ERROR, (_event, data) => {
-        if (destroyed || !data.fatal) return;
-        // Bounded recovery, decided by hlsRecovery.ts. A transient segment 5xx
-        // or a decoder hiccup must not replace the player with a permanent
-        // error; an unauthorized or missing video must not disappear behind a
-        // retry loop either.
-        const plan = planRecovery(
-          classifyFatalError(data.type, Hls.ErrorTypes), recoveries,
-        );
-        recoveries = plan.budget;
-        if (plan.action === 'restart-load') instance.startLoad();
-        else if (plan.action === 'recover-media') instance.recoverMediaError();
-        else setMode('error');
-      });
-
-      instance.loadSource(videoUrl);
-      instance.attachMedia(videoRef.current);
-      hls = instance;
+    return attachHlsSource(video, videoUrl, {
+      fillsViewport: true,
+      onFatal: () => setMode('error'),
     });
-
-    return () => {
-      destroyed = true;
-      hls?.destroy();
-    };
   }, [mode, videoUrl]);
 
   const onVideoDimensionsChange = useCallback(() => {
