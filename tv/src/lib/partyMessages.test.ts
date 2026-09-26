@@ -3,8 +3,8 @@ import test from 'node:test';
 import type { TvPartyMessage } from '../api/tv.ts';
 import {
   beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
-  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
-  sameMessages, settleBoundary,
+  nextHero, onMediaBoundary, remapRibbonIndex, ribbonOnFeed, ribbonOnRotate,
+  ribbonRotating, ribbonVisible, sameMessages, settleBoundary, RIBBON_START,
   HERO_DURATION_MS, HERO_EVERY_N_BOUNDARIES, MESSAGES_POLL_MS,
   NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
   type BoundaryDebt,
@@ -431,4 +431,32 @@ test('settleBoundary is the only way to spend a debt', () => {
     heroVisible: false, slideshowMode: true, playing: true,
   });
   assert.equal(again.advance, false);
+});
+
+// ── the ribbon cursor ───────────────────────────────────────────────────────
+
+test('hiding an earlier greeting does not skip the one being read', () => {
+  const A = message({ id: 'A' });
+  const B = message({ id: 'B' });
+  const C = message({ id: 'C' });
+  const D = message({ id: 'D' });
+  let cursor = ribbonOnFeed(RIBBON_START, [A, B, C]);
+  cursor = ribbonOnRotate(cursor, [A, B, C]);
+  assert.deepEqual(cursor, { index: 1, shownId: 'B' });
+
+  // A is hidden and D arrives: the band is still on B.
+  cursor = ribbonOnFeed(cursor, [B, C, D]);
+  assert.deepEqual(cursor, { index: 0, shownId: 'B' });
+});
+
+test('a withdrawn greeting moves the band on, and rotation wraps', () => {
+  const [A, B, C] = ['A', 'B', 'C'].map((id) => message({ id }));
+  let cursor = ribbonOnFeed(RIBBON_START, [A, B, C]);
+  cursor = ribbonOnRotate(cursor, [A, B, C]);
+  cursor = ribbonOnFeed(cursor, [A, C]);
+  assert.deepEqual(cursor, { index: 1, shownId: 'C' });
+  cursor = ribbonOnRotate(cursor, [A, C]);
+  assert.deepEqual(cursor, { index: 0, shownId: 'A' });
+  assert.deepEqual(ribbonOnFeed(cursor, []), { index: 0, shownId: null });
+  assert.deepEqual(ribbonOnRotate(cursor, []), RIBBON_START);
 });

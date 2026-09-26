@@ -23,10 +23,10 @@ import {
 } from '../semantics/partySlideshow';
 import {
   beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
-  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
+  nextHero, onMediaBoundary, ribbonOnFeed, ribbonOnRotate, ribbonRotating, ribbonVisible,
   sameMessages, settleBoundary,
-  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
-  type BoundaryDebt, type HeroRotation,
+  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS, RIBBON_START,
+  type BoundaryDebt, type HeroRotation, type RibbonCursor,
 } from '../semantics/partyMessages';
 import { mapViewerRemoteEvent, remoteEventFor, VIDEO_SEEK_SECONDS } from '../semantics/remoteMap';
 import { tvLog } from '../diagnostics';
@@ -102,7 +102,7 @@ export function TvViewer({
   const [videoReady, setVideoReady] = useState<TvVideoReadyState>('probing');
   const [faceFilter, setFaceFilter] = useState<FaceFilter | null>(null);
   const [messages, setMessages] = useState<TvPartyMessage[]>([]);
-  const [ribbonIndex, setRibbonIndex] = useState(0);
+  const [ribbonCursor, setRibbonCursor] = useState<RibbonCursor>(RIBBON_START);
   const [hero, setHero] = useState<TvPartyMessage | null>(null);
   const [partyPlayback, setPartyPlayback] = useState<TvPartyPlayback | null>(null);
   const visible = usePageVisible();
@@ -500,34 +500,23 @@ export function TvViewer({
     if (settled.advance) goNext();
   }, [hero, slideshowMode, playing, goNext]);
 
-  // The band stays on the message being read across a refresh.
-  //
-  // The id of what is ON SCREEN is recorded after each commit, in an effect
-  // declared AFTER the remap — never during render. Recording it during render
-  // (as the app's viewer does) overwrites it with whatever the NEW list holds
-  // at the old position before the remap reads it, so a greeting arriving at
-  // the top of the feed yanked the band to itself: the very jump the remap
-  // exists to prevent. (The app's ViewerScreen has this defect; it is fixed
-  // here and reported for the next TV release rather than shipped as an OTA.)
+  // The band stays on the message being read across a refresh: the cursor
+  // holds the position AND the message on screen as one piece of state, so a
+  // new feed can never overwrite what was being read before it is looked up.
+  useEffect(() => {
+    setRibbonCursor((cursor) => ribbonOnFeed(cursor, messages));
+  }, [messages]);
   const ribbonShown = ribbonVisible({
     partyEnabled, messageCount: messages.length, overlayVisible, heroVisible: hero !== null,
   });
-  const ribbonMessage = messages.length > 0 ? messages[Math.min(ribbonIndex, messages.length - 1)] : null;
-  const ribbonMessageId = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    // Read NOW: an updater runs at the next render, when the ref already holds
-    // what this render put on screen.
-    const reading = ribbonMessageId.current;
-    setRibbonIndex((previous) => remapRibbonIndex(messages, reading, previous));
-  }, [messages]);
-  useEffect(() => {
-    ribbonMessageId.current = ribbonMessage?.id;
-  });
+  const ribbonMessage = messages.length > 0
+    ? messages[Math.min(ribbonCursor.index, messages.length - 1)]
+    : null;
   const rotateRibbon = ribbonRotating({ visible: ribbonShown, messageCount: messages.length });
   useEffect(() => {
     if (!rotateRibbon) return;
     const timer = setInterval(() => {
-      setRibbonIndex((i) => (i + 1) % Math.max(1, refs.current.messages.length));
+      setRibbonCursor((cursor) => ribbonOnRotate(cursor, refs.current.messages));
     }, RIBBON_ROTATE_MS);
     return () => clearInterval(timer);
   }, [rotateRibbon, refs]);

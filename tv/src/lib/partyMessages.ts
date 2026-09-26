@@ -82,6 +82,36 @@ export function remapRibbonIndex(
   return Math.min(Math.max(previousIndex, 0), messages.length - 1);
 }
 
+// THE RIBBON CURSOR — where the band is, held as the position AND the message
+// on screen, together, in one piece of state.
+//
+// It used to be an index in state plus the on-screen id in a ref assigned
+// during render. A render with a NEW feed overwrote that ref with whatever the
+// new list held at the old position before the refresh could read it, so when
+// an earlier greeting was hidden, the band skipped the one somebody was
+// reading. Keeping the id in the same state as the index removes the race: a
+// refresh reads exactly what was on screen, whatever order React renders in.
+export interface RibbonCursor {
+  readonly index: number;
+  readonly shownId: string | null;
+}
+
+export const RIBBON_START: RibbonCursor = { index: 0, shownId: null };
+
+// The feed changed: stay on the message being read, by id; if it is gone, the
+// clamped position moves on to the next one (remapRibbonIndex).
+export function ribbonOnFeed(cursor: RibbonCursor, messages: TvPartyMessage[]): RibbonCursor {
+  const index = remapRibbonIndex(messages, cursor.shownId ?? undefined, cursor.index);
+  return { index, shownId: messages[index]?.id ?? null };
+}
+
+// The rotation moved the band on by one.
+export function ribbonOnRotate(cursor: RibbonCursor, messages: TvPartyMessage[]): RibbonCursor {
+  if (messages.length === 0) return RIBBON_START;
+  const index = (cursor.index + 1) % messages.length;
+  return { index, shownId: messages[index].id };
+}
+
 // Whether the ribbon should be on screen at all.
 //
 // The MENU overlay wins: it puts QR codes in the lower corners, which is
