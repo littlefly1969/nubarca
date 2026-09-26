@@ -67,6 +67,8 @@ To run NubArca, start with the production runbook:
 - [First deployment](deploy/FIRST_DEPLOY.md)
 - [Operations](docs/OPERATIONS.md)
 - [TV APK/OTA release runbook](docs/tv-release.md)
+- [A NubArca display in a browser](docs/tv-browser-display.md) — a mini-PC or any
+  modern browser on `/tv` as a paired, assignable TV
 - [Headless Windows Print Agent](docs/print-agent.md)
 - [Google Cast](docs/google-cast.md)
 - [Architecture](ARCHITECTURE.md)

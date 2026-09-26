@@ -2001,6 +2001,31 @@ These describe current behaviour, not history. Each is easy to "fix" wrongly.
   never a status, Dettagli is never only in the menu, and the menu drops
   whichever action the card already shows.
 
+- **A browser on `/tv` is a NubArca display, not a preview.** It pairs, is
+  listed, assigned, taken over and revoked exactly as a Fire TV, because it
+  reads the same control plane with the same rules: `frontend/src/tv/` holds a
+  PORT of the app's pure policy (assignment view, navigation state machine,
+  greetings/Hero/boundary ledger, slideshow timing, live items, game grant,
+  viewer remote) and `semantics/nativeParity.test.ts` loads the app's modules
+  from `tv/src` and runs both on the same cases — a rule changed on one side
+  fails the web suite, and a new native export must be ported or excused.
+  Three things are easy to undo by accident. **Only a 401 unpairs**: a boot or
+  a poll that fails for any other reason keeps the session and retries on a
+  capped backoff. **Every poll is single-flight with a timeout**
+  (`platform/usePoll.ts`): a read asked for mid-flight runs after the one in
+  the air, so an old answer can never land last, and a half-open socket after a
+  sleep cannot hold the loop. **Nothing platform-specific leaks into the Party
+  logic**: wake lock, fullscreen, lifecycle/resume (including a sleep detected
+  from the clock) and key mapping are the injected `DisplayPlatform`, which the
+  tests replace. The game renders the canonical stage IN-PROCESS
+  (`PartyDisplayStage`, shared with `/party-display/stage`) from a grant minted
+  by the TV session — never a party token. The browser deliberately diverges
+  from the app in one place: the greetings band records the message on screen
+  after commit, not during render, so hiding an earlier greeting no longer skips
+  the one being read (the app still has that defect; fix it in the next TV
+  release). `scripts/tv-browser-e2e.sh` proves the whole life of a display in
+  CI; hardware sleep/resume, Windows/Edge and real remotes are a manual matrix.
+
 ## Next: NUBARCA-UX-01.5 — Viewer Pagination Continuation
 
 Known, scoped, deliberately NOT fixed by the portrait/rotation slice.
