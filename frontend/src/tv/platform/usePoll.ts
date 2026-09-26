@@ -31,6 +31,41 @@ export interface PollOptions<T> {
 
 export const DEFAULT_POLL_TIMEOUT_MS = 12_000;
 
+/**
+ * A request's deadline: an abort signal that fires after `ms`, and can also be
+ * fired by whoever owns the request (an unmount, a restart). `expired` tells
+ * the two apart — a request that ran out of time is a transient failure to
+ * retry, one that was cancelled is nobody's business any more. The display's
+ * one-off requests carry one of these for the same reason every poll carries a
+ * timeout: a half-open socket must not hold the screen for ever.
+ */
+export interface Deadline {
+  readonly signal: AbortSignal;
+  readonly expired: boolean;
+  /** Cancel now (not a timeout). */
+  abort(): void;
+  /** The request settled: stop the clock. */
+  clear(): void;
+}
+
+export function startDeadline(ms: number = DEFAULT_POLL_TIMEOUT_MS): Deadline {
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, ms);
+  return {
+    signal: controller.signal,
+    get expired() { return expired; },
+    abort: () => {
+      clearTimeout(timer);
+      controller.abort();
+    },
+    clear: () => clearTimeout(timer),
+  };
+}
+
 export function usePoll<T>(options: PollOptions<T>): () => void {
   const { enabled, intervalMs, timeoutMs = DEFAULT_POLL_TIMEOUT_MS, refreshKey } = options;
   const latest = useLatest(options);

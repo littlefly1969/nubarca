@@ -752,6 +752,159 @@ describe('the network comes and goes', () => {
   });
 });
 
+describe('nothing the display waits on can hold it for ever', () => {
+  /**
+   * A request that never answers until the display gives up on it. `onAbort`
+   * runs at the moment of the abort, so "in flight" is counted exactly: an
+   * aborted request is dead the instant its signal fires.
+   */
+  function hanging(req: { init?: RequestInit }, log?: string[], onAbort?: () => void) {
+    return new Promise<Response>((_, reject) => {
+      req.init?.signal?.addEventListener('abort', () => {
+        log?.push('abandoned');
+        onAbort?.();
+        reject(new DOMException('aborted', 'AbortError'));
+      });
+    });
+  }
+
+  it('an assigned slideshow whose first load never answers asks again and appears', async () => {
+    const log: string[] = [];
+    let first = true;
+    installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'slideshow')),
+      'GET /api/tv/albums/a1/items': (req) => {
+        if (first) {
+          first = false;
+          log.push('hung');
+          return hanging(req, log);
+        }
+        log.push('read');
+        return jsonResponse(albumItems('a1', [photo('p1')]));
+      },
+    });
+    mount();
+    await settle();
+    expect(screen.getByTestId('tv-party-slideshow-waiting')).toBeInTheDocument();
+    await advance(12_000);
+    await settle();
+    await advance(2_000);
+    await settle();
+    expect(log.slice(0, 3)).toEqual(['hung', 'abandoned', 'read']);
+    expect(screen.getByAltText('p1.jpg')).toBeInTheDocument();
+  });
+
+  function mintHandlers(state: { hangFirst: boolean; inFlight: number; max: number; mints: number }) {
+    return {
+      'POST /api/tv/party-display/grant': (req: { init?: RequestInit }) => {
+        state.mints += 1;
+        state.inFlight += 1;
+        state.max = Math.max(state.max, state.inFlight);
+        if (state.hangFirst) {
+          state.hangFirst = false;
+          return hanging(req, undefined, () => { state.inFlight -= 1; });
+        }
+        state.inFlight -= 1;
+        return jsonResponse(GRANT);
+      },
+      'GET /api/party-display/game': () => jsonResponse(LOBBY),
+      'GET /api/party-display/join-qr': () => new Response('<svg></svg>', { status: 200 }),
+    };
+  }
+
+  it('a game grant mint that never answers times out and the next one takes the screen', async () => {
+    const state = { hangFirst: true, inFlight: 0, max: 0, mints: 0 };
+    installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'game')),
+      ...mintHandlers(state),
+    });
+    mount();
+    await settle();
+    expect(screen.getByTestId('tv-party-game-cover')).toBeInTheDocument();
+    await advance(12_000);
+    await settle();
+    await advance(2_000);
+    await settle();
+    expect(screen.getByTestId('party-tv-stage')).toBeInTheDocument();
+    expect(state.mints).toBe(2);
+    expect(state.max).toBe(1);
+  });
+
+  it('a resume recovers from a mint that is still hanging from before the sleep', async () => {
+    const state = { hangFirst: true, inFlight: 0, max: 0, mints: 0 };
+    installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'game')),
+      ...mintHandlers(state),
+    });
+    mount();
+    await settle();
+    await advance(3_000);
+    // Long before the deadline: the display comes back and asks again now.
+    platform.emit('visible');
+    await settle();
+    expect(screen.getByTestId('party-tv-stage')).toBeInTheDocument();
+    expect(state.mints).toBe(2);
+    expect(state.max).toBe(1);
+  });
+
+  it('a party boundary that never answers cannot freeze the wall, and advances exactly once', async () => {
+    let posts = 0;
+    installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'slideshow')),
+      'GET /api/tv/albums/a1/items': () => jsonResponse(albumItems('a1', [photo('p1'), photo('p2'), photo('p3')])),
+      'POST /api/tv/albums/a1/party-playback/boundary': (req) => {
+        posts += 1;
+        return posts === 1 ? hanging(req) : jsonResponse(MEDIA_PLAYBACK);
+      },
+    });
+    mount();
+    await settle();
+    await advance(5_000);
+    await settle();
+    // The photograph's time is up and the server is silent: the wall waits…
+    expect(screen.getByAltText('p1.jpg')).toBeInTheDocument();
+    await advance(8_000);
+    await settle();
+    // …then carries on, by ONE photograph, not two.
+    expect(screen.getByAltText('p2.jpg')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-viewer-counter')).toHaveTextContent('2 / 3');
+    expect(posts).toBe(1);
+    // And keeps rotating with a server that answers again.
+    await advance(5_000);
+    await settle();
+    expect(screen.getByAltText('p3.jpg')).toBeInTheDocument();
+    expect(posts).toBe(2);
+  });
+
+  it('a video’s end, cap and a hung boundary are still one advance', async () => {
+    let posts = 0;
+    installTvMock({
+      'GET /api/tv/session': () => session(party('kA', 'a1', 'slideshow')),
+      'GET /api/tv/albums/a1/items': () => jsonResponse(albumItems('a1', [video('v1'), photo('p2'), photo('p3')], { photoSeconds: 30, maxVideoSeconds: 8 })),
+      'GET /api/tv/media/v1/video': progressive,
+      'POST /api/tv/albums/a1/party-playback/boundary': (req) => {
+        posts += 1;
+        return hanging(req);
+      },
+    });
+    mount();
+    await settle();
+    const element = screen.getByTestId('tv-wall-video-element') as HTMLVideoElement;
+    fireEvent.loadedData(element);
+    Object.defineProperty(element, 'currentTime', { configurable: true, value: 8.5 });
+    fireEvent.timeUpdate(element);
+    fireEvent.ended(element);
+    fireEvent.ended(element);
+    await settle();
+    expect(posts).toBe(1);
+    await advance(8_000);
+    await settle();
+    expect(screen.getByAltText('p2.jpg')).toBeInTheDocument();
+    expect(screen.getByTestId('tv-viewer-counter')).toHaveTextContent('2 / 3');
+    expect(posts).toBe(1);
+  });
+});
+
 describe('holding the screen awake', () => {
   it('asks while paired, lets go when hidden or unpaired, and survives a refusal', async () => {
     installTvMock({ 'GET /api/tv/session': () => session(GENERAL) });

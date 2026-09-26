@@ -4,6 +4,7 @@ import { useI18n } from '../../i18n';
 import { PartyDisplayStage } from '../../pages/PartyDisplayStagePage';
 import { classifyMintFailure, mintRetryDelayMs, renewDelayMs } from '../semantics/partyDisplayGrant';
 import { useLatest } from '../platform/hooks';
+import { startDeadline } from '../platform/usePoll';
 import { tvLog } from '../diagnostics';
 import { TvPartySurface } from './TvPartyOverlays';
 
@@ -52,14 +53,20 @@ export function TvAssignedGame({ albumName, onSessionInvalid, onRequestAssignmen
   const authFailures = useRef(0);
   const generation = useRef(0);
 
+  // ONE mint at a time, by construction: every mint runs in this effect, and a
+  // new request (a retry, a renewal, a resume) re-runs it, whose cleanup
+  // cancels the one in the air first. Every mint has a DEADLINE: a request
+  // that never answers is a transient failure, retried like any other — it
+  // must not leave the display "minting" for ever, deaf to a resume.
   useEffect(() => {
     let cancelled = false;
     let next: ReturnType<typeof setTimeout> | undefined;
-    const controller = new AbortController();
+    const deadline = startDeadline();
     minting.current = true;
     retryPending.current = false;
-    mintTvPartyDisplayGrant(controller.signal)
+    mintTvPartyDisplayGrant(deadline.signal)
       .then((minted) => {
+        deadline.clear();
         if (cancelled) return;
         minting.current = false;
         failures.current = 0;
@@ -71,7 +78,10 @@ export function TvAssignedGame({ albumName, onSessionInvalid, onRequestAssignmen
         next = setTimeout(() => setMintRequest((n) => n + 1), renewDelayMs(minted, Date.now()));
       })
       .catch((error: unknown) => {
-        if (cancelled || controller.signal.aborted) return;
+        // Cancelled by this effect's cleanup: a newer mint owns the screen.
+        // A deadline that expired is NOT that — it falls through as transient.
+        deadline.clear();
+        if (cancelled) return;
         minting.current = false;
         const failure = classifyMintFailure(error instanceof ApiError ? error.status : null);
         tvLog('tv.game.grant.failed', { failure });
@@ -90,19 +100,21 @@ export function TvAssignedGame({ albumName, onSessionInvalid, onRequestAssignmen
     return () => {
       cancelled = true;
       minting.current = false;
-      controller.abort();
+      deadline.abort();
       if (next) clearTimeout(next);
     };
   }, [mintRequest, callbacks]);
 
-  // A resume: a grant that lapsed while the machine slept is replaced now.
+  // A resume mints now: a grant that lapsed while the machine slept is
+  // replaced, a retry waiting out its backoff is brought forward, and a mint
+  // still hanging from before the sleep is cancelled and asked again.
   const firstRefresh = useRef(true);
   useEffect(() => {
     if (firstRefresh.current) {
       firstRefresh.current = false;
       return;
     }
-    if (!minting.current) setMintRequest((n) => n + 1);
+    setMintRequest((n) => n + 1);
   }, [refreshKey]);
 
   useEffect(() => () => {

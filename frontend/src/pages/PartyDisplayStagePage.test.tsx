@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { I18nProvider } from '../i18n';
 import { errorResponse, installFetchMock, jsonResponse } from '../test-utils';
-import { PartyDisplayStagePage } from './PartyDisplayStagePage';
+import { PartyDisplayStage, PartyDisplayStagePage } from './PartyDisplayStagePage';
 import { PartyTvStagePage } from './PartyTvStagePage';
 
 // The display surface: the same show, a different authorisation.
@@ -402,6 +402,94 @@ describe('what the display page fetches besides the snapshot', () => {
     await waitFor(() => expect(posted.some((raw) => raw.includes('display-auth-failed'))).toBe(true));
     // The photograph is fetched with the header, and the URL never carries it.
     for (const raw of posted) expect(raw).not.toContain(GRANT);
+  });
+});
+
+describe('the stage never waits on one read for ever', () => {
+  it('reads one snapshot at a time, however slow the server is', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    let reads = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => {
+        reads += 1;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        // Slower than the poll interval: an interval would stack these up.
+        return new Promise<Response>((resolve) => setTimeout(() => {
+          inFlight -= 1;
+          resolve(jsonResponse(snapshot()));
+        }, 4_000));
+      },
+    });
+    mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(reads).toBeGreaterThan(2);
+    expect(maxInFlight).toBe(1);
+  });
+
+  it('gives up on a snapshot that never answers and recovers on the next', async () => {
+    let hang = true;
+    const events: string[] = [];
+    installFetchMock({
+      [`GET ${DISPLAY}`]: (req) => {
+        if (!hang) {
+          events.push('read');
+          return jsonResponse(snapshot());
+        }
+        hang = false;
+        events.push('hung');
+        return new Promise<Response>((_, reject) => {
+          req.init?.signal?.addEventListener('abort', () => {
+            events.push('abandoned');
+            reject(new DOMException('aborted', 'AbortError'));
+          });
+        });
+      },
+    });
+    mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    // Still waiting on the hung read — and nothing piled up behind it.
+    expect(events).toEqual(['hung']);
+    expect(screen.queryByTestId('party-stage-lobby')).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000 + 2_500 + 100); });
+    expect(await screen.findByTestId('party-stage-lobby')).toBeInTheDocument();
+    // It was given up on first, and only then asked again.
+    expect(events.slice(0, 3)).toEqual(['hung', 'abandoned', 'read']);
+  });
+
+  it('an old answer cannot land on top of a newer one', async () => {
+    let album = 'Vecchia';
+    let inFlight = 0;
+    let maxInFlight = 0;
+    installFetchMock({
+      [`GET ${DISPLAY}`]: () => {
+        const answer = album;
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        return new Promise<Response>((resolve) => setTimeout(() => {
+          inFlight -= 1;
+          resolve(jsonResponse(snapshot({ albumName: answer })));
+        }, answer === 'Vecchia' ? 3_000 : 10));
+      },
+    });
+    const view = render(
+      <I18nProvider>
+        <PartyDisplayStage grant={GRANT} refreshKey={0} />
+      </I18nProvider>,
+    );
+    // The slow read is in the air when the display asks again for fresh data.
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    album = 'Nuova';
+    view.rerender(
+      <I18nProvider>
+        <PartyDisplayStage grant={GRANT} refreshKey={1} />
+      </I18nProvider>,
+    );
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_500); });
+    expect(maxInFlight).toBe(1);
+    expect(screen.getByTestId('party-stage-lobby')).toHaveTextContent('Nuova');
+    expect(screen.getByTestId('party-stage-lobby')).not.toHaveTextContent('Vecchia');
   });
 });
 
