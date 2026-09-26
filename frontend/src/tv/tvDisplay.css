@@ -1,0 +1,281 @@
+/* A NubArca DISPLAY in a browser.
+ *
+ * The information, the priority and the timing are the app's; the drawing is
+ * the browser's own. Sizes follow the app's 540dp-tall TV canvas where the app
+ * has a component to follow (so `32dp` is 5.93vh), and everything that lives
+ * near an edge keeps the app's 3.5% overscan inset, because a mini-PC is very
+ * often plugged into a television that eats the border of the picture.
+ *
+ * On an assigned party the page stops being a web page: black ground, no
+ * scrolling, and no cursor once the mouse stops moving. */
+
+.tvd-root {
+  --tvd-panel: #141b26;
+  --tvd-accent: #0a84ff;
+  --tvd-text: #f8fafc;
+  --tvd-inset-x: max(24px, 3.5vw);
+  --tvd-inset-y: max(16px, 3.5vh);
+  min-height: 100vh;
+  background: #05070b;
+}
+
+.tvd-root--assigned {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  color: var(--tvd-text);
+}
+
+/* Nothing on a wall should look like a pointer is parked on it. */
+.tvd-root--idle,
+.tvd-root--idle * { cursor: none !important; }
+
+.tvd-wall {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+/* ---- The display's own two controls -------------------------------------- */
+
+.tvd-chrome {
+  position: fixed;
+  top: var(--tvd-inset-y);
+  right: var(--tvd-inset-x);
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: opacity 260ms ease;
+}
+.tvd-chrome--idle { opacity: 0; pointer-events: none; }
+/* Reconnecting stays readable even when the pointer is idle: it is news. */
+.tvd-chrome--idle .tvd-offline { opacity: 1; }
+
+.tvd-fullscreen {
+  min-height: 44px;
+  padding: 0.55rem 1.1rem;
+  border: 1px solid rgb(248 250 252 / 35%);
+  border-radius: 999px;
+  background: rgb(0 0 0 / 62%);
+  color: var(--tvd-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tvd-fullscreen:focus-visible { outline: 3px solid var(--tvd-accent); outline-offset: 3px; }
+
+.tvd-offline {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 70%);
+  color: #ffd166;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+/* ---- Media ---------------------------------------------------------------- */
+
+.tvd-media {
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+}
+/* On the wall the picture is scaled to the screen, whole — never cropped, and
+   never left small in the middle because the file happened to be. */
+.tvd-viewer .tv-viewer-media,
+.tvd-viewer .tvd-media {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.tvd-video {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tvd-video video.tvd-media { width: 100%; height: 100%; }
+.tvd-fade { animation: tvd-fade 600ms ease-out; }
+
+.tvd-sound-hint {
+  position: absolute;
+  top: var(--tvd-inset-y);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 72%);
+  color: var(--tvd-text);
+  font-size: 2.6vh;
+}
+
+/* ---- The greetings band --------------------------------------------------- */
+
+.tvd-ribbon {
+  position: absolute;
+  left: var(--tvd-inset-x);
+  right: var(--tvd-inset-x);
+  bottom: var(--tvd-inset-y);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.46vh;
+  min-height: 10vh;
+  padding: 3.7vh 5.93vh;
+  border-radius: 3.33vh;
+  background: rgb(0 0 0 / 82%);
+  color: var(--tvd-text);
+  animation: tvd-fade 320ms ease-out;
+}
+.tvd-ribbon-author { color: var(--tvd-accent); font-size: 4.07vh; font-weight: 800; }
+.tvd-ribbon-body {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 5.93vh;
+  font-weight: 700;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+/* ---- The Hero card -------------------------------------------------------- */
+
+.tvd-hero {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgb(4 6 10 / 92%);
+  color: var(--tvd-text);
+  animation: tvd-fade 420ms ease-out;
+}
+.tvd-hero-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5.93vh;
+  max-width: 86%;
+  padding: 8.89vh;
+  border-radius: 5.19vh;
+  background: var(--tvd-panel);
+  text-align: center;
+}
+.tvd-hero-mark { color: var(--tvd-accent); font-size: 8.15vh; }
+.tvd-hero-body {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  font-size: 11.11vh;
+  font-weight: 800;
+  line-height: 1.22;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+}
+.tvd-hero-author { margin: 0; color: var(--tvd-accent); font-size: 5.93vh; font-weight: 800; }
+
+/* ---- The challenge that holds the wall ------------------------------------ */
+
+.tvd-challenge {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--tvd-inset-y) var(--tvd-inset-x);
+  background: #070a12;
+}
+.tvd-challenge-card {
+  display: flex;
+  width: 92%;
+  max-width: 1420px;
+  min-height: 72%;
+  overflow: hidden;
+  padding: 0;
+  border: 2px solid #6f8dd8;
+  border-radius: 32px;
+  background: #141b2b;
+  color: var(--tvd-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tvd-challenge-image { width: 42%; object-fit: cover; }
+.tvd-challenge-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2.2vh;
+  padding: 7vh 6vw;
+}
+.tvd-challenge-eyebrow {
+  color: #9db8ff;
+  font-size: 2.6vh;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+.tvd-challenge-title { font-size: 6.2vh; font-weight: 900; line-height: 1.12; }
+.tvd-challenge-body { color: #e4e9f5; font-size: 3.9vh; line-height: 1.28; }
+.tvd-challenge-hint { margin-top: 3vh; color: #9ca9bf; font-size: 2.4vh; }
+
+/* ---- The party's own calm card -------------------------------------------- */
+
+.tvd-surface {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3vh;
+  padding: var(--tvd-inset-y) var(--tvd-inset-x);
+  background: radial-gradient(circle at top, #18324f, #05070b 72%);
+  color: var(--tvd-text);
+  text-align: center;
+}
+.tvd-surface--overlay { z-index: 50; }
+.tvd-surface-brand {
+  margin: 0;
+  color: var(--tvd-accent);
+  font-size: 2.6vh;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+}
+.tvd-surface-title { margin: 0; font-size: 7vh; line-height: 1.1; }
+.tvd-surface-message { margin: 0; color: rgb(248 250 252 / 78%); font-size: 3.6vh; }
+.tvd-surface-spinner {
+  width: 5vh;
+  height: 5vh;
+  border: 0.6vh solid rgb(248 250 252 / 20%);
+  border-top-color: var(--tvd-accent);
+  border-radius: 50%;
+  animation: tvd-spin 900ms linear infinite;
+}
+
+@keyframes tvd-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes tvd-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tvd-fade, .tvd-ribbon, .tvd-hero { animation: none; }
+  .tvd-surface-spinner { animation-duration: 3s; }
+  .tvd-chrome { transition: none; }
+}

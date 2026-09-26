@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import QRCode from 'qrcode';
 import {
   ApiError,
   clearTvActiveFaceSearch,
@@ -12,6 +11,8 @@ import {
 } from '@nubarca/api-client';
 import { useI18n } from '../i18n';
 import { VideoPreview } from '../video/VideoPreview';
+import { TvViewer } from '../tv/party/TvViewer';
+import { TvFaceIndicator, TvGuestHubQr } from '../tv/party/TvPartyOverlays';
 import { buildTvRows, TV_GRID_GAP } from './tvGridLayout';
 import { findNextTvGridItem, type TvGridDirection } from './tvGridNavigation';
 
@@ -19,9 +20,6 @@ type View =
   | { kind: 'albums' }
   | { kind: 'items'; album: TvAlbumItems }
   | { kind: 'viewer'; album: TvAlbumItems; index: number; playing: boolean };
-
-// Slideshow auto-advance interval.
-const SLIDE_MS = 9000;
 
 // Poll interval for an OPEN party album's active "find your face" search. Short
 // enough that a guest's search appears promptly on the TV; each request re-checks
@@ -76,16 +74,17 @@ interface TvBrowserProps {
   // Called on BACK from the album list (the Party root): the parent returns to
   // the mode-selection page (no PIN required to come back to Party).
   onExitRoot?: () => void;
+  // A new value re-reads the album list and the open album at once — the
+  // display has just come back from a sleep or a hidden tab.
+  refreshKey?: unknown;
 }
 
-export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
+export function TvBrowser({ onSessionInvalid, onExitRoot, refreshKey }: TvBrowserProps) {
   const { t, tn } = useI18n();
   const [albums, setAlbums] = useState<TvAlbum[] | null>(null);
   const [view, setView] = useState<View>({ kind: 'albums' });
   const [error, setError] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<HTMLDivElement>(null);
-  const [partyQr, setPartyQr] = useState<string | null>(null);
   const [focusedVideoId, setFocusedVideoId] = useState<string | null>(null);
   // Real measured width of the item grid; null until the ResizeObserver reports
   // it, so justified rows are never laid out against an invented width (no
@@ -147,13 +146,8 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
         if (sameItemIds(cur.album.items, detail.items) && samePartyFlags(cur.album, detail)) {
           return cur; // nothing new — avoid needless re-render/timer churn
         }
-        if (cur.kind === 'items') return { kind: 'items', album: detail };
-        // Viewer: preserve the current item by id across the merge.
-        const currentId = cur.album.items[cur.index]?.id;
-        if (detail.items.length === 0) return { kind: 'items', album: detail };
-        let nextIndex = currentId ? detail.items.findIndex((it) => it.id === currentId) : -1;
-        if (nextIndex < 0) nextIndex = Math.min(cur.index, detail.items.length - 1);
-        return { kind: 'viewer', album: detail, index: nextIndex, playing: cur.playing };
+        // The viewer keeps its own live list; the grid adopts the fresh one.
+        return cur.kind === 'items' ? { kind: 'items', album: detail } : { ...cur, album: detail };
       });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
@@ -172,8 +166,21 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
     }
   }, [onSessionInvalid, reloadAlbums]);
 
+  // A resume re-reads the list and the open grid now rather than at the next tick.
+  const firstRefresh = useRef(true);
+  useEffect(() => {
+    if (firstRefresh.current) {
+      firstRefresh.current = false;
+      return;
+    }
+    void reloadAlbums();
+    if (viewRef.current.kind === 'items') void refreshOpenAlbumItems();
+  }, [refreshKey, reloadAlbums, refreshOpenAlbumItems]);
+
   const openAlbumId = view.kind !== 'albums' ? view.album.id : null;
-  const partyOpen = view.kind !== 'albums' && view.album.partyEnabled;
+  // The GRID polls; an open viewer polls for itself (the same feeds, the same
+  // rules), so the two never ask for the same thing at once.
+  const partyOpen = view.kind === 'items' && view.album.partyEnabled;
   useEffect(() => {
     if (!openAlbumId || !partyOpen) return;
     const timer = window.setInterval(() => void refreshOpenAlbumItems(), PARTY_ITEMS_POLL_MS);
@@ -259,17 +266,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
     prevFaceRef.current = faceSearch;
     if (prev === faceSearch || (prev === null && faceSearch === null)) return;
 
-    setView((v) => {
-      if (v.kind !== 'viewer') return v;
-      const prevItems = prev ? prev.items : v.album.items;
-      const nextItems = faceSearch ? faceSearch.items : v.album.items;
-      if (nextItems.length === 0) return v;
-      const currentId = prevItems[Math.min(v.index, prevItems.length - 1)]?.id;
-      let nextIndex = currentId ? nextItems.findIndex((it) => it.id === currentId) : -1;
-      if (nextIndex < 0) nextIndex = 0;
-      return { ...v, index: nextIndex };
-    });
-
     // Grid focus (best-effort, after the filtered grid re-renders).
     const focusedId = (document.activeElement as HTMLElement | null)?.dataset?.itemId;
     window.requestAnimationFrame(() => {
@@ -342,11 +338,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
     [view.kind, faceSearch, exitFaceSearch, backToAlbums, onExitRoot],
   );
 
-  // The viewer owns the arrow keys for prev/next and Backspace/Escape to close.
-  useEffect(() => {
-    if (view.kind === 'viewer') viewerRef.current?.focus();
-  }, [view]);
-
   // Idle auto-hide of the 10-foot chrome (corner QRs + header/command bar) while
   // an album is open: visible on entry and on any activity, fading out after
   // CHROME_IDLE_MS. On the album list it is always shown.
@@ -376,24 +367,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
     };
   }, [albumOpen, view.kind]);
   const chromeClass = `tv-chrome ${chromeVisible ? '' : 'tv-chrome-hidden'}`.trim();
-
-  // Render the one canonical Guest Hub QR. The legacy upload URL remains in
-  // the API so already printed codes keep working, but is no longer published
-  // as a second on-screen QR.
-  useEffect(() => {
-    const album = view.kind !== 'albums' ? view.album : null;
-    const viewUrl = album?.partyEnabled ? album.partyUrl : null;
-    let cancelled = false;
-
-    const render = (url: string | null, set: (svg: string | null) => void) => {
-      if (!url) { set(null); return; }
-      void QRCode.toString(`${window.location.origin}${url}`, { type: 'svg', margin: 1, width: 220 })
-        .then((svg) => { if (!cancelled) set(svg); })
-        .catch(() => { if (!cancelled) set(null); });
-    };
-    render(viewUrl, setPartyQr);
-    return () => { cancelled = true; };
-  }, [view]);
 
   // While face-filter mode is active the open album's grid AND slideshow show
   // only the matching subset (rank order); otherwise the full album.
@@ -447,52 +420,7 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
     return () => el.classList.remove('tv-scroll-stable');
   }, []);
 
-  // Slideshow auto-advance: while playing, step to the next item every SLIDE_MS
-  // and loop at the end (within the current display list). Re-armed on each
-  // index change.
-  useEffect(() => {
-    if (view.kind !== 'viewer' || !view.playing) return;
-    const t = window.setTimeout(() => {
-      setView((v) => {
-        if (v.kind !== 'viewer') return v;
-        const len = (faceSearchRef.current?.items ?? v.album.items).length;
-        return len > 0 ? { ...v, index: (v.index + 1) % len } : v;
-      });
-    }, SLIDE_MS);
-    return () => window.clearTimeout(t);
-  }, [view]);
 
-  // The viewer BACK (Backspace/Escape or the bar button) exits face-filter mode
-  // FIRST — deleting the search and restoring the full-album slideshow on the
-  // same photo when it is still present — and only the next press closes the
-  // viewer (existing behavior).
-  const viewerBack = useCallback(() => {
-    if (faceSearchRef.current) {
-      exitFaceSearch();
-      return;
-    }
-    setView((v) => (v.kind === 'viewer' ? { kind: 'items', album: v.album } : v));
-  }, [exitFaceSearch]);
-
-  const onViewerKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (view.kind !== 'viewer') return;
-    const len = displayItems.length;
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      e.preventDefault();
-      setView((v) => (v.kind === 'viewer'
-        ? { ...v, index: Math.min(len - 1, v.index + 1) }
-        : v));
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      setView((v) => (v.kind === 'viewer' ? { ...v, index: Math.max(0, v.index - 1) } : v));
-    } else if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      setView((v) => (v.kind === 'viewer' ? { ...v, playing: !v.playing } : v));
-    } else if (e.key === 'Backspace' || e.key === 'Escape') {
-      e.preventDefault();
-      viewerBack();
-    }
-  };
 
   if (error) {
     return (
@@ -511,76 +439,29 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
   }
 
   if (view.kind === 'viewer') {
-    const safeIndex = Math.min(view.index, Math.max(0, displayItems.length - 1));
-    const item = displayItems[safeIndex];
+    const { album } = view;
     return (
-      <div
-        className="tv-viewer"
-        ref={viewerRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-label={item?.name ?? t('tv.mediaViewer')}
-        onKeyDown={onViewerKeyDown}
-        data-testid={faceSearch ? 'tv-face-viewer' : undefined}
-      >
-        {faceSearch && (
-          <div className={`tv-viewer-topbar ${chromeClass}`}>
-            <TvFaceIndicator
-              faceThumbnailUrl={faceSearch.faceThumbnailUrl}
-              albumName={view.album.name}
-              count={faceSearch.items.length}
-              onShowAll={exitFaceSearch}
-            />
-          </div>
-        )}
-        <div className="tv-viewer-stage">
-          {item?.mediaType === 'video' ? (
-            <video
-              key={item.id}
-              className="tv-viewer-media"
-              src={item.videoUrl ?? undefined}
-              poster={item.posterUrl ?? undefined}
-              controls
-              autoPlay
-            />
-          ) : (
-            <img className="tv-viewer-media" src={item?.previewUrl} alt={item?.name ?? ''} />
-          )}
-        </div>
-        <PartyQrOverlay partyQr={partyQr} hidden={!chromeVisible} />
-        <div className={`tv-viewer-bar ${chromeClass}`}>
-          <button type="button" onClick={viewerBack}>
-            {t('tv.viewerBack')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setView((v) => (v.kind === 'viewer'
-              ? { ...v, index: Math.max(0, v.index - 1) } : v))}
-          >
-            {t('tv.prev')}
-          </button>
-          <button
-            type="button"
-            aria-pressed={view.playing}
-            onClick={() => setView((v) => (v.kind === 'viewer' ? { ...v, playing: !v.playing } : v))}
-          >
-            {view.playing ? t('tv.pause') : t('tv.play')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setView((v) => (v.kind === 'viewer'
-              ? { ...v, index: Math.min(displayItems.length - 1, v.index + 1) } : v))}
-          >
-            {t('tv.next')}
-          </button>
-          <span className="tv-viewer-caption">
-            {view.playing ? '▶ ' : '❚❚ '}
-            {safeIndex + 1} / {displayItems.length} · {item?.name}
-          </span>
-        </div>
-      </div>
+      <TvViewer
+        key={`${album.id}:${view.index}`}
+        items={displayItems}
+        startIndex={Math.min(view.index, Math.max(0, displayItems.length - 1))}
+        autoPlay={view.playing}
+        albumId={album.id}
+        albumName={album.name}
+        partyEnabled={album.partyEnabled}
+        partyUrl={album.partyEnabled ? album.partyUrl : null}
+        partySlideshow={album.partySlideshow ?? null}
+        onClose={() => {
+          setView((v) => (v.kind === 'viewer' ? { kind: 'items', album: v.album } : v));
+          void refreshOpenAlbumItems();
+        }}
+        onSessionInvalid={onSessionInvalid}
+        initialOverlay
+        refreshKey={refreshKey}
+      />
     );
   }
+
 
   if (view.kind === 'items') {
     const { album } = view;
@@ -610,7 +491,7 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
             onShowAll={exitFaceSearch}
           />
         )}
-        <PartyQrOverlay partyQr={partyQr} hidden={!chromeVisible} />
+        <TvGuestHubQr partyUrl={album.partyEnabled ? album.partyUrl : null} hidden={!chromeVisible} />
         {displayItems.length === 0 ? (
           <p className="tv-empty">{t('tv.emptyAlbum')}</p>
         ) : (
@@ -702,64 +583,6 @@ export function TvBrowser({ onSessionInvalid, onExitRoot }: TvBrowserProps) {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// Shared face-filter indicator (grid + slideshow use the SAME component): a
-// fixed-size detected-face thumbnail, the "Photos with this person" label and
-// the album name, plus the match count and the "show all photos" exit. Never
-// names/scores/face identity data — the thumbnail is the small query-face crop
-// served through the TV-scoped endpoint.
-function TvFaceIndicator({
-  faceThumbnailUrl,
-  albumName,
-  count,
-  onShowAll,
-}: {
-  faceThumbnailUrl: string | null;
-  albumName: string;
-  count: number;
-  onShowAll: () => void;
-}) {
-  const { t, tn } = useI18n();
-  return (
-    <div className="tv-face-banner" role="status" data-testid="tv-face-indicator">
-      {faceThumbnailUrl && (
-        <img className="tv-face-banner-thumb" src={faceThumbnailUrl} alt="" />
-      )}
-      <span className="tv-face-banner-text">
-        <span className="tv-face-banner-title">{t('tv.facePerson')}</span>
-        <span className="tv-face-banner-album">{albumName}</span>
-      </span>
-      <span className="tv-face-banner-count">{tn(count, 'partyFace.resultsTitle')}</span>
-      <button type="button" className="tv-face-showall" onClick={onShowAll} data-testid="tv-face-showall">
-        {t('tv.faceShowAll')}
-      </button>
-    </div>
-  );
-}
-
-// One canonical Guest Hub QR sits in the bottom-left and fades with the rest
-// of the chrome after an idle period.
-function PartyQrOverlay({
-  partyQr,
-  hidden,
-}: {
-  partyQr: string | null;
-  hidden: boolean;
-}) {
-  const { t } = useI18n();
-  if (!partyQr) return null;
-  const cls = `tv-party-corner tv-chrome ${hidden ? 'tv-chrome-hidden' : ''}`.trim();
-  return (
-    <div className={`${cls} tv-party-corner-left`} data-testid="tv-party-qr">
-      <div
-        className="tv-party-qr"
-        aria-label={t('tv.partyGuestHubQr')}
-        dangerouslySetInnerHTML={{ __html: partyQr }}
-      />
-      <p className="tv-party-caption">{t('tv.partyGuestHub')}</p>
     </div>
   );
 }

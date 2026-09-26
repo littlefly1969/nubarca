@@ -3,213 +3,41 @@ import {
   ApiError,
   getTvPersonalHome,
   getTvPersonalStatus,
-  lockTvPersonal,
   TV_CODE_LENGTH,
   unlockTvPersonal,
 } from '@nubarca/api-client';
-import { TvBrowser } from './TvBrowser';
 import { TvPersonalGallery } from './TvPersonalGallery';
-import { TvBeautyLab } from './TvBeautyLab';
 import { useI18n } from '../i18n';
 
-// Paired /tv experience: the explicit mode state machine.
+// The paired /tv screens that belong to a GENERAL display: the mode selector,
+// the Personal Area code gate and the Personal Area itself.
 //
-//   modeSelect → party            (no PIN — the existing TV experience)
-//   modeSelect → pin → personalHome → galleryShell
-//   BACK: galleryShell → personalHome → (LOCK) → modeSelect; pin → modeSelect;
-//         party root → modeSelect (no PIN to come back).
+// WHICH of them is on screen is no longer decided here. It is the display's
+// state machine (tv/semantics/flow.ts, the port of the app's own), driven by
+// TvDisplay — which is what lets an owner's assignment take the screen from any
+// of them, a Personal Area included, and lock it on the way.
 //
-// The unlock grant lives ONLY in component state (application memory): a page
-// refresh, tab close, or leaving the paired state unmounts it — every start
-// is locked. It is never written to localStorage/sessionStorage/cookies/URLs.
-// Any 401 (pairing revoked/expired) clears local state and bubbles to the
-// parent, which returns to the pairing screen.
-//
-// PIN change while unlocked: the server answers 403 {error:"pin_changed"} for
-// the stale grant — the client locks immediately and shows the "PIN was
-// changed" notice on the mode selector (the pairing itself stays valid).
-//
-// Invariant recovery: a paired session whose owner has NO PIN can no longer be
-// produced by the atomic pairing flow — encountering pinConfigured=false means
-// legacy/corrupted state. The client reports it up (association incomplete)
-// instead of showing a PIN pad that can never succeed or quietly running Party.
+// The unlock grant still lives ONLY in application memory (TvDisplay's state):
+// a reload, a tab close or leaving the paired state loses it, and it is never
+// written to localStorage, sessionStorage, a cookie or a URL.
 
-type ModeNotice = 'pinChanged' | null;
-
-// The PIN screen is a shared gate: after a successful unlock it navigates to the
-// ORIGINAL requested target (Personal Area or Beauty Lab). Both reuse the SAME
-// PIN + in-memory grant — Beauty Lab never mints a second PIN or grant type.
-type UnlockTarget = 'personal' | 'beautyLab';
-
-type Mode =
-  | { kind: 'modeSelect'; notice: ModeNotice }
-  | { kind: 'party' }
-  | { kind: 'pin'; target: UnlockTarget }
-  | { kind: 'personalHome'; grant: string; displayName: string; galleryAvailable: boolean }
-  | { kind: 'galleryShell'; grant: string; displayName: string; galleryAvailable: boolean }
-  | { kind: 'beautyLab'; grant: string; displayName: string };
+export type ModeNotice = 'pinChanged' | null;
 
 // While inside the Personal Area, re-validate the grant on this cadence so a
 // code change (or server-side revocation) evicts the TV promptly, not merely on
 // the next user action.
 const PERSONAL_REVALIDATE_MS = 15_000;
 
-interface TvPairedExperienceProps {
-  onSessionInvalid: () => void;
-  // Paired session whose owner has no Personal Area PIN (legacy/corrupted
-  // state): the parent clears local TV state and returns to pairing with the
-  // "pairing is incomplete" message.
-  onAssociationIncomplete: () => void;
-}
-
-export function TvPairedExperience({
-  onSessionInvalid,
-  onAssociationIncomplete,
-}: TvPairedExperienceProps) {
+/** Mode selection: shown on every start of a GENERAL display; never auto-reopens a mode. */
+export function TvModeSelect({
+  notice, onChooseParty, onChoosePersonal, onChooseBeautyLab,
+}: {
+  notice: ModeNotice;
+  onChooseParty: () => void;
+  onChoosePersonal: () => void;
+  onChooseBeautyLab: () => void;
+}) {
   const { t } = useI18n();
-  // Every mount (page load, refresh, re-pair) starts on mode selection, locked.
-  const [mode, setMode] = useState<Mode>({ kind: 'modeSelect', notice: null });
-  // The owner still holds the retired numeric PIN. Resolved when entering the
-  // unlock gate, and reset there — never remembered across visits, so
-  // configuring the new code from another device takes effect on the next try.
-  const [legacyCredential, setLegacyCredential] = useState(false);
-
-  // Pairing revoked/expired: drop every bit of personal state BEFORE bubbling
-  // up, so no personal UI can survive under a dead session.
-  const sessionInvalid = useCallback(() => {
-    setMode({ kind: 'modeSelect', notice: null });
-    onSessionInvalid();
-  }, [onSessionInvalid]);
-
-  const associationIncomplete = useCallback(() => {
-    setMode({ kind: 'modeSelect', notice: null });
-    onAssociationIncomplete();
-  }, [onAssociationIncomplete]);
-
-  // Validate the association once per mount: atomic pairing guarantees a PIN,
-  // so pinConfigured=false is the legacy/corrupted state → recovery, before
-  // either mode can be used under an invalid association.
-  useEffect(() => {
-    const ctrl = new AbortController();
-    getTvPersonalStatus(ctrl.signal)
-      .then((status) => {
-        if (!status.pinConfigured) associationIncomplete();
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        if (err instanceof ApiError && err.status === 401) sessionInvalid();
-        // Transient error: the next interaction re-checks server-side anyway.
-      });
-    return () => ctrl.abort();
-  }, [associationIncomplete, sessionInvalid]);
-
-  const openMode = useCallback(async (target: UnlockTarget) => {
-    setMode({ kind: 'pin', target });
-    setLegacyCredential(false);
-    try {
-      const status = await getTvPersonalStatus();
-      if (!status.pinConfigured) { associationIncomplete(); return; }
-      // Configured, but with the retired numeric PIN: this television has no
-      // numeric entry surface any more and must not pretend otherwise. Show the
-      // "configure the new code from your account" notice rather than a code
-      // field that can only ever fail. Deliberately NOT an incomplete
-      // association — the pairing is fine and Party keeps working.
-      setLegacyCredential(status.scheme === 'pin-v1');
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) sessionInvalid();
-      // Transient error: entry still works — unlock re-checks server-side.
-    }
-  }, [associationIncomplete, sessionInvalid]);
-
-  // After a successful unlock, navigate to the ORIGINAL requested target.
-  const unlocked = useCallback(
-    (target: UnlockTarget, grant: string, displayName: string, galleryAvailable: boolean) => {
-      setMode(
-        target === 'beautyLab'
-          ? { kind: 'beautyLab', grant, displayName }
-          : { kind: 'personalHome', grant, displayName, galleryAvailable },
-      );
-    },
-    [],
-  );
-
-  // Leaving the Personal Area locks IMMEDIATELY: the grant is dropped from
-  // memory first, then revoked server-side (best-effort — the server's bounded
-  // grant lifetime covers a lost lock call). Idempotent by design.
-  const lock = useCallback((notice: ModeNotice = null) => {
-    setMode({ kind: 'modeSelect', notice });
-    void lockTvPersonal().catch(() => { /* grant already dropped locally */ });
-  }, []);
-
-  // Shared 403 handling for personal calls: a stale-generation grant means the
-  // owner changed the PIN → lock with the notice; any other 403 → plain lock.
-  const personalForbidden = useCallback((err: ApiError) => {
-    const body = err.body as { error?: string } | null;
-    lock(body?.error === 'pin_changed' ? 'pinChanged' : null);
-  }, [lock]);
-
-  if (mode.kind === 'party') {
-    return (
-      <TvBrowser
-        onSessionInvalid={sessionInvalid}
-        onExitRoot={() => setMode({ kind: 'modeSelect', notice: null })}
-      />
-    );
-  }
-
-  if (mode.kind === 'pin') {
-    const target = mode.target;
-    if (legacyCredential) {
-      return (
-        <div className="tv-pin-entry" data-testid="tv-code-upgrade-required">
-          <h2>{t('tv.codeTitle')}</h2>
-          <p role="status">{t('tv.codeUpgradeRequired')}</p>
-          <button type="button" onClick={() => setMode({ kind: 'modeSelect', notice: null })}>
-            {t('tv.personalBack')}
-          </button>
-        </div>
-      );
-    }
-    return (
-      <TvCodeEntry
-        onBack={() => setMode({ kind: 'modeSelect', notice: null })}
-        onUnlocked={(grant, displayName, galleryAvailable) =>
-          unlocked(target, grant, displayName, galleryAvailable)}
-        onSessionInvalid={sessionInvalid}
-      />
-    );
-  }
-
-  if (mode.kind === 'beautyLab') {
-    return (
-      <TvBeautyLab
-        grant={mode.grant}
-        // BACK from the Beauty Lab root LOCKS and returns to mode selection —
-        // exactly the Personal Area security behaviour.
-        onBack={() => lock()}
-        onPersonalError={(err) => {
-          if (err instanceof ApiError && err.status === 401) { sessionInvalid(); return true; }
-          if (err instanceof ApiError && err.status === 403) { personalForbidden(err); return true; }
-          return false;
-        }}
-      />
-    );
-  }
-
-  if (mode.kind === 'personalHome' || mode.kind === 'galleryShell') {
-    return (
-      <TvPersonalArea
-        mode={mode}
-        onOpenGallery={() => setMode({ ...mode, kind: 'galleryShell' })}
-        onGalleryBack={() => setMode({ ...mode, kind: 'personalHome' })}
-        onLock={() => lock()}
-        onForbidden={personalForbidden}
-        onSessionInvalid={sessionInvalid}
-      />
-    );
-  }
-
-  // Mode selection: shown on EVERY start; never auto-reopens the last mode.
   return (
     <div
       className="tv-mode-select"
@@ -219,38 +47,76 @@ export function TvPairedExperience({
       }}
     >
       <h2 className="tv-mode-title">{t('tv.modeTitle')}</h2>
-      {mode.notice === 'pinChanged' && (
+      {notice === 'pinChanged' && (
         <p role="status" data-testid="tv-pin-changed-notice">{t('tv.pinChangedNotice')}</p>
       )}
       <div className="tv-mode-options">
         <button
-          type="button"
-          className="tv-mode-option"
-          autoFocus
-          data-testid="tv-mode-party"
-          onClick={() => setMode({ kind: 'party' })}
+          type="button" className="tv-mode-option" autoFocus data-testid="tv-mode-party"
+          onClick={onChooseParty}
         >
           {t('tv.modeParty')}
         </button>
         <button
-          type="button"
-          className="tv-mode-option"
-          data-testid="tv-mode-personal"
-          onClick={() => void openMode('personal')}
+          type="button" className="tv-mode-option" data-testid="tv-mode-personal"
+          onClick={onChoosePersonal}
         >
           {t('tv.modePersonal')} <span aria-hidden="true">🔒</span>
         </button>
         <button
-          type="button"
-          className="tv-mode-option"
-          data-testid="tv-mode-beauty-lab"
-          onClick={() => void openMode('beautyLab')}
+          type="button" className="tv-mode-option" data-testid="tv-mode-beauty-lab"
+          onClick={onChooseBeautyLab}
         >
           {t('tv.modeBeautyLab')} <span aria-hidden="true">🔒</span>
         </button>
       </div>
     </div>
   );
+}
+
+/**
+ * The shared unlock gate for the Personal Area and the Beauty Lab. One code,
+ * one in-memory grant, whichever of the two asked for it.
+ *
+ * On entry it asks the server what credential the owner holds: none at all is
+ * an incomplete association (legacy data the atomic pairing cannot produce);
+ * the retired numeric PIN gets a notice instead of a code field that could only
+ * ever fail.
+ */
+export function TvCodeGate({
+  onBack, onUnlocked, onSessionInvalid, onAssociationIncomplete,
+}: {
+  onBack: () => void;
+  onUnlocked: (grant: string, displayName: string, galleryAvailable: boolean) => void;
+  onSessionInvalid: () => void;
+  onAssociationIncomplete: () => void;
+}) {
+  const { t } = useI18n();
+  const [legacyCredential, setLegacyCredential] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    getTvPersonalStatus(controller.signal)
+      .then((status) => {
+        if (!status.pinConfigured) { onAssociationIncomplete(); return; }
+        setLegacyCredential(status.scheme === 'pin-v1');
+      })
+      .catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 401) onSessionInvalid();
+        // Transient: entry still works — unlock re-checks server-side.
+      });
+    return () => controller.abort();
+  }, [onAssociationIncomplete, onSessionInvalid]);
+
+  if (legacyCredential) {
+    return (
+      <div className="tv-pin-entry" data-testid="tv-code-upgrade-required">
+        <h2>{t('tv.codeTitle')}</h2>
+        <p role="status">{t('tv.codeUpgradeRequired')}</p>
+        <button type="button" onClick={onBack}>{t('tv.personalBack')}</button>
+      </div>
+    );
+  }
+  return <TvCodeEntry onBack={onBack} onUnlocked={onUnlocked} onSessionInvalid={onSessionInvalid} />;
 }
 
 // BLIND directional-code entry, on the same security model as the native TV
@@ -386,7 +252,7 @@ function TvCodeEntry({
 // re-validation poll spans both screens: every PERSONAL_REVALIDATE_MS the
 // grant is checked server-side — a PIN change or revocation evicts the TV
 // promptly (403 → lock, with the pin_changed notice when reported).
-function TvPersonalArea({
+export function TvPersonalArea({
   mode,
   onOpenGallery,
   onGalleryBack,
