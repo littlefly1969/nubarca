@@ -47,10 +47,10 @@ import {
 } from '../lib/partySlideshow';
 import {
   beginHeroRotation, deferBoundary, discardBoundary, heroCandidates, heroEligible,
-  nextHero, onMediaBoundary, remapRibbonIndex, ribbonRotating, ribbonVisible,
+  nextHero, onMediaBoundary, ribbonOnFeed, ribbonOnRotate, ribbonRotating, ribbonVisible,
   sameMessages, settleBoundary,
-  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS,
-  type BoundaryDebt, type HeroRotation,
+  HERO_DURATION_MS, MESSAGES_POLL_MS, NO_BOUNDARY_DEBT, RIBBON_ROTATE_MS, RIBBON_START,
+  type BoundaryDebt, type HeroRotation, type RibbonCursor,
 } from '../lib/partyMessages';
 import { useI18n } from '../i18n';
 import { tvDebug } from '../debug';
@@ -165,7 +165,7 @@ export function ViewerScreen({
   // It is its OWN state, never merged into `items`: a message is not a slide,
   // and TvAlbumItem stays `image | video`.
   const [messages, setMessages] = useState<TvPartyMessage[]>([]);
-  const [ribbonIndex, setRibbonIndex] = useState(0);
+  const [ribbonCursor, setRibbonCursor] = useState<RibbonCursor>(RIBBON_START);
   // The Hero currently holding the screen, or null. While it is non-null the
   // media index is FROZEN — see the boundary handler for why that is what makes
   // the carousel resume with nothing lost and nothing repeated.
@@ -627,11 +627,12 @@ export function ViewerScreen({
 
   // Keep the ribbon on the SAME message across a refresh, by id. Without this
   // the band would jump back to the first message every time anybody wrote
-  // anything, which at a party is every few seconds.
-  const ribbonMessageIdRef = useRef<string | undefined>(undefined);
+  // anything, which at a party is every few seconds. The id is part of the
+  // cursor STATE (lib/partyMessages): a ref written during render used to be
+  // overwritten by the new feed before this effect read it, so hiding an
+  // earlier greeting skipped the one being read.
   useEffect(() => {
-    setRibbonIndex((previous) =>
-      remapRibbonIndex(messages, ribbonMessageIdRef.current, previous));
+    setRibbonCursor((cursor) => ribbonOnFeed(cursor, messages));
   }, [messages]);
 
   const ribbonShown = ribbonVisible({
@@ -641,9 +642,8 @@ export function ViewerScreen({
     heroVisible: hero !== null,
   });
   const ribbonMessage = messages.length > 0
-    ? messages[Math.min(ribbonIndex, messages.length - 1)]
+    ? messages[Math.min(ribbonCursor.index, messages.length - 1)]
     : null;
-  ribbonMessageIdRef.current = ribbonMessage?.id;
 
   // Rotate the band. A single message simply stays put — crossfading a message
   // into itself is a flicker carrying no information.
@@ -651,7 +651,7 @@ export function ViewerScreen({
   useEffect(() => {
     if (!rotateRibbon) return;
     const timer = setInterval(() => {
-      setRibbonIndex((i) => (i + 1) % Math.max(1, messagesRef.current.length));
+      setRibbonCursor((cursor) => ribbonOnRotate(cursor, messagesRef.current));
     }, RIBBON_ROTATE_MS);
     return () => clearInterval(timer);
   }, [rotateRibbon]);

@@ -230,6 +230,28 @@ describe('the same greetings and Heroes', () => {
     }
   });
 
+  it('moves the band the same way over an evening of refreshes and rotations', () => {
+    let web = webMessages.RIBBON_START;
+    let nat = native.messages.RIBBON_START as typeof web;
+    expect(web).toEqual(nat);
+    const script: Array<['feed' | 'rotate', number]> = [
+      ['feed', 2], ['rotate', 2], ['rotate', 2], ['feed', 3], ['rotate', 3], ['feed', 0],
+      ['feed', 4], ['rotate', 4], ['feed', 1], ['rotate', 1], ['rotate', 0], ['feed', 2],
+    ];
+    for (const [action, feedIndex] of script) {
+      const feed = feeds[feedIndex];
+      const w = action === 'feed'
+        ? webMessages.ribbonOnFeed(web, feed as never)
+        : webMessages.ribbonOnRotate(web, feed as never);
+      const n = (action === 'feed'
+        ? fn(native.messages, 'ribbonOnFeed')(nat, feed)
+        : fn(native.messages, 'ribbonOnRotate')(nat, feed)) as typeof w;
+      expect(w).toEqual(n);
+      web = w;
+      nat = n;
+    }
+  });
+
   it('shows the band and the card under the same conditions', () => {
     for (let bits = 0; bits < 32; bits += 1) {
       const flags = [1, 2, 4, 8, 16].map((b) => (bits & b) !== 0);

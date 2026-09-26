@@ -54,8 +54,15 @@ test('a message refresh never moves the media slideshow', () => {
 });
 
 test('the ribbon keeps its place across a refresh by message id', () => {
-  assert.match(viewer, /remapRibbonIndex\(/);
-  assert.match(viewer, /ribbonMessageIdRef/);
+  // The cursor — position AND the message on screen — is one piece of state,
+  // moved only by the pure policy.
+  assert.match(viewer, /useState<RibbonCursor>\(RIBBON_START\)/);
+  assert.match(viewer, /setRibbonCursor\(\(cursor\) => ribbonOnFeed\(cursor, messages\)\)/);
+  assert.match(viewer, /setRibbonCursor\(\(cursor\) => ribbonOnRotate\(cursor, messagesRef\.current\)\)/);
+  // Nothing records what is on screen during render any more: that is what
+  // let a new feed overwrite it before the refresh could read it.
+  assert.doesNotMatch(viewer, /ribbonMessageIdRef/);
+  assert.doesNotMatch(viewer, /\.current\s*=\s*ribbonMessage/);
 });
 
 test('the ribbon is driven by the tested visibility policy, not ad-hoc conditions', () => {

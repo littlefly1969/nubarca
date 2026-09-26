@@ -62,6 +62,33 @@ export function remapRibbonIndex(
   return Math.min(Math.max(previousIndex, 0), messages.length - 1);
 }
 
+/**
+ * THE RIBBON CURSOR — the band's position AND the message on screen, held in
+ * one piece of state, so a refresh reads exactly what was being read whatever
+ * order React renders in. (An id kept in a ref written during render is
+ * overwritten by the new feed first, and hiding an earlier greeting then skips
+ * the one being read.)
+ */
+export interface RibbonCursor {
+  readonly index: number;
+  readonly shownId: string | null;
+}
+
+export const RIBBON_START: RibbonCursor = { index: 0, shownId: null };
+
+/** The feed changed: stay on the message being read, by id. */
+export function ribbonOnFeed(cursor: RibbonCursor, messages: TvPartyMessage[]): RibbonCursor {
+  const index = remapRibbonIndex(messages, cursor.shownId ?? undefined, cursor.index);
+  return { index, shownId: messages[index]?.id ?? null };
+}
+
+/** The rotation moved the band on by one. */
+export function ribbonOnRotate(cursor: RibbonCursor, messages: TvPartyMessage[]): RibbonCursor {
+  if (messages.length === 0) return RIBBON_START;
+  const index = (cursor.index + 1) % messages.length;
+  return { index, shownId: messages[index].id };
+}
+
 /** The band: something to say, no overlay in the lower corners, no Hero saying it already. */
 export function ribbonVisible(input: {
   partyEnabled: boolean;
