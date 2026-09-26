@@ -14,7 +14,8 @@ public static class PrintAgentPlatform
     {
         PrintAdapterKinds.Fake => new FakePrinterAdapter(
             options.FakeOutputPath, TimeSpan.FromSeconds(options.FakeSheetSeconds)),
-        PrintAdapterKinds.WindowsSpooler when OperatingSystem.IsWindows() => new WindowsSpoolerPrinterAdapter(options.PrinterName),
+        PrintAdapterKinds.WindowsSpooler when OperatingSystem.IsWindows() =>
+            new WindowsSpoolerPrinterAdapter(options.PrinterName, options.StripPrinterName),
         PrintAdapterKinds.WindowsSpooler => throw new PlatformNotSupportedException("windows-spooler requires Windows."),
         PrintAdapterKinds.Cups => throw new NotSupportedException("cups is a reserved adapter contract and is not implemented yet. Use fake on Linux."),
         _ => throw new InvalidOperationException("Print Agent adapter is invalid."),

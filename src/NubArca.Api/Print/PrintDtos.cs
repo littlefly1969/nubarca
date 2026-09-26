@@ -13,7 +13,9 @@ public sealed record PrintHeartbeatRequest(string AgentVersion, IReadOnlyList<Pr
 public sealed record PrintHeartbeatResponse(string DesiredState, DateTime ServerTime);
 public sealed record PrintDeviceDto(
     Guid Id, string DisplayName, string? Manufacturer, string? Model,
-    string AdapterKind, string ObservedState, DateTime LastSeenAt, bool SupportsPhoto10x15);
+    string AdapterKind, string ObservedState, DateTime LastSeenAt, bool SupportsPhoto10x15,
+    /// <summary>The printer cuts a strip sheet into two 2x6 strips itself (reports 2x6x2).</summary>
+    bool CutsStrips = false);
 public sealed record PrintJobSummaryDto(Guid Id, string ShortCode, string Kind, string Format,
     string State, DateTime CreatedAt, string? FailureCode);
 public sealed record PrintStationDto(

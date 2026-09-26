@@ -187,6 +187,38 @@ public sealed class PartyPrintComposerTests
         Assert.Equal(PartyPrintGeometry.SlotsPerStrip, distinct);
     }
 
+    [Fact]
+    public async Task A_Strip_The_Printer_Cuts_Carries_No_Cut_Marks()
+    {
+        // The ticks show scissors where to go. Under a blade they would sit
+        // exactly on the cut, and a cut a fraction of a millimetre off leaves
+        // one on a strip's edge.
+        var composer = new PartyPrintComposer();
+        using var byHand = Image.Load<Rgba32>(await composer.RenderAsync(
+            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4), default));
+        using var byPrinter = Image.Load<Rgba32>(await composer.RenderAsync(
+            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4) with { CutByPrinter = true },
+            default));
+
+        var centre = PartyPrintGeometry.PortraitWidth / 2;
+        const int y = 10;
+        static int Distance(Rgba32 a, Rgba32 b) =>
+            Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
+
+        // The same spot on the top margin: a tick on one sheet, paper on the other.
+        Assert.True(Distance(byHand[centre, y], byHand[centre - 12, y]) > 30,
+            "the hand-cut sheet lost its cut mark");
+        Assert.True(Distance(byPrinter[centre, y], byPrinter[centre - 12, y]) <= 6,
+            "the printer-cut sheet still has a cut mark");
+
+        // Everything else is the same composition.
+        for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+        {
+            Assert.Equal(SampleSlot(byHand, 0, slot), SampleSlot(byPrinter, 0, slot));
+            Assert.Equal(SampleSlot(byHand, 1, slot), SampleSlot(byPrinter, 1, slot));
+        }
+    }
+
     private static Rgba32 SampleSlot(Image<Rgba32> sheet, int strip, int slot)
     {
         var (x, y, w, h) = PartyPrintGeometry.StripSlot(strip, slot);

@@ -6,6 +6,22 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Photo-booth strips, cut by the printer
+
+- **A DNP DS-RX1HS hands out two real 2×6 strips.** Give the Print Agent a
+  second Windows queue on the same printer with the driver's *2inch cut*
+  enabled (`StripPrinterName`), and a guest's four-photo strip comes out as two
+  separate strips — one to keep, one to give away — while single photos stay
+  uncut on the ordinary queue.
+- **No marks under the blade.** A sheet the printer cuts carries no cut ticks,
+  and the guest's preview shows it without them too. A printer that cannot cut
+  prints strips exactly as before: one sheet, ticks at the ends of the gutter.
+- **You can see it before spending paper.** *Print stations* now says, for each
+  printer, whether strips are cut by the printer or by hand.
+- Print Agent `0.2.4`. Only the configured printer can report the cut, and a
+  cut job that reaches any other printer fails instead of printing one uncut
+  sheet.
+
 ### The guest console's numbers are its filters, and a nicer RSVP
 
 - **Tap a number to see who it counts.** In *Invitati* the numbers — in lista,

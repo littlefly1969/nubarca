@@ -1,0 +1,92 @@
+using NubArca.PrintAgent;
+using NubArca.PrintAgent.Adapters;
+
+namespace NubArca.PrintAgent.Tests;
+
+/// <summary>
+/// The DNP strip cut, decided without a spooler: which printer may say it can
+/// cut, and which queue a cut sheet is sent to.
+/// </summary>
+public sealed class SpoolerQueueRoutingTests
+{
+    private const string Printer = "DNP DS-RX1HS";
+    private const string StripQueue = "DNP DS-RX1HS 2inch";
+
+    [Fact]
+    public void Only_The_Configured_Printer_With_A_Ready_Strip_Queue_Reports_2x6x2()
+    {
+        Assert.Equal(["10x15", "2x6x2"],
+            SpoolerQueueRouting.Formats(Printer, true, Printer, StripQueue, true));
+
+        // Case differs between what Windows lists and what an operator typed.
+        Assert.Equal(["10x15", "2x6x2"],
+            SpoolerQueueRouting.Formats(Printer.ToLowerInvariant(), true, Printer, StripQueue, true));
+
+        // No strip queue configured, or it lost its 10x15 paper: photos only.
+        Assert.Equal(["10x15"], SpoolerQueueRouting.Formats(Printer, true, Printer, null, false));
+        Assert.Equal(["10x15"], SpoolerQueueRouting.Formats(Printer, true, Printer, StripQueue, false));
+
+        // Another printer never borrows the DNP's cutter.
+        Assert.Equal(["10x15"],
+            SpoolerQueueRouting.Formats("Office Inkjet", true, Printer, StripQueue, true));
+        Assert.Equal(["10x15"],
+            SpoolerQueueRouting.Formats(Printer, true, null, StripQueue, true));
+
+        // A printer without 10x15 paper prints nothing, cut or not.
+        Assert.Empty(SpoolerQueueRouting.Formats(Printer, false, Printer, StripQueue, true));
+    }
+
+    [Fact]
+    public void A_2x6x2_Sheet_Goes_To_The_Strip_Queue_And_A_Photo_Stays_On_The_Printer()
+    {
+        Assert.Equal(Printer, SpoolerQueueRouting.TargetQueue("10x15", Printer, Printer, StripQueue));
+        Assert.Equal(StripQueue, SpoolerQueueRouting.TargetQueue("2x6x2", Printer, Printer, StripQueue));
+        Assert.Equal(StripQueue, SpoolerQueueRouting.TargetQueue("2X6X2", Printer, Printer, StripQueue));
+    }
+
+    [Fact]
+    public void A_Sheet_This_Printer_Cannot_Cut_Is_Refused_Not_Printed_Uncut()
+    {
+        // A 2x6x2 job sent to a printer without its cutting queue would come out
+        // as one sheet the guest was told would be two strips.
+        Assert.Null(SpoolerQueueRouting.TargetQueue("2x6x2", Printer, Printer, null));
+        Assert.Null(SpoolerQueueRouting.TargetQueue("2x6x2", "Office Inkjet", Printer, StripQueue));
+        Assert.Null(SpoolerQueueRouting.TargetQueue("A4", Printer, Printer, StripQueue));
+    }
+
+    [Fact]
+    public void A_Strip_Queue_Requires_A_Named_Printer_Of_Its_Own()
+    {
+        var unnamed = Options(printer: null, strip: StripQueue);
+        Assert.Contains("requires PrintAgent:PrinterName",
+            Assert.Throws<InvalidOperationException>(unnamed.NormalizeAndValidate).Message);
+
+        var same = Options(printer: Printer, strip: Printer.ToUpperInvariant());
+        Assert.Contains("second queue",
+            Assert.Throws<InvalidOperationException>(same.NormalizeAndValidate).Message);
+
+        var blank = Options(printer: null, strip: "  ");
+        blank.NormalizeAndValidate();
+        Assert.Null(blank.StripPrinterName);
+
+        var valid = Options(printer: Printer, strip: StripQueue);
+        valid.NormalizeAndValidate();
+        Assert.Equal(StripQueue, valid.StripPrinterName);
+    }
+
+    [Fact]
+    public void The_Windows_Installer_Writes_The_Strip_Queue()
+    {
+        var installer = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "install-service.ps1"));
+        Assert.Contains("[string] $StripPrinterName = ''", installer, StringComparison.Ordinal);
+        Assert.Contains("StripPrinterName = $configuredStripPrinter", installer, StringComparison.Ordinal);
+    }
+
+    private static PrintAgentOptions Options(string? printer, string? strip) => new()
+    {
+        ServerOrigin = "https://example.invalid",
+        Adapter = "windows-spooler",
+        PrinterName = printer,
+        StripPrinterName = strip,
+    };
+}

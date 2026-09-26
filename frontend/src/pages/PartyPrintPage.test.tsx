@@ -356,6 +356,25 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByTestId('party-print-strip-0')).not.toHaveAttribute('aria-hidden');
   });
 
+  it('draws no cut marks when the printer cuts the strips itself', async () => {
+    const user = setup();
+    mount(manifest({
+      formats: [
+        { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
+        {
+          type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 4, remainingForYou: null,
+          cutByPrinter: true,
+        },
+      ],
+    }));
+    const { container } = render(wrapper());
+    await compose(user, 'strip4');
+    // Still two strips on one sheet; the ticks would sit under the blade, and
+    // the printed sheet has none.
+    expect(container.querySelectorAll('.party-print-slot')).toHaveLength(8);
+    expect(container.querySelectorAll('.party-print-cut')).toHaveLength(0);
+  });
+
   it('turns the sheet to follow a landscape photograph', async () => {
     const user = setup();
     mount();

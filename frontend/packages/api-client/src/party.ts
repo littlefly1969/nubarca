@@ -770,6 +770,11 @@ export interface PartyPrintFormat {
    * per-guest limit. Null is not zero — it means the ceiling does not exist.
    */
   remainingForYou: number | null;
+  /**
+   * The printer cuts this sheet itself (a strip arrives as two 2x6 strips), so
+   * the printed sheet — and therefore the preview — carries no cut marks.
+   */
+  cutByPrinter?: boolean;
 }
 
 /** A choosable photograph: safe derived URLs only, never an original. */

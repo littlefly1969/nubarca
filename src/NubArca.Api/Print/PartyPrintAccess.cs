@@ -23,8 +23,21 @@ public sealed record PartyPrintAccess(
     string PartyName,
     string? FooterText,
     PartyPrintProductState Photo,
-    PartyPrintProductState Strip)
+    PartyPrintProductState Strip,
+    /// <summary>
+    /// The printer cuts the strip sheet into its two strips itself, so the
+    /// sheet is sent as 2x6x2 and carries no marks to cut along.
+    /// </summary>
+    bool StripCutByPrinter = false)
 {
+    /// <summary>True when the printer, not the guest, cuts this product's sheet.</summary>
+    public bool CutByPrinter(string product) =>
+        product == Domain.Print.PartyPrintProducts.Strip4 && StripCutByPrinter;
+
+    /// <summary>The job format this product's sheet is printed as.</summary>
+    public string PrintFormat(string product) =>
+        CutByPrinter(product) ? PrintFormats.Strip2x6Pair : PrintFormats.Photo10x15;
+
     /// <summary>This party's state for one product, or null if there is no such product.</summary>
     public PartyPrintProductState? Product(string product) => product switch
     {

@@ -35,7 +35,8 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         string ViewToken, string PrintToken, Guid AlbumId, Guid OwnerId, Guid PhotoId);
 
     /// <summary>A party with printing configured and one photograph carrying EXIF.</summary>
-    private async Task<Party> SeedPartyAsync(bool enablePrinting = true)
+    private async Task<Party> SeedPartyAsync(
+        bool enablePrinting = true, string capabilities = "{\"formats\":[\"10x15\"]}")
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync(
             $"host{Interlocked.Increment(ref _parties)}@example.com");
@@ -65,7 +66,7 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
                 {
                     Id = deviceId, PrintStationId = stationId, DeviceKey = "d1",
                     DisplayName = "DS620", AdapterKind = "fake",
-                    CapabilitiesJson = "{\"formats\":[\"10x15\"]}",
+                    CapabilitiesJson = capabilities,
                     LastObservedState = PrintDeviceStates.Ready, LastSeenAt = DateTime.UtcNow,
                 });
                 db.PartyPrintProfiles.Add(new PartyPrintProfile
@@ -102,6 +103,32 @@ public sealed class PartyPrintCapabilityMatrixTests : IDisposable
         // No profile, no capability, no card on the guest hub.
         var bare = await SeedPartyAsync(enablePrinting: false);
         Assert.Equal(string.Empty, bare.PrintToken);
+    }
+
+    [Fact]
+    public async Task The_Manifest_Says_When_The_Printer_Cuts_The_Strips()
+    {
+        var anon = _factory.CreateClient();
+        async Task<(bool Photo, bool Strip)> CutByPrinter(Party party)
+        {
+            var manifest = await anon.GetFromJsonAsync<JsonElement>(
+                $"/api/party/{party.PrintToken}/print");
+            bool Of(string type) => manifest.GetProperty("formats").EnumerateArray()
+                .Single(f => f.GetProperty("type").GetString() == type)
+                .GetProperty("cutByPrinter").GetBoolean();
+            return (Of("photo"), Of("strip4"));
+        }
+
+        // A printer that only prints 10x15: the strip is one sheet, cut by hand.
+        Assert.Equal((false, false), await CutByPrinter(await SeedPartyAsync()));
+
+        // One that can also cut it in two: the strip arrives as two strips.
+        Assert.Equal((false, true), await CutByPrinter(await SeedPartyAsync(
+            capabilities: "{\"formats\":[\"10x15\",\"2x6x2\"]}")));
+
+        // Cutting is an extra ON TOP of 10x15, never a way around it.
+        var cutOnly = await SeedPartyAsync(capabilities: "{\"formats\":[\"2x6x2\"]}");
+        Assert.Equal(string.Empty, cutOnly.PrintToken);
     }
 
     [Fact]

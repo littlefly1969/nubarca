@@ -107,7 +107,7 @@ enrollment tokens or image bytes.
 ## Party guest prints
 
 A party guest's keepsake is an ordinary print job to this agent. It arrives with
-the same `10x15` format, the same claim lease, the same artifact download and
+the same `10x15` format (or `2x6x2`, below), the same claim lease, the same artifact download and
 the same terminal report as an owner test page; the agent neither knows nor
 needs to know that a guest composed it. Everything party-specific — which
 capability token was held, which photographs were chosen, how they were cropped,
@@ -120,10 +120,12 @@ Two job kinds distinguish the compositions:
 | Kind | Sheet | What comes out |
 |---|---|---|
 | `party-photo` | 10×15, following the photograph's own orientation | one framed photograph with the party footer |
-| `party-strip4` | 10×15 portrait | four different photographs, printed as **two identical strips** side by side, with cut ticks at the ends of the gutter |
+| `party-strip4` | 10×15 portrait | four different photographs, printed as **two identical strips** side by side, with cut ticks at the ends of the gutter — or, on a printer that reports `2x6x2`, without ticks and cut in two by the printer |
 
 Both are one sheet of the same paper: the strip is a composition, not a second
-media size, so a station qualified for 10×15 is qualified for both. Operators
+media size, so a station qualified for 10×15 is qualified for both. Cutting is
+an extra on top of 10×15, never a substitute for it: a printer reporting only
+`2x6x2` opens no party printing at all. Operators
 sizing consumables should note that the products carry **separate budgets** on
 the server — a party out of photo prints can still be printing strips — and that
 each accepted job is numbered per party, which is the number a guest is shown
@@ -132,6 +134,53 @@ and reads out at the desk.
 Party artifacts are rendered by the server from the owner's originals and are
 subject to the same bounded-artifact and retention rules as any other job; the
 agent stores no party state and holds no party token.
+
+## DNP DS-RX1HS: strips cut by the printer
+
+The DS-RX1HS can cut a 4×6 print down the middle into two 2×6 strips. That is a
+driver option, **2inch cut**, not a paper size — so the agent uses a second
+Windows queue on the same printer whose defaults have it enabled, and sends
+strip sheets there as format `2x6x2`. Photos keep going to the ordinary queue,
+uncut. The artifact is identical either way: the same 10×15 portrait sheet with
+two strips side by side; only the queue differs, and the server leaves out the
+cut ticks, which would otherwise sit exactly under the blade.
+
+The cut needs a DNP driver and printer firmware recent enough to offer it
+([DNP: how to enable 2" cuts in Windows](https://dnpphoto.com/Portals/0/Resources/FAQ_17_DS_HowToEnable2InchCutsInWindows.pdf)).
+
+1. Install the DNP driver and check that the ordinary queue (for example
+   `DNP DS-RX1HS`) prints a 4×6 test page.
+2. **Add a second printer** on the same port with the same driver, named for
+   example `DNP DS-RX1HS 2inch`.
+3. On that second queue open **Printer properties → Advanced → Printing
+   Defaults…** (not *Printing preferences*: those are per user, and the agent
+   runs as `LocalSystem`, which sees only the defaults). Set paper size **4×6**,
+   then **Advanced… → Document Options → Printer Features → 2inch cut: Enable**.
+4. Configure the agent with both names — at install time
+   `-PrinterName 'DNP DS-RX1HS' -StripPrinterName 'DNP DS-RX1HS 2inch'`, or on
+   an existing installation by adding `"StripPrinterName"` beside
+   `"PrinterName"` in `appsettings.Production.json` and running
+   `Restart-Service NubArcaPrintAgent`.
+5. In **Cloud functions → Print stations** the printer now reads **Strips: Cut
+   by the printer (2×6)**. It reads *One sheet, cut by hand* when the second
+   queue is missing, invalid or has no 4×6 paper — nothing is ever advertised
+   as cut that the agent cannot route to a cutting queue.
+
+`StripPrinterName` requires `PrinterName`, and must be a different queue: the
+agent refuses to start otherwise, because without a named printer it would
+report every installed queue — the cutting one included — as a printer of its
+own. Only the configured printer can report `2x6x2`, and a `2x6x2` job reaching
+any other printer, or this one after its cutting queue was removed, fails as
+`format_unsupported` rather than printing one uncut sheet.
+
+On both queues the agent prefers the queue's own **default** 4×6 paper entry
+over the first 4×6-sized entry it finds, so what an operator set on a queue is
+not undone by a different entry of the same size.
+
+Physical acceptance, in addition to the matrix below: one strip job comes out as
+two separate 2×6 strips with the cut in the gutter, no tick visible on either
+edge, and the job completed remotely; a photo job on the same station comes out
+uncut.
 
 ## The simulator takes time, on purpose
 

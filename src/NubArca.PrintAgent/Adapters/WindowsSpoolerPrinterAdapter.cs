@@ -9,7 +9,18 @@ namespace NubArca.PrintAgent.Adapters;
 public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
 {
     private readonly string? _configuredPrinter;
-    public WindowsSpoolerPrinterAdapter(string? configuredPrinter) => _configuredPrinter = configuredPrinter;
+    private readonly string? _stripPrinter;
+
+    /// <param name="stripPrinter">
+    /// Optional second queue on the configured printer, with the DNP "2inch cut"
+    /// enabled in its Printing Defaults. Without it no 2x6x2 is advertised.
+    /// </param>
+    public WindowsSpoolerPrinterAdapter(string? configuredPrinter, string? stripPrinter = null)
+    {
+        _configuredPrinter = configuredPrinter;
+        _stripPrinter = stripPrinter;
+    }
+
     public string Kind => "windows-spooler";
 
     public Task<IReadOnlyList<DiscoveredPrinter>> DiscoverAsync(CancellationToken cancellationToken)
@@ -34,8 +45,8 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var settings = new PrinterSettings { PrinterName = printer.DeviceKey };
         if (!settings.IsValid) return Task.FromResult(new PrinterCapabilities([], false));
-        var formats = settings.PaperSizes.Cast<PaperSize>()
-            .Any(x => IsPhoto10x15(x.Width, x.Height)) ? new[] { "10x15" } : Array.Empty<string>();
+        var formats = SpoolerQueueRouting.Formats(printer.DeviceKey, PaperFor(settings) is not null,
+            _configuredPrinter, _stripPrinter, StripQueueReady());
         return Task.FromResult(new PrinterCapabilities(formats, settings.SupportsColor));
     }
 
@@ -52,17 +63,22 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         cancellationToken.ThrowIfCancellationRequested();
+        // The strip is the same 10x15 artifact; only the queue differs, and the
+        // cut comes from that queue's driver defaults.
+        var queue = SpoolerQueueRouting.TargetQueue(submission.Format, submission.DeviceKey,
+            _configuredPrinter, _stripPrinter);
+        if (queue is null)
+            return Task.FromResult(new PrintSubmissionResult(false, null, "format_unsupported"));
         using var image = Image.FromFile(submission.ArtifactPath);
         using var document = new PrintDocument
         {
             DocumentName = $"NubArca-{submission.JobId.ToString("N")[..8]}",
             PrintController = new StandardPrintController(),
         };
-        document.PrinterSettings.PrinterName = submission.DeviceKey;
+        document.PrinterSettings.PrinterName = queue;
         if (!document.PrinterSettings.IsValid)
             return Task.FromResult(new PrintSubmissionResult(false, null, "printer_unavailable"));
-        var paper = document.PrinterSettings.PaperSizes.Cast<PaperSize>()
-            .FirstOrDefault(x => IsPhoto10x15(x.Width, x.Height));
+        var paper = PaperFor(document.PrinterSettings);
         if (paper is null)
             return Task.FromResult(new PrintSubmissionResult(false, null, "format_unsupported"));
         document.DefaultPageSettings.PaperSize = paper;
@@ -88,6 +104,26 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         {
             return Task.FromResult(new PrintSubmissionResult(false, null, "printer_unavailable"));
         }
+    }
+
+    private bool StripQueueReady()
+    {
+        if (string.IsNullOrWhiteSpace(_stripPrinter)) return false;
+        var settings = new PrinterSettings { PrinterName = _stripPrinter };
+        return settings.IsValid && PaperFor(settings) is not null;
+    }
+
+    /// <summary>
+    /// The queue's own default paper when it is 10x15, else its first 10x15
+    /// entry. Whatever the operator set on a queue travels in its defaults, and
+    /// choosing a different entry of the same size must not quietly undo it.
+    /// </summary>
+    private static PaperSize? PaperFor(PrinterSettings settings)
+    {
+        var preferred = settings.DefaultPageSettings.PaperSize;
+        if (IsPhoto10x15(preferred.Width, preferred.Height)) return preferred;
+        return settings.PaperSizes.Cast<PaperSize>()
+            .FirstOrDefault(x => IsPhoto10x15(x.Width, x.Height));
     }
 
     private static bool IsPhoto10x15(int width, int height)

@@ -427,7 +427,8 @@ public sealed class PrintStationService
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim()[..Math.Min(64, value.Trim().Length)];
     private static PrintDeviceDto ToDeviceDto(PrinterDevice x) =>
         new(x.Id, x.DisplayName, x.Manufacturer, x.Model, x.AdapterKind, x.LastObservedState, x.LastSeenAt,
-            PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Photo10x15));
+            PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Photo10x15),
+            PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Strip2x6Pair));
     private static PrintJobSummaryDto ToJobDto(PrintJob x) =>
         new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode);
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;

@@ -33,6 +33,17 @@ describe('PrintStationsPanel', () => {
     expect(screen.getByText('Online')).toBeInTheDocument();
     expect(screen.getByText('DNP DS620')).toBeInTheDocument();
     expect(screen.getByText(/abc12345/)).toBeInTheDocument();
+    // A DS620 without a cutting queue: strips come out as one sheet.
+    expect(screen.getByTestId('print-strip-cut')).toHaveTextContent('Un foglio, da tagliare a mano');
+  });
+
+  it('says when the printer cuts strips itself', async () => {
+    installFetchMock({ 'GET /api/print/stations': () => jsonResponse([
+      { ...station, devices: [{ ...station.devices[0], displayName: 'DNP DS-RX1HS', cutsStrips: true }] },
+    ]) });
+    render(view());
+    expect(await screen.findByTestId('print-strip-cut'))
+      .toHaveTextContent('Tagliate dalla stampante (2×6)');
   });
 
   it('renders offline status and the bounded last error', async () => {

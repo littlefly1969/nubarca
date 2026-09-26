@@ -89,7 +89,8 @@ public static class PartyPrintEndpoints
                         PartyPrintProducts.Strip4, access.Strip.Enabled,
                         access.Strip.Remaining,
                         PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Strip4),
-                        YoursLeft(access.Strip.PerGuest, used.UsedStrips)),
+                        YoursLeft(access.Strip.PerGuest, used.UsedStrips),
+                        access.CutByPrinter(PartyPrintProducts.Strip4)),
                 ],
                 photos));
         }).WithName("GetPartyPrintManifest").RequireRateLimiting(PartyPublicRateLimitPolicy);
@@ -263,7 +264,12 @@ public sealed record PartyPrintFormatDto(
     /// per-guest limit. Null is not zero: it means the ceiling does not exist,
     /// and the party's budget is the only thing bounding them.
     /// </summary>
-    int? RemainingForYou);
+    int? RemainingForYou,
+    /// <summary>
+    /// The printer cuts this sheet itself, so the preview draws no cut marks —
+    /// because the printed sheet has none.
+    /// </summary>
+    bool CutByPrinter = false);
 
 /// <summary>A choosable photograph: safe derived URLs only, never an original.</summary>
 public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string PreviewUrl);

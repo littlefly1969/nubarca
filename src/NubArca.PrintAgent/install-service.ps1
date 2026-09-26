@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory = $true)] [Guid] $StationId,
     [Parameter(Mandatory = $true)] [string] $EnrollmentToken,
     [string] $PrinterName = '',
+    [string] $StripPrinterName = '',
     [ValidateSet('windows-spooler', 'fake')] [string] $Adapter = 'windows-spooler',
     [string] $ServiceName = 'NubArcaPrintAgent'
 )
@@ -30,6 +31,7 @@ New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
     /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Unable to restrict permissions on $dataDirectory" }
 $configuredPrinter = if ($PrinterName) { $PrinterName } else { $null }
+$configuredStripPrinter = if ($StripPrinterName) { $StripPrinterName } else { $null }
 $configuration = @{
     PrintAgent = @{
         ServerOrigin = $ServerOrigin.TrimEnd('/')
@@ -38,6 +40,7 @@ $configuration = @{
         TemporaryPath = Join-Path $dataDirectory 'temp'
         Adapter = $Adapter
         PrinterName = $configuredPrinter
+        StripPrinterName = $configuredStripPrinter
         FakeOutputPath = Join-Path $dataDirectory 'fake-output'
         IdlePollSeconds = 5
         MaxBackoffSeconds = 60

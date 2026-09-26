@@ -9,6 +9,15 @@ public sealed class PrintAgentOptions
     public string TemporaryPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\temp";
     public string Adapter { get; set; } = "windows-spooler";
     public string? PrinterName { get; set; }
+
+    /// <summary>
+    /// Optional second Windows queue on the SAME physical printer as
+    /// <see cref="PrinterName"/>, with the DNP "2inch cut" enabled in its
+    /// Printing Defaults. Only then does the printer report <c>2x6x2</c>, and
+    /// a party strip arrives as two separate 2x6 strips instead of one sheet to
+    /// cut by hand.
+    /// </summary>
+    public string? StripPrinterName { get; set; }
     public string FakeOutputPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\fake-output";
     public int IdlePollSeconds { get; set; } = 5;
     public int MaxBackoffSeconds { get; set; } = 60;
@@ -29,6 +38,17 @@ public sealed class PrintAgentOptions
         TemporaryPath = Environment.ExpandEnvironmentVariables(TemporaryPath);
         FakeOutputPath = Environment.ExpandEnvironmentVariables(FakeOutputPath);
         Adapter = Adapter.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(StripPrinterName)) StripPrinterName = null;
+        // The cutting queue belongs to ONE named printer. Without that name the
+        // agent would report every installed queue, the cutting one included,
+        // as a printer of its own.
+        if (StripPrinterName is not null && string.IsNullOrWhiteSpace(PrinterName))
+            throw new InvalidOperationException(
+                "PrintAgent:StripPrinterName requires PrintAgent:PrinterName.");
+        if (StripPrinterName is not null
+            && string.Equals(StripPrinterName, PrinterName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException(
+                "PrintAgent:StripPrinterName must be a second queue, not PrintAgent:PrinterName itself.");
         if (Adapter is not ("fake" or "windows-spooler" or "cups"))
             throw new InvalidOperationException("PrintAgent:Adapter must be fake, windows-spooler, or cups.");
         if (FakeSheetSeconds < 0) throw new InvalidOperationException(
