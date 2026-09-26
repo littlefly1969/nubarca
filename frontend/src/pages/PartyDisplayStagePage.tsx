@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ApiError,
   fetchPartyDisplayMedia,
@@ -77,12 +77,6 @@ function statusOf(error: unknown): number | null {
 
 export function PartyDisplayStagePage() {
   const [grant] = useState(() => readGrantFromFragment());
-  const [snapshot, setSnapshot] = useState<PartyGamePublicSnapshot | null>(null);
-  const [connection, setConnection] = useState<'loading' | 'ready' | 'unavailable' | 'error'>(
-    grant ? 'loading' : 'unavailable');
-  const [stale, setStale] = useState(false);
-  const [qr, setQr] = useState<string | null>(null);
-  const hasSnapshot = useRef(false);
 
   // The fragment is removed from the address bar and from history before
   // anything else runs. It stays only in the closure above.
@@ -93,19 +87,65 @@ export function PartyDisplayStagePage() {
   }, []);
 
   // The renderer heartbeat. The shell treats silence as a dead page and
-  // remounts, so this must keep running for as long as the document does.
-  useEffect(() => {
+  // remounts, so this must keep running for as long as the document does. A
+  // LAYOUT effect so the first beat still precedes anything the stage below
+  // reports: its effects run before this component's passive ones.
+  useLayoutEffect(() => {
     const beat = () => postToShell({ type: 'display-heartbeat', protocol: BRIDGE_PROTOCOL, at: Date.now() });
     beat();
     const timer = setInterval(beat, HEARTBEAT_MS);
     return () => clearInterval(timer);
   }, []);
 
-  // The grant was refused somewhere. There is nothing this page can do about
-  // it — the assignment moved, the party ended, the television was unpaired, or
+  return (
+    <PartyDisplayStage
+      grant={grant}
+      onReady={() => postToShell({ type: 'display-ready' })}
+      onAuthFailed={() => postToShell({ type: 'display-auth-failed' })}
+      onPresentation={(active) => postToShell({ type: 'display-presentation', active })}
+    />
+  );
+}
+
+export interface PartyDisplayStageProps {
+  /** The display grant, or null when there is none to use. */
+  readonly grant: string | null;
+  /** The first valid snapshot has been rendered. */
+  onReady?(): void;
+  /** The grant was refused: the CAPABILITY is dead, not the renderer. */
+  onAuthFailed?(): void;
+  /** Whether a live scene of the party is on screen, for the keep-awake policy. */
+  onPresentation?(active: boolean): void;
+  /** A new value reads the snapshot at once (a display that just resumed). */
+  readonly refreshKey?: unknown;
+}
+
+/**
+ * THE CANONICAL GAME STAGE, authorised by a display grant.
+ *
+ * Rendered by this page inside the native app's WebView, and in-process by a
+ * browser running /tv — the same stage, the same scenes, the same grant, so a
+ * room is never given two accounts of what the game is doing. What differs is
+ * only who is told about readiness and refusals: the page tells the native
+ * shell through its bridge, the browser display is told directly.
+ */
+export function PartyDisplayStage({
+  grant, onReady, onAuthFailed, onPresentation, refreshKey,
+}: PartyDisplayStageProps) {
+  const [snapshot, setSnapshot] = useState<PartyGamePublicSnapshot | null>(null);
+  const [connection, setConnection] = useState<'loading' | 'ready' | 'unavailable' | 'error'>(
+    grant ? 'loading' : 'unavailable');
+  const [stale, setStale] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
+  const hasSnapshot = useRef(false);
+  const callbacks = useRef({ onReady, onAuthFailed, onPresentation });
+  callbacks.current = { onReady, onAuthFailed, onPresentation };
+
+  // The grant was refused somewhere. There is nothing the stage can do about it
+  // — the assignment moved, the party ended, the television was unpaired, or
   // the grant simply reached its end — so it says so, and the shell decides.
   const reportAuthFailure = useCallback(() => {
-    postToShell({ type: 'display-auth-failed' });
+    callbacks.current.onAuthFailed?.();
   }, []);
 
   // The same polling shape every other live Party surface uses: every
@@ -120,7 +160,7 @@ export function PartyDisplayStagePage() {
       try {
         const next = await getPartyDisplaySnapshot(grant, controller.signal);
         if (cancelled) return;
-        if (!hasSnapshot.current) postToShell({ type: 'display-ready' });
+        if (!hasSnapshot.current) callbacks.current.onReady?.();
         hasSnapshot.current = true;
         setSnapshot(next);
         setConnection('ready');
@@ -129,7 +169,6 @@ export function PartyDisplayStagePage() {
         if (cancelled || isAbort(error)) return;
         const status = statusOf(error);
         // 401 means the grant is finished; 404 that there is no game to read.
-        // Either way this page shows no party, and a 401 is the shell's to act on.
         if (status === 401 || status === 404) {
           if (status === 401) reportAuthFailure();
           setConnection('unavailable');
@@ -143,19 +182,18 @@ export function PartyDisplayStagePage() {
     void read();
     const timer = setInterval(() => void read(), POLL_MS);
     return () => { cancelled = true; controller.abort(); clearInterval(timer); };
-  }, [grant, reportAuthFailure]);
+  }, [grant, reportAuthFailure, refreshKey]);
 
-  // Is a live scene of the party on screen? The shell needs exactly this for
-  // its keep-awake policy, and nothing more. An error card is not a scene.
+  // Is a live scene of the party on screen? An error card is not a scene.
   const presentationActive = connection === 'ready' && snapshot !== null;
   useEffect(() => {
-    postToShell({ type: 'display-presentation', active: presentationActive });
+    callbacks.current.onPresentation?.(presentationActive);
   }, [presentationActive]);
 
   // The join code, as pixels from the server. Fetched while the lobby is
   // showing it, kept for a return to the lobby (the code does not change for
   // the life of the party link), and retried if it failed for a reason that is
-  // not an answer — until it arrives, the scene changes, or the page goes.
+  // not an answer — until it arrives, the scene changes, or the stage goes.
   const wantsQr = stageScene(snapshot) === 'lobby';
   useEffect(() => {
     if (!grant || !wantsQr || qr !== null) return;
