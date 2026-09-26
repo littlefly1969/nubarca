@@ -6,6 +6,18 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The browser no longer translates NubArca over itself
+
+- **NubArca already speaks your language, so Chrome is told not to.** The whole
+  application is marked as not to be translated, which stops Google Translate
+  and similar browser features from rewriting the page under React — the cause
+  of broken party and guest pages when a guest accepted the offer.
+- **The page states its real language from the first byte.** `<html lang>` is
+  set before the application loads, from the same choices NubArca makes itself
+  (`?lang=`, your saved language, your browser's languages, then Italian),
+  instead of claiming English until the app starts. The language picker works
+  exactly as before.
+
 ### Photo-booth strips, cut by the printer
 
 - **A DNP DS-RX1HS hands out two real 2×6 strips.** Give the Print Agent a
