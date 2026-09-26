@@ -5,8 +5,9 @@
 # account, and the BUILT frontend under `vite preview` on :4173 — which
 # proxies /api to the API exactly like the production front door does, so the
 # display's cookie, origin and routes are the real ones. Then it runs
-# frontend/scripts/tv-browser-e2e.mjs in a headless Chromium, and tears it all
-# down whatever happened.
+# frontend/scripts/tv-browser-e2e.mjs in a headless Chromium — pairing,
+# assignment, game takeover, reload, a real browser restart on the same
+# profile, revocation — and tears it all down whatever happened.
 #
 #   scripts/tv-browser-e2e.sh               # everything, locally
 #   CHROME_BIN=/path/to/chrome scripts/tv-browser-e2e.sh
