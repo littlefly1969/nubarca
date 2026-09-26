@@ -6,7 +6,9 @@
 //   open /tv → pair (the owner approves over the API) → assign to a party →
 //   the slideshow → a game takes the screen → the game hands it back →
 //   reload: still paired, straight back into the party, never the mode
-//   selector → the owner revokes it → pairing again.
+//   selector → the browser is shut down and started again on the same
+//   profile: the same, with no new pairing → the owner revokes it → pairing
+//   again.
 //
 // The owner side is plain HTTP with a session cookie; the display side is the
 // browser, read through the DevTools protocol — what is asserted is what the
@@ -47,7 +49,7 @@ async function snapshot(name) {
   if (!SHOTS) return;
   const { mkdirSync, writeFileSync } = await import('node:fs');
   mkdirSync(SHOTS, { recursive: true });
-  const shot = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
+  const shot = await browser.send('Page.captureScreenshot', { format: 'png' });
   writeFileSync(join(SHOTS, `${String(steps.length).padStart(2, '0')}-${name}.png`), Buffer.from(shot.data, 'base64'));
 }
 
@@ -156,81 +158,117 @@ function findChrome() {
   throw new Error('No Chromium found: set CHROME_BIN.');
 }
 
-const port = 9300 + (process.pid % 500);
 const profile = mkdtempSync(join(tmpdir(), 'nubarca-tv-e2e-'));
-const chrome = spawn(findChrome(), [
-  '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
-  '--autoplay-policy=no-user-gesture-required',
-  `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`,
-  '--window-size=1280,720', 'about:blank',
-], { stdio: 'ignore' });
+let launches = 0;
 
-async function devtools() {
-  for (let i = 0; i < 150; i += 1) {
+/**
+ * Start Chromium on THE display's profile and attach to a fresh page. Called
+ * again after the browser has been shut down, on the same profile: that is a
+ * browser restart, and whatever survives it is what the display itself kept —
+ * this test adds no persistence of its own.
+ */
+async function launchBrowser() {
+  launches += 1;
+  const port = 9300 + ((process.pid + launches * 7) % 500);
+  const proc = spawn(findChrome(), [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
+    '--autoplay-policy=no-user-gesture-required',
+    `--user-data-dir=${profile}`, `--remote-debugging-port=${port}`,
+    '--window-size=1280,720', 'about:blank',
+  ], { stdio: 'ignore' });
+  const exited = new Promise((resolve) => proc.once('exit', resolve));
+
+  let url = null;
+  for (let i = 0; i < 150 && !url; i += 1) {
     try {
-      return (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl;
+      url = (await (await fetch(`http://127.0.0.1:${port}/json/version`)).json()).webSocketDebuggerUrl;
     } catch { await delay(100); }
   }
-  throw new Error('Chromium did not start');
-}
+  if (!url) throw new Error('Chromium did not start');
 
-const ws = new WebSocket(await devtools());
-await new Promise((resolve) => { ws.onopen = resolve; });
-let nextId = 0;
-const pending = new Map();
-const listeners = [];
-ws.onmessage = (event) => {
-  const message = JSON.parse(event.data);
-  if (message.id && pending.has(message.id)) {
-    pending.get(message.id)(message);
-    pending.delete(message.id);
-  } else if (message.method) {
-    for (const listener of listeners) listener(message);
+  const ws = new WebSocket(url);
+  await new Promise((resolve) => { ws.onopen = resolve; });
+  let nextId = 0;
+  const pending = new Map();
+  const listeners = [];
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.id && pending.has(message.id)) {
+      pending.get(message.id)(message);
+      pending.delete(message.id);
+    } else if (message.method) {
+      for (const listener of listeners) listener(message);
+    }
+  };
+  function send(method, params = {}, session) {
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      pending.set(id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message}`)) : resolve(m.result)));
+      ws.send(JSON.stringify({ id, method, params, sessionId: session }));
+    });
   }
-};
-function send(method, params = {}, sessionId) {
-  const id = ++nextId;
-  return new Promise((resolve, reject) => {
-    pending.set(id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message}`)) : resolve(m.result)));
-    ws.send(JSON.stringify({ id, method, params, sessionId }));
+
+  const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
+  const { sessionId: session } = await send('Target.attachToTarget', { targetId, flatten: true });
+  await send('Page.enable', {}, session);
+  await send('Runtime.enable', {}, session);
+  await send('Network.enable', {}, session);
+  // Every screen the display draws, recorded from the first frame of every
+  // load: it is how "never the mode selector" is checked, not by sampling.
+  await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `
+      window.__flows = [];
+      new MutationObserver(() => {
+        const f = document.querySelector('[data-testid="tv-display"]')?.getAttribute('data-flow');
+        if (f && window.__flows[window.__flows.length - 1] !== f) window.__flows.push(f);
+      }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-flow'] });
+    `,
+  }, session);
+
+  // Every pairing this browser starts is seen: the first one to read the
+  // secret a phone's QR carries, and any later one as a failure — a display
+  // that re-pairs after a restart has lost its pairing.
+  const pairingStarts = [];
+  listeners.push(async (message) => {
+    if (message.sessionId !== session) return;
+    if (message.method === 'Network.responseReceived'
+      && message.params.response.url.endsWith('/api/tv/pairing/start')) {
+      pairingStarts.push({ requestId: message.params.requestId, secret: null });
+    }
+    if (message.method === 'Network.loadingFinished') {
+      const start = pairingStarts.find((p) => p.requestId === message.params.requestId);
+      if (start) {
+        const { body } = await send('Network.getResponseBody', { requestId: start.requestId }, session);
+        start.secret = JSON.parse(body).pairingSecret;
+      }
+    }
   });
+
+  return {
+    send: (method, params = {}) => send(method, params, session),
+    pairingStarts,
+    /** Shut the browser down the way a user or the OS does, and wait until the process is gone. */
+    async close() {
+      try { await send('Browser.close'); } catch { /* already going */ }
+      await Promise.race([exited, delay(10_000)]);
+      if (proc.exitCode === null && proc.signalCode === null) {
+        proc.kill('SIGKILL');
+        await exited;
+      }
+      try { ws.close(); } catch { /* closing */ }
+      if (proc.exitCode === null && proc.signalCode === null) throw new Error('Chromium did not exit');
+    },
+    kill() {
+      try { ws.close(); } catch { /* closing */ }
+      proc.kill('SIGKILL');
+    },
+  };
 }
 
-const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
-const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
-await send('Page.enable', {}, sessionId);
-await send('Runtime.enable', {}, sessionId);
-await send('Network.enable', {}, sessionId);
-// Every screen the display draws, recorded from the first frame of every load:
-// it is how "never the mode selector" is checked, not by sampling.
-await send('Page.addScriptToEvaluateOnNewDocument', {
-  source: `
-    window.__flows = [];
-    new MutationObserver(() => {
-      const f = document.querySelector('[data-testid="tv-display"]')?.getAttribute('data-flow');
-      if (f && window.__flows[window.__flows.length - 1] !== f) window.__flows.push(f);
-    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-flow'] });
-  `,
-}, sessionId);
-
-// The pairing secret travels in the start response, as it does to a real TV;
-// the test reads it there, exactly where a phone's QR code carries it from.
-let pairingSecret = null;
-const startRequests = new Set();
-listeners.push(async (message) => {
-  if (message.sessionId !== sessionId) return;
-  if (message.method === 'Network.responseReceived'
-    && message.params.response.url.endsWith('/api/tv/pairing/start')) {
-    startRequests.add(message.params.requestId);
-  }
-  if (message.method === 'Network.loadingFinished' && startRequests.has(message.params.requestId)) {
-    const { body } = await send('Network.getResponseBody', { requestId: message.params.requestId }, sessionId);
-    pairingSecret = JSON.parse(body).pairingSecret;
-  }
-});
+let browser = await launchBrowser();
 
 async function evaluate(expression) {
-  const result = await send('Runtime.evaluate', { expression, returnByValue: true }, sessionId);
+  const result = await browser.send('Runtime.evaluate', { expression, returnByValue: true });
   return result.result?.value;
 }
 
@@ -271,12 +309,13 @@ try {
   }
 
   step('a browser opens /tv and offers a pairing code');
-  await send('Page.navigate', { url: `${APP}/tv` }, sessionId);
+  await browser.send('Page.navigate', { url: `${APP}/tv` });
   await waitFor('the pairing code', has('tv-pairing-code'));
   await delay(SHOTS ? 1_500 : 0);
   await snapshot('pairing');
   const publicCode = (await evaluate(`document.querySelector('[data-testid="tv-pairing-code"]').textContent`)).trim();
-  for (let i = 0; i < 40 && !pairingSecret; i += 1) await delay(100);
+  for (let i = 0; i < 40 && !browser.pairingStarts[0]?.secret; i += 1) await delay(100);
+  const pairingSecret = browser.pairingStarts[0]?.secret;
   if (!pairingSecret) throw new Error('The pairing start response was not seen');
 
   step('the owner approves it from their phone');
@@ -320,12 +359,25 @@ try {
   await snapshot('slideshow-again');
 
   step('a reload keeps the pairing and goes straight back into the party');
-  await send('Page.reload', { ignoreCache: true }, sessionId);
+  await browser.send('Page.reload', { ignoreCache: true });
   await waitFor('the slideshow after reload', `${flowIs('partySlideshow')} && ${has('tv-party-slideshow')}`);
   const flows = await evaluate('window.__flows');
   if (flows.includes('mode') || flows.includes('pairing')) {
     throw new Error(`After the reload the display passed through: ${flows.join(' → ')}`);
   }
+
+  step('the browser is shut down and started again on the same profile: still paired, straight into the party');
+  await browser.close();
+  browser = await launchBrowser();
+  await browser.send('Page.navigate', { url: `${APP}/tv` });
+  await waitFor('the slideshow after a browser restart', `${flowIs('partySlideshow')} && ${has('tv-party-slideshow')}`);
+  await delay(SHOTS ? 1_500 : 0);
+  await snapshot('after-restart');
+  const afterRestart = await evaluate('window.__flows');
+  if (afterRestart.includes('mode') || afterRestart.includes('pairing')) {
+    throw new Error(`After the restart the display passed through: ${afterRestart.join(' → ')}`);
+  }
+  if (browser.pairingStarts.length > 0) throw new Error('The display asked to be paired again after a restart');
 
   step('the owner revokes it: pairing again, nothing of the party left');
   await owner(`/api/tv-devices/${device.sessionId}`, { method: 'DELETE' });
@@ -341,14 +393,13 @@ try {
   exitCode = 1;
   console.error(`\n✗ ${error instanceof Error ? error.message : String(error)}`);
   try {
-    const shot = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
-    const path = join(profile, 'failure.png');
+    const shot = await browser.send('Page.captureScreenshot', { format: 'png' });
+    const path = join(tmpdir(), `nubarca-tv-e2e-failure-${process.pid}.png`);
     (await import('node:fs')).writeFileSync(path, Buffer.from(shot.data, 'base64'));
     console.error(`  screenshot: ${path}`);
     console.error(`  diagnostics: ${JSON.stringify(await evaluate('window.__nubarcaTvDiagnostics?.()'))}`);
   } catch { /* the browser may be gone */ }
 } finally {
-  try { ws.close(); } catch { /* closing */ }
-  chrome.kill('SIGKILL');
+  browser.kill();
 }
 process.exit(exitCode);
