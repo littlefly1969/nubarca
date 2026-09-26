@@ -32,7 +32,8 @@ public static class PrintJobKinds
 
     // Guest prints from a party. Both compose a 10x15 sheet: the strip is a
     // COMPOSITION, not a second paper size, so the printer requirement is
-    // unchanged and the agent has nothing new to understand.
+    // unchanged. A printer that can also cut that sheet in two receives the
+    // strip as PrintFormats.Strip2x6Pair; one that cannot receives it as 10x15.
     public const string PartyPhoto = "party-photo";
     public const string PartyStrip4 = "party-strip4";
 
@@ -42,6 +43,13 @@ public static class PrintJobKinds
 public static class PrintFormats
 {
     public const string Photo10x15 = "10x15";
+
+    /// <summary>
+    /// The same 10x15 sheet, cut down the middle by the printer into two 2x6
+    /// strips. Only a printer that reports it receives it: on the DNP that is a
+    /// second Windows queue with the driver's "2inch cut" enabled.
+    /// </summary>
+    public const string Strip2x6Pair = "2x6x2";
 }
 
 public static class PrintJobStates

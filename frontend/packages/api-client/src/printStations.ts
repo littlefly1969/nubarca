@@ -12,6 +12,8 @@ export interface PrintDevice {
   observedState: string;
   lastSeenAt: string;
   supportsPhoto10x15: boolean;
+  /** The printer cuts a strip sheet into two 2x6 strips itself. */
+  cutsStrips?: boolean;
 }
 
 export interface PrintJobSummary {

@@ -55,7 +55,13 @@ public sealed record PartyPrintComposition(
     /// it a strip — so turning that sheet would not turn a picture, it would
     /// destroy the product.
     /// </summary>
-    PartyPrintOrientation Orientation = PartyPrintOrientation.FollowPhoto);
+    PartyPrintOrientation Orientation = PartyPrintOrientation.FollowPhoto,
+    /// <summary>
+    /// The printer cuts the strip sheet itself. The ticks that show a pair of
+    /// scissors where to go would then sit exactly under the blade, and a cut a
+    /// fraction of a millimetre off leaves one of them on a strip's edge.
+    /// </summary>
+    bool CutByPrinter = false);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -191,7 +197,7 @@ public sealed class PartyPrintComposer
                     (int)Math.Round(PartyPrintGeometry.StripFooterFraction * h)));
             }
 
-            DrawCutMarks(sheet, palette);
+            if (!composition.CutByPrinter) DrawCutMarks(sheet, palette);
             return sheet;
         }
         finally

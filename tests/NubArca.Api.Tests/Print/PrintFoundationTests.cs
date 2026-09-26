@@ -163,6 +163,24 @@ public sealed class PrintFoundationTests : IDisposable
     }
 
     [Fact]
+    public async Task The_Dashboard_Says_Whether_A_Printer_Cuts_Strips_Itself()
+    {
+        var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
+        var plain = await EnrolledStationAsync(owner, "Sala");
+        var cutting = await EnrolledStationAsync(owner, "Photobooth");
+        (await HeartbeatAsync(plain.Credential)).EnsureSuccessStatusCode();
+        (await HeartbeatAsync(cutting.Credential, "10x15", "2x6x2")).EnsureSuccessStatusCode();
+
+        var stations = (await owner.GetFromJsonAsync<JsonElement[]>("/api/print/stations"))!;
+        JsonElement Device(Guid id) =>
+            stations.Single(s => s.GetProperty("id").GetGuid() == id).GetProperty("devices")[0];
+        Assert.True(Device(plain.Id).GetProperty("supportsPhoto10x15").GetBoolean());
+        Assert.False(Device(plain.Id).GetProperty("cutsStrips").GetBoolean());
+        Assert.True(Device(cutting.Id).GetProperty("supportsPhoto10x15").GetBoolean());
+        Assert.True(Device(cutting.Id).GetProperty("cutsStrips").GetBoolean());
+    }
+
+    [Fact]
     public async Task Paused_Station_Heartbeats_But_Claims_No_Job_Then_Resumes_End_To_End()
     {
         var (_, owner) = await _factory.CreateAuthenticatedClientAsync();
@@ -380,12 +398,13 @@ public sealed class PrintFoundationTests : IDisposable
     private Task<HttpResponseMessage> EnrollAsync(Guid station, string token) =>
         _factory.CreateClient().PostAsJsonAsync("/api/print-agent/enroll",
             new { stationId = station, enrollmentToken = token, agentVersion = "test" });
-    private Task<HttpResponseMessage> HeartbeatAsync(string credential)
+    private Task<HttpResponseMessage> HeartbeatAsync(string credential, params string[] formats)
     {
         var request = AgentRequest(HttpMethod.Post, "/api/print-agent/heartbeat", credential,
             new { agentVersion = "test", devices = new[] { new { deviceKey = "fake-10x15",
                 displayName = "Fake", manufacturer = "NubArca", model = "CI", adapterKind = "fake",
-                capabilities = new { formats = new[] { "10x15" }, color = true }, observedState = "ready" } } });
+                capabilities = new { formats = formats.Length == 0 ? ["10x15"] : formats, color = true },
+                observedState = "ready" } } });
         return _factory.CreateClient().SendAsync(request);
     }
     private Task<HttpResponseMessage> ClaimAsync(string credential) =>

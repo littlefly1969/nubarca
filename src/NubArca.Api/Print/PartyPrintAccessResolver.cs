@@ -94,6 +94,11 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
             return null;
         }
 
+        // Cutting that sheet in two is an extra a printer MAY have. Without it
+        // the strip still prints, as one sheet with marks to cut along.
+        var stripCutByPrinter = PrintCapabilityMatcher.SupportsFormat(
+            device.CapabilitiesJson, PrintFormats.Strip2x6Pair);
+
         var photo = new PartyPrintProductState(
             profile.PhotoEnabled,
             Math.Max(0, profile.PhotoMaxPrints - profile.PhotoAcceptedCount),
@@ -114,6 +119,6 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
 
         return new PartyPrintAccess(
             link.Id, link.AlbumId, link.OwnerUserId, station.Id, device.Id,
-            partyName, profile.FooterText, photo, strip);
+            partyName, profile.FooterText, photo, strip, stripCutByPrinter);
     }
 }

@@ -192,7 +192,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 request.Product, ParseTheme(request.Theme), photos,
                 access.PartyName, access.FooterText,
                 reservation.PublicSequence,
-                ParseOrientation(request.Orientation)), cancellationToken);
+                ParseOrientation(request.Orientation),
+                access.CutByPrinter(request.Product)), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
             // Stage outside the lock; publish and claim in one protected step.
@@ -223,7 +224,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     Kind = request.Product == PartyPrintProducts.Strip4
                         ? PrintJobKinds.PartyStrip4
                         : PrintJobKinds.PartyPhoto,
-                    Format = PrintFormats.Photo10x15,
+                    Format = access.PrintFormat(request.Product),
                     State = PrintJobStates.Ready,
                     PublicSequence = reservation.PublicSequence,
                     RenderSpecificationJson = JsonSerializer.Serialize(new

@@ -120,6 +120,14 @@ export function PrintStationsPanel() {
               </header>
               <dl>
                 <div><dt>{t('print.printer')}</dt><dd>{observedPrinter?.displayName ?? t('print.noPrinter')}</dd></div>
+                {observedPrinter && (
+                  <div>
+                    <dt>{t('print.stripCut')}</dt>
+                    <dd data-testid="print-strip-cut">
+                      {t(observedPrinter.cutsStrips ? 'print.stripCutPrinter' : 'print.stripCutHand')}
+                    </dd>
+                  </div>
+                )}
                 <div><dt>{t('print.lastSeen')}</dt><dd>{station.lastSeenAt ? formatDate(station.lastSeenAt) : '—'}</dd></div>
                 <div><dt>{t('print.queue')}</dt><dd>{station.queueCount}</dd></div>
                 <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>

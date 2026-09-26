@@ -195,6 +195,31 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     }
 
     [Fact]
+    public async Task On_A_Printer_That_Cuts_A_Strip_Is_Sent_As_2x6x2_And_A_Photo_Is_Not()
+    {
+        var (access, _) = await SeedAsync();
+        var cutting = access with { StripCutByPrinter = true };
+
+        var strip = await SubmitAsync(cutting,
+            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "s1");
+        var photo = await SubmitAsync(cutting, Request(PartyPrintProducts.Photo, _photos[0]), "p1");
+        var uncut = await SubmitAsync(access,
+            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "s2");
+        Assert.True(strip.Ok && photo.Ok && uncut.Ok);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        async Task<string> FormatOf(PartyPrintSubmitResult result) =>
+            (await db.PrintJobs.AsNoTracking().SingleAsync(j => j.Id == result.Accepted!.JobId)).Format;
+
+        // Still the same 10x15 sheet; the format is what tells the agent to cut it.
+        Assert.Equal(PrintFormats.Strip2x6Pair, await FormatOf(strip));
+        Assert.Equal(PrintFormats.Photo10x15, await FormatOf(photo));
+        // A printer that cannot cut still prints the strip, as one sheet.
+        Assert.Equal(PrintFormats.Photo10x15, await FormatOf(uncut));
+    }
+
+    [Fact]
     public async Task The_Same_Idempotency_Key_Prints_Once()
     {
         var (access, albumId) = await SeedAsync();

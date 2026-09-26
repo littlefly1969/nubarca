@@ -216,6 +216,8 @@ interface SheetProps {
   onAspect: (id: string, width: number, height: number) => void;
   /** Null follows the photograph, which is the default. */
   orientation: PartyPrintOrientation | null;
+  /** The printer cuts the sheet itself, so the printed sheet has no cut marks. */
+  cutByPrinter: boolean;
 }
 
 function pct(value: number): string {
@@ -223,7 +225,9 @@ function pct(value: number): string {
 }
 
 function SheetPreview(props: SheetProps) {
-  const { product, theme, chosen, photoById, aspectOf, views, onAspect, orientation } = props;
+  const {
+    product, theme, chosen, photoById, aspectOf, views, onAspect, orientation, cutByPrinter,
+  } = props;
   const viewOf = (id: string) => views[id] ?? DEFAULT_CROP_VIEW;
 
   if (product === 'photo') {
@@ -319,17 +323,22 @@ function SheetPreview(props: SheetProps) {
           </div>
         </div>
       ))}
-      {/* Ticks at the ends of the gutter only — where the sheet is cut. */}
-      <span
-        className="party-print-cut party-print-cut-top"
-        style={{ height: pct(CUT_MARK_LENGTH_FRACTION) }}
-        aria-hidden="true"
-      />
-      <span
-        className="party-print-cut party-print-cut-bottom"
-        style={{ height: pct(CUT_MARK_LENGTH_FRACTION) }}
-        aria-hidden="true"
-      />
+      {/* Ticks at the ends of the gutter only — where the sheet is cut. None
+          when the printer cuts it: the printed sheet has none either. */}
+      {!cutByPrinter && (
+        <>
+          <span
+            className="party-print-cut party-print-cut-top"
+            style={{ height: pct(CUT_MARK_LENGTH_FRACTION) }}
+            aria-hidden="true"
+          />
+          <span
+            className="party-print-cut party-print-cut-bottom"
+            style={{ height: pct(CUT_MARK_LENGTH_FRACTION) }}
+            aria-hidden="true"
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -886,6 +895,7 @@ export function PartyPrintPage() {
             views={views}
             onAspect={noteAspect}
             orientation={orientation}
+            cutByPrinter={format?.cutByPrinter === true}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp')}</p>
           {product === 'strip4' && (
