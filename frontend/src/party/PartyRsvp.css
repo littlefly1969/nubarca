@@ -18,91 +18,275 @@
 .party-rsvp-for { margin: 0; color: var(--party-hub-muted); }
 .party-rsvp-closed { margin: 0; font-weight: 600; }
 
-.party-rsvp-form { display: flex; flex-direction: column; gap: 1.1rem; }
+/* ───────────────────────────────────────────────────────────────────────────
+   The form, in its sheet
+   ───────────────────────────────────────────────────────────────────────────
 
-.party-rsvp fieldset {
-  border: 0;
-  margin: 0;
-  padding: 0;
+   A fieldset per person, drawn as a quiet card — never the browser's grooved
+   frame with the name cut into its top edge. The answer is a two-part control
+   as wide as the card, because answering is the whole point of the form and a
+   thumb should not have to aim for it; the radios stay real radios under the
+   drawing, so a keyboard, a screen reader and the tests all see a radio group. */
+
+.party-rsvp-form { display: flex; flex-direction: column; gap: 0.85rem; }
+
+.party-rsvp-form fieldset {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.65rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
-.party-rsvp legend { padding: 0; margin-bottom: 0.4rem; font-weight: 600; font-size: 1.05rem; }
+/* Floated, a legend is an ordinary block: no frame to cut into. */
+.party-rsvp-form legend {
+  float: left;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 
-.party-rsvp-choice { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+/* Two classes, so they outrank the plain `fieldset` reset above. */
+.party-rsvp-form .party-rsvp-person,
+.party-rsvp-form .party-rsvp-extras {
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 3.5%);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
 
-.party-rsvp-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  min-height: 44px;
-  padding: 0.45rem 0.95rem;
+.party-rsvp-form .party-rsvp-person[data-status='attending'] {
+  border-color: rgb(61 130 255 / 55%);
+  background: rgb(21 101 255 / 9%);
+}
+
+/* The questions are one section, introduced by a small heading rather than
+   drawn as one more card around cards. */
+.party-rsvp-form .party-rsvp-questions { gap: 1rem; padding-block-start: 0.35rem; }
+.party-rsvp-questions > legend {
+  margin-bottom: 0.1rem;
+  color: var(--party-hub-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.party-rsvp-question { display: grid; gap: 0.55rem; }
+.party-rsvp-question-prompt { margin: 0; font-weight: 600; }
+
+.party-rsvp-required {
+  display: inline-block;
+  margin-inline-start: 0.2rem;
+  padding: 0 0.5rem;
   border: 1px solid var(--party-hub-border);
   border-radius: 999px;
+  color: var(--party-hub-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.5;
+  vertical-align: 0.1em;
+}
+
+/* ---- Choices -------------------------------------------------------------- */
+
+.party-rsvp-segment { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.party-rsvp-choice { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.party-rsvp-choice > .party-rsvp-option { flex: 1 1 7rem; }
+
+.party-rsvp-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 4%);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.party-rsvp-option:hover { border-color: rgb(245 247 251 / 38%); }
+
+/* The real radio, over the whole option and invisible: the tap lands on it,
+   and so do the keyboard and the accessibility tree. */
+.party-rsvp-radio {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
   cursor: pointer;
 }
+.party-rsvp-radio:disabled { cursor: default; }
 
-.party-rsvp-option[data-selected='true'] {
-  border-color: currentColor;
-  background: rgba(255, 255, 255, 0.1);
+.party-rsvp-option:has(.party-rsvp-radio:focus-visible) {
+  outline: 3px solid var(--party-hub-focus);
+  outline-offset: 2px;
 }
 
-.party-rsvp-option:focus-within { outline: 3px solid var(--party-hub-focus); outline-offset: 2px; }
+.party-rsvp-option-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.2rem;
+  height: 1.2rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  line-height: 1;
+  opacity: 0.5;
+}
+/* The glyph is decoration: generated here, with an empty alternative, so it
+   is never part of the option's accessible name. */
+.party-rsvp-option-mark::before { content: '✓'; content: '✓' / ''; }
+.party-rsvp-option[data-value='declined'] .party-rsvp-option-mark::before { content: '✕'; content: '✕' / ''; }
 
-.party-rsvp-field { display: grid; gap: 0.3rem; }
-.party-rsvp-field > span { font-size: 0.9rem; color: var(--party-hub-muted); }
+/* "Non ci sarò" on one line down to the narrowest phone: the answer is
+   read at a glance, and a label broken in two is not. Below that width the
+   mark gives up its room first — the words are the answer, the mark only
+   decorates it. */
+.party-rsvp-segment .party-rsvp-option { white-space: nowrap; }
+@media (max-width: 22rem) {
+  .party-rsvp-segment .party-rsvp-option { font-size: 0.95rem; }
+  .party-rsvp-segment .party-rsvp-option-mark { display: none; }
+}
+
+/* A question's choices show a tick only on the one chosen. */
+.party-rsvp-question .party-rsvp-option:not([data-selected='true']) .party-rsvp-option-mark { color: transparent; }
+.party-rsvp-question .party-rsvp-option:not([data-selected='true']) .party-rsvp-option-mark { border-color: var(--party-hub-muted); }
+
+/* Chosen: coming, and any answer to a question, in the party's own blue. */
+.party-rsvp-option[data-selected='true'] {
+  border-color: var(--brand-electric-blue, #1565ff);
+  background: var(--brand-electric-blue, #1565ff);
+  color: #fff;
+}
+.party-rsvp-option[data-selected='true'] .party-rsvp-option-mark {
+  border-color: #fff;
+  background: #fff;
+  color: var(--brand-electric-blue, #1565ff);
+  opacity: 1;
+}
+
+/* Not coming is an answer too, and is shown as chosen — but without the
+   celebration: plain, light, unmistakably selected. */
+.party-rsvp-option[data-value='declined'][data-selected='true'] {
+  border-color: rgb(245 247 251 / 60%);
+  background: rgb(245 247 251 / 16%);
+  color: var(--party-hub-text, #fff);
+}
+.party-rsvp-option[data-value='declined'][data-selected='true'] .party-rsvp-option-mark {
+  border-color: currentColor;
+  background: transparent;
+  color: inherit;
+}
+
+/* ---- Fields --------------------------------------------------------------- */
+
+.party-rsvp-field { display: grid; gap: 0.35rem; }
+.party-rsvp-field > span { font-size: 0.85rem; color: var(--party-hub-muted); }
 
 .party-rsvp-field input {
-  font: inherit;
-  color: inherit;
-  min-height: 44px;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.6rem;
-  border: 1px solid var(--party-hub-border);
-  background: rgba(255, 255, 255, 0.06);
   box-sizing: border-box;
   width: 100%;
+  min-height: 46px;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.75rem;
+  background: rgb(4 8 16 / 35%);
+  color: inherit;
+  font: inherit;
 }
 
-.party-rsvp-field input:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 1px; }
+.party-rsvp-field input:focus-visible {
+  border-color: var(--party-hub-focus);
+  outline: 3px solid rgb(0 212 255 / 28%);
+  outline-offset: 0;
+}
+
+/* ---- Who comes along ------------------------------------------------------ */
 
 .party-rsvp-extra {
   display: grid;
-  gap: 0.45rem;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--party-hub-border);
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.8rem;
+  background: rgb(4 8 16 / 25%);
 }
+.party-rsvp-extra-remove { justify-self: end; }
 
-.party-rsvp-help,
-.party-rsvp-question-prompt { margin: 0; }
-.party-rsvp-help { color: var(--party-hub-muted); font-size: 0.9rem; }
-.party-rsvp-required { color: var(--party-hub-muted); font-size: 0.85rem; }
+.party-rsvp-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border: 1.5px dashed rgb(245 247 251 / 32%);
+  border-radius: 0.85rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.party-rsvp-add::before { content: '+'; font-size: 1.2rem; line-height: 1; }
+.party-rsvp-add:hover { border-color: rgb(245 247 251 / 60%); }
+.party-rsvp-add:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 2px; }
+.party-rsvp-add:disabled { opacity: 0.55; cursor: default; }
+
+.party-rsvp-help { margin: 0; color: var(--party-hub-muted); font-size: 0.9rem; }
 
 .party-rsvp-link {
   align-self: flex-start;
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
+  min-height: 44px;
   padding: 0.35rem 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   text-decoration: underline;
   cursor: pointer;
-  min-height: 44px;
 }
 
-.party-rsvp-problems { margin: 0; padding-left: 1.1rem; color: var(--party-hub-muted); }
+/* ---- Sending -------------------------------------------------------------- */
+
+.party-rsvp-problems {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: rgb(255 214 128);
+  font-size: 0.875rem;
+}
+.party-rsvp-problems li::before { content: '! '; font-weight: 700; }
 
 .party-rsvp-submit {
-  font: inherit;
-  font-weight: 600;
   min-height: 48px;
   padding: 0.8rem 1.5rem;
-  border-radius: 999px;
   border: 1px solid currentColor;
-  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 14%);
   color: inherit;
+  font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -110,9 +294,16 @@
 .party-rsvp-submit:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 3px; }
 
 .party-rsvp-notice { margin: 0; }
+.party-rsvp-form .party-rsvp-notice,
+.party-rsvp--summary .party-rsvp-notice {
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  font-size: 0.9rem;
+}
 .party-rsvp-notice--error { font-weight: 600; }
-
-.party-rsvp-summary { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.35rem; }
+.party-rsvp-form .party-rsvp-notice--error,
+.party-rsvp--summary .party-rsvp-notice--error { background: rgb(255 92 92 / 14%); }
+.party-rsvp--summary .party-rsvp-notice--ok { background: rgb(21 101 255 / 16%); }
 
 .party-rsvp-chip {
   margin-left: 0.4rem;
@@ -120,11 +311,8 @@
   border: 1px solid var(--party-hub-border);
   border-radius: 999px;
   font-size: 0.8rem;
+  font-weight: 500;
 }
-
-.party-rsvp-answers { margin: 0; display: grid; gap: 0.5rem; }
-.party-rsvp-answers dt { color: var(--party-hub-muted); font-size: 0.9rem; }
-.party-rsvp-answers dd { margin: 0; }
 
 /* "Sono qui": one row per person of the group, a big target for a thumb at a
    door, and the way into the party's own page underneath. */
@@ -167,26 +355,104 @@
    The reply, once there is one
    ─────────────────────────────────────────────────────────────────────────── */
 
-/* At the END of the invitation, after the host's words. It is a record, not a
-   form: quieter than the sections above it, and it carries the one button that
-   opens the sheet again. */
-.party-rsvp--summary { gap: 0.75rem; }
+/* At the END of the invitation, after the host's words. A receipt, not a
+   form: a heading with the one way back beside it, a line per person with the
+   answer as a small tag, and the host's questions as label and value. Short
+   enough to be glanced at, quieter than the invitation above it. */
+.party-rsvp--summary { gap: 0.85rem; padding: 1rem 1.1rem; }
+
+.party-rsvp-receipt-head { display: flex; align-items: center; gap: 0.75rem; }
+.party-rsvp-receipt-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--brand-electric-blue, #1565ff);
+  color: #fff;
+  font-weight: 700;
+}
+.party-rsvp-receipt-titles { flex: 1 1 auto; min-width: 0; }
+.party-rsvp--summary .party-rsvp-title { font-size: 1.1rem; line-height: 1.25; }
+.party-rsvp--summary .party-rsvp-for { font-size: 0.875rem; overflow-wrap: anywhere; }
 
 .party-rsvp-change {
-  align-self: flex-start;
-  min-height: 2.75rem;
-  padding: 0 1.1rem;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 1rem;
   border: 1px solid var(--party-hub-border);
   border-radius: 999px;
   background: transparent;
   color: inherit;
   font: inherit;
+  font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
 }
-
 .party-rsvp-change:hover { border-color: currentcolor; }
 .party-rsvp-change:focus-visible { outline: 3px solid var(--party-hub-focus); outline-offset: 2px; }
+
+.party-rsvp-summary {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--party-hub-border);
+}
+.party-rsvp-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--party-hub-border);
+}
+.party-rsvp-summary-row:last-child { border-bottom: 0; }
+.party-rsvp-summary-who { display: grid; gap: 0.1rem; min-width: 0; }
+.party-rsvp-summary-name { font-weight: 600; overflow-wrap: anywhere; }
+.party-rsvp-summary-note { color: var(--party-hub-muted); font-size: 0.82rem; overflow-wrap: anywhere; }
+
+.party-rsvp-tag {
+  flex: 0 0 auto;
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  color: var(--party-hub-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+/* The statuses are written to follow a name in a sentence; as a tag they
+   start with a capital. */
+.party-rsvp-tag::first-letter { text-transform: uppercase; }
+.party-rsvp-tag[data-status='attending'] {
+  border-color: rgb(61 130 255 / 60%);
+  background: rgb(21 101 255 / 22%);
+  color: #d6e4ff;
+}
+.party-rsvp-tag[data-status='pending'] { border-style: dashed; }
+
+.party-rsvp-answers {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 4%);
+}
+.party-rsvp-answers > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.15rem 0.75rem;
+  font-size: 0.9rem;
+}
+.party-rsvp-answers dt { color: var(--party-hub-muted); }
+.party-rsvp-answers dd { margin: 0; font-weight: 600; text-align: end; overflow-wrap: anywhere; }
+.party-rsvp-answers dd[data-empty] { color: var(--party-hub-muted); font-weight: 400; }
+
+.party-rsvp--summary .party-rsvp-closed { color: var(--party-hub-muted); font-size: 0.9rem; }
 
 /* ───────────────────────────────────────────────────────────────────────────
    The invitation's one call to action
@@ -298,8 +564,31 @@
    uses the panel's. */
 .party-rsvp-sheet .party-rsvp-form { padding-block-end: 0.25rem; }
 
+@media (max-width: 40rem) {
+  .party-rsvp-sheet .overlay-body { padding: 1rem; }
+  .party-rsvp-form .party-rsvp-person,
+  .party-rsvp-form .party-rsvp-extras { padding: 0.8rem 0.8rem 0.85rem; }
+}
+
 .party-rsvp-foot { display: flex; width: 100%; }
-.party-rsvp-sheet .party-rsvp-submit { flex: 1 1 auto; }
+
+/* The same solid button that opened the sheet: sending is the one thing it
+   is for, and it should look like the same promise kept. */
+.party-rsvp-sheet .party-rsvp-submit {
+  flex: 1 1 auto;
+  min-height: 3.25rem;
+  border: 0;
+  background: var(--brand-electric-blue, #1565ff);
+  color: #fff;
+  font-size: 1.0625rem;
+  box-shadow: 0 10px 30px rgb(2 6 16 / 45%);
+}
+.party-rsvp-sheet .party-rsvp-submit:disabled {
+  background: rgb(245 247 251 / 12%);
+  color: rgb(245 247 251 / 60%);
+  box-shadow: none;
+  opacity: 1;
+}
 
 @media (min-width: 40rem) {
   .overlay-backdrop.party-rsvp-sheet {
@@ -324,9 +613,3 @@
    be below the fold — a grey button with no explanation anywhere near it. */
 .party-rsvp-foot { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; }
 .party-rsvp-foot .party-rsvp-problems { margin: 0; }
-
-/* Radios and checkboxes on a fixed dark surface: the browser's default accent
-   is picked from the VISITOR's theme and lands somewhere unrelated to this
-   palette. */
-.party-rsvp input[type='radio'],
-.party-rsvp input[type='checkbox'] { accent-color: var(--brand-electric-blue, #1565ff); }

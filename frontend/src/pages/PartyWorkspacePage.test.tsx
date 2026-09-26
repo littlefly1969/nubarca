@@ -488,7 +488,7 @@ describe('the live console', () => {
 describe('the counts follow what the host just did', () => {
     /** The number one named metric is showing, so "0" elsewhere cannot answer. */
   const arrived = (root: HTMLElement) =>
-    root.querySelector('[data-metric="arrived"] dd')?.textContent;
+    root.querySelector('[data-metric="arrived"] .pw-stat-value')?.textContent;
 
   /** A directory page with one group of two, and a door that can be worked. */
   const directory = (over: { arrived?: number; others?: number } = {}) => ({
@@ -578,7 +578,7 @@ describe('the counts follow what the host just did', () => {
     const metrics = await screen.findByTestId('party-live-metrics');
     // The walk-in counts as an arrival and as an "altro arrivo": both move.
     await waitFor(() => expect(arrived(metrics)).toBe('1'));
-    expect(metrics.querySelector('[data-metric="others"] dd')?.textContent).toBe('1');
+    expect(metrics.querySelector('[data-metric="others"] .pw-stat-value')?.textContent).toBe('1');
     expect(mock.calls.some((c) => c.method === 'POST' && c.url.includes('other-guests'))).toBe(true);
   });
 });
