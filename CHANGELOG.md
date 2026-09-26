@@ -6,6 +6,25 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Any browser can be a NubArca TV
+
+- **A mini-PC under the television is a NubArca TV.** Open `/tv` in Chrome,
+  Chromium or Edge, pair it from your phone as you would a Fire TV, and it
+  appears in *TV Devices* like any other television: point it at a party or
+  back at the general experience, and it follows by itself — no second
+  pairing, no refresh, nobody at the keyboard.
+- **The whole party, not a preview.** Photographs on the party's own timing,
+  real videos, guest uploads as they arrive, the greetings band and the
+  promoted greetings, the challenge that holds the wall, a guest's "show these
+  photos on TV", and the game taking the screen and handing it back.
+- **It stays paired.** A reload, a browser restart, a network that drops, a
+  server that restarts, a machine that slept: the screen comes back to the
+  party it was showing. Only removing it from *TV Devices* unpairs it.
+- **Built for a screen nobody is standing next to.** The screen is kept awake
+  where the browser allows it, the cursor hides itself, fullscreen is one click
+  (or a kiosk), and a video the browser will not play with sound plays muted
+  rather than freezing.
+
 ### Somebody can help you run the party without a NubArca account
 
 - **"Chi ti aiuta", in Impostazioni.** Add a person by name and email, say what
