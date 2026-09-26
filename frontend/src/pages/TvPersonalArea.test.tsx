@@ -13,6 +13,7 @@ import {
   jsonResponse,
   type InstalledFetchMock,
 } from '../test-utils';
+import { installTvMock } from '../tv/testing/tvMock';
 import { I18nProvider } from '../i18n';
 
 vi.mock('qrcode', () => ({
@@ -58,7 +59,7 @@ const WRONG_CODE = 'LLLLLLLLL';
 
 describe('/tv Personal Area', () => {
   it('paired startup always opens mode selection with Party focused', async () => {
-    installFetchMock({ 'GET /api/tv/session': activeSession });
+    installTvMock({ 'GET /api/tv/session': activeSession });
     renderTv();
 
     expect(await screen.findByText('Come vuoi usare NubArca?')).toBeInTheDocument();
@@ -70,7 +71,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('renders a focusable third "Laboratorio bellezza" mode card', async () => {
-    installFetchMock({ 'GET /api/tv/session': activeSession });
+    installTvMock({ 'GET /api/tv/session': activeSession });
     renderTv();
 
     const card = await screen.findByTestId('tv-mode-beauty-lab');
@@ -79,7 +80,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('Beauty Lab uses the existing PIN flow and a successful unlock opens the lab grid', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
@@ -99,7 +100,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('BACK from the Beauty Lab root locks and returns to mode selection', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => jsonResponse({ unlockToken: 'grant-1', expiresAt: '2026-08-05T12:00:00Z' }),
@@ -119,7 +120,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('Personal area opens PIN entry; a wrong PIN shows a generic error, clears input, and stays locked', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(403),
@@ -141,7 +142,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('a throttled unlock (429) shows the cooldown message', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(429),
@@ -158,16 +159,23 @@ describe('/tv Personal Area', () => {
     // Legacy/corrupted state — unreachable through the atomic pairing flow.
     // Instead of a mode selector that silently allows Party or a PIN pad that
     // can never succeed, /tv shows the recovery message and offers re-pairing.
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: false, unlocked: false }),
+      'POST /api/tv/pairing/start': () => jsonResponse({
+        publicCode: 'NEWCODE1',
+        pairingSecret: 'a'.repeat(43),
+        approvalUrl: `https://nubarca.test/tv/pair?code=NEWCODE1#secret=${'a'.repeat(43)}`,
+        expiresAt: '2026-07-05T12:10:00Z',
+      }),
     });
     renderTv();
 
     expect(await screen.findByTestId('tv-incomplete')).toHaveTextContent(
       'Associazione incompleta. Collega di nuovo questa TV.',
     );
-    expect(screen.getByRole('button', { name: 'Abbina di nuovo questa TV' })).toBeInTheDocument();
+    // Re-pairing is offered at once, with a fresh code.
+    expect(await screen.findByTestId('tv-pairing-code')).toHaveTextContent('NEWCODE1');
     expect(screen.queryByTestId('tv-mode-party')).not.toBeInTheDocument();
     expect(screen.queryByTestId('tv-code-entry')).not.toBeInTheDocument();
   });
@@ -204,7 +212,7 @@ describe('/tv Personal Area', () => {
 
   it('a valid PIN opens the Personal Area home; the gallery shell proves the grant is enforced', async () => {
     const state = { locks: 0 };
-    const fetchMock = installFetchMock(unlockableHandlers(state));
+    const fetchMock = installTvMock(unlockableHandlers(state));
     await unlockToHome(fetchMock);
 
     expect(screen.getByText('Stefano')).toBeInTheDocument();
@@ -242,7 +250,7 @@ describe('/tv Personal Area', () => {
 
   it('BACK from the Personal Area home locks immediately and returning requires the PIN again', async () => {
     const state = { locks: 0 };
-    const fetchMock = installFetchMock(unlockableHandlers(state));
+    const fetchMock = installTvMock(unlockableHandlers(state));
     await unlockToHome(fetchMock);
 
     fireEvent.keyDown(screen.getByTestId('tv-personal-home'), { key: 'Backspace' });
@@ -260,7 +268,7 @@ describe('/tv Personal Area', () => {
   it('locks locally even when the lock API call fails', async () => {
     const handlers = unlockableHandlers({ locks: 0 });
     handlers['POST /api/tv/personal/lock'] = () => errorResponse(500);
-    const fetchMock = installFetchMock(handlers);
+    const fetchMock = installTvMock(handlers);
     await unlockToHome(fetchMock);
 
     fireEvent.keyDown(screen.getByTestId('tv-personal-home'), { key: 'Backspace' });
@@ -269,7 +277,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('pairing revocation during PIN entry returns to the revoked screen', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/personal/status': () => jsonResponse({ pinConfigured: true, unlocked: false, scheme: 'dpad-v1' }),
       'POST /api/tv/personal/unlock': () => errorResponse(401),
@@ -301,7 +309,7 @@ describe('/tv Personal Area', () => {
       approvalUrl: `https://nubarca.test/tv/pair?code=NEWCODE1#secret=${'a'.repeat(43)}`,
       expiresAt: '2026-07-05T12:10:00Z',
     });
-    const fetchMock = installFetchMock(handlers);
+    const fetchMock = installTvMock(handlers);
     await unlockToHome(fetchMock);
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Galleria' }));
@@ -320,7 +328,7 @@ describe('/tv Personal Area', () => {
       ? jsonResponse({ error: 'pin_changed' }, 403)
       : jsonResponse({ items: [], nextCursor: null, hasMore: false }));
     handlers['GET /api/tv/albums'] = () => jsonResponse([]);
-    const fetchMock = installFetchMock(handlers);
+    const fetchMock = installTvMock(handlers);
     await unlockToHome(fetchMock);
 
     // The owner changes the PIN; the next personal request (entering the
@@ -348,7 +356,7 @@ describe('/tv Personal Area', () => {
   });
 
   it('BACK from the Party root returns to mode selection without a PIN', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([]),
     });
@@ -398,7 +406,7 @@ describe('atomic pairing approval', () => {
 
   it('owner without a code sees mandatory create+confirm fields in ONE atomic approval', async () => {
     let approveBody: string | null = null;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null, scheme: null }),
       'POST /api/tv/pairing/ABCD2345/approve': ({ body }) => {
         approveBody = body;
@@ -446,7 +454,7 @@ describe('atomic pairing approval', () => {
   });
 
   it('a server-side rejection keeps the form (no false success) and clears the code fields', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-personal/pin': () => jsonResponse({ configured: false, updatedAt: null, scheme: null }),
       'POST /api/tv/pairing/ABCD2345/approve': () =>
         errorResponse(400, { error: 'invalid_code' }),
@@ -470,7 +478,7 @@ describe('atomic pairing approval', () => {
 
   it('owner with an existing PIN approves with one tap and sees no PIN fields', async () => {
     let approveBody: string | null = null;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z',
       }),
@@ -497,7 +505,7 @@ describe('atomic pairing approval', () => {
   it('asks how the TV will be used once the television has claimed the pairing', async () => {
     let claimed = false;
     let assignBody: string | null = null;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z',
       }),
@@ -540,7 +548,7 @@ describe('atomic pairing approval', () => {
 
   it('leaves the TV general when the use question is never answered', async () => {
     let assigned = false;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z',
       }),
@@ -595,7 +603,7 @@ describe('owner Personal Area TV code panel', () => {
 
   it('shows the unconfigured status and configures a missing code', async () => {
     let setBody: string | null = null;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-devices': () => jsonResponse([activeDevice]),
       'GET /api/tv-personal/pin': () =>
         jsonResponse({ configured: false, updatedAt: null, scheme: null }),
@@ -629,7 +637,7 @@ describe('owner Personal Area TV code panel', () => {
 
   it('validates length and confirmation before calling the API', async () => {
     let called = false;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-devices': () => jsonResponse([]),
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'dpad-v1',
@@ -666,7 +674,7 @@ describe('owner Personal Area TV code panel', () => {
     // The pairing is fine and its televisions still unlock — only the
     // credential needs upgrading, and the current TV app has no numeric entry
     // surface to offer. That is a call to action, not a broken pairing.
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-devices': () => jsonResponse([activeDevice]),
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'pin-v1',
@@ -680,7 +688,7 @@ describe('owner Personal Area TV code panel', () => {
   });
 
   it('an API failure keeps no code in the fields', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv-devices': () => jsonResponse([]),
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z', scheme: 'dpad-v1',

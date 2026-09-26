@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { TvPage } from './TvPage';
 import { TvPairApprovalPage } from './TvPairApprovalPage';
-import { AuthedWrapper, emptyResponse, errorResponse, installFetchMock, jsonResponse } from '../test-utils';
+import { AuthedWrapper, emptyResponse, errorResponse, jsonResponse } from '../test-utils';
+import { installTvMock } from '../tv/testing/tvMock';
 import { I18nProvider } from '../i18n';
 
 vi.mock('qrcode', () => ({
@@ -34,7 +35,7 @@ afterEach(() => {
 
 describe('TV pairing pages', () => {
   it('starts pairing and renders the short code with a locally generated QR', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': () => errorResponse(401),
       'POST /api/tv/pairing/start': () => jsonResponse({
         publicCode: 'ABCD2345',
@@ -58,7 +59,7 @@ describe('TV pairing pages', () => {
   });
 
   it('shows the empty state when no albums are enabled for the TV', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([]),
     });
@@ -73,7 +74,7 @@ describe('TV pairing pages', () => {
   });
 
   it('lists allowlisted albums and opens one to browse its media', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([
         { id: 'al-1', name: 'Trip 2025', itemCount: 2, coverThumbnailUrl: '/api/tv/media/f1/thumbnail' },
@@ -110,7 +111,7 @@ describe('TV pairing pages', () => {
       partyUrl: party ? '/party/tok-xyz' : null,
       partyUploadUrl: party && upload ? '/party/up-xyz/upload' : null,
     });
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([albumJson()]),
       'GET /api/tv/albums/al-1/items': () => jsonResponse({
@@ -158,7 +159,7 @@ describe('TV pairing pages', () => {
   });
 
   it('returns to the album list when an opened album is no longer enabled', async () => {
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([
         { id: 'al-1', name: 'Gone soon', itemCount: 1, coverThumbnailUrl: null },
@@ -178,7 +179,7 @@ describe('TV pairing pages', () => {
 
   it('starts a slideshow using medium previews with play/pause and manual next', async () => {
     const user = userEvent.setup();
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([
         { id: 'al-1', name: 'Trip 2025', itemCount: 2, coverThumbnailUrl: null },
@@ -223,7 +224,7 @@ describe('TV pairing pages', () => {
   it('keeps the Guest Hub QR visible during slideshow and localizes its label', async () => {
     const user = userEvent.setup();
     let upload = true;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([
         {
@@ -270,7 +271,7 @@ describe('TV pairing pages', () => {
 
   it('shows a revoked state when the TV session is revoked by the owner', async () => {
     // Paired session on load, but the albums call comes back 401 (owner revoked).
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => errorResponse(401),
       'POST /api/tv/pairing/start': () => jsonResponse({
@@ -284,11 +285,13 @@ describe('TV pairing pages', () => {
     render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
     await userEvent.setup().click(await screen.findByTestId('tv-mode-party'));
     expect(await screen.findByText('Questa sessione TV è stata revocata.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Abbina di nuovo questa TV' })).toBeInTheDocument();
+    // Straight back to a fresh code: a screen nobody is standing next to can be
+    // paired again from a phone.
+    expect(await screen.findByTestId('tv-pairing-code')).toHaveTextContent('NEWCODE1');
   });
 
   it('approves the QR request from an authenticated phone route', async () => {
-    const mock = installFetchMock({
+    const mock = installTvMock({
       // Owner already has a Personal Area PIN -> plain one-tap approval.
       'GET /api/tv-personal/pin': () => jsonResponse({
         configured: true, updatedAt: '2026-07-01T10:00:00Z',
@@ -338,7 +341,7 @@ describe('TV live party refresh', () => {
 
   it('live-refreshes an open party album grid to show a newly uploaded photo', async () => {
     let list = [img('f1', 'one.jpg')];
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([{
         id: 'al-1', name: 'Party 2025', itemCount: list.length, coverThumbnailUrl: null,
@@ -376,7 +379,7 @@ describe('TV live party refresh', () => {
 
   it('drops a hidden item from an open party album grid on the next poll', async () => {
     let list = [img('f1', 'one.jpg'), img('f2', 'two.jpg')];
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([{
         id: 'al-1', name: 'Party 2025', itemCount: list.length, coverThumbnailUrl: null,
@@ -410,7 +413,7 @@ describe('TV live party refresh', () => {
 
   it('keeps the current slideshow item while merging a new upload', async () => {
     let list = [img('f1', 'one.jpg'), img('f2', 'two.jpg')];
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse([{
         id: 'al-1', name: 'Party 2025', itemCount: list.length, coverThumbnailUrl: null,
@@ -453,7 +456,7 @@ describe('TV live party refresh', () => {
 
   it('drops back to the album list when the party album is revoked during refresh', async () => {
     let revoked = false;
-    installFetchMock({
+    installTvMock({
       'GET /api/tv/session': activeSession,
       'GET /api/tv/albums': () => jsonResponse(revoked ? [] : [{
         id: 'al-1', name: 'Party 2025', itemCount: 1, coverThumbnailUrl: null,
@@ -520,7 +523,7 @@ describe('TV live party refresh', () => {
   it('filters the grid when a face filter activates; BACK deletes the search and restores the full album', async () => {
     const state = { active: false };
     const deletes: string[] = [];
-    installFetchMock(faceFilterHandlers(state, deletes));
+    installTvMock(faceFilterHandlers(state, deletes));
     vi.useFakeTimers();
     try {
       render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
@@ -563,7 +566,7 @@ describe('TV live party refresh', () => {
   it('slideshow keeps the current photo when it matches the filter and restores the full album on the same photo', async () => {
     const state = { active: false };
     const deletes: string[] = [];
-    installFetchMock(faceFilterHandlers(state, deletes));
+    installTvMock(faceFilterHandlers(state, deletes));
     vi.useFakeTimers();
     try {
       render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
@@ -590,7 +593,11 @@ describe('TV live party refresh', () => {
       expect(screen.getByText(/1 \/ 1/)).toBeInTheDocument();
 
       // BACK exits face-filter mode: search deleted, full slideshow restored on
-      // the SAME photo (2/2); the viewer stays open.
+      // the SAME photo (2/2); the viewer stays open. As on the app, the first
+      // BACK only takes down the overlay that is up (it opened with the viewer).
+      fireEvent.keyDown(screen.getByTestId('tv-face-viewer'), { key: 'Escape' });
+      await settle();
+      expect(deletes).toEqual([]);
       fireEvent.keyDown(screen.getByTestId('tv-face-viewer'), { key: 'Escape' });
       await settle();
       expect(deletes.some((u) => u.includes('searchId=s1'))).toBe(true);
@@ -603,7 +610,7 @@ describe('TV live party refresh', () => {
 
   it('slideshow moves to the first matching photo when the current one does not match', async () => {
     const state = { active: false };
-    installFetchMock(faceFilterHandlers(state, []));
+    installTvMock(faceFilterHandlers(state, []));
     vi.useFakeTimers();
     try {
       render(<I18nProvider><MemoryRouter><TvPage /></MemoryRouter></I18nProvider>);
