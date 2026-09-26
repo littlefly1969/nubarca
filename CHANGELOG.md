@@ -17,9 +17,11 @@ originating repository and is deliberately not reproduced here.
   real videos, guest uploads as they arrive, the greetings band and the
   promoted greetings, the challenge that holds the wall, a guest's "show these
   photos on TV", and the game taking the screen and handing it back.
-- **It stays paired.** A reload, a browser restart, a network that drops, a
-  server that restarts, a machine that slept: the screen comes back to the
-  party it was showing. Only removing it from *TV Devices* unpairs it.
+- **It stays paired until you remove it or its TV session expires.** A reload,
+  a browser restart, a network that drops, a server that restarts, a machine
+  that slept: none of them unpairs it, and the screen comes back to the party
+  it was showing. What ends the pairing is removing it from *TV Devices*, or
+  its TV session reaching its expiry — exactly as for a Fire TV.
 - **Built for a screen nobody is standing next to.** The screen is kept awake
   where the browser allows it, the cursor hides itself, fullscreen is one click
   (or a kiosk), and a video the browser will not play with sound plays muted
