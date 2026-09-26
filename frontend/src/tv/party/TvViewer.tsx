@@ -15,7 +15,7 @@ import {
 import { useI18n } from '../../i18n';
 import { useDisplayPlatform } from '../platform/displayPlatform';
 import { useLatest, usePageVisible } from '../platform/hooks';
-import { usePoll } from '../platform/usePoll';
+import { startDeadline, usePoll, type Deadline } from '../platform/usePoll';
 import { remapIndexById, sameItemIds } from '../semantics/liveItems';
 import {
   photoSlideMs, resolvePlayPause, shouldArmPreparingGrace, videoPlaybackProps,
@@ -54,6 +54,8 @@ import { useMenuOverlay } from './useMenuOverlay';
 const PARTY_ITEMS_POLL_MS = 15_000;
 const FACE_SEARCH_POLL_MS = 6_000;
 const PARTY_PLAYBACK_POLL_MS = 5_000;
+/** How long the wall waits for the server's answer at a boundary before carrying on. */
+export const BOUNDARY_TIMEOUT_MS = 8_000;
 
 interface FaceFilter {
   searchId: string;
@@ -173,24 +175,42 @@ export function TvViewer({
 
   // A party boundary is also the server's: it answers whether a challenge now
   // HOLDS the wall, in which case nothing advances.
+  //
+  // The question has a DEADLINE, because the wall is waiting on it: a request
+  // that never answers must not keep a photograph up for ever, so a timeout is
+  // the transient failure it already falls back from — the ordinary boundary.
+  // And ONE boundary is settled at a time: a second trigger for the same media
+  // while the first is in the air (a re-armed dwell, a cap and an end in the
+  // same moment) is the same boundary, not another advance.
+  const boundaryInFlight = useRef<Deadline | null>(null);
+  useEffect(() => () => { boundaryInFlight.current?.abort(); }, []);
   const handleMediaBoundary = useCallback(() => {
     if (!partyEnabled || !albumId) {
       ordinaryMediaBoundary();
       return;
     }
-    void advanceTvPartyBoundary(albumId)
+    if (boundaryInFlight.current !== null) return;
+    const deadline = startDeadline(BOUNDARY_TIMEOUT_MS);
+    boundaryInFlight.current = deadline;
+    const settle = (advance: boolean) => {
+      deadline.clear();
+      if (boundaryInFlight.current !== deadline) return;
+      boundaryInFlight.current = null;
+      if (advance && mountedRef.current) ordinaryMediaBoundary();
+    };
+    void advanceTvPartyBoundary(albumId, deadline.signal)
       .then((snapshot) => {
-        if (!mountedRef.current) return;
-        setPartyPlayback(snapshot);
-        if (snapshot.mode !== 'challenge_hold') ordinaryMediaBoundary();
+        if (mountedRef.current) setPartyPlayback(snapshot);
+        settle(snapshot.mode !== 'challenge_hold');
       })
       .catch((error: unknown) => {
-        if (!mountedRef.current) return;
         if (statusOf(error) === 401) {
-          onSessionInvalid?.();
+          settle(false);
+          if (mountedRef.current) onSessionInvalid?.();
           return;
         }
-        ordinaryMediaBoundary();
+        // No answer, a timeout, a 5xx: the wall carries on as it would have.
+        settle(true);
       });
   }, [partyEnabled, albumId, ordinaryMediaBoundary, onSessionInvalid]);
 

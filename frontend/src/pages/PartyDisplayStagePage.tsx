@@ -9,6 +9,7 @@ import {
 import { PartyTvStage } from '../party/PartyTvStage';
 import { stageScene } from '../party/stageScene';
 import { displayRetryDelayMs, isRetryableDisplayFailure } from '../party/displayRetry';
+import { usePoll } from '../tv/platform/usePoll';
 
 // The party show as a PAIRED TELEVISION sees it, at /party-display/stage.
 //
@@ -42,6 +43,8 @@ import { displayRetryDelayMs, isRetryableDisplayFailure } from '../party/display
 // None of them carries the grant, the snapshot or anything from the server.
 
 const POLL_MS = 2_500;
+/** A snapshot read that has not answered in this long is given up on and asked again. */
+const SNAPSHOT_TIMEOUT_MS = 8_000;
 // The renderer heartbeat the native shell watches. It measures THIS page being
 // alive, not the party server: a wedged JS context still answers no beats.
 const HEARTBEAT_MS = 2_000;
@@ -150,39 +153,39 @@ export function PartyDisplayStage({
 
   // The same polling shape every other live Party surface uses: every
   // successful read is the current truth, a failure keeps what is on screen,
-  // and a reconnect is just the next read.
-  useEffect(() => {
-    if (!grant) return;
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const read = async () => {
-      try {
-        const next = await getPartyDisplaySnapshot(grant, controller.signal);
-        if (cancelled) return;
-        if (!hasSnapshot.current) callbacks.current.onReady?.();
-        hasSnapshot.current = true;
-        setSnapshot(next);
-        setConnection('ready');
-        setStale(false);
-      } catch (error) {
-        if (cancelled || isAbort(error)) return;
-        const status = statusOf(error);
-        // 401 means the grant is finished; 404 that there is no game to read.
-        if (status === 401 || status === 404) {
-          if (status === 401) reportAuthFailure();
-          setConnection('unavailable');
-          return;
-        }
-        if (hasSnapshot.current) setStale(true);
-        else setConnection('error');
+  // and a reconnect is just the next read. SINGLE-FLIGHT with a timeout (the
+  // display's own poller): the next read is scheduled when the last one has
+  // finished, so a slow answer never overlaps the next one and can never land
+  // on top of a newer frame, and a read that never answers is given up on
+  // instead of holding the stage. The poll keeps going after a 401 or a 404,
+  // as it always has: a game that appears, or a grant that works again, is
+  // simply the next read.
+  usePoll({
+    enabled: grant !== null,
+    intervalMs: POLL_MS,
+    timeoutMs: SNAPSHOT_TIMEOUT_MS,
+    refreshKey,
+    read: (signal) => getPartyDisplaySnapshot(grant!, signal),
+    onValue: (next) => {
+      if (!hasSnapshot.current) callbacks.current.onReady?.();
+      hasSnapshot.current = true;
+      setSnapshot(next);
+      setConnection('ready');
+      setStale(false);
+    },
+    onError: (error) => {
+      const status = statusOf(error);
+      // 401 means the grant is finished; 404 that there is no game to read.
+      if (status === 401 || status === 404) {
+        if (status === 401) reportAuthFailure();
+        setConnection('unavailable');
+        return;
       }
-    };
-
-    void read();
-    const timer = setInterval(() => void read(), POLL_MS);
-    return () => { cancelled = true; controller.abort(); clearInterval(timer); };
-  }, [grant, reportAuthFailure, refreshKey]);
+      // No answer, a timeout, a 5xx: keep the last frame, and say it is stale.
+      if (hasSnapshot.current) setStale(true);
+      else setConnection('error');
+    },
+  });
 
   // Is a live scene of the party on screen? An error card is not a scene.
   const presentationActive = connection === 'ready' && snapshot !== null;

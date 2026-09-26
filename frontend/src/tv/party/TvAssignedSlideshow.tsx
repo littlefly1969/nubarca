@@ -3,6 +3,7 @@ import { ApiError, listTvAlbumItems, type TvAlbumItems } from '@nubarca/api-clie
 import { useI18n } from '../../i18n';
 import { backoffMs } from '../semantics/assignmentView';
 import { useLatest, usePageVisible } from '../platform/hooks';
+import { startDeadline, type Deadline } from '../platform/usePoll';
 import { tvLog } from '../diagnostics';
 import { TvViewer } from './TvViewer';
 import { TvPartySurface } from './TvPartyOverlays';
@@ -56,15 +57,20 @@ export function TvAssignedSlideshow({ albumId, albumName, onBack, onGone, onSess
   const callbacks = useLatest({ onGone, onSessionInvalid });
 
   // Until there is something to show: load, retry what failed for a reason that
-  // is not an answer, keep asking an empty party. A resume asks at once.
+  // is not an answer, keep asking an empty party. A resume asks at once. Every
+  // attempt has a deadline: a request that never answers is a transient
+  // failure like any other, not a screen that waits for ever. One attempt at a
+  // time — a resume cancels the one in the air before it asks again.
   useEffect(() => {
     if (!waiting) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
-    const controller = new AbortController();
+    let inFlight: Deadline | null = null;
     const fetchItems = () => {
-      listTvAlbumItems(albumId, controller.signal)
+      const deadline = startDeadline();
+      inFlight = deadline;
+      listTvAlbumItems(albumId, deadline.signal)
         .then((detail) => {
           if (cancelled) return;
           if (detail.items.length === 0) {
@@ -84,12 +90,16 @@ export function TvAssignedSlideshow({ albumId, albumName, onBack, onGone, onSess
             return;
           }
           timer = setTimeout(fetchItems, backoffMs(attempt++));
+        })
+        .finally(() => {
+          deadline.clear();
+          if (inFlight === deadline) inFlight = null;
         });
     };
     fetchItems();
     return () => {
       cancelled = true;
-      controller.abort();
+      inFlight?.abort();
       if (timer) clearTimeout(timer);
     };
   }, [waiting, albumId, refreshKey, callbacks]);
