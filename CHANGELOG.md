@@ -21,6 +21,9 @@ originating repository and is deliberately not reproduced here.
 - Print Agent `0.2.4`. Only the configured printer can report the cut, and a
   cut job that reaches any other printer fails instead of printing one uncut
   sheet.
+- Print Agent `0.2.5`: the Windows installer runs on the PowerShell Windows
+  ships (5.1). It asked for an encoding only PowerShell 7 knows, and stopped
+  before enrolling the station.
 
 ### The guest console's numbers are its filters, and a nicer RSVP
 
