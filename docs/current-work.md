@@ -13,7 +13,7 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.2.5`; Linux fake-agent systemd instances
+  packaged headless Print Agent `0.2.6`; Linux fake-agent systemd instances
   cover protocol acceptance while DNP printers still require Windows hardware
   acceptance
 - Party printing: guests compose a 10x15 photo or a four-photo strip (printed as

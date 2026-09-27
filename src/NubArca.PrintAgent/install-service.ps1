@@ -62,9 +62,12 @@ try {
     Pop-Location
 }
 
-$service = New-Service -Name $ServiceName -DisplayName 'NubArca Print Agent' `
+New-Service -Name $ServiceName -DisplayName 'NubArca Print Agent' `
     -Description 'Headless NubArca print delivery station.' `
-    -BinaryPathName ('"{0}"' -f $executable) -StartupType Automatic -DependsOn Spooler
-$service | Start-Service
+    -BinaryPathName ('"{0}"' -f $executable) -StartupType Automatic -DependsOn Spooler | Out-Null
+# By name, not by piping New-Service's result: on Windows PowerShell 5.1 that
+# ServiceController arrives disposed, and Start-Service fails after the service
+# was created and the station enrolled.
+Start-Service -Name $ServiceName
 Write-Host "NubArca Print Agent installed and started as $ServiceName."
 Write-Host "Runtime data: $dataDirectory"

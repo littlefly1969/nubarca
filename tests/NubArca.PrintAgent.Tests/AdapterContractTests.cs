@@ -80,6 +80,12 @@ public sealed class AdapterContractTests
         }
         var installer = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "install-service.ps1"));
         Assert.Contains("[System.Text.UTF8Encoding]::new($false)", installer, StringComparison.Ordinal);
+
+        // Piping New-Service into Start-Service hands it a disposed
+        // ServiceController on 5.1: the station was enrolled and the service
+        // created, and then it never started.
+        Assert.DoesNotContain("| Start-Service", installer, StringComparison.Ordinal);
+        Assert.Contains("Start-Service -Name $ServiceName", installer, StringComparison.Ordinal);
     }
 
     [Fact]
