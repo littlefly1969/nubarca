@@ -175,7 +175,10 @@ any other printer, or this one after its cutting queue was removed, fails as
 
 On both queues the agent prefers the queue's own **default** 4×6 paper entry
 over the first 4×6-sized entry it finds, so what an operator set on a queue is
-not undone by a different entry of the same size.
+not undone by a different entry of the same size. It turns the page relative to
+that entry's own definition, not to the picture alone: the DS-RX1 driver defines
+4×6 lying down (6 wide, 4 tall), so a portrait sheet — every strip pair — is
+sent turned, and the cut falls between the two strips.
 
 Physical acceptance, in addition to the matrix below: one strip job comes out as
 two separate 2×6 strips with the cut in the gutter, no tick visible on either
