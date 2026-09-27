@@ -68,6 +68,21 @@ public sealed class AdapterContractTests
     }
 
     [Fact]
+    public void Windows_Scripts_Run_On_The_PowerShell_Windows_Ships()
+    {
+        // Windows ships PowerShell 5.1. `-Encoding utf8NoBOM` exists only from
+        // PowerShell 7, and on 5.1 it stopped the installer before enrollment
+        // on the first real station.
+        foreach (var script in new[] { "install-service.ps1", "uninstall-service.ps1" })
+        {
+            var text = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, script));
+            Assert.DoesNotContain("-Encoding utf8NoBOM", text, StringComparison.OrdinalIgnoreCase);
+        }
+        var installer = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "install-service.ps1"));
+        Assert.Contains("[System.Text.UTF8Encoding]::new($false)", installer, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Fake_Adapter_Discovers_Ready_10x15_Color_Printer()
     {
         var output = Path.Combine(Path.GetTempPath(), $"nubarca-fake-{Guid.NewGuid():N}");

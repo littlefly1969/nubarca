@@ -49,7 +49,10 @@ $configuration = @{
     }
 }
 $configPath = Join-Path $installDirectory 'appsettings.Production.json'
-$configuration | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $configPath -Encoding utf8NoBOM
+# Windows PowerShell 5.1, which every Windows ships, has no `utf8NoBOM`
+# encoding name (PowerShell 7 does); .NET writes UTF-8 without a BOM on both.
+[System.IO.File]::WriteAllText($configPath, ($configuration | ConvertTo-Json -Depth 4),
+    [System.Text.UTF8Encoding]::new($false))
 
 Push-Location $installDirectory
 try {
