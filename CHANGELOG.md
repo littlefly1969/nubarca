@@ -38,7 +38,9 @@ originating repository and is deliberately not reproduced here.
   before enrolling the station.
 - Print Agent `0.2.6`: on that same PowerShell the installer now also starts
   the service it created, instead of failing on its last line with the station
-  already enrolled.
+  already enrolled. And a print fills the sheet on a printer whose driver
+  defines 4×6 lying down, as the DS-RX1 does: a portrait photo no longer comes
+  out shrunk onto a sideways page, and a strip is cut between its two strips.
 
 ### The guest console's numbers are its filters, and a nicer RSVP
 

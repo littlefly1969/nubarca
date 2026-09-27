@@ -82,6 +82,23 @@ public sealed class SpoolerQueueRoutingTests
         Assert.Contains("StripPrinterName = $configuredStripPrinter", installer, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void The_Page_Turns_Relative_To_The_Drivers_Own_Paper()
+    {
+        // Paper sizes in hundredths of an inch, artifacts in pixels.
+        const int portraitSheetW = 1200, portraitSheetH = 1800;   // photo or strip pair
+        const int landscapeSheetW = 1800, landscapeSheetH = 1200; // landscape photo, test page
+
+        // A driver that defines 4x6 standing up (4 wide, 6 tall): unchanged.
+        Assert.False(SheetOrientation.Landscape(portraitSheetW, portraitSheetH, 410, 610));
+        Assert.True(SheetOrientation.Landscape(landscapeSheetW, landscapeSheetH, 410, 610));
+
+        // The DS-RX1 defines it lying down (6 wide, 4 tall), the way the paper
+        // runs: a portrait sheet must turn the page, a landscape one must not.
+        Assert.True(SheetOrientation.Landscape(portraitSheetW, portraitSheetH, 615, 413));
+        Assert.False(SheetOrientation.Landscape(landscapeSheetW, landscapeSheetH, 615, 413));
+    }
+
     private static PrintAgentOptions Options(string? printer, string? strip) => new()
     {
         ServerOrigin = "https://example.invalid",

@@ -82,7 +82,8 @@ public sealed class WindowsSpoolerPrinterAdapter : IPrinterAdapter
         if (paper is null)
             return Task.FromResult(new PrintSubmissionResult(false, null, "format_unsupported"));
         document.DefaultPageSettings.PaperSize = paper;
-        document.DefaultPageSettings.Landscape = image.Width > image.Height;
+        document.DefaultPageSettings.Landscape = SheetOrientation.Landscape(
+            image.Width, image.Height, paper.Width, paper.Height);
         document.DefaultPageSettings.Margins = new Margins(0, 0, 0, 0);
         document.PrintPage += (_, args) =>
         {
