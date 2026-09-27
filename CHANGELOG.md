@@ -36,6 +36,9 @@ originating repository and is deliberately not reproduced here.
 - Print Agent `0.2.5`: the Windows installer runs on the PowerShell Windows
   ships (5.1). It asked for an encoding only PowerShell 7 knows, and stopped
   before enrolling the station.
+- Print Agent `0.2.6`: on that same PowerShell the installer now also starts
+  the service it created, instead of failing on its last line with the station
+  already enrolled.
 
 ### The guest console's numbers are its filters, and a nicer RSVP
 
