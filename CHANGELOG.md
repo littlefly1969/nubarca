@@ -6,6 +6,17 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### The party's name on the photo, and two different strips
+
+- **A new look for single photos: *On the photo*.** The photograph fills the
+  whole sheet, and the party's name and the NubArca symbol are printed on it —
+  in white or black, as the guest chooses — over the same shading the party
+  invitation lays over its cover, fading into navy under white text and into
+  white under black text. The framed looks stay exactly as they were.
+- **A strip sheet is now two different strips.** Guests choose eight photos —
+  four for each strip — instead of four printed twice, so the two keepsakes on
+  one sheet are not copies.
+
 ### Adjust a printer's colours from NubArca
 
 - **Prints too dark or too light? Fix it from the Print stations page.** Each

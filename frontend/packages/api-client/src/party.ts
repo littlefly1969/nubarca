@@ -755,7 +755,8 @@ export type PartyGuestContentKind = (typeof PARTY_GUEST_CONTENT_KINDS)[number];
 // --- Party print studio (anonymous, print-token scoped) ---
 
 export type PartyPrintProduct = 'photo' | 'strip4';
-export type PartyPrintTheme = 'pure' | 'midnight' | 'event';
+/** The overlay looks put the party's name on a single photograph, in white or black. */
+export type PartyPrintTheme = 'pure' | 'midnight' | 'event' | 'overlay-white' | 'overlay-black';
 /** Absent means the sheet follows the photograph, which is the default. */
 export type PartyPrintOrientation = 'portrait' | 'landscape';
 

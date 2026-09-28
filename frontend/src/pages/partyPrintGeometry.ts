@@ -66,11 +66,43 @@ export function photoSlotAspect(portrait: boolean): number {
   return (slot.width * sheetWidth) / (slot.height * sheetHeight);
 }
 
+// --- Single photograph, title on the photograph -----------------------------
+
+/** Inset of the symbol and the text from the edges, short-edge fraction. */
+export const OVERLAY_MARGIN_FRACTION = 0.06;
+/** Height of the NubArca symbol, top-left, short-edge fraction. */
+export const OVERLAY_SYMBOL_FRACTION = 0.12;
+/** Type size of the party's name, short-edge fraction. */
+export const OVERLAY_TITLE_FRACTION = 0.085;
+/** Type size of the host's line and of the number. */
+export const OVERLAY_LINE_FRACTION = 0.036;
+/**
+ * The invitation cover's scrim, top to bottom, as (position, opacity) pairs of
+ * the base colour — PartyGuestHub.css draws the same stops over the cover.
+ */
+export const OVERLAY_SCRIM_STOPS: readonly number[] = [0, 0.58, 0.16, 0.26, 0.42, 0.46, 0.74, 0.86, 1, 1];
+
+/** A title-on-the-photograph crop fills the whole sheet. */
+export function overlaySlotAspect(portrait: boolean): number {
+  return portrait ? PORTRAIT_WIDTH / PORTRAIT_HEIGHT : LANDSCAPE_WIDTH / LANDSCAPE_HEIGHT;
+}
+
+/** The scrim as a CSS gradient over `rgb` (the base colour as "r g b"). */
+export function overlayScrim(rgb: string): string {
+  const stops: string[] = [];
+  for (let i = 0; i < OVERLAY_SCRIM_STOPS.length; i += 2) {
+    const percent = (v: number) => `${Number((v * 100).toFixed(3))}%`;
+    stops.push(`rgb(${rgb} / ${percent(OVERLAY_SCRIM_STOPS[i + 1])}) ${percent(OVERLAY_SCRIM_STOPS[i])}`);
+  }
+  return `linear-gradient(180deg, ${stops.join(', ')})`;
+}
+
 // --- Four-photo strip -------------------------------------------------------
 
 /**
- * TWO IDENTICAL STRIPS side by side on one portrait sheet, so a single 10x15
- * yields two photo-booth keepsakes: one to keep, one to give away.
+ * TWO STRIPS side by side on one portrait sheet, so a single 10x15 yields two
+ * photo-booth keepsakes: one to keep, one to give away. Each strip has its own
+ * four photographs — eight in all.
  */
 export const STRIPS_PER_SHEET = 2;
 export const SLOTS_PER_STRIP = 4;

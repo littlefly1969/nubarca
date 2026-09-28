@@ -80,7 +80,11 @@ public static class PartyPrintProducts
     public static bool IsKnown(string value) => value is Photo or Strip4;
 
     /// <summary>How many source photographs a product composes.</summary>
-    public static int RequiredPhotos(string product) => product == Strip4 ? 4 : 1;
+    /// <summary>
+    /// Four per strip, two strips per sheet: eight different photographs, so the
+    /// two keepsakes a sheet yields are not copies of each other.
+    /// </summary>
+    public static int RequiredPhotos(string product) => product == Strip4 ? 8 : 1;
 }
 
 /// <summary>Bounds the host's own settings. Not a guess: an explicit contract.</summary>

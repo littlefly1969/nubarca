@@ -18,6 +18,7 @@ public sealed class PartyPrintComposerTests
     private static readonly (byte R, byte G, byte B)[] Fixtures =
     [
         (0xC9, 0x76, 0x2F), (0x2F, 0x5F, 0xC9), (0x8A, 0x4A, 0x7A), (0x3F, 0x7A, 0x5A),
+        (0xB8, 0x3A, 0x3A), (0x3A, 0xA8, 0xB8), (0xC8, 0xB0, 0x3A), (0x5A, 0x3A, 0xB8),
     ];
 
     /// <summary>A recognisable stand-in photograph: a gradient plus a disc, so a
@@ -158,33 +159,85 @@ public sealed class PartyPrintComposerTests
     }
 
     [Fact]
-    public async Task Strip_Is_A_Portrait_Sheet_Carrying_Two_Identical_Strips()
+    public async Task Strip_Is_A_Portrait_Sheet_Carrying_Two_Different_Strips()
     {
         var composer = new PartyPrintComposer();
         var bytes = await composer.RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4), default);
+            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 8), default);
 
         using var sheet = Image.Load<Rgba32>(bytes);
         // One 10x15 sheet, portrait — not a new paper size.
         Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
         Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
 
-        // The twins are identical: sample the centre of each slot on both strips
-        // and require the pairs to match. If the second strip drew a different
-        // photograph, or the same photographs in another order, this fails.
+        // Eight slots, eight DIFFERENT photographs: the first strip carries
+        // photographs 1–4 in order, the second 5–8. Two copies of one strip is
+        // exactly what a guest who chose eight did not ask for.
+        var samples = Enumerable.Range(0, PartyPrintGeometry.StripsPerSheet)
+            .SelectMany(strip => Enumerable.Range(0, PartyPrintGeometry.SlotsPerStrip)
+                .Select(slot => SampleSlot(sheet, strip, slot)))
+            .ToList();
+        Assert.Equal(8, samples.Distinct().Count());
         for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
-        {
-            var left = SampleSlot(sheet, 0, slot);
-            var right = SampleSlot(sheet, 1, slot);
-            Assert.Equal(left, right);
-        }
+            Assert.NotEqual(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
+    }
 
-        // And the four slots are four DIFFERENT photographs, in order.
-        var distinct = Enumerable.Range(0, PartyPrintGeometry.SlotsPerStrip)
-            .Select(slot => SampleSlot(sheet, 0, slot))
-            .Distinct()
-            .Count();
-        Assert.Equal(PartyPrintGeometry.SlotsPerStrip, distinct);
+    [Fact]
+    public async Task Four_Photographs_Still_Make_A_Sheet_Of_Two_Copies()
+    {
+        // A client from before eight: nothing breaks, the strip is repeated.
+        var bytes = await new PartyPrintComposer().RenderAsync(
+            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4), default);
+        using var sheet = Image.Load<Rgba32>(bytes);
+        for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+            Assert.Equal(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
+    }
+
+    [Theory]
+    [InlineData(PartyPrintTheme.OverlayWhite, true)]
+    [InlineData(PartyPrintTheme.OverlayBlack, false)]
+    public async Task The_Title_On_The_Photo_Runs_The_Picture_To_The_Edge_Under_The_Invitation_Scrim(
+        PartyPrintTheme theme, bool whiteInk)
+    {
+        // A mid-grey photograph, so the scrim's effect is readable pixel by pixel.
+        using var grey = new Image<Rgba32>(1000, 1500, new Rgba32(128, 128, 128));
+        using var ms = new MemoryStream();
+        await grey.SaveAsJpegAsync(ms);
+        var bytes = await new PartyPrintComposer().RenderAsync(new PartyPrintComposition(
+            PartyPrintProducts.Photo, theme, [new PartyPrintPhoto(ms.ToArray(), 0, 0, 1, 1)],
+            "Giulia & Matteo", "Una notte da ricordare", 12), default);
+        using var sheet = Image.Load<Rgba32>(bytes);
+
+        Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
+        Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
+
+        // No paper margin: an edge pixel is the photograph under the scrim, and
+        // the scrim pulls it toward the base colour — navy under white ink,
+        // white under black ink.
+        var edge = sheet[sheet.Width / 2, sheet.Height / 4];
+        if (whiteInk) Assert.True(edge.R < 128, $"white-ink scrim left {edge.R}");
+        else Assert.True(edge.R > 128, $"black-ink scrim left {edge.R}");
+
+        // The foot of the sheet IS the base colour, as at the foot of the invitation.
+        var foot = sheet[sheet.Width / 2, sheet.Height - 2];
+        if (whiteInk) Assert.True(foot.R < 30 && foot.B < 45, $"foot {foot}");
+        else Assert.True(foot.R > 225, $"foot {foot}");
+
+        // The symbol sits top-left in the ink: somewhere in its box a pixel is
+        // the ink, which the grey photograph and its scrim alone never are.
+        var margin = (int)(PartyPrintGeometry.OverlayMarginFraction * sheet.Width);
+        var size = (int)(PartyPrintGeometry.OverlaySymbolFraction * sheet.Width);
+        var inked = false;
+        for (var y = margin; y < margin + size && !inked; y += 3)
+            for (var x = margin; x < margin + size && !inked; x += 3)
+            {
+                var p = sheet[x, y];
+                inked = whiteInk ? p.R > 235 && p.G > 235 : p.R < 20 && p.G < 25;
+            }
+        Assert.True(inked, "the NubArca symbol is not on the sheet");
+
+        await File.WriteAllBytesAsync(
+            Path.Combine(ArtifactDir(), $"photo-{theme.ToString().ToLowerInvariant()}.jpg"), bytes);
     }
 
     [Fact]
@@ -330,10 +383,12 @@ public sealed class PartyPrintComposerTests
     }
 
     [Fact]
-    public async Task Writes_The_Six_Artifacts_A_Person_Has_To_Look_At()
+    public async Task Writes_The_Eight_Artifacts_A_Person_Has_To_Look_At()
     {
         // Tests can prove the geometry. Whether the print is beautiful is a
-        // judgement, and these are what it is made on.
+        // judgement, and these are what it is made on: every look of a photo,
+        // and the three framed looks of a strip (the title on the photograph is
+        // a single-photograph look).
         var composer = new PartyPrintComposer();
         var dir = ArtifactDir();
         foreach (var theme in Enum.GetValues<PartyPrintTheme>())
@@ -343,12 +398,13 @@ public sealed class PartyPrintComposerTests
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"photo-{theme.ToString().ToLowerInvariant()}.jpg"), photo);
 
+            if (theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack) continue;
             var strip = await composer.RenderAsync(
-                Composition(PartyPrintProducts.Strip4, theme, 4), default);
+                Composition(PartyPrintProducts.Strip4, theme, 8), default);
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"strip-{theme.ToString().ToLowerInvariant()}.jpg"), strip);
         }
 
-        Assert.Equal(6, Directory.GetFiles(dir, "*.jpg").Length);
+        Assert.Equal(8, Directory.GetFiles(dir, "*.jpg").Length);
     }
 }

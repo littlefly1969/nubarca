@@ -26,6 +26,8 @@ import {
   DEFAULT_CROP_VIEW, MAX_ZOOM, SLOTS_PER_STRIP, STRIPS_PER_SHEET,
   CUT_MARK_LENGTH_FRACTION, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   type CropView, cropFor, photoLayout, photoSlotAspect, stripFooter, stripSlot,
+  OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
+  LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH, overlayScrim, overlaySlotAspect,
   stripSlotAspect,
 } from './partyPrintGeometry';
 import './PartyGuestHub.css';
@@ -54,13 +56,30 @@ const PARTY_WORDMARK_DARK = '/brand/nubarca-wordmark-on-dark-480w.png';
 const PARTY_WORDMARK_LIGHT = '/brand/nubarca-wordmark-on-light-480w.png';
 const PARTY_EYEBROW = `${PRODUCT_NAME} Party`;
 
-/** Themes, in the order they are offered. Same three the renderer knows. */
-const THEMES: readonly PartyPrintTheme[] = ['pure', 'midnight', 'event'] as const;
-const THEME_LABEL: Record<PartyPrintTheme, MessageKey> = {
+/**
+ * Looks, in the order they are offered. The first three frame any product; the
+ * title on the photograph is a single-photograph look, in white or black ink.
+ */
+type Look = 'pure' | 'midnight' | 'event' | 'overlay';
+type Ink = 'white' | 'black';
+const FRAMED_LOOKS: readonly Look[] = ['pure', 'midnight', 'event'] as const;
+const PHOTO_LOOKS: readonly Look[] = [...FRAMED_LOOKS, 'overlay'] as const;
+const LOOK_LABEL: Record<Look, MessageKey> = {
   pure: 'partyPrint.theme.pure',
   midnight: 'partyPrint.theme.midnight',
   event: 'partyPrint.theme.event',
+  overlay: 'partyPrint.theme.overlay',
 };
+/** Ink, and the base colour its scrim fades into ("r g b", the brand's navy or white). */
+const INKS: readonly Ink[] = ['white', 'black'] as const;
+const INK_COLOUR: Record<Ink, { ink: string; base: string }> = {
+  white: { ink: '#f5f7fb', base: '10 15 26' },
+  black: { ink: '#0a0f1a', base: '245 247 251' },
+};
+
+function isOverlay(theme: PartyPrintTheme): theme is 'overlay-white' | 'overlay-black' {
+  return theme === 'overlay-white' || theme === 'overlay-black';
+}
 /** Which wordmark an artwork this dark takes. Mirrors the renderer's palette. */
 const DARK_THEMES: readonly PartyPrintTheme[] = ['midnight', 'event'] as const;
 
@@ -230,6 +249,60 @@ function SheetPreview(props: SheetProps) {
   } = props;
   const viewOf = (id: string) => views[id] ?? DEFAULT_CROP_VIEW;
 
+  if (product === 'photo' && isOverlay(theme)) {
+    const id = chosen[0];
+    const aspect = aspectOf(id);
+    const portrait = orientation === null ? aspect <= 1 : orientation === 'portrait';
+    const [w, h] = portrait ? [PORTRAIT_WIDTH, PORTRAIT_HEIGHT] : [LANDSCAPE_WIDTH, LANDSCAPE_HEIGHT];
+    const short = Math.min(w, h);
+    // Everything is a fraction of the short edge, turned into a fraction of the
+    // sheet's width or height, exactly as the renderer measures it.
+    const ofWidth = (fraction: number) => pct((fraction * short) / w);
+    const ofHeight = (fraction: number) => pct((fraction * short) / h);
+    const colours = INK_COLOUR[theme === 'overlay-white' ? 'white' : 'black'];
+    return (
+      <div
+        className="party-print-sheet party-print-sheet-overlay"
+        data-theme={theme}
+        data-testid="party-print-sheet"
+        data-orientation={portrait ? 'portrait' : 'landscape'}
+        style={{ aspectRatio: `${w} / ${h}` }}
+      >
+        <div className="party-print-slot" style={{ left: 0, top: 0, width: '100%', height: '100%' }}>
+          <FramedPhoto
+            photo={photoById.get(id)} aspect={aspect}
+            slotAspect={overlaySlotAspect(portrait)} view={viewOf(id)}
+            onAspect={(width, height) => onAspect(id, width, height)}
+          />
+        </div>
+        <div className="party-print-overlay-scrim" style={{ background: overlayScrim(colours.base) }} />
+        <span
+          className="party-print-overlay-symbol"
+          data-testid="party-print-overlay-symbol"
+          aria-hidden="true"
+          style={{
+            left: ofWidth(OVERLAY_MARGIN_FRACTION), top: ofHeight(OVERLAY_MARGIN_FRACTION),
+            width: ofWidth(OVERLAY_SYMBOL_FRACTION), height: ofHeight(OVERLAY_SYMBOL_FRACTION),
+            backgroundColor: colours.ink,
+          }}
+        />
+        <div
+          className="party-print-overlay-text"
+          style={{
+            left: ofWidth(OVERLAY_MARGIN_FRACTION), right: ofWidth(OVERLAY_MARGIN_FRACTION),
+            bottom: ofHeight(OVERLAY_MARGIN_FRACTION), color: colours.ink,
+            // cqw of the sheet: the same fraction of the short edge as on paper.
+            ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
+            ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
+          }}
+        >
+          <span className="party-print-overlay-name">{props.partyName}</span>
+          {props.footerText && <span className="party-print-overlay-line">{props.footerText}</span>}
+        </div>
+      </div>
+    );
+  }
+
   if (product === 'photo') {
     const id = chosen[0];
     const aspect = aspectOf(id);
@@ -286,15 +359,11 @@ function SheetPreview(props: SheetProps) {
         <div
           key={strip}
           data-testid={`party-print-strip-${strip}`}
-          // The second strip is a copy of the first, so it is drawn but not
-          // announced: a screen reader would otherwise read the whole
-          // composition twice. The caption under the sheet is what says there
-          // are two of them.
-          aria-hidden={strip > 0 ? true : undefined}
         >
           {Array.from({ length: SLOTS_PER_STRIP }, (_, index) => {
             const rect = stripSlot(strip, index);
-            const id = chosen[index];
+            // Photographs 1–4 on the first strip, 5–8 on the second.
+            const id = chosen[strip * SLOTS_PER_STRIP + index] ?? chosen[index];
             return (
               <div
                 key={index}
@@ -355,7 +424,12 @@ export function PartyPrintPage() {
   const [chosen, setChosen] = useState<string[]>([]);
   const [views, setViews] = useState<Record<string, CropView>>({});
   const [aspects, setAspects] = useState<Record<string, number>>({});
-  const [theme, setTheme] = useState<PartyPrintTheme>('pure');
+  const [look, setLook] = useState<Look>('pure');
+  const [ink, setInk] = useState<Ink>('white');
+  // The theme the server is sent: the overlay exists only for a single photograph.
+  const theme: PartyPrintTheme = look === 'overlay'
+    ? (product === 'photo' ? `overlay-${ink}` : 'pure')
+    : look;
   const [cropIndex, setCropIndex] = useState(0);
   const [onlyMine, setOnlyMine] = useState(false);
   // Null is not "unset waiting for a value" — it IS the default: follow the
@@ -470,8 +544,10 @@ export function PartyPrintPage() {
   ), [orientation, aspectOf]);
 
   const slotAspectFor = useCallback((id: string) => (
-    product === 'strip4' ? stripSlotAspect() : photoSlotAspect(portraitFor(id))
-  ), [product, portraitFor]);
+    product === 'strip4'
+      ? stripSlotAspect()
+      : isOverlay(theme) ? overlaySlotAspect(portraitFor(id)) : photoSlotAspect(portraitFor(id))
+  ), [product, portraitFor, theme]);
 
   const toggle = (id: string) => {
     setChosen((prev) => {
@@ -924,19 +1000,36 @@ export function PartyPrintPage() {
           )}
           <fieldset className="party-print-themes">
             <legend>{t('partyPrint.theme')}</legend>
-            {THEMES.map((option) => (
+            {(product === 'photo' ? PHOTO_LOOKS : FRAMED_LOOKS).map((option) => (
               <label key={option} className="party-print-theme">
                 <input
                   type="radio"
                   name="party-print-theme"
                   value={option}
-                  checked={theme === option}
-                  onChange={() => setTheme(option)}
+                  checked={look === option || (option === 'pure' && look === 'overlay' && product !== 'photo')}
+                  onChange={() => setLook(option)}
                 />
-                <span>{t(THEME_LABEL[option])}</span>
+                <span>{t(LOOK_LABEL[option])}</span>
               </label>
             ))}
           </fieldset>
+          {product === 'photo' && look === 'overlay' && (
+            <fieldset className="party-print-themes">
+              <legend>{t('partyPrint.ink')}</legend>
+              {INKS.map((option) => (
+                <label key={option} className="party-print-theme">
+                  <input
+                    type="radio"
+                    name="party-print-ink"
+                    value={option}
+                    checked={ink === option}
+                    onChange={() => setInk(option)}
+                  />
+                  <span>{t(`partyPrint.ink.${option}`)}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
           {submitError && (
             <p className="party-print-error" role="alert">{t(submitError)}</p>
           )}
