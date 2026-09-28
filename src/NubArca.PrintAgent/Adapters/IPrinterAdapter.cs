@@ -4,8 +4,7 @@ public static class PrintAdapterKinds
 {
     public const string Fake = "fake";
     public const string WindowsSpooler = "windows-spooler";
-    // Reserved contract: a future implementation will discover CUPS queues,
-    // report IPP capabilities and submit only through the local CUPS service.
+    // Linux: queues of the local CUPS server, through its command-line tools.
     public const string Cups = "cups";
 }
 

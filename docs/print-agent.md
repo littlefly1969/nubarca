@@ -1,7 +1,7 @@
 # NubArca Print Agent
 
-The Print Agent is a headless Windows Service or Linux simulator that connects
-one NubArca Print Station to a printer adapter. It never receives an
+The Print Agent is a headless Windows Service, Linux Print Box or Linux
+simulator that connects one NubArca Print Station to a printer adapter. It never receives an
 owner cookie and cannot browse files: its credential is scoped to heartbeat,
 printer reporting, claiming its own jobs, downloading the claimed artifact and
 reporting the result.
@@ -53,10 +53,8 @@ with `sim-lab` and `sim-test`. Check it with
 instance's `fake-output` directory. `uninstall-instance.sh` retains state by
 default; `--purge-state` is only for intentional station replacement.
 
-`cups` is an explicit reserved adapter contract, not a fallback and not yet an
-implementation. A future CUPS adapter must retain this same journal boundary;
-until physical acceptance exists, Linux uses only `fake` and DS620 remains the
-Windows-spooler path.
+A real printer on Linux uses the `cups` adapter and is installed as a Print Box
+(below), never through this simulator installer.
 
 ## Windows enroll and install
 
@@ -185,6 +183,165 @@ two separate 2×6 strips with the cut in the gutter, no tick visible on either
 edge, and the job completed remotely; a photo job on the same station comes out
 uncut.
 
+## Linux Print Box (CUPS + Wi-Fi setup)
+
+A small Linux computer with no screen or keyboard, a USB cable to the DNP
+DS-RX1/RX1HS and one Wi-Fi adapter becomes a print station you carry to an
+event. NubArca never drives the printer or the radio itself: **CUPS** with
+**Gutenprint** prints, **NetworkManager** does the networking, and the agent
+only decides which queue a sheet goes to and when the box offers its own
+setup network.
+
+```text
+power on ──> Ethernet or a known Wi-Fi within 30 s? ──yes──> print
+                          │ no
+                          v
+            setup Wi-Fi  NubArca-Print-XXXX  ──> phone opens the setup page
+                          │                         picks a network, types the password
+                          v
+               joins that network ── fails? ──> the setup Wi-Fi comes back
+```
+
+### Requirements
+
+- Debian 12 or later, minimal, x86-64 (`linux-arm64` is a later target; nothing
+  here is Intel-specific). No desktop.
+- A Wi-Fi adapter that supports access-point mode (`iw list`, *Supported
+  interface modes*, lists `AP`). One adapter is enough.
+- Ethernet or another working network while installing: enrollment needs the
+  server.
+- Interfaces must be managed by NetworkManager. Debian's installer usually
+  configures the first one in `/etc/network/interfaces`, which NetworkManager
+  then leaves alone; the installer warns about it. Move that configuration to
+  NetworkManager from the machine's console, not over the connection being
+  moved.
+
+### Install
+
+1. In **Cloud functions → Print stations** create a station and keep its id.
+2. Extract the `linux-x64` bundle to `/opt/nubarca-print-agent`.
+3. Create the two CUPS queues (next section). They can also be created after
+   installing; the installer only warns while they are missing.
+4. Run, as root:
+
+   ```bash
+   sudo bash /opt/nubarca-print-agent/linux/install-print-box.sh \
+     --server https://your-nubarca-origin.example \
+     --station 00000000-0000-0000-0000-000000000000 \
+     --printer NubArca-RX1HS --strip-printer NubArca-RX1HS-STRIP \
+     --hostname nubarca-print
+   ```
+
+   It installs `cups`, `printer-driver-gutenprint`, `network-manager`,
+   `dnsmasq-base`, `avahi-daemon`, `polkitd`, ICU and CA certificates; asks
+   silently for the **setup Wi-Fi password** (8–63 characters) and the one-shot
+   **enrollment token**; and installs `nubarca-print-agent@box` under its own
+   account `nubarca-print-box`. It is idempotent: run it again to change the
+   queues or the setup password; the station is enrolled only once
+   (`--reenroll` replaces the credential on purpose). `--open-setup-network`
+   leaves the setup Wi-Fi open — for a first test only, and logged as a
+   warning. `--no-network-provisioning` is for a box that only ever uses a wired
+   or already-configured network.
+
+The agent does **not** run as root. The installer grants its account exactly the
+NetworkManager actions it needs through a polkit rule
+(`/etc/polkit-1/rules.d/49-nubarca-print-box.rules`: network control, system
+connection profiles, Wi-Fi scan, Wi-Fi sharing) — no sudo, no other service.
+Printing needs no privilege at all: any local account may submit to CUPS.
+
+### The two CUPS queues
+
+Both point at the same printer and the same 4×6 media; they differ only in the
+cut. NubArca never names a Gutenprint option: the queues carry their settings,
+and the agent only chooses one.
+
+| Queue | Media | 2-inch cut | Receives |
+|---|---|---|---|
+| `NubArca-RX1HS` | 4×6 / 10×15 | **off** | photos (`10x15`) |
+| `NubArca-RX1HS-STRIP` | 4×6 / 10×15 | **on** | party strips (`2x6x2`) |
+
+```bash
+lpinfo -v | grep -i dnp                   # the printer's USB device URI
+lpinfo -m | grep -i -E 'rx1|dnp'          # the Gutenprint model for it
+sudo lpadmin -p NubArca-RX1HS -E -v '<uri>' -m '<model>'
+sudo lpadmin -p NubArca-RX1HS-STRIP -E -v '<uri>' -m '<model>'
+lpoptions -p NubArca-RX1HS-STRIP -l       # find the 4x6 page size and the cut
+```
+
+How Gutenprint spells the 2-inch cut depends on its version — a page size such
+as "4x6 (2x6 ×2)" or a separate cutter option. Set the plain 4×6 size on the
+photo queue and the cut variant on the strip queue with
+`sudo lpadmin -p <queue> -o <Option>=<Value>`, using exactly the names
+`lpoptions -l` shows. Check each queue by hand before involving NubArca:
+`lp -d NubArca-RX1HS -o fit-to-page photo.jpg` must print one uncut sheet, the
+same on `NubArca-RX1HS-STRIP` two strips.
+
+Queue names are letters, digits, dot, dash and underscore. Without
+`--strip-printer`, or while the strip queue is missing from CUPS, the box
+simply does not offer `2x6x2`: strips are then printed as one sheet with cut
+ticks, like on any printer that cannot cut.
+
+### Wi-Fi setup from a phone
+
+- **At boot** NetworkManager gets `ConnectionGraceSeconds` (30) to use Ethernet
+  or a known Wi-Fi. A usable connection — an address and a default route — means
+  no setup network, whether or not the NubArca server answers.
+- **Otherwise** the box opens `NubArca-Print-XXXX`. XXXX is stable for the box
+  (a hash of its machine id); `journalctl -u nubarca-print-agent@box | grep
+  'Setup network'` shows it. Join it, then open `http://10.42.0.1:8080` (the
+  address NetworkManager usually gives the setup network; the page shows it) or
+  `http://nubarca-print.local:8080` where mDNS works.
+- **The page** shows the network, the printer, CUPS and whether NubArca is
+  reachable, lists the networks the box saw before it opened the setup network,
+  and has one form: network name and password. Nothing else — no account, no
+  server settings, no logs.
+- **Connect**: the setup network closes (one radio), the box tries the network,
+  and on success keeps it — the setup network does not come back, which is how
+  the phone knows it worked. On **any** failure — wrong password, no address —
+  the failed profile is removed and the setup network returns within about a
+  minute; the page then says the connection failed.
+- **Later**: at the next boot NetworkManager uses the saved network by itself. A
+  network lost afterwards gets the same grace period before the setup network
+  opens. While the setup network is up and nobody is on the page, the box
+  pauses it now and then (after 3 minutes, doubling up to 30) so a router that
+  was merely late is found again without a phone.
+
+Security notes: set a setup password for every real installation. The page
+accepts a connection request only in setup mode and only as JSON, never logs a
+request body, and never returns a password. Passwords reach `nmcli` as separate
+arguments, never through a shell; while `nmcli` runs they are visible in the
+process list to other local accounts, which a dedicated box does not have.
+
+### Diagnostics
+
+- `systemctl status nubarca-print-agent@box` and
+  `journalctl -u nubarca-print-agent@box`: "CUPS available/unavailable",
+  "Printer queue missing", "Setup network active", "Wi-Fi connection failed",
+  and so on. No password or credential is ever logged.
+- `lpstat -l -p`: what the agent reads for printer state (ready, printing,
+  offline, error).
+- `nmcli device status`: what it reads for the network.
+- Without CUPS the printer is reported offline; without NetworkManager the log
+  says provisioning is unavailable. Neither stops the agent.
+
+### Physical acceptance
+
+Not verified until one dated record covers, on the RX1HS over USB:
+
+| # | Check | Expected |
+|---:|---|---|
+| 1 | A `10x15` job | photo queue; one uncut 10×15 |
+| 2 | A `2x6x2` job | strip queue; the composite, cut into two strips |
+| 3 | `10x15`, `2x6x2`, `10x15`, `2x6x2` | each on its queue; the cutter never touches a photo |
+| 4 | USB unplugged | printer offline in the dashboard; no crash |
+| 5 | USB plugged back | ready again without restarting the agent |
+| 6 | First boot, no known network | `NubArca-Print-XXXX` after about 30 s |
+| 7 | Phone joins it, opens the page | status and networks shown |
+| 8 | Correct password | setup network gone, box online, station online in NubArca |
+| 9 | Reboot | saved network used; no setup network |
+| 10 | New place, no known network | setup network after the grace period |
+| 11 | Wrong password | setup network back, page says it failed, box still configurable |
+
 ## The simulator takes time, on purpose
 
 `FakeSheetSeconds` (default **10**) is how long the fake printer spends
@@ -220,6 +377,7 @@ guarantee.
 | `fake` | one deterministic virtual printer | yes | waits `FakeSheetSeconds`, then copies the artifact to a bounded local test directory | automated |
 | `windows-spooler` | installed Windows queues, optionally restricted by exact printer name | derived from driver paper sizes near 4×6 inches | silent `PrintDocument` through the installed driver | contract/build only |
 | DNP DS620 via Windows spooler | queue name and driver supplied by the operator | requires the installed driver to expose 4×6 / 10×15 media | same generic spooler path | **manual hardware acceptance pending** |
+| `cups` (Linux Print Box) | `lpstat -l -p`; only `PrinterName`, the strip queue folded into it | the configured queue exists in CUPS; `2x6x2` while the strip queue exists too | `lp -d <queue> -t NubArca-<job> -o fit-to-page <artifact>` | fake-runner contract; **hardware acceptance pending** |
 
 The DS620 path has no vendor SDK assumption. Install the DNP Windows driver,
 configure the intended 10×15 media and run **Stampa pagina test**. Acceptance

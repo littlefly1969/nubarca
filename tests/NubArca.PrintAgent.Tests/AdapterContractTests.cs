@@ -109,15 +109,6 @@ public sealed class AdapterContractTests
     }
 
     [Fact]
-    public void Cups_Is_An_Explicit_Future_Adapter_Not_A_Silent_Fallback()
-    {
-        var options = new PrintAgentOptions { Adapter = PrintAdapterKinds.Cups };
-        options.NormalizeAndValidate();
-        var error = Assert.Throws<NotSupportedException>(() => PrintAgentPlatform.CreatePrinterAdapter(options));
-        Assert.Contains("not implemented", error.Message, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
     public async Task The_Fake_Printer_Takes_As_Long_As_A_Sheet_Takes()
     {
         // A simulator that returns instantly is a poor model of a printer: a
