@@ -96,6 +96,7 @@ SKIP_FILES = ("package-lock.json",)
 # Numeric literals that carry no installation identity.
 #   loopback / unspecified / broadcast          — universal
 #   127.0.0.11                                  — Docker's embedded DNS resolver
+#   127.0.1.1                                   — Debian/Ubuntu's own-hostname line in /etc/hosts
 #   10.0.2.2                                    — Android emulator host alias
 #   10.0.0.0/8, 172.16.0.0/12                   — container-subnet documentation
 #   192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24 — RFC 5737 documentation
@@ -104,7 +105,7 @@ SKIP_FILES = ("package-lock.json",)
 # the only way to defer upstream name resolution to request time. An operator
 # cannot choose it and changing it would name nothing.
 GENERIC_ADDRESSES = frozenset({
-    "127.0.0.1", "0.0.0.0", "255.255.255.255", "10.0.2.2", "127.0.0.11",
+    "127.0.0.1", "0.0.0.0", "255.255.255.255", "10.0.2.2", "127.0.0.11", "127.0.1.1",
 })
 GENERIC_ADDRESS_PREFIXES = ("10.", "192.0.2.", "198.51.100.", "203.0.113.") + tuple(
     f"172.{octet}." for octet in range(16, 32)
