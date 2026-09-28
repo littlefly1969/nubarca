@@ -1,7 +1,9 @@
 [Unit]
-Description=NubArca Print Agent simulator (%i)
-Wants=network-online.target
-After=network-online.target
+Description=NubArca Print Agent (%i)
+# Not network-online.target: a Print Box with no known network must start
+# anyway, because it is the agent that opens the Wi-Fi setup network. Every
+# instance retries the server on its own.
+After=network.target
 
 [Service]
 Type=notify

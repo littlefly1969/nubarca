@@ -6,6 +6,27 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### A small Linux box can be the print station
+
+- **A headless NubArca Print Box.** A Linux computer with no screen or
+  keyboard, a USB cable to the DNP DS-RX1/RX1HS and one Wi-Fi adapter prints
+  NubArca's photos and strips through CUPS and Gutenprint: photos on one queue,
+  strips on a second queue of the same printer set up with the 2-inch cut.
+- **It finds a network by itself, or asks a phone for one.** At power-on it
+  uses Ethernet or a known Wi-Fi; with neither for 30 seconds it opens its own
+  setup network, `NubArca-Print-XXXX`. Join it from a phone, open the setup
+  page, pick the venue's Wi-Fi and type its password: the box joins it and the
+  setup network disappears. A wrong password brings the setup network back
+  instead of leaving the box unreachable, and at the next boot the saved network
+  is used by itself.
+- **The setup page shows only what you need** — network, printer, CUPS, whether
+  NubArca is reachable, the networks in range, one form — and never a password.
+- One installer script prepares a minimal Debian machine. The agent does not run
+  as root: it may manage Wi-Fi through NetworkManager and nothing else.
+- Print Agent `0.3.0`. The Windows service and the simulator are unchanged; the
+  bundles are larger because they now carry the web runtime the Print Box page
+  uses.
+
 ### The browser no longer translates NubArca over itself
 
 - **NubArca already speaks your language, so Chrome is told not to.** The whole

@@ -27,9 +27,17 @@ else if (OperatingSystem.IsLinux())
 else
     throw new PlatformNotSupportedException("NubArca Print Agent supports Windows and Linux only.");
 builder.Services.AddSingleton(options);
+builder.Services.AddSingleton<IProcessRunner, ProcessRunner>();
+builder.Services.AddSingleton<AgentConnectionState>();
 builder.Services.AddSingleton<ICredentialStore>(_ => PrintAgentPlatform.CreateCredentialStore(options.CredentialPath));
 builder.Services.AddSingleton(_ => new ExecutionJournal(options.JournalPath));
-builder.Services.AddSingleton<IPrinterAdapter>(_ => PrintAgentPlatform.CreatePrinterAdapter(options));
+builder.Services.AddSingleton<IPrinterAdapter>(sp => PrintAgentPlatform.CreatePrinterAdapter(options,
+    sp.GetRequiredService<IProcessRunner>(), sp.GetRequiredService<ILoggerFactory>()));
+if (OperatingSystem.IsLinux())
+{
+    builder.Services.AddHostedService<LinuxRuntimeCheck>();
+    if (options.NetworkProvisioning.Enabled) builder.Services.AddPrintBoxSetup(options.NetworkProvisioning);
+}
 builder.Services.AddHttpClient<PrintAgentApiClient>(nameof(PrintAgentApiClient), client =>
 {
     client.BaseAddress = new Uri(serverOrigin.ToString().TrimEnd('/') + "/");

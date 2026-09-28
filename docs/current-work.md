@@ -13,9 +13,11 @@ is built is described by `ARCHITECTURE.md`.
 - Frontend: React, TypeScript, Vite
 - Runtime: Docker Compose with separate API, worker and frontend services
 - Print foundation: server-owned stations/devices/jobs plus a separately
-  packaged headless Print Agent `0.2.6`; Linux fake-agent systemd instances
-  cover protocol acceptance while DNP printers still require Windows hardware
-  acceptance
+  packaged headless Print Agent `0.3.0`: a Windows service (spooler), a Linux
+  fake simulator (systemd instances, protocol acceptance) and a headless Linux
+  Print Box (`cups` adapter over CUPS/Gutenprint, NetworkManager Wi-Fi setup
+  network and local setup page). DNP printers still require hardware acceptance
+  on each path
 - Party printing: guests compose a 10x15 photo or a four-photo strip (printed as
   two twin strips on one sheet) on their own print-capability token. Per-product
   budgets are independent and server-authoritative, reservation and per-party

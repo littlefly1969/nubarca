@@ -25,6 +25,9 @@ state_dir="/var/lib/nubarca-print-agent/$instance"
 
 systemctl disable --now "$unit" 2>/dev/null || true
 rm -f "/etc/nubarca-print-agent/$instance.json"
+# What install-print-box.sh adds for the Print Box instance.
+rm -rf "/etc/systemd/system/$unit.d"
+if [[ "$instance" == box ]]; then rm -f /etc/polkit-1/rules.d/49-nubarca-print-box.rules; fi
 if [[ "$purge" == true ]]; then
   userdel "$user" 2>/dev/null || true
   rm -rf "$state_dir"

@@ -1,0 +1,17 @@
+// NubArca Print Box: the agent's service account may drive Wi-Fi through
+// NetworkManager — scan, share the setup network, add or remove its own
+// connection profiles, bring connections up and down — and nothing else. No
+// sudo, no other D-Bus service, no other account.
+polkit.addRule(function (action, subject) {
+  if (subject.user !== "nubarca-print-box") {
+    return polkit.Result.NOT_HANDLED;
+  }
+  var allowed = [
+    "org.freedesktop.NetworkManager.network-control",
+    "org.freedesktop.NetworkManager.settings.modify.system",
+    "org.freedesktop.NetworkManager.wifi.scan",
+    "org.freedesktop.NetworkManager.wifi.share.open",
+    "org.freedesktop.NetworkManager.wifi.share.protected"
+  ];
+  return allowed.indexOf(action.id) >= 0 ? polkit.Result.YES : polkit.Result.NOT_HANDLED;
+});

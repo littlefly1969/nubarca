@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" translate="no">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="google" content="notranslate" />
+  <title>NubArca Print Box</title>
+  <link rel="stylesheet" href="/setup.css" />
+</head>
+<body>
+  <main>
+    <h1>NubArca Print Box</h1>
+
+    <section class="card" aria-live="polite">
+      <dl>
+        <div><dt>Network</dt><dd id="network">…</dd></div>
+        <div><dt>Connection</dt><dd id="connection">…</dd></div>
+        <div><dt>Address</dt><dd id="address">…</dd></div>
+        <div><dt>Printer</dt><dd id="printer">…</dd></div>
+        <div><dt>CUPS</dt><dd id="cups">…</dd></div>
+        <div><dt>NubArca</dt><dd id="nubarca">…</dd></div>
+      </dl>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <h2>Available Wi-Fi</h2>
+        <button type="button" id="rescan" class="secondary">Refresh</button>
+      </div>
+      <ul id="networks" class="networks"></ul>
+      <p id="no-networks" class="muted" hidden>No networks found yet. Type the name below.</p>
+    </section>
+
+    <form id="connect" class="card" autocomplete="off">
+      <label for="ssid">Wi-Fi name (SSID)</label>
+      <input id="ssid" name="ssid" required maxlength="32" autocapitalize="off" spellcheck="false" />
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" maxlength="64" autocomplete="off" />
+      <button type="submit" id="submit">Connect</button>
+      <p id="message" role="status"></p>
+    </form>
+  </main>
+  <script src="/setup.js"></script>
+</body>
+</html>

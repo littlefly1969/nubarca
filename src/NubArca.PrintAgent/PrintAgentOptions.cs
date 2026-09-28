@@ -1,3 +1,5 @@
+using NubArca.PrintAgent.Networking;
+
 namespace NubArca.PrintAgent;
 
 public sealed class PrintAgentOptions
@@ -8,16 +10,22 @@ public sealed class PrintAgentOptions
     public string JournalPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\journal.db";
     public string TemporaryPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\temp";
     public string Adapter { get; set; } = "windows-spooler";
+
+    /// <summary>The printer's main queue — a Windows print queue or a CUPS queue.</summary>
     public string? PrinterName { get; set; }
 
     /// <summary>
-    /// Optional second Windows queue on the SAME physical printer as
-    /// <see cref="PrinterName"/>, with the DNP "2inch cut" enabled in its
-    /// Printing Defaults. Only then does the printer report <c>2x6x2</c>, and
-    /// a party strip arrives as two separate 2x6 strips instead of one sheet to
-    /// cut by hand.
+    /// Optional second queue on the SAME physical printer as
+    /// <see cref="PrinterName"/>, set up with the driver's 2-inch cut: on
+    /// Windows the DNP "2inch cut" in the queue's Printing Defaults, on Linux
+    /// the Gutenprint queue created with the cut. Only then does the printer
+    /// report <c>2x6x2</c>, and a party strip arrives as two separate 2x6
+    /// strips instead of one sheet to cut by hand.
     /// </summary>
     public string? StripPrinterName { get; set; }
+
+    /// <summary>The Linux Print Box's own Wi-Fi setup (NetworkManager). Off by default.</summary>
+    public NetworkProvisioningOptions NetworkProvisioning { get; set; } = new();
     public string FakeOutputPath { get; set; } = @"%ProgramData%\NubArca\PrintAgent\fake-output";
     public int IdlePollSeconds { get; set; } = 5;
     public int MaxBackoffSeconds { get; set; } = 60;
@@ -31,7 +39,9 @@ public sealed class PrintAgentOptions
     public long MaxArtifactBytes { get; set; } = 32 * 1024 * 1024;
     public long MaxTemporaryBytes { get; set; } = 128 * 1024 * 1024;
 
-    public void NormalizeAndValidate()
+    public void NormalizeAndValidate() => NormalizeAndValidate(OperatingSystem.IsLinux());
+
+    public void NormalizeAndValidate(bool isLinux)
     {
         CredentialPath = Environment.ExpandEnvironmentVariables(CredentialPath);
         JournalPath = Environment.ExpandEnvironmentVariables(JournalPath);
@@ -56,5 +66,7 @@ public sealed class PrintAgentOptions
         if (IdlePollSeconds < 1 || MaxBackoffSeconds < 2 || MaxArtifactBytes < 1
             || MaxTemporaryBytes < MaxArtifactBytes)
             throw new InvalidOperationException("Print Agent bounds are invalid.");
+        NetworkProvisioning ??= new NetworkProvisioningOptions();
+        NetworkProvisioning.Validate(isLinux);
     }
 }

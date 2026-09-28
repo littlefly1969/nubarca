@@ -15,14 +15,15 @@ public sealed class PrintAgentWorker : BackgroundService
     private readonly AgentExecutionCoordinator _coordinator;
     private readonly PrintAgentOptions _options;
     private readonly ILogger<PrintAgentWorker> _logger;
+    private readonly AgentConnectionState _connection;
     private static readonly string Version = typeof(PrintAgentWorker).Assembly.GetName().Version?.ToString() ?? "unknown";
 
     public PrintAgentWorker(PrintAgentApiClient api, ICredentialStore credentials,
         IPrinterAdapter adapter, ExecutionJournal journal, AgentExecutionCoordinator coordinator,
-        PrintAgentOptions options, ILogger<PrintAgentWorker> logger)
+        PrintAgentOptions options, ILogger<PrintAgentWorker> logger, AgentConnectionState connection)
     {
         _api = api; _credentials = credentials; _adapter = adapter; _journal = journal;
-        _coordinator = coordinator; _options = options; _logger = logger;
+        _coordinator = coordinator; _options = options; _logger = logger; _connection = connection;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,6 +42,7 @@ public sealed class PrintAgentWorker : BackgroundService
             {
                 var reports = await ObservePrintersAsync(stoppingToken);
                 var heartbeat = await _api.HeartbeatAsync(Version, reports, stoppingToken);
+                _connection.MarkContact(DateTimeOffset.UtcNow);
                 if (heartbeat.DesiredState == "running")
                 {
                     var claim = await _api.ClaimAsync(_adapter.Kind, stoppingToken);
