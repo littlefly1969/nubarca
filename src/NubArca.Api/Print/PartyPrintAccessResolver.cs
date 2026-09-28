@@ -119,6 +119,7 @@ public sealed class PartyPrintAccessResolver : IPartyPrintAccessResolver
 
         return new PartyPrintAccess(
             link.Id, link.AlbumId, link.OwnerUserId, station.Id, device.Id,
-            partyName, profile.FooterText, photo, strip, stripCutByPrinter);
+            partyName, profile.FooterText, photo, strip, stripCutByPrinter,
+            PrintCalibration.Of(device));
     }
 }

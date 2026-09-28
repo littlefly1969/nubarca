@@ -35,9 +35,15 @@ public sealed class PrintArtifactRenderer
         [' ']="00000000000000000000000000000000000",
     };
 
+    /// <summary>
+    /// The test page: who printed it, and a calibration strip — an 11-step grey
+    /// wedge from black to white and eight colour and skin patches — so the
+    /// printer's tone can be judged at a glance and compared after each change.
+    /// The printer's calibration is applied, exactly as to a guest's sheet.
+    /// </summary>
     public async Task<byte[]> RenderDiagnosticAsync(
         string stationName, string printerModel, DateTime now, string format,
-        string shortCode, CancellationToken cancellationToken)
+        string shortCode, CancellationToken cancellationToken, PrintCalibration? calibration = null)
     {
         using var image = new Image<Rgb24>(LandscapeWidth, LandscapeHeight, new Rgb24(248, 250, 252));
         DrawBand(image, 0, 0, LandscapeWidth, 210, new Rgb24(8, 46, 73));
@@ -47,9 +53,35 @@ public sealed class PrintArtifactRenderer
         DrawText(image, $"DATE {now:yyyy-MM-dd HH:mm} UTC".ToUpperInvariant(), 110, 635, 7, new Rgb24(30, 64, 87));
         DrawText(image, $"FORMAT {format}".ToUpperInvariant(), 110, 760, 7, new Rgb24(30, 64, 87));
         DrawText(image, $"JOB {shortCode}".ToUpperInvariant(), 110, 885, 9, new Rgb24(8, 104, 147));
+        DrawCalibrationStrip(image);
+        (calibration ?? PrintCalibration.Neutral).ApplyTo(image);
         using var output = new MemoryStream();
         await image.SaveAsPngAsync(output, cancellationToken);
         return output.ToArray();
+    }
+
+    /// <summary>Where the grey wedge and the patches sit, for the test page and its tests.</summary>
+    public const int WedgeTop = 980, WedgeHeight = 90, PatchTop = 1090, PatchHeight = 90;
+    public const int StripLeft = 110, StripWidth = LandscapeWidth - 220;
+    public const int WedgeSteps = 11;
+
+    public static readonly Rgb24[] Patches =
+    [
+        new(220, 40, 40), new(40, 170, 70), new(40, 80, 200), new(0, 170, 220),
+        new(210, 40, 150), new(245, 210, 40), new(240, 200, 175), new(190, 140, 105),
+    ];
+
+    private static void DrawCalibrationStrip(Image<Rgb24> image)
+    {
+        var step = StripWidth / WedgeSteps;
+        for (var i = 0; i < WedgeSteps; i++)
+        {
+            var level = (byte)Math.Round(255.0 * i / (WedgeSteps - 1));
+            DrawBand(image, StripLeft + (i * step), WedgeTop, step, WedgeHeight, new Rgb24(level, level, level));
+        }
+        var patch = StripWidth / Patches.Length;
+        for (var i = 0; i < Patches.Length; i++)
+            DrawBand(image, StripLeft + (i * patch), PatchTop, patch - 8, PatchHeight, Patches[i]);
     }
 
     public async Task<byte[]> RenderPhoto10x15Async(

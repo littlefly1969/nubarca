@@ -12,6 +12,7 @@ import {
 } from '@nubarca/api-client';
 import { useAuth } from '../auth/useAuth';
 import { useI18n, type MessageKey } from '../i18n';
+import { PrinterCalibrationControls } from './PrinterCalibrationControls';
 
 const STATUS_KEYS: Record<PrintStation['status'], MessageKey> = {
   online: 'print.statusOnline',
@@ -133,6 +134,10 @@ export function PrintStationsPanel() {
                 <div><dt>{t('print.currentJob')}</dt><dd>{station.currentJob ? `${station.currentJob.shortCode} · ${station.currentJob.state}` : '—'}</dd></div>
                 <div><dt>{t('print.lastError')}</dt><dd>{station.lastError ?? '—'}</dd></div>
               </dl>
+              {station.revokedAt === null && observedPrinter && (
+                <PrinterCalibrationControls stationId={station.id} device={observedPrinter}
+                  onSaved={() => load()} />
+              )}
               {station.revokedAt === null && (
                 <div className="print-station-actions">
                   {station.desiredState === 'running' ? (

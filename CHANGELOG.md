@@ -6,6 +6,19 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Adjust a printer's colours from NubArca
+
+- **Prints too dark or too light? Fix it from the Print stations page.** Each
+  printer has *Adjust colours* — midtones, brightness, contrast, saturation —
+  and every sheet NubArca renders for it, guest photos and strips included,
+  follows. No driver settings, no commands on the print box; it works for the
+  Windows station and the Linux Print Box alike.
+- **The test page is now a real test page**: a grey scale from black to white
+  and colour and skin patches, printed with the printer's adjustment, so each
+  change can be judged on paper.
+- The guests' preview does not change: this corrects the printer, not the
+  picture.
+
 ### A small Linux box can be the print station
 
 - **A headless NubArca Print Box.** A Linux computer with no screen or

@@ -14,6 +14,16 @@ export interface PrintDevice {
   supportsPhoto10x15: boolean;
   /** The printer cuts a strip sheet into two 2x6 strips itself. */
   cutsStrips?: boolean;
+  /** The owner's tone compensation for this printer; every factor 1 when neutral. */
+  calibration?: PrintCalibration;
+}
+
+export interface PrintCalibration {
+  brightness: number;
+  contrast: number;
+  /** Above 1 the midtones print lighter; black and white stay put. */
+  gamma: number;
+  saturation: number;
 }
 
 export interface PrintJobSummary {
@@ -69,6 +79,13 @@ export function revokePrintStation(id: string): Promise<void> {
 export function createPrintTestJob(stationId: string, printerDeviceId: string): Promise<PrintJobSummary> {
   return api(`/api/print/stations/${encodeURIComponent(stationId)}/test-jobs`, {
     method: 'POST', json: { printerDeviceId },
+  });
+}
+export function setPrinterCalibration(
+  stationId: string, deviceId: string, calibration: PrintCalibration,
+): Promise<PrintDevice> {
+  return api(`/api/print/stations/${encodeURIComponent(stationId)}/devices/${encodeURIComponent(deviceId)}/calibration`, {
+    method: 'PUT', json: calibration,
   });
 }
 export function cancelPrintJob(jobId: string): Promise<void> {

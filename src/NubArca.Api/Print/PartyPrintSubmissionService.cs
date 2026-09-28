@@ -193,7 +193,8 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                 access.PartyName, access.FooterText,
                 reservation.PublicSequence,
                 ParseOrientation(request.Orientation),
-                access.CutByPrinter(request.Product)), cancellationToken);
+                access.CutByPrinter(request.Product),
+                access.Calibration), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
             // Stage outside the lock; publish and claim in one protected step.

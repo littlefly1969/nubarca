@@ -136,6 +136,30 @@ public sealed class PrintStationService
         return rows == 1;
     }
 
+    /// <summary>
+    /// Sets how this printer's sheets are compensated. Null when the printer is
+    /// not on one of this owner's stations; throws when a value is out of range.
+    /// </summary>
+    public async Task<PrintDeviceDto?> SetCalibrationAsync(Guid ownerId, Guid stationId, Guid printerId,
+        PrintCalibrationDto request, CancellationToken cancellationToken)
+    {
+        var calibration = new PrintCalibration(request.Brightness, request.Contrast, request.Gamma, request.Saturation);
+        if (!calibration.IsValid) throw new ArgumentException("invalid_calibration");
+        var owned = await _db.PrintStations.AnyAsync(
+            x => x.Id == stationId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
+        var printer = owned
+            ? await _db.PrinterDevices.SingleOrDefaultAsync(
+                x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken)
+            : null;
+        if (printer is null) return null;
+        printer.CalibrationBrightness = calibration.Brightness;
+        printer.CalibrationContrast = calibration.Contrast;
+        printer.CalibrationGamma = calibration.Gamma;
+        printer.CalibrationSaturation = calibration.Saturation;
+        await _db.SaveChangesAsync(cancellationToken);
+        return ToDeviceDto(printer);
+    }
+
     public async Task<bool> RevokeAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
     {
         var now = Now;
@@ -217,6 +241,7 @@ public sealed class PrintStationService
                 now: now,
                 format: job.Format,
                 shortCode: job.Id.ToString("N")[..8],
+                calibration: PrintCalibration.Of(printer),
                 cancellationToken: cancellationToken);
             await using var source = new MemoryStream(bytes, writable: false);
             // Stage outside the lock, then publish and claim the artifact in one
@@ -428,7 +453,9 @@ public sealed class PrintStationService
     private static PrintDeviceDto ToDeviceDto(PrinterDevice x) =>
         new(x.Id, x.DisplayName, x.Manufacturer, x.Model, x.AdapterKind, x.LastObservedState, x.LastSeenAt,
             PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Photo10x15),
-            PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Strip2x6Pair));
+            PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Strip2x6Pair),
+            new PrintCalibrationDto(x.CalibrationBrightness, x.CalibrationContrast,
+                x.CalibrationGamma, x.CalibrationSaturation));
     private static PrintJobSummaryDto ToJobDto(PrintJob x) =>
         new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode);
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;
