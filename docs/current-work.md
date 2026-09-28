@@ -20,7 +20,7 @@ is built is described by `ARCHITECTURE.md`.
   setup network and local setup page). DNP printers still require hardware acceptance
   on each path
 - Party printing: guests compose a 10x15 photo or a four-photo strip (printed as
-  two twin strips on one sheet) on their own print-capability token. Per-product
+  two strips of four different photos on one sheet, eight in all) on their own print-capability token. Per-product
   budgets are independent and server-authoritative, reservation and per-party
   numbering are one atomic update, and submission is idempotent by contract. To
   the Print Agent these are ordinary `10x15` jobs, except that a strip goes out

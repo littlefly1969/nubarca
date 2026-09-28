@@ -21,6 +21,13 @@ public enum PartyPrintTheme
     Midnight,
     /// <summary>The party's own name given room, for a keepsake that says where it is from.</summary>
     Event,
+    /// <summary>
+    /// A single photograph to the edges, the party's name and the NubArca symbol
+    /// on it in white, over the invitation's scrim fading into Midnight Navy.
+    /// </summary>
+    OverlayWhite,
+    /// <summary>The same in black, over a scrim fading into Cloud White.</summary>
+    OverlayBlack,
 }
 
 /// <summary>One photograph and how it is framed, already validated.</summary>
@@ -132,6 +139,8 @@ public sealed class PartyPrintComposer
 
     private Image<Rgba32> RenderPhoto(PartyPrintComposition composition)
     {
+        if (composition.Theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack)
+            return RenderOverlayPhoto(composition);
         var photo = composition.Photos[0];
         using var source = LoadOriented(photo.Bytes);
         // The sheet follows the photograph unless the guest said otherwise: a
@@ -180,8 +189,7 @@ public sealed class PartyPrintComposer
             .ToList();
         try
         {
-            // The same four photographs, in the same order, drawn twice: one
-            // sheet, two keepsakes.
+            // Eight photographs, four per strip: one sheet, two keepsakes.
             for (var strip = 0; strip < PartyPrintGeometry.StripsPerSheet; strip++)
             {
                 for (var slotIndex = 0; slotIndex < PartyPrintGeometry.SlotsPerStrip; slotIndex++)
@@ -190,7 +198,10 @@ public sealed class PartyPrintComposer
                     var rect = new Rectangle(
                         (int)Math.Round(fx * w), (int)Math.Round(fy * h),
                         (int)Math.Round(fw * w), (int)Math.Round(fh * h));
-                    var (photo, image) = sources[slotIndex];
+                    // Strip 0 takes photographs 1–4, strip 1 takes 5–8. A
+                    // composition of only four (an older client) repeats them.
+                    var (photo, image) = sources[
+                        ((strip * PartyPrintGeometry.SlotsPerStrip) + slotIndex) % sources.Count];
                     DrawFramed(sheet, image, photo, rect, composition.Theme, palette);
                 }
 
@@ -212,6 +223,140 @@ public sealed class PartyPrintComposer
         {
             foreach (var (_, image) in sources) image.Dispose();
         }
+    }
+
+    // --- Single photograph, title on it ---------------------------------------
+
+    /// <summary>
+    /// The photograph to the edges of the sheet, and on it — never beside it —
+    /// the NubArca symbol top-left and the party's name bottom-left, in white or
+    /// black, over the scrim the party invitation lays over its cover. The
+    /// scrim fades into the base colour opposite the ink, so either one reads.
+    /// </summary>
+    private Image<Rgba32> RenderOverlayPhoto(PartyPrintComposition composition)
+    {
+        var photo = composition.Photos[0];
+        using var source = LoadOriented(photo.Bytes);
+        var portrait = composition.Orientation switch
+        {
+            PartyPrintOrientation.Portrait => true,
+            PartyPrintOrientation.Landscape => false,
+            _ => source.Height >= source.Width,
+        };
+        var (w, h) = portrait
+            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
+            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+
+        var white = composition.Theme == PartyPrintTheme.OverlayWhite;
+        var ink = white ? CloudWhite : Ink;
+        var baseColour = white ? MidnightNavy : CloudWhite;
+
+        var sheet = new Image<Rgba32>(w, h);
+        DrawFramed(sheet, source, photo, new Rectangle(0, 0, w, h), composition.Theme,
+            Palette(PartyPrintTheme.Pure));
+        DrawScrim(sheet, baseColour);
+
+        var shortEdge = Math.Min(w, h);
+        var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
+        DrawSymbol(sheet, ink, new Point(margin, margin),
+            (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge));
+        DrawOverlayText(sheet, composition, ink, margin, shortEdge);
+        return sheet;
+    }
+
+    private static void DrawScrim(Image<Rgba32> sheet, Rgba32 baseColour)
+    {
+        var values = PartyPrintGeometry.OverlayScrimStops;
+        var stops = new ColorStop[values.Length / 2];
+        for (var i = 0; i < stops.Length; i++)
+        {
+            var alpha = (byte)Math.Round(values[(i * 2) + 1] * 255);
+            stops[i] = new ColorStop((float)values[i * 2],
+                Color.FromPixel(new Rgba32(baseColour.R, baseColour.G, baseColour.B, alpha)));
+        }
+        var brush = new LinearGradientBrush(
+            new PointF(0, 0), new PointF(0, sheet.Height), GradientRepetitionMode.None, stops);
+        sheet.Mutate(x => x.Fill(brush));
+    }
+
+    /// <summary>
+    /// The approved flat symbol in ONE solid colour — the brand's flat mark is
+    /// exactly that geometry in solid colours — sized to <paramref name="size"/>.
+    /// </summary>
+    private void DrawSymbol(Image<Rgba32> sheet, Rgba32 ink, Point at, int size)
+    {
+        using var mark = Image.Load<Rgba32>(
+            Path.Combine(_assetRoot, "Assets", "brand", "nubarca-mark-flat-on-dark-512.png"));
+        mark.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height; y++)
+            {
+                var row = rows.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                    row[x] = new Rgba32(ink.R, ink.G, ink.B, row[x].A);
+            }
+        });
+        mark.Mutate(x => x.Resize(size, size));
+        sheet.Mutate(x => x.DrawImage(mark, at, 1f));
+    }
+
+    private void DrawOverlayText(Image<Rgba32> sheet, PartyPrintComposition composition, Rgba32 ink,
+        int margin, int shortEdge)
+    {
+        var (w, h) = (sheet.Width, sheet.Height);
+        var soft = new Rgba32(ink.R, ink.G, ink.B, 0xD9);
+        var lineSize = (float)(PartyPrintGeometry.OverlayLineFraction * shortEdge);
+        var footer = Truncate(composition.FooterText ?? string.Empty, 60);
+        var hasFooter = footer.Length > 0;
+        var bottom = h - margin;
+
+        // The guest's number, bottom-right, as on every other sheet.
+        var numberWidth = 0f;
+        if (composition.PublicSequence > 0)
+        {
+            var numberFont = _display.CreateFont(lineSize * 1.15f, FontStyle.Bold);
+            var number = $"#{composition.PublicSequence}";
+            numberWidth = TextMeasurer.MeasureSize(number, new TextOptions(numberFont)).Width;
+            sheet.Mutate(x => x.DrawText(
+                new RichTextOptions(numberFont)
+                {
+                    Origin = new PointF(w - margin, bottom),
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                },
+                number, soft));
+        }
+
+        if (hasFooter)
+        {
+            var lineFont = _ui.CreateFont(lineSize, FontStyle.Regular);
+            sheet.Mutate(x => x.DrawText(
+                new RichTextOptions(lineFont)
+                {
+                    Origin = new PointF(margin, bottom),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                },
+                footer, soft));
+            bottom -= (int)Math.Round(lineSize * 1.5f);
+        }
+
+        // The name takes what is left of the width, and shrinks rather than
+        // running under the number or off the paper.
+        var name = Truncate(composition.PartyName, 42);
+        var available = w - (2 * margin) - (hasFooter ? 0 : numberWidth + (lineSize * 1.5f));
+        var titleSize = (float)(PartyPrintGeometry.OverlayTitleFraction * shortEdge);
+        var measured = TextMeasurer.MeasureSize(name, new TextOptions(_display.CreateFont(titleSize, FontStyle.Bold))).Width;
+        if (measured > available && measured > 0) titleSize *= available / measured;
+        var titleFont = _display.CreateFont(Math.Max(12f, titleSize), FontStyle.Bold);
+        sheet.Mutate(x => x.DrawText(
+            new RichTextOptions(titleFont)
+            {
+                Origin = new PointF(margin, bottom),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+            },
+            name, ink));
     }
 
     // --- Shared drawing ----------------------------------------------------

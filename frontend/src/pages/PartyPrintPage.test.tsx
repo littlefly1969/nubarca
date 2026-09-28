@@ -52,9 +52,9 @@ function manifest(overrides: Record<string, unknown> = {}) {
     footerText: 'Grazie di essere qui',
     formats: [
       { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
-      { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 4, remainingForYou: null },
+      { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null },
     ],
-    photos: ['f1', 'f2', 'f3', 'f4', 'f5'].map(photo),
+    photos: ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8', 'f9', 'f10'].map(photo),
     ...overrides,
   };
 }
@@ -94,10 +94,10 @@ async function compose(
   user: ReturnType<typeof userEvent.setup>, type: 'photo' | 'strip4',
 ) {
   await chooseFormat(user, type);
-  await pick(user, type === 'strip4' ? 4 : 1);
+  await pick(user, type === 'strip4' ? 8 : 1);
   await user.click(next());
   if (type === 'strip4') await user.click(next());
-  const frames = type === 'strip4' ? 4 : 1;
+  const frames = type === 'strip4' ? 8 : 1;
   for (let i = 0; i < frames; i += 1) await user.click(next());
 }
 
@@ -124,7 +124,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1, remainingForYou: null },
-        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -138,7 +138,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 3, requiredPhotos: 1, remainingForYou: null },
-        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -153,7 +153,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 0, requiredPhotos: 1, remainingForYou: null },
-        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -176,17 +176,18 @@ describe('PartyPrintPage (public print studio)', () => {
 
   // --- Choosing -----------------------------------------------------------
 
-  it('requires FOUR DIFFERENT photos for a strip and will not take a fifth', async () => {
+  it('requires EIGHT DIFFERENT photos for a strip and will not take a ninth', async () => {
     const user = setup();
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
     expect(next()).toBeDisabled();
-    await pick(user, 3);
+    // Four would print the same strip twice: a strip needs its own four each.
+    await pick(user, 4);
     expect(next()).toBeDisabled();
-    await pick(user, 5);
-    // Five taps, four slots: the fifth photograph is simply not taken.
-    expect(screen.getByText('4 di 4')).toBeInTheDocument();
+    await pick(user, 9);
+    // Nine taps, eight slots: the ninth photograph is simply not taken.
+    expect(screen.getByText('8 di 8')).toBeInTheDocument();
     expect(next()).toBeEnabled();
   });
 
@@ -224,19 +225,19 @@ describe('PartyPrintPage (public print studio)', () => {
     });
     render(wrapper());
     await chooseFormat(user, 'strip4');
-    await pick(user, 4);
+    await pick(user, 8);
     await user.click(next());
     // Dragging is not reachable by keyboard, by screen reader, or by anyone who
     // cannot hold a press: the order has to be changeable without it.
     const down = screen.getAllByRole('button', { name: /Sposta giù/ });
-    expect(down).toHaveLength(4);
+    expect(down).toHaveLength(8);
     await user.click(down[0]);
     await user.click(next());
-    for (let i = 0; i < 4; i += 1) await user.click(next());
+    for (let i = 0; i < 8; i += 1) await user.click(next());
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
     expect(lastPost(mock.calls).slots.map((s: { itemId: string }) => s.itemId))
-      .toEqual(['f2', 'f1', 'f3', 'f4']);
+      .toEqual(['f2', 'f1', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8']);
   });
 
   it('cannot move the first photograph up or the last one down', async () => {
@@ -244,10 +245,10 @@ describe('PartyPrintPage (public print studio)', () => {
     mount();
     render(wrapper());
     await chooseFormat(user, 'strip4');
-    await pick(user, 4);
+    await pick(user, 8);
     await user.click(next());
     expect(screen.getAllByRole('button', { name: /Sposta su/ })[0]).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: /Sposta giù/ })[3]).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: /Sposta giù/ })[7]).toBeDisabled();
   });
 
   // --- Framing ------------------------------------------------------------
@@ -339,21 +340,57 @@ describe('PartyPrintPage (public print studio)', () => {
 
   // --- The sheet ----------------------------------------------------------
 
-  it('previews TWO identical strips on one sheet, with the cut marks', async () => {
+  it('previews TWO different strips on one sheet, with the cut marks', async () => {
     const user = setup();
     mount();
     const { container } = render(wrapper());
     await compose(user, 'strip4');
     // One 10x15 yields two keepsakes: eight slots, two strips, two ticks.
     expect(container.querySelectorAll('.party-print-slot')).toHaveLength(8);
-    expect(screen.getByTestId('party-print-strip-0')).toBeInTheDocument();
-    expect(screen.getByTestId('party-print-strip-1')).toBeInTheDocument();
     expect(container.querySelectorAll('.party-print-cut')).toHaveLength(2);
-    expect(screen.getByText(/Due strisce identiche/)).toBeInTheDocument();
-    // Drawn twice, announced once: the caption is what says there are two,
-    // rather than a screen reader reading the whole composition again.
-    expect(screen.getByTestId('party-print-strip-1')).toHaveAttribute('aria-hidden', 'true');
-    expect(screen.getByTestId('party-print-strip-0')).not.toHaveAttribute('aria-hidden');
+    expect(screen.getByText(/Due strisce da quattro foto/)).toBeInTheDocument();
+    // Photographs 1–4 on the first strip, 5–8 on the second: not copies.
+    const first = screen.getByTestId('party-print-strip-0').querySelector('img');
+    const second = screen.getByTestId('party-print-strip-1').querySelector('img');
+    expect(first?.getAttribute('src')).toContain('/f1/');
+    expect(second?.getAttribute('src')).toContain('/f5/');
+    // Two different strips are both announced.
+    expect(screen.getByTestId('party-print-strip-1')).not.toHaveAttribute('aria-hidden');
+  });
+
+  it('puts the title on the photo, in white or black, for a single photograph', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    const { container } = render(wrapper());
+    await compose(user, 'photo');
+
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    const sheet = screen.getByTestId('party-print-sheet');
+    // The photograph runs to the edges, under the invitation's scrim, with the
+    // symbol in the chosen ink.
+    expect(sheet).toHaveAttribute('data-theme', 'overlay-white');
+    expect(container.querySelector('.party-print-overlay-scrim')).not.toBeNull();
+    expect(screen.getByTestId('party-print-overlay-symbol')).toBeInTheDocument();
+    expect(within(sheet).getByText('Beach Party')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Bianco' })).toBeChecked();
+
+    await user.click(screen.getByRole('radio', { name: 'Nero' }));
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-theme', 'overlay-black');
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    expect(lastPost(mock.calls).theme).toBe('overlay-black');
+  });
+
+  it('keeps the title-on-the-photo look off a strip', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await compose(user, 'strip4');
+    expect(screen.queryByRole('radio', { name: 'Sulla foto' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
   });
 
   it('draws no cut marks when the printer cuts the strips itself', async () => {
@@ -362,7 +399,7 @@ describe('PartyPrintPage (public print studio)', () => {
       formats: [
         { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
         {
-          type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 4, remainingForYou: null,
+          type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null,
           cutByPrinter: true,
         },
       ],
@@ -610,7 +647,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 2 },
-        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: false, remaining: 0, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -637,7 +674,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 0 },
-        { type: 'strip4', enabled: true, remaining: 4, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 4, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -653,7 +690,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 40, requiredPhotos: 1, remainingForYou: 0 },
-        { type: 'strip4', enabled: true, remaining: 9, requiredPhotos: 4, remainingForYou: 0 },
+        { type: 'strip4', enabled: true, remaining: 9, requiredPhotos: 8, remainingForYou: 0 },
       ],
     }));
     render(wrapper());
@@ -669,7 +706,7 @@ describe('PartyPrintPage (public print studio)', () => {
     mount(manifest({
       formats: [
         { type: 'photo', enabled: true, remaining: 0, requiredPhotos: 1, remainingForYou: null },
-        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 4, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 0, requiredPhotos: 8, remainingForYou: null },
       ],
     }));
     render(wrapper());
@@ -803,7 +840,7 @@ describe('PartyPrintPage (public print studio)', () => {
     // Ids from elsewhere match nothing this token serves, so there is no filter
     // to offer rather than one that would empty the gallery.
     expect(screen.queryByRole('button', { name: 'Solo le mie foto' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(5);
+    expect(screen.getAllByRole('button', { name: /Scegli questa foto/ })).toHaveLength(10);
   });
 
   // --- The way out --------------------------------------------------------

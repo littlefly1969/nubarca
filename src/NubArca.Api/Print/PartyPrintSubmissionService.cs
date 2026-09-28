@@ -189,7 +189,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // printed ON it: the guest reads the same number off their phone and
             // off the paper.
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
-                request.Product, ParseTheme(request.Theme), photos,
+                request.Product, ThemeFor(request.Product, request.Theme), photos,
                 access.PartyName, access.FooterText,
                 reservation.PublicSequence,
                 ParseOrientation(request.Orientation),
@@ -231,7 +231,7 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     RenderSpecificationJson = JsonSerializer.Serialize(new
                     {
                         product = request.Product,
-                        theme = ParseTheme(request.Theme).ToString().ToLowerInvariant(),
+                        theme = ThemeFor(request.Product, request.Theme).ToString().ToLowerInvariant(),
                     }),
                     ArtifactStorageKey = stored.StorageKey,
                     ArtifactContentType = "image/jpeg",
@@ -308,8 +308,20 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     {
         "midnight" => PartyPrintTheme.Midnight,
         "event" => PartyPrintTheme.Event,
+        "overlay-white" => PartyPrintTheme.OverlayWhite,
+        "overlay-black" => PartyPrintTheme.OverlayBlack,
         _ => PartyPrintTheme.Pure,
     };
+
+    /// <summary>The title on the photograph is a single-photograph look; a strip keeps its frame.</summary>
+    private static PartyPrintTheme ThemeFor(string product, string? value)
+    {
+        var theme = ParseTheme(value);
+        return product == PartyPrintProducts.Strip4
+            && theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack
+            ? PartyPrintTheme.Pure
+            : theme;
+    }
 
     private static PartyPrintOrientation ParseOrientation(string? value) => value switch
     {

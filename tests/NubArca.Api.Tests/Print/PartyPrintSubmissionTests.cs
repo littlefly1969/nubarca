@@ -83,7 +83,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
 
         _photos.Clear();
         _videos.Clear();
-        for (var i = 0; i < 6; i++)
+        for (var i = 0; i < 10; i++)
         {
             var blobId = Guid.NewGuid();
             var fileId = Guid.NewGuid();
@@ -98,7 +98,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
                 Name = $"p{i}.jpg", MimeType = "image/jpeg", SizeBytes = 1,
                 CreatedAt = DateTime.UtcNow, EffectiveDateTaken = DateTime.UtcNow,
             });
-            if (i < 5) _photos.Add(fileId); else _videos.Add(fileId);
+            if (i < 9) _photos.Add(fileId); else _videos.Add(fileId);
         }
         await db.SaveChangesAsync();
 
@@ -119,6 +119,9 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             new FakeSources(),
             scope.ServiceProvider
                 .GetRequiredService<NubArca.Api.Party.IPartyParticipantService>());
+
+    /// <summary>A strip's eight photographs: four for each of its two strips.</summary>
+    private Guid[] Eight() => _photos.Take(8).ToArray();
 
     private static PartyPrintSubmitRequest Request(string product, params Guid[] ids) =>
         new(product, "pure",
@@ -166,11 +169,11 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Strip_Records_Its_Four_Sources_In_Order_And_Costs_One_Strip()
+    public async Task A_Strip_Records_Its_Eight_Sources_In_Order_And_Costs_One_Strip()
     {
         var (access, albumId) = await SeedAsync();
         var result = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "k1");
+            Request(PartyPrintProducts.Strip4, Eight()), "k1");
         Assert.True(result.Ok);
 
         using var scope = _factory.Services.CreateScope();
@@ -180,15 +183,13 @@ public sealed class PartyPrintSubmissionTests : IDisposable
             .OrderBy(s => s.SlotIndex)
             .ToListAsync();
 
-        // Four real rows with real foreign keys, in the order the guest chose —
-        // not three ids buried in a JSON blob.
-        Assert.Equal(4, sources.Count);
-        Assert.Equal(
-            new[] { _photos[0], _photos[1], _photos[2], _photos[3] },
-            sources.Select(s => s.FileItemId));
-        Assert.Equal([0, 1, 2, 3], sources.Select(s => s.SlotIndex));
+        // Eight real rows with real foreign keys, in the order the guest chose —
+        // four for each strip, not ids buried in a JSON blob.
+        Assert.Equal(8, sources.Count);
+        Assert.Equal(Eight(), sources.Select(s => s.FileItemId));
+        Assert.Equal([0, 1, 2, 3, 4, 5, 6, 7], sources.Select(s => s.SlotIndex));
 
-        // Four photographs, one strip.
+        // Eight photographs, one sheet, one strip.
         var profile = await ProfileAsync(albumId);
         Assert.Equal(1, profile.StripAcceptedCount);
         Assert.Equal(0, profile.PhotoAcceptedCount);
@@ -201,10 +202,10 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         var cutting = access with { StripCutByPrinter = true };
 
         var strip = await SubmitAsync(cutting,
-            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "s1");
+            Request(PartyPrintProducts.Strip4, Eight()), "s1");
         var photo = await SubmitAsync(cutting, Request(PartyPrintProducts.Photo, _photos[0]), "p1");
         var uncut = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "s2");
+            Request(PartyPrintProducts.Strip4, Eight()), "s2");
         Assert.True(strip.Ok && photo.Ok && uncut.Ok);
 
         using var scope = _factory.Services.CreateScope();
@@ -217,6 +218,26 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         Assert.Equal(PrintFormats.Photo10x15, await FormatOf(photo));
         // A printer that cannot cut still prints the strip, as one sheet.
         Assert.Equal(PrintFormats.Photo10x15, await FormatOf(uncut));
+    }
+
+    [Fact]
+    public async Task The_Title_On_The_Photo_Is_A_Photo_Look_And_A_Strip_Keeps_Its_Frame()
+    {
+        var (access, _) = await SeedAsync();
+        var photo = await SubmitAsync(access,
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Theme = "overlay-black" }, "o1");
+        var strip = await SubmitAsync(access,
+            Request(PartyPrintProducts.Strip4, Eight()) with { Theme = "overlay-white" }, "o2");
+        Assert.True(photo.Ok && strip.Ok);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        async Task<string> ThemeOf(PartyPrintSubmitResult result) =>
+            System.Text.Json.JsonDocument.Parse((await db.PrintJobs.AsNoTracking()
+                .SingleAsync(j => j.Id == result.Accepted!.JobId)).RenderSpecificationJson)
+                .RootElement.GetProperty("theme").GetString()!;
+        Assert.Equal("overlayblack", await ThemeOf(photo));
+        Assert.Equal("pure", await ThemeOf(strip));
     }
 
     [Fact]
@@ -254,19 +275,22 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_Strip_Needs_Four_DIFFERENT_Photographs()
+    public async Task A_Strip_Needs_Eight_DIFFERENT_Photographs()
     {
         var (access, albumId) = await SeedAsync();
 
-        // Too few, too many, and the same picture four times are all refused.
+        // Too few — the old four included, which would print two copies — too
+        // many, and a repeated picture are all refused.
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.Strip4, _photos[0]), "a")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.Strip4,
-                _photos[0], _photos[1], _photos[2], _photos[3], _photos[4]), "b")).Refusal);
+                _photos[0], _photos[1], _photos[2], _photos[3]), "four")).Refusal);
+        Assert.Equal(PartyPrintRefusal.Invalid,
+            (await SubmitAsync(access, Request(PartyPrintProducts.Strip4, _photos.Take(9).ToArray()), "b")).Refusal);
         Assert.Equal(PartyPrintRefusal.Invalid,
             (await SubmitAsync(access, Request(PartyPrintProducts.Strip4,
-                _photos[0], _photos[0], _photos[1], _photos[2]), "c")).Refusal);
+                [.. _photos.Take(7), _photos[0]]), "c")).Refusal);
 
         // None of them cost anything.
         Assert.Equal(0, (await ProfileAsync(albumId)).StripAcceptedCount);
@@ -312,7 +336,7 @@ public sealed class PartyPrintSubmissionTests : IDisposable
 
         // Photos are gone; strips are untouched.
         var strip = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, _photos[0], _photos[1], _photos[2], _photos[3]), "s1");
+            Request(PartyPrintProducts.Strip4, Eight()), "s1");
         Assert.True(strip.Ok);
 
         var profile = await ProfileAsync(albumId);

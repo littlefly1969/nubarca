@@ -475,6 +475,41 @@
   max-width: 100%;
 }
 
+/* Title on the photograph: the invitation cover's scrim over a full-bleed
+   picture, the party's name bottom-left and the symbol top-left in one ink —
+   the approved flat mark in a solid colour, drawn from its alpha as the
+   renderer does. */
+.party-print-sheet-overlay { container-type: inline-size; }
+.party-print-overlay-scrim { position: absolute; inset: 0; pointer-events: none; }
+.party-print-overlay-symbol {
+  position: absolute;
+  -webkit-mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
+  mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
+}
+.party-print-overlay-text {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  min-width: 0;
+}
+.party-print-overlay-name {
+  overflow: hidden;
+  font-family: var(--font-heading);
+  font-size: var(--title-size);
+  font-weight: 700;
+  line-height: 1.05;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.party-print-overlay-line {
+  overflow: hidden;
+  font-size: var(--line-size);
+  opacity: 0.85;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* The wordmark is placed and scaled, never redrawn: no filter, no recolour,
    and the on-dark artwork on dark paper. */
 .party-print-sheet-mark {

@@ -54,11 +54,44 @@ public static class PartyPrintGeometry
         return slotW / slotH;
     }
 
+    // --- Single photograph, title on the photograph ---------------------------
+
+    /// <summary>
+    /// Inset of the symbol and the text from the edges of the full-bleed sheet,
+    /// as a fraction of the short edge. The photograph itself runs to the edge.
+    /// </summary>
+    public const double OverlayMarginFraction = 0.06;
+
+    /// <summary>Height of the NubArca symbol, top-left, short-edge fraction.</summary>
+    public const double OverlaySymbolFraction = 0.12;
+
+    /// <summary>Type size of the party's name, bottom-left, short-edge fraction.</summary>
+    public const double OverlayTitleFraction = 0.085;
+
+    /// <summary>Type size of the host's line and of the guest's number.</summary>
+    public const double OverlayLineFraction = 0.036;
+
+    /// <summary>
+    /// The party invitation's cover scrim, top to bottom, as pairs of
+    /// (position, opacity of the base colour): darker behind the symbol, light
+    /// over the middle of the picture, deep under the title, and the base
+    /// colour itself at the foot. PartyGuestHub.css draws the same stops.
+    /// </summary>
+    public static readonly double[] OverlayScrimStops =
+        [0, 0.58, 0.16, 0.26, 0.42, 0.46, 0.74, 0.86, 1, 1];
+
+    /// <summary>Aspect ratio of a title-on-the-photograph crop: the whole sheet.</summary>
+    public static double OverlaySlotAspect(bool portrait) =>
+        portrait
+            ? (double)PortraitWidth / PortraitHeight
+            : (double)LandscapeWidth / LandscapeHeight;
+
     // --- Four-photo strip --------------------------------------------------
 
     /// <summary>
-    /// TWO IDENTICAL STRIPS side by side on one portrait sheet, so a single
-    /// 10x15 yields two photo-booth keepsakes: one to keep, one to give away.
+    /// TWO STRIPS side by side on one portrait sheet, so a single 10x15 yields
+    /// two photo-booth keepsakes: one to keep, one to give away. Each strip has
+    /// its own four photographs — eight in all.
     /// </summary>
     public const int StripsPerSheet = 2;
     public const int SlotsPerStrip = 4;
