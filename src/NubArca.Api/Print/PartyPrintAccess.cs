@@ -28,7 +28,9 @@ public sealed record PartyPrintAccess(
     /// The printer cuts the strip sheet into its two strips itself, so the
     /// sheet is sent as 2x6x2 and carries no marks to cut along.
     /// </summary>
-    bool StripCutByPrinter = false)
+    bool StripCutByPrinter = false,
+    /// <summary>The printer's tone compensation. Null is neutral.</summary>
+    PrintCalibration? Calibration = null)
 {
     /// <summary>True when the printer, not the guest, cuts this product's sheet.</summary>
     public bool CutByPrinter(string product) =>

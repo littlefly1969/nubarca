@@ -64,6 +64,11 @@ public sealed class PrinterDeviceConfiguration : IEntityTypeConfiguration<Printe
         builder.Property(x => x.CapabilitiesJson).IsRequired().HasColumnType("jsonb");
         builder.Property(x => x.LastObservedState).IsRequired().HasMaxLength(24);
         builder.Property(x => x.LastSeenAt).HasColumnType("timestamp with time zone");
+        // Database defaults, so a row the previous application inserts is neutral.
+        builder.Property(x => x.CalibrationBrightness).HasDefaultValue(1.0);
+        builder.Property(x => x.CalibrationContrast).HasDefaultValue(1.0);
+        builder.Property(x => x.CalibrationGamma).HasDefaultValue(1.0);
+        builder.Property(x => x.CalibrationSaturation).HasDefaultValue(1.0);
         builder.HasIndex(x => new { x.PrintStationId, x.DeviceKey }).IsUnique()
             .HasDatabaseName("ux_printer_devices_station_device_key");
         builder.HasOne<PrintStation>().WithMany().HasForeignKey(x => x.PrintStationId)

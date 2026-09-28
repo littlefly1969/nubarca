@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { PrintStationsPanel } from './PrintStationsPanel';
 import { AuthedWrapper, emptyResponse, installFetchMock, jsonResponse } from '../test-utils';
@@ -35,6 +35,32 @@ describe('PrintStationsPanel', () => {
     expect(screen.getByText(/abc12345/)).toBeInTheDocument();
     // A DS620 without a cutting queue: strips come out as one sheet.
     expect(screen.getByTestId('print-strip-cut')).toHaveTextContent('Un foglio, da tagliare a mano');
+  });
+
+  it('adjusts the printer colours and saves them for the next sheets', async () => {
+    const user = userEvent.setup();
+    const device = station.devices[0];
+    const url = `/api/print/stations/${station.id}/devices/${device.id}/calibration`;
+    const mock = installFetchMock({
+      'GET /api/print/stations': () => jsonResponse([station]),
+      [`PUT ${url}`]: () => jsonResponse({ ...device, calibration: { brightness: 1, contrast: 1, gamma: 1.2, saturation: 1 } }),
+    });
+    render(view());
+    await user.click(await screen.findByRole('button', { name: 'Regola colori' }));
+
+    const midtones = screen.getByLabelText('Toni medi');
+    expect(midtones).toHaveValue('1');
+    fireEvent.change(midtones, { target: { value: '1.2' } });
+    expect(screen.getByText('+20%')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Salva' }));
+    expect(await screen.findByText(/Salvato\. Premi «Stampa pagina test»/)).toBeInTheDocument();
+    const put = mock.calls.find((c) => c.method === 'PUT' && c.url === url);
+    expect(JSON.parse(put!.body!)).toEqual({ brightness: 1, contrast: 1, gamma: 1.2, saturation: 1 });
+
+    // Back to neutral in one press, saved the same way.
+    await user.click(screen.getByRole('button', { name: 'Valori neutri' }));
+    expect(screen.getByLabelText('Toni medi')).toHaveValue('1');
   });
 
   it('says when the printer cuts strips itself', async () => {

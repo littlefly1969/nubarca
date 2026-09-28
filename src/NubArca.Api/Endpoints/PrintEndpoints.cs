@@ -49,6 +49,19 @@ public static class PrintEndpoints
             HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
             await service.RevokeAsync(context.GetCurrentUserId()!.Value, stationId, ct)
                 ? Results.NoContent() : Results.NotFound()).WithName("RevokePrintStation");
+        owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/calibration", async (Guid stationId,
+            Guid deviceId, [FromBody] PrintCalibrationDto? request, HttpContext context,
+            [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest(new { error = "invalid_calibration" });
+            try
+            {
+                var device = await service.SetCalibrationAsync(context.GetCurrentUserId()!.Value,
+                    stationId, deviceId, request, ct);
+                return device is null ? Results.NotFound() : Results.Ok(device);
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }).WithName("SetPrinterCalibration");
         owner.MapPost("/stations/{stationId:guid}/test-jobs", async (Guid stationId,
             [FromBody] CreateTestPrintRequest request, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>

@@ -8678,3 +8678,10 @@ video.lightbox-image {
 .print-station-card dt { color: var(--muted); font-size: .75rem; }
 .print-station-card dd { margin: .2rem 0 0; overflow-wrap: anywhere; }
 .print-station-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.print-calibration { margin: 0 0 1rem; }
+.print-calibration-toggle { padding: .35rem .7rem; }
+.print-calibration-body { margin-top: .75rem; display: grid; gap: .6rem; max-width: 34rem; }
+.print-calibration-body p { margin: 0; }
+.print-calibration-row { display: grid; grid-template-columns: 8rem 1fr 3.5rem; align-items: center; gap: .6rem; }
+.print-calibration-row output { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) { .print-calibration-row { grid-template-columns: 1fr 3.5rem; } .print-calibration-row label { grid-column: 1 / -1; } }

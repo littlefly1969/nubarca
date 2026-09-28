@@ -357,6 +357,31 @@ Not verified until one dated record covers, on the RX1HS over USB:
 | 10 | New place, no known network | setup network after the grace period |
 | 11 | Wrong password | setup network back, page says it failed, box still configurable |
 
+## Colour adjustment per printer
+
+Every printer and driver has its own tone response: the same sheet can come out
+darker from a DS-RX1 on Gutenprint than from the same printer on Windows. Each
+printer in **Cloud functions → Print stations** therefore has **Adjust colours**:
+midtones, brightness, contrast and saturation, each a gentle factor around
+neutral (midtones 0.6–1.6, brightness and contrast 0.7–1.3, saturation
+0.5–1.5; the server refuses anything outside).
+
+The server applies it to the **whole sheet** it renders for that printer —
+guest photos, strips and the test page — before the artifact is stored, so it
+works the same on every adapter and no agent or driver setting is involved.
+It compensates the printer, not the picture: the guest's preview does not
+change, and a job already queued keeps the sheet it was rendered with.
+*Midtones* is usually the right first control for prints that are too dark or
+too light: it moves faces and shadows while black and white stay where they
+are.
+
+**Print test page** shows the result: under its text it carries an 11-step grey
+wedge from black to white and eight colour and skin patches, rendered with the
+printer's adjustment. Adjust, save, print the test page, compare.
+
+Leave the driver's own tone options (for example Gutenprint's `StpGamma`) at
+their defaults, or the two corrections add up.
+
 ## The simulator takes time, on purpose
 
 `FakeSheetSeconds` (default **10**) is how long the fake printer spends

@@ -171,6 +171,11 @@
       "automated": true,
       "previousApplicationCompatible": true,
       "reason": "Purely additive: it creates four new tables — album_share_links, album_share_guests, album_share_challenges and album_share_devices — with their own indexes, check constraints and foreign keys. It creates no column on an existing table, alters no existing column, drops nothing, changes no existing constraint and backfills nothing, so no existing table is rewritten and no lock is held on one beyond its catalogue entry. Every foreign key points FROM a new table TO an existing one (albums) and cascades in that direction, so deleting an album is unaffected in shape and no existing delete path acquires a new restriction. The previously pinned application neither reads nor writes any of the four, and nothing it does depends on their absence, so rolling the image back leaves it running correctly against the upgraded schema — which is what makes the guided path's smoke-failure rollback safe here."
+    },
+    "20260928225817_AddPrinterCalibration": {
+      "automated": true,
+      "previousApplicationCompatible": true,
+      "reason": "Adds four non-null double columns to printer_devices (CalibrationBrightness, CalibrationContrast, CalibrationGamma, CalibrationSaturation), each with a database default of 1.0, so every existing row becomes neutral and a row the previous application inserts without naming them is neutral too. Nothing is dropped, altered, backfilled or constrained beyond the defaults. The previously pinned application neither reads nor writes these columns, so rolling the image back leaves it printing exactly as before against the upgraded schema."
     }
   }
 }

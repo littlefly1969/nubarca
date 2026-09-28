@@ -61,7 +61,9 @@ public sealed record PartyPrintComposition(
     /// scissors where to go would then sit exactly under the blade, and a cut a
     /// fraction of a millimetre off leaves one of them on a strip's edge.
     /// </summary>
-    bool CutByPrinter = false);
+    bool CutByPrinter = false,
+    /// <summary>The printer's tone compensation, applied to the whole sheet. Null is neutral.</summary>
+    PrintCalibration? Calibration = null);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -71,7 +73,9 @@ public sealed record PartyPrintComposition(
 /// the guest composed is what comes out of the printer.
 ///
 /// Two rules the output must keep. Photographs are never filtered — a theme
-/// decides the paper around a picture, never the picture. And the sheet carries
+/// decides the paper around a picture, never the picture; the one adjustment
+/// that touches it is the PRINTER's calibration, which compensates that device
+/// on the whole sheet so it prints what was composed. And the sheet carries
 /// no metadata: the JPEG is written without the EXIF, GPS and camera data the
 /// sources came with, because a print handed to a stranger should not carry
 /// where it was taken.
@@ -105,6 +109,10 @@ public sealed class PartyPrintComposer
         using var sheet = composition.Product == Domain.Print.PartyPrintProducts.Strip4
             ? RenderStrip(composition)
             : RenderPhoto(composition);
+
+        // The printer's compensation, not a filter: the whole sheet, paper and
+        // photographs, so that this printer's output matches what was composed.
+        (composition.Calibration ?? PrintCalibration.Neutral).ApplyTo(sheet);
 
         // Strip everything the sources carried: a printed keepsake must not
         // travel with the GPS coordinates of where it was taken.
