@@ -21,9 +21,12 @@ originating repository and is deliberately not reproduced here.
   is used by itself.
 - **The setup page shows only what you need** — network, printer, CUPS, whether
   NubArca is reachable, the networks in range, one form — and never a password.
-- One installer script prepares a minimal Debian machine. The agent does not run
-  as root: it may manage Wi-Fi through NetworkManager and nothing else.
-- Print Agent `0.3.0`. The Windows service and the simulator are unchanged; the
+- **One command sets it up**, on Ubuntu Server 24.04 LTS or later (or Debian 12
+  or later): it finds the DNP on USB and creates its photo and strip queues
+  itself, hands the network to NetworkManager, and asks only for the setup
+  Wi-Fi password and the enrollment token. The agent does not run as root: it
+  may manage Wi-Fi through NetworkManager and nothing else.
+- Print Agent `0.3.1`. The Windows service and the simulator are unchanged; the
   bundles are larger because they now carry the web runtime the Print Box page
   uses.
 

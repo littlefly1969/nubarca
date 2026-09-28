@@ -6,6 +6,12 @@ using NubArca.PrintAgent.Execution;
 using NubArca.PrintAgent.Journal;
 using NubArca.PrintAgent.Security;
 
+// Run by the Print Box installer, as root, before this box has a configuration.
+if (args.FirstOrDefault()?.Equals("setup-cups", StringComparison.OrdinalIgnoreCase) == true)
+{
+    return await SetupCupsAsync(args.Skip(1).ToArray());
+}
+
 var builder = Host.CreateApplicationBuilder(args);
 PrintAgentConfiguration.AddInstanceFile(builder.Configuration, args);
 var options = builder.Configuration.GetSection(PrintAgentOptions.SectionName).Get<PrintAgentOptions>()
@@ -67,6 +73,34 @@ builder.Services.AddSingleton<AgentExecutionCoordinator>();
 builder.Services.AddHostedService<PrintAgentWorker>();
 await builder.Build().RunAsync();
 return 0;
+
+static async Task<int> SetupCupsAsync(string[] args)
+{
+    string Value(string name, string fallback)
+    {
+        var index = Array.FindIndex(args, x => string.Equals(x, name, StringComparison.OrdinalIgnoreCase));
+        return index >= 0 && index + 1 < args.Length ? args[index + 1] : fallback;
+    }
+    if (!OperatingSystem.IsLinux())
+    {
+        Console.Error.WriteLine("setup-cups requires Linux.");
+        return 2;
+    }
+    var photo = Value("--printer", "NubArca-RX1HS");
+    var strip = Value("--strip-printer", "NubArca-RX1HS-STRIP");
+    var name = new System.Text.RegularExpressions.Regex("^[A-Za-z0-9_.-]{1,127}$");
+    if (!name.IsMatch(photo) || !name.IsMatch(strip) || string.Equals(photo, strip, StringComparison.OrdinalIgnoreCase))
+    {
+        Console.Error.WriteLine("Usage: NubArca.PrintAgent setup-cups [--printer <queue>] [--strip-printer <queue>]");
+        return 2;
+    }
+    var result = await new CupsQueueSetup(new ProcessRunner()).RunAsync(photo, strip, CancellationToken.None);
+    if (result.DeviceUri is not null) Console.WriteLine($"Printer: {result.DeviceUri}");
+    if (result.Driver is not null) Console.WriteLine($"Driver:  {result.Driver}");
+    Console.WriteLine(result.Message);
+    // 0 both queues, 10 photos only (no cut size), 3 no printer, 4 anything else.
+    return result.StripQueue ? 0 : result.PhotoQueue ? 10 : result.PrinterFound ? 4 : 3;
+}
 
 static async Task<int> EnrollAsync(string[] args, PrintAgentOptions options)
 {

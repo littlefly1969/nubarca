@@ -204,44 +204,61 @@ power on ──> Ethernet or a known Wi-Fi within 30 s? ──yes──> print
 
 ### Requirements
 
-- Debian 12 or later, minimal, x86-64 (`linux-arm64` is a later target; nothing
-  here is Intel-specific). No desktop.
+- **Ubuntu Server 24.04 LTS or later** (recommended; 26.04 LTS works) or
+  **Debian 12 or later**, minimal, x86-64 (`linux-arm64` is a later target;
+  nothing here is Intel-specific). No desktop. The installer refuses anything
+  older: it needs polkit's JavaScript rules.
 - A Wi-Fi adapter that supports access-point mode (`iw list`, *Supported
   interface modes*, lists `AP`). One adapter is enough.
-- Ethernet or another working network while installing: enrollment needs the
-  server.
-- Interfaces must be managed by NetworkManager. Debian's installer usually
-  configures the first one in `/etc/network/interfaces`, which NetworkManager
-  then leaves alone; the installer warns about it. Move that configuration to
-  NetworkManager from the machine's console, not over the connection being
-  moved.
+- Ethernet while installing: packages and enrollment need the network.
+- The DNP plugged in over USB and switched on, so its queues can be created.
 
 ### Install
 
-1. In **Cloud functions → Print stations** create a station and keep its id.
-2. Extract the `linux-x64` bundle to `/opt/nubarca-print-agent`.
-3. Create the two CUPS queues (next section). They can also be created after
-   installing; the installer only warns while they are missing.
-4. Run, as root:
+Three commands and two answers; nothing else is done by hand.
+
+1. In **Cloud functions → Print stations** create a **new** station and keep
+   its id and one-shot token on screen (the token lasts 10 minutes).
+2. Copy the `linux-x64` bundle to the box and extract it (Ubuntu Server has
+   Python; no extra package needed):
+
+   ```bash
+   sudo python3 -m zipfile -e nubarca-print-agent-<version>-linux-x64.zip /opt/nubarca-print-agent
+   ```
+
+3. Run, as root:
 
    ```bash
    sudo bash /opt/nubarca-print-agent/linux/install-print-box.sh \
      --server https://your-nubarca-origin.example \
-     --station 00000000-0000-0000-0000-000000000000 \
-     --printer NubArca-RX1HS --strip-printer NubArca-RX1HS-STRIP \
-     --hostname nubarca-print
+     --station 00000000-0000-0000-0000-000000000000
    ```
 
-   It installs `cups`, `printer-driver-gutenprint`, `network-manager`,
-   `dnsmasq-base`, `avahi-daemon`, `polkitd`, ICU and CA certificates; asks
-   silently for the **setup Wi-Fi password** (8–63 characters) and the one-shot
-   **enrollment token**; and installs `nubarca-print-agent@box` under its own
-   account `nubarca-print-box`. It is idempotent: run it again to change the
-   queues or the setup password; the station is enrolled only once
+   It answers two questions silently — the **setup Wi-Fi password** (8–63
+   characters) and the **enrollment token** — and then, by itself:
+
+   - installs `cups`, `printer-driver-gutenprint`, `network-manager`,
+     `dnsmasq-base`, `avahi-daemon`, `polkitd`, `iw`, ICU and CA certificates;
+   - finds the DNP on USB and creates both print queues (next section);
+   - names the machine `nubarca-print` (`--hostname`, `--keep-hostname`);
+   - installs `nubarca-print-agent@box` under its own account
+     `nubarca-print-box`, with the polkit rule below;
+   - on Ubuntu Server, hands every network interface from systemd-networkd to
+     NetworkManager — one netplan file, `99-nubarca-network-manager.yaml`,
+     keeping each interface's DHCP or static settings — as the very last step,
+     ten seconds after it finishes. An SSH session may pause or drop then;
+     reconnect to the same address.
+
+   It is idempotent: run the same command again after plugging the printer in,
+   or to change the setup password; the station is enrolled only once
    (`--reenroll` replaces the credential on purpose). `--open-setup-network`
    leaves the setup Wi-Fi open — for a first test only, and logged as a
    warning. `--no-network-provisioning` is for a box that only ever uses a wired
-   or already-configured network.
+   or already-configured network, and leaves its network configuration alone.
+
+   On Debian, an interface configured in `/etc/network/interfaces` stays with
+   ifupdown and NetworkManager cannot use it; the installer warns. Ubuntu Server
+   has no such file.
 
 The agent does **not** run as root. The installer grants its account exactly the
 NetworkManager actions it needs through a polkit rule
@@ -252,34 +269,32 @@ Printing needs no privilege at all: any local account may submit to CUPS.
 ### The two CUPS queues
 
 Both point at the same printer and the same 4×6 media; they differ only in the
-cut. NubArca never names a Gutenprint option: the queues carry their settings,
-and the agent only chooses one.
+cut. The installer creates them with `NubArca.PrintAgent setup-cups`; at run
+time the agent only chooses a queue, the queues carry their settings.
 
 | Queue | Media | 2-inch cut | Receives |
 |---|---|---|---|
 | `NubArca-RX1HS` | 4×6 / 10×15 | **off** | photos (`10x15`) |
 | `NubArca-RX1HS-STRIP` | 4×6 / 10×15 | **on** | party strips (`2x6x2`) |
 
-```bash
-lpinfo -v | grep -i dnp                   # the printer's USB device URI
-lpinfo -m | grep -i -E 'rx1|dnp'          # the Gutenprint model for it
-sudo lpadmin -p NubArca-RX1HS -E -v '<uri>' -m '<model>'
-sudo lpadmin -p NubArca-RX1HS-STRIP -E -v '<uri>' -m '<model>'
-lpoptions -p NubArca-RX1HS-STRIP -l       # find the 4x6 page size and the cut
-```
+`setup-cups` takes the printer's **Gutenprint dye-sub** device
+(`gutenprint53+usb://dnp-dsrx1/…`, plain `usb://` only as a last resort) and
+Gutenprint's DS-RX1 driver (the *expert* PPD, which lists every page size),
+and gives the photo queue Gutenprint's `w288h432` (4×6) and the strip queue
+its `w288h432-div2` — Gutenprint's "2x6*2": the same 4×6 sheet, cut in two by
+the printer ([Gutenprint discussion](https://sourceforge.net/p/gimp-print/discussion/4358/thread/936fafa9/)).
+Both queues **retry** a job while the printer is unplugged instead of stopping
+— a stopped queue would wait for an operator the box does not have — and
+neither is shared on the network.
 
-How Gutenprint spells the 2-inch cut depends on its version — a page size such
-as "4x6 (2x6 ×2)" or a separate cutter option. Set the plain 4×6 size on the
-photo queue and the cut variant on the strip queue with
-`sudo lpadmin -p <queue> -o <Option>=<Value>`, using exactly the names
-`lpoptions -l` shows. Check each queue by hand before involving NubArca:
-`lp -d NubArca-RX1HS -o fit-to-page photo.jpg` must print one uncut sheet, the
-same on `NubArca-RX1HS-STRIP` two strips.
+It only chooses sizes the installed driver actually lists. If the cut size is
+missing, the strip queue is removed rather than left printing strips uncut, and
+the box prints strips as one sheet with cut ticks, like any printer that cannot
+cut. `--no-cups-setup` leaves existing queues untouched; `--printer` and
+`--strip-printer` change the names (letters, digits, dot, dash, underscore).
 
-Queue names are letters, digits, dot, dash and underscore. Without
-`--strip-printer`, or while the strip queue is missing from CUPS, the box
-simply does not offer `2x6x2`: strips are then printed as one sheet with cut
-ticks, like on any printer that cannot cut.
+To check a queue by hand: `lp -d NubArca-RX1HS -o fit-to-page photo.jpg` prints
+one uncut sheet, the same on `NubArca-RX1HS-STRIP` two strips.
 
 ### Wi-Fi setup from a phone
 
@@ -377,7 +392,7 @@ guarantee.
 | `fake` | one deterministic virtual printer | yes | waits `FakeSheetSeconds`, then copies the artifact to a bounded local test directory | automated |
 | `windows-spooler` | installed Windows queues, optionally restricted by exact printer name | derived from driver paper sizes near 4×6 inches | silent `PrintDocument` through the installed driver | contract/build only |
 | DNP DS620 via Windows spooler | queue name and driver supplied by the operator | requires the installed driver to expose 4×6 / 10×15 media | same generic spooler path | **manual hardware acceptance pending** |
-| `cups` (Linux Print Box) | `lpstat -l -p`; only `PrinterName`, the strip queue folded into it | the configured queue exists in CUPS; `2x6x2` while the strip queue exists too | `lp -d <queue> -t NubArca-<job> -o fit-to-page <artifact>` | fake-runner contract; **hardware acceptance pending** |
+| `cups` (Linux Print Box) | `lpstat -l -p`; only `PrinterName`, the strip queue folded into it; queues created by `setup-cups` | the configured queue exists in CUPS; `2x6x2` while the strip queue exists too | `lp -d <queue> -t NubArca-<job> -o fit-to-page <artifact>` | fake-runner contract; **hardware acceptance pending** |
 
 The DS620 path has no vendor SDK assumption. Install the DNP Windows driver,
 configure the intended 10×15 media and run **Stampa pagina test**. Acceptance
