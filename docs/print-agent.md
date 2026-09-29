@@ -117,7 +117,7 @@ Two job kinds distinguish the compositions:
 
 | Kind | Sheet | What comes out |
 |---|---|---|
-| `party-photo` | 10×15, following the photograph's own orientation | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support in the last fifth only) and the NubArca symbol, light or dark, chosen separately |
+| `party-photo` | 10×15, following the photograph's own orientation | one framed photograph with the party footer — or, in the *On the photo* look, the untouched photograph to the edges with the party's name, host's line and number on it in white, black or red (over a faint support that starts just above the words) and the NubArca symbol, light or dark, chosen separately |
 | `party-strip4` | 10×15 portrait | **eight** different photographs, printed as **two strips of four** side by side, with cut ticks at the ends of the gutter — or, on a printer that reports `2x6x2`, without ticks and cut in two by the printer |
 
 Both are one sheet of the same paper: the strip is a composition, not a second

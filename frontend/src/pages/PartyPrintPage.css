@@ -480,7 +480,8 @@
 /* Title on the photograph: a full-bleed picture left exactly as it is, the
    symbol top-left in its own colour (the approved flat mark, one solid colour,
    drawn from its alpha as the renderer does), and the words bottom-left over
-   a faint support across the last fifth only — the renderer's, value for value. */
+   a faint support that is their own box — from just above them to the foot —
+   the renderer's, value for value. */
 .party-print-sheet-overlay { container-type: inline-size; }
 .party-print-overlay-support { position: absolute; inset-inline: 0; bottom: 0; pointer-events: none; }
 .party-print-overlay-symbol {
@@ -489,15 +490,39 @@
   mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
 }
 .party-print-overlay-text {
-  position: absolute;
   display: flex;
   flex-direction: column;
-  gap: 0.35em;
+  /* The renderer's gap between the name and the line under it. */
+  gap: calc(var(--line-size) * 0.45);
   min-width: 0;
-  /* The renderer's soft halo round the letters: blurred, faint, no badge. */
-  text-shadow: 0 0 0.35em var(--halo), 0 0 0.12em var(--halo);
+  /* The renderer's halo, exactly: the letters blurred by its sigma (a CSS
+     blur radius is two), at its opacity. Faint, round the letters, no badge. */
+  text-shadow: 0 0 var(--halo-blur) var(--halo);
+}
+/* The bottom line: the host's line (or the name alone), and the number's room
+   at the right, the renderer's gap between them. */
+.party-print-overlay-bottom {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  column-gap: calc(var(--line-size) * 1.2);
+  min-width: 0;
+}
+/* The widest number a party reaches, set as the number is set, and invisible:
+   it only keeps its room, so a long line shortens here as it will on paper. */
+.party-print-overlay-bottom::after {
+  content: attr(data-number-room);
+  flex: none;
+  visibility: hidden;
+  font-family: var(--font-heading);
+  font-size: var(--number-size);
+  font-weight: 700;
+  line-height: 0.72;
+  white-space: nowrap;
 }
 .party-print-overlay-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-family: var(--font-heading);
   font-size: var(--title-size);
@@ -507,18 +532,19 @@
   text-overflow: ellipsis;
 }
 .party-print-overlay-line {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   font-size: var(--line-size);
-  opacity: 0.85;
+  /* The renderer's Exo 2 Medium. */
+  font-weight: 500;
+  /* A line box as tall as the type, like the renderer's measured one; the
+     clip reaches below it so no descender is cut. */
+  line-height: 1;
+  padding-block-end: 0.25em;
+  margin-block-end: -0.25em;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-/* The guest's number is only known once the print is sent, so the preview
-   shows none — but its bottom line keeps the room the renderer reserves for it
-   (about a two-digit number, plus the gap), so a long line shortens here where
-   it will shorten on paper. */
-.party-print-overlay-text > :last-child {
-  padding-inline-end: calc(var(--number-size) * 2 + var(--line-size) * 1.2);
 }
 
 /* The wordmark is placed and scaled, never redrawn: no filter, no recolour,

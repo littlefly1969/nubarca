@@ -78,10 +78,43 @@ export const OVERLAY_TITLE_FRACTION = 0.085;
 export const OVERLAY_LINE_FRACTION = 0.036;
 /** Type size of the guest's number, a touch above the host's line. */
 export const OVERLAY_NUMBER_FRACTION = 0.044;
-/** Where the words' legibility support begins: the last fifth of the sheet. */
-export const OVERLAY_TEXT_SUPPORT_START_FRACTION = 0.8;
+/**
+ * How far above the words their support begins, short-edge fraction: it starts
+ * just over the real block of text and runs to the foot, as tall as the words.
+ */
+export const OVERLAY_TEXT_SUPPORT_PADDING_FRACTION = 0.025;
 /** Its strongest point, at the foot: a whisper, never a tint. */
 export const OVERLAY_TEXT_SUPPORT_MAX_OPACITY = 0.22;
+/**
+ * The halo round the letters: a Gaussian of this sigma (short-edge fraction)
+ * at this opacity. A CSS text-shadow's blur radius is two sigmas.
+ */
+export const OVERLAY_HALO_BLUR_FRACTION = 0.006;
+export const OVERLAY_HALO_OPACITY = 0.33;
+/**
+ * The room the preview keeps for the guest's number, which only exists once
+ * the print is sent. Numbering runs per party across both products, each
+ * budget capped at 500 (`PartyPrintProfile.MaxBudget`), so the highest number
+ * a party reaches is #1000: four digits, and four nines are the widest four
+ * digits there are. Kept, never shown.
+ */
+export const OVERLAY_NUMBER_ROOM = '#9999';
+
+// --- Words on any sheet -----------------------------------------------------
+
+/** The longest party name a sheet prints, and the longest host's line. */
+export const PARTY_NAME_MAX_LENGTH = 42;
+export const FOOTER_MAX_LENGTH = 60;
+
+/**
+ * A line as the renderer prints it (its `Truncate`): line breaks become
+ * spaces, the ends are trimmed, and a longer line is cut to `max` characters,
+ * the last one an ellipsis.
+ */
+export function printedLine(value: string, max: number): string {
+  const flat = value.replace(/[\r\n]/g, ' ').trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
 
 /** A title-on-the-photograph crop fills the whole sheet. */
 export function overlaySlotAspect(portrait: boolean): number {
@@ -89,8 +122,9 @@ export function overlaySlotAspect(portrait: boolean): number {
 }
 
 /**
- * The support under the words, as the renderer draws it over the last fifth:
- * transparent at its top, `OVERLAY_TEXT_SUPPORT_MAX_OPACITY` of `rgb` at the foot.
+ * The support under the words, as the renderer draws it from just above them
+ * to the foot: transparent at its top, `OVERLAY_TEXT_SUPPORT_MAX_OPACITY` of
+ * `rgb` at the foot.
  */
 export function overlayTextSupport(rgb: string): string {
   const strongest = Number((OVERLAY_TEXT_SUPPORT_MAX_OPACITY * 100).toFixed(3));

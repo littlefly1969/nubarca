@@ -272,17 +272,20 @@ public sealed class PartyPrintComposer
         // Dark words get a whisper of white under them; light and red words, of black.
         var support = overlay.Text == PartyPrintOverlayText.Black ? CloudWhite : Ink;
 
+        // The words are laid out first: their support is drawn behind them, as
+        // tall as they turned out to be.
+        var layout = LayoutOverlayText(composition, w, h);
         var sheet = new Image<Rgba32>(w, h);
         DrawFramed(sheet, source, photo, new Rectangle(0, 0, w, h), composition.Theme,
             Palette(PartyPrintTheme.Pure));
-        DrawOverlayTextSupport(sheet, support);
+        DrawOverlayTextSupport(sheet, OverlayTextSupportTop(layout, w, h), support);
 
         var shortEdge = Math.Min(w, h);
         var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
         DrawSymbol(sheet, overlay.Logo == PartyPrintOverlayLogo.Dark ? Ink : CloudWhite,
             new Point(margin, margin),
             (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge));
-        DrawOverlayText(sheet, LayoutOverlayText(composition, w, h), ink, support);
+        DrawOverlayText(sheet, layout, ink, support);
         return sheet;
     }
 
@@ -294,13 +297,26 @@ public sealed class PartyPrintComposer
     };
 
     /// <summary>
-    /// Transparent at the start of the last fifth, at most
+    /// Where the words' support begins: just above the highest of the name, the
+    /// host's line and the number, by
+    /// <see cref="PartyPrintGeometry.OverlayTextSupportPaddingFraction"/> of the
+    /// short edge.
+    /// </summary>
+    internal static float OverlayTextSupportTop(OverlayTextLayout layout, int w, int h)
+    {
+        var textTop = new[] { layout.Title, layout.Footer, layout.Number }
+            .Where(x => x is not null).Min(x => x!.Box.Top);
+        var padding = (float)(PartyPrintGeometry.OverlayTextSupportPaddingFraction * Math.Min(w, h));
+        return Math.Max(0f, textTop - padding);
+    }
+
+    /// <summary>
+    /// Transparent at <paramref name="top"/>, at most
     /// <see cref="PartyPrintGeometry.OverlayTextSupportMaxOpacity"/> of
     /// <paramref name="colour"/> at the foot, and nothing above it.
     /// </summary>
-    private static void DrawOverlayTextSupport(Image<Rgba32> sheet, Rgba32 colour)
+    private static void DrawOverlayTextSupport(Image<Rgba32> sheet, float top, Rgba32 colour)
     {
-        var top = (float)(PartyPrintGeometry.OverlayTextSupportStartFraction * sheet.Height);
         var strongest = (byte)Math.Round(PartyPrintGeometry.OverlayTextSupportMaxOpacity * 255);
         var brush = new LinearGradientBrush(
             new PointF(0, top), new PointF(0, sheet.Height), GradientRepetitionMode.None,
@@ -335,8 +351,28 @@ public sealed class PartyPrintComposer
     internal sealed record OverlayTextLayout(
         OverlayWord Title, OverlayWord? Footer, OverlayWord? Number);
 
-    /// <summary>One run of text, its font, its bottom-left origin and its measured box.</summary>
-    internal sealed record OverlayWord(string Text, Font Font, PointF Origin, RectangleF Box);
+    /// <summary>
+    /// One run of text: its font, the bottom origin it is drawn from (right
+    /// edge for a right-aligned run), and <paramref name="Box"/>, the ink it
+    /// actually puts on the paper — measured with the very options it is drawn
+    /// with, so a box that does not touch another is letters that do not touch.
+    /// </summary>
+    internal sealed record OverlayWord(string Text, Font Font, PointF Origin, bool AlignRight, RectangleF Box)
+    {
+        public RichTextOptions Options(float dy = 0) => new(Font)
+        {
+            Origin = new PointF(Origin.X, Origin.Y + dy),
+            HorizontalAlignment = AlignRight ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Bottom,
+        };
+
+        public static OverlayWord At(string text, Font font, PointF origin, bool alignRight)
+        {
+            var word = new OverlayWord(text, font, origin, alignRight, RectangleF.Empty);
+            var ink = TextMeasurer.MeasureBounds(text, word.Options());
+            return word with { Box = new RectangleF(ink.X, ink.Y, ink.Width, ink.Height) };
+        }
+    }
 
     /// <summary>
     /// The name bottom-left, the host's line under it, and the number
@@ -353,51 +389,52 @@ public sealed class PartyPrintComposer
         var gap = lineSize * 1.2f;
 
         OverlayWord? number = null;
+        var reserved = 0f;
         if (composition.PublicSequence > 0)
         {
             var font = _display.CreateFont((float)(PartyPrintGeometry.OverlayNumberFraction * shortEdge), FontStyle.Bold);
             var text = $"#{composition.PublicSequence}";
-            var size = TextMeasurer.MeasureSize(text, new TextOptions(font));
-            number = new OverlayWord(text, font, new PointF(w - margin, bottom),
-                new RectangleF(w - margin - size.Width, bottom - size.Height, size.Width, size.Height));
+            number = OverlayWord.At(text, font, new PointF(w - margin, bottom), alignRight: true);
+            reserved = TextMeasurer.MeasureSize(text, new TextOptions(font)).Width + gap;
         }
-        var reserved = number is null ? 0f : number.Box.Width + gap;
 
         OverlayWord? footer = null;
-        var footerText = Truncate(composition.FooterText ?? string.Empty, 60);
+        var footerText = Truncate(composition.FooterText ?? string.Empty, PartyPrintGeometry.FooterMaxLength);
         if (footerText.Length > 0)
         {
             var available = w - (2 * margin) - reserved;
             var (text, font) = FitLine(footerText, _ui, FontStyle.Regular, lineSize, lineSize * 0.75f, available);
-            var size = TextMeasurer.MeasureSize(text, new TextOptions(font));
-            footer = new OverlayWord(text, font, new PointF(margin, bottom),
-                new RectangleF(margin, bottom - size.Height, size.Width, size.Height));
+            footer = OverlayWord.At(text, font, new PointF(margin, bottom), alignRight: false);
         }
 
-        // The name takes the full width above the host's line — and above the
-        // number, which stands a touch taller — or the width the number leaves
-        // when it shares the bottom line.
+        // The name takes the full width above the host's line — clear of the
+        // tallest ink on that line, the number's included — or the width the
+        // number leaves when it shares the bottom line.
         var lineTop = Math.Min(footer?.Box.Top ?? bottom, number?.Box.Top ?? bottom);
         var nameBottom = footer is null ? bottom : lineTop - (lineSize * 0.45f);
         var nameAvailable = w - (2 * margin) - (footer is null ? reserved : 0f);
         var titleSize = (float)(PartyPrintGeometry.OverlayTitleFraction * shortEdge);
-        var (name, titleFont) = FitLine(Truncate(composition.PartyName, 42), _display, FontStyle.Bold,
+        var (name, titleFont) = FitLine(
+            Truncate(composition.PartyName, PartyPrintGeometry.PartyNameMaxLength), _display, FontStyle.Bold,
             titleSize, 12f, nameAvailable);
-        var nameMeasure = TextMeasurer.MeasureSize(name, new TextOptions(titleFont));
-        var title = new OverlayWord(name, titleFont, new PointF(margin, nameBottom),
-            new RectangleF(margin, nameBottom - nameMeasure.Height, nameMeasure.Width, nameMeasure.Height));
+        var title = OverlayWord.At(name, titleFont, new PointF(margin, nameBottom), alignRight: false);
         return new OverlayTextLayout(title, footer, number);
     }
 
-    /// <summary>Shrinks a line toward <paramref name="minSize"/>, then shortens it with an ellipsis, until it fits.</summary>
+    /// <summary>
+    /// Shrinks a line toward <paramref name="minSize"/>, then shortens it with
+    /// an ellipsis, until its INK — not just its advance — ends within
+    /// <paramref name="available"/> of where it starts.
+    /// </summary>
     private static (string Text, Font Font) FitLine(
         string text, FontFamily family, FontStyle style, float size, float minSize, float available)
     {
+        static float Reach(string value, Font font) => TextMeasurer.MeasureBounds(value, new TextOptions(font)).Right;
         var font = family.CreateFont(size, style);
-        var width = TextMeasurer.MeasureSize(text, new TextOptions(font)).Width;
+        var width = Reach(text, font);
         if (width <= available || width <= 0) return (text, font);
         font = family.CreateFont(Math.Max(minSize, size * available / width), style);
-        while (text.Length > 1 && TextMeasurer.MeasureSize(text, new TextOptions(font)).Width > available)
+        while (text.Length > 1 && Reach(text, font) > available)
             text = text[..^2].TrimEnd() + "…";
         return (text, font);
     }
@@ -412,27 +449,18 @@ public sealed class PartyPrintComposer
         var shortEdge = Math.Min(sheet.Width, sheet.Height);
         var pad = (int)Math.Ceiling(shortEdge * 0.03);
         var top = Math.Max(0, (int)words.Min(x => x.Box.Top) - pad);
-        using (var band = new Image<Rgba32>(sheet.Width, sheet.Height - top))
+        // The band is the halo colour throughout, transparent: only its alpha
+        // carries the letters, so blurring it cannot drag the colour anywhere.
+        using (var band = new Image<Rgba32>(sheet.Width, sheet.Height - top, new Rgba32(halo.R, halo.G, halo.B, 0)))
         {
-            var shadow = new Rgba32(halo.R, halo.G, halo.B, 0x8C);
-            foreach (var word in words) Draw(band, word, shadow, -top);
-            band.Mutate(x => x.GaussianBlur((float)(shortEdge * 0.006)));
-            sheet.Mutate(x => x.DrawImage(band, new Point(0, top), 0.6f));
+            foreach (var word in words) Draw(band, word, new Rgba32(halo.R, halo.G, halo.B, 255), -top);
+            band.Mutate(x => x.GaussianBlur((float)(shortEdge * PartyPrintGeometry.OverlayHaloBlurFraction)));
+            sheet.Mutate(x => x.DrawImage(band, new Point(0, top), (float)PartyPrintGeometry.OverlayHaloOpacity));
         }
         foreach (var word in words) Draw(sheet, word, ink, 0);
 
-        static void Draw(Image<Rgba32> target, OverlayWord word, Rgba32 colour, int dy)
-        {
-            var right = word.Origin.X > word.Box.X + 1;
-            target.Mutate(x => x.DrawText(
-                new RichTextOptions(word.Font)
-                {
-                    Origin = new PointF(word.Origin.X, word.Origin.Y + dy),
-                    HorizontalAlignment = right ? HorizontalAlignment.Right : HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                },
-                word.Text, colour));
-        }
+        static void Draw(Image<Rgba32> target, OverlayWord word, Rgba32 colour, int dy) =>
+            target.Mutate(x => x.DrawText(word.Options(dy), word.Text, colour));
     }
 
     // --- Shared drawing ----------------------------------------------------
@@ -490,7 +518,7 @@ public sealed class PartyPrintComposer
         // line, the wordmark — so the area is DIVIDED between them rather than
         // each being placed at its own fraction, which is how the footer and the
         // wordmark ended up drawn on top of each other.
-        var footer = Truncate(composition.FooterText ?? string.Empty, 60);
+        var footer = Truncate(composition.FooterText ?? string.Empty, PartyPrintGeometry.FooterMaxLength);
         var hasFooter = footer.Length > 0;
 
         var markBand = area.Height * 0.38f;
@@ -507,7 +535,7 @@ public sealed class PartyPrintComposer
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             },
-            Truncate(composition.PartyName, 42), palette.Foreground));
+            Truncate(composition.PartyName, PartyPrintGeometry.PartyNameMaxLength), palette.Foreground));
 
         if (hasFooter)
         {
