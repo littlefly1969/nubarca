@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { PartyPage } from './PartyPage';
@@ -658,6 +658,35 @@ describe('PartyPage (public party landing)', () => {
     expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
     expect(viewer.querySelector('video')).toBeNull();
     expect(screen.queryByRole('link', { name: /Scarica/i })).not.toBeInTheDocument();
+  });
+
+  it('moves through the gallery — photos and videos — with ‹ ›, arrows and swipe', async () => {
+    mockAlbum([media('f1'), media('f2', 'video'), media('f3')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    await user.click(screen.getAllByRole('button', { name: 'Apri foto' })[0]);
+    const shown = () => screen.getByTestId('party-image-viewer').querySelector('img')?.getAttribute('src');
+
+    // First of three: nothing before it.
+    expect(shown()).toBe('/api/party/tok-1/media/f1/preview');
+    expect(screen.getByRole('button', { name: 'Precedente' })).toBeDisabled();
+
+    // Next is the video, shown as its poster and named as a video.
+    await user.click(screen.getByRole('button', { name: 'Successivo' }));
+    expect(shown()).toBe('/api/party/tok-1/media/f2/preview');
+    expect(screen.getByRole('dialog', { name: 'Visualizzatore video' })).toBeInTheDocument();
+
+    // The arrow key, then the end of the gallery.
+    await user.keyboard('{ArrowRight}');
+    expect(shown()).toBe('/api/party/tok-1/media/f3/preview');
+    expect(screen.getByRole('button', { name: 'Successivo' })).toBeDisabled();
+
+    // A swipe to the right goes back.
+    const stage = screen.getByTestId('party-viewer-stage');
+    fireEvent.touchStart(stage, { touches: [{ clientX: 100, clientY: 200 }] });
+    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 220, clientY: 205 }] });
+    expect(shown()).toBe('/api/party/tok-1/media/f2/preview');
   });
 
   it('returns focus to the tile the viewer was opened from', async () => {

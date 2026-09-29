@@ -32,9 +32,17 @@ export interface PartyImageViewerProps {
    */
   downloadUrl?: string | null;
   onClose(): void;
+  /**
+   * The gallery's neighbours, when there are any: the same ‹ › buttons, arrow
+   * keys and swipe as the app's MediaViewer. A content poster passes none.
+   */
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
-export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImageViewerProps) {
+export function PartyImageViewer({
+  src, label, downloadUrl, onClose, onPrevious, onNext,
+}: PartyImageViewerProps) {
   const { t } = useI18n();
   const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -58,9 +66,14 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
     return { x: clientX - (box.left + box.width / 2), y: clientY - (box.top + box.height / 2) };
   }, []);
 
-  // Escape closes, and the page behind does not scroll while this is up.
+  // Escape closes, arrows move through the gallery, and the page behind does
+  // not scroll while this is up.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      else if (e.key === 'ArrowLeft') onPrevious?.();
+      else if (e.key === 'ArrowRight') onNext?.();
+    };
     window.addEventListener('keydown', onKey);
     const body = document.body;
     const previousOverflow = body.style.overflow;
@@ -69,7 +82,23 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
       window.removeEventListener('keydown', onKey);
       body.style.overflow = previousOverflow;
     };
-  }, [onClose]);
+  }, [onClose, onPrevious, onNext]);
+
+  // Swipe left/right to navigate, as in MediaViewer — one finger, at fit. A
+  // finger on a zoomed photograph is panning it, and two are a pinch.
+  const swipeStartX = useRef<number | null>(null);
+  const onTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    swipeStartX.current = e.touches.length === 1 && !isZoomed(transform)
+      ? e.touches[0]?.clientX ?? null
+      : null;
+  }, [transform]);
+  const onTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    const start = swipeStartX.current;
+    swipeStartX.current = null;
+    if (start == null) return;
+    const dx = (e.changedTouches[0]?.clientX ?? start) - start;
+    if (Math.abs(dx) > 50) { if (dx > 0) onPrevious?.(); else onNext?.(); }
+  }, [onPrevious, onNext]);
 
   // `aria-modal` claims the rest of the page is inert, so Tab must not walk out
   // of the dialog into it. The surface holds at most two controls — close, and
@@ -229,6 +258,8 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
           onPointerCancel={onPointerCancel}
           onDoubleClick={(e) => onDoubleActivate(e.clientX, e.clientY)}
           onWheel={onWheel}
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
         >
           {/* The medium derivative, whole and uncropped. Never an original. */}
           <img
@@ -256,6 +287,16 @@ export function PartyImageViewer({ src, label, downloadUrl, onClose }: PartyImag
           )}
         </div>
       </div>
+      {(onPrevious || onNext) && (
+        <>
+          <button type="button" className="media-viewer-nav media-viewer-prev"
+            aria-label={t('mediaViewer.previous')} disabled={!onPrevious}
+            onClick={(e) => { e.stopPropagation(); onPrevious?.(); }}>‹</button>
+          <button type="button" className="media-viewer-nav media-viewer-next"
+            aria-label={t('mediaViewer.next')} disabled={!onNext}
+            onClick={(e) => { e.stopPropagation(); onNext?.(); }}>›</button>
+        </>
+      )}
     </div>
   );
 }
