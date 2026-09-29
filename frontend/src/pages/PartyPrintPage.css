@@ -346,6 +346,8 @@
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
+  /* A thumb's target, like every control on a guest's page. */
+  min-height: 2.75rem;
   padding: 0.4rem 0.75rem;
   border: 1px solid var(--party-hub-border);
   border-radius: 999px;
@@ -475,12 +477,12 @@
   max-width: 100%;
 }
 
-/* Title on the photograph: the invitation cover's scrim over a full-bleed
-   picture, the party's name bottom-left and the symbol top-left in one ink —
-   the approved flat mark in a solid colour, drawn from its alpha as the
-   renderer does. */
+/* Title on the photograph: a full-bleed picture left exactly as it is, the
+   symbol top-left in its own colour (the approved flat mark, one solid colour,
+   drawn from its alpha as the renderer does), and the words bottom-left over
+   a faint support across the last fifth only — the renderer's, value for value. */
 .party-print-sheet-overlay { container-type: inline-size; }
-.party-print-overlay-scrim { position: absolute; inset: 0; pointer-events: none; }
+.party-print-overlay-support { position: absolute; inset-inline: 0; bottom: 0; pointer-events: none; }
 .party-print-overlay-symbol {
   position: absolute;
   -webkit-mask: url('/brand/nubarca-mark-flat-on-dark-256.png') center / contain no-repeat;
@@ -492,6 +494,8 @@
   flex-direction: column;
   gap: 0.35em;
   min-width: 0;
+  /* The renderer's soft halo round the letters: blurred, faint, no badge. */
+  text-shadow: 0 0 0.35em var(--halo), 0 0 0.12em var(--halo);
 }
 .party-print-overlay-name {
   overflow: hidden;
@@ -508,6 +512,13 @@
   opacity: 0.85;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+/* The guest's number is only known once the print is sent, so the preview
+   shows none — but its bottom line keeps the room the renderer reserves for it
+   (about a two-digit number, plus the gap), so a long line shortens here where
+   it will shorten on paper. */
+.party-print-overlay-text > :last-child {
+  padding-inline-end: calc(var(--number-size) * 2 + var(--line-size) * 1.2);
 }
 
 /* The wordmark is placed and scaled, never redrawn: no filter, no recolour,
@@ -527,6 +538,99 @@
 
 .party-print-cut-top { inset-block-start: 0; }
 .party-print-cut-bottom { inset-block-end: 0; }
+
+/* "On the photo" options ---------------------------------------------------
+   Two independent groups under the preview, in the Print Studio's own pill
+   language: bordered, rounded, cyan when chosen — but as cards with a swatch,
+   the native radio kept for semantics and keyboard, not shown. Thumb-sized,
+   wrapping into rows on a phone, never scrolling sideways. */
+
+.party-print-overlay-options {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 0.8rem;
+}
+
+.party-print-choice {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.party-print-choice legend {
+  margin-bottom: 0.5rem;
+  padding: 0;
+  color: var(--party-hub-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.party-print-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(7.5rem, 100%), 1fr));
+  gap: 0.5rem;
+}
+
+.party-print-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  min-height: 3rem;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--party-hub-border);
+  border-radius: 999px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.party-print-option:has(input:checked) {
+  border-color: var(--brand-cyan-glow);
+  background: rgb(0 212 255 / 14%);
+}
+
+.party-print-option:has(input:focus-visible) {
+  outline: 2px solid var(--brand-cyan-glow);
+  outline-offset: 2px;
+}
+
+/* Kept in the accessibility tree and the tab order; the card is what is seen. */
+.party-print-option-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.party-print-swatch {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid rgb(245 247 251 / 45%);
+  border-radius: 50%;
+}
+
+/* The symbol in the chosen treatment, on a photograph-grey chip so both show. */
+.party-print-swatch-mark {
+  display: grid;
+  place-items: center;
+  border-radius: 0.35rem;
+  background: linear-gradient(135deg, #7a808c, #4a505c);
+}
+
+.party-print-swatch-mark > span {
+  width: 80%;
+  height: 80%;
+  -webkit-mask: url('/brand/nubarca-mark-flat-on-dark-64.png') center / contain no-repeat;
+  mask: url('/brand/nubarca-mark-flat-on-dark-64.png') center / contain no-repeat;
+}
 
 /* Sent ------------------------------------------------------------------- */
 

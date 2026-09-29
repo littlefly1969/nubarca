@@ -131,7 +131,9 @@ public static class PartyPrintEndpoints
                     body.Theme ?? "pure",
                     (body.Slots ?? []).Select(s => new PartyPrintSlotRequest(
                         s.ItemId, s.CropX, s.CropY, s.CropWidth, s.CropHeight)).ToList(),
-                    body.Orientation),
+                    body.Orientation,
+                    body.OverlayText,
+                    body.OverlayLogo),
                 key,
                 participantId,
                 cancellationToken);
@@ -276,7 +278,7 @@ public sealed record PartyPrintPhotoDto(Guid Id, string ThumbnailUrl, string Pre
 
 public sealed record PartyPrintSubmitBody(
     string? Product, string? Theme, List<PartyPrintSlotBody>? Slots,
-    string? Orientation = null);
+    string? Orientation = null, string? OverlayText = null, string? OverlayLogo = null);
 
 public sealed record PartyPrintSlotBody(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);

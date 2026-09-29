@@ -68,17 +68,27 @@ public static class PartyPrintGeometry
     /// <summary>Type size of the party's name, bottom-left, short-edge fraction.</summary>
     public const double OverlayTitleFraction = 0.085;
 
-    /// <summary>Type size of the host's line and of the guest's number.</summary>
+    /// <summary>Type size of the host's line under the name.</summary>
     public const double OverlayLineFraction = 0.036;
 
     /// <summary>
-    /// The party invitation's cover scrim, top to bottom, as pairs of
-    /// (position, opacity of the base colour): darker behind the symbol, light
-    /// over the middle of the picture, deep under the title, and the base
-    /// colour itself at the foot. PartyGuestHub.css draws the same stops.
+    /// Type size of the guest's number: a touch above the host's line, because
+    /// the number is what the desk reads to hand the right print over.
     /// </summary>
-    public static readonly double[] OverlayScrimStops =
-        [0, 0.58, 0.16, 0.26, 0.42, 0.46, 0.74, 0.86, 1, 1];
+    public const double OverlayNumberFraction = 0.044;
+
+    /// <summary>
+    /// Where the words' own legibility support begins, as a fraction of the
+    /// sheet's height: the last fifth, and nowhere else. The photograph above
+    /// it is untouched.
+    /// </summary>
+    public const double OverlayTextSupportStartFraction = 0.8;
+
+    /// <summary>
+    /// The support's strongest point, at the very foot of the sheet — a whisper
+    /// of black under light words or of white under dark ones, never a tint.
+    /// </summary>
+    public const double OverlayTextSupportMaxOpacity = 0.22;
 
     /// <summary>Aspect ratio of a title-on-the-photograph crop: the whole sheet.</summary>
     public static double OverlaySlotAspect(bool portrait) =>

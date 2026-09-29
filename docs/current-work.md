@@ -25,7 +25,11 @@ is built is described by `ARCHITECTURE.md`.
   numbering are one atomic update, and submission is idempotent by contract. To
   the Print Agent these are ordinary `10x15` jobs, except that a strip goes out
   as `2x6x2` when the printer reports it can cut the sheet in two (a DNP second
-  queue with *2inch cut*, `StripPrinterName`), and then carries no cut ticks
+  queue with *2inch cut*, `StripPrinterName`), and then carries no cut ticks.
+  A single photo also has the *On the photo* look: the untouched photograph
+  runs full bleed, with the words in white, black or red over a faint support
+  in the last fifth only. The flat symbol, light or dark, is chosen separately.
+  The number's measured width is reserved, so the host's line never meets it
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the

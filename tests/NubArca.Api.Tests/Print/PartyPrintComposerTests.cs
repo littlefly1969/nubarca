@@ -193,51 +193,315 @@ public sealed class PartyPrintComposerTests
             Assert.Equal(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
     }
 
-    [Theory]
-    [InlineData(PartyPrintTheme.OverlayWhite, true)]
-    [InlineData(PartyPrintTheme.OverlayBlack, false)]
-    public async Task The_Title_On_The_Photo_Runs_The_Picture_To_The_Edge_Under_The_Invitation_Scrim(
-        PartyPrintTheme theme, bool whiteInk)
+    // --- The title on the photo ---------------------------------------------
+
+    /// <summary>
+    /// A photograph the size of the sheet, stored losslessly, so the only thing
+    /// between it and the print is the renderer (and the JPEG it writes).
+    /// </summary>
+    private static byte[] SheetPhoto(string kind, bool portrait = true)
     {
-        // A mid-grey photograph, so the scrim's effect is readable pixel by pixel.
-        using var grey = new Image<Rgba32>(1000, 1500, new Rgba32(128, 128, 128));
-        using var ms = new MemoryStream();
-        await grey.SaveAsJpegAsync(ms);
-        var bytes = await new PartyPrintComposer().RenderAsync(new PartyPrintComposition(
-            PartyPrintProducts.Photo, theme, [new PartyPrintPhoto(ms.ToArray(), 0, 0, 1, 1)],
-            "Giulia & Matteo", "Una notte da ricordare", 12), default);
-        using var sheet = Image.Load<Rgba32>(bytes);
-
-        Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
-        Assert.Equal(PartyPrintGeometry.PortraitHeight, sheet.Height);
-
-        // No paper margin: an edge pixel is the photograph under the scrim, and
-        // the scrim pulls it toward the base colour — navy under white ink,
-        // white under black ink.
-        var edge = sheet[sheet.Width / 2, sheet.Height / 4];
-        if (whiteInk) Assert.True(edge.R < 128, $"white-ink scrim left {edge.R}");
-        else Assert.True(edge.R > 128, $"black-ink scrim left {edge.R}");
-
-        // The foot of the sheet IS the base colour, as at the foot of the invitation.
-        var foot = sheet[sheet.Width / 2, sheet.Height - 2];
-        if (whiteInk) Assert.True(foot.R < 30 && foot.B < 45, $"foot {foot}");
-        else Assert.True(foot.R > 225, $"foot {foot}");
-
-        // The symbol sits top-left in the ink: somewhere in its box a pixel is
-        // the ink, which the grey photograph and its scrim alone never are.
-        var margin = (int)(PartyPrintGeometry.OverlayMarginFraction * sheet.Width);
-        var size = (int)(PartyPrintGeometry.OverlaySymbolFraction * sheet.Width);
-        var inked = false;
-        for (var y = margin; y < margin + size && !inked; y += 3)
-            for (var x = margin; x < margin + size && !inked; x += 3)
+        var (w, h) = portrait
+            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
+            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        using var image = new Image<Rgba32>(w, h);
+        image.ProcessPixelRows(rows =>
+        {
+            for (var y = 0; y < rows.Height; y++)
             {
-                var p = sheet[x, y];
-                inked = whiteInk ? p.R > 235 && p.G > 235 : p.R < 20 && p.G < 25;
+                var row = rows.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    var (u, v) = ((double)x / w, (double)y / h);
+                    row[x] = kind switch
+                    {
+                        "grey" => new Rgba32(128, 128, 128),
+                        "light" => new Rgba32((byte)(225 + (25 * u)), (byte)(228 + (20 * v)), (byte)(232 + (15 * u))),
+                        "dark" => new Rgba32((byte)(12 + (30 * u)), (byte)(14 + (24 * v)), (byte)(20 + (26 * u))),
+                        // Every hue across, bright to deep down: a party's lights.
+                        _ => Hue(u, 0.35 + (0.6 * v)),
+                    };
+                }
             }
-        Assert.True(inked, "the NubArca symbol is not on the sheet");
+        });
+        using var ms = new MemoryStream();
+        image.SaveAsPng(ms);
+        return ms.ToArray();
 
-        await File.WriteAllBytesAsync(
-            Path.Combine(ArtifactDir(), $"photo-{theme.ToString().ToLowerInvariant()}.jpg"), bytes);
+        static Rgba32 Hue(double h, double value)
+        {
+            var sector = h * 6;
+            var f = sector - Math.Floor(sector);
+            (double R, double G, double B) c = ((int)sector % 6) switch
+            {
+                0 => (1, f, 0), 1 => (1 - f, 1, 0), 2 => (0, 1, f),
+                3 => (0, 1 - f, 1), 4 => (f, 0, 1), _ => (1, 0, 1 - f),
+            };
+            var (r, g, b) = c;
+            return new Rgba32((byte)(r * 255 * value), (byte)(g * 255 * value), (byte)(b * 255 * value));
+        }
+    }
+
+    private static PartyPrintComposition OnThePhoto(
+        byte[] photo, PartyPrintOverlayText text, PartyPrintOverlayLogo logo,
+        string? footer = "Una notte da ricordare", long number = 27,
+        string name = "Giulia & Matteo")
+        => new(PartyPrintProducts.Photo, PartyPrintTheme.Overlay,
+            [new PartyPrintPhoto(photo, 0, 0, 1, 1)], name, footer, number,
+            Overlay: new PartyPrintOverlay(text, logo));
+
+    private static Rectangle SymbolBox(Image<Rgba32> sheet)
+    {
+        var shortEdge = Math.Min(sheet.Width, sheet.Height);
+        var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
+        var size = (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge);
+        return new Rectangle(margin, margin, size, size);
+    }
+
+    private static int Distance(Rgba32 a, Rgba32 b) =>
+        Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B)));
+
+    /// <summary>Whether any pixel inside <paramref name="box"/> matches <paramref name="test"/>.</summary>
+    private static bool Any(Image<Rgba32> sheet, RectangleF box, Func<Rgba32, bool> test)
+    {
+        for (var y = (int)box.Top; y < (int)box.Bottom; y += 2)
+            for (var x = (int)box.Left; x < (int)box.Right; x += 2)
+                if (test(sheet[x, y])) return true;
+        return false;
+    }
+
+    private static bool IsWhite(Rgba32 p) => p.R > 225 && p.G > 225 && p.B > 225;
+    private static bool IsBlack(Rgba32 p) => p.R < 35 && p.G < 35 && p.B < 45;
+    private static bool IsRed(Rgba32 p) => p.R > 170 && p.G < 70 && p.B < 80;
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_Title_On_The_Photo_Leaves_The_Photograph_Itself_Untouched(bool portrait)
+    {
+        // The invitation's scrim once lay over the whole print, and at the foot
+        // it replaced the photograph with navy. Now, above the last fifth and
+        // outside the symbol and the words, the print IS the photograph — to the
+        // very edges, which is what full bleed means.
+        var source = SheetPhoto("colourful", portrait);
+        using var original = Image.Load<Rgba32>(source);
+        var composer = new PartyPrintComposer();
+        var composition = OnThePhoto(source, PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light);
+        using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(composition, default));
+        Assert.Equal((original.Width, original.Height), (sheet.Width, sheet.Height));
+
+        var symbol = SymbolBox(sheet);
+        var layout = composer.LayoutOverlayText(composition, sheet.Width, sheet.Height);
+        // The halo round the letters reaches a little past them.
+        var halo = (float)Math.Ceiling(Math.Min(sheet.Width, sheet.Height) * 0.03);
+        var words = new[] { layout.Title.Box, layout.Footer!.Box, layout.Number!.Box }
+            .Select(b => new RectangleF(b.X - halo, b.Y - halo, b.Width + (2 * halo), b.Height + (2 * halo)))
+            .ToList();
+        var supportTop = (int)(PartyPrintGeometry.OverlayTextSupportStartFraction * sheet.Height);
+
+        var worst = 0;
+        var compared = 0;
+        for (var y = 0; y < supportTop; y += 3)
+            for (var x = 0; x < sheet.Width; x += 3)
+            {
+                if (symbol.Contains(x, y) || words.Any(b => b.Contains(x, y))) continue;
+                worst = Math.Max(worst, Distance(sheet[x, y], original[x, y]));
+                compared++;
+            }
+        // Only the JPEG's own rounding: no tint, no fade, no scrim.
+        Assert.True(compared > 100_000);
+        Assert.True(worst <= 12, $"the photograph changed by {worst} above the words");
+
+        // The edges are the photograph's own, top and sides.
+        for (var x = 0; x < sheet.Width; x += 5)
+            Assert.True(Distance(sheet[x, 0], original[x, 0]) <= 12, $"top edge at {x}");
+        for (var y = 0; y < supportTop; y += 5)
+        {
+            Assert.True(Distance(sheet[0, y], original[0, y]) <= 12, $"left edge at {y}");
+            Assert.True(Distance(sheet[sheet.Width - 1, y], original[sheet.Width - 1, y]) <= 12, $"right edge at {y}");
+        }
+    }
+
+    [Theory]
+    [InlineData(PartyPrintOverlayText.White)]
+    [InlineData(PartyPrintOverlayText.Red)]
+    [InlineData(PartyPrintOverlayText.Black)]
+    public async Task The_Words_Support_Is_A_Whisper_In_The_Last_Fifth_Only(PartyPrintOverlayText text)
+    {
+        // A mid-grey photograph makes the support readable pixel by pixel. The
+        // column is inside the right margin, clear of the number and its halo.
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+            OnThePhoto(SheetPhoto("grey"), text, PartyPrintOverlayLogo.Light), default));
+        var x = sheet.Width - 4;
+        var start = PartyPrintGeometry.OverlayTextSupportStartFraction * sheet.Height;
+
+        // Nothing at all above the last fifth.
+        for (var y = 0; y < (int)start - 2; y += 4)
+            Assert.InRange(sheet[x, y].R, 125, 131);
+
+        // Toward the foot it leans — black under white or red words, white under
+        // black ones — never more than a quarter of the way, never solid.
+        var foot = sheet[x, sheet.Height - 1].R;
+        var strongest = PartyPrintGeometry.OverlayTextSupportMaxOpacity;
+        Assert.InRange(strongest, 0.15, 0.25);
+        if (text == PartyPrintOverlayText.Black)
+        {
+            var expected = 128 + ((245 - 128) * strongest);
+            Assert.InRange(foot, expected - 4, expected + 4);
+            Assert.True(foot < 128 + ((245 - 128) * 0.25) + 2, $"white support reached {foot}");
+        }
+        else
+        {
+            var expected = 128 - ((128 - 10) * strongest);
+            Assert.InRange(foot, expected - 4, expected + 4);
+            Assert.True(foot > 128 - ((128 - 10) * 0.25) - 2, $"dark support reached {foot}");
+        }
+
+        // It grows smoothly from nothing: halfway down it is about half.
+        var middle = sheet[x, (int)((start + sheet.Height) / 2)].R;
+        Assert.InRange(middle, Math.Min(128, (int)foot) - 1, Math.Max(128, (int)foot) + 1);
+    }
+
+    [Theory]
+    [InlineData(PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light)]
+    [InlineData(PartyPrintOverlayText.Black, PartyPrintOverlayLogo.Dark)]
+    [InlineData(PartyPrintOverlayText.Red, PartyPrintOverlayLogo.Light)]
+    [InlineData(PartyPrintOverlayText.Red, PartyPrintOverlayLogo.Dark)]
+    [InlineData(PartyPrintOverlayText.White, PartyPrintOverlayLogo.Dark)]
+    [InlineData(PartyPrintOverlayText.Black, PartyPrintOverlayLogo.Light)]
+    public async Task The_Words_And_The_Symbol_Take_Their_Own_Colours(
+        PartyPrintOverlayText text, PartyPrintOverlayLogo logo)
+    {
+        var composer = new PartyPrintComposer();
+        var composition = OnThePhoto(SheetPhoto("grey"), text, logo);
+        using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(composition, default));
+        var layout = composer.LayoutOverlayText(composition, sheet.Width, sheet.Height);
+
+        Func<Rgba32, bool> ink = text switch
+        {
+            PartyPrintOverlayText.Black => IsBlack,
+            PartyPrintOverlayText.Red => IsRed,
+            _ => IsWhite,
+        };
+        // Name, host's line and number are all in the words' colour.
+        Assert.True(Any(sheet, layout.Title.Box, ink), $"the name is not {text}");
+        Assert.True(Any(sheet, layout.Footer!.Box, ink), $"the host's line is not {text}");
+        Assert.True(Any(sheet, layout.Number!.Box, ink), $"the number is not {text}");
+
+        // The symbol keeps its own colour, whatever the words chose — and is
+        // never red: red is a colour for words on a photograph, not the brand's.
+        var symbol = SymbolBox(sheet);
+        Assert.True(Any(sheet, symbol, logo == PartyPrintOverlayLogo.Dark ? IsBlack : IsWhite),
+            $"the symbol is not {logo}");
+        Assert.False(Any(sheet, symbol, logo == PartyPrintOverlayLogo.Dark ? IsWhite : IsBlack),
+            "the symbol took the other colour");
+        Assert.False(Any(sheet, symbol, IsRed), "the symbol turned red");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void The_Number_Keeps_Its_Room_However_Long_The_Line(bool portrait)
+    {
+        // The host's line and the number share the bottom line. The number is
+        // measured and its room reserved first, so a long line shrinks and then
+        // shortens — it never runs under the number.
+        var composer = new PartyPrintComposer();
+        var (w, h) = portrait
+            ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
+            : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
+        var composition = OnThePhoto([], PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light,
+            footer: "Grazie a tutti di essere venuti, è stata una notte che ricorderemo",
+            number: 12345,
+            name: "Il matrimonio di Giulia Rossi e Matteo Bianchi, finalmente");
+        var layout = composer.LayoutOverlayText(composition, w, h);
+        var (title, footer, number) = (layout.Title, layout.Footer!, layout.Number!);
+
+        Assert.False(footer.Box.IntersectsWith(number.Box), "the host's line runs under the number");
+        Assert.False(title.Box.IntersectsWith(number.Box), "the name runs under the number");
+        Assert.False(title.Box.IntersectsWith(footer.Box), "the name sits on the host's line");
+        // A visible gap, not a touch.
+        var lineSize = PartyPrintGeometry.OverlayLineFraction * Math.Min(w, h);
+        Assert.True(number.Box.Left - footer.Box.Right >= lineSize, "the line touches the number");
+        // Everything inside the margins.
+        var margin = Math.Round(PartyPrintGeometry.OverlayMarginFraction * Math.Min(w, h));
+        foreach (var word in new[] { title, footer, number })
+        {
+            Assert.True(word.Box.Left >= margin - 1 && word.Box.Right <= w - margin + 1, word.Text);
+            Assert.True(word.Box.Bottom <= h - margin + 1, word.Text);
+        }
+        // The number is the one thing read at the collection table: it stands
+        // out from the host's line, and it is printed whole.
+        Assert.Equal("#12345", number.Text);
+        Assert.True(number.Font.Size > footer.Font.Size, "the number is no larger than the line");
+        Assert.EndsWith("…", footer.Text);
+    }
+
+    [Fact]
+    public void Without_A_Line_The_Name_Leaves_The_Number_Its_Room()
+    {
+        var composer = new PartyPrintComposer();
+        var composition = OnThePhoto([], PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light,
+            footer: null, number: 987,
+            name: "Il matrimonio di Giulia Rossi e Matteo Bianchi, finalmente");
+        var layout = composer.LayoutOverlayText(
+            composition, PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight);
+        Assert.Null(layout.Footer);
+        Assert.False(layout.Title.Box.IntersectsWith(layout.Number!.Box));
+        Assert.True(layout.Title.Box.Right < layout.Number.Box.Left);
+    }
+
+    [Theory]
+    [InlineData(PartyPrintTheme.Pure)]
+    [InlineData(PartyPrintTheme.Midnight)]
+    [InlineData(PartyPrintTheme.Event)]
+    public async Task A_Framed_Look_Is_Not_Touched_By_The_Overlay_Choices(PartyPrintTheme theme)
+    {
+        // The three framed looks draw exactly what they drew before: whatever
+        // the overlay's colours say, the sheet is the same, byte for byte.
+        var composer = new PartyPrintComposer();
+        var plain = await composer.RenderAsync(Composition(PartyPrintProducts.Photo, theme, 1), default);
+        var chosen = await composer.RenderAsync(Composition(PartyPrintProducts.Photo, theme, 1) with
+        {
+            Overlay = new PartyPrintOverlay(PartyPrintOverlayText.Red, PartyPrintOverlayLogo.Dark),
+        }, default);
+        Assert.Equal(plain, chosen);
+    }
+
+    [Fact]
+    public async Task Writes_The_Title_On_The_Photo_Artifacts_A_Person_Has_To_Look_At()
+    {
+        // Three photographs a party produces — a bright one, a dark one, a
+        // colourful one — under the three pairings worth judging side by side.
+        var composer = new PartyPrintComposer();
+        var dir = Path.Combine(ArtifactDir(), "on-the-photo");
+        Directory.CreateDirectory(dir);
+        var pairings = new[]
+        {
+            (PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light),
+            (PartyPrintOverlayText.Black, PartyPrintOverlayLogo.Dark),
+            (PartyPrintOverlayText.Red, PartyPrintOverlayLogo.Light),
+        };
+        var written = 0;
+        foreach (var kind in new[] { "light", "dark", "colourful" })
+            foreach (var (text, logo) in pairings)
+            {
+                var bytes = await composer.RenderAsync(OnThePhoto(SheetPhoto(kind), text, logo), default);
+                await File.WriteAllBytesAsync(Path.Combine(dir,
+                    $"{kind}-text-{text.ToString().ToLowerInvariant()}-logo-{logo.ToString().ToLowerInvariant()}.jpg"),
+                    bytes);
+                written++;
+            }
+        // And the tightest line: a long host's line against a five-digit number.
+        var tight = await composer.RenderAsync(OnThePhoto(SheetPhoto("colourful", portrait: false),
+            PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light,
+            footer: "Grazie a tutti di essere venuti, è stata una notte che ricorderemo",
+            number: 12345), default);
+        await File.WriteAllBytesAsync(Path.Combine(dir, "landscape-long-line.jpg"), tight);
+        written++;
+
+        Assert.Equal(10, written);
+        Assert.Equal(10, Directory.GetFiles(dir, "*.jpg").Length);
     }
 
     [Fact]
@@ -383,14 +647,16 @@ public sealed class PartyPrintComposerTests
     }
 
     [Fact]
-    public async Task Writes_The_Eight_Artifacts_A_Person_Has_To_Look_At()
+    public async Task Writes_The_Seven_Artifacts_A_Person_Has_To_Look_At()
     {
         // Tests can prove the geometry. Whether the print is beautiful is a
         // judgement, and these are what it is made on: every look of a photo,
         // and the three framed looks of a strip (the title on the photograph is
-        // a single-photograph look).
+        // a single-photograph look, with its own set under on-the-photo/).
         var composer = new PartyPrintComposer();
         var dir = ArtifactDir();
+        // A sheet left by an earlier run of an older renderer is not evidence.
+        foreach (var stale in Directory.GetFiles(dir, "*.jpg")) File.Delete(stale);
         foreach (var theme in Enum.GetValues<PartyPrintTheme>())
         {
             var photo = await composer.RenderAsync(
@@ -398,13 +664,13 @@ public sealed class PartyPrintComposerTests
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"photo-{theme.ToString().ToLowerInvariant()}.jpg"), photo);
 
-            if (theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack) continue;
+            if (theme is PartyPrintTheme.Overlay) continue;
             var strip = await composer.RenderAsync(
                 Composition(PartyPrintProducts.Strip4, theme, 8), default);
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"strip-{theme.ToString().ToLowerInvariant()}.jpg"), strip);
         }
 
-        Assert.Equal(8, Directory.GetFiles(dir, "*.jpg").Length);
+        Assert.Equal(7, Directory.GetFiles(dir, "*.jpg").Length);
     }
 }

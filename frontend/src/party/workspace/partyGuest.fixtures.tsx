@@ -350,3 +350,36 @@ it('game — a challenge is running', async () => {
   mount(`/party/${TOKEN}/game`, '/party/:token/game', <PartyGamePage />);
   await capture('game', 'party-game-page');
 });
+
+/* ── The print studio ─────────────────────────────────────────────────────── */
+
+// The preview of a single photograph with the title on it, where the look's
+// own choices — text colour and logo — sit between the style and the buttons.
+it('print studio — the title on the photo', async () => {
+  const { fireEvent } = await import('@testing-library/react');
+  const PRINT = 'print-token';
+  installFetchMock({
+    [`GET /api/party/${PRINT}/print`]: () => jsonResponse({
+      partyName: 'Il compleanno di Marta',
+      footerText: 'Grazie di essere qui, con tutto il cuore',
+      formats: [
+        { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
+        { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null },
+      ],
+      photos: Array.from({ length: 6 }, (_, i) => ({
+        id: `f${i + 1}`,
+        thumbnailUrl: `/api/party/${PRINT}/print/media/f${i + 1}/thumbnail`,
+        previewUrl: `/api/party/${PRINT}/print/media/f${i + 1}/preview`,
+      })),
+    }),
+  });
+  const { PartyPrintPage } = await import('../../pages/PartyPrintPage');
+  mount(`/party/${PRINT}/print`, '/party/:token/print', <PartyPrintPage />);
+  fireEvent.click(await screen.findByTestId('party-print-format-photo'));
+  fireEvent.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[0]);
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Rosso' }));
+  await capture('print-overlay', 'party-print-overlay-support');
+});

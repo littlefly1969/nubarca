@@ -755,8 +755,12 @@ export type PartyGuestContentKind = (typeof PARTY_GUEST_CONTENT_KINDS)[number];
 // --- Party print studio (anonymous, print-token scoped) ---
 
 export type PartyPrintProduct = 'photo' | 'strip4';
-/** The overlay looks put the party's name on a single photograph, in white or black. */
-export type PartyPrintTheme = 'pure' | 'midnight' | 'event' | 'overlay-white' | 'overlay-black';
+/** 'overlay' prints the party's name on a single photograph, which stays untouched. */
+export type PartyPrintTheme = 'pure' | 'midnight' | 'event' | 'overlay';
+/** The words of an 'overlay' print: name, host's line and number. */
+export type PartyPrintOverlayText = 'white' | 'black' | 'red';
+/** Its NubArca symbol, chosen independently of the words. */
+export type PartyPrintOverlayLogo = 'light' | 'dark';
 /** Absent means the sheet follows the photograph, which is the default. */
 export type PartyPrintOrientation = 'portrait' | 'landscape';
 
@@ -842,6 +846,9 @@ export function submitPartyPrint(
     theme: PartyPrintTheme;
     slots: PartyPrintSlot[];
     orientation?: PartyPrintOrientation;
+    /** Only with theme 'overlay'. */
+    overlayText?: PartyPrintOverlayText;
+    overlayLogo?: PartyPrintOverlayLogo;
   },
   idempotencyKey: string,
   signal?: AbortSignal,

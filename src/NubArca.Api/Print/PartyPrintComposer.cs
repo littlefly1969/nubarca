@@ -22,12 +22,23 @@ public enum PartyPrintTheme
     /// <summary>The party's own name given room, for a keepsake that says where it is from.</summary>
     Event,
     /// <summary>
-    /// A single photograph to the edges, the party's name and the NubArca symbol
-    /// on it in white, over the invitation's scrim fading into Midnight Navy.
+    /// A single photograph to the edges, untouched, with the NubArca symbol and
+    /// the party's name printed on it. Its colours are the composition's
+    /// <see cref="PartyPrintOverlay"/>, chosen independently.
     /// </summary>
-    OverlayWhite,
-    /// <summary>The same in black, over a scrim fading into Cloud White.</summary>
-    OverlayBlack,
+    Overlay,
+}
+
+/// <summary>The words on an "On the photo" print: name, host's line and number.</summary>
+public enum PartyPrintOverlayText { White, Black, Red }
+
+/// <summary>The NubArca symbol on an "On the photo" print, independent of the words.</summary>
+public enum PartyPrintOverlayLogo { Light, Dark }
+
+/// <summary>The two independent choices an "On the photo" print carries.</summary>
+public sealed record PartyPrintOverlay(PartyPrintOverlayText Text, PartyPrintOverlayLogo Logo)
+{
+    public static readonly PartyPrintOverlay Default = new(PartyPrintOverlayText.White, PartyPrintOverlayLogo.Light);
 }
 
 /// <summary>One photograph and how it is framed, already validated.</summary>
@@ -70,7 +81,9 @@ public sealed record PartyPrintComposition(
     /// </summary>
     bool CutByPrinter = false,
     /// <summary>The printer's tone compensation, applied to the whole sheet. Null is neutral.</summary>
-    PrintCalibration? Calibration = null);
+    PrintCalibration? Calibration = null,
+    /// <summary>Text and symbol colours of the "On the photo" look. Null is its default.</summary>
+    PartyPrintOverlay? Overlay = null);
 
 /// <summary>
 /// Draws the sheet that is actually printed.
@@ -94,6 +107,12 @@ public sealed class PartyPrintComposer
     private static readonly Rgba32 DeepBlue = new(0x0F, 0x1E, 0x3A);
     private static readonly Rgba32 CyanGlow = new(0x00, 0xD4, 0xFF);
     private static readonly Rgba32 Ink = new(0x0A, 0x0F, 0x1A);
+
+    /// <summary>
+    /// The red a guest may choose for the words on a photograph: decided and
+    /// printable, neither fluorescent nor brown. A print colour, not a brand one.
+    /// </summary>
+    private static readonly Rgba32 OverlayTextRed = new(0xD1, 0x1F, 0x2E);
 
     /// <summary>Minimum rendered wordmark width, from the brand guidelines.</summary>
     private const int BrandMinWordmarkWidth = 120;
@@ -139,7 +158,7 @@ public sealed class PartyPrintComposer
 
     private Image<Rgba32> RenderPhoto(PartyPrintComposition composition)
     {
-        if (composition.Theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack)
+        if (composition.Theme == PartyPrintTheme.Overlay)
             return RenderOverlayPhoto(composition);
         var photo = composition.Photos[0];
         using var source = LoadOriented(photo.Bytes);
@@ -228,10 +247,11 @@ public sealed class PartyPrintComposer
     // --- Single photograph, title on it ---------------------------------------
 
     /// <summary>
-    /// The photograph to the edges of the sheet, and on it — never beside it —
-    /// the NubArca symbol top-left and the party's name bottom-left, in white or
-    /// black, over the scrim the party invitation lays over its cover. The
-    /// scrim fades into the base colour opposite the ink, so either one reads.
+    /// The photograph to the edges of the sheet, exactly as cropped — no tint,
+    /// no scrim, no fade — with the NubArca symbol top-left and the party's name
+    /// bottom-left printed ON it. Legibility is helped only where the words are:
+    /// a faint gradient across the last fifth of the sheet and a soft halo round
+    /// the letters. The photograph stays the subject.
     /// </summary>
     private Image<Rgba32> RenderOverlayPhoto(PartyPrintComposition composition)
     {
@@ -247,43 +267,54 @@ public sealed class PartyPrintComposer
             ? (PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight)
             : (PartyPrintGeometry.LandscapeWidth, PartyPrintGeometry.LandscapeHeight);
 
-        var white = composition.Theme == PartyPrintTheme.OverlayWhite;
-        var ink = white ? CloudWhite : Ink;
-        var baseColour = white ? MidnightNavy : CloudWhite;
+        var overlay = composition.Overlay ?? PartyPrintOverlay.Default;
+        var ink = TextInk(overlay.Text);
+        // Dark words get a whisper of white under them; light and red words, of black.
+        var support = overlay.Text == PartyPrintOverlayText.Black ? CloudWhite : Ink;
 
         var sheet = new Image<Rgba32>(w, h);
         DrawFramed(sheet, source, photo, new Rectangle(0, 0, w, h), composition.Theme,
             Palette(PartyPrintTheme.Pure));
-        DrawScrim(sheet, baseColour);
+        DrawOverlayTextSupport(sheet, support);
 
         var shortEdge = Math.Min(w, h);
         var margin = (int)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
-        DrawSymbol(sheet, ink, new Point(margin, margin),
+        DrawSymbol(sheet, overlay.Logo == PartyPrintOverlayLogo.Dark ? Ink : CloudWhite,
+            new Point(margin, margin),
             (int)Math.Round(PartyPrintGeometry.OverlaySymbolFraction * shortEdge));
-        DrawOverlayText(sheet, composition, ink, margin, shortEdge);
+        DrawOverlayText(sheet, LayoutOverlayText(composition, w, h), ink, support);
         return sheet;
     }
 
-    private static void DrawScrim(Image<Rgba32> sheet, Rgba32 baseColour)
+    private static Rgba32 TextInk(PartyPrintOverlayText text) => text switch
     {
-        var values = PartyPrintGeometry.OverlayScrimStops;
-        var stops = new ColorStop[values.Length / 2];
-        for (var i = 0; i < stops.Length; i++)
-        {
-            var alpha = (byte)Math.Round(values[(i * 2) + 1] * 255);
-            stops[i] = new ColorStop((float)values[i * 2],
-                Color.FromPixel(new Rgba32(baseColour.R, baseColour.G, baseColour.B, alpha)));
-        }
+        PartyPrintOverlayText.Black => Ink,
+        PartyPrintOverlayText.Red => OverlayTextRed,
+        _ => CloudWhite,
+    };
+
+    /// <summary>
+    /// Transparent at the start of the last fifth, at most
+    /// <see cref="PartyPrintGeometry.OverlayTextSupportMaxOpacity"/> of
+    /// <paramref name="colour"/> at the foot, and nothing above it.
+    /// </summary>
+    private static void DrawOverlayTextSupport(Image<Rgba32> sheet, Rgba32 colour)
+    {
+        var top = (float)(PartyPrintGeometry.OverlayTextSupportStartFraction * sheet.Height);
+        var strongest = (byte)Math.Round(PartyPrintGeometry.OverlayTextSupportMaxOpacity * 255);
         var brush = new LinearGradientBrush(
-            new PointF(0, 0), new PointF(0, sheet.Height), GradientRepetitionMode.None, stops);
-        sheet.Mutate(x => x.Fill(brush));
+            new PointF(0, top), new PointF(0, sheet.Height), GradientRepetitionMode.None,
+            new ColorStop(0, Color.FromPixel(new Rgba32(colour.R, colour.G, colour.B, 0))),
+            new ColorStop(1, Color.FromPixel(new Rgba32(colour.R, colour.G, colour.B, strongest))));
+        sheet.Mutate(x => x.Fill(brush, new RectangleF(0, top, sheet.Width, sheet.Height - top)));
     }
 
     /// <summary>
     /// The approved flat symbol in ONE solid colour — the brand's flat mark is
     /// exactly that geometry in solid colours — sized to <paramref name="size"/>.
+    /// Nothing is drawn under it: the photograph is not altered for the mark.
     /// </summary>
-    private void DrawSymbol(Image<Rgba32> sheet, Rgba32 ink, Point at, int size)
+    private void DrawSymbol(Image<Rgba32> sheet, Rgba32 colour, Point at, int size)
     {
         using var mark = Image.Load<Rgba32>(
             Path.Combine(_assetRoot, "Assets", "brand", "nubarca-mark-flat-on-dark-512.png"));
@@ -293,70 +324,115 @@ public sealed class PartyPrintComposer
             {
                 var row = rows.GetRowSpan(y);
                 for (var x = 0; x < row.Length; x++)
-                    row[x] = new Rgba32(ink.R, ink.G, ink.B, row[x].A);
+                    row[x] = new Rgba32(colour.R, colour.G, colour.B, row[x].A);
             }
         });
         mark.Mutate(x => x.Resize(size, size));
         sheet.Mutate(x => x.DrawImage(mark, at, 1f));
     }
 
-    private void DrawOverlayText(Image<Rgba32> sheet, PartyPrintComposition composition, Rgba32 ink,
-        int margin, int shortEdge)
-    {
-        var (w, h) = (sheet.Width, sheet.Height);
-        var soft = new Rgba32(ink.R, ink.G, ink.B, 0xD9);
-        var lineSize = (float)(PartyPrintGeometry.OverlayLineFraction * shortEdge);
-        var footer = Truncate(composition.FooterText ?? string.Empty, 60);
-        var hasFooter = footer.Length > 0;
-        var bottom = h - margin;
+    /// <summary>Where the words go and how big they are: measured, so nothing meets.</summary>
+    internal sealed record OverlayTextLayout(
+        OverlayWord Title, OverlayWord? Footer, OverlayWord? Number);
 
-        // The guest's number, bottom-right, as on every other sheet.
-        var numberWidth = 0f;
+    /// <summary>One run of text, its font, its bottom-left origin and its measured box.</summary>
+    internal sealed record OverlayWord(string Text, Font Font, PointF Origin, RectangleF Box);
+
+    /// <summary>
+    /// The name bottom-left, the host's line under it, and the number
+    /// bottom-right on the same line as the host's line. The number's measured
+    /// width — plus a gap — is RESERVED before the line is laid out, and the line
+    /// shrinks, then shortens, to fit what is left, so the two can never touch.
+    /// </summary>
+    internal OverlayTextLayout LayoutOverlayText(PartyPrintComposition composition, int w, int h)
+    {
+        var shortEdge = Math.Min(w, h);
+        var margin = (float)Math.Round(PartyPrintGeometry.OverlayMarginFraction * shortEdge);
+        var bottom = h - margin;
+        var lineSize = (float)(PartyPrintGeometry.OverlayLineFraction * shortEdge);
+        var gap = lineSize * 1.2f;
+
+        OverlayWord? number = null;
         if (composition.PublicSequence > 0)
         {
-            var numberFont = _display.CreateFont(lineSize * 1.15f, FontStyle.Bold);
-            var number = $"#{composition.PublicSequence}";
-            numberWidth = TextMeasurer.MeasureSize(number, new TextOptions(numberFont)).Width;
-            sheet.Mutate(x => x.DrawText(
-                new RichTextOptions(numberFont)
-                {
-                    Origin = new PointF(w - margin, bottom),
-                    HorizontalAlignment = HorizontalAlignment.Right,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                },
-                number, soft));
+            var font = _display.CreateFont((float)(PartyPrintGeometry.OverlayNumberFraction * shortEdge), FontStyle.Bold);
+            var text = $"#{composition.PublicSequence}";
+            var size = TextMeasurer.MeasureSize(text, new TextOptions(font));
+            number = new OverlayWord(text, font, new PointF(w - margin, bottom),
+                new RectangleF(w - margin - size.Width, bottom - size.Height, size.Width, size.Height));
         }
+        var reserved = number is null ? 0f : number.Box.Width + gap;
 
-        if (hasFooter)
+        OverlayWord? footer = null;
+        var footerText = Truncate(composition.FooterText ?? string.Empty, 60);
+        if (footerText.Length > 0)
         {
-            var lineFont = _ui.CreateFont(lineSize, FontStyle.Regular);
-            sheet.Mutate(x => x.DrawText(
-                new RichTextOptions(lineFont)
-                {
-                    Origin = new PointF(margin, bottom),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Bottom,
-                },
-                footer, soft));
-            bottom -= (int)Math.Round(lineSize * 1.5f);
+            var available = w - (2 * margin) - reserved;
+            var (text, font) = FitLine(footerText, _ui, FontStyle.Regular, lineSize, lineSize * 0.75f, available);
+            var size = TextMeasurer.MeasureSize(text, new TextOptions(font));
+            footer = new OverlayWord(text, font, new PointF(margin, bottom),
+                new RectangleF(margin, bottom - size.Height, size.Width, size.Height));
         }
 
-        // The name takes what is left of the width, and shrinks rather than
-        // running under the number or off the paper.
-        var name = Truncate(composition.PartyName, 42);
-        var available = w - (2 * margin) - (hasFooter ? 0 : numberWidth + (lineSize * 1.5f));
+        // The name takes the full width above the host's line — and above the
+        // number, which stands a touch taller — or the width the number leaves
+        // when it shares the bottom line.
+        var lineTop = Math.Min(footer?.Box.Top ?? bottom, number?.Box.Top ?? bottom);
+        var nameBottom = footer is null ? bottom : lineTop - (lineSize * 0.45f);
+        var nameAvailable = w - (2 * margin) - (footer is null ? reserved : 0f);
         var titleSize = (float)(PartyPrintGeometry.OverlayTitleFraction * shortEdge);
-        var measured = TextMeasurer.MeasureSize(name, new TextOptions(_display.CreateFont(titleSize, FontStyle.Bold))).Width;
-        if (measured > available && measured > 0) titleSize *= available / measured;
-        var titleFont = _display.CreateFont(Math.Max(12f, titleSize), FontStyle.Bold);
-        sheet.Mutate(x => x.DrawText(
-            new RichTextOptions(titleFont)
-            {
-                Origin = new PointF(margin, bottom),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Bottom,
-            },
-            name, ink));
+        var (name, titleFont) = FitLine(Truncate(composition.PartyName, 42), _display, FontStyle.Bold,
+            titleSize, 12f, nameAvailable);
+        var nameMeasure = TextMeasurer.MeasureSize(name, new TextOptions(titleFont));
+        var title = new OverlayWord(name, titleFont, new PointF(margin, nameBottom),
+            new RectangleF(margin, nameBottom - nameMeasure.Height, nameMeasure.Width, nameMeasure.Height));
+        return new OverlayTextLayout(title, footer, number);
+    }
+
+    /// <summary>Shrinks a line toward <paramref name="minSize"/>, then shortens it with an ellipsis, until it fits.</summary>
+    private static (string Text, Font Font) FitLine(
+        string text, FontFamily family, FontStyle style, float size, float minSize, float available)
+    {
+        var font = family.CreateFont(size, style);
+        var width = TextMeasurer.MeasureSize(text, new TextOptions(font)).Width;
+        if (width <= available || width <= 0) return (text, font);
+        font = family.CreateFont(Math.Max(minSize, size * available / width), style);
+        while (text.Length > 1 && TextMeasurer.MeasureSize(text, new TextOptions(font)).Width > available)
+            text = text[..^2].TrimEnd() + "…";
+        return (text, font);
+    }
+
+    /// <summary>
+    /// The words, over a soft halo of the support colour — blurred, faint, only
+    /// round the letters — so they read on any photograph without a badge.
+    /// </summary>
+    private static void DrawOverlayText(Image<Rgba32> sheet, OverlayTextLayout layout, Rgba32 ink, Rgba32 halo)
+    {
+        var words = new[] { layout.Title, layout.Footer, layout.Number }.Where(x => x is not null).Cast<OverlayWord>().ToList();
+        var shortEdge = Math.Min(sheet.Width, sheet.Height);
+        var pad = (int)Math.Ceiling(shortEdge * 0.03);
+        var top = Math.Max(0, (int)words.Min(x => x.Box.Top) - pad);
+        using (var band = new Image<Rgba32>(sheet.Width, sheet.Height - top))
+        {
+            var shadow = new Rgba32(halo.R, halo.G, halo.B, 0x8C);
+            foreach (var word in words) Draw(band, word, shadow, -top);
+            band.Mutate(x => x.GaussianBlur((float)(shortEdge * 0.006)));
+            sheet.Mutate(x => x.DrawImage(band, new Point(0, top), 0.6f));
+        }
+        foreach (var word in words) Draw(sheet, word, ink, 0);
+
+        static void Draw(Image<Rgba32> target, OverlayWord word, Rgba32 colour, int dy)
+        {
+            var right = word.Origin.X > word.Box.X + 1;
+            target.Mutate(x => x.DrawText(
+                new RichTextOptions(word.Font)
+                {
+                    Origin = new PointF(word.Origin.X, word.Origin.Y + dy),
+                    HorizontalAlignment = right ? HorizontalAlignment.Right : HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                },
+                word.Text, colour));
+        }
     }
 
     // --- Shared drawing ----------------------------------------------------
