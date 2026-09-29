@@ -389,11 +389,10 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(within(sheet).getByText('Beach Party')).toBeInTheDocument();
     expect(screen.getByTestId('party-print-overlay-symbol')).toBeInTheDocument();
 
-    // Nothing lies over the whole photograph: the only support starts at the
-    // last fifth, is transparent there, and never reaches a solid colour.
+    // Nothing lies over the whole photograph: the only support is the words'
+    // own box, transparent at its top and never a solid colour at the foot.
     expect(container.querySelector('.party-print-overlay-scrim')).toBeNull();
     const support = screen.getByTestId('party-print-overlay-support');
-    expect(support.style.top).toBe('80%');
     expect(support.style.background).toBe(
       'linear-gradient(180deg, rgba(10, 15, 26, 0) 0%, rgba(10, 15, 26, 0.22) 100%)');
     // The real number only exists once the print is sent: none is invented.
@@ -432,6 +431,104 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(lastPost(mock.calls)).toMatchObject({
       theme: 'overlay', overlayText: 'black', overlayLogo: 'dark',
     });
+  });
+
+  // --- The title on the photo: the preview is the renderer's layout ----------
+
+  async function onThePhoto(
+    user: ReturnType<typeof userEvent.setup>, body: Record<string, unknown> = {},
+  ) {
+    mount(manifest(body));
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    return screen.getByTestId('party-print-sheet');
+  }
+
+  it('starts the support just above the words, not at a fixed band of the photo', async () => {
+    const user = setup();
+    const sheet = await onThePhoto(user);
+    const support = screen.getByTestId('party-print-overlay-support');
+    // The support IS the words' box: anchored to the foot (CSS), it holds the
+    // text and begins one padding above it — 2.5% of the short edge, which on
+    // a portrait sheet is 2.5% of its width. No top of its own.
+    expect(support.style.top).toBe('');
+    expect(support.style.paddingTop).toBe('2.5%');
+    expect(support.contains(within(sheet).getByText('Beach Party'))).toBe(true);
+    expect(support.contains(within(sheet).getByText('Grazie di essere qui'))).toBe(true);
+
+    // Turned landscape, the same padding is a smaller share of the wider sheet.
+    await user.click(screen.getByRole('radio', { name: 'Orizzontale' }));
+    expect(sheet).toHaveAttribute('data-orientation', 'landscape');
+    expect(Number.parseFloat(support.style.paddingTop)).toBeCloseTo((2.5 * 1200) / 1800, 3);
+  });
+
+  it('prints the name as the paper will, and keeps the number its room', async () => {
+    const user = setup();
+    const sheet = await onThePhoto(user, {
+      partyName: 'Il matrimonio di Giulia Rossi\ne Matteo Bianchi, finalmente insieme',
+    });
+    // Cut where the renderer cuts it, line break and all: never a longer name
+    // than the one that will be printed.
+    expect(within(sheet).getByText('Il matrimonio di Giulia Rossi e Matteo Bi…')).toBeInTheDocument();
+
+    // The host's line shares the bottom line with the room kept for the widest
+    // number a party reaches — kept, not written: no digit is on the page.
+    const bottom = screen.getByTestId('party-print-overlay-bottom');
+    expect(bottom).toHaveAttribute('data-number-room', '#9999');
+    expect(bottom).toHaveTextContent(/^Grazie di essere qui$/);
+    expect(within(sheet).queryByText(/#\d/)).not.toBeInTheDocument();
+    // The name stands above that line, over the whole width.
+    expect(bottom.contains(within(sheet).getByText(/^Il matrimonio/))).toBe(false);
+  });
+
+  it('puts the name on the bottom line, beside the number room, when there is no host\'s line', async () => {
+    const user = setup();
+    const sheet = await onThePhoto(user, { footerText: '  \n ' });
+    const bottom = screen.getByTestId('party-print-overlay-bottom');
+    // One line of words, so the support is one line tall.
+    expect(bottom).toHaveTextContent(/^Beach Party$/);
+    expect(sheet.querySelector('.party-print-overlay-line')).toBeNull();
+    expect(bottom).toHaveAttribute('data-number-room', '#9999');
+  });
+
+  it('shrinks a long line, then lets the ellipsis take it, before it reaches the number', async () => {
+    // jsdom lays nothing out, so the layout's answer is stated: the line has
+    // 200px left beside the number's room and needs 300, the name 250 for 500.
+    const measured: Record<string, [number, number]> = {
+      'party-print-overlay-line': [200, 300],
+      'party-print-overlay-name': [250, 500],
+    };
+    const size = (el: Element, i: 0 | 1) =>
+      Object.entries(measured).find(([cls]) => el.classList.contains(cls))?.[1][i] ?? 0;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true, get() { return size(this, 0); },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+      configurable: true, get() { return size(this, 1); },
+    });
+    try {
+      const user = setup();
+      const sheet = await onThePhoto(user);
+      // The line goes no smaller than 3/4 — the rest is the ellipsis's — and
+      // the name as small as it must be, like FitLine.
+      expect((sheet.querySelector('.party-print-overlay-line') as HTMLElement).style.fontSize)
+        .toBe('calc(var(--line-size) * 0.75)');
+      expect((sheet.querySelector('.party-print-overlay-name') as HTMLElement).style.fontSize)
+        .toBe('calc(var(--title-size) * 0.5)');
+    } finally {
+      delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+      delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
+    }
+  });
+
+  it('draws the renderer\'s halo, not a stronger one', async () => {
+    const user = setup();
+    await onThePhoto(user);
+    const words = document.querySelector('.party-print-overlay-text') as HTMLElement;
+    // A Gaussian of 0.6% of the short edge is a 1.2% blur radius; at 33%.
+    expect(words.style.getPropertyValue('--halo')).toBe('rgb(10 15 26 / 33%)');
+    expect(Number.parseFloat(words.style.getPropertyValue('--halo-blur'))).toBeCloseTo(1.2, 6);
   });
 
   it('keeps the overlay choices as real radios a keyboard can walk', async () => {

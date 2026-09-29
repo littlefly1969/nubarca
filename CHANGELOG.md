@@ -10,15 +10,18 @@ originating repository and is deliberately not reproduced here.
 
 - **The photograph is printed as it is.** *On the photo* no longer lays the
   invitation's shading over the whole picture, and the foot of the print is no
-  longer covered in navy or white. Only the last fifth gets a faint shadow
-  behind the words, at most about a fifth as dark, plus a soft halo around the
-  letters.
+  longer covered in navy or white. The only shading is a faint shadow behind
+  the words, at most about a fifth as dark. It starts just above them and is
+  only as tall as they are. The letters also get a soft halo.
 - **The text and the logo are now separate choices.** The party's name, the
   host's line and the guest's number can be white, black or red. The NubArca
   symbol can be light or dark.
 - **The guest's number always keeps its own space.** It is a touch larger than
   the host's line. A long line shrinks, then shortens, and never runs under
   the number.
+- **What the preview shows is what prints.** It cuts a long party name exactly
+  as the print does. The bottom line keeps room for the widest possible number
+  (the real one is only known once the print is sent).
 - The choices under the preview are now buttons with a colour swatch, sized for
   a thumb. The other looks and the strips have not changed.
 

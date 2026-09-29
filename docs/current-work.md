@@ -27,9 +27,11 @@ is built is described by `ARCHITECTURE.md`.
   as `2x6x2` when the printer reports it can cut the sheet in two (a DNP second
   queue with *2inch cut*, `StripPrinterName`), and then carries no cut ticks.
   A single photo also has the *On the photo* look: the untouched photograph
-  runs full bleed, with the words in white, black or red over a faint support
-  in the last fifth only. The flat symbol, light or dark, is chosen separately.
-  The number's measured width is reserved, so the host's line never meets it
+  runs full bleed, with the words in white, black or red. A faint support sits
+  behind them, from just above the measured ink of the words to the foot. The
+  flat symbol, light or dark, is chosen separately. The number's measured width
+  is reserved, so the host's line never meets it. The preview cuts the name as
+  the renderer does and keeps room for `#9999`
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the

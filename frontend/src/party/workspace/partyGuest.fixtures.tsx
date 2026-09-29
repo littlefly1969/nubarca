@@ -355,13 +355,17 @@ it('game — a challenge is running', async () => {
 
 // The preview of a single photograph with the title on it, where the look's
 // own choices — text colour and logo — sit between the style and the buttons.
-it('print studio — the title on the photo', async () => {
+// Three layouts of the words: a name with the host's line, a name alone, and
+// a long line on a landscape sheet, so the support is measured at each height.
+async function printOverlay(
+  file: string, partyName: string, footerText: string | null, landscape: boolean,
+) {
   const { fireEvent } = await import('@testing-library/react');
   const PRINT = 'print-token';
   installFetchMock({
     [`GET /api/party/${PRINT}/print`]: () => jsonResponse({
-      partyName: 'Il compleanno di Marta',
-      footerText: 'Grazie di essere qui, con tutto il cuore',
+      partyName,
+      footerText,
       formats: [
         { type: 'photo', enabled: true, remaining: 12, requiredPhotos: 1, remainingForYou: null },
         { type: 'strip4', enabled: true, remaining: 5, requiredPhotos: 8, remainingForYou: null },
@@ -379,7 +383,18 @@ it('print studio — the title on the photo', async () => {
   fireEvent.click(screen.getAllByRole('button', { name: /Scegli questa foto/ })[0]);
   fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continua' }));
+  if (landscape) fireEvent.click(screen.getByRole('radio', { name: 'Orizzontale' }));
   fireEvent.click(screen.getByRole('radio', { name: 'Sulla foto' }));
   fireEvent.click(screen.getByRole('radio', { name: 'Rosso' }));
-  await capture('print-overlay', 'party-print-overlay-support');
-});
+  await capture(file, 'party-print-overlay-support');
+}
+
+it('print studio — the title on the photo', () =>
+  printOverlay('print-overlay', 'Giulia & Matteo', 'Una notte da ricordare', false));
+
+it('print studio — the title on the photo, no host\'s line', () =>
+  printOverlay('print-overlay-no-line', 'Marta 50', null, false));
+
+it('print studio — the title on the photo, landscape, a long line', () =>
+  printOverlay('print-overlay-landscape', 'Giulia & Matteo',
+    'Grazie a tutti di essere venuti, è stata una notte che ricorderemo', true));

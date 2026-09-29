@@ -6,8 +6,10 @@ import {
   STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION, DEFAULT_CROP_VIEW, MAX_ZOOM,
   clampCrop, coverCrop, cropFor, stripSlot, stripWidthFraction,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_NUMBER_FRACTION, OVERLAY_SYMBOL_FRACTION,
-  OVERLAY_TEXT_SUPPORT_MAX_OPACITY, OVERLAY_TEXT_SUPPORT_START_FRACTION, OVERLAY_TITLE_FRACTION,
-  overlaySlotAspect, overlayTextSupport,
+  OVERLAY_TEXT_SUPPORT_MAX_OPACITY, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_TITLE_FRACTION,
+  OVERLAY_HALO_BLUR_FRACTION, OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM,
+  PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
+  overlaySlotAspect, overlayTextSupport, printedLine,
 } from './partyPrintGeometry';
 
 /** Every constant this file mirrors, and where it is mirrored FROM. */
@@ -49,10 +51,16 @@ describe('party print geometry', () => {
     expect(constant('OverlayTitleFraction')).toBe(OVERLAY_TITLE_FRACTION);
     expect(constant('OverlayLineFraction')).toBe(OVERLAY_LINE_FRACTION);
     expect(constant('OverlayNumberFraction')).toBe(OVERLAY_NUMBER_FRACTION);
-    expect(constant('OverlayTextSupportStartFraction')).toBe(OVERLAY_TEXT_SUPPORT_START_FRACTION);
+    expect(constant('OverlayTextSupportPaddingFraction')).toBe(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION);
     expect(constant('OverlayTextSupportMaxOpacity')).toBe(OVERLAY_TEXT_SUPPORT_MAX_OPACITY);
-    // The photograph's own scrim is gone from the print for good.
+    expect(constant('OverlayHaloBlurFraction')).toBe(OVERLAY_HALO_BLUR_FRACTION);
+    expect(constant('OverlayHaloOpacity')).toBe(OVERLAY_HALO_OPACITY);
+    expect(constant('PartyNameMaxLength')).toBe(PARTY_NAME_MAX_LENGTH);
+    expect(constant('FooterMaxLength')).toBe(FOOTER_MAX_LENGTH);
+    // The photograph's own scrim is gone from the print for good, and so is
+    // the fixed band that replaced it: the support follows the words.
     expect(source).not.toContain('OverlayScrimStops');
+    expect(source).not.toContain('OverlayTextSupportStartFraction');
   });
 
   it('puts the title-on-the-photo crop on the whole sheet, with support only under the words', () => {
@@ -61,8 +69,42 @@ describe('party print geometry', () => {
     // Transparent where it starts, a fifth of the colour at the foot, never solid.
     expect(overlayTextSupport('10 15 26')).toBe(
       'linear-gradient(180deg, rgb(10 15 26 / 0%) 0%, rgb(10 15 26 / 22%) 100%)');
+    expect(OVERLAY_TEXT_SUPPORT_MAX_OPACITY).toBeGreaterThanOrEqual(0.15);
     expect(OVERLAY_TEXT_SUPPORT_MAX_OPACITY).toBeLessThanOrEqual(0.25);
-    expect(OVERLAY_TEXT_SUPPORT_START_FRACTION).toBeGreaterThanOrEqual(0.8);
+    // It begins a hair above the words: 2–3% of the short edge.
+    expect(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION).toBeGreaterThanOrEqual(0.02);
+    expect(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION).toBeLessThanOrEqual(0.03);
+  });
+
+  it('cuts a line exactly as the renderer does', () => {
+    // PartyPrintComposer.Truncate: breaks become spaces, ends are trimmed, and
+    // a longer line keeps max - 1 characters and an ellipsis.
+    expect(printedLine('  Marta 50  ', PARTY_NAME_MAX_LENGTH)).toBe('Marta 50');
+    expect(printedLine('Giulia\r\nMatteo', PARTY_NAME_MAX_LENGTH)).toBe('Giulia  Matteo');
+    const exactly = 'x'.repeat(PARTY_NAME_MAX_LENGTH);
+    expect(printedLine(exactly, PARTY_NAME_MAX_LENGTH)).toBe(exactly);
+    const long = 'Il matrimonio di Giulia Rossi e Matteo Bianchi, finalmente insieme';
+    const cut = printedLine(long, PARTY_NAME_MAX_LENGTH);
+    expect(cut).toBe('Il matrimonio di Giulia Rossi e Matteo Bi…');
+    expect(cut).toHaveLength(PARTY_NAME_MAX_LENGTH);
+    // A cut that lands after a space does not leave the space before the ellipsis.
+    expect(printedLine('abc def', 5)).toBe('abc…');
+    expect(printedLine('', FOOTER_MAX_LENGTH)).toBe('');
+  });
+
+  it('keeps room for the widest number a party can reach', async () => {
+    // Numbering is per party across both products; each budget is capped by
+    // PartyPrintProfile.MaxBudget. If that cap ever grows a digit, the room the
+    // preview keeps must grow with it — this reads the cap from the server.
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const profile = readFileSync(
+      resolve(process.cwd(), '..', 'src/NubArca.Api/Domain/Print/PartyPrintProfile.cs'), 'utf8');
+    const cap = Number(profile.match(/MaxBudget\s*=\s*(\d+)/)?.[1]);
+    expect(cap).toBeGreaterThan(0);
+    const highest = 2 * cap;
+    expect(OVERLAY_NUMBER_ROOM).toMatch(/^#9+$/);
+    expect(OVERLAY_NUMBER_ROOM.length - 1).toBeGreaterThanOrEqual(String(highest).length);
   });
 
   it('keeps the twin strips inside the sheet and apart from each other', () => {

@@ -29,8 +29,9 @@ import {
   CUT_MARK_LENGTH_FRACTION, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   type CropView, cropFor, photoLayout, photoSlotAspect, stripFooter, stripSlot,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
-  OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_START_FRACTION,
-  LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH, overlaySlotAspect, overlayTextSupport,
+  OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_PADDING_FRACTION, OVERLAY_HALO_BLUR_FRACTION,
+  OVERLAY_HALO_OPACITY, OVERLAY_NUMBER_ROOM, PARTY_NAME_MAX_LENGTH, FOOTER_MAX_LENGTH,
+  LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH, overlaySlotAspect, overlayTextSupport, printedLine,
   stripSlotAspect,
 } from './partyPrintGeometry';
 import './PartyGuestHub.css';
@@ -264,6 +265,7 @@ function pct(value: number): string {
 /**
  * The renderer's FitLine for the preview: a line wider than its box shrinks —
  * never below `floor` of its size — before the ellipsis takes the rest. The
+ * box is what the layout left it, the number's room already taken out. The
  * sizes are container units, so the ratio found once holds at any width.
  */
 function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
@@ -273,10 +275,8 @@ function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
     if (!el) return undefined;
     const fit = () => {
       el.style.fontSize = size;
-      // The room kept for the number is not the words' room.
-      const kept = parseFloat(getComputedStyle(el).paddingRight) || 0;
-      const room = el.clientWidth - kept;
-      const needed = el.scrollWidth - kept;
+      const room = el.clientWidth;
+      const needed = el.scrollWidth;
       if (needed > room && room > 0) {
         el.style.fontSize = `calc(${size} * ${Math.max(floor, room / needed)})`;
       }
@@ -290,19 +290,39 @@ function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
   return ref;
 }
 
-/** The words of the title-on-the-photo preview, fitted as the renderer fits them. */
+/**
+ * The words of the title-on-the-photo preview, laid out as the renderer lays
+ * them out: the name and the host's line cut to what the paper prints, the
+ * bottom line sharing its width with the room kept for the number, and each
+ * line fitted into what is left.
+ */
 function OverlayWords({ partyName, footerText, orientation }: {
   partyName: string; footerText: string | null; orientation: string;
 }) {
+  const name = printedLine(partyName, PARTY_NAME_MAX_LENGTH);
+  const footer = printedLine(footerText ?? '', FOOTER_MAX_LENGTH);
   // The renderer's floors: the name as small as it must be, the line to 3/4.
-  const name = useFitLine('var(--title-size)', 0, [partyName, footerText, orientation]);
-  const line = useFitLine('var(--line-size)', 0.75, [footerText, orientation]);
-  return (
-    <>
-      <span ref={name} className="party-print-overlay-name">{partyName}</span>
-      {footerText && <span ref={line} className="party-print-overlay-line">{footerText}</span>}
-    </>
+  const nameRef = useFitLine('var(--title-size)', 0, [name, footer, orientation]);
+  const lineRef = useFitLine('var(--line-size)', 0.75, [footer, orientation]);
+  const nameLine = <span ref={nameRef} className="party-print-overlay-name">{name}</span>;
+  // The number's room is the bottom line's ::after — never text on the page.
+  const bottom = (content: ReactNode) => (
+    <div
+      className="party-print-overlay-bottom"
+      data-testid="party-print-overlay-bottom"
+      data-number-room={OVERLAY_NUMBER_ROOM}
+    >
+      {content}
+    </div>
   );
+  // With a host's line the name stands above the bottom line; without one it
+  // shares the bottom line with the number, as on paper.
+  return footer ? (
+    <>
+      {nameLine}
+      {bottom(<span ref={lineRef} className="party-print-overlay-line">{footer}</span>)}
+    </>
+  ) : bottom(nameLine);
 }
 
 function SheetPreview(props: SheetProps) {
@@ -339,15 +359,6 @@ function SheetPreview(props: SheetProps) {
             onAspect={(width, height) => onAspect(id, width, height)}
           />
         </div>
-        {/* Only under the words: the photograph above keeps every pixel. */}
-        <div
-          className="party-print-overlay-support"
-          data-testid="party-print-overlay-support"
-          style={{
-            top: pct(OVERLAY_TEXT_SUPPORT_START_FRACTION),
-            background: overlayTextSupport(text.support),
-          }}
-        />
         <span
           className="party-print-overlay-symbol"
           data-testid="party-print-overlay-symbol"
@@ -358,23 +369,38 @@ function SheetPreview(props: SheetProps) {
             backgroundColor: OVERLAY_LOGO[props.overlayLogo],
           }}
         />
+        {/* The support is the words' own box: anchored to the foot, it begins
+            one padding above the real block of text, whatever the words turn
+            out to be, and the photograph above it keeps every pixel. Padding
+            percentages are of the sheet's width, as `ofWidth` gives them. */}
         <div
-          className="party-print-overlay-text"
+          className="party-print-overlay-support"
+          data-testid="party-print-overlay-support"
           style={{
-            left: ofWidth(OVERLAY_MARGIN_FRACTION), right: ofWidth(OVERLAY_MARGIN_FRACTION),
-            bottom: ofHeight(OVERLAY_MARGIN_FRACTION), color: text.ink,
-            ['--halo' as string]: `rgb(${text.support} / 55%)`,
-            // cqw of the sheet: the same fraction of the short edge as on paper.
-            ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
-            ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
-            ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
+            background: overlayTextSupport(text.support),
+            paddingTop: ofWidth(OVERLAY_TEXT_SUPPORT_PADDING_FRACTION),
+            paddingInline: ofWidth(OVERLAY_MARGIN_FRACTION),
+            paddingBottom: ofWidth(OVERLAY_MARGIN_FRACTION),
           }}
         >
-          <OverlayWords
-            partyName={props.partyName}
-            footerText={props.footerText}
-            orientation={portrait ? 'portrait' : 'landscape'}
-          />
+          <div
+            className="party-print-overlay-text"
+            style={{
+              color: text.ink,
+              ['--halo' as string]: `rgb(${text.support} / ${OVERLAY_HALO_OPACITY * 100}%)`,
+              // cqw of the sheet: the same fraction of the short edge as on paper.
+              ['--halo-blur' as string]: `${((2 * OVERLAY_HALO_BLUR_FRACTION * short) / w) * 100}cqw`,
+              ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
+              ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
+              ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
+            }}
+          >
+            <OverlayWords
+              partyName={props.partyName}
+              footerText={props.footerText}
+              orientation={portrait ? 'portrait' : 'landscape'}
+            />
+          </div>
         </div>
       </div>
     );

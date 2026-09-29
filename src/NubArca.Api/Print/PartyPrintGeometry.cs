@@ -78,17 +78,41 @@ public static class PartyPrintGeometry
     public const double OverlayNumberFraction = 0.044;
 
     /// <summary>
-    /// Where the words' own legibility support begins, as a fraction of the
-    /// sheet's height: the last fifth, and nowhere else. The photograph above
-    /// it is untouched.
+    /// How far above the words their legibility support begins, short-edge
+    /// fraction. The support starts just over the real block of text — the
+    /// name, the host's line and the number as laid out — and runs to the foot
+    /// of the sheet, so it is as tall as the words need and no taller. The
+    /// photograph above it is untouched.
     /// </summary>
-    public const double OverlayTextSupportStartFraction = 0.8;
+    public const double OverlayTextSupportPaddingFraction = 0.025;
 
     /// <summary>
     /// The support's strongest point, at the very foot of the sheet — a whisper
     /// of black under light words or of white under dark ones, never a tint.
     /// </summary>
     public const double OverlayTextSupportMaxOpacity = 0.22;
+
+    /// <summary>
+    /// The halo round the letters: the words in the support colour, blurred by
+    /// a Gaussian of this sigma (short-edge fraction), laid under them at
+    /// <see cref="OverlayHaloOpacity"/>. The preview's text-shadow is the same
+    /// thing — a CSS blur radius is two sigmas.
+    /// </summary>
+    public const double OverlayHaloBlurFraction = 0.006;
+
+    public const double OverlayHaloOpacity = 0.33;
+
+    // --- Words on any sheet ----------------------------------------------------
+
+    /// <summary>
+    /// The longest party name a sheet prints; a longer one is cut with an
+    /// ellipsis, after line breaks become spaces. The preview applies the same
+    /// cut, so it never shows a name longer than the one on the paper.
+    /// </summary>
+    public const int PartyNameMaxLength = 42;
+
+    /// <summary>The longest host's line a sheet prints, cut the same way.</summary>
+    public const int FooterMaxLength = 60;
 
     /// <summary>Aspect ratio of a title-on-the-photograph crop: the whole sheet.</summary>
     public static double OverlaySlotAspect(bool portrait) =>
