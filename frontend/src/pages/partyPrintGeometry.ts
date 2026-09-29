@@ -102,7 +102,10 @@ export const OVERLAY_NUMBER_ROOM = '#9999';
 
 // --- Words on any sheet -----------------------------------------------------
 
-/** The longest party name a sheet prints, and the longest host's line. */
+/**
+ * The longest party name a sheet prints (PartyPrintGeometry), and the longest
+ * host's line (the domain's PartyPrintLimits, the one limit for that line).
+ */
 export const PARTY_NAME_MAX_LENGTH = 42;
 export const FOOTER_MAX_LENGTH = 60;
 

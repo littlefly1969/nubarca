@@ -111,9 +111,6 @@ public static class PartyPrintGeometry
     /// </summary>
     public const int PartyNameMaxLength = 42;
 
-    /// <summary>The longest host's line a sheet prints, cut the same way.</summary>
-    public const int FooterMaxLength = 60;
-
     /// <summary>Aspect ratio of a title-on-the-photograph crop: the whole sheet.</summary>
     public static double OverlaySlotAspect(bool portrait) =>
         portrait
