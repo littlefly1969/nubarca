@@ -399,7 +399,7 @@ public sealed class PartyPrintComposer
         }
 
         OverlayWord? footer = null;
-        var footerText = Truncate(composition.FooterText ?? string.Empty, PartyPrintGeometry.FooterMaxLength);
+        var footerText = Truncate(composition.FooterText ?? string.Empty, Domain.Print.PartyPrintLimits.FooterMaxLength);
         if (footerText.Length > 0)
         {
             var available = w - (2 * margin) - reserved;
@@ -518,7 +518,7 @@ public sealed class PartyPrintComposer
         // line, the wordmark — so the area is DIVIDED between them rather than
         // each being placed at its own fraction, which is how the footer and the
         // wordmark ended up drawn on top of each other.
-        var footer = Truncate(composition.FooterText ?? string.Empty, PartyPrintGeometry.FooterMaxLength);
+        var footer = Truncate(composition.FooterText ?? string.Empty, Domain.Print.PartyPrintLimits.FooterMaxLength);
         var hasFooter = footer.Length > 0;
 
         var markBand = area.Height * 0.38f;

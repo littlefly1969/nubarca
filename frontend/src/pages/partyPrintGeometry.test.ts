@@ -14,6 +14,7 @@ import {
 
 /** Every constant this file mirrors, and where it is mirrored FROM. */
 const SERVER_GEOMETRY = 'src/NubArca.Api/Print/PartyPrintGeometry.cs';
+const SERVER_LIMITS = 'src/NubArca.Api/Domain/Print/PartyPrintProfile.cs';
 
 describe('party print geometry', () => {
   it('holds the SAME numbers as the server renderer', async () => {
@@ -56,7 +57,11 @@ describe('party print geometry', () => {
     expect(constant('OverlayHaloBlurFraction')).toBe(OVERLAY_HALO_BLUR_FRACTION);
     expect(constant('OverlayHaloOpacity')).toBe(OVERLAY_HALO_OPACITY);
     expect(constant('PartyNameMaxLength')).toBe(PARTY_NAME_MAX_LENGTH);
-    expect(constant('FooterMaxLength')).toBe(FOOTER_MAX_LENGTH);
+    // The host's line has one limit, the domain's (PartyPrintLimits), which
+    // the settings, the database column and the renderer all use.
+    const limits = readFileSync(resolve(process.cwd(), '..', SERVER_LIMITS), 'utf8');
+    expect(Number(limits.match(/FooterMaxLength\s*=\s*(\d+)/)?.[1])).toBe(FOOTER_MAX_LENGTH);
+    expect(source).not.toContain('FooterMaxLength');
     // The photograph's own scrim is gone from the print for good, and so is
     // the fixed band that replaced it: the support follows the words.
     expect(source).not.toContain('OverlayScrimStops');
@@ -98,8 +103,7 @@ describe('party print geometry', () => {
     // preview keeps must grow with it — this reads the cap from the server.
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
-    const profile = readFileSync(
-      resolve(process.cwd(), '..', 'src/NubArca.Api/Domain/Print/PartyPrintProfile.cs'), 'utf8');
+    const profile = readFileSync(resolve(process.cwd(), '..', SERVER_LIMITS), 'utf8');
     const cap = Number(profile.match(/MaxBudget\s*=\s*(\d+)/)?.[1]);
     expect(cap).toBeGreaterThan(0);
     const highest = 2 * cap;
