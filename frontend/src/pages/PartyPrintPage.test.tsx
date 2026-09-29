@@ -371,7 +371,7 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByTestId('party-print-strip-1')).not.toHaveAttribute('aria-hidden');
   });
 
-  it('puts the title on the photo, in white or black, for a single photograph', async () => {
+  it('puts the title on the untouched photo, with text and logo chosen apart', async () => {
     const user = setup();
     const mock = mount(manifest(), {
       [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
@@ -379,22 +379,105 @@ describe('PartyPrintPage (public print studio)', () => {
     const { container } = render(wrapper());
     await compose(user, 'photo');
 
+    // The other looks carry none of the overlay's own choices.
+    expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Logo' })).not.toBeInTheDocument();
+
     await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
     const sheet = screen.getByTestId('party-print-sheet');
-    // The photograph runs to the edges, under the invitation's scrim, with the
-    // symbol in the chosen ink.
-    expect(sheet).toHaveAttribute('data-theme', 'overlay-white');
-    expect(container.querySelector('.party-print-overlay-scrim')).not.toBeNull();
-    expect(screen.getByTestId('party-print-overlay-symbol')).toBeInTheDocument();
+    expect(sheet).toHaveAttribute('data-theme', 'overlay');
     expect(within(sheet).getByText('Beach Party')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Bianco' })).toBeChecked();
+    expect(screen.getByTestId('party-print-overlay-symbol')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('radio', { name: 'Nero' }));
-    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-theme', 'overlay-black');
+    // Nothing lies over the whole photograph: the only support starts at the
+    // last fifth, is transparent there, and never reaches a solid colour.
+    expect(container.querySelector('.party-print-overlay-scrim')).toBeNull();
+    const support = screen.getByTestId('party-print-overlay-support');
+    expect(support.style.top).toBe('80%');
+    expect(support.style.background).toBe(
+      'linear-gradient(180deg, rgba(10, 15, 26, 0) 0%, rgba(10, 15, 26, 0.22) 100%)');
+    // The real number only exists once the print is sent: none is invented.
+    expect(within(sheet).queryByText(/#\d/)).not.toBeInTheDocument();
+
+    const text = screen.getByRole('group', { name: 'Colore del testo' });
+    const logo = screen.getByRole('group', { name: 'Logo' });
+    expect(within(text).getAllByRole('radio').map((r) => r.getAttribute('value')))
+      .toEqual(['white', 'black', 'red']);
+    expect(within(logo).getAllByRole('radio').map((r) => r.getAttribute('value')))
+      .toEqual(['light', 'dark']);
+    expect(within(text).getByRole('radio', { name: 'Bianco' })).toBeChecked();
+    expect(within(logo).getByRole('radio', { name: 'Chiaro' })).toBeChecked();
+
+    // Red text leaves the logo where it was, and the preview follows at once.
+    await user.click(within(text).getByRole('radio', { name: 'Rosso' }));
+    expect(sheet).toHaveAttribute('data-overlay-text', 'red');
+    expect(sheet).toHaveAttribute('data-overlay-logo', 'light');
+    expect(within(logo).getByRole('radio', { name: 'Chiaro' })).toBeChecked();
+    // A dark logo leaves the text red.
+    await user.click(within(logo).getByRole('radio', { name: 'Scuro' }));
+    expect(sheet).toHaveAttribute('data-overlay-logo', 'dark');
+    expect(sheet).toHaveAttribute('data-overlay-text', 'red');
+    expect(within(text).getByRole('radio', { name: 'Rosso' })).toBeChecked();
+    expect(screen.getByTestId('party-print-overlay-symbol').style.backgroundColor)
+      .toBe('rgb(10, 15, 26)');
+    expect(within(sheet).getByText('Beach Party').parentElement?.style.color)
+      .toBe('rgb(209, 31, 46)');
+
+    // Black text puts a white whisper under the words instead of a dark one.
+    await user.click(within(text).getByRole('radio', { name: 'Nero' }));
+    expect(support.style.background).toContain('rgba(245, 247, 251, 0.22)');
 
     await user.click(screen.getByRole('button', { name: 'Stampa' }));
     await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
-    expect(lastPost(mock.calls).theme).toBe('overlay-black');
+    expect(lastPost(mock.calls)).toMatchObject({
+      theme: 'overlay', overlayText: 'black', overlayLogo: 'dark',
+    });
+  });
+
+  it('keeps the overlay choices as real radios a keyboard can walk', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+
+    const text = screen.getByRole('group', { name: 'Colore del testo' });
+    const white = within(text).getByRole('radio', { name: 'Bianco' });
+    // One group, one name: arrow keys move the choice, Tab leaves the group.
+    for (const radio of within(text).getAllByRole('radio')) {
+      expect(radio).toHaveAttribute('name', 'party-print-overlay-text');
+    }
+    white.focus();
+    expect(white).toHaveFocus();
+    await user.keyboard('{ArrowRight}');
+    expect(within(text).getByRole('radio', { name: 'Nero' })).toBeChecked();
+    expect(screen.getByTestId('party-print-sheet')).toHaveAttribute('data-overlay-text', 'black');
+    await user.tab();
+    expect(within(screen.getByRole('group', { name: 'Logo' })).getByRole('radio', { name: 'Chiaro' }))
+      .toHaveFocus();
+  });
+
+  it('sends no overlay colours with a framed look', async () => {
+    const user = setup();
+    const mock = mount(manifest(), {
+      [`POST /api/party/${TOKEN}/print`]: () => jsonResponse(accepted, 202),
+    });
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    await user.click(within(screen.getByRole('group', { name: 'Colore del testo' }))
+      .getByRole('radio', { name: 'Rosso' }));
+    // Back to a framed look: the overlay's choices go away, and stay out of the job.
+    await user.click(screen.getByRole('radio', { name: 'Notte' }));
+    expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('party-print-overlay-support')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Stampa' }));
+    await waitFor(() => expect(lastPost(mock.calls)).not.toBeNull());
+    const body = lastPost(mock.calls);
+    expect(body.theme).toBe('midnight');
+    expect(body).not.toHaveProperty('overlayText');
+    expect(body).not.toHaveProperty('overlayLogo');
   });
 
   it('keeps the title-on-the-photo look off a strip', async () => {
@@ -404,6 +487,8 @@ describe('PartyPrintPage (public print studio)', () => {
     await compose(user, 'strip4');
     expect(screen.queryByRole('radio', { name: 'Sulla foto' })).not.toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
+    expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Logo' })).not.toBeInTheDocument();
   });
 
   it('draws no cut marks when the printer cuts the strips itself', async () => {

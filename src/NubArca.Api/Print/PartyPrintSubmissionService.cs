@@ -188,13 +188,17 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
             // The number is reserved before the sheet is drawn, so it can be
             // printed ON it: the guest reads the same number off their phone and
             // off the paper.
+            var theme = ThemeFor(request.Product, request.Theme);
+            // The words' and the symbol's colours belong to the title on the photo only.
+            var overlay = theme == PartyPrintTheme.Overlay ? ParseOverlay(request) : null;
             var artifact = await _composer.RenderAsync(new PartyPrintComposition(
-                request.Product, ThemeFor(request.Product, request.Theme), photos,
+                request.Product, theme, photos,
                 access.PartyName, access.FooterText,
                 reservation.PublicSequence,
                 ParseOrientation(request.Orientation),
                 access.CutByPrinter(request.Product),
-                access.Calibration), cancellationToken);
+                access.Calibration,
+                overlay), cancellationToken);
 
             await using var stream = new MemoryStream(artifact, writable: false);
             // Stage outside the lock; publish and claim in one protected step.
@@ -231,7 +235,9 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
                     RenderSpecificationJson = JsonSerializer.Serialize(new
                     {
                         product = request.Product,
-                        theme = ThemeFor(request.Product, request.Theme).ToString().ToLowerInvariant(),
+                        theme = theme.ToString().ToLowerInvariant(),
+                        overlayText = overlay?.Text.ToString().ToLowerInvariant(),
+                        overlayLogo = overlay?.Logo.ToString().ToLowerInvariant(),
                     }),
                     ArtifactStorageKey = stored.StorageKey,
                     ArtifactContentType = "image/jpeg",
@@ -308,17 +314,28 @@ public sealed class PartyPrintSubmissionService : IPartyPrintSubmissionService
     {
         "midnight" => PartyPrintTheme.Midnight,
         "event" => PartyPrintTheme.Event,
-        "overlay-white" => PartyPrintTheme.OverlayWhite,
-        "overlay-black" => PartyPrintTheme.OverlayBlack,
+        "overlay" => PartyPrintTheme.Overlay,
         _ => PartyPrintTheme.Pure,
     };
+
+    /// <summary>An unreadable colour is the look's default, not a refused print.</summary>
+    private static PartyPrintOverlay ParseOverlay(PartyPrintSubmitRequest request) => new(
+        request.OverlayText?.ToLowerInvariant() switch
+        {
+            "black" => PartyPrintOverlayText.Black,
+            "red" => PartyPrintOverlayText.Red,
+            _ => PartyPrintOverlayText.White,
+        },
+        request.OverlayLogo?.ToLowerInvariant() == "dark"
+            ? PartyPrintOverlayLogo.Dark
+            : PartyPrintOverlayLogo.Light);
 
     /// <summary>The title on the photograph is a single-photograph look; a strip keeps its frame.</summary>
     private static PartyPrintTheme ThemeFor(string product, string? value)
     {
         var theme = ParseTheme(value);
         return product == PartyPrintProducts.Strip4
-            && theme is PartyPrintTheme.OverlayWhite or PartyPrintTheme.OverlayBlack
+            && theme == PartyPrintTheme.Overlay
             ? PartyPrintTheme.Pure
             : theme;
     }

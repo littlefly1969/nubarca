@@ -6,6 +6,22 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### *On the photo* keeps the photograph
+
+- **The photograph is printed as it is.** *On the photo* no longer lays the
+  invitation's shading over the whole picture, and the foot of the print is no
+  longer covered in navy or white. Only the last fifth gets a faint shadow
+  behind the words, at most about a fifth as dark, plus a soft halo around the
+  letters.
+- **The text and the logo are now separate choices.** The party's name, the
+  host's line and the guest's number can be white, black or red. The NubArca
+  symbol can be light or dark.
+- **The guest's number always keeps its own space.** It is a touch larger than
+  the host's line. A long line shrinks, then shortens, and never runs under
+  the number.
+- The choices under the preview are now buttons with a colour swatch, sized for
+  a thumb. The other looks and the strips have not changed.
+
 ### Guests move through the album, and Continue stays in reach
 
 - **Swipe, tap ‹ › or use the arrow keys** to go from one photo (or video) of the
@@ -18,10 +34,8 @@ originating repository and is deliberately not reproduced here.
 ### The party's name on the photo, and two different strips
 
 - **A new look for single photos: *On the photo*.** The photograph fills the
-  whole sheet, and the party's name and the NubArca symbol are printed on it —
-  in white or black, as the guest chooses — over the same shading the party
-  invitation lays over its cover, fading into navy under white text and into
-  white under black text. The framed looks stay exactly as they were.
+  whole sheet, and the party's name and the NubArca symbol are printed on it.
+  The framed looks stay exactly as they were.
 - **A strip sheet is now two different strips.** Guests choose eight photos —
   four for each strip — instead of four printed twice, so the two keepsakes on
   one sheet are not copies.

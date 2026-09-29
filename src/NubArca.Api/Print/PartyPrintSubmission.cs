@@ -10,7 +10,11 @@ public sealed record PartyPrintSubmitRequest(
     /// else follows the photograph too: an unreadable preference is not worth
     /// refusing a print over.
     /// </summary>
-    string? Orientation = null);
+    string? Orientation = null,
+    /// <summary>"white", "black" or "red": the words of an "On the photo" print.</summary>
+    string? OverlayText = null,
+    /// <summary>"light" or "dark": its NubArca symbol, independent of the words.</summary>
+    string? OverlayLogo = null);
 
 public sealed record PartyPrintSlotRequest(
     Guid ItemId, double CropX, double CropY, double CropWidth, double CropHeight);

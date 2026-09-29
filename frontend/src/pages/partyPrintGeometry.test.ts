@@ -5,8 +5,9 @@ import {
   SLOTS_PER_STRIP, STRIPS_PER_SHEET, STRIP_FOOTER_FRACTION, STRIP_GUTTER_FRACTION,
   STRIP_MARGIN_FRACTION, STRIP_SLOT_GAP_FRACTION, DEFAULT_CROP_VIEW, MAX_ZOOM,
   clampCrop, coverCrop, cropFor, stripSlot, stripWidthFraction,
-  OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SCRIM_STOPS, OVERLAY_SYMBOL_FRACTION,
-  OVERLAY_TITLE_FRACTION, overlayScrim, overlaySlotAspect,
+  OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_NUMBER_FRACTION, OVERLAY_SYMBOL_FRACTION,
+  OVERLAY_TEXT_SUPPORT_MAX_OPACITY, OVERLAY_TEXT_SUPPORT_START_FRACTION, OVERLAY_TITLE_FRACTION,
+  overlaySlotAspect, overlayTextSupport,
 } from './partyPrintGeometry';
 
 /** Every constant this file mirrors, and where it is mirrored FROM. */
@@ -47,19 +48,21 @@ describe('party print geometry', () => {
     expect(constant('OverlaySymbolFraction')).toBe(OVERLAY_SYMBOL_FRACTION);
     expect(constant('OverlayTitleFraction')).toBe(OVERLAY_TITLE_FRACTION);
     expect(constant('OverlayLineFraction')).toBe(OVERLAY_LINE_FRACTION);
-
-    // The scrim is a list, so it is compared as one.
-    const scrim = source.match(/OverlayScrimStops\s*=\s*\[([^\]]*)\]/);
-    if (!scrim) throw new Error(`OverlayScrimStops is no longer in ${SERVER_GEOMETRY}`);
-    expect(scrim[1].split(',').map((v) => Number(v.trim()))).toEqual([...OVERLAY_SCRIM_STOPS]);
+    expect(constant('OverlayNumberFraction')).toBe(OVERLAY_NUMBER_FRACTION);
+    expect(constant('OverlayTextSupportStartFraction')).toBe(OVERLAY_TEXT_SUPPORT_START_FRACTION);
+    expect(constant('OverlayTextSupportMaxOpacity')).toBe(OVERLAY_TEXT_SUPPORT_MAX_OPACITY);
+    // The photograph's own scrim is gone from the print for good.
+    expect(source).not.toContain('OverlayScrimStops');
   });
 
-  it('puts the title-on-the-photo crop on the whole sheet, under the invitation scrim', () => {
+  it('puts the title-on-the-photo crop on the whole sheet, with support only under the words', () => {
     expect(overlaySlotAspect(true)).toBeCloseTo(PORTRAIT_WIDTH / PORTRAIT_HEIGHT, 9);
     expect(overlaySlotAspect(false)).toBeCloseTo(LANDSCAPE_WIDTH / LANDSCAPE_HEIGHT, 9);
-    expect(overlayScrim('10 15 26')).toBe(
-      'linear-gradient(180deg, rgb(10 15 26 / 58%) 0%, rgb(10 15 26 / 26%) 16%, '
-      + 'rgb(10 15 26 / 46%) 42%, rgb(10 15 26 / 86%) 74%, rgb(10 15 26 / 100%) 100%)');
+    // Transparent where it starts, a fifth of the colour at the foot, never solid.
+    expect(overlayTextSupport('10 15 26')).toBe(
+      'linear-gradient(180deg, rgb(10 15 26 / 0%) 0%, rgb(10 15 26 / 22%) 100%)');
+    expect(OVERLAY_TEXT_SUPPORT_MAX_OPACITY).toBeLessThanOrEqual(0.25);
+    expect(OVERLAY_TEXT_SUPPORT_START_FRACTION).toBeGreaterThanOrEqual(0.8);
   });
 
   it('keeps the twin strips inside the sheet and apart from each other', () => {

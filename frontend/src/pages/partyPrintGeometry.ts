@@ -74,27 +74,27 @@ export const OVERLAY_MARGIN_FRACTION = 0.06;
 export const OVERLAY_SYMBOL_FRACTION = 0.12;
 /** Type size of the party's name, short-edge fraction. */
 export const OVERLAY_TITLE_FRACTION = 0.085;
-/** Type size of the host's line and of the number. */
+/** Type size of the host's line. */
 export const OVERLAY_LINE_FRACTION = 0.036;
-/**
- * The invitation cover's scrim, top to bottom, as (position, opacity) pairs of
- * the base colour — PartyGuestHub.css draws the same stops over the cover.
- */
-export const OVERLAY_SCRIM_STOPS: readonly number[] = [0, 0.58, 0.16, 0.26, 0.42, 0.46, 0.74, 0.86, 1, 1];
+/** Type size of the guest's number, a touch above the host's line. */
+export const OVERLAY_NUMBER_FRACTION = 0.044;
+/** Where the words' legibility support begins: the last fifth of the sheet. */
+export const OVERLAY_TEXT_SUPPORT_START_FRACTION = 0.8;
+/** Its strongest point, at the foot: a whisper, never a tint. */
+export const OVERLAY_TEXT_SUPPORT_MAX_OPACITY = 0.22;
 
 /** A title-on-the-photograph crop fills the whole sheet. */
 export function overlaySlotAspect(portrait: boolean): number {
   return portrait ? PORTRAIT_WIDTH / PORTRAIT_HEIGHT : LANDSCAPE_WIDTH / LANDSCAPE_HEIGHT;
 }
 
-/** The scrim as a CSS gradient over `rgb` (the base colour as "r g b"). */
-export function overlayScrim(rgb: string): string {
-  const stops: string[] = [];
-  for (let i = 0; i < OVERLAY_SCRIM_STOPS.length; i += 2) {
-    const percent = (v: number) => `${Number((v * 100).toFixed(3))}%`;
-    stops.push(`rgb(${rgb} / ${percent(OVERLAY_SCRIM_STOPS[i + 1])}) ${percent(OVERLAY_SCRIM_STOPS[i])}`);
-  }
-  return `linear-gradient(180deg, ${stops.join(', ')})`;
+/**
+ * The support under the words, as the renderer draws it over the last fifth:
+ * transparent at its top, `OVERLAY_TEXT_SUPPORT_MAX_OPACITY` of `rgb` at the foot.
+ */
+export function overlayTextSupport(rgb: string): string {
+  const strongest = Number((OVERLAY_TEXT_SUPPORT_MAX_OPACITY * 100).toFixed(3));
+  return `linear-gradient(180deg, rgb(${rgb} / 0%) 0%, rgb(${rgb} / ${strongest}%) 100%)`;
 }
 
 // --- Four-photo strip -------------------------------------------------------

@@ -225,19 +225,34 @@ public sealed class PartyPrintSubmissionTests : IDisposable
     {
         var (access, _) = await SeedAsync();
         var photo = await SubmitAsync(access,
-            Request(PartyPrintProducts.Photo, _photos[0]) with { Theme = "overlay-black" }, "o1");
+            Request(PartyPrintProducts.Photo, _photos[0])
+                with { Theme = "overlay", OverlayText = "red", OverlayLogo = "dark" }, "o1");
+        var plain = await SubmitAsync(access,
+            Request(PartyPrintProducts.Photo, _photos[0]) with { Theme = "overlay" }, "o2");
         var strip = await SubmitAsync(access,
-            Request(PartyPrintProducts.Strip4, Eight()) with { Theme = "overlay-white" }, "o2");
-        Assert.True(photo.Ok && strip.Ok);
+            Request(PartyPrintProducts.Strip4, Eight())
+                with { Theme = "overlay", OverlayText = "red", OverlayLogo = "dark" }, "o3");
+        var framed = await SubmitAsync(access,
+            Request(PartyPrintProducts.Photo, _photos[0])
+                with { Theme = "midnight", OverlayText = "red", OverlayLogo = "dark" }, "o4");
+        Assert.True(photo.Ok && plain.Ok && strip.Ok && framed.Ok);
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        async Task<string> ThemeOf(PartyPrintSubmitResult result) =>
-            System.Text.Json.JsonDocument.Parse((await db.PrintJobs.AsNoTracking()
-                .SingleAsync(j => j.Id == result.Accepted!.JobId)).RenderSpecificationJson)
-                .RootElement.GetProperty("theme").GetString()!;
-        Assert.Equal("overlayblack", await ThemeOf(photo));
-        Assert.Equal("pure", await ThemeOf(strip));
+        async Task<(string? Theme, string? Text, string? Logo)> SpecOf(PartyPrintSubmitResult result)
+        {
+            var spec = System.Text.Json.JsonDocument.Parse((await db.PrintJobs.AsNoTracking()
+                .SingleAsync(j => j.Id == result.Accepted!.JobId)).RenderSpecificationJson).RootElement;
+            return (spec.GetProperty("theme").GetString(), spec.GetProperty("overlayText").GetString(),
+                spec.GetProperty("overlayLogo").GetString());
+        }
+        // The look, and its two colours chosen apart.
+        Assert.Equal(("overlay", "red", "dark"), await SpecOf(photo));
+        // Unsaid, they are white words and the light symbol.
+        Assert.Equal(("overlay", "white", "light"), await SpecOf(plain));
+        // A strip keeps its frame, and a framed look has no overlay colours.
+        Assert.Equal(("pure", null, null), await SpecOf(strip));
+        Assert.Equal(("midnight", null, null), await SpecOf(framed));
     }
 
     [Fact]

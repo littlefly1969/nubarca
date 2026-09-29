@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useMemo, useRef, useState, type ReactNode,
+  useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
 import { Link, useParams } from 'react-router';
 import {
@@ -16,6 +16,8 @@ import {
   type PartyPrintSlot,
   type PartyPrintState,
   type PartyPrintTheme,
+  type PartyPrintOverlayText,
+  type PartyPrintOverlayLogo,
 } from '@nubarca/api-client';
 import { useI18n, type MessageKey } from '../i18n';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
@@ -27,7 +29,8 @@ import {
   CUT_MARK_LENGTH_FRACTION, PORTRAIT_HEIGHT, PORTRAIT_WIDTH,
   type CropView, cropFor, photoLayout, photoSlotAspect, stripFooter, stripSlot,
   OVERLAY_LINE_FRACTION, OVERLAY_MARGIN_FRACTION, OVERLAY_SYMBOL_FRACTION, OVERLAY_TITLE_FRACTION,
-  LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH, overlayScrim, overlaySlotAspect,
+  OVERLAY_NUMBER_FRACTION, OVERLAY_TEXT_SUPPORT_START_FRACTION,
+  LANDSCAPE_HEIGHT, LANDSCAPE_WIDTH, overlaySlotAspect, overlayTextSupport,
   stripSlotAspect,
 } from './partyPrintGeometry';
 import './PartyGuestHub.css';
@@ -58,10 +61,10 @@ const PARTY_EYEBROW = `${PRODUCT_NAME} Party`;
 
 /**
  * Looks, in the order they are offered. The first three frame any product; the
- * title on the photograph is a single-photograph look, in white or black ink.
+ * title on the photograph is a single-photograph look, whose words and symbol
+ * take their colours independently.
  */
 type Look = 'pure' | 'midnight' | 'event' | 'overlay';
-type Ink = 'white' | 'black';
 const FRAMED_LOOKS: readonly Look[] = ['pure', 'midnight', 'event'] as const;
 const PHOTO_LOOKS: readonly Look[] = [...FRAMED_LOOKS, 'overlay'] as const;
 const LOOK_LABEL: Record<Look, MessageKey> = {
@@ -70,15 +73,27 @@ const LOOK_LABEL: Record<Look, MessageKey> = {
   event: 'partyPrint.theme.event',
   overlay: 'partyPrint.theme.overlay',
 };
-/** Ink, and the base colour its scrim fades into ("r g b", the brand's navy or white). */
-const INKS: readonly Ink[] = ['white', 'black'] as const;
-const INK_COLOUR: Record<Ink, { ink: string; base: string }> = {
-  white: { ink: '#f5f7fb', base: '10 15 26' },
-  black: { ink: '#0a0f1a', base: '245 247 251' },
+/**
+ * The words' colour, and the support and halo under them ("r g b"): a whisper of
+ * black under light or red words, of white under dark ones. The red is a print
+ * colour for photographs (`overlay-text-red`), not a brand colour. Mirrors the
+ * renderer value for value.
+ */
+const OVERLAY_TEXTS: readonly PartyPrintOverlayText[] = ['white', 'black', 'red'] as const;
+const OVERLAY_TEXT: Record<PartyPrintOverlayText, { ink: string; support: string }> = {
+  white: { ink: '#f5f7fb', support: '10 15 26' },
+  black: { ink: '#0a0f1a', support: '245 247 251' },
+  red: { ink: '#d11f2e', support: '10 15 26' },
+};
+/** The symbol's two treatments: the approved flat mark in one solid colour. */
+const OVERLAY_LOGOS: readonly PartyPrintOverlayLogo[] = ['light', 'dark'] as const;
+const OVERLAY_LOGO: Record<PartyPrintOverlayLogo, string> = {
+  light: '#f5f7fb',
+  dark: '#0a0f1a',
 };
 
-function isOverlay(theme: PartyPrintTheme): theme is 'overlay-white' | 'overlay-black' {
-  return theme === 'overlay-white' || theme === 'overlay-black';
+function isOverlay(theme: PartyPrintTheme): theme is 'overlay' {
+  return theme === 'overlay';
 }
 /** Which wordmark an artwork this dark takes. Mirrors the renderer's palette. */
 const DARK_THEMES: readonly PartyPrintTheme[] = ['midnight', 'event'] as const;
@@ -237,10 +252,57 @@ interface SheetProps {
   orientation: PartyPrintOrientation | null;
   /** The printer cuts the sheet itself, so the printed sheet has no cut marks. */
   cutByPrinter: boolean;
+  /** Only read for the 'overlay' look. */
+  overlayText: PartyPrintOverlayText;
+  overlayLogo: PartyPrintOverlayLogo;
 }
 
 function pct(value: number): string {
   return `${value * 100}%`;
+}
+
+/**
+ * The renderer's FitLine for the preview: a line wider than its box shrinks —
+ * never below `floor` of its size — before the ellipsis takes the rest. The
+ * sizes are container units, so the ratio found once holds at any width.
+ */
+function useFitLine(size: string, floor: number, deps: readonly unknown[]) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const fit = () => {
+      el.style.fontSize = size;
+      // The room kept for the number is not the words' room.
+      const kept = parseFloat(getComputedStyle(el).paddingRight) || 0;
+      const room = el.clientWidth - kept;
+      const needed = el.scrollWidth - kept;
+      if (needed > room && room > 0) {
+        el.style.fontSize = `calc(${size} * ${Math.max(floor, room / needed)})`;
+      }
+    };
+    fit();
+    let live = true;
+    // Measured again once the web fonts arrive: they set the real width.
+    void document.fonts?.ready.then(() => { if (live) fit(); });
+    return () => { live = false; };
+  }, [size, floor, ...deps]);
+  return ref;
+}
+
+/** The words of the title-on-the-photo preview, fitted as the renderer fits them. */
+function OverlayWords({ partyName, footerText, orientation }: {
+  partyName: string; footerText: string | null; orientation: string;
+}) {
+  // The renderer's floors: the name as small as it must be, the line to 3/4.
+  const name = useFitLine('var(--title-size)', 0, [partyName, footerText, orientation]);
+  const line = useFitLine('var(--line-size)', 0.75, [footerText, orientation]);
+  return (
+    <>
+      <span ref={name} className="party-print-overlay-name">{partyName}</span>
+      {footerText && <span ref={line} className="party-print-overlay-line">{footerText}</span>}
+    </>
+  );
 }
 
 function SheetPreview(props: SheetProps) {
@@ -259,13 +321,15 @@ function SheetPreview(props: SheetProps) {
     // sheet's width or height, exactly as the renderer measures it.
     const ofWidth = (fraction: number) => pct((fraction * short) / w);
     const ofHeight = (fraction: number) => pct((fraction * short) / h);
-    const colours = INK_COLOUR[theme === 'overlay-white' ? 'white' : 'black'];
+    const text = OVERLAY_TEXT[props.overlayText];
     return (
       <div
         className="party-print-sheet party-print-sheet-overlay"
         data-theme={theme}
         data-testid="party-print-sheet"
         data-orientation={portrait ? 'portrait' : 'landscape'}
+        data-overlay-text={props.overlayText}
+        data-overlay-logo={props.overlayLogo}
         style={{ aspectRatio: `${w} / ${h}` }}
       >
         <div className="party-print-slot" style={{ left: 0, top: 0, width: '100%', height: '100%' }}>
@@ -275,7 +339,15 @@ function SheetPreview(props: SheetProps) {
             onAspect={(width, height) => onAspect(id, width, height)}
           />
         </div>
-        <div className="party-print-overlay-scrim" style={{ background: overlayScrim(colours.base) }} />
+        {/* Only under the words: the photograph above keeps every pixel. */}
+        <div
+          className="party-print-overlay-support"
+          data-testid="party-print-overlay-support"
+          style={{
+            top: pct(OVERLAY_TEXT_SUPPORT_START_FRACTION),
+            background: overlayTextSupport(text.support),
+          }}
+        />
         <span
           className="party-print-overlay-symbol"
           data-testid="party-print-overlay-symbol"
@@ -283,21 +355,26 @@ function SheetPreview(props: SheetProps) {
           style={{
             left: ofWidth(OVERLAY_MARGIN_FRACTION), top: ofHeight(OVERLAY_MARGIN_FRACTION),
             width: ofWidth(OVERLAY_SYMBOL_FRACTION), height: ofHeight(OVERLAY_SYMBOL_FRACTION),
-            backgroundColor: colours.ink,
+            backgroundColor: OVERLAY_LOGO[props.overlayLogo],
           }}
         />
         <div
           className="party-print-overlay-text"
           style={{
             left: ofWidth(OVERLAY_MARGIN_FRACTION), right: ofWidth(OVERLAY_MARGIN_FRACTION),
-            bottom: ofHeight(OVERLAY_MARGIN_FRACTION), color: colours.ink,
+            bottom: ofHeight(OVERLAY_MARGIN_FRACTION), color: text.ink,
+            ['--halo' as string]: `rgb(${text.support} / 55%)`,
             // cqw of the sheet: the same fraction of the short edge as on paper.
             ['--title-size' as string]: `${((OVERLAY_TITLE_FRACTION * short) / w) * 100}cqw`,
             ['--line-size' as string]: `${((OVERLAY_LINE_FRACTION * short) / w) * 100}cqw`,
+            ['--number-size' as string]: `${((OVERLAY_NUMBER_FRACTION * short) / w) * 100}cqw`,
           }}
         >
-          <span className="party-print-overlay-name">{props.partyName}</span>
-          {props.footerText && <span className="party-print-overlay-line">{props.footerText}</span>}
+          <OverlayWords
+            partyName={props.partyName}
+            footerText={props.footerText}
+            orientation={portrait ? 'portrait' : 'landscape'}
+          />
         </div>
       </div>
     );
@@ -425,10 +502,11 @@ export function PartyPrintPage() {
   const [views, setViews] = useState<Record<string, CropView>>({});
   const [aspects, setAspects] = useState<Record<string, number>>({});
   const [look, setLook] = useState<Look>('pure');
-  const [ink, setInk] = useState<Ink>('white');
+  const [overlayText, setOverlayText] = useState<PartyPrintOverlayText>('white');
+  const [overlayLogo, setOverlayLogo] = useState<PartyPrintOverlayLogo>('light');
   // The theme the server is sent: the overlay exists only for a single photograph.
   const theme: PartyPrintTheme = look === 'overlay'
-    ? (product === 'photo' ? `overlay-${ink}` : 'pure')
+    ? (product === 'photo' ? 'overlay' : 'pure')
     : look;
   const [cropIndex, setCropIndex] = useState(0);
   const [onlyMine, setOnlyMine] = useState(false);
@@ -451,7 +529,7 @@ export function PartyPrintPage() {
   const pendingRef = useRef<{ key: string; slots: PartyPrintSlot[] } | null>(null);
   useEffect(() => {
     pendingRef.current = null;
-  }, [product, chosen, views, theme, orientation]);
+  }, [product, chosen, views, theme, orientation, overlayText, overlayLogo]);
 
   useEffect(() => {
     if (!token) {
@@ -611,6 +689,7 @@ export function PartyPrintPage() {
           // Omitted when the guest left the default: the server follows the
           // photograph, which is what it did before this choice existed.
           ...(product === 'photo' && orientation ? { orientation } : {}),
+          ...(theme === 'overlay' ? { overlayText, overlayLogo } : {}),
         },
         pending.key);
       setSent({ accepted, state: 'preparing' });
@@ -976,6 +1055,8 @@ export function PartyPrintPage() {
             onAspect={noteAspect}
             orientation={orientation}
             cutByPrinter={format?.cutByPrinter === true}
+            overlayText={overlayText}
+            overlayLogo={overlayLogo}
           />
           <p className="party-print-hint">{t('partyPrint.previewHelp')}</p>
           {product === 'strip4' && (
@@ -1017,22 +1098,55 @@ export function PartyPrintPage() {
               </label>
             ))}
           </fieldset>
+          {/* Only for "On the photo": two independent choices, each a group of
+              option cards over real radio inputs, sized for a thumb. */}
           {product === 'photo' && look === 'overlay' && (
-            <fieldset className="party-print-themes">
-              <legend>{t('partyPrint.ink')}</legend>
-              {INKS.map((option) => (
-                <label key={option} className="party-print-theme">
-                  <input
-                    type="radio"
-                    name="party-print-ink"
-                    value={option}
-                    checked={ink === option}
-                    onChange={() => setInk(option)}
-                  />
-                  <span>{t(`partyPrint.ink.${option}`)}</span>
-                </label>
-              ))}
-            </fieldset>
+            <div className="party-print-overlay-options">
+              <fieldset className="party-print-choice">
+                <legend>{t('partyPrint.overlayText')}</legend>
+                <div className="party-print-choice-grid">
+                  {OVERLAY_TEXTS.map((option) => (
+                    <label key={option} className="party-print-option">
+                      <input
+                        type="radio"
+                        className="party-print-option-input"
+                        name="party-print-overlay-text"
+                        value={option}
+                        checked={overlayText === option}
+                        onChange={() => setOverlayText(option)}
+                      />
+                      <span
+                        className="party-print-swatch"
+                        aria-hidden="true"
+                        style={{ backgroundColor: OVERLAY_TEXT[option].ink }}
+                      />
+                      <span>{t(`partyPrint.overlayText.${option}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset className="party-print-choice">
+                <legend>{t('partyPrint.overlayLogo')}</legend>
+                <div className="party-print-choice-grid">
+                  {OVERLAY_LOGOS.map((option) => (
+                    <label key={option} className="party-print-option">
+                      <input
+                        type="radio"
+                        className="party-print-option-input"
+                        name="party-print-overlay-logo"
+                        value={option}
+                        checked={overlayLogo === option}
+                        onChange={() => setOverlayLogo(option)}
+                      />
+                      <span className="party-print-swatch party-print-swatch-mark" aria-hidden="true">
+                        <span style={{ backgroundColor: OVERLAY_LOGO[option] }} />
+                      </span>
+                      <span>{t(`partyPrint.overlayLogo.${option}`)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
           )}
           {submitError && (
             <p className="party-print-error" role="alert">{t(submitError)}</p>

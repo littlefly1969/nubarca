@@ -110,6 +110,9 @@ const styles = [
   // has no equivalent of. Everything else on a crew surface is the `pw-*`
   // system above, shared with the host.
   ['src', 'pages', 'PartyCrew.css'],
+  // The print studio a guest reaches from the hub, with its crop frame.
+  ['src', 'party', 'PhotoCropFrame.css'],
+  ['src', 'pages', 'PartyPrintPage.css'],
 ].map((parts) => readFileSync(join(frontend, ...parts), 'utf8')).join('\n');
 
 const fixtures = readdirSync(fixtureDir).filter((f) => f.endsWith('.html')).sort();
