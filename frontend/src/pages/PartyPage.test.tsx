@@ -689,6 +689,34 @@ describe('PartyPage (public party landing)', () => {
     expect(shown()).toBe('/api/party/tok-1/media/f2/preview');
   });
 
+  it('stays on the last photo when several arrows land before a render', async () => {
+    mockAlbum([media('f1'), media('f2'), media('f3')]);
+    render(wrapper());
+    const user = userEvent.setup();
+    await screen.findByTestId('party-grid');
+    await user.click(screen.getAllByRole('button', { name: 'Apri foto' })[1]);
+
+    // Three presses from the penultimate photo in ONE batch: the handler of the
+    // render that showed "next" runs for all of them.
+    act(() => {
+      for (let i = 0; i < 3; i += 1) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+      }
+    });
+    const viewer = screen.getByTestId('party-image-viewer');
+    expect(viewer.querySelector('img')).toHaveAttribute('src', '/api/party/tok-1/media/f3/preview');
+    expect(screen.getByRole('button', { name: 'Successivo' })).toBeDisabled();
+
+    // And the same the other way, past the first.
+    act(() => {
+      for (let i = 0; i < 5; i += 1) {
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+      }
+    });
+    expect(screen.getByTestId('party-image-viewer').querySelector('img'))
+      .toHaveAttribute('src', '/api/party/tok-1/media/f1/preview');
+  });
+
   it('returns focus to the tile the viewer was opened from', async () => {
     mockAlbum([media('f1'), media('f2')]);
     render(wrapper());

@@ -997,7 +997,12 @@ export function PartyPage() {
           gallery, so `lightbox` is simply null on the other two. */}
       {lightbox && (() => {
         const item = lightbox.items[lightbox.index];
-        const move = (delta: number) => setLightbox((lb) => (lb ? { ...lb, index: lb.index + delta } : lb));
+        // Clamped HERE, not only by which buttons this render showed: several
+        // key presses can land before the next render, each one an update on
+        // the last, and none of them may walk off either end of the gallery.
+        const move = (delta: number) => setLightbox((lb) => (lb
+          ? { ...lb, index: Math.max(0, Math.min(lb.items.length - 1, lb.index + delta)) }
+          : lb));
         return (
           <PartyImageViewer
             src={item.previewUrl}
