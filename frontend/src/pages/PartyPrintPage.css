@@ -580,6 +580,18 @@
   margin-top: 0.5rem;
 }
 
+/* In the pinned bar the buttons take the clicks the bar itself lets through,
+   and the gallery keeps room so its last row is never under the bar. */
+.party-invitation-cta .party-print-actions {
+  pointer-events: auto;
+  width: min(30rem, 100%);
+  margin-top: 0;
+}
+
+.party-print-step:has(> .party-invitation-cta) .party-print-gallery {
+  margin-bottom: 6rem;
+}
+
 .party-print-primary,
 .party-print-secondary {
   flex: 1;

@@ -6,6 +6,15 @@ originating repository and is deliberately not reproduced here.
 
 ## Unreleased
 
+### Guests move through the album, and Continue stays in reach
+
+- **Swipe, tap ‹ › or use the arrow keys** to go from one photo (or video) of the
+  party album to the next, without closing the viewer — the same controls as the
+  app's own viewer.
+- **Choosing photos to print, Continue is always on screen**, pinned at the
+  bottom like the invitation's reply button, instead of waiting at the end of a
+  long album.
+
 ### The party's name on the photo, and two different strips
 
 - **A new look for single photos: *On the photo*.** The photograph fills the

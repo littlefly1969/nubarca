@@ -191,6 +191,19 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(next()).toBeEnabled();
   });
 
+  it('keeps Continue pinned at the bottom while the guest chooses from a long album', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await chooseFormat(user, 'photo');
+    // The invitation's own bar: reachable without scrolling to the album's end.
+    const bar = screen.getByTestId('party-print-select-bar');
+    expect(bar).toHaveClass('party-invitation-cta');
+    expect(within(bar).getByRole('button', { name: 'Continua' })).toBeDisabled();
+    await pick(user, 1);
+    expect(within(bar).getByRole('button', { name: 'Continua' })).toBeEnabled();
+  });
+
   it('numbers the chosen photographs in the order they were chosen', async () => {
     const user = setup();
     mount();

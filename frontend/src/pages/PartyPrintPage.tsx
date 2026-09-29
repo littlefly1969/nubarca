@@ -807,22 +807,26 @@ export function PartyPrintPage() {
               })}
             </ul>
           )}
-          <div className="party-print-actions">
-            <button
-              type="button"
-              className="party-print-secondary"
-              onClick={() => setStep('format')}
-            >
-              {t('partyPrint.previous')}
-            </button>
-            <button
-              type="button"
-              className="party-print-primary"
-              disabled={chosen.length !== required}
-              onClick={() => setStep(product === 'strip4' ? 'arrange' : 'crop')}
-            >
-              {t('partyPrint.continue')}
-            </button>
+          {/* Pinned where a thumb is — the invitation's own bar — so a guest
+              choosing from a long album never has to scroll to its end to go on. */}
+          <div className="party-invitation-cta" data-testid="party-print-select-bar">
+            <div className="party-print-actions">
+              <button
+                type="button"
+                className="party-print-secondary"
+                onClick={() => setStep('format')}
+              >
+                {t('partyPrint.previous')}
+              </button>
+              <button
+                type="button"
+                className="party-print-primary"
+                disabled={chosen.length !== required}
+                onClick={() => setStep(product === 'strip4' ? 'arrange' : 'crop')}
+              >
+                {t('partyPrint.continue')}
+              </button>
+            </div>
           </div>
         </section>
       )}

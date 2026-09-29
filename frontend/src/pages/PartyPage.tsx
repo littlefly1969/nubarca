@@ -313,7 +313,9 @@ export function PartyPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const posterParam = searchParams.get('poster');
   const [state, setState] = useState<State>({ kind: 'loading' });
-  const [lightbox, setLightbox] = useState<PartyItem | null>(null);
+  // The gallery as it was when the viewer opened, and where in it the guest is:
+  // moving through it must not shift under them when the album refreshes.
+  const [lightbox, setLightbox] = useState<{ items: PartyItem[]; index: number } | null>(null);
   // The party moving under a guest who is reading is an OFFER, not a takeover.
   //
   // `shownPhase` is the surface they are ON, and it only moves when they say so
@@ -401,9 +403,9 @@ export function PartyPage() {
   const seenIdsRef = useRef<Set<string> | null>(null);
   const [newMoments, setNewMoments] = useState(0);
 
-  const openViewer = useCallback((item: PartyItem, trigger: HTMLElement) => {
+  const openViewer = useCallback((items: PartyItem[], index: number, trigger: HTMLElement) => {
     viewerOpenerRef.current = trigger;
-    setLightbox(item);
+    setLightbox({ items, index });
   }, []);
 
   // THE POSTER, RESOLVED AGAINST THE SERVER'S ANSWER — never against the query.
@@ -538,7 +540,18 @@ export function PartyPage() {
           setState((cur) => (cur.kind === 'ready' && !sameItemIds(cur.items, fresh.items)
             ? { ...cur, items: fresh.items }
             : cur));
-          setLightbox((lb) => (lb && !fresh.items.some((it) => it.id === lb.id) ? null : lb));
+          // A photograph the host hid leaves the viewer's sequence; the one on
+          // screen vanishing closes the viewer, as before.
+          setLightbox((lb) => {
+            if (!lb) return lb;
+            const alive = new Set(fresh.items.map((it) => it.id));
+            const current = lb.items[lb.index];
+            if (!alive.has(current.id)) return null;
+            const items = lb.items.filter((it) => alive.has(it.id));
+            return items.length === lb.items.length
+              ? lb
+              : { items, index: items.findIndex((it) => it.id === current.id) };
+          });
         })
         .catch((err: unknown) => {
           if (err instanceof ApiError && err.status === 404) setState({ kind: 'unavailable' });
@@ -914,7 +927,7 @@ export function PartyPage() {
               type="button"
               className="party-guest-hub-tile"
               data-shape={shapes[index]}
-              onClick={(e) => openViewer(item, e.currentTarget)}
+              onClick={(e) => openViewer(visibleItems, index, e.currentTarget)}
               aria-label={item.mediaType === 'video' ? t('party.openVideo') : t('party.openPhoto')}
             >
               <img
@@ -982,14 +995,20 @@ export function PartyPage() {
           here. It keeps the download the server offered, which is the one thing
           a content poster never has. Only the Live/memories surface has a
           gallery, so `lightbox` is simply null on the other two. */}
-      {lightbox && (
-        <PartyImageViewer
-          src={lightbox.previewUrl}
-          label={lightbox.mediaType === 'video' ? t('party.videoViewer') : t('party.photoViewer')}
-          downloadUrl={lightbox.downloadUrl}
-          onClose={() => setLightbox(null)}
-        />
-      )}
+      {lightbox && (() => {
+        const item = lightbox.items[lightbox.index];
+        const move = (delta: number) => setLightbox((lb) => (lb ? { ...lb, index: lb.index + delta } : lb));
+        return (
+          <PartyImageViewer
+            src={item.previewUrl}
+            label={item.mediaType === 'video' ? t('party.videoViewer') : t('party.photoViewer')}
+            downloadUrl={item.downloadUrl}
+            onClose={() => setLightbox(null)}
+            onPrevious={lightbox.index > 0 ? () => move(-1) : undefined}
+            onNext={lightbox.index < lightbox.items.length - 1 ? () => move(1) : undefined}
+          />
+        );
+      })()}
 
       {/* A content POSTER, in the same viewer and with no download at all: a
           Party reference authorizes looking at a derived, metadata-stripped

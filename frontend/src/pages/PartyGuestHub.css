@@ -1493,3 +1493,66 @@
   .party-after-cta,
   .party-phase-banner { transition: none; }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The invitation's one call to action — and any guest page's
+   ───────────────────────────────────────────────────────────────────────────
+
+   Pinned to the bottom edge, where a thumb is, over a scrim so the words
+   scrolling under it stay readable. It is `fixed` rather than `sticky` because
+   it must be reachable from the FIRST screen of a long invitation, not only
+   once the guest has scrolled to wherever it would otherwise sit. */
+
+.party-invitation-cta {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding:
+    2.5rem
+    max(1rem, env(safe-area-inset-right))
+    max(1rem, env(safe-area-inset-bottom))
+    max(1rem, env(safe-area-inset-left));
+  /* The scrim belongs to the bar, not to the page: a solid strip would cut the
+     cover in half on a short invitation. */
+  background: linear-gradient(
+    to top,
+    var(--brand-midnight-navy) 38%,
+    rgb(10 15 26 / 72%) 68%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.party-invitation-cta-button {
+  pointer-events: auto;
+  width: min(30rem, 100%);
+  min-height: 3.25rem;
+  padding: 0 1.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent-strong, #1565ff);
+  color: #fff;
+  font: inherit;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 30px rgb(2 6 16 / 45%);
+}
+
+.party-invitation-cta-button:hover { background: var(--brand-electric-blue, #1565ff); }
+.party-invitation-cta-button:focus-visible {
+  outline: 3px solid var(--party-hub-focus, #00d4ff);
+  outline-offset: 3px;
+}
+
+/* Room for it: the closing line must be readable with the bar in front of it. */
+.party-guest-hub:has(~ .party-invitation-cta) .party-invitation-footnote {
+  padding-block-end: 5rem;
+}
+
+@media (min-width: 40rem) {
+  .party-invitation-cta { padding-block-start: 3rem; }
+}
