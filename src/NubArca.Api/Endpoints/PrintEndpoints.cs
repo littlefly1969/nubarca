@@ -46,10 +46,23 @@ public static class PrintEndpoints
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).WithName("SetPrintStationDesiredState");
-        owner.MapDelete("/stations/{stationId:guid}", async (Guid stationId,
-            HttpContext context, [FromServices] PrintStationService service, CancellationToken ct) =>
-            await service.RevokeAsync(context.GetCurrentUserId()!.Value, stationId, ct)
-                ? Results.NoContent() : Results.NotFound()).WithName("RevokePrintStation");
+        owner.MapDelete("/stations/{stationId:guid}", async (Guid stationId, HttpContext context,
+            [FromServices] PrintStationService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
+        {
+            var userId = context.GetCurrentUserId()!.Value;
+            var ended = await service.RevokeAsync(userId, stationId, ct);
+            if (ended is null) return Results.NotFound();
+            // A station taken away ends every loan of its printers, and each
+            // is recorded as a loan ending, with why.
+            foreach (var share in ended)
+            {
+                await audit.LogAsync(AuditActor.User(userId), AuditActions.PrinterShareRevoke,
+                    AuditEntityTypes.PrinterDevice, share.PrinterDeviceId, Ip(context),
+                    new { shareId = share.Id, deviceId = share.PrinterDeviceId, usedSheets = share.UsedSheets,
+                        reason = "station_revoked" }, ct);
+            }
+            return Results.NoContent();
+        }).WithName("RevokePrintStation");
         owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/calibration", async (Guid stationId,
             Guid deviceId, [FromBody] PrintCalibrationDto? request, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>
@@ -125,8 +138,11 @@ public static class PrintEndpoints
             [FromBody] UpdatePrinterShareRequest? request, HttpContext context,
             [FromServices] PrintStationService service, [FromServices] IAuditLogger audit, CancellationToken ct) =>
         {
+            // No body is not "no ceiling": that is {"maxSheets": null}, said on
+            // purpose. A request that says nothing changes nothing.
+            if (request is null) return Results.BadRequest(new { error = "invalid_ceiling" });
             var userId = context.GetCurrentUserId()!.Value;
-            var (share, error) = await service.UpdateShareAsync(userId, shareId, request?.MaxSheets, ct);
+            var (share, error) = await service.UpdateShareAsync(userId, shareId, request.MaxSheets, ct);
             if (error == "not_found") return Results.NotFound();
             if (error is not null) return Results.BadRequest(new { error });
             await audit.LogAsync(AuditActor.User(userId), AuditActions.PrinterShareUpdate,

@@ -39,7 +39,8 @@ public interface IPrinterAccess
 
     /// <summary>
     /// Takes one sheet of a share's ceiling, atomically with the check that the
-    /// share is still live. The owner takes nothing and is always answered yes.
+    /// loan is still live: the share, its station, both accounts. The owner
+    /// takes nothing and is always answered yes.
     /// </summary>
     Task<PrinterSheetResult> TryTakeSheetAsync(Guid? shareId, CancellationToken cancellationToken);
 
@@ -50,7 +51,10 @@ public interface IPrinterAccess
 public enum PrinterSheetResult
 {
     Taken,
-    /// <summary>The share was revoked a moment ago: this print is not allowed any more.</summary>
+    /// <summary>
+    /// The loan is over — the share or its station revoked, an account
+    /// disabled — a moment ago: this print is not allowed any more.
+    /// </summary>
     Revoked,
     /// <summary>The share's ceiling is spent.</summary>
     Exhausted,
@@ -98,8 +102,10 @@ public sealed class PrinterAccess : IPrinterAccess
     {
         if (shareId is not Guid id) return PrinterSheetResult.Taken;
         // One statement decides and records: two guests on the last sheet of a
-        // lent printer cannot both take it, and a share revoked between the
-        // studio opening and this print is caught here, at acceptance.
+        // lent printer cannot both take it, and the loan's whole standing — the
+        // share, the station it is on still live and still the lender's, both
+        // accounts still active — is read by the same statement that takes the
+        // sheet. Nothing ForUserAsync saw a moment ago is trusted here.
         var taken = await _db.Database.ExecuteSqlRawAsync(
             """
             UPDATE printer_shares
@@ -107,12 +113,31 @@ public sealed class PrinterAccess : IPrinterAccess
              WHERE "Id" = {0}
                AND "RevokedAt" IS NULL
                AND ("MaxSheets" IS NULL OR "UsedSheets" < "MaxSheets")
+               AND EXISTS (SELECT 1
+                             FROM printer_devices d
+                             JOIN print_stations s ON s."Id" = d."PrintStationId"
+                            WHERE d."Id" = printer_shares."PrinterDeviceId"
+                              AND s."RevokedAt" IS NULL
+                              AND s."OwnerUserId" = printer_shares."OwnerUserId")
+               AND EXISTS (SELECT 1 FROM users u
+                            WHERE u."Id" = printer_shares."OwnerUserId" AND u."DisabledAt" IS NULL)
+               AND EXISTS (SELECT 1 FROM users u
+                            WHERE u."Id" = printer_shares."GranteeUserId" AND u."DisabledAt" IS NULL)
             """,
             [id], cancellationToken);
         if (taken == 1) return PrinterSheetResult.Taken;
-        var revoked = await _db.PrinterShares.AsNoTracking()
-            .AnyAsync(s => s.Id == id && s.RevokedAt != null, cancellationToken);
-        return revoked ? PrinterSheetResult.Revoked : PrinterSheetResult.Exhausted;
+
+        // Why not, said only as far as the borrower may act on it: a spent
+        // ceiling on a loan that is otherwise live is Exhausted; anything else —
+        // revoked, its station revoked, an account disabled — is the loan being
+        // over, and says nothing more.
+        var share = await _db.PrinterShares.AsNoTracking()
+            .Where(s => s.Id == id)
+            .Select(s => new { s.RevokedAt, s.MaxSheets, s.UsedSheets })
+            .FirstOrDefaultAsync(cancellationToken);
+        return share is { RevokedAt: null, MaxSheets: int max } && share.UsedSheets >= max
+            ? PrinterSheetResult.Exhausted
+            : PrinterSheetResult.Revoked;
     }
 
     public async Task ReturnSheetAsync(Guid? shareId, CancellationToken cancellationToken)

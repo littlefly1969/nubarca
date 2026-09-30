@@ -364,6 +364,8 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         var lender = await _factory.SeedUserAsync($"lender{Interlocked.Increment(ref _seeded)}@example.com");
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // A loan is of the LENDER's printer: the station is theirs, the party the host's.
+        (await db.PrintStations.SingleAsync(s => s.Id == access.PrintStationId)).OwnerUserId = lender;
         var share = new PrinterShare
         {
             Id = Guid.NewGuid(), PrinterDeviceId = access.PrinterDeviceId, OwnerUserId = lender,

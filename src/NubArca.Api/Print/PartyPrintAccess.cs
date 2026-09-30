@@ -98,4 +98,17 @@ public interface IPartyPrintAccessResolver
 {
     /// <summary>Null when the token is unknown, or printing is not currently open.</summary>
     Task<PartyPrintAccess?> ResolveAsync(string printToken, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The party a print token belongs to, for following a sheet already
+    /// accepted. Null only when the token itself is no longer good — unknown,
+    /// its link revoked, disabled or expired. Deliberately NOT whether printing
+    /// is open now: the budget, the printer, a loan's sheets or the party's
+    /// phase decide what may be SENT, and an accepted sheet stays followable
+    /// while the queue drains.
+    /// </summary>
+    Task<PartyPrintScope?> ResolveScopeAsync(string printToken, CancellationToken cancellationToken);
 }
+
+/// <summary>Which party a print token speaks for, and nothing about what it may print.</summary>
+public sealed record PartyPrintScope(Guid LinkId, Guid PartyAlbumId, Guid OwnerUserId);

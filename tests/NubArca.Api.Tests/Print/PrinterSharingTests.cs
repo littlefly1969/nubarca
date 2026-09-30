@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NubArca.Api.Audit;
 using NubArca.Api.Data;
 using NubArca.Api.Domain.Print;
+using NubArca.Api.Print;
 using NubArca.Api.Tests.Endpoints;
 
 namespace NubArca.Api.Tests.Print;
@@ -387,5 +388,132 @@ public sealed class PrinterSharingTests : IDisposable
         await people.Owner.DeleteAsync($"/api/print/stations/{printer.StationId}");
         Assert.Empty(await SharedWith(people.Mario));
         Assert.Equal(HttpStatusCode.NotFound, (await SetPaper(people.Mario, printer, "20x15")).StatusCode);
+    }
+
+    // --- A loan's standing is decided where the sheet is taken ------------------
+
+    private async Task<(Guid ShareId, PrinterUse Use)> LentUseAsync(People people, Printer printer, int? maxSheets = 5)
+    {
+        var share = await (await Share(people.Owner, printer, "mario@example.com", maxSheets))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        using var scope = _factory.Services.CreateScope();
+        var access = scope.ServiceProvider.GetRequiredService<IPrinterAccess>();
+        var use = await access.ForUserAsync(people.MarioId, printer.StationId, printer.DeviceId, CancellationToken.None);
+        Assert.NotNull(use);
+        return (share.GetProperty("id").GetGuid(), use!);
+    }
+
+    private async Task<PrinterSheetResult> TakeAsync(Guid shareId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IPrinterAccess>()
+            .TryTakeSheetAsync(shareId, CancellationToken.None);
+    }
+
+    private async Task<PrinterShare> ShareRowAsync(Guid shareId)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AppDbContext>()
+            .PrinterShares.AsNoTracking().SingleAsync(s => s.Id == shareId);
+    }
+
+    [Fact]
+    public async Task A_Station_Revoked_After_The_Check_Takes_No_Sheet_And_Ends_Its_Loans()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var (shareId, use) = await LentUseAsync(people, printer);
+        Assert.Equal(shareId, use.ShareId);
+
+        // Between the guest's studio resolving the printer and the sheet being
+        // taken, the owner revokes the station.
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await people.Owner.DeleteAsync($"/api/print/stations/{printer.StationId}")).StatusCode);
+        Assert.Equal(PrinterSheetResult.Revoked, await TakeAsync(shareId));
+
+        // The loan itself is over, in the same transaction, and recorded as such.
+        var row = await ShareRowAsync(shareId);
+        Assert.NotNull(row.RevokedAt);
+        Assert.Equal(people.OwnerId, row.RevokedByUserId);
+        Assert.Equal(0, row.UsedSheets);
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var revoke = await db.AuditLogs.AsNoTracking()
+            .SingleAsync(a => a.Action == AuditActions.PrinterShareRevoke && a.UserId == people.OwnerId);
+        Assert.Contains("station_revoked", revoke.MetadataJson);
+        Assert.Contains(shareId.ToString(), revoke.MetadataJson);
+    }
+
+    [Fact]
+    public async Task The_Sheet_Is_Refused_By_The_Station_Itself_Even_With_The_Share_Row_Untouched()
+    {
+        // The second guard: the statement that takes the sheet reads the
+        // station too, so a station revoked by any path stops the sheet.
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var (shareId, _) = await LentUseAsync(people, printer);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.PrintStations.SingleAsync(s => s.Id == printer.StationId)).RevokedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(PrinterSheetResult.Revoked, await TakeAsync(shareId));
+        Assert.Equal(0, (await ShareRowAsync(shareId)).UsedSheets);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_Disabled_Account_After_The_Check_Takes_No_Sheet(bool lender)
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var (shareId, _) = await LentUseAsync(people, printer);
+        await _factory.DisableUserAsync(lender ? people.OwnerId : people.MarioId);
+
+        // Refused as the loan being over, not as a spent ceiling: nobody can
+        // fix this by raising the ceiling.
+        Assert.Equal(PrinterSheetResult.Revoked, await TakeAsync(shareId));
+        Assert.Equal(0, (await ShareRowAsync(shareId)).UsedSheets);
+    }
+
+    [Fact]
+    public async Task A_Spent_Ceiling_On_A_Live_Loan_Is_Still_Exhausted()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var (shareId, _) = await LentUseAsync(people, printer, maxSheets: 1);
+        Assert.Equal(PrinterSheetResult.Taken, await TakeAsync(shareId));
+        Assert.Equal(PrinterSheetResult.Exhausted, await TakeAsync(shareId));
+        Assert.Equal(1, (await ShareRowAsync(shareId)).UsedSheets);
+    }
+
+    // --- A ceiling is changed only when the request says to ---------------------
+
+    [Fact]
+    public async Task A_Ceiling_Change_Must_Say_What_The_Ceiling_Is()
+    {
+        var people = await PeopleAsync();
+        var printer = await PrinterAsync(people.Owner);
+        var (shareId, _) = await LentUseAsync(people, printer, maxSheets: 20);
+        var url = $"/api/print/shares/{shareId}";
+
+        // No body, and a body that leaves the ceiling out: refused, the ceiling
+        // unchanged — neither is a request to remove it.
+        using (var empty = new HttpRequestMessage(HttpMethod.Put, url))
+        {
+            empty.Content = new StringContent(string.Empty, System.Text.Encoding.UTF8, "application/json");
+            Assert.Equal(HttpStatusCode.BadRequest, (await people.Owner.SendAsync(empty)).StatusCode);
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await people.Owner.PutAsJsonAsync(url, new { })).StatusCode);
+        Assert.Equal(20, (await ShareRowAsync(shareId)).MaxSheets);
+
+        // Saying null, on purpose, removes it.
+        Assert.Equal(HttpStatusCode.OK,
+            (await people.Owner.PutAsJsonAsync(url, new { maxSheets = (int?)null })).StatusCode);
+        Assert.Null((await ShareRowAsync(shareId)).MaxSheets);
+        Assert.Equal(HttpStatusCode.OK, (await people.Owner.PutAsJsonAsync(url, new { maxSheets = 30 })).StatusCode);
+        Assert.Equal(30, (await ShareRowAsync(shareId)).MaxSheets);
     }
 }

@@ -19,7 +19,10 @@ originating repository and is deliberately not reproduced here.
   that person's parties stop accepting prints and say why. Lending the printer
   again starts a new count.
 - **Ending a loan** stops new prints at once. What is already queued still
-  prints.
+  prints. Revoking a station ends the loans of its printers too.
+- **A guest keeps following a print already sent**, even after the party's
+  printing closes or the loan runs out. A print's progress can be read only
+  through the party that sent it.
 - **A sheet made for another paper waits for it.** If the roll is changed while
   sheets are queued, the printer skips the ones for the old paper. They print
   as soon as that paper is back in. The Print stations page shows them as
