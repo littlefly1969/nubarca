@@ -37,6 +37,17 @@ is built is described by `ARCHITECTURE.md`.
   approved colours. The number's measured width
   is reserved, so the host's line never meets it. The preview cuts the name as
   the renderer does and keeps room for `#9999`
+- Printer lending: an owner lends one printer (`PrinterShare`) to another
+  account by email, with an optional single sheet ceiling per loan. Every
+  "may this user print here?" question goes through `IPrinterAccess` (party
+  profile save, guest manifest and submission, paper, test page, retry); a
+  loan's sheet is taken atomically with the proof it is still live, so a
+  revoke closes acceptance at once while the queue drains. The borrower may set
+  the paper and print a test page; everything else stays the owner's. A claim
+  gives a printer only the sheets its loaded paper takes; the rest wait as
+  `ready` (shown as waiting for that paper). The owner's station list carries
+  the live queue and a per-person sheet summary aggregated in SQL over the
+  printer's whole history
 - CI: GitHub Actions verifies identity, backend, frontend, TV and mobile on pull
   requests and `main`; the external backend lane runs nightly or on demand; a
   separate manual, `main`-only native TV workflow builds and validates the
