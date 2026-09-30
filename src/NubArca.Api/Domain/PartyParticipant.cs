@@ -52,6 +52,7 @@ public class PartyParticipant
     /// other counter here: a print that came out cannot be un-spent.
     /// </summary>
     public int AcceptedPhotoPrintCount { get; set; }
+    public int AcceptedGridPrintCount { get; set; }
     public int AcceptedStripPrintCount { get; set; }
 
     /// <summary>

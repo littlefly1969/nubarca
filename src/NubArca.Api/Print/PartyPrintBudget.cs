@@ -58,7 +58,6 @@ public sealed class PartyPrintBudget : IPartyPrintBudget
         Guid partyAlbumId, string product, CancellationToken cancellationToken)
     {
         if (!PartyPrintProducts.IsKnown(product)) return null;
-        var photo = product == PartyPrintProducts.Photo;
 
         // One statement: the guard, the increment and the sequence draw. The
         // WHERE is the guard — a row that no longer qualifies simply does not
@@ -69,8 +68,9 @@ public sealed class PartyPrintBudget : IPartyPrintBudget
         // timestamp is a parameter rather than a database function, which keeps
         // the one statement identical on PostgreSQL and on the SQLite the tests
         // run against.
-        var sql = photo
-            ? """
+        var sql = product switch
+        {
+            PartyPrintProducts.Photo => """
               UPDATE party_print_profiles
                  SET "PhotoAcceptedCount" = "PhotoAcceptedCount" + 1,
                      "PublicSequenceNext" = "PublicSequenceNext" + 1,
@@ -81,8 +81,20 @@ public sealed class PartyPrintBudget : IPartyPrintBudget
                  AND "PhotoAcceptedCount" < "PhotoMaxPrints"
               RETURNING "PublicSequenceNext" - 1 AS "PublicSequence",
                         "PhotoMaxPrints" - "PhotoAcceptedCount" AS "RemainingAfter"
-              """
-            : """
+              """,
+            PartyPrintProducts.Grid4 => """
+              UPDATE party_print_profiles
+                 SET "GridAcceptedCount" = "GridAcceptedCount" + 1,
+                     "PublicSequenceNext" = "PublicSequenceNext" + 1,
+                     "UpdatedAt" = {1}
+               WHERE "PartyAlbumId" = {0}
+                 AND "Enabled" = TRUE
+                 AND "GridEnabled" = TRUE
+                 AND "GridAcceptedCount" < "GridMaxPrints"
+              RETURNING "PublicSequenceNext" - 1 AS "PublicSequence",
+                        "GridMaxPrints" - "GridAcceptedCount" AS "RemainingAfter"
+              """,
+            _ => """
               UPDATE party_print_profiles
                  SET "StripAcceptedCount" = "StripAcceptedCount" + 1,
                      "PublicSequenceNext" = "PublicSequenceNext" + 1,
@@ -93,7 +105,8 @@ public sealed class PartyPrintBudget : IPartyPrintBudget
                  AND "StripAcceptedCount" < "StripMaxPrints"
               RETURNING "PublicSequenceNext" - 1 AS "PublicSequence",
                         "StripMaxPrints" - "StripAcceptedCount" AS "RemainingAfter"
-              """;
+              """,
+        };
 
         var rows = await _db.Database
             .SqlQueryRaw<PartyPrintReservationRow>(sql, partyAlbumId, DateTime.UtcNow)
@@ -106,23 +119,30 @@ public sealed class PartyPrintBudget : IPartyPrintBudget
         Guid partyAlbumId, string product, CancellationToken cancellationToken)
     {
         if (!PartyPrintProducts.IsKnown(product)) return;
-        var photo = product == PartyPrintProducts.Photo;
 
         // The counter only ever goes back down to where it was, never below
         // zero: a release that arrives twice cannot manufacture budget.
-        var sql = photo
-            ? """
+        var sql = product switch
+        {
+            PartyPrintProducts.Photo => """
               UPDATE party_print_profiles
                  SET "PhotoAcceptedCount" = "PhotoAcceptedCount" - 1,
                      "UpdatedAt" = {1}
                WHERE "PartyAlbumId" = {0} AND "PhotoAcceptedCount" > 0
-              """
-            : """
+              """,
+            PartyPrintProducts.Grid4 => """
+              UPDATE party_print_profiles
+                 SET "GridAcceptedCount" = "GridAcceptedCount" - 1,
+                     "UpdatedAt" = {1}
+               WHERE "PartyAlbumId" = {0} AND "GridAcceptedCount" > 0
+              """,
+            _ => """
               UPDATE party_print_profiles
                  SET "StripAcceptedCount" = "StripAcceptedCount" - 1,
                      "UpdatedAt" = {1}
                WHERE "PartyAlbumId" = {0} AND "StripAcceptedCount" > 0
-              """;
+              """,
+        };
         await _db.Database.ExecuteSqlRawAsync(
             sql, [partyAlbumId, DateTime.UtcNow], cancellationToken);
     }

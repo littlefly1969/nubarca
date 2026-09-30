@@ -160,6 +160,28 @@ public sealed class PrintStationService
         return ToDeviceDto(printer);
     }
 
+    /// <summary>
+    /// Records which paper the operator loaded. Null when the printer is not on
+    /// one of this owner's stations; throws for a paper NubArca does not know.
+    /// A paper the agent does not report is still recorded — it is what is in
+    /// the printer — and simply offers guests nothing until the agent can print it.
+    /// </summary>
+    public async Task<PrintDeviceDto?> SetLoadedPaperAsync(Guid ownerId, Guid stationId, Guid printerId,
+        string? paperSize, CancellationToken cancellationToken)
+    {
+        if (!PrintPapers.IsKnown(paperSize)) throw new ArgumentException("invalid_paper");
+        var owned = await _db.PrintStations.AnyAsync(
+            x => x.Id == stationId && x.OwnerUserId == ownerId && x.RevokedAt == null, cancellationToken);
+        var printer = owned
+            ? await _db.PrinterDevices.SingleOrDefaultAsync(
+                x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken)
+            : null;
+        if (printer is null) return null;
+        printer.LoadedPaperSize = paperSize!;
+        await _db.SaveChangesAsync(cancellationToken);
+        return ToDeviceDto(printer);
+    }
+
     public async Task<bool> RevokeAsync(Guid ownerId, Guid stationId, CancellationToken cancellationToken)
     {
         var now = Now;
@@ -218,15 +240,20 @@ public sealed class PrintStationService
             cancellationToken);
         var printer = await _db.PrinterDevices.SingleOrDefaultAsync(
             x => x.Id == printerId && x.PrintStationId == stationId, cancellationToken);
+        // The test page goes on the paper that is in the printer: sending a
+        // 10x15 job to a printer loaded with 20x15 stops it with a media error.
+        var paper = printer is not null && PrintPapers.IsKnown(printer.LoadedPaperSize)
+            ? printer.LoadedPaperSize
+            : PrintPapers.Photo10x15;
         if (station is null || printer is null
-            || !PrintCapabilityMatcher.SupportsFormat(printer.CapabilitiesJson, PrintFormats.Photo10x15))
+            || !PrintCapabilityMatcher.SupportsFormat(printer.CapabilitiesJson, paper))
             return null;
         var now = Now;
         var job = new PrintJob
         {
             Id = Guid.NewGuid(), OwnerUserId = ownerId, PrintStationId = stationId,
             PrinterDeviceId = printerId, Kind = PrintJobKinds.Diagnostic,
-            Format = PrintFormats.Photo10x15, State = PrintJobStates.Requested,
+            Format = paper, State = PrintJobStates.Requested,
             RenderSpecificationJson = JsonSerializer.Serialize(new { type = "diagnostic", width = 1800, height = 1200 }),
             CreatedAt = now,
         };
@@ -455,7 +482,9 @@ public sealed class PrintStationService
             PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Photo10x15),
             PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, PrintFormats.Strip2x6Pair),
             new PrintCalibrationDto(x.CalibrationBrightness, x.CalibrationContrast,
-                x.CalibrationGamma, x.CalibrationSaturation));
+                x.CalibrationGamma, x.CalibrationSaturation),
+            PrintPapers.IsKnown(x.LoadedPaperSize) ? x.LoadedPaperSize : PrintPapers.Photo10x15,
+            PrintPapers.All.Where(p => PrintCapabilityMatcher.SupportsFormat(x.CapabilitiesJson, p)).ToList());
     private static PrintJobSummaryDto ToJobDto(PrintJob x) =>
         new(x.Id, x.Id.ToString("N")[..8], x.Kind, x.Format, x.State, x.CreatedAt, x.FailureCode);
     private DateTime Now => _clock.GetUtcNow().UtcDateTime;

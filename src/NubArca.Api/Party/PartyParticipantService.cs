@@ -303,18 +303,18 @@ public sealed class PartyParticipantService : IPartyParticipantService
     /// last free slot. `max` of 0 means the host set no per-guest limit, and the
     /// party-wide budget is then the only ceiling.
     ///
-    /// The column name comes from a bool, never from caller input, so the
-    /// interpolation carries no injection surface.
+    /// The column name is one of three constants chosen by the product, never
+    /// caller text, so the interpolation carries no injection surface.
     /// </summary>
     public async Task<bool> TryClaimPrintAsync(
-        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default)
+        Guid participantId, string product, int max, CancellationToken cancellationToken = default)
     {
         if (max <= 0)
         {
-            await TouchAsync(participantId, isStrip, cancellationToken);
+            await TouchAsync(participantId, product, cancellationToken);
             return true;
         }
-        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        var column = PrintCountColumn(product);
         var affected = await _db.Database.ExecuteSqlRawAsync(
             $"UPDATE party_participants SET \"{column}\" = \"{column}\" + 1, "
             + "\"LastSeenAt\" = {1} "
@@ -328,19 +328,28 @@ public sealed class PartyParticipantService : IPartyParticipantService
     {
         var row = await _db.PartyParticipants.AsNoTracking()
             .Where(p => p.Id == participantId)
-            .Select(p => new { p.AcceptedPhotoPrintCount, p.AcceptedStripPrintCount })
+            .Select(p => new { p.AcceptedPhotoPrintCount, p.AcceptedStripPrintCount, p.AcceptedGridPrintCount })
             .FirstOrDefaultAsync(cancellationToken);
         return row is null
             ? new PartyPrintQuotaSnapshot(0, 0)
-            : new PartyPrintQuotaSnapshot(row.AcceptedPhotoPrintCount, row.AcceptedStripPrintCount);
+            : new PartyPrintQuotaSnapshot(
+                row.AcceptedPhotoPrintCount, row.AcceptedStripPrintCount, row.AcceptedGridPrintCount);
     }
+
+    /// <summary>The per-guest counter a product spends — a constant, never input.</summary>
+    private static string PrintCountColumn(string product) => product switch
+    {
+        NubArca.Api.Domain.Print.PartyPrintProducts.Grid4 => "AcceptedGridPrintCount",
+        NubArca.Api.Domain.Print.PartyPrintProducts.TwinStrip4 => "AcceptedStripPrintCount",
+        _ => "AcceptedPhotoPrintCount",
+    };
 
     /// <summary>Give a claimed print slot back when the sheet never happened.</summary>
     public Task ReleasePrintAsync(
-        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default)
+        Guid participantId, string product, int max, CancellationToken cancellationToken = default)
     {
         if (max <= 0) return Task.CompletedTask;
-        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        var column = PrintCountColumn(product);
         return _db.Database.ExecuteSqlRawAsync(
             $"UPDATE party_participants SET \"{column}\" = "
             + $"CASE WHEN \"{column}\" > 0 THEN \"{column}\" - 1 ELSE 0 END "
@@ -350,9 +359,9 @@ public sealed class PartyParticipantService : IPartyParticipantService
 
     /// <summary>Counting nothing still means the guest was here.</summary>
     private Task TouchAsync(
-        Guid participantId, bool isStrip, CancellationToken cancellationToken)
+        Guid participantId, string product, CancellationToken cancellationToken)
     {
-        var column = isStrip ? "AcceptedStripPrintCount" : "AcceptedPhotoPrintCount";
+        var column = PrintCountColumn(product);
         return _db.Database.ExecuteSqlRawAsync(
             $"UPDATE party_participants SET \"{column}\" = \"{column}\" + 1, "
             + "\"LastSeenAt\" = {1} WHERE \"Id\" = {0}",

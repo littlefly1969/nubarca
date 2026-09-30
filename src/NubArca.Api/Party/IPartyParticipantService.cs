@@ -18,7 +18,16 @@ public sealed record PartyQuotaSnapshot(
     int UsedVideos);
 
 // Sheets one guest has had accepted, per product.
-public sealed record PartyPrintQuotaSnapshot(int UsedPhotos, int UsedStrips);
+public sealed record PartyPrintQuotaSnapshot(int UsedPhotos, int UsedStrips, int UsedGrids = 0)
+{
+    /// <summary>Sheets of one product this guest has had accepted.</summary>
+    public int Used(string product) => product switch
+    {
+        NubArca.Api.Domain.Print.PartyPrintProducts.Grid4 => UsedGrids,
+        NubArca.Api.Domain.Print.PartyPrintProducts.TwinStrip4 => UsedStrips,
+        _ => UsedPhotos,
+    };
+}
 
 // Server-issued, link-scoped identity for anonymous party guests, and the
 // atomic quota claim built on it.
@@ -75,11 +84,11 @@ public interface IPartyParticipantService
     // one statement decides and records. `max` of 0 means the host set no
     // per-guest limit, so the claim always succeeds and only counts.
     Task<bool> TryClaimPrintAsync(
-        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default);
+        Guid participantId, string product, int max, CancellationToken cancellationToken = default);
 
     // Give a claimed slot back when the sheet never happened.
     Task ReleasePrintAsync(
-        Guid participantId, bool isStrip, int max, CancellationToken cancellationToken = default);
+        Guid participantId, string product, int max, CancellationToken cancellationToken = default);
 
     // What this guest has already had PRINTED, per product. Read-only: the
     // atomic claim above is what spends it.

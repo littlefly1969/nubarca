@@ -79,12 +79,12 @@ public sealed class PartyPrintBudgetTests : IDisposable
         var albumId = await SeedProfileAsync(photoMax: 2, stripMax: 2);
 
         Assert.NotNull(await WithBudgetAsync(b =>
-            b.TryReserveAsync(albumId, PartyPrintProducts.Strip4, default)));
+            b.TryReserveAsync(albumId, PartyPrintProducts.TwinStrip4, default)));
         Assert.NotNull(await WithBudgetAsync(b =>
-            b.TryReserveAsync(albumId, PartyPrintProducts.Strip4, default)));
+            b.TryReserveAsync(albumId, PartyPrintProducts.TwinStrip4, default)));
         // Strips are gone.
         Assert.Null(await WithBudgetAsync(b =>
-            b.TryReserveAsync(albumId, PartyPrintProducts.Strip4, default)));
+            b.TryReserveAsync(albumId, PartyPrintProducts.TwinStrip4, default)));
 
         // Photos are untouched by that, and are never summed with it.
         var photo = await WithBudgetAsync(b =>
@@ -102,7 +102,7 @@ public sealed class PartyPrintBudgetTests : IDisposable
     {
         // A strip composes four photographs and still costs one strip.
         var albumId = await SeedProfileAsync(photoMax: 10, stripMax: 10);
-        await WithBudgetAsync(b => b.TryReserveAsync(albumId, PartyPrintProducts.Strip4, default));
+        await WithBudgetAsync(b => b.TryReserveAsync(albumId, PartyPrintProducts.TwinStrip4, default));
         await WithBudgetAsync(b => b.TryReserveAsync(albumId, PartyPrintProducts.Photo, default));
 
         var profile = await ReadAsync(albumId);
@@ -118,13 +118,13 @@ public sealed class PartyPrintBudgetTests : IDisposable
             b.TryReserveAsync(photoOff, PartyPrintProducts.Photo, default)));
         // The other product still works: one switch does not close both.
         Assert.NotNull(await WithBudgetAsync(b =>
-            b.TryReserveAsync(photoOff, PartyPrintProducts.Strip4, default)));
+            b.TryReserveAsync(photoOff, PartyPrintProducts.TwinStrip4, default)));
 
         var partyOff = await SeedProfileAsync(enabled: false);
         Assert.Null(await WithBudgetAsync(b =>
             b.TryReserveAsync(partyOff, PartyPrintProducts.Photo, default)));
         Assert.Null(await WithBudgetAsync(b =>
-            b.TryReserveAsync(partyOff, PartyPrintProducts.Strip4, default)));
+            b.TryReserveAsync(partyOff, PartyPrintProducts.TwinStrip4, default)));
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class PartyPrintBudgetTests : IDisposable
         // The case the conditional UPDATE exists for: eight guests reaching for
         // three prints at the same moment. Exactly three may win — never four,
         // whatever the interleaving.
-        foreach (var product in new[] { PartyPrintProducts.Photo, PartyPrintProducts.Strip4 })
+        foreach (var product in new[] { PartyPrintProducts.Photo, PartyPrintProducts.TwinStrip4 })
         {
             var albumId = await SeedProfileAsync(photoMax: 3, stripMax: 3);
             var attempts = Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
@@ -184,7 +184,7 @@ public sealed class PartyPrintBudgetTests : IDisposable
         var second = await SeedProfileAsync(photoMax: 5, stripMax: 5);
 
         var a = await WithBudgetAsync(b => b.TryReserveAsync(first, PartyPrintProducts.Photo, default));
-        var b2 = await WithBudgetAsync(b => b.TryReserveAsync(first, PartyPrintProducts.Strip4, default));
+        var b2 = await WithBudgetAsync(b => b.TryReserveAsync(first, PartyPrintProducts.TwinStrip4, default));
         var c = await WithBudgetAsync(b => b.TryReserveAsync(first, PartyPrintProducts.Photo, default));
         Assert.Equal(1, a!.PublicSequence);
         Assert.Equal(2, b2!.PublicSequence);
@@ -221,7 +221,7 @@ public sealed class PartyPrintBudgetTests : IDisposable
     public void Product_Rules_State_What_Each_Print_Composes()
     {
         Assert.Equal(1, PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Photo));
-        Assert.Equal(8, PartyPrintProducts.RequiredPhotos(PartyPrintProducts.Strip4));
+        Assert.Equal(8, PartyPrintProducts.RequiredPhotos(PartyPrintProducts.TwinStrip4));
         Assert.True(PartyPrintProducts.IsKnown("photo"));
         Assert.False(PartyPrintProducts.IsKnown("collage"));
         // Both party kinds print on the same paper: the strip is a composition,

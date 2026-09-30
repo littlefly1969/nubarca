@@ -136,7 +136,7 @@ public sealed class PartyPrintComposerTests
         var photos = Enumerable.Range(0, 4)
             .Select(i => new PartyPrintPhoto(Fixture(i), 0, 0, 1, 1)).ToList();
         var asked = await composer.RenderAsync(new PartyPrintComposition(
-            PartyPrintProducts.Strip4, PartyPrintTheme.Pure, photos,
+            PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, photos,
             "Festa", null, 0, PartyPrintOrientation.Landscape), default);
         using var sheet = Image.Load(asked);
         Assert.Equal(PartyPrintGeometry.PortraitWidth, sheet.Width);
@@ -163,7 +163,7 @@ public sealed class PartyPrintComposerTests
     {
         var composer = new PartyPrintComposer();
         var bytes = await composer.RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 8), default);
+            Composition(PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, 8), default);
 
         using var sheet = Image.Load<Rgba32>(bytes);
         // One 10x15 sheet, portrait — not a new paper size.
@@ -187,7 +187,7 @@ public sealed class PartyPrintComposerTests
     {
         // A client from before eight: nothing breaks, the strip is repeated.
         var bytes = await new PartyPrintComposer().RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4), default);
+            Composition(PartyPrintProducts.TwinStrip4, PartyPrintTheme.Pure, 4), default);
         using var sheet = Image.Load<Rgba32>(bytes);
         for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
             Assert.Equal(SampleSlot(sheet, 0, slot), SampleSlot(sheet, 1, slot));
@@ -629,7 +629,7 @@ public sealed class PartyPrintComposerTests
         // photograph's proportions the wordmark shrank to the brand minimum —
         // its symbol a smudge on paper — and the number was squinted at.
         using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
-            Composition(PartyPrintProducts.Strip4, theme, 8) with { PublicSequence = 1000 }, default));
+            Composition(PartyPrintProducts.TwinStrip4, theme, 8) with { PublicSequence = 1000 }, default));
         const int w = PartyPrintGeometry.PortraitWidth;
         const int h = PartyPrintGeometry.PortraitHeight;
         var stripW = PartyPrintGeometry.StripWidthFraction * w;
@@ -671,35 +671,194 @@ public sealed class PartyPrintComposerTests
         Assert.True(Math.Max(number.Bottom, wordmark.Bottom) < footBottom);
     }
 
-    [Fact]
-    public async Task A_Strip_The_Printer_Cuts_Carries_No_Cut_Marks()
+    // --- Papers and four photographs -------------------------------------------
+
+    [Theory]
+    [InlineData(PrintPapers.Photo10x15, true, 1200, 1800)]
+    [InlineData(PrintPapers.Photo10x15, false, 1800, 1200)]
+    [InlineData(PrintPapers.Photo13x18, true, 1500, 2100)]
+    [InlineData(PrintPapers.Photo13x18, false, 2100, 1500)]
+    [InlineData(PrintPapers.Photo20x15, true, 1800, 2400)]
+    [InlineData(PrintPapers.Photo20x15, false, 2400, 1800)]
+    public async Task A_Photo_Is_A_Sheet_Of_Its_Paper_Either_Way_Up(string paper, bool portrait, int w, int h)
     {
-        // The ticks show scissors where to go. Under a blade they would sit
-        // exactly on the cut, and a cut a fraction of a millimetre off leaves
-        // one on a strip's edge.
-        var composer = new PartyPrintComposer();
-        using var byHand = Image.Load<Rgba32>(await composer.RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4), default));
-        using var byPrinter = Image.Load<Rgba32>(await composer.RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Pure, 4) with { CutByPrinter = true },
-            default));
-
-        var centre = PartyPrintGeometry.PortraitWidth / 2;
-        const int y = 10;
-        static int Distance(Rgba32 a, Rgba32 b) =>
-            Math.Abs(a.R - b.R) + Math.Abs(a.G - b.G) + Math.Abs(a.B - b.B);
-
-        // The same spot on the top margin: a tick on one sheet, paper on the other.
-        Assert.True(Distance(byHand[centre, y], byHand[centre - 12, y]) > 30,
-            "the hand-cut sheet lost its cut mark");
-        Assert.True(Distance(byPrinter[centre, y], byPrinter[centre - 12, y]) <= 6,
-            "the printer-cut sheet still has a cut mark");
-
-        // Everything else is the same composition.
-        for (var slot = 0; slot < PartyPrintGeometry.SlotsPerStrip; slot++)
+        // 4x6, 5x7 and 6x8 inches at 300dpi: the media DNP ships under those names.
+        var orientation = portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape;
+        foreach (var theme in new[] { PartyPrintTheme.Pure, PartyPrintTheme.Overlay })
         {
-            Assert.Equal(SampleSlot(byHand, 0, slot), SampleSlot(byPrinter, 0, slot));
-            Assert.Equal(SampleSlot(byHand, 1, slot), SampleSlot(byPrinter, 1, slot));
+            using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+                Composition(PartyPrintProducts.Photo, theme, 1) with { Paper = paper, Orientation = orientation },
+                default));
+            Assert.Equal((w, h), (sheet.Width, sheet.Height));
+        }
+    }
+
+    private static Rgba32 SampleGrid(Image<Rgba32> sheet, string paper, int index)
+    {
+        var (x, y, w, h) = PartyPrintGeometry.GridSlot(paper, index);
+        return sheet[(int)((x + (w / 2)) * sheet.Width), (int)((y + (h / 2)) * sheet.Height)];
+    }
+
+    [Theory]
+    [InlineData(PrintPapers.Photo10x15, 1200, 1800)]
+    [InlineData(PrintPapers.Photo13x18, 1500, 2100)]
+    [InlineData(PrintPapers.Photo20x15, 2400, 1800)]
+    public async Task Four_Photographs_Sit_Two_By_Two_In_The_Order_Chosen(string paper, int w, int h)
+    {
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+            Composition(PartyPrintProducts.Grid4, PartyPrintTheme.Pure, 4) with { Paper = paper }, default));
+        // Standing as 10x15 and 13x18 are named, lying as 20x15 is.
+        Assert.Equal((w, h), (sheet.Width, sheet.Height));
+
+        // 1 top left, 2 top right, 3 bottom left, 4 bottom right: each frame is
+        // its own photograph, in the order the guest arranged them.
+        for (var i = 0; i < 4; i++)
+        {
+            var (r, g, b) = Fixtures[i];
+            Assert.True(Distance(SampleGrid(sheet, paper, i), new Rgba32(r, g, b)) <= 12,
+                $"frame {i + 1} is not photograph {i + 1}");
+        }
+
+        // The four never overlap, and stay clear of the footer and the edges.
+        var slots = Enumerable.Range(0, 4).Select(i => PartyPrintGeometry.GridSlot(paper, i)).ToList();
+        var footer = PartyPrintGeometry.GridFooter(paper);
+        for (var a = 0; a < 4; a++)
+        {
+            var sa = slots[a];
+            Assert.True(sa.X > 0 && sa.Y > 0 && sa.X + sa.Width < 1 && sa.Y + sa.Height <= footer.Y + 1e-9);
+            for (var b = a + 1; b < 4; b++)
+            {
+                var sb = slots[b];
+                var apart = sa.X + sa.Width <= sb.X + 1e-9 || sb.X + sb.Width <= sa.X + 1e-9
+                    || sa.Y + sa.Height <= sb.Y + 1e-9 || sb.Y + sb.Height <= sa.Y + 1e-9;
+                Assert.True(apart, $"frames {a + 1} and {b + 1} overlap");
+            }
+        }
+
+        // A sheet of four is not cut: the gutter's ends carry no marks.
+        var centre = sheet.Width / 2;
+        Assert.True(Distance(sheet[centre, 3], sheet[centre - 12, 3]) <= 6);
+    }
+
+    [Fact]
+    public async Task Each_Of_The_Four_Keeps_Its_Own_Crop()
+    {
+        var composer = new PartyPrintComposer();
+        var plain = Composition(PartyPrintProducts.Grid4, PartyPrintTheme.Pure, 4) with { Paper = PrintPapers.Photo20x15 };
+        // Only the third photograph is framed on its complementary square.
+        var photos = plain.Photos.ToList();
+        photos[2] = photos[2] with { CropX = 0.64, CropY = 0.14, CropWidth = 0.22, CropHeight = 0.2 };
+        using var a = Image.Load<Rgba32>(await composer.RenderAsync(plain, default));
+        using var b = Image.Load<Rgba32>(await composer.RenderAsync(plain with { Photos = photos }, default));
+        for (var i = 0; i < 4; i++)
+        {
+            var moved = Distance(SampleGrid(a, PrintPapers.Photo20x15, i), SampleGrid(b, PrintPapers.Photo20x15, i)) > 60;
+            Assert.Equal(i == 2, moved);
+        }
+    }
+
+    [Fact]
+    public void The_Layouts_The_Preview_Mirrors_Are_The_Renderers()
+    {
+        // The preview is a different program. It reads THIS file, written from
+        // the geometry the renderer uses, for every paper and product that
+        // exists — so a layout that changes here and not there fails a test on
+        // one side or the other. NUBARCA_WRITE_PRINT_LAYOUTS=1 rewrites it.
+        static double[] R((double X, double Y, double Width, double Height) r) =>
+            [Math.Round(r.X, 6), Math.Round(r.Y, 6), Math.Round(r.Width, 6), Math.Round(r.Height, 6)];
+        var layouts = new SortedDictionary<string, object>(StringComparer.Ordinal);
+        foreach (var paper in PrintPapers.All)
+        {
+            var products = new SortedDictionary<string, object>(StringComparer.Ordinal);
+            var photo = new SortedDictionary<string, object>(StringComparer.Ordinal);
+            foreach (var portrait in new[] { true, false })
+            {
+                var (w, h) = PartyPrintGeometry.Sheet(paper, portrait);
+                photo[portrait ? "portrait" : "landscape"] = new
+                {
+                    sheet = new[] { w, h },
+                    slot = R(PartyPrintGeometry.PhotoSlot(paper, portrait)),
+                    footer = R(PartyPrintGeometry.PhotoFooter(paper, portrait)),
+                };
+            }
+            products[PartyPrintProducts.Photo] = photo;
+            var (gw, gh) = PartyPrintGeometry.Sheet(paper, PartyPrintGeometry.GridPortrait(paper));
+            products[PartyPrintProducts.Grid4] = new
+            {
+                sheet = new[] { gw, gh },
+                slots = Enumerable.Range(0, 4).Select(i => R(PartyPrintGeometry.GridSlot(paper, i))).ToArray(),
+                footer = R(PartyPrintGeometry.GridFooter(paper)),
+            };
+            if (PartyPrintProducts.Allowed(paper, PartyPrintProducts.TwinStrip4))
+            {
+                products[PartyPrintProducts.TwinStrip4] = new
+                {
+                    sheet = new[] { PartyPrintGeometry.PortraitWidth, PartyPrintGeometry.PortraitHeight },
+                    slots = Enumerable.Range(0, PartyPrintGeometry.StripsPerSheet)
+                        .SelectMany(strip => Enumerable.Range(0, PartyPrintGeometry.SlotsPerStrip)
+                            .Select(slot => R(PartyPrintGeometry.StripSlot(strip, slot))))
+                        .ToArray(),
+                };
+            }
+            // Nothing the matrix forbids has a layout.
+            Assert.Equal(PartyPrintProducts.All.Where(x => PartyPrintProducts.Allowed(paper, x)).OrderBy(x => x, StringComparer.Ordinal),
+                products.Keys);
+            layouts[paper] = products;
+        }
+        var json = System.Text.Json.JsonSerializer.Serialize(layouts,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n";
+
+        var root = AppContext.BaseDirectory;
+        while (!File.Exists(Path.Combine(root, "NubArca.sln"))) root = Path.GetDirectoryName(root)!;
+        var file = Path.Combine(root, "frontend", "src", "pages", "partyPrintLayouts.json");
+        if (Environment.GetEnvironmentVariable("NUBARCA_WRITE_PRINT_LAYOUTS") == "1")
+            File.WriteAllText(file, json);
+        Assert.True(File.Exists(file), $"{file} is missing: run with NUBARCA_WRITE_PRINT_LAYOUTS=1");
+        Assert.Equal(json, File.ReadAllText(file).Replace("\r\n", "\n"));
+    }
+
+    [Fact]
+    public async Task Writes_The_Paper_Artifacts_A_Person_Has_To_Look_At()
+    {
+        // Four photographs on each paper, and a photograph on the two new ones.
+        var composer = new PartyPrintComposer();
+        var dir = Path.Combine(ArtifactDir(), "papers");
+        Directory.CreateDirectory(dir);
+        foreach (var stale in Directory.GetFiles(dir, "*.jpg")) File.Delete(stale);
+        foreach (var paper in PrintPapers.All)
+        {
+            await File.WriteAllBytesAsync(Path.Combine(dir, $"grid4-{paper}.jpg"), await composer.RenderAsync(
+                Composition(PartyPrintProducts.Grid4, PartyPrintTheme.Pure, 4) with { Paper = paper, PublicSequence = 27 },
+                default));
+        }
+        foreach (var (paper, portrait) in new[] { (PrintPapers.Photo13x18, true), (PrintPapers.Photo20x15, false) })
+        {
+            await File.WriteAllBytesAsync(Path.Combine(dir, $"photo-{paper}.jpg"), await composer.RenderAsync(
+                Composition(PartyPrintProducts.Photo, PartyPrintTheme.Midnight, 1) with
+                {
+                    Paper = paper, PublicSequence = 27,
+                    Orientation = portrait ? PartyPrintOrientation.Portrait : PartyPrintOrientation.Landscape,
+                }, default));
+        }
+        Assert.Equal(5, Directory.GetFiles(dir, "*.jpg").Length);
+    }
+
+    [Fact]
+    public async Task A_Twin_Strip_Carries_No_Cut_Marks_In_Any_Look()
+    {
+        // The printer cuts the twin strip. A tick showing scissors where to go
+        // would sit exactly under the blade, and a cut a fraction of a
+        // millimetre off leaves it on a strip's edge — so there is none, ever.
+        var composer = new PartyPrintComposer();
+        var centre = PartyPrintGeometry.PortraitWidth / 2;
+        foreach (var theme in new[] { PartyPrintTheme.Pure, PartyPrintTheme.Midnight, PartyPrintTheme.Event })
+        {
+            using var sheet = Image.Load<Rgba32>(await composer.RenderAsync(
+                Composition(PartyPrintProducts.TwinStrip4, theme, 8), default));
+            // The gutter's ends, top and bottom, are the paper's colour.
+            foreach (var y in new[] { 10, PartyPrintGeometry.PortraitHeight - 10 })
+                Assert.True(Distance(sheet[centre, y], sheet[centre - 12, y]) <= 6,
+                    $"{theme}: a cut mark at ({centre},{y})");
         }
     }
 
@@ -764,7 +923,7 @@ public sealed class PartyPrintComposerTests
     {
         var composer = new PartyPrintComposer();
         var bytes = await composer.RenderAsync(
-            Composition(PartyPrintProducts.Strip4, PartyPrintTheme.Midnight, 4), default);
+            Composition(PartyPrintProducts.TwinStrip4, PartyPrintTheme.Midnight, 4), default);
 
         using var sheet = Image.Load<Rgba32>(bytes);
         // A print handed to a stranger must not travel with where it was taken.
@@ -834,7 +993,7 @@ public sealed class PartyPrintComposerTests
 
             if (theme is PartyPrintTheme.Overlay) continue;
             var strip = await composer.RenderAsync(
-                Composition(PartyPrintProducts.Strip4, theme, 8) with { PublicSequence = 27 }, default);
+                Composition(PartyPrintProducts.TwinStrip4, theme, 8) with { PublicSequence = 27 }, default);
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"strip-{theme.ToString().ToLowerInvariant()}.jpg"), strip);
         }

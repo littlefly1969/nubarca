@@ -19,6 +19,13 @@ public sealed class PrinterDevice
     public double CalibrationContrast { get; set; } = 1;
     public double CalibrationGamma { get; set; } = 1;
     public double CalibrationSaturation { get; set; } = 1;
+
+    /// <summary>
+    /// The paper the OPERATOR says is loaded (a <see cref="PrintPapers"/> id).
+    /// One roll at a time; the agent never writes it, so a heartbeat keeps it.
+    /// Guests are offered only what this paper can make.
+    /// </summary>
+    public string LoadedPaperSize { get; set; } = PrintPapers.Photo10x15;
 }
 
 public static class PrintDeviceStates

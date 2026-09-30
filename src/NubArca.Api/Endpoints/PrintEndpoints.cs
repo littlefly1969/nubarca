@@ -62,6 +62,19 @@ public static class PrintEndpoints
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).WithName("SetPrinterCalibration");
+        owner.MapPut("/stations/{stationId:guid}/devices/{deviceId:guid}/paper", async (Guid stationId,
+            Guid deviceId, [FromBody] SetPrinterPaperRequest? request, HttpContext context,
+            [FromServices] PrintStationService service, CancellationToken ct) =>
+        {
+            if (request is null) return Results.BadRequest(new { error = "invalid_paper" });
+            try
+            {
+                var device = await service.SetLoadedPaperAsync(context.GetCurrentUserId()!.Value,
+                    stationId, deviceId, request.PaperSize, ct);
+                return device is null ? Results.NotFound() : Results.Ok(device);
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }).WithName("SetPrinterPaper");
         owner.MapPost("/stations/{stationId:guid}/test-jobs", async (Guid stationId,
             [FromBody] CreateTestPrintRequest request, HttpContext context,
             [FromServices] PrintStationService service, CancellationToken ct) =>
