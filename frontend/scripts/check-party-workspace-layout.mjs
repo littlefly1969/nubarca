@@ -7,7 +7,9 @@
 //
 //   * whether the page scrolls sideways at 320px;
 //   * whether a thumb can hit its controls;
-//   * whether the side gutter survives at every width.
+//   * whether the side gutter survives at every width;
+//   * whether a crop frame — where a finger moves the photograph, not the
+//     page — fits the visible screen, with nothing fixed lying over it.
 //
 // This renders the markup the REAL components emit — written by
 // `src/party/workspace/partyWorkspace.fixtures.tsx`, against mocked responses,
@@ -36,8 +38,16 @@ const frontend = resolve(here, '..');
 // and 1440 a desktop where the section rail leaves the flow.
 const VIEWPORTS = [
   { name: '320', width: 320, height: 900 },
+  // The screen a phone's browser actually leaves between its bars — an SE,
+  // a 6.1" iPhone, a Pixel, a Max — the heights that decide whether a crop
+  // frame's bottom can be reached.
+  { name: '320s', width: 320, height: 480 },
   { name: '375', width: 375, height: 900 },
+  { name: '375s', width: 375, height: 553 },
+  { name: '390s', width: 390, height: 664 },
+  { name: '393s', width: 393, height: 660 },
   { name: '430', width: 430, height: 950 },
+  { name: '430s', width: 430, height: 740 },
   { name: '820', width: 820, height: 1000 },
   { name: '1440', width: 1440, height: 1000 },
 ];
@@ -324,6 +334,32 @@ const expression = \`(() => {
     const sideBySide = a.right <= b.left + 1 || b.right <= a.left + 1;
     if (!sideBySide && b.top < a.bottom - 1) {
       problems.push('the search hides under the section rail');
+    }
+  }
+
+  // 5. A crop frame is where a finger moves the photograph instead of the
+  // page (touch-action: none). Brought to the top of the screen, all of it
+  // must be on screen with room left below to scroll by, and nothing fixed or
+  // sticky may lie over it.
+  for (const frame of main.querySelectorAll('.photo-crop')) {
+    frame.scrollIntoView({ block: 'start' });
+    const r = frame.getBoundingClientRect();
+    const screenH = window.innerHeight;
+    if (r.bottom > screenH + 0.5) {
+      problems.push('crop frame runs below the screen: ' + Math.round(r.bottom) + ' > ' + screenH);
+    } else if (screenH - r.bottom < 64) {
+      problems.push('crop frame leaves ' + Math.round(screenH - r.bottom) + 'px to scroll the page by');
+    }
+    for (const el of document.querySelectorAll('body *')) {
+      const cs = getComputedStyle(el);
+      if (cs.position !== 'fixed' && cs.position !== 'sticky') continue;
+      if (el.contains(frame) || cs.display === 'none' || cs.visibility === 'hidden') continue;
+      const o = el.getBoundingClientRect();
+      if (o.width > 0 && o.height > 0 && o.left < r.right && o.right > r.left
+          && o.top < r.bottom && o.bottom > r.top) {
+        problems.push('crop frame covered by ' + el.tagName.toLowerCase() + '.'
+          + (el.className || '').toString().split(' ')[0]);
+      }
     }
   }
 

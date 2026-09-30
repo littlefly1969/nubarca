@@ -417,8 +417,9 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(sheet).toHaveAttribute('data-overlay-logo', 'dark');
     expect(sheet).toHaveAttribute('data-overlay-text', 'red');
     expect(within(text).getByRole('radio', { name: 'Rosso' })).toBeChecked();
-    expect(screen.getByTestId('party-print-overlay-symbol').style.backgroundColor)
-      .toBe('rgb(10, 15, 26)');
+    // The dark treatment is the brand's own dark mark, not the light one refilled.
+    expect(screen.getByTestId('party-print-overlay-symbol'))
+      .toHaveAttribute('src', '/brand/nubarca-mark-flat-on-light-256.png');
     expect(within(sheet).getByText('Beach Party').parentElement?.style.color)
       .toBe('rgb(209, 31, 46)');
 
@@ -586,6 +587,52 @@ describe('PartyPrintPage (public print studio)', () => {
     expect(screen.getByRole('radio', { name: 'Chiaro' })).toBeChecked();
     expect(screen.queryByRole('group', { name: 'Colore del testo' })).not.toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Logo' })).not.toBeInTheDocument();
+  });
+
+  it('shows the brand\'s own light and dark marks, in their colours, for the symbol', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await compose(user, 'photo');
+    await user.click(screen.getByRole('radio', { name: 'Sulla foto' }));
+    const symbol = screen.getByTestId('party-print-overlay-symbol');
+    // Light: the mark made for dark grounds (Cloud White, Cyan, Electric Blue).
+    expect(symbol).toHaveAttribute('src', '/brand/nubarca-mark-flat-on-dark-256.png');
+    // No flat fill of any colour over an outline.
+    expect(symbol.style.backgroundColor).toBe('');
+    const logo = screen.getByRole('group', { name: 'Logo' });
+    // Each choice shows the mark it will print.
+    const swatch = (name: string) => within(logo).getByRole('radio', { name })
+      .closest('label')?.querySelector('img');
+    expect(swatch('Chiaro')).toHaveAttribute('src', '/brand/nubarca-mark-flat-on-dark-64.png');
+    expect(swatch('Scuro')).toHaveAttribute('src', '/brand/nubarca-mark-flat-on-light-64.png');
+    await user.click(within(logo).getByRole('radio', { name: 'Scuro' }));
+    expect(symbol).toHaveAttribute('src', '/brand/nubarca-mark-flat-on-light-256.png');
+  });
+
+  it('gives a strip\'s wordmark the width the renderer gives it', async () => {
+    const user = setup();
+    mount();
+    const { container } = render(wrapper());
+    await compose(user, 'strip4');
+    const marks = container.querySelectorAll<HTMLImageElement>('.party-print-sheet-mark-strip');
+    expect(marks).toHaveLength(2);
+    for (const mark of marks) expect(mark.style.width).toBe('27%');
+  });
+
+  it('sizes the framing to the screen, not only to the column', async () => {
+    const user = setup();
+    mount();
+    render(wrapper());
+    await chooseFormat(user, 'photo');
+    await pick(user, 1);
+    await user.click(next());
+    const frame = screen.getByTestId('party-print-crop');
+    // The frame keeps its shape and is capped by the visible screen (the
+    // CSS reads the shape from here), so on a phone its bottom is reachable.
+    const stage = frame.parentElement as HTMLElement;
+    expect(stage).toHaveClass('party-print-crop-stage');
+    expect(Number(stage.style.getPropertyValue('--crop-aspect'))).toBeGreaterThan(0);
   });
 
   it('draws no cut marks when the printer cuts the strips itself', async () => {

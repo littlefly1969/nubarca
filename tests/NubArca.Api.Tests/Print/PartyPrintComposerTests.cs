@@ -273,6 +273,8 @@ public sealed class PartyPrintComposerTests
     private static bool IsWhite(Rgba32 p) => p.R > 225 && p.G > 225 && p.B > 225;
     private static bool IsBlack(Rgba32 p) => p.R < 35 && p.G < 35 && p.B < 45;
     private static bool IsRed(Rgba32 p) => p.R > 170 && p.G < 70 && p.B < 80;
+    private static bool IsElectricBlue(Rgba32 p) => p.R < 70 && p.G is > 70 and < 140 && p.B > 215;
+    private static bool IsCyan(Rgba32 p) => p.R < 60 && p.G > 180 && p.B > 215;
 
     private const string LongLine = "Grazie a tutti di essere venuti, è stata una notte che ricorderemo";
 
@@ -444,14 +446,56 @@ public sealed class PartyPrintComposerTests
         Assert.True(Any(sheet, layout.Footer!.Box, ink), $"the host's line is not {text}");
         Assert.True(Any(sheet, layout.Number!.Box, ink), $"the number is not {text}");
 
-        // The symbol keeps its own colour, whatever the words chose — and is
+        // The symbol keeps its own treatment, whatever the words chose: the
+        // brand's light mark (Cloud White, Cyan, Electric Blue) or its dark one
+        // (Midnight Navy, Electric Blue) — coloured, never one flat fill — and
         // never red: red is a colour for words on a photograph, not the brand's.
         var symbol = SymbolBox(sheet);
-        Assert.True(Any(sheet, symbol, logo == PartyPrintOverlayLogo.Dark ? IsBlack : IsWhite),
-            $"the symbol is not {logo}");
-        Assert.False(Any(sheet, symbol, logo == PartyPrintOverlayLogo.Dark ? IsWhite : IsBlack),
-            "the symbol took the other colour");
+        Assert.True(Any(sheet, symbol, IsElectricBlue), $"the {logo} symbol lost its Electric Blue");
+        if (logo == PartyPrintOverlayLogo.Light)
+        {
+            Assert.True(Any(sheet, symbol, IsWhite), "the light symbol has no Cloud White");
+            Assert.True(Any(sheet, symbol, IsCyan), "the light symbol has no Cyan");
+            Assert.False(Any(sheet, symbol, IsBlack), "the light symbol took the dark one's navy");
+        }
+        else
+        {
+            Assert.True(Any(sheet, symbol, IsBlack), "the dark symbol has no Midnight Navy");
+            Assert.False(Any(sheet, symbol, IsWhite), "the dark symbol took the light one's white");
+            Assert.False(Any(sheet, symbol, IsCyan), "the dark symbol took the light one's cyan");
+        }
         Assert.False(Any(sheet, symbol, IsRed), "the symbol turned red");
+    }
+
+    [Theory]
+    [InlineData(PartyPrintOverlayLogo.Light)]
+    [InlineData(PartyPrintOverlayLogo.Dark)]
+    public async Task The_Symbol_Is_The_Brand_Artwork_As_Shipped(PartyPrintOverlayLogo logo)
+    {
+        // Not the mark's outline refilled with one colour: the approved file for
+        // the treatment, scaled once, laid on the photograph as it is.
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+            OnThePhoto(SheetPhoto("grey"), PartyPrintOverlayText.White, logo), default));
+        var box = SymbolBox(sheet);
+        using var expected = new Image<Rgba32>(box.Width, box.Height, new Rgba32(128, 128, 128));
+        using (var mark = Image.Load<Rgba32>(Path.Combine(
+            AppContext.BaseDirectory, "Assets", "brand", PartyPrintComposer.SymbolFile(logo))))
+        {
+            mark.Mutate(x => x.Resize(new ResizeOptions
+            {
+                Size = new Size(box.Width, box.Height),
+                Sampler = KnownResamplers.Lanczos3,
+            }));
+            expected.Mutate(x => x.DrawImage(mark, new Point(0, 0), 1f));
+        }
+
+        long total = 0;
+        for (var y = 0; y < box.Height; y++)
+            for (var x = 0; x < box.Width; x++)
+                total += Distance(sheet[box.X + x, box.Y + y], expected[x, y]);
+        var mean = total / (double)(box.Width * box.Height);
+        // Only the JPEG's rounding between the two.
+        Assert.True(mean < 3, $"the {logo} symbol differs from the artwork by {mean:F1} on average");
     }
 
     [Theory]
@@ -573,6 +617,58 @@ public sealed class PartyPrintComposerTests
 
         Assert.Equal(12, written);
         Assert.Equal(12, Directory.GetFiles(dir, "*.jpg").Length);
+    }
+
+    [Theory]
+    [InlineData(PartyPrintTheme.Pure)]
+    [InlineData(PartyPrintTheme.Midnight)]
+    [InlineData(PartyPrintTheme.Event)]
+    public async Task A_Strip_Signs_With_A_Wordmark_And_A_Number_Large_Enough_To_Read(PartyPrintTheme theme)
+    {
+        // A strip's signature row is a third as wide as a photograph's. At the
+        // photograph's proportions the wordmark shrank to the brand minimum —
+        // its symbol a smudge on paper — and the number was squinted at.
+        using var sheet = Image.Load<Rgba32>(await new PartyPrintComposer().RenderAsync(
+            Composition(PartyPrintProducts.Strip4, theme, 8) with { PublicSequence = 1000 }, default));
+        const int w = PartyPrintGeometry.PortraitWidth;
+        const int h = PartyPrintGeometry.PortraitHeight;
+        var stripW = PartyPrintGeometry.StripWidthFraction * w;
+        var footX = (int)Math.Round(PartyPrintGeometry.StripMarginFraction * w);
+        var footH = PartyPrintGeometry.StripFooterFraction * h;
+        var footBottom = (int)Math.Round((1.0 - PartyPrintGeometry.StripMarginFraction) * h);
+        // The signature row: the lower part of the strip's foot.
+        var rowTop = (int)(footBottom - (footH * 0.38));
+        var paper = sheet[footX + (int)(stripW / 2), footBottom - 2];
+
+        // Which columns of the row carry ink, grouped into runs.
+        var ink = new List<(int Left, int Right, int Top, int Bottom)>();
+        for (var x = footX; x < footX + (int)stripW; x++)
+        {
+            int top = int.MaxValue, bottom = -1;
+            for (var y = rowTop; y < footBottom; y++)
+                if (Distance(sheet[x, y], paper) > 48) { top = Math.Min(top, y); bottom = Math.Max(bottom, y); }
+            if (bottom < 0) continue;
+            if (ink.Count > 0 && x - ink[^1].Right <= 14)
+            {
+                var last = ink[^1];
+                ink[^1] = (last.Left, x, Math.Min(last.Top, top), Math.Max(last.Bottom, bottom));
+            }
+            else ink.Add((x, x, top, bottom));
+        }
+        Assert.True(ink.Count >= 2, $"expected the wordmark and the number, found {ink.Count} marks");
+        var (wordmark, number) = (ink[0], ink[^1]);
+
+        // The wordmark stands as wide as the row lets it: past the old 120px.
+        Assert.InRange(wordmark.Right - wordmark.Left, 0.25 * stripW, 0.28 * stripW);
+        // The number is a size up (0.34 → 0.39 of the row): its digits stand
+        // about 13px of a 51px row, where they stood about 11 — and well clear
+        // of the wordmark.
+        Assert.True(number.Bottom - number.Top >= 0.24 * footH * 0.38,
+            $"the number's digits are {number.Bottom - number.Top}px in a {footH * 0.38:F0}px row");
+        Assert.True(number.Left - wordmark.Right > 100, "the number crowds the wordmark");
+        // Both inside the strip's own foot.
+        Assert.True(number.Right < footX + stripW && wordmark.Left >= footX);
+        Assert.True(Math.Max(number.Bottom, wordmark.Bottom) < footBottom);
     }
 
     [Fact]
@@ -730,14 +826,15 @@ public sealed class PartyPrintComposerTests
         foreach (var stale in Directory.GetFiles(dir, "*.jpg")) File.Delete(stale);
         foreach (var theme in Enum.GetValues<PartyPrintTheme>())
         {
+            // Numbered, as a guest's sheet is, so the number is judged too.
             var photo = await composer.RenderAsync(
-                Composition(PartyPrintProducts.Photo, theme, 1), default);
+                Composition(PartyPrintProducts.Photo, theme, 1) with { PublicSequence = 27 }, default);
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"photo-{theme.ToString().ToLowerInvariant()}.jpg"), photo);
 
             if (theme is PartyPrintTheme.Overlay) continue;
             var strip = await composer.RenderAsync(
-                Composition(PartyPrintProducts.Strip4, theme, 8), default);
+                Composition(PartyPrintProducts.Strip4, theme, 8) with { PublicSequence = 27 }, default);
             await File.WriteAllBytesAsync(
                 Path.Combine(dir, $"strip-{theme.ToString().ToLowerInvariant()}.jpg"), strip);
         }
