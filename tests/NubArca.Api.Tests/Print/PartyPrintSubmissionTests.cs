@@ -356,6 +356,87 @@ public sealed class PartyPrintSubmissionTests : IDisposable
         Assert.Equal(orientation, job.Spec.GetProperty("orientation").GetString());
     }
 
+    // --- On a printer lent to the host ---------------------------------------
+
+    /// <summary>A loan of the party's printer to its host, from another account.</summary>
+    private async Task<Guid> LendAsync(PartyPrintAccess access, int? maxSheets)
+    {
+        var lender = await _factory.SeedUserAsync($"lender{Interlocked.Increment(ref _seeded)}@example.com");
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var share = new PrinterShare
+        {
+            Id = Guid.NewGuid(), PrinterDeviceId = access.PrinterDeviceId, OwnerUserId = lender,
+            GranteeUserId = access.OwnerUserId, MaxSheets = maxSheets, CreatedAt = DateTime.UtcNow,
+        };
+        db.PrinterShares.Add(share);
+        await db.SaveChangesAsync();
+        return share.Id;
+    }
+
+    private async Task<PrinterShare> ShareAsync(Guid id)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterShares
+            .AsNoTracking().SingleAsync(s => s.Id == id);
+    }
+
+    [Fact]
+    public async Task On_A_Lent_Printer_Every_Sheet_Takes_One_Of_The_Loan_And_None_Beyond_It()
+    {
+        var (access, albumId) = await SeedAsync();
+        var shareId = await LendAsync(access, maxSheets: 2);
+        var lent = access with { PrinterShareId = shareId };
+
+        // A twin strip is one sheet, like a photo.
+        Assert.True((await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[0]), "a")).Ok);
+        Assert.True((await SubmitAsync(lent, Request(PartyPrintProducts.TwinStrip4, Eight()), "b")).Ok);
+        Assert.Equal(2, (await ShareAsync(shareId)).UsedSheets);
+
+        // The loan is spent while the party still has sheets of its own: the
+        // owner's ceiling is the one that holds, and nothing else is spent.
+        var third = await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[1]), "c");
+        Assert.Equal(PartyPrintRefusal.ShareExhausted, third.Refusal);
+        Assert.Equal(1, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+        Assert.Equal(2, (await ShareAsync(shareId)).UsedSheets);
+
+        // A retry of an accepted print takes nothing more.
+        Assert.True((await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[0]), "a")).Ok);
+        Assert.Equal(2, (await ShareAsync(shareId)).UsedSheets);
+    }
+
+    [Fact]
+    public async Task A_Loan_Ended_While_A_Guest_Composed_Stops_That_Print_At_Acceptance()
+    {
+        var (access, albumId) = await SeedAsync();
+        var shareId = await LendAsync(access, maxSheets: null);
+        var lent = access with { PrinterShareId = shareId };
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            (await db.PrinterShares.SingleAsync(s => s.Id == shareId)).RevokedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        // The capability was resolved before the owner ended the loan; the
+        // print still does not go through, and costs the party nothing.
+        var refused = await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[0]), "late");
+        Assert.Equal(PartyPrintRefusal.Unavailable, refused.Refusal);
+        Assert.Equal(0, (await ProfileAsync(albumId)).PhotoAcceptedCount);
+    }
+
+    [Fact]
+    public async Task A_Party_Out_Of_Budget_Gives_The_Loans_Sheet_Back()
+    {
+        var (access, _) = await SeedAsync(photoMax: 1);
+        var shareId = await LendAsync(access, maxSheets: 5);
+        var lent = access with { PrinterShareId = shareId };
+        Assert.True((await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[0]), "one")).Ok);
+        var none = await SubmitAsync(lent, Request(PartyPrintProducts.Photo, _photos[1]), "two");
+        Assert.Equal(PartyPrintRefusal.BudgetExhausted, none.Refusal);
+        // Only the sheet that became a job was taken from the loan.
+        Assert.Equal(1, (await ShareAsync(shareId)).UsedSheets);
+    }
+
     [Fact]
     public async Task A_Twin_Strip_Is_Sent_As_2x6x2_And_Needs_The_Printers_Cut()
     {
