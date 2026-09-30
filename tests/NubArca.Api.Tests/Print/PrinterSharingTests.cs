@@ -350,6 +350,29 @@ public sealed class PrinterSharingTests : IDisposable
         Assert.Equal(1, mario.GetProperty("byPaper").GetProperty("20x15").GetInt32());
         // The live loan's own ceiling counts only what it took.
         Assert.Equal(1, (await OwnerDevice(people.Owner)).GetProperty("shares")[0].GetProperty("usedSheets").GetInt32());
+
+        // Finished sheets stay in the summary; they leave the queue. One of
+        // Mario's came out, the owner's failed.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var marios = await db.PrintJobs.Where(j => j.OwnerUserId == people.MarioId)
+                .OrderBy(j => j.CreatedAt).ToListAsync();
+            marios[0].State = PrintJobStates.Completed;
+            var owners = await db.PrintJobs.SingleAsync(j => j.OwnerUserId != people.MarioId);
+            owners.State = PrintJobStates.Failed;
+            owners.FailureCode = "printer_error";
+            await db.SaveChangesAsync();
+        }
+        var station = await OwnerStation(people.Owner);
+        Assert.Equal(1, station.GetProperty("queueCount").GetInt32());
+        Assert.Single(station.GetProperty("queue").EnumerateArray());
+        Assert.Equal("printer_error", station.GetProperty("lastError").GetString());
+        var after = station.GetProperty("devices")[0].GetProperty("usage").EnumerateArray().ToList();
+        Assert.Equal(1, after[0].GetProperty("sheets").GetInt32());
+        Assert.Equal(0, after[0].GetProperty("completed").GetInt32());
+        Assert.Equal(2, after[1].GetProperty("sheets").GetInt32());
+        Assert.Equal(1, after[1].GetProperty("completed").GetInt32());
     }
 
     [Fact]

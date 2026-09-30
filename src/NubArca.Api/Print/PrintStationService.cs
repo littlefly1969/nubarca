@@ -104,10 +104,27 @@ public sealed class PrintStationService
         var devices = await _db.PrinterDevices.AsNoTracking()
             .Where(x => stationIds.Contains(x.PrintStationId))
             .OrderBy(x => x.DisplayName).ToListAsync(cancellationToken);
+        // What is still to print, row by row; the history only as counts. A
+        // printer that has served a year of parties lists as fast as a new one.
         var jobs = await _db.PrintJobs.AsNoTracking()
-            .Where(x => stationIds.Contains(x.PrintStationId))
+            .Where(x => stationIds.Contains(x.PrintStationId) && !PrintJobStates.Terminal.Contains(x.State))
             .OrderByDescending(x => x.CreatedAt).ToListAsync(cancellationToken);
+        var lastErrors = new Dictionary<Guid, string?>();
+        foreach (var stationId in stationIds)
+        {
+            lastErrors[stationId] = await _db.PrintJobs.AsNoTracking()
+                .Where(x => x.PrintStationId == stationId && x.FailureCode != null)
+                .OrderByDescending(x => x.CreatedAt).Select(x => x.FailureCode)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
         var deviceIds = devices.Select(x => x.Id).ToArray();
+        var usage = await _db.PrintJobs.AsNoTracking()
+            .Where(x => stationIds.Contains(x.PrintStationId) && deviceIds.Contains(x.PrinterDeviceId)
+                && x.RenderedAt != null && x.ArtifactStorageKey != null)
+            .GroupBy(x => new { x.PrinterDeviceId, x.OwnerUserId, x.Kind, x.Format, x.State })
+            .Select(g => new UsageRow(g.Key.PrinterDeviceId, g.Key.OwnerUserId,
+                g.Key.Kind, g.Key.Format, g.Key.State, g.Count()))
+            .ToListAsync(cancellationToken);
         var shares = await _db.PrinterShares.AsNoTracking()
             .Where(x => deviceIds.Contains(x.PrinterDeviceId) && x.RevokedAt == null)
             .OrderBy(x => x.CreatedAt).ToListAsync(cancellationToken);
@@ -116,6 +133,7 @@ public sealed class PrintStationService
         var people = await NamesAsync(
             shares.Select(x => x.GranteeUserId)
                 .Concat(jobs.Select(x => x.OwnerUserId))
+                .Concat(usage.Select(x => x.OwnerUserId))
                 .Concat(devices.Where(x => x.LoadedPaperChangedByUserId != null)
                     .Select(x => x.LoadedPaperChangedByUserId!.Value)),
             cancellationToken);
@@ -125,8 +143,8 @@ public sealed class PrintStationService
         {
             var stationDevices = devices.Where(x => x.PrintStationId == station.Id).ToArray();
             var stationJobs = jobs.Where(x => x.PrintStationId == station.Id).ToArray();
-            var current = stationJobs.FirstOrDefault(x => !PrintJobStates.IsTerminal(x.State));
-            var lastError = stationJobs.FirstOrDefault(x => x.FailureCode != null)?.FailureCode;
+            var current = stationJobs.FirstOrDefault();
+            var lastError = lastErrors.GetValueOrDefault(station.Id);
             PrintJobSummaryDto Job(PrintJob job) => ToJobDto(job,
                 WaitingFor(job, stationDevices),
                 job.OwnerUserId == station.OwnerUserId ? null : people.GetValueOrDefault(job.OwnerUserId)?.Name);
@@ -144,15 +162,14 @@ public sealed class PrintStationService
                             people.GetValueOrDefault(x.GranteeUserId)?.Email ?? string.Empty,
                             x.MaxSheets, x.UsedSheets, x.CreatedAt))
                         .ToArray(),
-                    Usage = Usage(stationJobs.Where(x => x.PrinterDeviceId == device.Id),
+                    Usage = Usage(usage.Where(x => x.PrinterDeviceId == device.Id),
                         station.OwnerUserId, people),
                 }).ToArray(),
-                stationJobs.Count(x => !PrintJobStates.IsTerminal(x.State)),
+                stationJobs.Length,
                 current is null ? null : Job(current), lastError,
                 // The queue, oldest first: what is waiting, for which paper, and
                 // whose — so the owner can see and clear a lent printer's work.
-                stationJobs.Where(x => !PrintJobStates.IsTerminal(x.State))
-                    .OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray());
+                stationJobs.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id).Take(25).Select(Job).ToArray());
         }).ToArray();
     }
 
@@ -711,22 +728,25 @@ public sealed class PrintStationService
     /// out, on which paper, and from where. The whole history, across loans.
     /// </summary>
     private static IReadOnlyList<PrinterUsageDto> Usage(
-        IEnumerable<PrintJob> jobs, Guid ownerId, IReadOnlyDictionary<Guid, Person> people) =>
-        jobs.Where(j => j.RenderedAt != null && j.ArtifactStorageKey != null)
-            .GroupBy(j => j.OwnerUserId)
+        IEnumerable<UsageRow> rows, Guid ownerId, IReadOnlyDictionary<Guid, Person> people) =>
+        rows.GroupBy(r => r.OwnerUserId)
             .Select(g => new PrinterUsageDto(
                 g.Key == ownerId ? null : people.GetValueOrDefault(g.Key)?.Name ?? string.Empty,
                 g.Key == ownerId,
-                g.Count(),
-                g.Count(j => j.State == PrintJobStates.Completed),
-                g.GroupBy(j => PrintPapers.RequiredFor(j.Format) ?? j.Format)
+                g.Sum(r => r.Count),
+                g.Where(r => r.State == PrintJobStates.Completed).Sum(r => r.Count),
+                g.GroupBy(r => PrintPapers.RequiredFor(r.Format) ?? r.Format)
                     .OrderBy(p => p.Key, StringComparer.Ordinal)
-                    .ToDictionary(p => p.Key, p => p.Count()),
-                g.Count(j => PrintJobKinds.IsParty(j.Kind)),
-                g.Count(j => j.Kind == PrintJobKinds.OwnerPhoto),
-                g.Count(j => j.Kind == PrintJobKinds.Diagnostic)))
+                    .ToDictionary(p => p.Key, p => p.Sum(r => r.Count)),
+                g.Where(r => PrintJobKinds.IsParty(r.Kind)).Sum(r => r.Count),
+                g.Where(r => r.Kind == PrintJobKinds.OwnerPhoto).Sum(r => r.Count),
+                g.Where(r => r.Kind == PrintJobKinds.Diagnostic).Sum(r => r.Count)))
             .OrderByDescending(u => u.IsYou).ThenByDescending(u => u.Sheets)
             .ToArray();
+
+    /// <summary>How many rendered sheets share one printer, sender, kind, format and state.</summary>
+    private sealed record UsageRow(
+        Guid PrinterDeviceId, Guid OwnerUserId, string Kind, string Format, string State, int Count);
 
     private sealed record Person(string Name, string Email);
 
